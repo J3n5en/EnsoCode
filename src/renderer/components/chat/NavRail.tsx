@@ -18,9 +18,21 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   if (items.length < 2) return null;
 
+  /** Dock 式波浪：hover 处最长，按距离衰减回基础长度 */
+  const widthOf = (index: number, active: boolean): number => {
+    const base = active ? 24 : 12;
+    if (hoverIndex === null) return base;
+    const distance = Math.abs(index - hoverIndex);
+    const boost = Math.max(0, 16 - distance * 6);
+    return base + boost;
+  };
+
   return (
     <div className="absolute top-1/2 left-2 z-10 -translate-y-1/2">
-      <div className="relative flex max-h-[60vh] flex-col justify-center gap-[5px]">
+      <div
+        className="relative flex max-h-[60vh] flex-col justify-center gap-[5px]"
+        onMouseLeave={() => setHoverIndex(null)}
+      >
         {items.map((item, index) => {
           const active = item.key === activeKey;
           return (
@@ -29,16 +41,14 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
               type="button"
               onClick={() => onJump(item.key)}
               onMouseEnter={() => setHoverIndex(index)}
-              onMouseLeave={() => setHoverIndex(null)}
-              className="group flex h-[7px] items-center"
+              className="flex h-[7px] items-center"
             >
               <span
                 className={cn(
-                  'rounded-full transition-all',
-                  active
-                    ? 'h-[3px] w-7 bg-foreground'
-                    : 'h-[2px] w-4 bg-muted-foreground/35 group-hover:w-6 group-hover:bg-muted-foreground/70'
+                  'rounded-full transition-all duration-150',
+                  active ? 'h-[3px] bg-foreground' : 'h-[2px] bg-muted-foreground/40'
                 )}
+                style={{ width: widthOf(index, active) }}
               />
             </button>
           );
