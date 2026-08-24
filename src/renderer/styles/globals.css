@@ -1,0 +1,210 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: var(--font-family-sans, "Inter", system-ui, sans-serif);
+  --font-mono: var(--font-family-mono, "JetBrains Mono", "Menlo", monospace);
+
+  --animate-skeleton: skeleton 2s -1s infinite linear;
+  --animate-marquee: marquee 4s linear infinite alternate;
+
+  @keyframes skeleton {
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes marquee {
+    0%, 20% {
+      transform: translateX(0);
+    }
+    80%, 100% {
+      transform: translateX(var(--marquee-offset, 0));
+    }
+  }
+}
+
+@layer base {
+  :root {
+    --font-family-mono: "JetBrains Mono", "Menlo", monospace;
+    --font-size-base: 14px;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0.014 285.82);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0.014 285.82);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0.014 285.82);
+    --primary: oklch(0.205 0.014 285.82);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.965 0.003 285.82);
+    --secondary-foreground: oklch(0.205 0.014 285.82);
+    --muted: oklch(0.965 0.003 285.82);
+    --muted-foreground: oklch(0.556 0.014 285.82);
+    --accent: oklch(0.965 0.003 285.82);
+    --accent-foreground: oklch(0.205 0.014 285.82);
+    --destructive: oklch(0.577 0.245 27.33);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.527 0.154 150.07);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.769 0.189 70.08);
+    --warning-foreground: oklch(0.205 0.014 285.82);
+    --info: oklch(0.623 0.214 259.81);
+    --info-foreground: oklch(0.985 0 0);
+    --border: oklch(0.922 0.003 285.82);
+    --input: oklch(0.922 0.003 285.82);
+    --ring: oklch(0.708 0.014 285.82);
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: oklch(0.145 0.014 285.82);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.145 0.014 285.82);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.145 0.014 285.82);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.985 0 0);
+    --primary-foreground: oklch(0.205 0.014 285.82);
+    --secondary: oklch(0.269 0.014 285.82);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0.014 285.82);
+    --muted-foreground: oklch(0.708 0.014 285.82);
+    --accent: oklch(0.269 0.014 285.82);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.396 0.141 25.72);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.527 0.154 150.07);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.769 0.189 70.08);
+    --warning-foreground: oklch(0.205 0.014 285.82);
+    --info: oklch(0.623 0.214 259.81);
+    --info-foreground: oklch(0.985 0 0);
+    --border: oklch(0.269 0.014 285.82);
+    --input: oklch(0.269 0.014 285.82);
+    --ring: oklch(0.439 0.014 285.82);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-size: var(--font-size-base);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Frameless window drag regions */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /**
+   * 菜单组件 no-drag 覆盖规则
+   *
+   * 在无边框窗口中，标题栏设置了 -webkit-app-region: drag 使其可拖拽。
+   * 但 Portal 渲染的菜单会继承这个属性，导致菜单项无法点击。
+   * 这里使用 !important 和 pointer-events: auto 强制覆盖，确保菜单交互正常。
+   */
+  [data-slot="menu-positioner"],
+  [data-slot="menu-popup"],
+  [data-slot="menu-item"] {
+    -webkit-app-region: no-drag !important;
+    pointer-events: auto !important;
+  }
+
+  [data-slot="menu-item"] * {
+    -webkit-app-region: no-drag !important;
+    pointer-events: auto !important;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/20 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+
+  /* Disable text selection */
+  * {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Allow selection in input fields */
+  input,
+  textarea,
+  [contenteditable="true"],
+  .select-text,
+  .select-text * {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Remove focus outline on buttons and interactive elements */
+  button:focus,
+  [role="button"]:focus,
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+  }
+
+  *:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+}

@@ -1,0 +1,23 @@
+appId: com.j3n5en.enso-code
+productName: EnsoCode
+directories:
+  buildResources: build
+files:
+  - out/**
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+    - deb
+npmRebuild: false

@@ -1,0 +1,559 @@
+import { ChevronLeft, ChevronRight, Heart, Monitor, Moon, Sun, Terminal } from 'lucide-react';
+import * as React from 'react';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Combobox,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+} from '@/components/ui/combobox';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useI18n } from '@/i18n';
+import {
+  defaultDarkTheme,
+  getThemeNames,
+  getXtermTheme,
+  type XtermTheme,
+} from '@/lib/ghosttyTheme';
+import { cn } from '@/lib/utils';
+import { type FontWeight, type Theme, useSettingsStore } from '@/stores/settings';
+import { fontWeightOptions } from './constants';
+
+function TerminalPreview({
+  theme,
+  fontSize,
+  fontFamily,
+  fontWeight,
+}: {
+  theme: XtermTheme;
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: string;
+}) {
+  const sampleLines = [
+    { id: 'prompt1', text: '$ ', color: theme.green },
+    { id: 'cmd1', text: 'ls -la', color: theme.foreground },
+    { id: 'nl1', text: '\n' },
+    { id: 'perm1', text: 'drwxr-xr-x  ', color: theme.blue },
+    { id: 'meta1', text: '5 user staff  160 Dec 23 ', color: theme.foreground },
+    { id: 'dir1', text: 'Documents', color: theme.cyan },
+    { id: 'nl2', text: '\n' },
+    { id: 'perm2', text: '-rw-r--r--  ', color: theme.foreground },
+    { id: 'meta2', text: '1 user staff 2048 Dec 22 ', color: theme.foreground },
+    { id: 'file1', text: 'config.json', color: theme.yellow },
+    { id: 'nl3', text: '\n\n' },
+    { id: 'prompt2', text: '$ ', color: theme.green },
+    { id: 'cmd2', text: 'echo "Hello, World!"', color: theme.foreground },
+    { id: 'nl4', text: '\n' },
+    { id: 'output1', text: 'Hello, World!', color: theme.magenta },
+  ];
+
+  return (
+    <div
+      className="rounded-lg border p-4 h-40 overflow-auto"
+      style={{
+        backgroundColor: theme.background,
+        fontSize: `${fontSize}px`,
+        fontFamily,
+        fontWeight,
+      }}
+    >
+      {sampleLines.map((segment) =>
+        segment.text === '\n' ? (
+          <br key={segment.id} />
+        ) : segment.text === '\n\n' ? (
+          <React.Fragment key={segment.id}>
+            <br />
+            <br />
+          </React.Fragment>
+        ) : (
+          <span key={segment.id} style={{ color: segment.color }}>
+            {segment.text}
+          </span>
+        )
+      )}
+      <span
+        className="inline-block w-2 h-4 animate-pulse"
+        style={{ backgroundColor: theme.cursor }}
+      />
+    </div>
+  );
+}
+
+function FavoriteButton({
+  isFavorite,
+  onClick,
+  ariaLabel,
+}: {
+  isFavorite: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      aria-pressed={isFavorite}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onClick(e);
+      }}
+      className="p-1 hover:text-red-500 transition-colors"
+    >
+      {isFavorite ? (
+        <Heart className="h-4 w-4 fill-red-500 text-red-500" />
+      ) : (
+        <Heart className="h-4 w-4" />
+      )}
+    </button>
+  );
+}
+
+function ThemeCombobox({
+  value,
+  onValueChange,
+  themes,
+  favoriteThemes,
+  onToggleFavorite,
+  onThemeHover,
+  showFavoritesOnly,
+  onShowFavoritesOnlyChange,
+  showEmptyFavoritesHint,
+}: {
+  value: string;
+  onValueChange: (value: string | null) => void;
+  themes: string[];
+  favoriteThemes: string[];
+  onToggleFavorite: (theme: string) => void;
+  onThemeHover?: (theme: string) => void;
+  showFavoritesOnly: boolean;
+  onShowFavoritesOnlyChange: (checked: boolean) => void;
+  showEmptyFavoritesHint?: boolean;
+}) {
+  const { t } = useI18n();
+  // 使用内部值与外部值解耦，防止悬停时下拉框关闭
+  const [internalValue, setInternalValue] = React.useState(value);
+  const [search, setSearch] = React.useState(value);
+  const [isOpen, setIsOpen] = React.useState(false);
+  const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const originalValueRef = React.useRef<string>(value);
+  const explicitSelectionRef = React.useRef(false);
+
+  const favoriteSet = React.useMemo(() => new Set(favoriteThemes), [favoriteThemes]);
+
+  // 仅在下拉框关闭时同步外部值
+  React.useEffect(() => {
+    if (!isOpen) {
+      setInternalValue(value);
+      setSearch(value);
+    }
+  }, [value, isOpen]);
+
+  const filteredThemes = React.useMemo(() => {
+    if (!search || search === internalValue) return themes;
+    const query = search.toLowerCase();
+    return themes.filter((name) => name.toLowerCase().includes(query));
+  }, [themes, search, internalValue]);
+
+  const handleValueChange = (newValue: string | null) => {
+    if (newValue) {
+      explicitSelectionRef.current = true;
+      setInternalValue(newValue);
+      setSearch(newValue);
+    }
+    onValueChange(newValue);
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (open) {
+      originalValueRef.current = value;
+      explicitSelectionRef.current = false;
+      setInternalValue(value);
+      setSearch(value);
+    } else {
+      // 关闭时如果没有显式选择，恢复原始主题
+      if (!explicitSelectionRef.current) {
+        onThemeHover?.(originalValueRef.current);
+      }
+    }
+  };
+
+  const handleItemMouseEnter = (themeName: string) => {
+    clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      onThemeHover?.(themeName);
+    }, 50);
+  };
+
+  const handleItemMouseLeave = () => {
+    clearTimeout(hoverTimeoutRef.current);
+  };
+
+  // 键盘导航时同步预览悬停主题
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        requestAnimationFrame(() => {
+          const highlighted = listRef.current?.querySelector('[data-highlighted]');
+          if (highlighted) {
+            const themeName = highlighted.getAttribute('data-value');
+            if (themeName) {
+              onThemeHover?.(themeName);
+            }
+          }
+        });
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [isOpen, onThemeHover]);
+
+  React.useEffect(() => {
+    return () => {
+      clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
+
+  return (
+    <Combobox<string>
+      value={internalValue}
+      onValueChange={handleValueChange}
+      inputValue={search}
+      onInputValueChange={setSearch}
+      open={isOpen}
+      onOpenChange={handleOpenChange}
+    >
+      <div className="relative">
+        <ComboboxInput placeholder={t('Search themes...')} />
+        <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+          <Checkbox
+            id="show-favorites-only-inner"
+            checked={showFavoritesOnly}
+            onCheckedChange={(checked) => onShowFavoritesOnlyChange(checked === true)}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <label
+            htmlFor="show-favorites-only-inner"
+            className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {t('Show favorites only')}
+          </label>
+        </div>
+      </div>
+      <ComboboxPopup>
+        <ComboboxList ref={listRef}>
+          {filteredThemes.length === 0 && (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              {showEmptyFavoritesHint
+                ? t('No favorite themes yet. Click the heart icon to add favorites.')
+                : t('No themes found')}
+            </div>
+          )}
+          {filteredThemes.map((name) => (
+            <ComboboxItem
+              key={name}
+              value={name}
+              data-value={name}
+              onMouseEnter={() => handleItemMouseEnter(name)}
+              onMouseLeave={handleItemMouseLeave}
+              endAddon={
+                <FavoriteButton
+                  isFavorite={favoriteSet.has(name)}
+                  onClick={() => onToggleFavorite(name)}
+                  ariaLabel={
+                    favoriteSet.has(name) ? t('Remove from favorites') : t('Add to favorites')
+                  }
+                />
+              }
+            >
+              {name}
+            </ComboboxItem>
+          ))}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
+  );
+}
+
+export function AppearanceSettings() {
+  const {
+    theme,
+    setTheme,
+    terminalTheme,
+    setTerminalTheme,
+    terminalFontSize: globalFontSize,
+    setTerminalFontSize,
+    terminalFontFamily: globalFontFamily,
+    setTerminalFontFamily,
+    terminalFontWeight,
+    setTerminalFontWeight,
+    terminalFontWeightBold,
+    setTerminalFontWeightBold,
+    favoriteTerminalThemes,
+    toggleFavoriteTerminalTheme,
+  } = useSettingsStore();
+  const { t } = useI18n();
+
+  const themeModeOptions: {
+    value: Theme;
+    icon: React.ElementType;
+    label: string;
+  }[] = [
+    { value: 'light', icon: Sun, label: t('Light') },
+    { value: 'dark', icon: Moon, label: t('Dark') },
+    { value: 'system', icon: Monitor, label: t('System') },
+    { value: 'sync-terminal', icon: Terminal, label: t('Sync terminal theme') },
+  ];
+
+  const [localFontSize, setLocalFontSize] = React.useState(globalFontSize);
+  const [localFontFamily, setLocalFontFamily] = React.useState(globalFontFamily);
+  const [showFavoritesOnly, setShowFavoritesOnly] = React.useState(false);
+
+  React.useEffect(() => {
+    setLocalFontSize(globalFontSize);
+  }, [globalFontSize]);
+
+  React.useEffect(() => {
+    setLocalFontFamily(globalFontFamily);
+  }, [globalFontFamily]);
+
+  const applyFontSizeChange = React.useCallback(() => {
+    const validFontSize = Math.max(8, Math.min(32, localFontSize || 8));
+    if (validFontSize !== localFontSize) {
+      setLocalFontSize(validFontSize);
+    }
+    if (validFontSize !== globalFontSize) {
+      setTerminalFontSize(validFontSize);
+    }
+  }, [localFontSize, globalFontSize, setTerminalFontSize]);
+
+  const applyFontFamilyChange = React.useCallback(() => {
+    const validFontFamily = localFontFamily.trim() || globalFontFamily;
+    if (validFontFamily !== localFontFamily) {
+      setLocalFontFamily(validFontFamily);
+    }
+    if (validFontFamily !== globalFontFamily) {
+      setTerminalFontFamily(validFontFamily);
+    }
+  }, [localFontFamily, globalFontFamily, setTerminalFontFamily]);
+
+  const themeNames = React.useMemo(() => getThemeNames(), []);
+
+  const displayThemes = React.useMemo(() => {
+    if (!showFavoritesOnly) {
+      return themeNames;
+    }
+    const favorites = themeNames.filter((name) => favoriteTerminalThemes.includes(name));
+    // 当前选中的非收藏配色临时显示在列表第1位
+    if (!favoriteTerminalThemes.includes(terminalTheme)) {
+      return [terminalTheme, ...favorites];
+    }
+    return favorites;
+  }, [themeNames, showFavoritesOnly, favoriteTerminalThemes, terminalTheme]);
+
+  const showEmptyFavoritesHint = showFavoritesOnly && favoriteTerminalThemes.length === 0;
+
+  const previewTheme = React.useMemo(() => {
+    return getXtermTheme(terminalTheme) ?? defaultDarkTheme;
+  }, [terminalTheme]);
+
+  const handleThemeChange = (value: string | null) => {
+    if (value) {
+      setTerminalTheme(value);
+    }
+  };
+
+  const handlePrevTheme = () => {
+    const list = showFavoritesOnly ? displayThemes : themeNames;
+    const idx = list.indexOf(terminalTheme);
+    const newIndex = idx <= 0 ? list.length - 1 : idx - 1;
+    setTerminalTheme(list[newIndex]);
+  };
+
+  const handleNextTheme = () => {
+    const list = showFavoritesOnly ? displayThemes : themeNames;
+    const idx = list.indexOf(terminalTheme);
+    const newIndex = idx >= list.length - 1 ? 0 : idx + 1;
+    setTerminalTheme(list[newIndex]);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Theme Mode Section */}
+      <div>
+        <h3 className="text-lg font-medium">{t('Theme mode')}</h3>
+        <p className="text-sm text-muted-foreground">{t('Choose interface theme')}</p>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        {themeModeOptions.map((option) => (
+          <button
+            type="button"
+            key={option.value}
+            onClick={() => setTheme(option.value)}
+            className={cn(
+              'flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-colors',
+              theme === option.value
+                ? 'border-primary bg-accent text-accent-foreground'
+                : 'border-transparent bg-muted/50 hover:bg-muted'
+            )}
+          >
+            <div
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-full',
+                theme === option.value
+                  ? 'bg-accent-foreground/20 text-accent-foreground'
+                  : 'bg-muted'
+              )}
+            >
+              <option.icon className="h-5 w-5" />
+            </div>
+            <span className="text-sm font-medium">{option.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Terminal Section */}
+      <div className="border-t pt-6">
+        <h3 className="text-lg font-medium">{t('Terminal')}</h3>
+        <p className="text-sm text-muted-foreground">{t('Terminal appearance')}</p>
+      </div>
+
+      {/* Preview */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium">{t('Preview')}</p>
+        <TerminalPreview
+          theme={previewTheme}
+          fontSize={localFontSize}
+          fontFamily={localFontFamily}
+          fontWeight={terminalFontWeight}
+        />
+      </div>
+
+      {/* Theme Selector */}
+      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Color scheme')}</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={handlePrevTheme}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1">
+            <ThemeCombobox
+              value={terminalTheme}
+              onValueChange={handleThemeChange}
+              themes={displayThemes}
+              favoriteThemes={favoriteTerminalThemes}
+              onToggleFavorite={toggleFavoriteTerminalTheme}
+              onThemeHover={setTerminalTheme}
+              showFavoritesOnly={showFavoritesOnly}
+              onShowFavoritesOnlyChange={setShowFavoritesOnly}
+              showEmptyFavoritesHint={showEmptyFavoritesHint}
+            />
+          </div>
+          <Button variant="outline" size="icon" onClick={handleNextTheme}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Font Family */}
+      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Font')}</span>
+        <Input
+          value={localFontFamily}
+          onChange={(e) => setLocalFontFamily(e.target.value)}
+          onBlur={applyFontFamilyChange}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              applyFontFamilyChange();
+              e.currentTarget.blur();
+            }
+          }}
+          placeholder="JetBrains Mono, monospace"
+        />
+      </div>
+
+      {/* Font Size */}
+      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Font size')}</span>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            value={localFontSize}
+            onChange={(e) => setLocalFontSize(Number(e.target.value))}
+            onBlur={applyFontSizeChange}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                applyFontSizeChange();
+                e.currentTarget.blur();
+              }
+            }}
+            min={8}
+            max={32}
+            className="w-20"
+          />
+          <span className="text-sm text-muted-foreground">px</span>
+        </div>
+      </div>
+
+      {/* Font Weight */}
+      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Font weight')}</span>
+        <Select
+          value={terminalFontWeight}
+          onValueChange={(v) => setTerminalFontWeight(v as FontWeight)}
+        >
+          <SelectTrigger className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {fontWeightOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+
+      {/* Font Weight Bold */}
+      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Bold font weight')}</span>
+        <Select
+          value={terminalFontWeightBold}
+          onValueChange={(v) => setTerminalFontWeightBold(v as FontWeight)}
+        >
+          <SelectTrigger className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {fontWeightOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+    </div>
+  );
+}
