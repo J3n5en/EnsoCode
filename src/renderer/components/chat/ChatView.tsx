@@ -1,3 +1,4 @@
+import { ArrowDown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/i18n';
@@ -13,6 +14,9 @@ import { TimelineRow } from './TimelineRow';
 
 const INITIAL_VISIBLE = 150;
 const LOAD_MORE_STEP = 200;
+/** 消息列/输入区共用的列宽：随容器宽度阶梯放宽，宽屏不留大片空白 */
+const CHAT_COL =
+  'mx-auto w-full max-w-2xl @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[96rem]:max-w-5xl';
 
 export function ChatView() {
   const { t } = useI18n();
@@ -83,6 +87,8 @@ export function ChatView() {
   }, [timeline]);
 
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
+  /** 是否贴底：驱动「滚到底」按钮的显隐（与 followRef 同源，但需要触发渲染） */
+  const [atBottom, setAtBottom] = useState(true);
 
   const jumpTo = (key: string) => {
     followRef.current = false;
@@ -106,6 +112,7 @@ export function ChatView() {
     let frame = 0;
     const onScroll = () => {
       followRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 40;
+      setAtBottom(followRef.current);
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
@@ -132,6 +139,7 @@ export function ChatView() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在会话切换时触发
   useEffect(() => {
     followRef.current = true;
+    setAtBottom(true);
     const viewport = viewportOf();
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [conversation?.id]);
@@ -178,7 +186,12 @@ export function ChatView() {
       <div className="@container relative min-h-0 flex-1">
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         <ScrollArea ref={scrollRef} className="h-full">
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6 select-text [overflow-wrap:anywhere]">
+          <div
+            className={cn(
+              CHAT_COL,
+              'flex flex-col gap-4 px-4 py-6 select-text [overflow-wrap:anywhere]'
+            )}
+          >
             {timeline.length === 0 && !busy && (
               <div className="flex flex-col items-center gap-1 py-24 text-center">
                 <p className="text-lg font-medium">{project?.name ?? 'EnsoCode'}</p>
@@ -209,10 +222,25 @@ export function ChatView() {
             )}
           </div>
         </ScrollArea>
+        {!atBottom && (
+          <button
+            type="button"
+            onClick={() => {
+              followRef.current = true;
+              setAtBottom(true);
+              const viewport = viewportOf();
+              if (viewport) viewport.scrollTop = viewport.scrollHeight;
+            }}
+            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background p-2 text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
+            title={t('Scroll to bottom')}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      <div className="px-4 pt-1">
-        <div className="mx-auto w-full max-w-2xl">
+      <div className="@container px-4 pt-1">
+        <div className={CHAT_COL}>
           <Composer
             cwd={project?.path}
             commands={conversation.commands}
