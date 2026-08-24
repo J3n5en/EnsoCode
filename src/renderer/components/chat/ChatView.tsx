@@ -175,7 +175,7 @@ export function ChatView() {
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="@container relative min-h-0 flex-1">
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         <ScrollArea ref={scrollRef} className="h-full">
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6">

@@ -28,45 +28,50 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
   };
 
   return (
-    <div className="absolute top-1/2 left-2 z-10 -translate-y-1/2">
+    // 默认隐藏：鼠标进入左缘感应带才淡入；容器宽不足（对话区顶满）时整体不显示，
+    // 阈值 = 列宽 42rem + 两侧留白，由父级 @container 提供查询上下文
+    <div className="group/rail absolute top-0 left-0 z-10 hidden h-full w-14 @min-[52rem]:block">
       <div
-        className="relative flex max-h-[60vh] flex-col justify-center gap-[5px]"
+        className="absolute top-1/2 left-2 -translate-y-1/2 opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100"
         onMouseLeave={() => setHoverIndex(null)}
       >
-        {items.map((item, index) => {
-          const active = item.key === activeKey;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onJump(item.key)}
-              onMouseEnter={() => setHoverIndex(index)}
-              className="flex h-[7px] items-center"
-            >
-              <span
-                className={cn(
-                  'rounded-full transition-all duration-150',
-                  active ? 'h-[3px] bg-foreground' : 'h-[2px] bg-muted-foreground/40'
-                )}
-                style={{ width: widthOf(index, active) }}
-              />
-            </button>
-          );
-        })}
+        <div className="relative flex max-h-[60vh] flex-col justify-center gap-[5px]">
+          {items.map((item, index) => {
+            const active = item.key === activeKey;
+            const hovered = index === hoverIndex;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onJump(item.key)}
+                onMouseEnter={() => setHoverIndex(index)}
+                className="flex h-[7px] items-center"
+              >
+                <span
+                  className={cn(
+                    'rounded-full transition-all duration-150',
+                    active || hovered ? 'h-[3px] bg-foreground' : 'h-[2px] bg-muted-foreground/40'
+                  )}
+                  style={{ width: widthOf(index, active) }}
+                />
+              </button>
+            );
+          })}
 
-        {hoverIndex !== null && (
-          <div
-            className="pointer-events-none absolute left-10 w-72 -translate-y-1/2 rounded-xl border bg-popover p-3 shadow-lg"
-            style={{ top: `${((hoverIndex + 0.5) / items.length) * 100}%` }}
-          >
-            <p className="line-clamp-2 text-xs font-semibold">{items[hoverIndex].question}</p>
-            {items[hoverIndex].answer && (
-              <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
-                {items[hoverIndex].answer}
-              </p>
-            )}
-          </div>
-        )}
+          {hoverIndex !== null && (
+            <div
+              className="pointer-events-none absolute left-10 w-72 -translate-y-1/2 rounded-xl border bg-popover p-3 shadow-lg"
+              style={{ top: `${((hoverIndex + 0.5) / items.length) * 100}%` }}
+            >
+              <p className="line-clamp-2 text-xs font-semibold">{items[hoverIndex].question}</p>
+              {items[hoverIndex].answer && (
+                <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
+                  {items[hoverIndex].answer}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
