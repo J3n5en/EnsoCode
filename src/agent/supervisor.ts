@@ -25,6 +25,9 @@ interface ManagedSession {
   /** 渲染层投影的权威副本，message-upsert 以此为准 */
   messages: ProjectedMessage[];
   commands: SlashCommand[];
+  modelId: string;
+  /** adaptive→budget 的自动降级每会话只做一次，防重试循环 */
+  adaptiveDowngraded: boolean;
   unsubscribe: () => void;
 }
 
@@ -163,6 +166,8 @@ export class SessionSupervisor {
       seq: 0,
       messages: [],
       commands: collectSlashCommands(session),
+      modelId: model.modelId,
+      adaptiveDowngraded: false,
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
@@ -224,6 +229,7 @@ export class SessionSupervisor {
         // 注意：agent_end 事件的 messages 只是本次 run 的消息，多轮会话下
         // 用它对齐会把历史轮次抹掉；session.messages 才是全量权威源。
         this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
+        if (this.tryAdaptiveDowngrade(sessionId, managed)) return;
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
@@ -232,6 +238,29 @@ export class SessionSupervisor {
       default:
         return;
     }
+  }
+
+  /**
+   * 运行时自愈：模型不吃 adaptive（400 "adaptive thinking is not supported"）时，
+   * 记入黑名单、就地改回 budget 形态并自动重发最后一条输入。返回 true 表示已接管本次收尾。
+   */
+  private tryAdaptiveDowngrade(sessionId: string, managed: ManagedSession): boolean {
+    if (managed.adaptiveDowngraded) return false;
+    const lastError = managed.messages.at(-1)?.errorMessage ?? '';
+    if (!lastError.includes('adaptive thinking is not supported')) return false;
+    managed.adaptiveDowngraded = true;
+    runtimeAdaptiveBlocklist.add(managed.modelId);
+    const compat = managed.session.model?.compat as { forceAdaptiveThinking?: boolean } | undefined;
+    if (compat) compat.forceAdaptiveThinking = undefined;
+    // 重发最后一条 user 文本（降级场景极少见，图片附件不随重试携带）
+    const lastUser = [...managed.messages].reverse().find((message) => message.role === 'user');
+    const text = lastUser?.content.find((part) => part.type === 'text')?.text;
+    if (!text) return false;
+    void managed.session.prompt(text).catch((error) => {
+      managed.status = 'failed';
+      this.emitStatus(sessionId, managed, toErrorMessage(error));
+    });
+    return true;
   }
 
   private upsertLocalMessage(
@@ -325,11 +354,17 @@ const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * 支持 adaptive thinking（output_config.effort）的模型：opus-4.7+ 与 Claude 5 家族，
- * 以及 grok（中转会把 effort 翻译成 xai 的 reasoning_effort，实测面板可识别档位）
+ * adaptive thinking（output_config.effort）的判定：乐观默认支持——未来新模型都支持，
+ * 白名单会过时而这个黑名单是封闭集合（不支持的只有历史老世代，不会再新增）。
+ * 漏网的靠运行时自愈：撞到 "adaptive thinking is not supported" 会记入 runtimeAdaptiveBlocklist
+ * 并自动降级重试（见 handleAdaptiveUnsupported）。
  */
+const ADAPTIVE_UNSUPPORTED = /claude-(3|opus-4-[0-6]|sonnet-4-[0-6]|haiku-4-[0-6])/i;
+/** 运行时学到的不支持 adaptive 的模型（进程内记忆） */
+const runtimeAdaptiveBlocklist = new Set<string>();
+
 export function supportsAdaptiveThinking(modelId: string): boolean {
-  return /claude-(opus-4-[7-9]|opus-5|sonnet-5|haiku-5|fable|mythos)|grok/i.test(modelId);
+  return !ADAPTIVE_UNSUPPORTED.test(modelId) && !runtimeAdaptiveBlocklist.has(modelId);
 }
 
 /** 从 pi 的资源加载器收集可用斜杠命令：skills（/skill:name）与 prompt templates（/name） */
