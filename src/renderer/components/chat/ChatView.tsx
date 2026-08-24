@@ -130,13 +130,17 @@ export function ChatView() {
             commands={conversation.commands}
             running={running}
             busy={busy}
-            onSend={(content) => {
+            onSend={(content, images) => {
               if (!provider || !effectiveModelId || !project) return;
-              void useSessionsStore.getState().send(content, {
-                providerId: provider.id,
-                modelId: effectiveModelId,
-                cwd: project.path,
-              });
+              void useSessionsStore.getState().send(
+                content,
+                {
+                  providerId: provider.id,
+                  modelId: effectiveModelId,
+                  cwd: project.path,
+                },
+                images
+              );
             }}
             onAbort={() => void useSessionsStore.getState().abort()}
           />

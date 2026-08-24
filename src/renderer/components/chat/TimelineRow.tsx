@@ -9,10 +9,21 @@ export function TimelineRow({ item }: { item: TimelineItem }) {
   switch (item.kind) {
     case 'user':
       return (
-        <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
-            {item.text}
-          </div>
+        <div className="flex flex-col items-end gap-1.5">
+          {item.images.map((image, index) => (
+            <img
+              // biome-ignore lint/suspicious/noArrayIndexKey: 图片无稳定 id，消息整体快照替换
+              key={index}
+              src={`data:${image.mimeType};base64,${image.data}`}
+              alt=""
+              className="max-h-48 max-w-[60%] rounded-lg border object-contain"
+            />
+          ))}
+          {item.text && (
+            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
+              {item.text}
+            </div>
+          )}
         </div>
       );
     case 'text':

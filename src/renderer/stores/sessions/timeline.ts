@@ -1,7 +1,7 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 
 export type TimelineItem =
-  | { kind: 'user'; key: string; text: string }
+  | { kind: 'user'; key: string; text: string; images: { data: string; mimeType: string }[] }
   | { kind: 'text'; key: string; text: string; streaming: boolean }
   | { kind: 'thinking'; key: string; text: string; streaming: boolean }
   | {
@@ -53,7 +53,10 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     const isLastMessage = messageIndex === messages.length - 1;
     if (message.role === 'user') {
       const text = partText(message);
-      if (text) items.push({ kind: 'user', key: `${messageIndex}`, text });
+      const images = message.content.filter((part) => part.type === 'image');
+      if (text || images.length > 0) {
+        items.push({ kind: 'user', key: `${messageIndex}`, text, images });
+      }
       return;
     }
     if (message.role === 'toolResult') return;

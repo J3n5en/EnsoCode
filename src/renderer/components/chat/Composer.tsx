@@ -1,5 +1,5 @@
-import type { SlashCommand } from '@shared/types/agent';
-import { ArrowUp, CircleStop, FileText, SlashSquare } from 'lucide-react';
+import type { AttachedImage, SlashCommand } from '@shared/types/agent';
+import { ArrowUp, CircleStop, FileText, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
@@ -17,7 +17,7 @@ interface ComposerProps {
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, images: AttachedImage[]) => void;
   onAbort: () => void;
 }
 
@@ -47,6 +47,7 @@ function findSlashStart(text: string, cursor: number): number | null {
 export function Composer({ cwd, commands, running, busy, onSend, onAbort }: ComposerProps) {
   const { t } = useI18n();
   const [text, setText] = useState('');
+  const [images, setImages] = useState<AttachedImage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -151,11 +152,49 @@ export function Composer({ cwd, commands, running, busy, onSend, onAbort }: Comp
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content) return;
+    if (!content && images.length === 0) return;
     setText('');
+    setImages([]);
     setMentionQuery(null);
     setSlashQuery(null);
-    onSend(content);
+    onSend(content, images);
+  };
+
+  /** 在光标处插入文本片段 */
+  const insertAtCursor = useCallback(
+    (snippet: string) => {
+      const ta = textareaRef.current;
+      const cursor = ta ? ta.selectionStart : text.length;
+      const next = text.slice(0, cursor) + snippet + text.slice(cursor);
+      setText(next);
+      const newCursor = cursor + snippet.length;
+      setTimeout(() => {
+        ta?.focus();
+        ta?.setSelectionRange(newCursor, newCursor);
+      }, 0);
+    },
+    [text]
+  );
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+          setImages((prev) => [...prev, { data: base64, mimeType: file.type }]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // 非图片文件：插入磁盘路径，agent 用 read 工具读取
+        const filePath = window.electronAPI.files.pathForFile(file);
+        if (filePath) insertAtCursor(`@${filePath} `);
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -238,6 +277,27 @@ export function Composer({ cwd, commands, running, busy, onSend, onAbort }: Comp
       )}
 
       <div className="rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring">
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-3 pt-3">
+            {images.map((image, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: 附件无稳定 id，增删都整组重渲染
+              <div key={index} className="group relative">
+                <img
+                  src={`data:${image.mimeType};base64,${image.data}`}
+                  alt=""
+                  className="h-16 w-16 rounded-md border object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setImages((prev) => prev.filter((_, i) => i !== index))}
+                  className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={text}
@@ -246,13 +306,13 @@ export function Composer({ cwd, commands, running, busy, onSend, onAbort }: Comp
             detect(e.target.value);
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
           placeholder={running ? t('Steer the running agent…') : t('Ask the agent…')}
           rows={2}
           className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
         />
-        <div className="flex items-center justify-between gap-1.5 px-2.5 pb-2">
-          <span className="text-xs text-muted-foreground/60">{t('@ files, / commands')}</span>
+        <div className="flex items-center justify-end gap-1.5 px-2.5 pb-2">
           {busy ? (
             <Button variant="outline" size="icon" className="h-7 w-7 rounded-lg" onClick={onAbort}>
               <CircleStop className="h-4 w-4" />
@@ -262,7 +322,7 @@ export function Composer({ cwd, commands, running, busy, onSend, onAbort }: Comp
               size="icon"
               className="h-7 w-7 rounded-lg"
               onClick={handleSend}
-              disabled={!text.trim()}
+              disabled={!text.trim() && images.length === 0}
             >
               <ArrowUp className="h-4 w-4" />
             </Button>
