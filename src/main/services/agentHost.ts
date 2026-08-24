@@ -72,6 +72,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     cwd: request.cwd,
     model,
     ...(request.resumeFile ? { resumeFile: request.resumeFile } : {}),
+    ...(request.reasoningEnabled ? { reasoningEnabled: true } : {}),
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
   });

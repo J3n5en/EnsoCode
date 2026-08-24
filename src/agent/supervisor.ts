@@ -82,6 +82,7 @@ export class SessionSupervisor {
           command.cwd,
           command.model,
           command.resumeFile,
+          command.reasoningEnabled ?? false,
           command.thinkingLevel,
           command.loadLocalSkills
         );
@@ -118,12 +119,15 @@ export class SessionSupervisor {
     cwd: string,
     model: SpawnModelConfig,
     resumeFile?: string,
+    reasoningEnabled = false,
     thinkingLevel?: ThinkingLevel,
     loadLocalSkills = true
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
     const providerId = `enso-${model.api}-${model.baseUrl}`;
+    // reasoning 开关关闭时注册 reasoning:false，pi 完全不发 thinking（adaptive 模型也不会 400）
+    const adaptive = reasoningEnabled && supportsAdaptiveThinking(model.modelId);
     runtime.registerProvider(providerId, {
       baseUrl: model.baseUrl,
       api: model.api,
@@ -134,15 +138,12 @@ export class SessionSupervisor {
         {
           id: model.modelId,
           name: model.modelId,
-          // 声明支持 reasoning，否则 pi 会把任何思考档位钳到 off
-          reasoning: true,
+          reasoning: reasoningEnabled,
           // max 档需显式声明，否则被钳到 high
           thinkingLevelMap: { max: 'max' },
-          // 新 Claude 模型用 adaptive+effort（面板可解析档位）；老模型只认 budget_tokens，
-          // 对它们发 adaptive 会 400 "adaptive thinking is not supported"
-          ...(supportsAdaptiveThinking(model.modelId)
-            ? { compat: { forceAdaptiveThinking: true } }
-            : {}),
+          // 新 Claude 模型用 adaptive+effort（面板可解析档位）；老模型只认 budget_tokens。
+          // 关推理时不加，避免 pi 对不支持 disabled 的 adaptive 模型发 disabled 而 400
+          ...(adaptive ? { compat: { forceAdaptiveThinking: true } } : {}),
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200_000,
@@ -159,7 +160,7 @@ export class SessionSupervisor {
       agentDir: this.options.agentDir,
       modelRuntime: runtime,
       model: piModel,
-      thinkingLevel: thinkingLevel ?? 'off',
+      thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
       // 关闭 skill：resourceLoader 传 noSkills，pi 就不扫描 .agents/skills、.pi/skills
       resourceLoader:
         loadLocalSkills === false

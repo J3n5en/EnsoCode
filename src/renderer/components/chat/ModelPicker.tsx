@@ -4,11 +4,11 @@ import { Brain, Check, ChevronDown } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
 const LEVEL_LABELS: Record<ThinkingLevel, string> = {
-  off: 'Off',
   low: 'Low',
   medium: 'Med',
   high: 'High',
@@ -19,18 +19,25 @@ interface ModelPickerProps {
   providers: ModelProvider[];
   providerId: string;
   modelId: string;
+  reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
+  /** reasoning 开关切换后需重开会话生效时为 true（用于提示） */
+  reasoningNeedsRestart: boolean;
   onSelect: (providerId: string, modelId: string) => void;
+  onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
 }
 
-/** composer 工具行上的模型选择（ref-chat-b ModelChooser 形状）：pill 触发 + 搜索 + provider 分组列表 + 思考深度 */
+/** composer 工具行的模型选择：pill 触发 + 搜索 + provider 分组 + 推理开关 + 档位滑块 */
 export function ModelPicker({
   providers,
   providerId,
   modelId,
+  reasoningEnabled,
   thinkingLevel,
+  reasoningNeedsRestart,
   onSelect,
+  onReasoningChange,
   onThinkingChange,
 }: ModelPickerProps) {
   const { t } = useI18n();
@@ -56,12 +63,13 @@ export function ModelPicker({
   );
 
   const current = providers.find((p) => p.id === providerId)?.models.find((m) => m.id === modelId);
+  const levelIndex = Math.max(0, THINKING_LEVELS.indexOf(thinkingLevel));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className="flex h-7 max-w-64 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
         <span className="truncate">{current?.label ?? modelId ?? t('Model')}</span>
-        {thinkingLevel !== 'off' && (
+        {reasoningEnabled && (
           <span className="flex shrink-0 items-center gap-0.5 text-primary">
             <Brain className="h-3 w-3" />
             {LEVEL_LABELS[thinkingLevel]}
@@ -116,57 +124,62 @@ export function ModelPicker({
             </p>
           )}
         </div>
+
         <div className="border-t p-3">
-          <div className="flex items-center justify-between pb-2">
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Brain className="h-3.5 w-3.5" />
-              {t('Thinking level')}
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1 text-xs">
+              <Brain className="h-3.5 w-3.5 text-muted-foreground" />
+              {t('Reasoning')}
             </span>
-            <span
-              className={cn(
-                'text-xs font-medium',
-                thinkingLevel === 'off' ? 'text-muted-foreground' : 'text-primary'
-              )}
-            >
-              {LEVEL_LABELS[thinkingLevel]}
-            </span>
+            <Switch checked={reasoningEnabled} onCheckedChange={onReasoningChange} />
           </div>
-          <Slider
-            min={0}
-            max={THINKING_LEVELS.length - 1}
-            step={1}
-            value={THINKING_LEVELS.indexOf(thinkingLevel)}
-            onValueChange={(value) => {
-              const index = Array.isArray(value) ? value[0] : value;
-              onThinkingChange(THINKING_LEVELS[index] ?? 'off');
-            }}
-          />
-          <div className="mt-1.5 flex justify-between">
-            {THINKING_LEVELS.map((entry, index) => (
-              <button
-                key={entry}
-                type="button"
-                onClick={() => onThinkingChange(entry)}
-                className={cn(
-                  'flex w-8 flex-col items-center gap-0.5',
-                  index === 0 && 'items-start',
-                  index === THINKING_LEVELS.length - 1 && 'items-end'
-                )}
-              >
-                <span className="h-1.5 w-px bg-muted-foreground/40" />
-                <span
-                  className={cn(
-                    'text-[10px] transition-colors',
-                    entry === thinkingLevel
-                      ? 'font-medium text-primary'
-                      : 'text-muted-foreground/70 hover:text-foreground'
-                  )}
-                >
-                  {LEVEL_LABELS[entry]}
-                </span>
-              </button>
-            ))}
-          </div>
+
+          {reasoningEnabled && (
+            <div className="mt-3">
+              <Slider
+                min={0}
+                max={THINKING_LEVELS.length - 1}
+                step={1}
+                value={levelIndex}
+                onValueChange={(value) => {
+                  const index = Array.isArray(value) ? value[0] : value;
+                  onThinkingChange(THINKING_LEVELS[index] ?? 'medium');
+                }}
+              />
+              <div className="mt-1.5 flex justify-between">
+                {THINKING_LEVELS.map((entry, index) => (
+                  <button
+                    key={entry}
+                    type="button"
+                    onClick={() => onThinkingChange(entry)}
+                    className={cn(
+                      'flex w-8 flex-col items-center gap-0.5',
+                      index === 0 && 'items-start',
+                      index === THINKING_LEVELS.length - 1 && 'items-end'
+                    )}
+                  >
+                    <span className="h-1.5 w-px bg-muted-foreground/40" />
+                    <span
+                      className={cn(
+                        'text-[10px] transition-colors',
+                        entry === thinkingLevel
+                          ? 'font-medium text-primary'
+                          : 'text-muted-foreground/70 hover:text-foreground'
+                      )}
+                    >
+                      {LEVEL_LABELS[entry]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {reasoningNeedsRestart && (
+            <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-500">
+              {t('Takes effect in a new conversation')}
+            </p>
+          )}
         </div>
       </PopoverPopup>
     </Popover>

@@ -18,7 +18,11 @@ export interface Conversation extends SessionProjection {
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
-  /** 思考深度（per 会话记忆） */
+  /** 是否开启推理（per 会话记忆） */
+  reasoningEnabled?: boolean;
+  /** spawn 时实际用的 reasoning 值，用于判断当前设置是否需重开生效 */
+  spawnedReasoning?: boolean;
+  /** 推理档位（reasoning 开启时有效） */
   thinkingLevel?: ThinkingLevel;
 }
 
@@ -45,7 +49,9 @@ interface SessionsState {
     projectId: string,
     imported: { sessionFile: string; title: string }
   ): string;
-  /** 设置思考深度；已 spawn 的会话即时生效，未 spawn 的在下次 spawn 时带上 */
+  /** 设置推理开关；影响下次 spawn（reasoning 注册时固化，已 spawn 会话需重开生效） */
+  setReasoning(id: string, enabled: boolean): void;
+  /** 设置推理档位；已 spawn 的会话即时生效 */
   setThinking(id: string, level: ThinkingLevel): void;
   abort(): Promise<void>;
 }
@@ -205,6 +211,7 @@ export const useSessionsStore = create<SessionsState>()(
               modelId: target.modelId,
               cwd: target.cwd,
               resumeFile: conversation.sessionFile,
+              reasoningEnabled: conversation.reasoningEnabled,
               thinkingLevel: conversation.thinkingLevel,
               loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
             });
@@ -220,6 +227,7 @@ export const useSessionsStore = create<SessionsState>()(
                 started: true,
                 lastProviderId: target.providerId,
                 lastModelId: target.modelId,
+                spawnedReasoning: conversation.reasoningEnabled ?? false,
               })
             );
           }
@@ -254,6 +262,7 @@ export const useSessionsStore = create<SessionsState>()(
             modelId,
             cwd: project.path,
             resumeFile: conversation.sessionFile,
+            reasoningEnabled: conversation.reasoningEnabled,
             thinkingLevel: conversation.thinkingLevel,
             loadLocalSkills: settings.loadLocalSkills,
           });
@@ -289,11 +298,17 @@ export const useSessionsStore = create<SessionsState>()(
           return id;
         },
 
+        setReasoning(id, enabled) {
+          if (!get().conversations[id]) return;
+          // reasoning 是 spawn 时固化的，只改状态，下次 spawn 生效（提示重开由 UI 负责）
+          set((state) => patch(state, id, { reasoningEnabled: enabled }));
+        },
+
         setThinking(id, level) {
           const conversation = get().conversations[id];
           if (!conversation) return;
           set((state) => patch(state, id, { thinkingLevel: level }));
-          if (conversation.started) {
+          if (conversation.started && conversation.reasoningEnabled) {
             void window.electronAPI.agent.setThinking(id, level);
           }
         },

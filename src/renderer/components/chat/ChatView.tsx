@@ -251,11 +251,20 @@ export function ChatView() {
                 providers={enabledProviders}
                 providerId={provider?.id ?? ''}
                 modelId={effectiveModelId}
-                thinkingLevel={conversation.thinkingLevel ?? 'off'}
+                reasoningEnabled={conversation.reasoningEnabled ?? false}
+                thinkingLevel={conversation.thinkingLevel ?? 'medium'}
+                reasoningNeedsRestart={
+                  conversation.started &&
+                  (conversation.reasoningEnabled ?? false) !==
+                    (conversation.spawnedReasoning ?? false)
+                }
                 onSelect={(pid, mid) => {
                   setProviderId(pid);
                   setModelId(mid);
                 }}
+                onReasoningChange={(enabled) =>
+                  useSessionsStore.getState().setReasoning(conversation.id, enabled)
+                }
                 onThinkingChange={(level) =>
                   useSessionsStore.getState().setThinking(conversation.id, level)
                 }

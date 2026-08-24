@@ -11,8 +11,8 @@ export interface SpawnModelConfig {
   modelId: string;
 }
 
-/** 思考深度，值域对齐 pi 的 ThinkingLevel */
-export const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'max'] as const;
+/** 思考努力档位（reasoning 开启时有效），值域对齐 pi 的 ThinkingLevel。off 由 reasoningEnabled 表达 */
+export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /** Main → worker 命令 */
@@ -24,6 +24,8 @@ export type AgentCommand =
       model: SpawnModelConfig;
       /** 从既有 jsonl 恢复会话（app 重启后 resume） */
       resumeFile?: string;
+      /** 是否开启推理；关闭时注册模型 reasoning:false，pi 完全不发 thinking */
+      reasoningEnabled?: boolean;
       thinkingLevel?: ThinkingLevel;
       /** 是否加载本机 skill（.agents/skills、.pi/skills）；默认 true */
       loadLocalSkills?: boolean;
@@ -91,6 +93,7 @@ export interface AgentSpawnRequest {
   cwd: string;
   /** 从既有 jsonl 恢复（app 重启后 resume） */
   resumeFile?: string;
+  reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
   loadLocalSkills?: boolean;
 }
