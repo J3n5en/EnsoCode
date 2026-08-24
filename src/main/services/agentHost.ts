@@ -85,6 +85,14 @@ export function setSessionThinking(
   return sendCommand({ type: 'set-thinking', sessionId, level });
 }
 
+export function setSessionReasoning(
+  sessionId: string,
+  enabled: boolean,
+  level?: ThinkingLevel
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'set-reasoning', sessionId, enabled, ...(level ? { level } : {}) });
+}
+
 export function promptSession(
   sessionId: string,
   text: string,

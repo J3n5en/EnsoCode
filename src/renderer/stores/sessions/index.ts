@@ -20,8 +20,6 @@ export interface Conversation extends SessionProjection {
   lastModelId?: string;
   /** 是否开启推理（per 会话记忆） */
   reasoningEnabled?: boolean;
-  /** spawn 时实际用的 reasoning 值，用于判断当前设置是否需重开生效 */
-  spawnedReasoning?: boolean;
   /** 推理档位（reasoning 开启时有效） */
   thinkingLevel?: ThinkingLevel;
 }
@@ -49,7 +47,7 @@ interface SessionsState {
     projectId: string,
     imported: { sessionFile: string; title: string }
   ): string;
-  /** 设置推理开关；影响下次 spawn（reasoning 注册时固化，已 spawn 会话需重开生效） */
+  /** 设置推理开关；已 spawn 的会话即时下发命令（worker 就地改 model，下条请求生效） */
   setReasoning(id: string, enabled: boolean): void;
   /** 设置推理档位；已 spawn 的会话即时生效 */
   setThinking(id: string, level: ThinkingLevel): void;
@@ -227,7 +225,6 @@ export const useSessionsStore = create<SessionsState>()(
                 started: true,
                 lastProviderId: target.providerId,
                 lastModelId: target.modelId,
-                spawnedReasoning: conversation.reasoningEnabled ?? false,
               })
             );
           }
@@ -299,9 +296,17 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         setReasoning(id, enabled) {
-          if (!get().conversations[id]) return;
-          // reasoning 是 spawn 时固化的，只改状态，下次 spawn 生效（提示重开由 UI 负责）
+          const conversation = get().conversations[id];
+          if (!conversation) return;
           set((state) => patch(state, id, { reasoningEnabled: enabled }));
+          // 已 spawn 的会话即时切换：worker 就地改 model.reasoning，下条请求生效
+          if (conversation.started) {
+            void window.electronAPI.agent.setReasoning(
+              id,
+              enabled,
+              enabled ? (conversation.thinkingLevel ?? 'medium') : undefined
+            );
+          }
         },
 
         setThinking(id, level) {

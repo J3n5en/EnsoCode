@@ -127,6 +127,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),
     setThinking: (sessionId: string, level: ThinkingLevel): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_THINKING, sessionId, level),
+    setReasoning: (
+      sessionId: string,
+      enabled: boolean,
+      level?: ThinkingLevel
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_REASONING, sessionId, enabled, level),
     onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);

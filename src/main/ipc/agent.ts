@@ -8,6 +8,7 @@ import {
   promptSession,
   requestSnapshot,
   setAgentEventListener,
+  setSessionReasoning,
   setSessionThinking,
   spawnSession,
   steerSession,
@@ -102,6 +103,19 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid thinking level' };
       }
       return setSessionThinking(sessionId, level as ThinkingLevel);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SET_REASONING,
+    (_event, sessionId: unknown, enabled: unknown, level?: unknown): AgentActionResult => {
+      if (!isNonEmptyString(sessionId) || typeof enabled !== 'boolean') {
+        return { ok: false, error: 'invalid reasoning input' };
+      }
+      if (level !== undefined && !THINKING_LEVELS.includes(level as ThinkingLevel)) {
+        return { ok: false, error: 'invalid thinking level' };
+      }
+      return setSessionReasoning(sessionId, enabled, level as ThinkingLevel | undefined);
     }
   );
 
