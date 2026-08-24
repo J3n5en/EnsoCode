@@ -324,9 +324,12 @@ export class SessionSupervisor {
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** 支持 adaptive thinking（output_config.effort）的 Claude 世代：opus-4.7+ 与 Claude 5 家族 */
+/**
+ * 支持 adaptive thinking（output_config.effort）的模型：opus-4.7+ 与 Claude 5 家族，
+ * 以及 grok（中转会把 effort 翻译成 xai 的 reasoning_effort，实测面板可识别档位）
+ */
 export function supportsAdaptiveThinking(modelId: string): boolean {
-  return /claude-(opus-4-[7-9]|opus-5|sonnet-5|haiku-5|fable|mythos)/i.test(modelId);
+  return /claude-(opus-4-[7-9]|opus-5|sonnet-5|haiku-5|fable|mythos)|grok/i.test(modelId);
 }
 
 /** 从 pi 的资源加载器收集可用斜杠命令：skills（/skill:name）与 prompt templates（/name） */
