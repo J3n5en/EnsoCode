@@ -63,7 +63,7 @@ export function ChatView() {
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Select value={provider?.id ?? ''} onValueChange={(v) => setProviderId(v ?? '')}>
           <SelectTrigger className="h-8 w-44">
-            <SelectValue placeholder={t('Provider')} />
+            <SelectValue>{provider?.name ?? t('Provider')}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
             {enabledProviders.map((p) => (
