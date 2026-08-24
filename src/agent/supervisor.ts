@@ -130,6 +130,11 @@ export class SessionSupervisor {
           reasoning: true,
           // max 档需显式声明，否则被钳到 high
           thinkingLevelMap: { max: 'max' },
+          // 新 Claude 模型用 adaptive+effort（面板可解析档位）；老模型只认 budget_tokens，
+          // 对它们发 adaptive 会 400 "adaptive thinking is not supported"
+          ...(supportsAdaptiveThinking(model.modelId)
+            ? { compat: { forceAdaptiveThinking: true } }
+            : {}),
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200_000,
@@ -318,6 +323,11 @@ export class SessionSupervisor {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 支持 adaptive thinking（output_config.effort）的 Claude 世代：opus-4.7+ 与 Claude 5 家族 */
+export function supportsAdaptiveThinking(modelId: string): boolean {
+  return /claude-(opus-4-[7-9]|opus-5|sonnet-5|haiku-5|fable|mythos)/i.test(modelId);
+}
 
 /** 从 pi 的资源加载器收集可用斜杠命令：skills（/skill:name）与 prompt templates（/name） */
 function collectSlashCommands(session: AgentSession): SlashCommand[] {
