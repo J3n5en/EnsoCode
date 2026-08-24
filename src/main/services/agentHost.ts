@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import {
   type AgentCommand,
@@ -60,6 +61,11 @@ function sendCommand(command: AgentCommand): { ok: boolean; error?: string } {
 export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?: string } {
   const provider = findProvider(request.providerId);
   if (!provider) return { ok: false, error: `provider not found: ${request.providerId}` };
+  // resume 的 jsonl 已被删除时 pi 会静默打开空会话（内容全空、不报错），历史会话打开一片空白。
+  // 在此同步拦下，让 Renderer 经 IPC 返回值拿到明确错误
+  if (request.resumeFile && !existsSync(request.resumeFile)) {
+    return { ok: false, error: '会话文件已丢失，无法恢复历史' };
+  }
   const model: SpawnModelConfig = {
     api: provider.api,
     baseUrl: provider.baseUrl,

@@ -71,6 +71,7 @@ export function Composer({
   const listRef = useRef<HTMLDivElement>(null);
 
   // 新建/切换会话（focusKey 变化）时自动聚焦输入框
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey 是触发信号，非计算依赖
   useEffect(() => {
     textareaRef.current?.focus();
   }, [focusKey]);
