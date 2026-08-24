@@ -206,6 +206,7 @@ export const useSessionsStore = create<SessionsState>()(
               cwd: target.cwd,
               resumeFile: conversation.sessionFile,
               thinkingLevel: conversation.thinkingLevel,
+              loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
             });
             if (!result.ok) {
               set((state) =>
@@ -254,6 +255,7 @@ export const useSessionsStore = create<SessionsState>()(
             cwd: project.path,
             resumeFile: conversation.sessionFile,
             thinkingLevel: conversation.thinkingLevel,
+            loadLocalSkills: settings.loadLocalSkills,
           });
           set((state) =>
             result.ok

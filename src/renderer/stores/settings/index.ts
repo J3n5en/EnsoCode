@@ -72,6 +72,7 @@ const initialState = {
   terminalFontWeight: 'normal' as FontWeight,
   terminalFontWeightBold: '500' as FontWeight,
   favoriteTerminalThemes: [] as string[],
+  loadLocalSkills: true,
   providers: [] as import('@shared/types').ModelProvider[],
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
@@ -126,6 +127,8 @@ export const useSettingsStore = create<SettingsState>()(
             ? state.favoriteTerminalThemes.filter((t) => t !== theme)
             : [...state.favoriteTerminalThemes, theme],
         })),
+
+      setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
 
       // 按 baseUrl+apiKey 指纹去重，返回实际新增数量
       addProviders: (providers) => {

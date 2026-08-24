@@ -25,6 +25,8 @@ export type AgentCommand =
       /** 从既有 jsonl 恢复会话（app 重启后 resume） */
       resumeFile?: string;
       thinkingLevel?: ThinkingLevel;
+      /** 是否加载本机 skill（.agents/skills、.pi/skills）；默认 true */
+      loadLocalSkills?: boolean;
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
@@ -90,6 +92,7 @@ export interface AgentSpawnRequest {
   /** 从既有 jsonl 恢复（app 重启后 resume） */
   resumeFile?: string;
   thinkingLevel?: ThinkingLevel;
+  loadLocalSkills?: boolean;
 }
 
 export interface AgentActionResult {

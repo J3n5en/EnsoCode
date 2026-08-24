@@ -13,10 +13,22 @@ export function SkillsSettings() {
   const skills = useSettingsStore((state) => state.skills);
   const updateSkill = useSettingsStore((state) => state.updateSkill);
   const removeSkill = useSettingsStore((state) => state.removeSkill);
+  const loadLocalSkills = useSettingsStore((state) => state.loadLocalSkills);
+  const setLoadLocalSkills = useSettingsStore((state) => state.setLoadLocalSkills);
   const [importOpen, setImportOpen] = React.useState(false);
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+        <div>
+          <p className="font-medium text-sm">{t('Load local skills')}</p>
+          <p className="text-muted-foreground text-xs">
+            {t('Let the agent auto-discover skills under .agents/skills and .pi/skills')}
+          </p>
+        </div>
+        <Switch checked={loadLocalSkills} onCheckedChange={setLoadLocalSkills} />
+      </div>
+
       <div className="flex items-end justify-between gap-4">
         <div>
           <h3 className="font-medium text-lg">{t('Skills')}</h3>

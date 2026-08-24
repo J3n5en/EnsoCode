@@ -144,6 +144,9 @@ export const zhTranslations: Record<string, string> = {
   'Show {{count}} earlier': '显示更早的 {{count}} 条',
   'Scroll to bottom': '滚动到底部',
   'Thinking level': '思考深度',
+  'Load local skills': '加载本机 skill',
+  'Let the agent auto-discover skills under .agents/skills and .pi/skills':
+    '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
 };
 
 export function normalizeLocale(input?: string): Locale {

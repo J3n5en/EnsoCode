@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   type AgentSession,
   createAgentSession,
+  DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
@@ -81,7 +82,8 @@ export class SessionSupervisor {
           command.cwd,
           command.model,
           command.resumeFile,
-          command.thinkingLevel
+          command.thinkingLevel,
+          command.loadLocalSkills
         );
         return;
       case 'prompt': {
@@ -116,7 +118,8 @@ export class SessionSupervisor {
     cwd: string,
     model: SpawnModelConfig,
     resumeFile?: string,
-    thinkingLevel?: ThinkingLevel
+    thinkingLevel?: ThinkingLevel,
+    loadLocalSkills = true
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
@@ -125,6 +128,8 @@ export class SessionSupervisor {
       baseUrl: model.baseUrl,
       api: model.api,
       apiKey: model.apiKey,
+      // 统一伪装为 enso-code 客户端（覆盖 pi 默认的 "pi (darwin ...)"）
+      headers: { 'User-Agent': ENSO_USER_AGENT },
       models: [
         {
           id: model.modelId,
@@ -155,6 +160,15 @@ export class SessionSupervisor {
       modelRuntime: runtime,
       model: piModel,
       thinkingLevel: thinkingLevel ?? 'off',
+      // 关闭 skill：resourceLoader 传 noSkills，pi 就不扫描 .agents/skills、.pi/skills
+      resourceLoader:
+        loadLocalSkills === false
+          ? new DefaultResourceLoader({
+              cwd,
+              agentDir: this.options.agentDir,
+              noSkills: true,
+            })
+          : undefined,
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
@@ -352,6 +366,9 @@ export class SessionSupervisor {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
+const ENSO_USER_AGENT = 'enso-code';
 
 /**
  * adaptive thinking（output_config.effort）的判定：乐观默认支持——未来新模型都支持，

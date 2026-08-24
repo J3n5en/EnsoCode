@@ -35,6 +35,9 @@ export interface SettingsState {
   terminalFontWeightBold: FontWeight;
   favoriteTerminalThemes: string[];
 
+  /** 是否让 agent 加载本机 skill（.agents/skills、.pi/skills）；缺省视为 true */
+  loadLocalSkills: boolean;
+
   // Model providers
   providers: ModelProvider[];
 
@@ -55,6 +58,7 @@ export interface SettingsState {
   setTerminalFontWeight: (weight: FontWeight) => void;
   setTerminalFontWeightBold: (weight: FontWeight) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
+  setLoadLocalSkills: (value: boolean) => void;
 
   // Provider actions
   /** 按 baseUrl+apiKey 指纹与现有项去重，返回实际新增数量 */
