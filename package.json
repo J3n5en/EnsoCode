@@ -37,6 +37,8 @@
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "smol-toml": "^1.8.0",
     "tailwind-merge": "^3.6.0",
     "yaml": "^2.9.0",

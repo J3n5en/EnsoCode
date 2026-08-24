@@ -117,6 +117,8 @@ export const zhTranslations: Record<string, string> = {
   'Working directory': '工作目录',
   'Ask the agent…': '想让 agent 做什么…',
   'Steer the running agent…': '给运行中的 agent 补一句…',
+  'Thinking…': '思考中…',
+  'Thought process': '思考过程',
 };
 
 export function normalizeLocale(input?: string): Locale {
