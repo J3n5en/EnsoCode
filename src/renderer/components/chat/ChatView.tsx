@@ -246,6 +246,7 @@ export function ChatView() {
             commands={conversation.commands}
             running={running}
             busy={busy}
+            focusKey={conversation.id}
             toolbar={
               <ModelPicker
                 providers={enabledProviders}

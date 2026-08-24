@@ -17,6 +17,8 @@ interface ComposerProps {
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
+  /** 会话 id：变化（新建/切换会话）时自动 focus 输入框 */
+  focusKey?: string;
   /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
   onSend: (text: string, images: AttachedImage[]) => void;
@@ -51,6 +53,7 @@ export function Composer({
   commands,
   running,
   busy,
+  focusKey,
   toolbar,
   onSend,
   onAbort,
@@ -66,6 +69,11 @@ export function Composer({
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // 新建/切换会话（focusKey 变化）时自动聚焦输入框
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, [focusKey]);
 
   const slashResults =
     slashQuery === null
