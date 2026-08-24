@@ -128,10 +128,13 @@ export class SessionSupervisor {
           name: model.modelId,
           // 声明支持 reasoning，否则 pi 会把任何思考档位钳到 off
           reasoning: true,
+          // max 档需显式声明，否则被钳到 high
+          thinkingLevelMap: { max: 'max' },
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200_000,
-          maxTokens: 8192,
+          // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
+          maxTokens: 32_000,
         },
       ],
     });
