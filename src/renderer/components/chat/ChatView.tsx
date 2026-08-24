@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, Settings } from 'lucide-react';
+import { ArrowUp, CircleStop } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -115,14 +115,6 @@ export function ChatView() {
             </span>
           )}
           <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => window.electronAPI.window.openSettings()}
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </Button>
         </div>
       </div>
 

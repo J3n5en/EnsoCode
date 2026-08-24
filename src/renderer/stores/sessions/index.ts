@@ -96,95 +96,95 @@ export const useSessionsStore = create<SessionsState>()(
       });
 
       return {
-    conversations: {},
-    order: [],
-    activeId: null,
+        conversations: {},
+        order: [],
+        activeId: null,
 
-    newConversation(projectId) {
-      // 复用同项目下已存在的空对话，避免连点堆一排空行
-      const existing = get().order.find((id) => {
-        const conversation = get().conversations[id];
-        return conversation.projectId === projectId && !conversation.started;
-      });
-      if (existing) {
-        set({ activeId: existing });
-        return existing;
-      }
-      const id = crypto.randomUUID();
-      const conversation: Conversation = {
-        ...emptyProjection,
-        id,
-        projectId,
-        title: '',
-        started: false,
-        spawning: false,
-        createdAt: Date.now(),
+        newConversation(projectId) {
+          // 复用同项目下已存在的空对话，避免连点堆一排空行
+          const existing = get().order.find((id) => {
+            const conversation = get().conversations[id];
+            return conversation.projectId === projectId && !conversation.started;
+          });
+          if (existing) {
+            set({ activeId: existing });
+            return existing;
+          }
+          const id = crypto.randomUUID();
+          const conversation: Conversation = {
+            ...emptyProjection,
+            id,
+            projectId,
+            title: '',
+            started: false,
+            spawning: false,
+            createdAt: Date.now(),
+          };
+          set((state) => ({
+            conversations: { ...state.conversations, [id]: conversation },
+            order: [id, ...state.order],
+            activeId: id,
+          }));
+          return id;
+        },
+
+        selectConversation(id) {
+          if (get().conversations[id]) set({ activeId: id });
+        },
+
+        removeConversation(id) {
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          if (conversation.started && conversation.status === 'running') {
+            void window.electronAPI.agent.abort(id);
+          }
+          set((state) => {
+            const conversations = { ...state.conversations };
+            delete conversations[id];
+            const order = state.order.filter((entry) => entry !== id);
+            return {
+              conversations,
+              order,
+              activeId: state.activeId === id ? (order[0] ?? null) : state.activeId,
+            };
+          });
+        },
+
+        async send(text, target) {
+          const id = get().activeId;
+          if (!id) return 'no conversation';
+          const conversation = get().conversations[id];
+          if (!conversation.started) {
+            set((state) => patch(state, id, { spawning: true, title: text.slice(0, 40) }));
+            const result = await window.electronAPI.agent.spawn({
+              sessionId: id,
+              providerId: target.providerId,
+              modelId: target.modelId,
+              cwd: target.cwd,
+            });
+            if (!result.ok) {
+              set((state) =>
+                patch(state, id, { spawning: false, status: 'failed', error: result.error })
+              );
+              return result.error ?? 'spawn failed';
+            }
+            set((state) => patch(state, id, { spawning: false, started: true }));
+          }
+          const action =
+            get().conversations[id]?.status === 'running'
+              ? window.electronAPI.agent.steer(id, text)
+              : window.electronAPI.agent.prompt(id, text);
+          const result = await action;
+          return result.ok ? null : (result.error ?? 'send failed');
+        },
+
+        async abort() {
+          const id = get().activeId;
+          if (id && get().conversations[id]?.started) {
+            await window.electronAPI.agent.abort(id);
+          }
+        },
       };
-      set((state) => ({
-        conversations: { ...state.conversations, [id]: conversation },
-        order: [id, ...state.order],
-        activeId: id,
-      }));
-      return id;
-    },
-
-    selectConversation(id) {
-      if (get().conversations[id]) set({ activeId: id });
-    },
-
-    removeConversation(id) {
-      const conversation = get().conversations[id];
-      if (!conversation) return;
-      if (conversation.started && conversation.status === 'running') {
-        void window.electronAPI.agent.abort(id);
-      }
-      set((state) => {
-        const conversations = { ...state.conversations };
-        delete conversations[id];
-        const order = state.order.filter((entry) => entry !== id);
-        return {
-          conversations,
-          order,
-          activeId: state.activeId === id ? (order[0] ?? null) : state.activeId,
-        };
-      });
-    },
-
-    async send(text, target) {
-      const id = get().activeId;
-      if (!id) return 'no conversation';
-      const conversation = get().conversations[id];
-      if (!conversation.started) {
-        set((state) => patch(state, id, { spawning: true, title: text.slice(0, 40) }));
-        const result = await window.electronAPI.agent.spawn({
-          sessionId: id,
-          providerId: target.providerId,
-          modelId: target.modelId,
-          cwd: target.cwd,
-        });
-        if (!result.ok) {
-          set((state) =>
-            patch(state, id, { spawning: false, status: 'failed', error: result.error })
-          );
-          return result.error ?? 'spawn failed';
-        }
-        set((state) => patch(state, id, { spawning: false, started: true }));
-      }
-      const action =
-        get().conversations[id]?.status === 'running'
-          ? window.electronAPI.agent.steer(id, text)
-          : window.electronAPI.agent.prompt(id, text);
-      const result = await action;
-      return result.ok ? null : (result.error ?? 'send failed');
-    },
-
-    async abort() {
-      const id = get().activeId;
-      if (id && get().conversations[id]?.started) {
-        await window.electronAPI.agent.abort(id);
-      }
-    },
-  };
     },
     {
       name: 'enso-conversations',

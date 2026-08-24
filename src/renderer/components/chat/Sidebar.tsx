@@ -1,10 +1,27 @@
-import { FolderPlus, MessageSquarePlus, Trash2, X } from 'lucide-react';
+import {
+  FolderPlus,
+  MessageSquarePlus,
+  PanelLeft,
+  PanelLeftClose,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
-export function Sidebar() {
+const ICON_BUTTON_CLASS =
+  'rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+
+interface SidebarProps {
+  width?: number;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+}
+
+export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const { t } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
   const addProject = useSettingsStore((state) => state.addProject);
@@ -23,14 +40,46 @@ export function Sidebar() {
     newConversation(project.id);
   };
 
+  if (collapsed) {
+    return (
+      <aside className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/20 py-2">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className={ICON_BUTTON_CLASS}
+          title={t('Expand sidebar')}
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleAddProject()}
+          className={ICON_BUTTON_CLASS}
+          title={t('Add project')}
+        >
+          <FolderPlus className="h-4 w-4" />
+        </button>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => window.electronAPI.window.openSettings()}
+          className={ICON_BUTTON_CLASS}
+          title={t('Settings')}
+        >
+          <Settings className="h-4 w-4" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-muted/20">
+    <aside className="flex shrink-0 flex-col bg-muted/20" style={{ width }}>
       <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
         <span className="text-xs font-medium text-muted-foreground">{t('Projects')}</span>
         <button
           type="button"
           onClick={() => void handleAddProject()}
-          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className={ICON_BUTTON_CLASS}
           title={t('Add project')}
         >
           <FolderPlus className="h-3.5 w-3.5" />
@@ -113,6 +162,25 @@ export function Sidebar() {
             </div>
           );
         })}
+      </div>
+
+      <div className="flex items-center justify-between border-t px-2 py-1.5">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className={ICON_BUTTON_CLASS}
+          title={t('Collapse sidebar')}
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => window.electronAPI.window.openSettings()}
+          className={ICON_BUTTON_CLASS}
+          title={t('Settings')}
+        >
+          <Settings className="h-4 w-4" />
+        </button>
       </div>
     </aside>
   );

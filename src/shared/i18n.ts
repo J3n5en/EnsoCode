@@ -125,6 +125,8 @@ export const zhTranslations: Record<string, string> = {
   'New conversation': '新对话',
   'Remove project': '移除项目',
   'Select or create a conversation': '选择或新建一个对话',
+  'Collapse sidebar': '折叠侧边栏',
+  'Expand sidebar': '展开侧边栏',
 };
 
 export function normalizeLocale(input?: string): Locale {
