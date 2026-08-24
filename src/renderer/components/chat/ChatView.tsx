@@ -13,6 +13,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { Composer } from './Composer';
+import { StatsLine } from './StatsLine';
 import { TimelineRow } from './TimelineRow';
 
 const SELECT_TRIGGER_CLASS =
@@ -144,6 +145,7 @@ export function ChatView() {
             }}
             onAbort={() => void useSessionsStore.getState().abort()}
           />
+          <StatsLine messages={conversation.messages} activeMs={conversation.activeMs} />
         </div>
       </div>
     </div>

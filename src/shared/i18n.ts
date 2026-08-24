@@ -127,6 +127,10 @@ export const zhTranslations: Record<string, string> = {
   'Select or create a conversation': '选择或新建一个对话',
   'Collapse sidebar': '折叠侧边栏',
   'Expand sidebar': '展开侧边栏',
+  '{{count}} turns': '{{count}} 轮',
+  'Cache hit {{percent}}%': '缓存命中 {{percent}}%',
+  'Input {{input}} tok · Output {{output}} tok': '输入 {{input}} · 输出 {{output}} tok',
+  '{{speed}} tok/s': '{{speed}} tok/s',
 };
 
 export function normalizeLocale(input?: string): Locale {

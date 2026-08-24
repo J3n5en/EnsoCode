@@ -26,7 +26,8 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
 /** 只保留四个 token 计数，cost 等其余字段不出 worker */
 function projectUsage(value: unknown): ProjectedMessage['usage'] | null {
   if (!isRecord(value)) return null;
-  const num = (key: string): number => (typeof value[key] === 'number' ? (value[key] as number) : 0);
+  const num = (key: string): number =>
+    typeof value[key] === 'number' ? (value[key] as number) : 0;
   return {
     input: num('input'),
     output: num('output'),
