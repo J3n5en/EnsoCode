@@ -133,6 +133,14 @@ export const zhTranslations: Record<string, string> = {
   '{{speed}} tok/s': '{{speed}} tok/s',
   'Search models': '搜索模型',
   'No models found': '没有匹配的模型',
+  'Import session': '导入会话',
+  'Pick a conversation from a local AI app under {{name}}.':
+    '从本地 AI 应用导入 {{name}} 项目下的对话历史。',
+  'No sessions found for this project': '没有找到该项目的会话',
+  'Select a session to preview': '选择一个会话预览',
+  Untitled: '未命名',
+  '{{count}} messages': '{{count}} 条消息',
+  Import: '导入',
 };
 
 export function normalizeLocale(input?: string): Locale {

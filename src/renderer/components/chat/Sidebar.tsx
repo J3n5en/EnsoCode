@@ -1,6 +1,8 @@
+import type { Project } from '@shared/types';
 import {
   ChevronDown,
   FolderPlus,
+  HardDriveDownload,
   MessageSquarePlus,
   PanelLeft,
   PanelLeftClose,
@@ -9,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useState } from 'react';
+import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -57,6 +60,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     const project = addProject(path);
     newConversation(project.id);
   };
+
+  const [importProject, setImportProject] = useState<Project | null>(null);
 
   if (collapsed) {
     return (
@@ -148,6 +153,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setImportProject(project)}
+                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                  title={t('Import session')}
+                >
+                  <HardDriveDownload className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     for (const id of projectConversations) removeConversation(id);
                     removeProject(project.id);
@@ -215,6 +228,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           <Settings className="h-4 w-4" />
         </button>
       </div>
+
+      <ImportSessionDialog project={importProject} onClose={() => setImportProject(null)} />
     </aside>
   );
 }

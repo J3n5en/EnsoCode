@@ -38,6 +38,11 @@ interface SessionsState {
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
+  /** 登记一条从外部应用导入的对话（选中后自动 resume 回放） */
+  addImportedConversation(
+    projectId: string,
+    imported: { sessionFile: string; title: string }
+  ): string;
   abort(): Promise<void>;
 }
 
@@ -215,29 +220,57 @@ export const useSessionsStore = create<SessionsState>()(
         async resumeConversation(id) {
           const conversation = get().conversations[id];
           if (!conversation || conversation.started || conversation.spawning) return;
-          if (
-            !conversation.sessionFile ||
-            !conversation.lastProviderId ||
-            !conversation.lastModelId
-          )
-            return;
-          const project = useSettingsStore
-            .getState()
-            .projects.find((p) => p.id === conversation.projectId);
+          if (!conversation.sessionFile) return;
+          const settings = useSettingsStore.getState();
+          const project = settings.projects.find((p) => p.id === conversation.projectId);
           if (!project) return;
+          // 导入的对话没有历史模型记录，退化到第一个可用 provider/model
+          const fallbackProvider = settings.providers.find(
+            (p) => p.enabled && p.apiKey && p.models.some((m) => m.enabled !== false)
+          );
+          const providerId = conversation.lastProviderId ?? fallbackProvider?.id;
+          const modelId =
+            conversation.lastModelId ??
+            fallbackProvider?.models.find((m) => m.enabled !== false)?.id;
+          if (!providerId || !modelId) return;
           set((state) => patch(state, id, { spawning: true }));
           const result = await window.electronAPI.agent.spawn({
             sessionId: id,
-            providerId: conversation.lastProviderId,
-            modelId: conversation.lastModelId,
+            providerId,
+            modelId,
             cwd: project.path,
             resumeFile: conversation.sessionFile,
           });
           set((state) =>
             result.ok
-              ? patch(state, id, { spawning: false, started: true })
+              ? patch(state, id, {
+                  spawning: false,
+                  started: true,
+                  lastProviderId: providerId,
+                  lastModelId: modelId,
+                })
               : patch(state, id, { spawning: false, status: 'failed', error: result.error })
           );
+        },
+
+        addImportedConversation(projectId, imported) {
+          const id = crypto.randomUUID();
+          const conversation: Conversation = {
+            ...emptyProjection,
+            id,
+            projectId,
+            title: imported.title || '[imported]',
+            started: false,
+            spawning: false,
+            createdAt: Date.now(),
+            sessionFile: imported.sessionFile,
+          };
+          set((state) => ({
+            conversations: { ...state.conversations, [id]: conversation },
+            order: [id, ...state.order],
+            activeId: id,
+          }));
+          return id;
         },
 
         async abort() {
