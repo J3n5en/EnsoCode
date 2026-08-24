@@ -41,6 +41,9 @@ function saveWindowState(win: BrowserWindow, stateFile: string): void {
   } catch {}
 }
 
+/** macOS 红绿灯自定义位置（按 44px 标题栏垂直居中） */
+export const TRAFFIC_LIGHT_POSITION = { x: 16, y: 16 };
+
 /**
  * 通用无边框窗口创建：
  * - macOS: hiddenInset 保留 traffic lights
@@ -63,7 +66,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     parent: options.parent,
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     frame: isMac,
-    ...(isMac && { trafficLightPosition: { x: 16, y: 16 } }),
+    ...(isMac && { trafficLightPosition: TRAFFIC_LIGHT_POSITION }),
     ...(isWindows && { thickFrame: true }),
     show: false,
     webPreferences: {

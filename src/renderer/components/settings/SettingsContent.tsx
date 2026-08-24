@@ -1,10 +1,14 @@
-import { Palette, Settings } from 'lucide-react';
+import { FileText, Palette, Plug, Server, Settings, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import type { SettingsCategory } from './constants';
 import { GeneralSettings } from './GeneralSettings';
+import { InstructionsSettings } from './InstructionsSettings';
+import { McpSettings } from './McpSettings';
+import { ProvidersSettings } from './ProvidersSettings';
+import { SkillsSettings } from './SkillsSettings';
 
 export function SettingsContent() {
   const { t } = useI18n();
@@ -13,6 +17,10 @@ export function SettingsContent() {
   const categories: Array<{ id: SettingsCategory; icon: React.ElementType; label: string }> = [
     { id: 'general', icon: Settings, label: t('General') },
     { id: 'appearance', icon: Palette, label: t('Appearance') },
+    { id: 'providers', icon: Server, label: t('Model Providers') },
+    { id: 'skills', icon: Sparkles, label: t('Skills') },
+    { id: 'mcp', icon: Plug, label: t('MCP Servers') },
+    { id: 'instructions', icon: FileText, label: t('Instruction Files') },
   ];
 
   return (
@@ -41,6 +49,10 @@ export function SettingsContent() {
       <div className="flex-1 min-w-0 overflow-y-auto p-6">
         {activeCategory === 'general' && <GeneralSettings />}
         {activeCategory === 'appearance' && <AppearanceSettings />}
+        {activeCategory === 'providers' && <ProvidersSettings />}
+        {activeCategory === 'skills' && <SkillsSettings />}
+        {activeCategory === 'mcp' && <McpSettings />}
+        {activeCategory === 'instructions' && <InstructionsSettings />}
       </div>
     </div>
   );

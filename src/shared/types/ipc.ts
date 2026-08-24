@@ -14,6 +14,16 @@ export const IPC_CHANNELS = {
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed',
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+
+  // Local provider scan/import
+  PROVIDERS_SCAN_LOCAL: 'providers:scan-local',
+  PROVIDERS_COLLECT_IMPORT: 'providers:collect-import',
+  PROVIDERS_LIST_MODELS: 'providers:list-models',
+  PROVIDERS_TEST: 'providers:test',
+
+  // Local skill / MCP scan/import
+  ASSETS_SCAN_LOCAL: 'assets:scan-local',
+  ASSETS_COLLECT_IMPORT: 'assets:collect-import',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

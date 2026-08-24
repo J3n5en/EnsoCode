@@ -1,6 +1,12 @@
 import type { FontWeight } from '@/stores/settings';
 
-export type SettingsCategory = 'general' | 'appearance';
+export type SettingsCategory =
+  | 'general'
+  | 'appearance'
+  | 'providers'
+  | 'skills'
+  | 'mcp'
+  | 'instructions';
 
 export const fontWeightOptions: { value: FontWeight; label: string }[] = [
   { value: 'normal', label: 'Normal' },

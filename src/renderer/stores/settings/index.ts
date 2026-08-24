@@ -72,6 +72,10 @@ const initialState = {
   terminalFontWeight: 'normal' as FontWeight,
   terminalFontWeightBold: '500' as FontWeight,
   favoriteTerminalThemes: [] as string[],
+  providers: [] as import('@shared/types').ModelProvider[],
+  skills: [] as import('@shared/types').SkillEntry[],
+  mcpServers: [] as import('@shared/types').McpServerEntry[],
+  instructions: [] as import('@shared/types').InstructionEntry[],
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -121,6 +125,108 @@ export const useSettingsStore = create<SettingsState>()(
             ? state.favoriteTerminalThemes.filter((t) => t !== theme)
             : [...state.favoriteTerminalThemes, theme],
         })),
+
+      // 按 baseUrl+apiKey 指纹去重，返回实际新增数量
+      addProviders: (providers) => {
+        const fingerprint = (p: { baseUrl: string; apiKey: string }) =>
+          `${p.baseUrl.trim().replace(/\/+$/, '')}::${p.apiKey.trim()}`;
+        const known = new Set(get().providers.map(fingerprint));
+        const fresh = providers.filter((provider) => {
+          const key = fingerprint(provider);
+          if (known.has(key)) return false;
+          known.add(key);
+          return true;
+        });
+        if (fresh.length > 0) {
+          set((state) => ({ providers: [...state.providers, ...fresh] }));
+        }
+        return fresh.length;
+      },
+
+      updateProvider: (id, updates) =>
+        set((state) => ({
+          providers: state.providers.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+        })),
+
+      removeProvider: (id) =>
+        set((state) => ({ providers: state.providers.filter((p) => p.id !== id) })),
+
+      // 技能以名称为标识去重，同时拦住同路径的重复登记
+      addSkills: (skills) => {
+        const nameKey = (name: string) => name.trim().toLowerCase();
+        const knownNames = new Set(get().skills.map((skill) => nameKey(skill.name)));
+        const knownPaths = new Set(get().skills.map((skill) => skill.path));
+        const fresh = skills.filter((skill) => {
+          const key = nameKey(skill.name);
+          if (knownNames.has(key) || knownPaths.has(skill.path)) return false;
+          knownNames.add(key);
+          knownPaths.add(skill.path);
+          return true;
+        });
+        if (fresh.length > 0) {
+          set((state) => ({ skills: [...state.skills, ...fresh] }));
+        }
+        return fresh.length;
+      },
+
+      updateSkill: (id, updates) =>
+        set((state) => ({
+          skills: state.skills.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+        })),
+
+      removeSkill: (id) => set((state) => ({ skills: state.skills.filter((s) => s.id !== id) })),
+
+      // 按启动命令或 URL 去重
+      addMcpServers: (servers) => {
+        const fingerprint = (server: import('@shared/types').McpServerEntry) =>
+          server.url
+            ? `url::${server.url.replace(/\/+$/, '')}`
+            : `cmd::${server.command} ${(server.args ?? []).join(' ')}`.trim();
+        const known = new Set(get().mcpServers.map(fingerprint));
+        const fresh = servers.filter((server) => {
+          const key = fingerprint(server);
+          if (known.has(key)) return false;
+          known.add(key);
+          return true;
+        });
+        if (fresh.length > 0) {
+          set((state) => ({ mcpServers: [...state.mcpServers, ...fresh] }));
+        }
+        return fresh.length;
+      },
+
+      updateMcpServer: (id, updates) =>
+        set((state) => ({
+          mcpServers: state.mcpServers.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+        })),
+
+      removeMcpServer: (id) =>
+        set((state) => ({ mcpServers: state.mcpServers.filter((s) => s.id !== id) })),
+
+      // 按文件路径去重；无文件的内联条目按名称+来源去重
+      addInstructions: (instructions) => {
+        const key = (item: import('@shared/types').InstructionEntry) =>
+          item.path ?? `${item.source}::${item.name}`;
+        const known = new Set(get().instructions.map(key));
+        const fresh = instructions.filter((item) => {
+          const value = key(item);
+          if (known.has(value)) return false;
+          known.add(value);
+          return true;
+        });
+        if (fresh.length > 0) {
+          set((state) => ({ instructions: [...state.instructions, ...fresh] }));
+        }
+        return fresh.length;
+      },
+
+      updateInstruction: (id, updates) =>
+        set((state) => ({
+          instructions: state.instructions.map((i) => (i.id === id ? { ...i, ...updates } : i)),
+        })),
+
+      removeInstruction: (id) =>
+        set((state) => ({ instructions: state.instructions.filter((i) => i.id !== id) })),
     }),
     {
       name: 'enso-settings',

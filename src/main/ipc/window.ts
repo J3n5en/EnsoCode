@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '@shared/types';
 import { BrowserWindow, ipcMain } from 'electron';
+import { TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 
 /** 窗口控制：所有 handler 作用于发起 IPC 的窗口，天然支持多窗口 */
@@ -37,7 +38,13 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, (event, visible: unknown) => {
     if (typeof visible !== 'boolean' || process.platform !== 'darwin') return;
-    senderWindow(event)?.setWindowButtonVisibility(visible);
+    const win = senderWindow(event);
+    if (!win) return;
+    win.setWindowButtonVisibility(visible);
+    // setWindowButtonVisibility 会把按钮位置重置为系统默认，恢复显示时需要重新设置
+    if (visible) {
+      win.setWindowButtonPosition(TRAFFIC_LIGHT_POSITION);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, () => {

@@ -1,3 +1,12 @@
+import type {
+  CollectedAsset,
+  CollectedProvider,
+  ListModelsResult,
+  LocalAssetScanResult,
+  LocalProviderScanResult,
+  ProviderApiConfig,
+  TestProviderResult,
+} from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -17,6 +26,24 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, listener);
     },
+  },
+
+  providers: {
+    scanLocal: (): Promise<LocalProviderScanResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_SCAN_LOCAL),
+    collectImport: (scanId: string, candidateIds: string[]): Promise<CollectedProvider[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_COLLECT_IMPORT, scanId, candidateIds),
+    listModels: (config: ProviderApiConfig): Promise<ListModelsResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_LIST_MODELS, config),
+    test: (config: ProviderApiConfig, modelId?: string): Promise<TestProviderResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_TEST, config, modelId),
+  },
+
+  assets: {
+    scanLocal: (): Promise<LocalAssetScanResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SCAN_LOCAL),
+    collectImport: (scanId: string, candidateIds: string[]): Promise<CollectedAsset[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_COLLECT_IMPORT, scanId, candidateIds),
   },
 
   window: {
