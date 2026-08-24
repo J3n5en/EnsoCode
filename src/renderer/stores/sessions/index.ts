@@ -131,10 +131,18 @@ export const useSessionsStore = create<SessionsState>()(
         activeId: null,
 
         newConversation(projectId) {
-          // 复用同项目下已存在的空对话，避免连点堆一排空行
+          // 复用同项目下已存在的空白草稿，避免连点堆一排空行。
+          // 注意排除「待 resume 的旧对话」——app 重启后它们 started 也是 false，
+          // 但有 sessionFile/标题，不是草稿
           const existing = get().order.find((id) => {
             const conversation = get().conversations[id];
-            return conversation.projectId === projectId && !conversation.started;
+            return (
+              conversation.projectId === projectId &&
+              !conversation.started &&
+              !conversation.sessionFile &&
+              conversation.messages.length === 0 &&
+              !conversation.title
+            );
           });
           if (existing) {
             set({ activeId: existing });
