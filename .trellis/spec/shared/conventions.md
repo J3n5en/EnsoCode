@@ -67,6 +67,13 @@ app.commandLine.appendSwitch('remote-debugging-port', '9222'); // TEMP-DEBUG
 然后 `pnpm dev`，通过 CDP（`http://127.0.0.1:9222/json/list` 拿到 WebSocket 地址，
 Node 24 有原生 `WebSocket`，不需要装 `ws`）驱动界面、截图、读取状态。
 
+**dev 模式只热重载 renderer**：`src/main/`、`src/preload/`、`src/agent/` 的改动
+不会触发 rebuild 或重启，改完必须手动重启 `pnpm dev`，否则跑的还是旧产物
+（agent worker 的行为 bug 尤其容易被这个假象掩盖）。
+
+CDP 里驱动 renderer 模块可以用 vite 的动态 import——注意 renderer 的 vite root 是
+`src/renderer`，模块路径是 `/stores/...` 而不是 `/src/renderer/stores/...`。
+
 **验证完必须清理**：删掉 `// TEMP-DEBUG` 那行、结束 dev 进程、还原测试期间写入的
 `settings.json` 与 `userData/instructions/`。改动过用户真实文件（如 `~/.factory/AGENTS.md`）
 的测试，事前备份、事后用 md5 核对已还原。

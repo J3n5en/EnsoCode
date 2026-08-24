@@ -64,3 +64,15 @@ ls out/preload/
 
 正常只有 `index.mjs`（加 source map）。出现 `install.js`、`cli.js` 之类
 明显来自某个 npm 包内部的文件名，就是 external 失效了。
+
+## 同类坑：main 段自定义 rollupOptions.input
+
+给 main 段加多入口（agent worker）时同样触发：`rollupOptions.input` 一出现，
+electron-vite 就不走 lib 模式，默认 `external: ['electron', ...builtins]` 不再生效，
+electron 包与全部 dependencies 被打进 `out/main/index.js`（症状：ESM scope 报
+`__dirname is not defined`，产物暴涨到几 MB）。
+
+修法：`electron.vite.config.ts` 里显式复刻默认 external（electron + builtins +
+`package.json` 的 dependencies），见 main 段配置的 `nodeExternal`。
+
+判别：`grep -c "install.js" out/main/index.js` 非 0 即中招。

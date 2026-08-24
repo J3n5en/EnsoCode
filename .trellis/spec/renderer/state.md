@@ -1,13 +1,21 @@
 # 状态管理规范
 
-全应用只有一个 store：`src/renderer/stores/settings/`。
+两个 store：持久化的 `stores/settings/` 与内存态的 `stores/sessions/`。
 
 ```
 stores/settings/
   types.ts     SettingsState：数据字段 + 全部 action 的签名
   storage.ts   electronStorage：persist 的 IPC 存储适配器
   index.ts     create + persist + 副作用
+stores/sessions/
+  reducer.ts   applyAgentEvent：agent 事件 → 会话投影的纯函数（seq 单调守卫）
+  index.ts     create（不 persist）+ onAgentEvent 订阅 + spawn/send/abort
 ```
+
+`sessions` 是**可丢弃投影**（权威源在 worker/jsonl），不 persist、不进 settings.json。
+消息按 `message-upsert` 的 index 整条替换，**没有增量归并**；
+过期 seq 的事件在 reducer 里丢弃。改事件处理逻辑时改 `reducer.ts`（纯函数，有测试），
+不要把逻辑写进订阅回调。
 
 ## 加字段的完整流程
 

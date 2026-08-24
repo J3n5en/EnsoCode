@@ -21,6 +21,10 @@ pnpm test:watch    # 监听模式
 | `src/main/services/providerApi.test.ts` | URL 拼接、模型列表解析、错误文案 |
 | `src/main/services/instructionStore.test.ts` | 路径穿越防护 |
 | `src/shared/i18n.test.ts` | locale 归一化、插值 |
+| `src/shared/types/agent.test.ts` | agent 命令/事件的收窄（脏输入不崩） |
+| `src/agent/projection.test.ts` | 消息投影白名单（脱敏即白名单克隆） |
+| `src/agent/gate.test.ts` | 操作门：同 key 串行、异 key 并行、抛错不断链 |
+| `src/renderer/stores/sessions/reducer.test.ts` | 事件归并：seq 守卫、index upsert、截断 |
 
 **暂未覆盖**（有意为之）：React 组件、zustand store、真实网络请求、Electron 窗口行为。
 这些需要 jsdom 或真机环境，成本高且 UI 仍在快速迭代。

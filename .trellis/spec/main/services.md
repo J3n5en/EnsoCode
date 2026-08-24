@@ -1,7 +1,24 @@
 # services 层规范
 
-`src/main/services/` 放不依赖 `ipcMain` 的业务逻辑。两类典型：**扫描外部应用配置**、
-**对外发起网络请求**。
+`src/main/services/` 放不依赖 `ipcMain` 的业务逻辑。三类典型：**扫描外部应用配置**、
+**对外发起网络请求**、**agent worker 的生命周期托管**（`agentHost.ts`）。
+
+## agentHost：worker 生命周期与命令下发
+
+`agentHost.ts` 托管唯一的 agent worker（`utilityProcess.fork(out/main/agent.js)`，
+故障域 A：一个进程装全部活会话）。关键约束：
+
+- **apiKey 到 Main 为止**：Renderer 发 `AgentSpawnRequest` 只带 `providerId`，
+  `spawnSession` 从 settings 补全 apiKey 组装 `SpawnModelConfig` 下发 worker；
+  worker 回来的事件经 `parseAgentWorkerEvent` 收窄，类型上不给 auth 位置。
+- worker `exit` 时向 Renderer 广播 `worker-exited`（全部会话视为 failed），
+  **不自动重启**——重启牵出 jsonl 恢复，是独立一刀。
+- pi 的全局目录与会话目录经 `ENSO_AGENT_DATA_DIR` 指到 `userData/agent/`，
+  不碰用户的 `~/.pi`。
+
+worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared 平级，
+只准 import `@shared` 与 pi sdk），协议类型在 `src/shared/types/agent.ts`。
+
 
 ## 扫描器的三件套结构
 
