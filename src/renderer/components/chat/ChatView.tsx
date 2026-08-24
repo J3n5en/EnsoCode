@@ -1,6 +1,4 @@
-import { ArrowUp, CircleStop } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -14,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { Composer } from './Composer';
 import { TimelineRow } from './TimelineRow';
 
 const SELECT_TRIGGER_CLASS =
@@ -45,7 +44,6 @@ export function ChatView() {
 
   const project = projects.find((p) => p.id === conversation?.projectId);
 
-  const [text, setText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const running = conversation?.status === 'running';
@@ -59,17 +57,6 @@ export function ChatView() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [timeline]);
-
-  const handleSend = async () => {
-    const content = text.trim();
-    if (!content || !provider || !effectiveModelId || !project) return;
-    setText('');
-    await useSessionsStore.getState().send(content, {
-      providerId: provider.id,
-      modelId: effectiveModelId,
-      cwd: project.path,
-    });
-  };
 
   if (!conversation) {
     return (
@@ -138,42 +125,21 @@ export function ChatView() {
 
       <div className="px-4 pt-1 pb-4">
         <div className="mx-auto w-full max-w-2xl">
-          <div className="rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-              placeholder={running ? t('Steer the running agent…') : t('Ask the agent…')}
-              rows={2}
-              className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
-            />
-            <div className="flex items-center justify-end gap-1.5 px-2.5 pb-2">
-              {busy ? (
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7 rounded-lg"
-                  onClick={() => void useSessionsStore.getState().abort()}
-                >
-                  <CircleStop className="h-4 w-4" />
-                </Button>
-              ) : (
-                <Button
-                  size="icon"
-                  className="h-7 w-7 rounded-lg"
-                  onClick={() => void handleSend()}
-                  disabled={!text.trim()}
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
+          <Composer
+            cwd={project?.path}
+            commands={conversation.commands}
+            running={running}
+            busy={busy}
+            onSend={(content) => {
+              if (!provider || !effectiveModelId || !project) return;
+              void useSessionsStore.getState().send(content, {
+                providerId: provider.id,
+                modelId: effectiveModelId,
+                cwd: project.path,
+              });
+            }}
+            onAbort={() => void useSessionsStore.getState().abort()}
+          />
         </div>
       </div>
     </div>
