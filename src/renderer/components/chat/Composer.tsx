@@ -58,6 +58,7 @@ export function Composer({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -186,25 +187,41 @@ export function Composer({
     [text]
   );
 
+  /** 粘贴/拖入的文件统一处理：图片转 base64 附件，其余插入磁盘路径 */
+  const ingestFiles = useCallback(
+    (files: File[]) => {
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+            setImages((prev) => [...prev, { data: base64, mimeType: file.type }]);
+          };
+          reader.readAsDataURL(file);
+        } else {
+          // 非图片文件：插入磁盘路径，agent 用 read 工具读取
+          const filePath = window.electronAPI.files.pathForFile(file);
+          if (filePath) insertAtCursor(`@${filePath} `);
+        }
+      }
+    },
+    [insertAtCursor]
+  );
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const files = Array.from(e.clipboardData.files);
     if (files.length === 0) return;
     e.preventDefault();
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-          setImages((prev) => [...prev, { data: base64, mimeType: file.type }]);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        // 非图片文件：插入磁盘路径，agent 用 read 工具读取
-        const filePath = window.electronAPI.files.pathForFile(file);
-        if (filePath) insertAtCursor(`@${filePath} `);
-      }
-    }
+    ingestFiles(files);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    setDragging(false);
+    ingestFiles(files);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -286,7 +303,22 @@ export function Composer({
         </div>
       )}
 
-      <div className="rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring">
+      <div
+        className={cn(
+          'rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring',
+          dragging && 'border-ring bg-muted/30'
+        )}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+        }}
+        onDrop={handleDrop}
+      >
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">
             {images.map((image, index) => (
