@@ -14,16 +14,23 @@ export interface SpawnModelConfig {
 /** Main → worker 命令 */
 export type AgentCommand =
   | { type: 'spawn'; sessionId: string; cwd: string; model: SpawnModelConfig }
-  | { type: 'prompt'; sessionId: string; text: string }
-  | { type: 'steer'; sessionId: string; text: string }
+  | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
+  | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' };
+
+/** 随消息附带的图片（base64） */
+export interface AttachedImage {
+  data: string;
+  mimeType: string;
+}
 
 /** 渲染层可见的消息内容片段。白名单投影，未识别的类型收敛为 unknown */
 export type ProjectedPart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'toolCall'; id: string; name: string; arguments?: unknown }
+  | { type: 'image'; data: string; mimeType: string }
   | { type: 'unknown' };
 
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
@@ -113,11 +120,24 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return null;
     }
     case 'prompt':
-    case 'steer':
-      if (isNonEmptyString(value.sessionId) && isNonEmptyString(value.text)) {
+    case 'steer': {
+      const hasImages =
+        Array.isArray(value.images) &&
+        value.images.length > 0 &&
+        value.images.every(
+          (image) =>
+            isRecord(image) && isNonEmptyString(image.data) && isNonEmptyString(image.mimeType)
+        );
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.text === 'string' &&
+        (value.text.length > 0 || hasImages) &&
+        (value.images === undefined || hasImages)
+      ) {
         return value as unknown as AgentCommand;
       }
       return null;
+    }
     case 'abort':
       return isNonEmptyString(value.sessionId) ? (value as unknown as AgentCommand) : null;
     case 'snapshot':

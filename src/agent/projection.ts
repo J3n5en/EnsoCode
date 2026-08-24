@@ -46,6 +46,11 @@ function projectPart(part: unknown): ProjectedPart {
       }
       return projected;
     }
+    case 'image':
+      if (typeof part.data === 'string' && typeof part.mimeType === 'string') {
+        return { type: 'image', data: part.data, mimeType: part.mimeType };
+      }
+      return { type: 'unknown' };
     default:
       return { type: 'unknown' };
   }

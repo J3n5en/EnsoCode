@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   type AgentCommand,
   type AgentSpawnRequest,
+  type AttachedImage,
   parseAgentWorkerEvent,
   type RendererAgentEvent,
   type SpawnModelConfig,
@@ -67,12 +68,20 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   return sendCommand({ type: 'spawn', sessionId: request.sessionId, cwd: request.cwd, model });
 }
 
-export function promptSession(sessionId: string, text: string): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'prompt', sessionId, text });
+export function promptSession(
+  sessionId: string,
+  text: string,
+  images?: AttachedImage[]
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'prompt', sessionId, text, ...(images?.length ? { images } : {}) });
 }
 
-export function steerSession(sessionId: string, text: string): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'steer', sessionId, text });
+export function steerSession(
+  sessionId: string,
+  text: string,
+  images?: AttachedImage[]
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'steer', sessionId, text, ...(images?.length ? { images } : {}) });
 }
 
 export function abortSession(sessionId: string): { ok: boolean; error?: string } {

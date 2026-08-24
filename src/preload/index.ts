@@ -8,8 +8,13 @@ import type {
   TestProviderResult,
 } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
-import type { AgentActionResult, AgentSpawnRequest, RendererAgentEvent } from '@shared/types/agent';
-import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  AgentActionResult,
+  AgentSpawnRequest,
+  AttachedImage,
+  RendererAgentEvent,
+} from '@shared/types/agent';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
   env: {
@@ -78,15 +83,25 @@ const electronAPI = {
     /** 在 root 下按文件名/路径模糊搜索（@ 提及用） */
     search: (root: string, query: string): Promise<{ relativePath: string; name: string }[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
+    /** 取粘贴/拖入的 File 对象的磁盘路径（渲染层拿不到，需经 webUtils） */
+    pathForFile: (file: File): string => webUtils.getPathForFile(file),
   },
 
   agent: {
     spawn: (request: AgentSpawnRequest): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SPAWN, request),
-    prompt: (sessionId: string, text: string): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PROMPT, sessionId, text),
-    steer: (sessionId: string, text: string): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text),
+    prompt: (
+      sessionId: string,
+      text: string,
+      images?: AttachedImage[]
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PROMPT, sessionId, text, images),
+    steer: (
+      sessionId: string,
+      text: string,
+      images?: AttachedImage[]
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images),
     abort: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */

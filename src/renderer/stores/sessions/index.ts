@@ -1,3 +1,4 @@
+import type { AttachedImage } from '@shared/types/agent';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
@@ -28,7 +29,7 @@ interface SessionsState {
   newConversation(projectId: string): string;
   selectConversation(id: string): void;
   removeConversation(id: string): void;
-  send(text: string, target: SendTarget): Promise<string | null>;
+  send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   abort(): Promise<void>;
 }
 
@@ -151,12 +152,14 @@ export const useSessionsStore = create<SessionsState>()(
           });
         },
 
-        async send(text, target) {
+        async send(text, target, images) {
           const id = get().activeId;
           if (!id) return 'no conversation';
           const conversation = get().conversations[id];
           if (!conversation.started) {
-            set((state) => patch(state, id, { spawning: true, title: text.slice(0, 40) }));
+            set((state) =>
+              patch(state, id, { spawning: true, title: (text || '[image]').slice(0, 40) })
+            );
             const result = await window.electronAPI.agent.spawn({
               sessionId: id,
               providerId: target.providerId,
@@ -173,8 +176,8 @@ export const useSessionsStore = create<SessionsState>()(
           }
           const action =
             get().conversations[id]?.status === 'running'
-              ? window.electronAPI.agent.steer(id, text)
-              : window.electronAPI.agent.prompt(id, text);
+              ? window.electronAPI.agent.steer(id, text, images)
+              : window.electronAPI.agent.prompt(id, text, images);
           const result = await action;
           return result.ok ? null : (result.error ?? 'send failed');
         },

@@ -76,17 +76,20 @@ export class SessionSupervisor {
         return;
       case 'prompt': {
         const managed = this.must(command.sessionId);
+        const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
         // user 消息不本地 upsert——agent 会为它发 message_start，本地再发一份会错位
         // prompt 的 promise 覆盖整个 turn，不 await——否则门会把 steer/abort 排到 turn 之后
-        void managed.session.prompt(command.text).catch((error) => {
+        void managed.session.prompt(command.text, images ? { images } : undefined).catch((error) => {
           managed.status = 'failed';
           this.emitStatus(command.sessionId, managed, toErrorMessage(error));
         });
         return;
       }
-      case 'steer':
-        await this.must(command.sessionId).session.steer(command.text);
+      case 'steer': {
+        const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
+        await this.must(command.sessionId).session.steer(command.text, images);
         return;
+      }
       case 'abort':
         await this.must(command.sessionId).session.abort();
         return;

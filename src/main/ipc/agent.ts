@@ -14,6 +14,23 @@ import { searchFiles } from '../services/fileSearch';
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
+const isValidImages = (value: unknown): value is { data: string; mimeType: string }[] | undefined =>
+  value === undefined ||
+  (Array.isArray(value) &&
+    value.every(
+      (image) =>
+        image &&
+        typeof image === 'object' &&
+        typeof (image as Record<string, unknown>).data === 'string' &&
+        typeof (image as Record<string, unknown>).mimeType === 'string'
+    ));
+
+const isValidMessageInput = (sessionId: unknown, text: unknown, images: unknown): boolean =>
+  isNonEmptyString(sessionId) &&
+  typeof text === 'string' &&
+  isValidImages(images) &&
+  (text.length > 0 || (Array.isArray(images) && images.length > 0));
+
 export function registerAgentHandlers(): void {
   setAgentEventListener((event) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -37,21 +54,29 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_PROMPT,
-    (_event, sessionId: unknown, text: unknown): AgentActionResult => {
-      if (!isNonEmptyString(sessionId) || !isNonEmptyString(text)) {
+    (_event, sessionId: unknown, text: unknown, images?: unknown): AgentActionResult => {
+      if (!isValidMessageInput(sessionId, text, images)) {
         return { ok: false, error: 'invalid prompt' };
       }
-      return promptSession(sessionId, text);
+      return promptSession(
+        sessionId as string,
+        text as string,
+        images as { data: string; mimeType: string }[] | undefined
+      );
     }
   );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_STEER,
-    (_event, sessionId: unknown, text: unknown): AgentActionResult => {
-      if (!isNonEmptyString(sessionId) || !isNonEmptyString(text)) {
+    (_event, sessionId: unknown, text: unknown, images?: unknown): AgentActionResult => {
+      if (!isValidMessageInput(sessionId, text, images)) {
         return { ok: false, error: 'invalid steer' };
       }
-      return steerSession(sessionId, text);
+      return steerSession(
+        sessionId as string,
+        text as string,
+        images as { data: string; mimeType: string }[] | undefined
+      );
     }
   );
 
