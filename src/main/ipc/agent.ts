@@ -1,6 +1,7 @@
+import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AgentActionResult, AgentSpawnRequest } from '@shared/types/agent';
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
   promptSession,
@@ -10,6 +11,11 @@ import {
   steerSession,
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
+import {
+  importExternalSession,
+  listExternalSessions,
+  readExternalSession,
+} from '../services/sessionImport';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -91,4 +97,32 @@ export function registerAgentHandlers(): void {
     if (!isNonEmptyString(root) || typeof query !== 'string') return [];
     return searchFiles(root, query);
   });
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_SCAN_EXTERNAL, (_event, projectPath: unknown) => {
+    if (!isNonEmptyString(projectPath)) return [];
+    return listExternalSessions(projectPath);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_READ_EXTERNAL,
+    (_event, sourceId: unknown, sessionPath: unknown) => {
+      if (!isNonEmptyString(sourceId) || !isNonEmptyString(sessionPath)) return [];
+      return readExternalSession(sourceId, sessionPath);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_IMPORT_EXTERNAL,
+    (_event, sourceId: unknown, sessionPath: unknown, projectPath: unknown) => {
+      if (
+        !isNonEmptyString(sourceId) ||
+        !isNonEmptyString(sessionPath) ||
+        !isNonEmptyString(projectPath)
+      ) {
+        return null;
+      }
+      const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
+      return importExternalSession(sourceId, sessionPath, projectPath, sessionDir);
+    }
+  );
 }

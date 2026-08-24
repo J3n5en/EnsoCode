@@ -44,6 +44,11 @@ export const IPC_CHANNELS = {
 
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
+
+  // External session import
+  SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',
+  SESSIONS_READ_EXTERNAL: 'sessions:read-external',
+  SESSIONS_IMPORT_EXTERNAL: 'sessions:import-external',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

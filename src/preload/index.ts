@@ -14,6 +14,7 @@ import type {
   AttachedImage,
   RendererAgentEvent,
 } from '@shared/types/agent';
+import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
@@ -85,6 +86,22 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
     /** 取粘贴/拖入的 File 对象的磁盘路径（渲染层拿不到，需经 webUtils） */
     pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  },
+
+  sessionImport: {
+    /** 列出各本地 AI 应用在项目目录下的会话 */
+    scan: (projectPath: string): Promise<ExternalSessionSource[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SESSIONS_SCAN_EXTERNAL, projectPath),
+    /** 读取外部会话的拉平消息（预览用） */
+    read: (sourceId: string, sessionPath: string): Promise<SimpleMessage[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SESSIONS_READ_EXTERNAL, sourceId, sessionPath),
+    /** 转成 pi jsonl，返回可 resume 的文件与标题 */
+    import: (
+      sourceId: string,
+      sessionPath: string,
+      projectPath: string
+    ): Promise<{ sessionFile: string; title: string; messageCount: number } | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SESSIONS_IMPORT_EXTERNAL, sourceId, sessionPath, projectPath),
   },
 
   agent: {
