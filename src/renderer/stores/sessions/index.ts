@@ -161,6 +161,8 @@ export const useSessionsStore = create<SessionsState>()(
             started: false,
             spawning: false,
             createdAt: Date.now(),
+            reasoningEnabled: true,
+            thinkingLevel: 'medium',
           };
           set((state) => ({
             conversations: { ...state.conversations, [id]: conversation },
@@ -286,6 +288,8 @@ export const useSessionsStore = create<SessionsState>()(
             spawning: false,
             createdAt: Date.now(),
             sessionFile: imported.sessionFile,
+            reasoningEnabled: true,
+            thinkingLevel: 'medium',
           };
           set((state) => ({
             conversations: { ...state.conversations, [id]: conversation },
