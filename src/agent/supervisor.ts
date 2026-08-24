@@ -168,8 +168,10 @@ export class SessionSupervisor {
         this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
         return;
       case 'agent_end': {
-        // 以 agent 的完整消息列表做全量对齐，兜住未经 message_* 事件出现的消息（steer 注入等）
-        this.reconcileMessages(sessionId, managed, event.messages);
+        // 全量对齐兜住未经 message_* 事件出现的消息（steer 注入等）。
+        // 注意：agent_end 事件的 messages 只是本次 run 的消息，多轮会话下
+        // 用它对齐会把历史轮次抹掉；session.messages 才是全量权威源。
+        this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
