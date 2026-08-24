@@ -1,3 +1,4 @@
+export * from './agent';
 export * from './assetScan';
 export * from './assets';
 export * from './ipc';

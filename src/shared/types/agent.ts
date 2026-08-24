@@ -44,6 +44,22 @@ export interface SessionSnapshot {
   messages: ProjectedMessage[];
 }
 
+/** Renderer 发起开会话的请求。apiKey 由 Main 从 settings 补全，不经过 Renderer */
+export interface AgentSpawnRequest {
+  sessionId: string;
+  providerId: string;
+  modelId: string;
+  cwd: string;
+}
+
+export interface AgentActionResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** Renderer 收到的事件流：worker 事件 + Main 合成的 worker 退出通知 */
+export type RendererAgentEvent = AgentWorkerEvent | { type: 'worker-exited' };
+
 /**
  * worker → Main → Renderer 事件。seq 为 per-session 单调递增，接收端丢弃过期事件。
  * message-upsert 携带该位置消息的完整投影（消息级快照，不做 delta），按 index 幂等写入。

@@ -8,6 +8,7 @@ import type {
   TestProviderResult,
 } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
+import type { AgentActionResult, AgentSpawnRequest, RendererAgentEvent } from '@shared/types/agent';
 import { contextBridge, ipcRenderer } from 'electron';
 
 const electronAPI = {
@@ -65,6 +66,22 @@ const electronAPI = {
     ): Promise<{ ok: boolean; bytes: number; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_WRITE_SOURCE, id, sourcePath, content),
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_DELETE, id),
+  },
+
+  agent: {
+    spawn: (request: AgentSpawnRequest): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SPAWN, request),
+    prompt: (sessionId: string, text: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PROMPT, sessionId, text),
+    steer: (sessionId: string, text: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text),
+    abort: (sessionId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
+    onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_EVENT, listener);
+    },
   },
 
   window: {

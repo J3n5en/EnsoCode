@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { registerAgentHandlers } from './agent';
 import { registerAssetHandlers } from './assets';
 import { registerProviderHandlers } from './providers';
 import { registerSettingsHandlers } from './settings';
@@ -9,6 +10,7 @@ export function registerIpcHandlers(): void {
   registerWindowHandlers();
   registerProviderHandlers();
   registerAssetHandlers();
+  registerAgentHandlers();
 
   // 所有新建窗口自动挂载状态事件
   app.on('browser-window-created', (_, win) => {

@@ -30,6 +30,13 @@ export const IPC_CHANNELS = {
   INSTRUCTIONS_WRITE: 'instructions:write',
   INSTRUCTIONS_WRITE_SOURCE: 'instructions:write-source',
   INSTRUCTIONS_DELETE: 'instructions:delete',
+
+  // Agent sessions (Renderer → Main → utilityProcess)
+  AGENT_SPAWN: 'agent:spawn',
+  AGENT_PROMPT: 'agent:prompt',
+  AGENT_STEER: 'agent:steer',
+  AGENT_ABORT: 'agent:abort',
+  AGENT_EVENT: 'agent:event',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
