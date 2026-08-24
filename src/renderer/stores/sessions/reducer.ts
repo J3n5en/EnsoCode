@@ -47,6 +47,8 @@ export function applyAgentEvent(
     }
     case 'turn-completed':
       return { ...state, lastSeq: event.seq };
+    case 'messages-truncated':
+      return { ...state, messages: state.messages.slice(0, event.length), lastSeq: event.seq };
     case 'turn-failed':
       return { ...state, status: 'failed', error: event.error, lastSeq: event.seq };
     default:

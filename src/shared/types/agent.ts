@@ -75,6 +75,7 @@ export type AgentWorkerEvent =
     }
   | { type: 'turn-completed'; sessionId: string; seq: number }
   | { type: 'turn-failed'; sessionId: string; seq: number; error: string }
+  | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
   | { type: 'snapshot'; sessions: SessionSnapshot[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -143,6 +144,16 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return null;
     case 'turn-completed':
       if (isNonEmptyString(value.sessionId) && typeof value.seq === 'number') {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'messages-truncated':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        typeof value.length === 'number' &&
+        value.length >= 0
+      ) {
         return value as unknown as AgentWorkerEvent;
       }
       return null;

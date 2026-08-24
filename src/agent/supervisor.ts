@@ -74,11 +74,7 @@ export class SessionSupervisor {
         return;
       case 'prompt': {
         const managed = this.must(command.sessionId);
-        this.upsertLocalMessage(command.sessionId, managed, {
-          role: 'user',
-          content: [{ type: 'text', text: command.text }],
-          timestamp: Date.now(),
-        });
+        // user 消息不本地 upsert——agent 会为它发 message_start，本地再发一份会错位
         // prompt 的 promise 覆盖整个 turn，不 await——否则门会把 steer/abort 排到 turn 之后
         void managed.session.prompt(command.text).catch((error) => {
           managed.status = 'failed';
@@ -210,7 +206,15 @@ export class SessionSupervisor {
       managed.messages[index] = message;
       this.options.emit({ type: 'message-upsert', sessionId, seq: ++managed.seq, index, message });
     });
-    managed.messages.length = projected.length;
+    if (managed.messages.length > projected.length) {
+      managed.messages.length = projected.length;
+      this.options.emit({
+        type: 'messages-truncated',
+        sessionId,
+        seq: ++managed.seq,
+        length: projected.length,
+      });
+    }
   }
 
   private emitStatus(sessionId: string, managed: ManagedSession, error?: string): void {

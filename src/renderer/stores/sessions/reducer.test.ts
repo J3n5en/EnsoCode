@@ -60,6 +60,26 @@ describe('applyAgentEvent', () => {
     expect(next.error).toBe('boom');
   });
 
+  it('messages-truncated 裁掉对齐后多余的尾部消息', () => {
+    let state = base;
+    for (let i = 0; i < 3; i++) {
+      state = applyAgentEvent(state, 's1', {
+        type: 'message-upsert',
+        sessionId: 's1',
+        seq: i + 1,
+        index: i,
+        message: { role: 'assistant', content: [{ type: 'text', text: String(i) }] },
+      });
+    }
+    const truncated = applyAgentEvent(state, 's1', {
+      type: 'messages-truncated',
+      sessionId: 's1',
+      seq: 4,
+      length: 2,
+    });
+    expect(truncated.messages).toHaveLength(2);
+  });
+
   it('worker-exited 无 seq 门槛，任何时刻都把会话标 failed', () => {
     const next = applyAgentEvent(base, 's1', { type: 'worker-exited' });
     expect(next.status).toBe('failed');
