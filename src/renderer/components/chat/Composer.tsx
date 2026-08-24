@@ -322,7 +322,7 @@ export function Composer({
           rows={2}
           className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
         />
-        <div className="flex items-center justify-between gap-1.5 px-2.5 pb-2">
+        <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
           {busy ? (
             <Button variant="outline" size="icon" className="h-7 w-7 rounded-lg" onClick={onAbort}>

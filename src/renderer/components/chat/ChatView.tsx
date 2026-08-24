@@ -92,7 +92,7 @@ export function ChatView() {
         </div>
       </ScrollArea>
 
-      <div className="px-4 pt-1 pb-1.5">
+      <div className="px-4 pt-1">
         <div className="mx-auto w-full max-w-2xl">
           <Composer
             cwd={project?.path}
