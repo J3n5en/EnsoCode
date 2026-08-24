@@ -8,11 +8,11 @@ interface StatsLineProps {
   activeMs: number;
 }
 
-/** composer 下方的会话统计条（deepseek-harness StatsLine 形状）：无数据的组整组消失 */
+/** composer 下方的会话统计条（deepseek-harness StatsLine 形状）：无数据的组整组消失。
+ *  外层恒占一行高度，避免统计从无到有时输入框跳动。 */
 export function StatsLine({ messages, activeMs }: StatsLineProps) {
   const { t } = useI18n();
   const stats = useMemo(() => computeStats(messages, activeMs), [messages, activeMs]);
-  if (stats.turns === 0 && stats.inputTokens === 0 && stats.outputTokens === 0) return null;
 
   const groups: string[] = [];
   if (stats.turns > 0) groups.push(t('{{count}} turns', { count: stats.turns }));
@@ -32,8 +32,12 @@ export function StatsLine({ messages, activeMs }: StatsLineProps) {
   }
 
   return (
-    <p className="truncate px-1 pt-1.5 text-center text-[11px] text-muted-foreground/70">
-      {groups.join('  |  ')}
-    </p>
+    <div className="flex h-6 items-end justify-center px-1">
+      {groups.length > 0 && (
+        <span className="truncate text-[11px] text-muted-foreground/70">
+          {groups.join('  |  ')}
+        </span>
+      )}
+    </div>
   );
 }
