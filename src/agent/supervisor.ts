@@ -224,6 +224,7 @@ export class SessionSupervisor {
         .filter((message): message is ProjectedMessage => message !== null);
       this.options.emit({
         type: 'snapshot',
+        partial: true,
         sessions: [
           {
             sessionId,

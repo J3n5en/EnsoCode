@@ -81,30 +81,38 @@ export const useSessionsStore = create<SessionsState>()(
         if (event.type === 'snapshot') {
           // 刷新后的补投影：worker 还活着的会话恢复消息与状态；
           // 已 spawn 但 worker 不认识的（app 全量重启过）：有 jsonl 的转为可 resume，
-          // 没有的（老数据）标为已结束
+          // 没有的（老数据）标为已结束。
+          // partial=true 是 resume 的单会话回放，不能据此判定未涉及会话的死活。
           set((state) => {
             const alive = new Map(event.sessions.map((s) => [s.sessionId, s]));
+            const partial = event.partial === true;
             const conversations = { ...state.conversations };
             for (const id of Object.keys(conversations)) {
               const conversation = conversations[id];
-              if (!conversation.started) continue;
               const snapshot = alive.get(id);
-              conversations[id] = snapshot
-                ? {
+              if (snapshot) {
+                // worker 确认存活（含 resume 回放）：无条件采纳消息并标 started，避免与
+                // spawn 的 IPC 返回竞态时因 started 尚未置位而丢弃回放
+                conversations[id] = {
+                  ...conversation,
+                  started: true,
+                  status: snapshot.status,
+                  messages: snapshot.messages,
+                  commands: snapshot.commands,
+                  lastSeq: 0,
+                  error: undefined,
+                };
+                continue;
+              }
+              // 增量快照不涉及的会话保持原样
+              if (partial || !conversation.started) continue;
+              conversations[id] = conversation.sessionFile
+                ? { ...conversation, started: false, status: 'idle', error: undefined }
+                : {
                     ...conversation,
-                    status: snapshot.status,
-                    messages: snapshot.messages,
-                    commands: snapshot.commands,
-                    lastSeq: 0,
-                    error: undefined,
-                  }
-                : conversation.sessionFile
-                  ? { ...conversation, started: false, status: 'idle', error: undefined }
-                  : {
-                      ...conversation,
-                      status: 'failed',
-                      error: 'Session ended — history not restored',
-                    };
+                    status: 'failed',
+                    error: 'Session ended — history not restored',
+                  };
             }
             return { conversations };
           });

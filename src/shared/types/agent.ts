@@ -125,7 +125,7 @@ export type AgentWorkerEvent =
   | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
   | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
-  | { type: 'snapshot'; sessions: SessionSnapshot[] };
+  | { type: 'snapshot'; sessions: SessionSnapshot[]; partial?: boolean };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
