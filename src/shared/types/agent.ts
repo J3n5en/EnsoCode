@@ -33,6 +33,7 @@ export type AgentCommand =
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
+  | { type: 'set-reasoning'; sessionId: string; enabled: boolean; level?: ThinkingLevel }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' };
 
@@ -177,6 +178,15 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       if (
         isNonEmptyString(value.sessionId) &&
         THINKING_LEVELS.includes(value.level as ThinkingLevel)
+      ) {
+        return value as unknown as AgentCommand;
+      }
+      return null;
+    case 'set-reasoning':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.enabled === 'boolean' &&
+        (value.level === undefined || THINKING_LEVELS.includes(value.level as ThinkingLevel))
       ) {
         return value as unknown as AgentCommand;
       }

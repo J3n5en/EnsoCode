@@ -108,6 +108,17 @@ export class SessionSupervisor {
       case 'set-thinking':
         this.must(command.sessionId).session.setThinkingLevel(command.level);
         return;
+      case 'set-reasoning': {
+        const managed = this.must(command.sessionId);
+        if (managed.session.model) {
+          applyReasoningToModel(managed.session.model, command.enabled, managed.modelId);
+        }
+        // 重新开启时把档位落到 session（clamp 到模型支持的档位）
+        if (command.enabled && command.level) {
+          managed.session.setThinkingLevel(command.level);
+        }
+        return;
+      }
       case 'abort':
         await this.must(command.sessionId).session.abort();
         return;
@@ -126,8 +137,8 @@ export class SessionSupervisor {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
     const providerId = `enso-${model.api}-${model.baseUrl}`;
-    // reasoning 开关关闭时注册 reasoning:false，pi 完全不发 thinking（adaptive 模型也不会 400）
-    const adaptive = reasoningEnabled && supportsAdaptiveThinking(model.modelId);
+    // 注册基础模型恒 reasoning:true（放开全部档位能力）。开关/adaptive 由 per-session
+    // 克隆的 applyReasoningToModel 决定，避免同 provider 多会话共享引用而串台或被后开会话覆盖。
     runtime.registerProvider(providerId, {
       baseUrl: model.baseUrl,
       api: model.api,
@@ -138,12 +149,9 @@ export class SessionSupervisor {
         {
           id: model.modelId,
           name: model.modelId,
-          reasoning: reasoningEnabled,
+          reasoning: true,
           // max 档需显式声明，否则被钳到 high
           thinkingLevelMap: { max: 'max' },
-          // 新 Claude 模型用 adaptive+effort（面板可解析档位）；老模型只认 budget_tokens。
-          // 关推理时不加，避免 pi 对不支持 disabled 的 adaptive 模型发 disabled 而 400
-          ...(adaptive ? { compat: { forceAdaptiveThinking: true } } : {}),
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200_000,
@@ -152,8 +160,14 @@ export class SessionSupervisor {
         },
       ],
     });
-    const piModel = runtime.getModel(providerId, model.modelId);
-    if (!piModel) throw new Error(`model not found after register: ${model.modelId}`);
+    const baseModel = runtime.getModel(providerId, model.modelId);
+    if (!baseModel) throw new Error(`model not found after register: ${model.modelId}`);
+    // per-session 独立副本：set-reasoning 就地改它，不污染其它会话
+    const piModel = applyReasoningToModel(
+      { ...baseModel, compat: baseModel.compat ? { ...baseModel.compat } : undefined },
+      reasoningEnabled,
+      model.modelId
+    );
 
     const { session } = await createAgentSession({
       cwd,
@@ -375,7 +389,7 @@ const ENSO_USER_AGENT = 'enso-code';
  * adaptive thinking（output_config.effort）的判定：乐观默认支持——未来新模型都支持，
  * 白名单会过时而这个黑名单是封闭集合（不支持的只有历史老世代，不会再新增）。
  * 漏网的靠运行时自愈：撞到 "adaptive thinking is not supported" 会记入 runtimeAdaptiveBlocklist
- * 并自动降级重试（见 handleAdaptiveUnsupported）。
+ * 并自动降级重试（见 tryAdaptiveDowngrade）。
  */
 const ADAPTIVE_UNSUPPORTED = /claude-(3|opus-4-[0-6]|sonnet-4-[0-6]|haiku-4-[0-6])/i;
 /** 运行时学到的不支持 adaptive 的模型（进程内记忆） */
@@ -383,6 +397,23 @@ const runtimeAdaptiveBlocklist = new Set<string>();
 
 export function supportsAdaptiveThinking(modelId: string): boolean {
   return !ADAPTIVE_UNSUPPORTED.test(modelId) && !runtimeAdaptiveBlocklist.has(modelId);
+}
+
+/**
+ * 按 reasoning 开关就地定制 model：关 → reasoning:false（pi 不发 thinking）；
+ * 开 → reasoning:true + adaptive 模型加 forceAdaptiveThinking。返回同一个 model（就地改）。
+ */
+function applyReasoningToModel<T extends { reasoning?: boolean; compat?: unknown }>(
+  model: T,
+  enabled: boolean,
+  modelId: string
+): T {
+  model.reasoning = enabled;
+  const adaptive = enabled && supportsAdaptiveThinking(modelId);
+  const compat = (model.compat ?? {}) as { forceAdaptiveThinking?: boolean };
+  compat.forceAdaptiveThinking = adaptive ? true : undefined;
+  model.compat = compat;
+  return model;
 }
 
 /** 从 pi 的资源加载器收集可用斜杠命令：skills（/skill:name）与 prompt templates（/name） */
