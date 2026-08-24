@@ -1,12 +1,14 @@
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
-import type { AgentActionResult, AgentSpawnRequest } from '@shared/types/agent';
+import type { AgentActionResult, AgentSpawnRequest, ThinkingLevel } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agent';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
   promptSession,
   requestSnapshot,
   setAgentEventListener,
+  setSessionThinking,
   spawnSession,
   steerSession,
 } from '../services/agentHost';
@@ -92,6 +94,16 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SET_THINKING,
+    (_event, sessionId: unknown, level: unknown): AgentActionResult => {
+      if (!isNonEmptyString(sessionId) || !THINKING_LEVELS.includes(level as ThinkingLevel)) {
+        return { ok: false, error: 'invalid thinking level' };
+      }
+      return setSessionThinking(sessionId, level as ThinkingLevel);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
     if (!isNonEmptyString(root) || typeof query !== 'string') return [];

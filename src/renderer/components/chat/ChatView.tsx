@@ -251,10 +251,14 @@ export function ChatView() {
                 providers={enabledProviders}
                 providerId={provider?.id ?? ''}
                 modelId={effectiveModelId}
+                thinkingLevel={conversation.thinkingLevel ?? 'off'}
                 onSelect={(pid, mid) => {
                   setProviderId(pid);
                   setModelId(mid);
                 }}
+                onThinkingChange={(level) =>
+                  useSessionsStore.getState().setThinking(conversation.id, level)
+                }
               />
             }
             onSend={(content, images) => {

@@ -11,6 +11,10 @@ export interface SpawnModelConfig {
   modelId: string;
 }
 
+/** 思考深度，值域对齐 pi 的 ThinkingLevel */
+export const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'max'] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 /** Main → worker 命令 */
 export type AgentCommand =
   | {
@@ -20,9 +24,11 @@ export type AgentCommand =
       model: SpawnModelConfig;
       /** 从既有 jsonl 恢复会话（app 重启后 resume） */
       resumeFile?: string;
+      thinkingLevel?: ThinkingLevel;
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
+  | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' };
 
@@ -83,6 +89,7 @@ export interface AgentSpawnRequest {
   cwd: string;
   /** 从既有 jsonl 恢复（app 重启后 resume） */
   resumeFile?: string;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface AgentActionResult {
@@ -160,6 +167,14 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
     }
     case 'abort':
       return isNonEmptyString(value.sessionId) ? (value as unknown as AgentCommand) : null;
+    case 'set-thinking':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        THINKING_LEVELS.includes(value.level as ThinkingLevel)
+      ) {
+        return value as unknown as AgentCommand;
+      }
+      return null;
     case 'snapshot':
       return { type: 'snapshot' };
     default:

@@ -1,5 +1,6 @@
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow } from 'electron';
+
 import { registerIpcHandlers } from './ipc';
 import { startAgentWorker } from './services/agentHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';

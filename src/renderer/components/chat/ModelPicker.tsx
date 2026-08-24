@@ -1,19 +1,38 @@
 import type { ModelProvider } from '@shared/types';
-import { Check, ChevronDown } from 'lucide-react';
+import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import { Brain, Check, ChevronDown } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
+import { Slider } from '@/components/ui/slider';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+
+const LEVEL_LABELS: Record<ThinkingLevel, string> = {
+  off: 'Off',
+  low: 'Low',
+  medium: 'Med',
+  high: 'High',
+  max: 'Max',
+};
 
 interface ModelPickerProps {
   providers: ModelProvider[];
   providerId: string;
   modelId: string;
+  thinkingLevel: ThinkingLevel;
   onSelect: (providerId: string, modelId: string) => void;
+  onThinkingChange: (level: ThinkingLevel) => void;
 }
 
-/** composer 工具行上的模型选择（ref-chat-b ModelChooser 形状）：pill 触发 + 搜索 + provider 分组列表 */
-export function ModelPicker({ providers, providerId, modelId, onSelect }: ModelPickerProps) {
+/** composer 工具行上的模型选择（ref-chat-b ModelChooser 形状）：pill 触发 + 搜索 + provider 分组列表 + 思考深度 */
+export function ModelPicker({
+  providers,
+  providerId,
+  modelId,
+  thinkingLevel,
+  onSelect,
+  onThinkingChange,
+}: ModelPickerProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -40,8 +59,14 @@ export function ModelPicker({ providers, providerId, modelId, onSelect }: ModelP
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className="flex h-7 max-w-56 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+      <PopoverTrigger className="flex h-7 max-w-64 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
         <span className="truncate">{current?.label ?? modelId ?? t('Model')}</span>
+        {thinkingLevel !== 'off' && (
+          <span className="flex shrink-0 items-center gap-0.5 text-primary">
+            <Brain className="h-3 w-3" />
+            {LEVEL_LABELS[thinkingLevel]}
+          </span>
+        )}
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-80 p-0">
@@ -90,6 +115,58 @@ export function ModelPicker({ providers, providerId, modelId, onSelect }: ModelP
               {t('No models found')}
             </p>
           )}
+        </div>
+        <div className="border-t p-3">
+          <div className="flex items-center justify-between pb-2">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Brain className="h-3.5 w-3.5" />
+              {t('Thinking level')}
+            </span>
+            <span
+              className={cn(
+                'text-xs font-medium',
+                thinkingLevel === 'off' ? 'text-muted-foreground' : 'text-primary'
+              )}
+            >
+              {LEVEL_LABELS[thinkingLevel]}
+            </span>
+          </div>
+          <Slider
+            min={0}
+            max={THINKING_LEVELS.length - 1}
+            step={1}
+            value={THINKING_LEVELS.indexOf(thinkingLevel)}
+            onValueChange={(value) => {
+              const index = Array.isArray(value) ? value[0] : value;
+              onThinkingChange(THINKING_LEVELS[index] ?? 'off');
+            }}
+          />
+          <div className="mt-1.5 flex justify-between">
+            {THINKING_LEVELS.map((entry, index) => (
+              <button
+                key={entry}
+                type="button"
+                onClick={() => onThinkingChange(entry)}
+                className={cn(
+                  'flex w-8 flex-col items-center gap-0.5',
+                  index === 0 && 'items-start',
+                  index === THINKING_LEVELS.length - 1 && 'items-end'
+                )}
+              >
+                <span className="h-1.5 w-px bg-muted-foreground/40" />
+                <span
+                  className={cn(
+                    'text-[10px] transition-colors',
+                    entry === thinkingLevel
+                      ? 'font-medium text-primary'
+                      : 'text-muted-foreground/70 hover:text-foreground'
+                  )}
+                >
+                  {LEVEL_LABELS[entry]}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </PopoverPopup>
     </Popover>

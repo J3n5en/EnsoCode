@@ -38,6 +38,7 @@ export const IPC_CHANNELS = {
   AGENT_ABORT: 'agent:abort',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
+  AGENT_SET_THINKING: 'agent:set-thinking',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

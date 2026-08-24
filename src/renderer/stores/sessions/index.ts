@@ -1,4 +1,4 @@
-import type { AttachedImage } from '@shared/types/agent';
+import type { AttachedImage, ThinkingLevel } from '@shared/types/agent';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useSettingsStore } from '@/stores/settings';
@@ -18,6 +18,8 @@ export interface Conversation extends SessionProjection {
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
+  /** 思考深度（per 会话记忆） */
+  thinkingLevel?: ThinkingLevel;
 }
 
 interface SendTarget {
@@ -43,6 +45,8 @@ interface SessionsState {
     projectId: string,
     imported: { sessionFile: string; title: string }
   ): string;
+  /** 设置思考深度；已 spawn 的会话即时生效，未 spawn 的在下次 spawn 时带上 */
+  setThinking(id: string, level: ThinkingLevel): void;
   abort(): Promise<void>;
 }
 
@@ -193,6 +197,7 @@ export const useSessionsStore = create<SessionsState>()(
               modelId: target.modelId,
               cwd: target.cwd,
               resumeFile: conversation.sessionFile,
+              thinkingLevel: conversation.thinkingLevel,
             });
             if (!result.ok) {
               set((state) =>
@@ -240,6 +245,7 @@ export const useSessionsStore = create<SessionsState>()(
             modelId,
             cwd: project.path,
             resumeFile: conversation.sessionFile,
+            thinkingLevel: conversation.thinkingLevel,
           });
           set((state) =>
             result.ok
@@ -271,6 +277,15 @@ export const useSessionsStore = create<SessionsState>()(
             activeId: id,
           }));
           return id;
+        },
+
+        setThinking(id, level) {
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          set((state) => patch(state, id, { thinkingLevel: level }));
+          if (conversation.started) {
+            void window.electronAPI.agent.setThinking(id, level);
+          }
         },
 
         async abort() {

@@ -143,6 +143,7 @@ export const zhTranslations: Record<string, string> = {
   Import: '导入',
   'Show {{count}} earlier': '显示更早的 {{count}} 条',
   'Scroll to bottom': '滚动到底部',
+  'Thinking level': '思考深度',
 };
 
 export function normalizeLocale(input?: string): Locale {

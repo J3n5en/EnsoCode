@@ -13,6 +13,7 @@ import type {
   SessionSnapshot,
   SlashCommand,
   SpawnModelConfig,
+  ThinkingLevel,
 } from '@shared/types/agent';
 import { OperationGate } from './gate';
 import { projectMessage } from './projection';
@@ -72,7 +73,13 @@ export class SessionSupervisor {
   private async execute(command: Exclude<AgentCommand, { type: 'snapshot' }>): Promise<void> {
     switch (command.type) {
       case 'spawn':
-        await this.spawn(command.sessionId, command.cwd, command.model, command.resumeFile);
+        await this.spawn(
+          command.sessionId,
+          command.cwd,
+          command.model,
+          command.resumeFile,
+          command.thinkingLevel
+        );
         return;
       case 'prompt': {
         const managed = this.must(command.sessionId);
@@ -92,6 +99,9 @@ export class SessionSupervisor {
         await this.must(command.sessionId).session.steer(command.text, images);
         return;
       }
+      case 'set-thinking':
+        this.must(command.sessionId).session.setThinkingLevel(command.level);
+        return;
       case 'abort':
         await this.must(command.sessionId).session.abort();
         return;
@@ -102,7 +112,8 @@ export class SessionSupervisor {
     sessionId: string,
     cwd: string,
     model: SpawnModelConfig,
-    resumeFile?: string
+    resumeFile?: string,
+    thinkingLevel?: ThinkingLevel
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
@@ -115,7 +126,8 @@ export class SessionSupervisor {
         {
           id: model.modelId,
           name: model.modelId,
-          reasoning: false,
+          // 声明支持 reasoning，否则 pi 会把任何思考档位钳到 off
+          reasoning: true,
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200_000,
@@ -131,6 +143,7 @@ export class SessionSupervisor {
       agentDir: this.options.agentDir,
       modelRuntime: runtime,
       model: piModel,
+      thinkingLevel: thinkingLevel ?? 'off',
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),

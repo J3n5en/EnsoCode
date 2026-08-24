@@ -6,6 +6,7 @@ import {
   parseAgentWorkerEvent,
   type RendererAgentEvent,
   type SpawnModelConfig,
+  type ThinkingLevel,
 } from '@shared/types/agent';
 import type { ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
@@ -71,7 +72,15 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     cwd: request.cwd,
     model,
     ...(request.resumeFile ? { resumeFile: request.resumeFile } : {}),
+    ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
   });
+}
+
+export function setSessionThinking(
+  sessionId: string,
+  level: ThinkingLevel
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'set-thinking', sessionId, level });
 }
 
 export function promptSession(

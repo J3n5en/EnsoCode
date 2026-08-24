@@ -13,6 +13,7 @@ import type {
   AgentSpawnRequest,
   AttachedImage,
   RendererAgentEvent,
+  ThinkingLevel,
 } from '@shared/types/agent';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
@@ -124,6 +125,8 @@ const electronAPI = {
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
     requestSnapshot: (): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),
+    setThinking: (sessionId: string, level: ThinkingLevel): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_THINKING, sessionId, level),
     onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);
