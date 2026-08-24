@@ -178,7 +178,7 @@ export function ChatView() {
       <div className="@container relative min-h-0 flex-1">
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         <ScrollArea ref={scrollRef} className="h-full">
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6 select-text [overflow-wrap:anywhere]">
             {timeline.length === 0 && !busy && (
               <div className="flex flex-col items-center gap-1 py-24 text-center">
                 <p className="text-lg font-medium">{project?.name ?? 'EnsoCode'}</p>
