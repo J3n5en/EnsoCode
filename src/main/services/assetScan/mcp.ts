@@ -34,7 +34,7 @@ function toTransport(raw: unknown, url: string): McpTransport {
 }
 
 /** 解析 { name: { command, args, env, url, type } } 形态的服务器表 */
-function parseServerMap(servers: unknown): DiscoveredMcpServer[] {
+export function parseServerMap(servers: unknown): DiscoveredMcpServer[] {
   if (!servers || typeof servers !== 'object') return [];
   const result: DiscoveredMcpServer[] = [];
 

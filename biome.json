@@ -47,6 +47,19 @@
     }
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/out", "!**/dist", "!**/*.min.js", "!**/*.css"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/out",
+      "!**/dist",
+      "!**/*.min.js",
+      "!**/*.css",
+      "!.trellis",
+      "!.agents",
+      "!.codex",
+      "!.cursor",
+      "!.omp",
+      "!.pi"
+    ]
   }
 }

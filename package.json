@@ -21,6 +21,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "biome format --write .",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -53,7 +55,8 @@
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=22"

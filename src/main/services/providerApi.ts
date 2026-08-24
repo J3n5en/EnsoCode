@@ -16,13 +16,13 @@ const DEFAULT_BASE_URLS: Record<ModelApiKind, string> = {
 const ANTHROPIC_VERSION = '2023-06-01';
 const TIMEOUT_MS = 15000;
 
-function resolveBase(config: ProviderApiConfig): string {
+export function resolveBase(config: ProviderApiConfig): string {
   const base = config.baseUrl.trim().replace(/\/+$/, '');
   return base || DEFAULT_BASE_URLS[config.api];
 }
 
 /** anthropic：base 已含 /v1 则不重复拼接 */
-function withVersionSegment(base: string, segment: string): string {
+export function withVersionSegment(base: string, segment: string): string {
   return base.endsWith(`/${segment}`) ? base : `${base}/${segment}`;
 }
 
@@ -41,7 +41,7 @@ async function errorText(response: Response): Promise<string> {
   return `HTTP ${response.status}${body ? `: ${body}` : ''}`;
 }
 
-function toMessage(error: unknown): string {
+export function toMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.name === 'AbortError' ? 'Request timed out' : error.message;
   }
@@ -81,7 +81,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
   }
 }
 
-function extractModelIds(api: ModelApiKind, data: Record<string, unknown>): string[] {
+export function extractModelIds(api: ModelApiKind, data: Record<string, unknown>): string[] {
   let list: unknown[] = [];
   if (api === 'ollama') {
     list = Array.isArray(data.models) ? data.models : [];

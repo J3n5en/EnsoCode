@@ -9,7 +9,7 @@ function storeDir(): string {
 }
 
 /** id 由主进程校验，只接受 uuid 形态，避免路径穿越 */
-const isValidId = (id: string): boolean => /^[a-f0-9-]{36}$/i.test(id);
+export const isValidId = (id: string): boolean => /^[a-f0-9-]{36}$/i.test(id);
 
 function localFile(id: string): string {
   return path.join(storeDir(), `${id}.md`);

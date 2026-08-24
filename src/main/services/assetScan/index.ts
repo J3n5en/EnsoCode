@@ -119,9 +119,9 @@ function sourceSpec(sourceId: AssetSourceId): SourceSpec {
 const skillKey = (target: string): string => path.resolve(target);
 
 /** 技能以名称为标识：同名技能无法共存，跨来源的同一技能应视为重复 */
-const skillNameKey = (name: string): string => name.trim().toLowerCase();
+export const skillNameKey = (name: string): string => name.trim().toLowerCase();
 
-const mcpKey = (server: DiscoveredMcpServer): string =>
+export const mcpKey = (server: DiscoveredMcpServer): string =>
   server.url
     ? `url::${server.url.replace(/\/+$/, '')}`
     : `cmd::${server.command} ${(server.args ?? []).join(' ')}`.trim();
