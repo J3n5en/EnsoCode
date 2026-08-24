@@ -33,6 +33,14 @@ export type ProjectedPart =
   | { type: 'image'; data: string; mimeType: string }
   | { type: 'unknown' };
 
+/** assistant 消息的 token 用量（白名单投影自 pi 的 usage） */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
 export interface ProjectedMessage {
   role: string;
@@ -44,6 +52,7 @@ export interface ProjectedMessage {
   stopReason?: string;
   errorMessage?: string;
   timestamp?: number;
+  usage?: TokenUsage;
 }
 
 export interface SessionSnapshot {

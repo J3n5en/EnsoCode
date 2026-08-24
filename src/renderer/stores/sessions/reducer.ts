@@ -11,6 +11,10 @@ export interface SessionProjection {
   messages: ProjectedMessage[];
   commands: SlashCommand[];
   lastSeq: number;
+  /** 累计 running 时长（统计条的吞吐分母，含工具执行时间） */
+  activeMs: number;
+  /** 本次 running 的起点（wall clock），idle/failed 时清空 */
+  runStartedAt?: number;
 }
 
 export const emptyProjection: SessionProjection = {
@@ -18,19 +22,21 @@ export const emptyProjection: SessionProjection = {
   messages: [],
   commands: [],
   lastSeq: 0,
+  activeMs: 0,
 };
 
 /**
- * 把 agent 事件归并进会话投影。纯函数。
+ * 把 agent 事件归并进会话投影。纯函数，now 仅用于 running 计时（测试可注入）。
  * seq 单调守卫：过期事件（seq <= lastSeq）直接丢弃，重连/重放时保证不回退。
  */
 export function applyAgentEvent(
   state: SessionProjection,
   sessionId: string,
-  event: RendererAgentEvent
+  event: RendererAgentEvent,
+  now: number = Date.now()
 ): SessionProjection {
   if (event.type === 'worker-exited') {
-    return { ...state, status: 'failed', error: 'agent worker exited' };
+    return { ...settleTiming(state, now), status: 'failed', error: 'agent worker exited' };
   }
   if (event.type === 'snapshot') {
     const snapshot = event.sessions.find((s) => s.sessionId === sessionId);
@@ -40,32 +46,53 @@ export function applyAgentEvent(
       messages: snapshot.messages,
       commands: snapshot.commands,
       lastSeq: 0,
+      activeMs: state.activeMs,
     };
   }
   if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
 
   switch (event.type) {
-    case 'status':
+    case 'status': {
+      const base =
+        event.status === 'running'
+          ? { ...state, runStartedAt: state.runStartedAt ?? now }
+          : settleTiming(state, now);
       return {
-        ...state,
+        ...base,
         status: event.status,
         error: event.error,
         lastSeq: event.seq,
       };
+    }
     case 'message-upsert': {
       const messages = state.messages.slice();
       messages[event.index] = event.message;
       return { ...state, messages, lastSeq: event.seq };
     }
     case 'turn-completed':
-      return { ...state, lastSeq: event.seq };
+      return { ...settleTiming(state, now), lastSeq: event.seq };
     case 'messages-truncated':
       return { ...state, messages: state.messages.slice(0, event.length), lastSeq: event.seq };
     case 'commands':
       return { ...state, commands: event.commands, lastSeq: event.seq };
     case 'turn-failed':
-      return { ...state, status: 'failed', error: event.error, lastSeq: event.seq };
+      return {
+        ...settleTiming(state, now),
+        status: 'failed',
+        error: event.error,
+        lastSeq: event.seq,
+      };
     default:
       return state;
   }
+}
+
+/** 结算进行中的 running 计时：把 runStartedAt 到 now 的时长并入 activeMs */
+function settleTiming(state: SessionProjection, now: number): SessionProjection {
+  if (state.runStartedAt === undefined) return state;
+  return {
+    ...state,
+    activeMs: state.activeMs + Math.max(0, now - state.runStartedAt),
+    runStartedAt: undefined,
+  };
 }

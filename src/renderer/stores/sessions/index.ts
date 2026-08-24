@@ -198,7 +198,14 @@ export const useSessionsStore = create<SessionsState>()(
         conversations: Object.fromEntries(
           Object.entries(state.conversations).map(([id, conversation]) => [
             id,
-            { ...conversation, messages: [], lastSeq: 0, spawning: false, error: undefined },
+            {
+              ...conversation,
+              messages: [],
+              lastSeq: 0,
+              spawning: false,
+              error: undefined,
+              runStartedAt: undefined,
+            },
           ])
         ),
         order: state.order,

@@ -18,7 +18,21 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.stopReason === 'string') projected.stopReason = value.stopReason;
   if (typeof value.errorMessage === 'string') projected.errorMessage = value.errorMessage;
   if (typeof value.timestamp === 'number') projected.timestamp = value.timestamp;
+  const usage = projectUsage(value.usage);
+  if (usage) projected.usage = usage;
   return projected;
+}
+
+/** 只保留四个 token 计数，cost 等其余字段不出 worker */
+function projectUsage(value: unknown): ProjectedMessage['usage'] | null {
+  if (!isRecord(value)) return null;
+  const num = (key: string): number => (typeof value[key] === 'number' ? (value[key] as number) : 0);
+  return {
+    input: num('input'),
+    output: num('output'),
+    cacheRead: num('cacheRead'),
+    cacheWrite: num('cacheWrite'),
+  };
 }
 
 function projectContent(content: unknown): ProjectedPart[] {

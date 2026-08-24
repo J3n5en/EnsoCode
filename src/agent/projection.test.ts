@@ -9,7 +9,7 @@ describe('projectMessage', () => {
       api: 'anthropic-messages',
       provider: 'anthropic',
       model: 'claude',
-      usage: { input: 1, output: 2 },
+      usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 9 } },
       stopReason: 'stop',
       timestamp: 123,
     });
@@ -18,9 +18,10 @@ describe('projectMessage', () => {
       content: [{ type: 'text', text: 'hi' }],
       stopReason: 'stop',
       timestamp: 123,
+      usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
     });
     expect(projected).not.toHaveProperty('api');
-    expect(projected).not.toHaveProperty('usage');
+    expect(projected?.usage).not.toHaveProperty('cost');
   });
 
   it('user 消息的字符串 content 归一为 text part', () => {

@@ -80,6 +80,24 @@ describe('applyAgentEvent', () => {
     expect(truncated.messages).toHaveLength(2);
   });
 
+  it('running→完成的耗时并入 activeMs，用于统计条吞吐', () => {
+    let state = applyAgentEvent(
+      base,
+      's1',
+      { type: 'status', sessionId: 's1', seq: 1, status: 'running' },
+      1000
+    );
+    expect(state.runStartedAt).toBe(1000);
+    state = applyAgentEvent(
+      state,
+      's1',
+      { type: 'status', sessionId: 's1', seq: 2, status: 'idle' },
+      4500
+    );
+    expect(state.activeMs).toBe(3500);
+    expect(state.runStartedAt).toBeUndefined();
+  });
+
   it('worker-exited 无 seq 门槛，任何时刻都把会话标 failed', () => {
     const next = applyAgentEvent(base, 's1', { type: 'worker-exited' });
     expect(next.status).toBe('failed');
