@@ -32,6 +32,7 @@ export interface ProjectedMessage {
   content: ProjectedPart[];
   /** toolResult 消息附带 */
   toolName?: string;
+  toolCallId?: string;
   isError?: boolean;
   stopReason?: string;
   errorMessage?: string;

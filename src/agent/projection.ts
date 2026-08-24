@@ -13,6 +13,7 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     content: projectContent(value.content),
   };
   if (typeof value.toolName === 'string') projected.toolName = value.toolName;
+  if (typeof value.toolCallId === 'string') projected.toolCallId = value.toolCallId;
   if (typeof value.isError === 'boolean') projected.isError = value.isError;
   if (typeof value.stopReason === 'string') projected.stopReason = value.stopReason;
   if (typeof value.errorMessage === 'string') projected.errorMessage = value.errorMessage;
