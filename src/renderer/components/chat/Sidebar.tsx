@@ -45,14 +45,6 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       <aside className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/20 py-2">
         <button
           type="button"
-          onClick={onToggleCollapse}
-          className={ICON_BUTTON_CLASS}
-          title={t('Expand sidebar')}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
           onClick={() => void handleAddProject()}
           className={ICON_BUTTON_CLASS}
           title={t('Add project')}
@@ -60,6 +52,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           <FolderPlus className="h-4 w-4" />
         </button>
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className={ICON_BUTTON_CLASS}
+          title={t('Expand sidebar')}
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
         <button
           type="button"
           onClick={() => window.electronAPI.window.openSettings()}
