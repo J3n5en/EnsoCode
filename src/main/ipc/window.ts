@@ -1,5 +1,5 @@
 import { IPC_CHANNELS } from '@shared/types';
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 
@@ -9,6 +9,13 @@ export function registerWindowHandlers(): void {
     const win = BrowserWindow.fromWebContents(event.sender);
     return win && !win.isDestroyed() ? win : null;
   };
+
+  ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY, async (event): Promise<string | null> => {
+    const win = senderWindow(event);
+    if (!win) return null;
+    const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, (event) => {
     senderWindow(event)?.minimize();

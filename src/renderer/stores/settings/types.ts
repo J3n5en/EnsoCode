@@ -1,5 +1,11 @@
 import type { Locale } from '@shared/i18n';
-import type { InstructionEntry, McpServerEntry, ModelProvider, SkillEntry } from '@shared/types';
+import type {
+  InstructionEntry,
+  McpServerEntry,
+  ModelProvider,
+  Project,
+  SkillEntry,
+} from '@shared/types';
 
 export type Theme = 'light' | 'dark' | 'system' | 'sync-terminal';
 
@@ -37,6 +43,9 @@ export interface SettingsState {
   mcpServers: McpServerEntry[];
   instructions: InstructionEntry[];
 
+  // Projects（本地目录引用，作为会话工作目录）
+  projects: Project[];
+
   // Setters
   setTheme: (theme: Theme) => void;
   setLanguage: (language: Locale) => void;
@@ -70,4 +79,9 @@ export interface SettingsState {
   addInstructions: (instructions: InstructionEntry[]) => number;
   updateInstruction: (id: string, updates: Partial<Omit<InstructionEntry, 'id'>>) => void;
   removeInstruction: (id: string) => void;
+
+  // Project actions
+  /** 按目录路径去重；已存在时返回已有项 */
+  addProject: (path: string) => Project;
+  removeProject: (id: string) => void;
 }

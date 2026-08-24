@@ -68,6 +68,12 @@ const electronAPI = {
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_DELETE, id),
   },
 
+  dialog: {
+    /** 打开系统目录选择框，取消时返回 null */
+    selectDirectory: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
+  },
+
   agent: {
     spawn: (request: AgentSpawnRequest): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SPAWN, request),

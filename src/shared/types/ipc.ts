@@ -37,6 +37,9 @@ export const IPC_CHANNELS = {
   AGENT_STEER: 'agent:steer',
   AGENT_ABORT: 'agent:abort',
   AGENT_EVENT: 'agent:event',
+
+  // Native dialogs
+  DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
