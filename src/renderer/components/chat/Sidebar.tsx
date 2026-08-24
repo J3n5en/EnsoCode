@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   FolderPlus,
   MessageSquarePlus,
   PanelLeft,
@@ -7,6 +8,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -32,6 +34,22 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const newConversation = useSessionsStore((state) => state.newConversation);
   const selectConversation = useSessionsStore((state) => state.selectConversation);
   const removeConversation = useSessionsStore((state) => state.removeConversation);
+
+  // 折叠的项目分组（记忆到 localStorage）
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('enso-collapsed-projects') ?? '{}');
+    } catch {
+      return {};
+    }
+  });
+  const toggleProject = (id: string) => {
+    setCollapsedProjects((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      localStorage.setItem('enso-collapsed-projects', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleAddProject = async () => {
     const path = await window.electronAPI.dialog.selectDirectory();
@@ -100,12 +118,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           const projectConversations = order.filter(
             (id) => conversations[id]?.projectId === project.id
           );
+          const folded = collapsedProjects[project.id] === true;
           return (
             <div key={project.id} className="mt-1">
               <div className="group flex items-center gap-1 rounded-md px-1.5 py-1">
-                <span className="min-w-0 flex-1 truncate text-xs font-medium" title={project.path}>
-                  {project.name}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleProject(project.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                  title={project.path}
+                >
+                  <ChevronDown
+                    className={cn(
+                      'h-3 w-3 shrink-0 text-muted-foreground transition-transform',
+                      folded && '-rotate-90'
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                    {project.name}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => newConversation(project.id)}
@@ -126,39 +158,40 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
-              {projectConversations.map((id) => {
-                const conversation = conversations[id];
-                return (
-                  <div
-                    key={id}
-                    className={cn(
-                      'group flex cursor-pointer items-center gap-1.5 rounded-md py-1 pl-3 pr-1.5',
-                      activeId === id ? 'bg-muted' : 'hover:bg-muted/50'
-                    )}
-                    onClick={() => selectConversation(id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') selectConversation(id);
-                    }}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <ConversationDot conversation={conversation} />
-                    <span className="min-w-0 flex-1 truncate text-xs">
-                      {conversation.title || t('New conversation')}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeConversation(id);
+              {!folded &&
+                projectConversations.map((id) => {
+                  const conversation = conversations[id];
+                  return (
+                    <div
+                      key={id}
+                      className={cn(
+                        'group flex cursor-pointer items-center gap-1.5 rounded-md py-1 pl-3 pr-1.5',
+                        activeId === id ? 'bg-muted' : 'hover:bg-muted/50'
+                      )}
+                      onClick={() => selectConversation(id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') selectConversation(id);
                       }}
-                      className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      role="button"
+                      tabIndex={0}
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
+                      <ConversationDot conversation={conversation} />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {conversation.title || t('New conversation')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeConversation(id);
+                        }}
+                        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
           );
         })}
