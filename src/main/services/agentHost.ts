@@ -65,7 +65,13 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     apiKey: provider.apiKey,
     modelId: request.modelId,
   };
-  return sendCommand({ type: 'spawn', sessionId: request.sessionId, cwd: request.cwd, model });
+  return sendCommand({
+    type: 'spawn',
+    sessionId: request.sessionId,
+    cwd: request.cwd,
+    model,
+    ...(request.resumeFile ? { resumeFile: request.resumeFile } : {}),
+  });
 }
 
 export function promptSession(

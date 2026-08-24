@@ -1,6 +1,7 @@
 import type { AttachedImage } from '@shared/types/agent';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { useSettingsStore } from '@/stores/settings';
 import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
 
 export interface Conversation extends SessionProjection {
@@ -12,6 +13,11 @@ export interface Conversation extends SessionProjection {
   started: boolean;
   spawning: boolean;
   createdAt: number;
+  /** pi 会话 jsonl 路径，app 重启后凭它 resume */
+  sessionFile?: string;
+  /** 上次使用的模型，resume 时沿用 */
+  lastProviderId?: string;
+  lastModelId?: string;
 }
 
 interface SendTarget {
@@ -30,6 +36,8 @@ interface SessionsState {
   selectConversation(id: string): void;
   removeConversation(id: string): void;
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
+  /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
+  resumeConversation(id: string): Promise<void>;
   abort(): Promise<void>;
 }
 
@@ -59,7 +67,8 @@ export const useSessionsStore = create<SessionsState>()(
         }
         if (event.type === 'snapshot') {
           // 刷新后的补投影：worker 还活着的会话恢复消息与状态；
-          // 已 spawn 但 worker 不认识的（app 全量重启过）标为已结束
+          // 已 spawn 但 worker 不认识的（app 全量重启过）：有 jsonl 的转为可 resume，
+          // 没有的（老数据）标为已结束
           set((state) => {
             const alive = new Map(event.sessions.map((s) => [s.sessionId, s]));
             const conversations = { ...state.conversations };
@@ -76,14 +85,24 @@ export const useSessionsStore = create<SessionsState>()(
                     lastSeq: 0,
                     error: undefined,
                   }
-                : {
-                    ...conversation,
-                    status: 'failed',
-                    error: 'Session ended — history not restored',
-                  };
+                : conversation.sessionFile
+                  ? { ...conversation, started: false, status: 'idle', error: undefined }
+                  : {
+                      ...conversation,
+                      status: 'failed',
+                      error: 'Session ended — history not restored',
+                    };
             }
             return { conversations };
           });
+          return;
+        }
+        if (event.type === 'session-meta') {
+          set((state) =>
+            state.conversations[event.sessionId]
+              ? patch(state, event.sessionId, { sessionFile: event.sessionFile })
+              : state
+          );
           return;
         }
         if (!('sessionId' in event)) return;
@@ -158,13 +177,17 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (!conversation.started) {
             set((state) =>
-              patch(state, id, { spawning: true, title: (text || '[image]').slice(0, 40) })
+              patch(state, id, {
+                spawning: true,
+                title: conversation.title || (text || '[image]').slice(0, 40),
+              })
             );
             const result = await window.electronAPI.agent.spawn({
               sessionId: id,
               providerId: target.providerId,
               modelId: target.modelId,
               cwd: target.cwd,
+              resumeFile: conversation.sessionFile,
             });
             if (!result.ok) {
               set((state) =>
@@ -172,7 +195,14 @@ export const useSessionsStore = create<SessionsState>()(
               );
               return result.error ?? 'spawn failed';
             }
-            set((state) => patch(state, id, { spawning: false, started: true }));
+            set((state) =>
+              patch(state, id, {
+                spawning: false,
+                started: true,
+                lastProviderId: target.providerId,
+                lastModelId: target.modelId,
+              })
+            );
           }
           const action =
             get().conversations[id]?.status === 'running'
@@ -180,6 +210,34 @@ export const useSessionsStore = create<SessionsState>()(
               : window.electronAPI.agent.prompt(id, text, images);
           const result = await action;
           return result.ok ? null : (result.error ?? 'send failed');
+        },
+
+        async resumeConversation(id) {
+          const conversation = get().conversations[id];
+          if (!conversation || conversation.started || conversation.spawning) return;
+          if (
+            !conversation.sessionFile ||
+            !conversation.lastProviderId ||
+            !conversation.lastModelId
+          )
+            return;
+          const project = useSettingsStore
+            .getState()
+            .projects.find((p) => p.id === conversation.projectId);
+          if (!project) return;
+          set((state) => patch(state, id, { spawning: true }));
+          const result = await window.electronAPI.agent.spawn({
+            sessionId: id,
+            providerId: conversation.lastProviderId,
+            modelId: conversation.lastModelId,
+            cwd: project.path,
+            resumeFile: conversation.sessionFile,
+          });
+          set((state) =>
+            result.ok
+              ? patch(state, id, { spawning: false, started: true })
+              : patch(state, id, { spawning: false, status: 'failed', error: result.error })
+          );
         },
 
         async abort() {

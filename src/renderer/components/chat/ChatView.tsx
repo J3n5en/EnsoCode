@@ -69,6 +69,13 @@ export function ChatView() {
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [conversation?.id]);
 
+  // app 重启后选中可恢复的对话时自动 resume（历史消息由 worker 回放）
+  useEffect(() => {
+    if (conversation && !conversation.started && conversation.sessionFile) {
+      void useSessionsStore.getState().resumeConversation(conversation.id);
+    }
+  }, [conversation]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: 时间线变化时若在跟随则滚到底部
   useEffect(() => {
     if (!followRef.current) return;

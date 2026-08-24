@@ -13,7 +13,14 @@ export interface SpawnModelConfig {
 
 /** Main → worker 命令 */
 export type AgentCommand =
-  | { type: 'spawn'; sessionId: string; cwd: string; model: SpawnModelConfig }
+  | {
+      type: 'spawn';
+      sessionId: string;
+      cwd: string;
+      model: SpawnModelConfig;
+      /** 从既有 jsonl 恢复会话（app 重启后 resume） */
+      resumeFile?: string;
+    }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'abort'; sessionId: string }
@@ -74,6 +81,8 @@ export interface AgentSpawnRequest {
   providerId: string;
   modelId: string;
   cwd: string;
+  /** 从既有 jsonl 恢复（app 重启后 resume） */
+  resumeFile?: string;
 }
 
 export interface AgentActionResult {
@@ -101,6 +110,7 @@ export type AgentWorkerEvent =
   | { type: 'turn-failed'; sessionId: string; seq: number; error: string }
   | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
   | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
+  | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
   | { type: 'snapshot'; sessions: SessionSnapshot[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -118,6 +128,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       if (
         isNonEmptyString(value.sessionId) &&
         typeof value.cwd === 'string' &&
+        (value.resumeFile === undefined || isNonEmptyString(value.resumeFile)) &&
         isRecord(model) &&
         isNonEmptyString(model.api) &&
         typeof model.baseUrl === 'string' &&
@@ -200,6 +211,15 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
         Array.isArray(value.commands)
+      ) {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'session-meta':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        (value.sessionFile === undefined || typeof value.sessionFile === 'string')
       ) {
         return value as unknown as AgentWorkerEvent;
       }

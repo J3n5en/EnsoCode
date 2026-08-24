@@ -72,7 +72,7 @@ export class SessionSupervisor {
   private async execute(command: Exclude<AgentCommand, { type: 'snapshot' }>): Promise<void> {
     switch (command.type) {
       case 'spawn':
-        await this.spawn(command.sessionId, command.cwd, command.model);
+        await this.spawn(command.sessionId, command.cwd, command.model, command.resumeFile);
         return;
       case 'prompt': {
         const managed = this.must(command.sessionId);
@@ -98,7 +98,12 @@ export class SessionSupervisor {
     }
   }
 
-  private async spawn(sessionId: string, cwd: string, model: SpawnModelConfig): Promise<void> {
+  private async spawn(
+    sessionId: string,
+    cwd: string,
+    model: SpawnModelConfig,
+    resumeFile?: string
+  ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
     const providerId = `enso-${model.api}-${model.baseUrl}`;
@@ -126,7 +131,9 @@ export class SessionSupervisor {
       agentDir: this.options.agentDir,
       modelRuntime: runtime,
       model: piModel,
-      sessionManager: SessionManager.create(cwd, this.options.sessionDir),
+      sessionManager: resumeFile
+        ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
+        : SessionManager.create(cwd, this.options.sessionDir),
     });
 
     const managed: ManagedSession = {
@@ -148,6 +155,17 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       commands: managed.commands,
     });
+    // jsonl 路径回传给 renderer 持久化，app 重启后凭它 resume
+    this.options.emit({
+      type: 'session-meta',
+      sessionId,
+      seq: ++managed.seq,
+      sessionFile: managed.session.sessionFile,
+    });
+    if (resumeFile) {
+      // 恢复的会话把历史消息全量回放进投影
+      this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
+    }
   }
 
   private onSessionEvent(
