@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, FolderOpen, Settings } from 'lucide-react';
+import { ArrowUp, CircleStop, Settings } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,10 +16,16 @@ import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { TimelineRow } from './TimelineRow';
 
+const SELECT_TRIGGER_CLASS =
+  'h-7 w-auto min-w-0 shrink-0 gap-1 border-none bg-transparent px-2 text-xs shadow-none before:shadow-none hover:bg-muted';
+
 export function ChatView() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
-  const session = useSessionsStore();
+  const projects = useSettingsStore((state) => state.projects);
+  const conversation = useSessionsStore((state) =>
+    state.activeId ? state.conversations[state.activeId] : null
+  );
 
   const enabledProviders = useMemo(
     () => providers.filter((provider) => provider.enabled && provider.apiKey),
@@ -37,15 +43,16 @@ export function ChatView() {
     : (enabledModels[0]?.id ?? '');
   const modelLabel = enabledModels.find((m) => m.id === effectiveModelId)?.label;
 
+  const project = projects.find((p) => p.id === conversation?.projectId);
+
   const [text, setText] = useState('');
-  const [cwd, setCwd] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const running = session.status === 'running';
-  const busy = running || session.spawning;
+  const running = conversation?.status === 'running';
+  const busy = running || conversation?.spawning === true;
   const timeline = useMemo(
-    () => buildTimeline(session.messages, running),
-    [session.messages, running]
+    () => buildTimeline(conversation?.messages ?? [], running),
+    [conversation?.messages, running]
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 时间线变化时滚到底部
@@ -55,20 +62,29 @@ export function ChatView() {
 
   const handleSend = async () => {
     const content = text.trim();
-    if (!content || !provider || !effectiveModelId) return;
+    if (!content || !provider || !effectiveModelId || !project) return;
     setText('');
-    if (!session.sessionId) {
-      const error = await session.start(provider.id, effectiveModelId, cwd.trim());
-      if (error) return;
-    }
-    await useSessionsStore.getState().send(content);
+    await useSessionsStore.getState().send(content, {
+      providerId: provider.id,
+      modelId: effectiveModelId,
+      cwd: project.path,
+    });
   };
+
+  if (!conversation) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 text-center">
+        <p className="text-lg font-medium">EnsoCode</p>
+        <p className="text-sm text-muted-foreground">{t('Select or create a conversation')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1.5 border-b px-3 py-1.5">
         <Select value={provider?.id ?? ''} onValueChange={(v) => setProviderId(v ?? '')}>
-          <SelectTrigger className="h-7 w-auto min-w-0 shrink-0 gap-1 border-none bg-transparent px-2 text-xs shadow-none before:shadow-none hover:bg-muted">
+          <SelectTrigger className={SELECT_TRIGGER_CLASS}>
             <SelectValue>{provider?.name ?? t('Provider')}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -81,7 +97,7 @@ export function ChatView() {
         </Select>
         <span className="text-muted-foreground/40 text-xs">/</span>
         <Select value={effectiveModelId} onValueChange={(v) => setModelId(v ?? '')}>
-          <SelectTrigger className="h-7 w-auto min-w-0 shrink-0 gap-1 border-none bg-transparent px-2 text-xs shadow-none before:shadow-none hover:bg-muted">
+          <SelectTrigger className={SELECT_TRIGGER_CLASS}>
             <SelectValue>{modelLabel ?? effectiveModelId ?? t('Model')}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -93,7 +109,12 @@ export function ChatView() {
           </SelectPopup>
         </Select>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-          <StatusDot status={session.spawning ? 'running' : session.status} />
+          {project && (
+            <span className="truncate font-mono text-xs text-muted-foreground" title={project.path}>
+              {project.name}
+            </span>
+          )}
+          <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
           <Button
             variant="ghost"
             size="icon"
@@ -109,7 +130,7 @@ export function ChatView() {
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6">
           {timeline.length === 0 && !busy && (
             <div className="flex flex-col items-center gap-1 py-24 text-center">
-              <p className="text-lg font-medium">EnsoCode</p>
+              <p className="text-lg font-medium">{project?.name ?? 'EnsoCode'}</p>
               <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
             </div>
           )}
@@ -117,8 +138,8 @@ export function ChatView() {
             <TimelineRow key={item.key} item={item} />
           ))}
           {busy && <LoadingDots />}
-          {session.error && (
-            <p className="text-sm text-destructive whitespace-pre-wrap">{session.error}</p>
+          {conversation.error && (
+            <p className="text-sm text-destructive whitespace-pre-wrap">{conversation.error}</p>
           )}
         </div>
       </ScrollArea>
@@ -139,21 +160,13 @@ export function ChatView() {
               rows={2}
               className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
             />
-            <div className="flex items-center gap-1.5 px-2.5 pb-2">
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <input
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
-                placeholder={t('Working directory')}
-                disabled={session.sessionId !== null}
-                className="h-6 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground disabled:text-muted-foreground"
-              />
+            <div className="flex items-center justify-end gap-1.5 px-2.5 pb-2">
               {busy ? (
                 <Button
                   variant="outline"
                   size="icon"
                   className="h-7 w-7 rounded-lg"
-                  onClick={() => void session.abort()}
+                  onClick={() => void useSessionsStore.getState().abort()}
                 >
                   <CircleStop className="h-4 w-4" />
                 </Button>

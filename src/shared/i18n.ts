@@ -119,6 +119,12 @@ export const zhTranslations: Record<string, string> = {
   'Steer the running agent…': '给运行中的 agent 补一句…',
   'Thinking…': '思考中…',
   'Thought process': '思考过程',
+  Projects: '项目',
+  'Add project': '添加项目',
+  'Add a project to start': '添加一个项目开始',
+  'New conversation': '新对话',
+  'Remove project': '移除项目',
+  'Select or create a conversation': '选择或新建一个对话',
 };
 
 export function normalizeLocale(input?: string): Locale {
