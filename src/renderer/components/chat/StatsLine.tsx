@@ -32,7 +32,7 @@ export function StatsLine({ messages, activeMs }: StatsLineProps) {
   }
 
   return (
-    <div className="flex h-6 items-end justify-center px-1">
+    <div className="flex h-5 items-center justify-center px-1">
       {groups.length > 0 && (
         <span className="truncate text-[11px] text-muted-foreground/70">
           {groups.join('  |  ')}
