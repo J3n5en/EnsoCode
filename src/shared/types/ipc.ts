@@ -41,6 +41,9 @@ export const IPC_CHANNELS = {
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
+
+  // File search (@ mention)
+  FILES_SEARCH: 'files:search',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -9,6 +9,7 @@ import {
   spawnSession,
   steerSession,
 } from '../services/agentHost';
+import { searchFiles } from '../services/fileSearch';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -60,4 +61,9 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
+
+  ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
+    if (!isNonEmptyString(root) || typeof query !== 'string') return [];
+    return searchFiles(root, query);
+  });
 }

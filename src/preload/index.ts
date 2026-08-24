@@ -74,6 +74,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
   },
 
+  files: {
+    /** 在 root 下按文件名/路径模糊搜索（@ 提及用） */
+    search: (root: string, query: string): Promise<{ relativePath: string; name: string }[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
+  },
+
   agent: {
     spawn: (request: AgentSpawnRequest): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SPAWN, request),
