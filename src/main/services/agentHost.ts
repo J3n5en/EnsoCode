@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { type UtilityProcess, utilityProcess } from 'electron';
+import { app, type UtilityProcess, utilityProcess } from 'electron';
 
 /** 管理 agent worker（utilityProcess）的生命周期。当前为通路雏形，命令下发后续补。 */
 let worker: UtilityProcess | null = null;
@@ -8,6 +8,11 @@ export function startAgentWorker(): void {
   if (worker) return;
   const child = utilityProcess.fork(path.join(import.meta.dirname, 'agent.js'), [], {
     serviceName: 'enso-agent-worker',
+    env: {
+      ...process.env,
+      // pi 的全局目录与会话目录都收进 userData，不碰用户的 ~/.pi
+      ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
+    },
   });
   worker = child;
 
