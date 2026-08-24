@@ -17,6 +17,8 @@ interface ComposerProps {
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
+  /** 底部工具行左侧插槽（模型选择器等） */
+  toolbar?: React.ReactNode;
   onSend: (text: string, images: AttachedImage[]) => void;
   onAbort: () => void;
 }
@@ -44,7 +46,15 @@ function findSlashStart(text: string, cursor: number): number | null {
   return null;
 }
 
-export function Composer({ cwd, commands, running, busy, onSend, onAbort }: ComposerProps) {
+export function Composer({
+  cwd,
+  commands,
+  running,
+  busy,
+  toolbar,
+  onSend,
+  onAbort,
+}: ComposerProps) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
@@ -312,7 +322,8 @@ export function Composer({ cwd, commands, running, busy, onSend, onAbort }: Comp
           rows={2}
           className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
         />
-        <div className="flex items-center justify-end gap-1.5 px-2.5 pb-2">
+        <div className="flex items-center justify-between gap-1.5 px-2.5 pb-2">
+          <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
           {busy ? (
             <Button variant="outline" size="icon" className="h-7 w-7 rounded-lg" onClick={onAbort}>
               <CircleStop className="h-4 w-4" />

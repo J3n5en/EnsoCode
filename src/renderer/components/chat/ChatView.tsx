@@ -1,23 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { Composer } from './Composer';
+import { ModelPicker } from './ModelPicker';
 import { StatsLine } from './StatsLine';
 import { TimelineRow } from './TimelineRow';
-
-const SELECT_TRIGGER_CLASS =
-  'h-7 w-auto min-w-0 shrink-0 gap-1 border-none bg-transparent px-2 text-xs shadow-none before:shadow-none hover:bg-muted';
 
 export function ChatView() {
   const { t } = useI18n();
@@ -41,7 +32,6 @@ export function ChatView() {
   const effectiveModelId = enabledModels.some((m) => m.id === modelId)
     ? modelId
     : (enabledModels[0]?.id ?? '');
-  const modelLabel = enabledModels.find((m) => m.id === effectiveModelId)?.label;
 
   const project = projects.find((p) => p.id === conversation?.projectId);
 
@@ -70,33 +60,11 @@ export function ChatView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1.5 border-b px-3 py-1.5">
-        <Select value={provider?.id ?? ''} onValueChange={(v) => setProviderId(v ?? '')}>
-          <SelectTrigger className={SELECT_TRIGGER_CLASS}>
-            <SelectValue>{provider?.name ?? t('Provider')}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {enabledProviders.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <span className="text-muted-foreground/40 text-xs">/</span>
-        <Select value={effectiveModelId} onValueChange={(v) => setModelId(v ?? '')}>
-          <SelectTrigger className={SELECT_TRIGGER_CLASS}>
-            <SelectValue>{modelLabel ?? effectiveModelId ?? t('Model')}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {enabledModels.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                {model.label ?? model.id}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+      <div className="flex items-center justify-between gap-1.5 border-b px-3 py-1.5">
+        <span className="truncate text-xs font-medium">
+          {conversation.title || t('New conversation')}
+        </span>
+        <div className="flex min-w-0 items-center gap-1.5">
           {project && (
             <span className="truncate font-mono text-xs text-muted-foreground" title={project.path}>
               {project.name}
@@ -131,6 +99,17 @@ export function ChatView() {
             commands={conversation.commands}
             running={running}
             busy={busy}
+            toolbar={
+              <ModelPicker
+                providers={enabledProviders}
+                providerId={provider?.id ?? ''}
+                modelId={effectiveModelId}
+                onSelect={(pid, mid) => {
+                  setProviderId(pid);
+                  setModelId(mid);
+                }}
+              />
+            }
             onSend={(content, images) => {
               if (!provider || !effectiveModelId || !project) return;
               void useSessionsStore.getState().send(

@@ -131,6 +131,8 @@ export const zhTranslations: Record<string, string> = {
   'Cache hit {{percent}}%': '缓存命中 {{percent}}%',
   'Input {{input}} tok · Output {{output}} tok': '输入 {{input}} · 输出 {{output}} tok',
   '{{speed}} tok/s': '{{speed}} tok/s',
+  'Search models': '搜索模型',
+  'No models found': '没有匹配的模型',
 };
 
 export function normalizeLocale(input?: string): Locale {
