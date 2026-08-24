@@ -71,6 +71,7 @@ export const useSessionsStore = create<SessionsState>()(
                     ...conversation,
                     status: snapshot.status,
                     messages: snapshot.messages,
+                    commands: snapshot.commands,
                     lastSeq: 0,
                     error: undefined,
                   }

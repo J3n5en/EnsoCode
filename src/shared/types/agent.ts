@@ -43,6 +43,13 @@ export interface SessionSnapshot {
   sessionId: string;
   status: NodeStatus;
   messages: ProjectedMessage[];
+  commands: SlashCommand[];
+}
+
+/** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
+export interface SlashCommand {
+  name: string;
+  description: string;
 }
 
 /** Renderer 发起开会话的请求。apiKey 由 Main 从 settings 补全，不经过 Renderer */
@@ -77,6 +84,7 @@ export type AgentWorkerEvent =
   | { type: 'turn-completed'; sessionId: string; seq: number }
   | { type: 'turn-failed'; sessionId: string; seq: number; error: string }
   | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
+  | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
   | { type: 'snapshot'; sessions: SessionSnapshot[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -154,6 +162,15 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         typeof value.seq === 'number' &&
         typeof value.length === 'number' &&
         value.length >= 0
+      ) {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'commands':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        Array.isArray(value.commands)
       ) {
         return value as unknown as AgentWorkerEvent;
       }

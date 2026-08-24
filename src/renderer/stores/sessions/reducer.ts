@@ -1,15 +1,22 @@
-import type { NodeStatus, ProjectedMessage, RendererAgentEvent } from '@shared/types/agent';
+import type {
+  NodeStatus,
+  ProjectedMessage,
+  RendererAgentEvent,
+  SlashCommand,
+} from '@shared/types/agent';
 
 export interface SessionProjection {
   status: NodeStatus;
   error?: string;
   messages: ProjectedMessage[];
+  commands: SlashCommand[];
   lastSeq: number;
 }
 
 export const emptyProjection: SessionProjection = {
   status: 'idle',
   messages: [],
+  commands: [],
   lastSeq: 0,
 };
 
@@ -28,7 +35,12 @@ export function applyAgentEvent(
   if (event.type === 'snapshot') {
     const snapshot = event.sessions.find((s) => s.sessionId === sessionId);
     if (!snapshot) return state;
-    return { status: snapshot.status, messages: snapshot.messages, lastSeq: 0 };
+    return {
+      status: snapshot.status,
+      messages: snapshot.messages,
+      commands: snapshot.commands,
+      lastSeq: 0,
+    };
   }
   if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
 
@@ -49,6 +61,8 @@ export function applyAgentEvent(
       return { ...state, lastSeq: event.seq };
     case 'messages-truncated':
       return { ...state, messages: state.messages.slice(0, event.length), lastSeq: event.seq };
+    case 'commands':
+      return { ...state, commands: event.commands, lastSeq: event.seq };
     case 'turn-failed':
       return { ...state, status: 'failed', error: event.error, lastSeq: event.seq };
     default:

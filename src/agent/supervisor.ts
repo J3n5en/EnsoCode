@@ -11,6 +11,7 @@ import type {
   NodeStatus,
   ProjectedMessage,
   SessionSnapshot,
+  SlashCommand,
   SpawnModelConfig,
 } from '@shared/types/agent';
 import { OperationGate } from './gate';
@@ -22,6 +23,7 @@ interface ManagedSession {
   seq: number;
   /** 渲染层投影的权威副本，message-upsert 以此为准 */
   messages: ProjectedMessage[];
+  commands: SlashCommand[];
   unsubscribe: () => void;
 }
 
@@ -127,6 +129,7 @@ export class SessionSupervisor {
       status: 'idle',
       seq: 0,
       messages: [],
+      commands: collectSlashCommands(session),
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
@@ -134,6 +137,12 @@ export class SessionSupervisor {
     });
     this.sessions.set(sessionId, managed);
     this.emitStatus(sessionId, managed);
+    this.options.emit({
+      type: 'commands',
+      sessionId,
+      seq: ++managed.seq,
+      commands: managed.commands,
+    });
   }
 
   private onSessionEvent(
@@ -232,6 +241,7 @@ export class SessionSupervisor {
       sessionId,
       status: managed.status,
       messages: managed.messages,
+      commands: managed.commands,
     }));
   }
 
@@ -254,3 +264,20 @@ export class SessionSupervisor {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 从 pi 的资源加载器收集可用斜杠命令：skills（/skill:name）与 prompt templates（/name） */
+function collectSlashCommands(session: AgentSession): SlashCommand[] {
+  const commands: SlashCommand[] = [];
+  try {
+    const loader = session.resourceLoader;
+    for (const skill of loader.getSkills().skills) {
+      commands.push({ name: `/skill:${skill.name}`, description: skill.description });
+    }
+    for (const prompt of loader.getPrompts().prompts) {
+      commands.push({ name: `/${prompt.name}`, description: prompt.description });
+    }
+  } catch {
+    // 资源加载失败不阻塞会话，命令列表为空即可
+  }
+  return commands;
+}
