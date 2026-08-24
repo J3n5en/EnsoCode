@@ -21,8 +21,6 @@ interface ModelPickerProps {
   modelId: string;
   reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
-  /** reasoning 开关切换后需重开会话生效时为 true（用于提示） */
-  reasoningNeedsRestart: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -35,7 +33,6 @@ export function ModelPicker({
   modelId,
   reasoningEnabled,
   thinkingLevel,
-  reasoningNeedsRestart,
   onSelect,
   onReasoningChange,
   onThinkingChange,
@@ -173,12 +170,6 @@ export function ModelPicker({
                 ))}
               </div>
             </div>
-          )}
-
-          {reasoningNeedsRestart && (
-            <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-500">
-              {t('Takes effect in a new conversation')}
-            </p>
           )}
         </div>
       </PopoverPopup>

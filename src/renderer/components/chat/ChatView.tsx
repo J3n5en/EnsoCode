@@ -253,11 +253,6 @@ export function ChatView() {
                 modelId={effectiveModelId}
                 reasoningEnabled={conversation.reasoningEnabled ?? false}
                 thinkingLevel={conversation.thinkingLevel ?? 'medium'}
-                reasoningNeedsRestart={
-                  conversation.started &&
-                  (conversation.reasoningEnabled ?? false) !==
-                    (conversation.spawnedReasoning ?? false)
-                }
                 onSelect={(pid, mid) => {
                   setProviderId(pid);
                   setModelId(mid);
