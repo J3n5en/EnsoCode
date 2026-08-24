@@ -7,6 +7,7 @@ import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { Composer } from './Composer';
 import { ModelPicker } from './ModelPicker';
+import { NavRail } from './NavRail';
 import { StatsLine } from './StatsLine';
 import { TimelineRow } from './TimelineRow';
 
@@ -61,16 +62,70 @@ export function ChatView() {
   const hiddenCount = Math.max(0, timeline.length - visibleCount);
   const visibleTimeline = hiddenCount > 0 ? timeline.slice(hiddenCount) : timeline;
 
-  // 用户滚动维护跟随状态：距底 40px 内视为贴底
+  // 导航条数据：每条 user 轮次 + 其后首个回答摘要
+  const navItems = useMemo(() => {
+    const items: { key: string; question: string; answer: string }[] = [];
+    for (let i = 0; i < timeline.length; i++) {
+      const item = timeline[i];
+      if (item.kind !== 'user') continue;
+      let answer = '';
+      for (let j = i + 1; j < timeline.length; j++) {
+        const next = timeline[j];
+        if (next.kind === 'user') break;
+        if (next.kind === 'text') {
+          answer = next.text;
+          break;
+        }
+      }
+      items.push({ key: item.key, question: item.text || '[image]', answer });
+    }
+    return items;
+  }, [timeline]);
+
+  const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
+
+  const jumpTo = (key: string) => {
+    followRef.current = false;
+    const index = timeline.findIndex((item) => item.key === key);
+    if (index >= 0 && index < hiddenCount) {
+      // 目标在未渲染的早期区间，先展开到包含它
+      setVisibleCount(timeline.length - index + 10);
+    }
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector(`[data-nav-key="${key}"]`)
+        ?.scrollIntoView({ block: 'start' });
+    });
+  };
+
+  // 用户滚动维护跟随状态：距底 40px 内视为贴底；同时追踪当前所在的 user 轮次（导航条高亮）
   // biome-ignore lint/correctness/useExhaustiveDependencies: 会话切换后 viewport 可能重挂载，需重绑
   useEffect(() => {
     const viewport = viewportOf();
     if (!viewport) return;
+    let frame = 0;
     const onScroll = () => {
       followRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 40;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const anchors = viewport.querySelectorAll<HTMLElement>('[data-nav-key]');
+        const threshold = viewport.getBoundingClientRect().top + viewport.clientHeight / 3;
+        let current: string | null = null;
+        for (const anchor of anchors) {
+          if (anchor.getBoundingClientRect().top <= threshold) {
+            current = anchor.dataset.navKey ?? null;
+          } else break;
+        }
+        setActiveNavKey(current ?? anchors[0]?.dataset.navKey ?? null);
+      });
     };
     viewport.addEventListener('scroll', onScroll, { passive: true });
-    return () => viewport.removeEventListener('scroll', onScroll);
+    onScroll();
+    return () => {
+      viewport.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [conversation?.id]);
 
   // 切换会话时回到底部并恢复跟随
@@ -120,32 +175,41 @@ export function ChatView() {
         </div>
       </div>
 
-      <ScrollArea ref={scrollRef} className="min-h-0 flex-1">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6">
-          {timeline.length === 0 && !busy && (
-            <div className="flex flex-col items-center gap-1 py-24 text-center">
-              <p className="text-lg font-medium">{project?.name ?? 'EnsoCode'}</p>
-              <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
-            </div>
-          )}
-          {hiddenCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setVisibleCount((v) => v + LOAD_MORE_STEP)}
-              className="mx-auto rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              {t('Show {{count}} earlier', { count: hiddenCount })}
-            </button>
-          )}
-          {visibleTimeline.map((item) => (
-            <TimelineRow key={item.key} item={item} />
-          ))}
-          {busy && <LoadingDots />}
-          {conversation.error && (
-            <p className="text-sm text-destructive whitespace-pre-wrap">{conversation.error}</p>
-          )}
-        </div>
-      </ScrollArea>
+      <div className="relative min-h-0 flex-1">
+        <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
+        <ScrollArea ref={scrollRef} className="h-full">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-6">
+            {timeline.length === 0 && !busy && (
+              <div className="flex flex-col items-center gap-1 py-24 text-center">
+                <p className="text-lg font-medium">{project?.name ?? 'EnsoCode'}</p>
+                <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
+              </div>
+            )}
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((v) => v + LOAD_MORE_STEP)}
+                className="mx-auto rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {t('Show {{count}} earlier', { count: hiddenCount })}
+              </button>
+            )}
+            {visibleTimeline.map((item) =>
+              item.kind === 'user' ? (
+                <div key={item.key} data-nav-key={item.key}>
+                  <TimelineRow item={item} />
+                </div>
+              ) : (
+                <TimelineRow key={item.key} item={item} />
+              )
+            )}
+            {busy && <LoadingDots />}
+            {conversation.error && (
+              <p className="text-sm text-destructive whitespace-pre-wrap">{conversation.error}</p>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
 
       <div className="px-4 pt-1">
         <div className="mx-auto w-full max-w-2xl">
