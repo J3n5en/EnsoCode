@@ -28,16 +28,19 @@ export interface McpServerEntry {
   enabled: boolean;
 }
 
-/** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等 */
+/** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等
+ *  默认指向源应用的原文件（跟随其更新）；一旦在应用内编辑，
+ *  先复制为本地副本再改，不回写源文件 */
 export interface InstructionEntry {
   id: string;
-  /** 文件名或条目名 */
+  /** 条目名，可重命名 */
   name: string;
-  /** 文件路径；来自数据库的内联条目为空 */
-  path?: string;
-  /** 无文件来源（如 CC Switch prompts）直接保存内容 */
-  content?: string;
+  /** 来源展示名 */
   source: string;
+  /** 原文件路径；无文件来源（如 CC Switch prompts）为空 */
+  sourcePath?: string;
+  /** true 表示内容已复制到 userData/instructions/<id>.md，不再跟随源文件 */
+  local: boolean;
   bytes: number;
   enabled: boolean;
 }

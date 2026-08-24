@@ -1,4 +1,5 @@
-import { FileText, HardDriveDownload, Trash2 } from 'lucide-react';
+import type { InstructionEntry } from '@shared/types';
+import { FileText, HardDriveDownload, Link2, Pencil, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { InstructionEditDialog } from './InstructionEditDialog';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 
 const formatBytes = (bytes: number): string =>
@@ -17,6 +19,7 @@ export function InstructionsSettings() {
   const updateInstruction = useSettingsStore((state) => state.updateInstruction);
   const removeInstruction = useSettingsStore((state) => state.removeInstruction);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<InstructionEntry | null>(null);
 
   return (
     <div className="space-y-6">
@@ -60,8 +63,16 @@ export function InstructionsSettings() {
                 <Badge variant="secondary" className="shrink-0 text-[11px]">
                   {instruction.source}
                 </Badge>
+                {!instruction.local && (
+                  <Badge variant="outline" className="shrink-0 gap-1 text-[11px]">
+                    <Link2 className="h-3 w-3" />
+                    {t('Linked')}
+                  </Badge>
+                )}
                 <span className="min-w-0 truncate text-muted-foreground text-xs">
-                  {instruction.path ?? t('Stored inline')} · {formatBytes(instruction.bytes)}
+                  {instruction.local
+                    ? `${t('Local copy')} · ${formatBytes(instruction.bytes)}`
+                    : `${instruction.sourcePath} · ${formatBytes(instruction.bytes)}`}
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -69,6 +80,14 @@ export function InstructionsSettings() {
                   checked={instruction.enabled}
                   onCheckedChange={(enabled) => updateInstruction(instruction.id, { enabled })}
                 />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => setEditing(instruction)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -84,6 +103,7 @@ export function InstructionsSettings() {
       )}
 
       <LocalAssetImportDialog kind="instruction" open={importOpen} onOpenChange={setImportOpen} />
+      <InstructionEditDialog instruction={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

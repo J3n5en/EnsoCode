@@ -203,10 +203,10 @@ export const useSettingsStore = create<SettingsState>()(
       removeMcpServer: (id) =>
         set((state) => ({ mcpServers: state.mcpServers.filter((s) => s.id !== id) })),
 
-      // 按文件路径去重；无文件的内联条目按名称+来源去重
+      // 按源文件路径去重；无文件的内联条目按名称+来源去重
       addInstructions: (instructions) => {
         const key = (item: import('@shared/types').InstructionEntry) =>
-          item.path ?? `${item.source}::${item.name}`;
+          item.sourcePath ?? `${item.source}::${item.name}`;
         const known = new Set(get().instructions.map(key));
         const fresh = instructions.filter((item) => {
           const value = key(item);
@@ -225,8 +225,11 @@ export const useSettingsStore = create<SettingsState>()(
           instructions: state.instructions.map((i) => (i.id === id ? { ...i, ...updates } : i)),
         })),
 
-      removeInstruction: (id) =>
-        set((state) => ({ instructions: state.instructions.filter((i) => i.id !== id) })),
+      removeInstruction: (id) => {
+        // 只删本地副本，源文件不动
+        void window.electronAPI.instructions.delete(id);
+        set((state) => ({ instructions: state.instructions.filter((i) => i.id !== id) }));
+      },
     }),
     {
       name: 'enso-settings',

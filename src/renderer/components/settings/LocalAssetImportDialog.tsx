@@ -98,15 +98,26 @@ export function LocalAssetImportDialog({ kind, open, onOpenChange }: LocalAssetI
           }))
       );
     } else {
-      added = addInstructions(
-        collected
-          .filter((item) => item.kind === 'instruction')
-          .map(({ candidateId: _candidateId, kind: _kind, ...instruction }) => ({
-            ...instruction,
-            id: crypto.randomUUID(),
-            enabled: true,
-          }))
-      );
+      const entries: import('@shared/types').InstructionEntry[] = [];
+      for (const item of collected) {
+        if (item.kind !== 'instruction') continue;
+        const id = crypto.randomUUID();
+        // 有源文件的先保持链接；无文件来源立即写成本地副本
+        const local = !item.sourcePath;
+        if (local && item.content) {
+          await window.electronAPI.instructions.write(id, item.content);
+        }
+        entries.push({
+          id,
+          name: item.name,
+          source: item.source,
+          sourcePath: item.sourcePath,
+          local,
+          bytes: item.bytes,
+          enabled: true,
+        });
+      }
+      added = addInstructions(entries);
     }
     setImportedCount(added);
     setPhase('done');

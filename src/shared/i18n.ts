@@ -97,7 +97,21 @@ export const zhTranslations: Record<string, string> = {
   'Import instruction files': '导入指令文件',
   'Same content': '内容相同',
   'Same name': '同名',
-  'Stored inline': '内联存储',
+  'Edit Instruction': '编辑指令文件',
+  Content: '内容',
+  'Loading...': '加载中...',
+  Linked: '链接',
+  'Local copy': '本地副本',
+  'Local copy — edits stay in this app.': '本地副本 —— 修改只保存在应用内。',
+  'Write back to original file': '直接修改原文件',
+  'Saving creates a local copy — {{path}} is left untouched, and this entry stops following its updates.':
+    '保存后会复制一份到应用内 —— {{path}} 不会被改动,此条目也将不再跟随其更新。',
+  'Saving overwrites {{path}} directly — {{source}} will pick up the change.':
+    '保存会直接覆盖 {{path}} —— {{source}} 会随之生效。',
+  'Overwrite original': '覆盖原文件',
+  'Save as local copy': '保存为本地副本',
+  'Failed to read content': '读取内容失败',
+  'Failed to save': '保存失败',
 };
 
 export function normalizeLocale(input?: string): Locale {

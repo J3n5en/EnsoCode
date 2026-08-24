@@ -24,6 +24,12 @@ export const IPC_CHANNELS = {
   // Local skill / MCP scan/import
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
   ASSETS_COLLECT_IMPORT: 'assets:collect-import',
+
+  // Instruction content (copy-on-write)
+  INSTRUCTIONS_READ: 'instructions:read',
+  INSTRUCTIONS_WRITE: 'instructions:write',
+  INSTRUCTIONS_WRITE_SOURCE: 'instructions:write-source',
+  INSTRUCTIONS_DELETE: 'instructions:delete',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

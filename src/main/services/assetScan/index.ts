@@ -160,7 +160,7 @@ function existingKeys(): {
     mcp: new Set(mcpServers.map((item) => mcpKey(item as DiscoveredMcpServer))),
     instructionPaths: new Set(
       instructions
-        .map((item) => (item as { path?: string }).path)
+        .map((item) => (item as { sourcePath?: string }).sourcePath)
         .filter((value): value is string => Boolean(value))
         .map((value) => path.resolve(value))
     ),
@@ -329,8 +329,9 @@ export function collectAssetImport(scanId: string, candidateIds: string[]): Coll
         candidateId,
         kind: 'instruction',
         name: cached.instruction.name,
-        path: cached.instruction.path,
-        content: cached.instruction.content,
+        sourcePath: cached.instruction.path,
+        // 无文件来源必须立即落成本地副本
+        content: cached.instruction.path ? undefined : cached.instruction.content,
         bytes: cached.instruction.bytes,
         source: SOURCE_NAMES[cached.sourceId],
       });

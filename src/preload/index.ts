@@ -46,6 +46,27 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_COLLECT_IMPORT, scanId, candidateIds),
   },
 
+  instructions: {
+    /** local 为 false 时读源文件，为 true 时读本地副本 */
+    read: (
+      id: string,
+      local: boolean,
+      sourcePath?: string
+    ): Promise<{ ok: boolean; content: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_READ, id, local, sourcePath),
+    /** 写入本地副本，首次写入即完成 copy-on-write */
+    write: (id: string, content: string): Promise<{ ok: boolean; bytes: number }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_WRITE, id, content),
+    /** 直接写回源应用的原文件（会改动对方配置） */
+    writeSource: (
+      id: string,
+      sourcePath: string,
+      content: string
+    ): Promise<{ ok: boolean; bytes: number; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_WRITE_SOURCE, id, sourcePath, content),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_DELETE, id),
+  },
+
   window: {
     minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),
     maximize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MAXIMIZE),

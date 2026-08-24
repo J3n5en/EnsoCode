@@ -82,9 +82,12 @@ export type CollectedMcpServer = Omit<McpServerEntry, 'id' | 'enabled'> & {
   kind: 'mcp';
 };
 
-export type CollectedInstruction = Omit<InstructionEntry, 'id' | 'enabled'> & {
+export type CollectedInstruction = Omit<InstructionEntry, 'id' | 'enabled' | 'bytes' | 'local'> & {
   candidateId: string;
   kind: 'instruction';
+  bytes: number;
+  /** 无文件来源（如 CC Switch prompts）的内容，导入时直接落成本地副本 */
+  content?: string;
 };
 
 export type CollectedAsset = CollectedSkill | CollectedMcpServer | CollectedInstruction;
