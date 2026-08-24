@@ -112,6 +112,11 @@ export const zhTranslations: Record<string, string> = {
   'Save as local copy': '保存为本地副本',
   'Failed to read content': '读取内容失败',
   'Failed to save': '保存失败',
+  Provider: '模型服务',
+  Model: '模型',
+  'Working directory': '工作目录',
+  'Ask the agent…': '想让 agent 做什么…',
+  'Steer the running agent…': '给运行中的 agent 补一句…',
 };
 
 export function normalizeLocale(input?: string): Locale {
