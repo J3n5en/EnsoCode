@@ -79,6 +79,11 @@ export function abortSession(sessionId: string): { ok: boolean; error?: string }
   return sendCommand({ type: 'abort', sessionId });
 }
 
+/** 请求 worker 全量投影快照，结果经 AGENT_EVENT 广播回来 */
+export function requestSnapshot(): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'snapshot' });
+}
+
 function findProvider(providerId: string): ModelProvider | null {
   const settings = readSettings();
   const state = (settings?.['enso-settings'] as { state?: { providers?: unknown } } | undefined)

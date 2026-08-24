@@ -37,6 +37,7 @@ export const IPC_CHANNELS = {
   AGENT_STEER: 'agent:steer',
   AGENT_ABORT: 'agent:abort',
   AGENT_EVENT: 'agent:event',
+  AGENT_SNAPSHOT: 'agent:snapshot',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

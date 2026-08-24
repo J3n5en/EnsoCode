@@ -4,6 +4,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
   promptSession,
+  requestSnapshot,
   setAgentEventListener,
   spawnSession,
   steerSession,
@@ -57,4 +58,6 @@ export function registerAgentHandlers(): void {
     if (!isNonEmptyString(sessionId)) return { ok: false, error: 'invalid abort' };
     return abortSession(sessionId);
   });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
 }

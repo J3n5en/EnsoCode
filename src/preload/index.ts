@@ -83,6 +83,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text),
     abort: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
+    /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
+    requestSnapshot: (): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),
     onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);

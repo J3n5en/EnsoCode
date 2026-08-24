@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
 
 export interface Conversation extends SessionProjection {
@@ -39,32 +40,62 @@ const patch = (
   conversations: { ...state.conversations, [id]: { ...state.conversations[id], ...updates } },
 });
 
-export const useSessionsStore = create<SessionsState>()((set, get) => {
-  window.electronAPI.agent.onEvent((event) => {
-    if (event.type === 'worker-exited') {
-      set((state) => {
-        const conversations = { ...state.conversations };
-        for (const id of Object.keys(conversations)) {
-          if (conversations[id].started) {
-            conversations[id] = applyAgentEvent(conversations[id], id, event) as Conversation;
-          }
+export const useSessionsStore = create<SessionsState>()(
+  persist(
+    (set, get) => {
+      window.electronAPI.agent.onEvent((event) => {
+        if (event.type === 'worker-exited') {
+          set((state) => {
+            const conversations = { ...state.conversations };
+            for (const id of Object.keys(conversations)) {
+              if (conversations[id].started) {
+                conversations[id] = applyAgentEvent(conversations[id], id, event) as Conversation;
+              }
+            }
+            return { conversations };
+          });
+          return;
         }
-        return { conversations };
+        if (event.type === 'snapshot') {
+          // 刷新后的补投影：worker 还活着的会话恢复消息与状态；
+          // 已 spawn 但 worker 不认识的（app 全量重启过）标为已结束
+          set((state) => {
+            const alive = new Map(event.sessions.map((s) => [s.sessionId, s]));
+            const conversations = { ...state.conversations };
+            for (const id of Object.keys(conversations)) {
+              const conversation = conversations[id];
+              if (!conversation.started) continue;
+              const snapshot = alive.get(id);
+              conversations[id] = snapshot
+                ? {
+                    ...conversation,
+                    status: snapshot.status,
+                    messages: snapshot.messages,
+                    lastSeq: 0,
+                    error: undefined,
+                  }
+                : {
+                    ...conversation,
+                    status: 'failed',
+                    error: 'Session ended — history not restored',
+                  };
+            }
+            return { conversations };
+          });
+          return;
+        }
+        if (!('sessionId' in event)) return;
+        const id = event.sessionId;
+        set((state) => {
+          const conversation = state.conversations[id];
+          if (!conversation) return state;
+          const next = applyAgentEvent(conversation, id, event);
+          if (next === conversation) return state;
+          return patch(state, id, next);
+        });
       });
-      return;
-    }
-    if (!('sessionId' in event)) return;
-    const id = event.sessionId;
-    set((state) => {
-      const conversation = state.conversations[id];
-      if (!conversation) return state;
-      const next = applyAgentEvent(conversation, id, event);
-      if (next === conversation) return state;
-      return patch(state, id, next);
-    });
-  });
 
-  return {
+      return {
     conversations: {},
     order: [],
     activeId: null,
@@ -154,4 +185,25 @@ export const useSessionsStore = create<SessionsState>()((set, get) => {
       }
     },
   };
-});
+    },
+    {
+      name: 'enso-conversations',
+      storage: createJSONStorage(() => localStorage),
+      // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
+      partialize: (state) => ({
+        conversations: Object.fromEntries(
+          Object.entries(state.conversations).map(([id, conversation]) => [
+            id,
+            { ...conversation, messages: [], lastSeq: 0, spawning: false, error: undefined },
+          ])
+        ),
+        order: state.order,
+        activeId: state.activeId,
+      }),
+      onRehydrateStorage: () => () => {
+        // 刷新时 worker 仍活着：要一份全量投影把消息接回来
+        void window.electronAPI.agent.requestSnapshot();
+      },
+    }
+  )
+);
