@@ -51,7 +51,7 @@ export function ChatView() {
 
   if (!conversation) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 text-center">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1 text-center">
         <p className="text-lg font-medium">EnsoCode</p>
         <p className="text-sm text-muted-foreground">{t('Select or create a conversation')}</p>
       </div>
@@ -59,9 +59,9 @@ export function ChatView() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-1.5 border-b px-3 py-1.5">
-        <span className="truncate text-xs font-medium">
+        <span className="min-w-0 truncate text-xs font-medium">
           {conversation.title || t('New conversation')}
         </span>
         <div className="flex min-w-0 items-center gap-1.5">
