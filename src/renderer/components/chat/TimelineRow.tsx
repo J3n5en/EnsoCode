@@ -1,12 +1,43 @@
 import { Brain, Check, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { Markdown } from './Markdown';
 import { ZoomableImage } from './ZoomableImage';
 
-export function TimelineRow({ item }: { item: TimelineItem }) {
+/**
+ * 按内容字段比较：buildTimeline 每次产出新 item 对象，直接 memo 无效。
+ * 长对话下这层比较挡住了未变行的 markdown 重解析与 DOM 重建。
+ */
+function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): boolean {
+  const a = prev.item;
+  const b = next.item;
+  if (a === b) return true;
+  if (a.kind !== b.kind || a.key !== b.key) return false;
+  switch (a.kind) {
+    case 'user': {
+      if (b.kind !== 'user') return false;
+      if (a.text !== b.text || a.images.length !== b.images.length) return false;
+      return a.images.every((image, i) => image === b.images[i]);
+    }
+    case 'text':
+    case 'thinking':
+      return b.kind === a.kind && a.text === b.text && a.streaming === b.streaming;
+    case 'tool':
+      return (
+        b.kind === 'tool' &&
+        a.state === b.state &&
+        a.name === b.name &&
+        a.summary === b.summary &&
+        a.output === b.output
+      );
+    case 'error':
+      return b.kind === 'error' && a.text === b.text;
+  }
+}
+
+export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -44,7 +75,7 @@ export function TimelineRow({ item }: { item: TimelineItem }) {
         </p>
       );
   }
-}
+}, itemEqual);
 
 /** deepseek-harness 的 Think 行：单行摘要，点击展开为灰色缩进文本 */
 function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) {

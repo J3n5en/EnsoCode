@@ -163,8 +163,21 @@ export class SessionSupervisor {
       sessionFile: managed.session.sessionFile,
     });
     if (resumeFile) {
-      // 恢复的会话把历史消息全量回放进投影
-      this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
+      // 恢复的会话历史一次性快照回放——逐条 upsert 会打出上千条 IPC 事件，渲染层每条都重渲染
+      managed.messages = (managed.session.messages as unknown[])
+        .map(projectMessage)
+        .filter((message): message is ProjectedMessage => message !== null);
+      this.options.emit({
+        type: 'snapshot',
+        sessions: [
+          {
+            sessionId,
+            status: managed.status,
+            messages: managed.messages,
+            commands: managed.commands,
+          },
+        ],
+      });
     }
   }
 

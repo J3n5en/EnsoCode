@@ -10,6 +10,9 @@ import { ModelPicker } from './ModelPicker';
 import { StatsLine } from './StatsLine';
 import { TimelineRow } from './TimelineRow';
 
+const INITIAL_VISIBLE = 150;
+const LOAD_MORE_STEP = 200;
+
 export function ChatView() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
@@ -48,6 +51,15 @@ export function ChatView() {
     () => buildTimeline(conversation?.messages ?? [], running),
     [conversation?.messages, running]
   );
+
+  // 长对话只渲染最近一段，避免上千条 markdown 一次性进 DOM
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 切换会话时重置渲染窗口
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE);
+  }, [conversation?.id]);
+  const hiddenCount = Math.max(0, timeline.length - visibleCount);
+  const visibleTimeline = hiddenCount > 0 ? timeline.slice(hiddenCount) : timeline;
 
   // 用户滚动维护跟随状态：距底 40px 内视为贴底
   // biome-ignore lint/correctness/useExhaustiveDependencies: 会话切换后 viewport 可能重挂载，需重绑
@@ -116,7 +128,16 @@ export function ChatView() {
               <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
             </div>
           )}
-          {timeline.map((item) => (
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((v) => v + LOAD_MORE_STEP)}
+              className="mx-auto rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {t('Show {{count}} earlier', { count: hiddenCount })}
+            </button>
+          )}
+          {visibleTimeline.map((item) => (
             <TimelineRow key={item.key} item={item} />
           ))}
           {busy && <LoadingDots />}
