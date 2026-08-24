@@ -49,10 +49,10 @@
 ## 6. 收尾
 
 ```bash
-pnpm typecheck && pnpm lint
+pnpm typecheck && pnpm lint && pnpm test
 ```
 
-两者干净，且没有调试残留：
+三者干净，且没有调试残留：
 
 ```bash
 command grep -rn "TEMP-DEBUG\|remote-debugging-port\|console.log(" src/

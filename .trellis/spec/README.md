@@ -15,10 +15,10 @@
 | 组件 | `@base-ui/react` 封装于 `src/renderer/components/ui/` | 约 50 个封装组件，不直接用 base-ui 原语 |
 | 状态 | zustand 5 + persist | 唯一 store：`src/renderer/stores/settings/` |
 | 持久化 | 主进程 `settings.json` | 无数据库、无 ORM |
-| 工具链 | Biome 2.5、pnpm 10 | `pnpm typecheck` / `pnpm lint` |
+| 工具链 | Biome 2.5、pnpm 10、Vitest 4 | `pnpm typecheck` / `pnpm lint` / `pnpm test` |
 
 **本项目没有的东西**（不要引入或假设其存在）：数据库与 ORM、事务、分页、HTTP 服务端、
-路由库、测试框架。`better-sqlite3` 与 `level` 仅用于**只读**扫描其它应用的配置，
+路由库。`better-sqlite3` 与 `level` 仅用于**只读**扫描其它应用的配置，
 见 `src/main/services/providerScan/readers.ts`。
 
 ---
@@ -36,6 +36,7 @@
 
 - [big-question/index.md](big-question/index.md) —— 本仓库真实踩过、排查代价高的坑
 - [guides/index.md](guides/index.md) —— 跨层改动、代码复用、根因分析的思考流程
+- [testing.md](testing.md) —— 测什么、怎么测、私有函数如何暴露
 
 ---
 
@@ -46,8 +47,8 @@
 3. 提交前跑：
 
 ```bash
-pnpm typecheck && pnpm lint
+pnpm typecheck && pnpm lint && pnpm test
 ```
 
-两者都必须干净。`pnpm lint` 输出里那条 `biome.json` 的 `recommended` 字段弃用提示（`Found 1 info`）
+三者都必须干净。测试约定见 [testing.md](testing.md)。`pnpm lint` 输出里那条 `biome.json` 的 `recommended` 字段弃用提示（`Found 1 info`）
 是配置本身的历史遗留，与代码无关，不必处理。

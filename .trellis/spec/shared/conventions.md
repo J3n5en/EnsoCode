@@ -45,7 +45,7 @@ pnpm lint         # 只检查
 
 - 提交信息用**中文**，前缀 `feat:` / `fix:` / `refactor:` / `chore:`。
 - **小步提交**：一个能独立描述的改动就提交一次，不要把多个特性攒成一个大提交。
-- 提交前 `pnpm typecheck && pnpm lint` 必须干净。
+- 提交前 `pnpm typecheck && pnpm lint && pnpm test` 必须干净。
 - 提交前确认没有调试残留：
 
 ```bash

@@ -42,6 +42,7 @@
 
 ```bash
 pnpm typecheck && pnpm lint     # 静态
+pnpm test                       # 已有用例
 ```
 
 行为类问题用真机 CDP 验证：读计算样式、读 IPC 返回值、读 `settings.json`、截图。
