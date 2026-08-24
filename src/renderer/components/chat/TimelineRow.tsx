@@ -4,6 +4,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { Markdown } from './Markdown';
+import { ZoomableImage } from './ZoomableImage';
 
 export function TimelineRow({ item }: { item: TimelineItem }) {
   switch (item.kind) {
@@ -11,12 +12,11 @@ export function TimelineRow({ item }: { item: TimelineItem }) {
       return (
         <div className="flex flex-col items-end gap-1.5">
           {item.images.map((image, index) => (
-            <img
+            <ZoomableImage
               // biome-ignore lint/suspicious/noArrayIndexKey: 图片无稳定 id，消息整体快照替换
               key={index}
               src={`data:${image.mimeType};base64,${image.data}`}
-              alt=""
-              className="max-h-48 max-w-[60%] rounded-lg border object-contain"
+              className="max-h-48 max-w-full rounded-lg border object-contain"
             />
           ))}
           {item.text && (

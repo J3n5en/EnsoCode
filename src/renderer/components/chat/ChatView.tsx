@@ -36,6 +36,11 @@ export function ChatView() {
   const project = projects.find((p) => p.id === conversation?.projectId);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** 跟随模式：贴底时内容更新自动滚底；用户上滚脱离后停止，滚回底部恢复（ref-chat-b 语义） */
+  const followRef = useRef(true);
+
+  const viewportOf = () =>
+    scrollRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
 
   const running = conversation?.status === 'running';
   const busy = running || conversation?.spawning === true;
@@ -44,9 +49,31 @@ export function ChatView() {
     [conversation?.messages, running]
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 时间线变化时滚到底部
+  // 用户滚动维护跟随状态：距底 40px 内视为贴底
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 会话切换后 viewport 可能重挂载，需重绑
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    const viewport = viewportOf();
+    if (!viewport) return;
+    const onScroll = () => {
+      followRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 40;
+    };
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, [conversation?.id]);
+
+  // 切换会话时回到底部并恢复跟随
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在会话切换时触发
+  useEffect(() => {
+    followRef.current = true;
+    const viewport = viewportOf();
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }, [conversation?.id]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 时间线变化时若在跟随则滚到底部
+  useEffect(() => {
+    if (!followRef.current) return;
+    const viewport = viewportOf();
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [timeline]);
 
   if (!conversation) {
@@ -112,6 +139,8 @@ export function ChatView() {
             }
             onSend={(content, images) => {
               if (!provider || !effectiveModelId || !project) return;
+              // 发送后强制回到跟随（ref-chat-b 的 post-submit scroll）
+              followRef.current = true;
               void useSessionsStore.getState().send(
                 content,
                 {
