@@ -82,25 +82,28 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
 }
 
 export function extractModelIds(api: ModelApiKind, data: Record<string, unknown>): string[] {
-  let list: unknown[] = [];
+  // 条目可能是 null 或非对象，先过滤再取字段，避免响应结构异常时抛错
+  const objects = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value)
+      ? value.filter(
+          (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
+        )
+      : [];
+
   if (api === 'ollama') {
-    list = Array.isArray(data.models) ? data.models : [];
-    return list
-      .map(
-        (item) =>
-          (item as { name?: string; model?: string }).model ?? (item as { name?: string }).name
-      )
+    return objects(data.models)
+      .map((item) => item.model ?? item.name)
       .filter((id): id is string => typeof id === 'string');
   }
   if (api === 'google-generative-ai') {
-    list = Array.isArray(data.models) ? data.models : [];
-    return list
-      .map((item) => (item as { name?: string }).name?.replace(/^models\//, ''))
+    return objects(data.models)
+      .map((item) =>
+        typeof item.name === 'string' ? item.name.replace(/^models\//, '') : undefined
+      )
       .filter((id): id is string => typeof id === 'string');
   }
-  list = Array.isArray(data.data) ? data.data : [];
-  return list
-    .map((item) => (item as { id?: string }).id)
+  return objects(data.data)
+    .map((item) => item.id)
     .filter((id): id is string => typeof id === 'string');
 }
 
