@@ -21,3 +21,6 @@ build/cer.p12
 .worktrees
 .claude/
 .serena/
+
+# 设计文档不入库
+docs/plans/
