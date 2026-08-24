@@ -1,6 +1,7 @@
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
+import { startAgentWorker } from './services/agentHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -24,6 +25,7 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
+    startAgentWorker();
     createMainWindow();
 
     app.on('activate', () => {
