@@ -212,6 +212,24 @@ export const useSessionsStore = create<SessionsState>()(
           const id = get().activeId;
           if (!id) return 'no conversation';
           const conversation = get().conversations[id];
+          // 乐观回显：立即上屏，不等 spawn/prompt 往返。worker 会为这条 user 消息
+          // 发同 index 的 message-upsert（其 messages.length 与本地一致），自然覆盖对齐；
+          // 万一错位由 agent_end 的全量 reconcile 兜底。
+          set((state) =>
+            patch(state, id, {
+              messages: [
+                ...state.conversations[id].messages,
+                {
+                  role: 'user',
+                  content: [
+                    ...(text ? [{ type: 'text' as const, text }] : []),
+                    ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+                  ],
+                  timestamp: Date.now(),
+                },
+              ],
+            })
+          );
           if (!conversation.started) {
             set((state) =>
               patch(state, id, {
