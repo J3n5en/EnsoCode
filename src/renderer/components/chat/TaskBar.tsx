@@ -140,7 +140,15 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
               />
               <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {agent.agentType && (
+                  <span className="mr-1 rounded border border-border/60 bg-muted px-1 py-px text-[10px]">
+                    {agent.agentType}
+                  </span>
+                )}
                 {agent.description}
+                {agent.modelId && (
+                  <span className="text-muted-foreground/60"> · {agent.modelId}</span>
+                )}
                 {agent.status === 'running' && agent.currentActivity && (
                   <span className="text-muted-foreground/60"> · {agent.currentActivity}</span>
                 )}

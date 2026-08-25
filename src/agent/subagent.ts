@@ -113,6 +113,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         steps: 0,
         currentActivity: 'starting…',
         modelId: agentType?.model?.modelId ?? deps.modelId,
+        ...(agentType ? { agentType: agentType.name } : {}),
         startedAt: Date.now(),
       };
       deps.emitUpdate({ ...info });

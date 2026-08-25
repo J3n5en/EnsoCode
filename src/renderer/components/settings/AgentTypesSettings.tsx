@@ -147,7 +147,7 @@ function AgentTypeEditDialog({
         <DialogHeader>
           <DialogTitle>{entry ? t('Edit agent type') : t('New agent type')}</DialogTitle>
         </DialogHeader>
-        <DialogPanel className="max-h-[60vh] space-y-4">
+        <DialogPanel className="max-h-[60vh] space-y-4 pb-4">
           <Field>
             <FieldLabel>{t('Name (slug)')}</FieldLabel>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="scout" />

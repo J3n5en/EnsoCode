@@ -68,6 +68,8 @@ export interface SubagentInfo {
   resultText?: string;
   /** 使用的模型 */
   modelId?: string;
+  /** 命中的 agent 类型（缺省 general） */
+  agentType?: string;
   /** 累计输出 token */
   outputTokens?: number;
   startedAt: number;
