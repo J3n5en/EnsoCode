@@ -11,6 +11,10 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 }
 
+// 打包版 productName=EnsoCode 会把 userData 指到新目录，与 dev（enso-code）分家；
+// 统一到 enso-code，保证打包版接上既有会话与设置
+app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
