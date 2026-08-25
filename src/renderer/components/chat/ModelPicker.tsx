@@ -74,7 +74,7 @@ export function ModelPicker({
         )}
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
-      <PopoverPopup side="top" align="start" className="w-80 p-0">
+      <PopoverPopup side="top" align="start" className="w-80 [&_[data-slot=popover-viewport]]:p-0">
         <div className="border-b p-2">
           <input
             value={keyword}

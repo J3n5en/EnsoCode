@@ -31,7 +31,7 @@ export function PresetPicker({ presetId, onSelect }: PresetPickerProps) {
         <span className="truncate">{current.name}</span>
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
-      <PopoverPopup side="top" align="start" className="w-56 p-1">
+      <PopoverPopup side="top" align="start" className="w-52 [&_[data-slot=popover-viewport]]:p-1">
         {options.map((option) => {
           const selected = option.id === current.id;
           return (

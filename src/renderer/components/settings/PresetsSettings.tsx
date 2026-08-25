@@ -1,5 +1,5 @@
-import type { Preset } from '@shared/types';
-import { Layers, Pencil, Plus, Trash2 } from 'lucide-react';
+import type { InstructionEntry, Preset } from '@shared/types';
+import { Eye, Layers, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -126,55 +127,62 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
 
-          <Section title={t('Skills')}>
-            {skills.length === 0 && <Empty text={t('No skills yet')} />}
-            {skills.map((skill) => (
-              <label key={skill.id} className="flex cursor-pointer items-center gap-2 py-1">
-                <Checkbox
-                  checked={skillIds.includes(skill.id)}
-                  onCheckedChange={() => setSkillIds((list) => toggle(list, skill.id))}
-                />
-                <span className="truncate text-sm">{skill.name}</span>
-              </label>
-            ))}
-          </Section>
-
-          <Section title={t('MCP Servers')}>
-            {mcpServers.length === 0 && <Empty text={t('No MCP servers yet')} />}
-            {mcpServers.map((server) => (
-              <label key={server.id} className="flex cursor-pointer items-center gap-2 py-1">
-                <Checkbox
-                  checked={mcpServerIds.includes(server.id)}
-                  onCheckedChange={() => setMcpServerIds((list) => toggle(list, server.id))}
-                />
-                <span className="truncate text-sm">{server.name}</span>
-              </label>
-            ))}
-          </Section>
-
-          <Section title={t('Instruction Files')}>
-            <label className="flex cursor-pointer items-center gap-2 py-1">
-              <Checkbox
-                checked={instructionId === undefined}
-                onCheckedChange={() => setInstructionId(undefined)}
+          <PickList
+            title={t('Skills')}
+            emptyText={t('No skills yet')}
+            items={skills}
+            getName={(s) => s.name}
+            isChecked={(s) => skillIds.includes(s.id)}
+            onToggle={(s) => setSkillIds((list) => toggle(list, s.id))}
+            renderDetail={(s) => (
+              <DetailRows
+                rows={[
+                  [t('Source'), s.source],
+                  [t('Path'), s.path],
+                  [t('Description'), s.description],
+                ]}
               />
-              <span className="text-sm text-muted-foreground">{t('None')}</span>
-            </label>
-            {instructions.map((instruction) => (
-              <label key={instruction.id} className="flex cursor-pointer items-center gap-2 py-1">
+            )}
+          />
+
+          <PickList
+            title={t('MCP Servers')}
+            emptyText={t('No MCP servers yet')}
+            items={mcpServers}
+            getName={(m) => m.name}
+            isChecked={(m) => mcpServerIds.includes(m.id)}
+            onToggle={(m) => setMcpServerIds((list) => toggle(list, m.id))}
+            renderDetail={(m) => (
+              <DetailRows
+                rows={[
+                  [t('Source'), m.source],
+                  ['Transport', m.transport],
+                  ['Command', [m.command, ...(m.args ?? [])].filter(Boolean).join(' ')],
+                  ['URL', m.url],
+                ]}
+              />
+            )}
+          />
+
+          <PickList
+            title={t('Instruction Files')}
+            emptyText={t('No instruction files yet')}
+            items={instructions}
+            getName={(i) => i.name}
+            getMeta={(i) => i.source}
+            isChecked={(i) => instructionId === i.id}
+            onToggle={(i) => setInstructionId((cur) => (cur === i.id ? undefined : i.id))}
+            leading={
+              <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5">
                 <Checkbox
-                  checked={instructionId === instruction.id}
-                  onCheckedChange={(checked) =>
-                    setInstructionId(checked ? instruction.id : undefined)
-                  }
+                  checked={instructionId === undefined}
+                  onCheckedChange={() => setInstructionId(undefined)}
                 />
-                <span className="truncate text-sm">
-                  {instruction.name}
-                  <span className="ml-1.5 text-xs text-muted-foreground">{instruction.source}</span>
-                </span>
+                <span className="text-sm text-muted-foreground">{t('None')}</span>
               </label>
-            ))}
-          </Section>
+            }
+            renderDetail={(i) => <InstructionDetail instruction={i} />}
+          />
         </DialogPanel>
 
         <DialogFooter>
@@ -188,13 +196,135 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** 带搜索的可勾选列表：每项 checkbox + 名字 + 眼睛（detail popover） */
+function PickList<T extends { id: string }>({
+  title,
+  emptyText,
+  items,
+  getName,
+  getMeta,
+  isChecked,
+  onToggle,
+  renderDetail,
+  leading,
+}: {
+  title: string;
+  emptyText: string;
+  items: T[];
+  getName: (item: T) => string;
+  getMeta?: (item: T) => string;
+  isChecked: (item: T) => boolean;
+  onToggle: (item: T) => void;
+  renderDetail: (item: T) => React.ReactNode;
+  leading?: React.ReactNode;
+}) {
+  const { t } = useI18n();
+  const [query, setQuery] = React.useState('');
+  const filtered = query
+    ? items.filter((item) => getName(item).toLowerCase().includes(query.toLowerCase()))
+    : items;
+
   return (
     <div>
       <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         {title}
       </p>
-      <div className="max-h-40 overflow-y-auto rounded-md border px-3 py-1.5">{children}</div>
+      <div className="rounded-md border">
+        {items.length > 0 && (
+          <div className="border-b p-1.5">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('Search')}
+              className="h-7 text-xs"
+            />
+          </div>
+        )}
+        <div className="max-h-40 overflow-y-auto p-1.5">
+          {leading}
+          {items.length === 0 && <Empty text={emptyText} />}
+          {items.length > 0 && filtered.length === 0 && <Empty text={t('No results')} />}
+          {filtered.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-muted"
+            >
+              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                <Checkbox checked={isChecked(item)} onCheckedChange={() => onToggle(item)} />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {getName(item)}
+                  {getMeta && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">{getMeta(item)}</span>
+                  )}
+                </span>
+              </label>
+              <DetailPopover>{renderDetail(item)}</DetailPopover>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailPopover({ children }: { children: React.ReactNode }) {
+  return (
+    <Popover>
+      <PopoverTrigger className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+        <Eye className="h-3.5 w-3.5" />
+      </PopoverTrigger>
+      <PopoverPopup side="left" align="start" className="w-80 p-3">
+        {children}
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+function DetailRows({ rows }: { rows: [string, string | undefined][] }) {
+  return (
+    <div className="space-y-2 text-xs">
+      {rows
+        .filter(([, value]) => value)
+        .map(([label, value]) => (
+          <div key={label}>
+            <p className="font-semibold text-muted-foreground">{label}</p>
+            <p className="mt-0.5 break-words whitespace-pre-wrap">{value}</p>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+/** 指令文件 detail：元信息 + 内容预览（异步读取） */
+function InstructionDetail({ instruction }: { instruction: InstructionEntry }) {
+  const { t } = useI18n();
+  const [content, setContent] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    window.electronAPI.instructions
+      .read(instruction.id, instruction.local, instruction.sourcePath)
+      .then((r) => {
+        if (alive) setContent(r.ok ? r.content : (r.error ?? ''));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [instruction]);
+
+  return (
+    <div className="space-y-2 text-xs">
+      <DetailRows
+        rows={[
+          [t('Source'), instruction.source],
+          [t('Path'), instruction.sourcePath ?? (instruction.local ? t('Local copy') : '')],
+        ]}
+      />
+      <div>
+        <p className="font-semibold text-muted-foreground">{t('Content')}</p>
+        <pre className="mt-0.5 max-h-60 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+          {content ?? `${t('Loading...')}`}
+        </pre>
+      </div>
     </div>
   );
 }
