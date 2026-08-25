@@ -147,7 +147,7 @@ function AgentTypeEditDialog({
         <DialogHeader>
           <DialogTitle>{entry ? t('Edit agent type') : t('New agent type')}</DialogTitle>
         </DialogHeader>
-        <DialogPanel className="max-h-[60vh] space-y-4 pb-4">
+        <DialogPanel className="max-h-[60vh] space-y-4">
           <Field>
             <FieldLabel>{t('Name (slug)')}</FieldLabel>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="scout" />
@@ -219,6 +219,7 @@ function AgentTypeEditDialog({
               <option value="readonly">{t('Read-only (read/grep/find/ls)')}</option>
             </select>
           </Field>
+          <div className="h-2" />
         </DialogPanel>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
