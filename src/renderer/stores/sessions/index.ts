@@ -412,8 +412,10 @@ export const useSessionsStore = create<SessionsState>()(
               spawning: false,
               error: undefined,
               runStartedAt: undefined,
-              // 旧持久化数据可能缺该字段，rehydrate 时兜底为空数组
+              // 运行态字段不持久化：重启后由 worker snapshot 重建，避免 rehydrate 先摆出陈旧状态
               pendingApprovals: [],
+              backgroundTasks: [],
+              subagents: [],
             },
           ])
         ),
