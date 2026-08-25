@@ -1,8 +1,9 @@
 import { Brain, Check, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { TimelineItem } from '@/stores/sessions/timeline';
+import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { ZoomableImage } from './ZoomableImage';
 
@@ -30,7 +31,8 @@ function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): 
         a.state === b.state &&
         a.name === b.name &&
         a.summary === b.summary &&
-        a.output === b.output
+        a.output === b.output &&
+        a.edits === b.edits
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
@@ -101,12 +103,32 @@ function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) 
   );
 }
 
-/** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；整行点击展开输出 */
+/** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff，其余展开为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
-  const [expanded, setExpanded] = useState(false);
-  const expandable = Boolean(item.output);
+  const hasDiff = Boolean(item.edits && item.edits.length > 0);
+  const expandable = hasDiff || Boolean(item.output);
+  // edit 的 diff 默认展开（「直接看到」），其余保持收起
+  const [expanded, setExpanded] = useState(hasDiff);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // diff 滚出视口后自动折叠为单行；再次滚回保持折叠，需要时点开
+  useEffect(() => {
+    if (!hasDiff) return;
+    const el = ref.current;
+    if (!el) return;
+    const root = el.closest('[data-slot="scroll-area-viewport"]');
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) setExpanded(false);
+      },
+      { root, threshold: 0 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasDiff]);
+
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30">
+    <div ref={ref} className="rounded-lg border border-border/60 bg-muted/30">
       <button
         type="button"
         disabled={!expandable}
@@ -140,7 +162,12 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           />
         )}
       </button>
-      {expanded && item.output && (
+      {expanded && hasDiff && item.edits && (
+        <div className="max-h-96 overflow-auto">
+          <EditDiff path={item.summary} blocks={item.edits} />
+        </div>
+      )}
+      {expanded && !hasDiff && item.output && (
         <pre className="max-h-64 overflow-auto border-t border-border/60 px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
           {item.output}
         </pre>

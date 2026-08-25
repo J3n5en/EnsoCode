@@ -1,5 +1,11 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 
+/** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
+export interface EditBlock {
+  oldText: string;
+  newText: string;
+}
+
 export type TimelineItem =
   | { kind: 'user'; key: string; text: string; images: { data: string; mimeType: string }[] }
   | { kind: 'text'; key: string; text: string; streaming: boolean }
@@ -11,6 +17,8 @@ export type TimelineItem =
       summary: string;
       output: string | null;
       state: 'running' | 'ok' | 'error';
+      /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
+      edits: EditBlock[] | null;
     }
   | { kind: 'error'; key: string; text: string };
 
@@ -26,6 +34,21 @@ function summarizeArgs(args: unknown): string {
   }
   const json = JSON.stringify(record);
   return json === '{}' ? '' : json.slice(0, 80);
+}
+
+/** edit 工具参数里取出替换块（保持同一数组引用，供 memo 做引用比较） */
+function extractEdits(name: string, args: unknown): EditBlock[] | null {
+  if (name !== 'edit' || !args || typeof args !== 'object') return null;
+  const edits = (args as Record<string, unknown>).edits;
+  if (!Array.isArray(edits) || edits.length === 0) return null;
+  const ok = edits.every(
+    (e) =>
+      e &&
+      typeof e === 'object' &&
+      typeof (e as EditBlock).oldText === 'string' &&
+      typeof (e as EditBlock).newText === 'string'
+  );
+  return ok ? (edits as EditBlock[]) : null;
 }
 
 const partText = (message: ProjectedMessage): string =>
@@ -82,6 +105,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             summary: summarizeArgs(part.arguments),
             output: result ? result.output : null,
             state: result ? (result.isError ? 'error' : 'ok') : running ? 'running' : 'ok',
+            edits: extractEdits(part.name, part.arguments),
           });
           return;
         }
