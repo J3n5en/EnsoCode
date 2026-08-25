@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { Composer } from './Composer';
 import { ModelPicker } from './ModelPicker';
 import { NavRail } from './NavRail';
+import { PresetPicker } from './PresetPicker';
 import { StatsLine } from './StatsLine';
 import { TimelineRow } from './TimelineRow';
 
@@ -248,23 +249,31 @@ export function ChatView() {
             busy={busy}
             focusKey={conversation.id}
             toolbar={
-              <ModelPicker
-                providers={enabledProviders}
-                providerId={provider?.id ?? ''}
-                modelId={effectiveModelId}
-                reasoningEnabled={conversation.reasoningEnabled ?? false}
-                thinkingLevel={conversation.thinkingLevel ?? 'medium'}
-                onSelect={(pid, mid) => {
-                  setProviderId(pid);
-                  setModelId(mid);
-                }}
-                onReasoningChange={(enabled) =>
-                  useSessionsStore.getState().setReasoning(conversation.id, enabled)
-                }
-                onThinkingChange={(level) =>
-                  useSessionsStore.getState().setThinking(conversation.id, level)
-                }
-              />
+              <>
+                <PresetPicker
+                  presetId={conversation.presetId ?? 'default'}
+                  onSelect={(presetId) =>
+                    useSessionsStore.getState().setPreset(conversation.id, presetId)
+                  }
+                />
+                <ModelPicker
+                  providers={enabledProviders}
+                  providerId={provider?.id ?? ''}
+                  modelId={effectiveModelId}
+                  reasoningEnabled={conversation.reasoningEnabled ?? false}
+                  thinkingLevel={conversation.thinkingLevel ?? 'medium'}
+                  onSelect={(pid, mid) => {
+                    setProviderId(pid);
+                    setModelId(mid);
+                  }}
+                  onReasoningChange={(enabled) =>
+                    useSessionsStore.getState().setReasoning(conversation.id, enabled)
+                  }
+                  onThinkingChange={(level) =>
+                    useSessionsStore.getState().setThinking(conversation.id, level)
+                  }
+                />
+              </>
             }
             onSend={(content, images) => {
               if (!provider || !effectiveModelId || !project) return;

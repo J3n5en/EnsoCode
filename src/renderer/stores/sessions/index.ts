@@ -22,6 +22,8 @@ export interface Conversation extends SessionProjection {
   reasoningEnabled?: boolean;
   /** 推理档位（reasoning 开启时有效） */
   thinkingLevel?: ThinkingLevel;
+  /** 注入组合预设（per 会话记忆）；缺省 = 默认预设。下次 spawn 生效 */
+  presetId?: string;
 }
 
 interface SendTarget {
@@ -51,6 +53,8 @@ interface SessionsState {
   setReasoning(id: string, enabled: boolean): void;
   /** 设置推理档位；已 spawn 的会话即时生效 */
   setThinking(id: string, level: ThinkingLevel): void;
+  /** 设置注入预设；下次 spawn 生效 */
+  setPreset(id: string, presetId: string): void;
   abort(): Promise<void>;
 }
 
@@ -222,6 +226,7 @@ export const useSessionsStore = create<SessionsState>()(
               reasoningEnabled: conversation.reasoningEnabled,
               thinkingLevel: conversation.thinkingLevel,
               loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
+              presetId: conversation.presetId,
             });
             if (!result.ok) {
               set((state) =>
@@ -272,6 +277,7 @@ export const useSessionsStore = create<SessionsState>()(
             reasoningEnabled: conversation.reasoningEnabled,
             thinkingLevel: conversation.thinkingLevel,
             loadLocalSkills: settings.loadLocalSkills,
+            presetId: conversation.presetId,
           });
           set((state) =>
             result.ok
@@ -328,6 +334,11 @@ export const useSessionsStore = create<SessionsState>()(
           if (conversation.started && conversation.reasoningEnabled) {
             void window.electronAPI.agent.setThinking(id, level);
           }
+        },
+
+        setPreset(id, presetId) {
+          if (!get().conversations[id]) return;
+          set((state) => patch(state, id, { presetId }));
         },
 
         async abort() {
