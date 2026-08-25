@@ -111,6 +111,8 @@ export interface AgentSpawnRequest {
   reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
   loadLocalSkills?: boolean;
+  /** 注入组合预设；缺省/default 走各条目 enabled 过滤（现行为） */
+  presetId?: string;
 }
 
 export interface AgentActionResult {

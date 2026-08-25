@@ -10,6 +10,7 @@ import {
   type SpawnModelConfig,
   type ThinkingLevel,
 } from '@shared/types/agent';
+import { DEFAULT_PRESET_ID, type Preset } from '@shared/types/assets';
 import type { ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { readSettings } from '../ipc/settings';
@@ -68,8 +69,10 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
   }
-  // 启用的指令文件（单主源）落到 pi agentDir 的 AGENTS.md，pi 会话自动读取
-  syncGlobalInstruction();
+  // 启用的指令文件（单主源）落到 pi agentDir 的 AGENTS.md，pi 会话自动读取；
+  // 自定义预设则显式指定注入哪份（或不注入）
+  const preset = resolvePreset(request.presetId);
+  syncGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
   const model: SpawnModelConfig = {
     api: provider.api,
     baseUrl: provider.baseUrl,
@@ -86,35 +89,49 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(() => {
-      const skillPaths = enabledSkillPaths();
+      const skillPaths = enabledSkillPaths(preset);
       return skillPaths.length > 0 ? { skillPaths } : {};
     })(),
     ...(() => {
-      const mcpServers = enabledMcpServers();
+      const mcpServers = enabledMcpServers(preset);
       return mcpServers.length > 0 ? { mcpServers } : {};
     })(),
   });
 }
 
-/** 设置里启用的 skill 目录（引用登记，注入给 pi） */
-function enabledSkillPaths(): string[] {
+/** 解析自定义预设；缺省 / default / 找不到（已删）都返回 undefined = 走 enabled 过滤 */
+function resolvePreset(presetId?: string): Preset | undefined {
+  if (!presetId || presetId === DEFAULT_PRESET_ID) return undefined;
+  const state = readSettingsState();
+  const presets = Array.isArray(state?.presets) ? (state.presets as Preset[]) : [];
+  return presets.find((preset) => preset?.id === presetId);
+}
+
+/** 注入的 skill 目录：默认走 enabled 过滤；自定义预设按 id 集合（忽略条目 enabled） */
+function enabledSkillPaths(preset?: Preset): string[] {
   const state = readSettingsState();
   const skills = Array.isArray(state?.skills)
-    ? (state.skills as { path?: string; enabled?: boolean }[])
+    ? (state.skills as { id?: string; path?: string; enabled?: boolean }[])
     : [];
-  return skills
-    .filter((skill) => skill.enabled !== false && typeof skill.path === 'string' && skill.path)
+  const picked = preset
+    ? skills.filter((skill) => skill.id && preset.skillIds.includes(skill.id))
+    : skills.filter((skill) => skill.enabled !== false);
+  return picked
+    .filter((skill) => typeof skill.path === 'string' && skill.path)
     .map((skill) => skill.path as string);
 }
 
-/** 设置里启用的 MCP server（剥掉 id/source，只带运行所需字段） */
-function enabledMcpServers(): McpServerSpawnConfig[] {
+/** 注入的 MCP server：默认走 enabled 过滤；自定义预设按 id 集合（忽略条目 enabled） */
+function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
   const state = readSettingsState();
   const servers = Array.isArray(state?.mcpServers)
-    ? (state.mcpServers as (McpServerSpawnConfig & { enabled?: boolean })[])
+    ? (state.mcpServers as (McpServerSpawnConfig & { id?: string; enabled?: boolean })[])
     : [];
-  return servers
-    .filter((server) => server.enabled !== false && server.name && server.transport)
+  const picked = preset
+    ? servers.filter((server) => server.id && preset.mcpServerIds.includes(server.id))
+    : servers.filter((server) => server.enabled !== false);
+  return picked
+    .filter((server) => server.name && server.transport)
     .map(({ name, transport, command, args, env, url }) => ({
       name,
       transport,

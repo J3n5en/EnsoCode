@@ -28,6 +28,20 @@ export interface McpServerEntry {
   enabled: boolean;
 }
 
+/** 注入组合预设：会话级选用的 skill/MCP/指令文件集合。
+ *  默认预设不入库（DEFAULT_PRESET_ID 运行时合成，语义 = 跟随各条目的 enabled 开关）；
+ *  自定义预设按 id 显式集合过滤，忽略条目自身 enabled */
+export interface Preset {
+  id: string;
+  name: string;
+  skillIds: string[];
+  mcpServerIds: string[];
+  /** 注入的指令文件（单主源）；不选则不注入 */
+  instructionId?: string;
+}
+
+export const DEFAULT_PRESET_ID = 'default';
+
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等
  *  默认指向源应用的原文件（跟随其更新）；一旦在应用内编辑，
  *  先复制为本地副本再改，不回写源文件 */

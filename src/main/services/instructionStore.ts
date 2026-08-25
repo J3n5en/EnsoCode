@@ -100,28 +100,37 @@ function globalContextFile(): string {
 }
 
 /**
- * 把启用的指令条目（单主源，最多一条）落到 pi agentDir 的 AGENTS.md；
- * 无启用条目或读取失败则移除该文件。spawn 前调用，保证会话拿到最新内容。
+ * 把指令内容落到 pi agentDir 的 AGENTS.md（pi 每次会话自动读取）。
+ * 不传 explicit → 取启用条目（单主源，现行为）；
+ * 传 explicit → 自定义预设：注入指定 instructionId（无视 enabled），未指定则不注入。
+ * 无可注入内容或读取失败则移除该文件。spawn 前调用，保证会话拿到最新内容。
  */
-export function syncGlobalInstruction(): void {
+export function syncGlobalInstruction(explicit?: { instructionId?: string }): void {
   const settings = readSettings();
   const state = (settings?.['enso-settings'] as { state?: { instructions?: unknown } } | undefined)
     ?.state;
-  const instructions = Array.isArray(state?.instructions) ? state.instructions : [];
-  const enabled = instructions.find((item) => (item as { enabled?: boolean }).enabled === true) as
-    | { id: string; local: boolean; sourcePath?: string }
-    | undefined;
+  const instructions = Array.isArray(state?.instructions)
+    ? (state.instructions as {
+        id: string;
+        local: boolean;
+        sourcePath?: string;
+        enabled?: boolean;
+      }[])
+    : [];
+  const target = explicit
+    ? explicit.instructionId
+      ? instructions.find((item) => item.id === explicit.instructionId)
+      : undefined
+    : instructions.find((item) => item.enabled === true);
 
-  const target = globalContextFile();
-  const result = enabled
-    ? readInstruction(enabled.id, enabled.local, enabled.sourcePath)
-    : undefined;
+  const file = globalContextFile();
+  const result = target ? readInstruction(target.id, target.local, target.sourcePath) : undefined;
   try {
     if (result?.ok && result.content.trim()) {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, result.content, 'utf8');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, result.content, 'utf8');
     } else {
-      fs.rmSync(target, { force: true });
+      fs.rmSync(file, { force: true });
     }
   } catch (error) {
     console.error('syncGlobalInstruction failed:', error);
