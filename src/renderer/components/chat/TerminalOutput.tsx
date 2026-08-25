@@ -5,23 +5,19 @@ import { useSettingsStore } from '@/stores/settings';
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 const stripAnsi = (text: string): string => text.replace(ANSI_RE, '');
 
-/** bash 工具输出：终端配色 + 终端字体（与设置里外观预览同源） */
+/** bash 工具输出：沿用终端配色与等宽字体族，但字号/字重跟随聊天流（text-xs），不套终端那套大字号 */
 export function TerminalOutput({ command, output }: { command: string; output: string }) {
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
-  const fontSize = useSettingsStore((s) => s.terminalFontSize);
-  const fontWeight = useSettingsStore((s) => s.terminalFontWeight);
   const theme = getXtermTheme(terminalTheme) ?? defaultDarkTheme;
 
   return (
     <div
-      className="px-3 py-2"
+      className="px-3 py-2 text-xs leading-relaxed"
       style={{
         backgroundColor: theme.background,
         color: theme.foreground,
         fontFamily,
-        fontSize,
-        fontWeight,
       }}
     >
       <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
