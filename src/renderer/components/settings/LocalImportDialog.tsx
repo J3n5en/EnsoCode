@@ -18,7 +18,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 
-type Phase = 'scanning' | 'select' | 'error' | 'done';
+type Phase = 'scanning' | 'select' | 'error' | 'configure';
 
 interface LocalImportDialogProps {
   open: boolean;
@@ -32,7 +32,7 @@ export function LocalImportDialog({ open, onOpenChange }: LocalImportDialogProps
   const [phase, setPhase] = React.useState<Phase>('scanning');
   const [scan, setScan] = React.useState<LocalProviderScanResult | null>(null);
   const [checked, setChecked] = React.useState<Set<string>>(new Set());
-  const [importedCount, setImportedCount] = React.useState(0);
+  const [importedIds, setImportedIds] = React.useState<string[]>([]);
 
   const runScan = React.useCallback(async () => {
     setPhase('scanning');
@@ -77,26 +77,13 @@ export function LocalImportDialog({ open, onOpenChange }: LocalImportDialogProps
       id: crypto.randomUUID(),
       enabled: true,
     }));
-    const added = addProviders(toAdd);
-    setImportedCount(added);
-    setPhase('done');
-
-    // 导入的 provider 常无模型列表（中转配置只存默认模型名）——对真正入库且无模型的后台拉取补全
+    addProviders(toAdd);
+    // 只对真正入库（未被去重）的进入配置页拉取模型
     const store = useSettingsStore.getState();
-    for (const provider of toAdd) {
-      if (provider.models.length > 0) continue;
-      if (!store.providers.some((p) => p.id === provider.id)) continue; // 被去重的跳过
-      void window.electronAPI.providers
-        .listModels({ api: provider.api, apiKey: provider.apiKey, baseUrl: provider.baseUrl })
-        .then((result) => {
-          if (result.ok && result.models.length > 0) {
-            useSettingsStore.getState().updateProvider(provider.id, {
-              models: result.models.map((id) => ({ id, enabled: true })),
-            });
-          }
-        })
-        .catch(() => {});
-    }
+    setImportedIds(
+      toAdd.filter((p) => store.providers.some((x) => x.id === p.id)).map((p) => p.id)
+    );
+    setPhase('configure');
   };
 
   const foundApps = scan?.apps.filter((app) => app.status !== 'not-found') ?? [];
@@ -230,19 +217,109 @@ export function LocalImportDialog({ open, onOpenChange }: LocalImportDialogProps
           </>
         )}
 
-        {phase === 'done' && (
-          <DialogPanel>
-            <div className="flex flex-col items-center gap-3 py-12">
-              <p className="text-sm font-medium">
-                {t('Imported {{count}} providers', { count: importedCount })}
-              </p>
+        {phase === 'configure' && (
+          <>
+            <DialogPanel className="max-h-[50vh] space-y-3">
+              {importedIds.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  {t('No new providers imported')}
+                </p>
+              ) : (
+                <>
+                  <p className="px-1 text-xs text-muted-foreground">
+                    {t('Fetch models for each provider, then enable the ones you want.')}
+                  </p>
+                  {importedIds.map((id) => (
+                    <ProviderModelSection key={id} providerId={id} />
+                  ))}
+                </>
+              )}
+            </DialogPanel>
+            <DialogFooter>
               <Button size="sm" onClick={() => onOpenChange(false)}>
                 {t('Done')}
               </Button>
-            </div>
-          </DialogPanel>
+            </DialogFooter>
+          </>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 单个已导入 provider 的模型配置：拉取 + 逐个启用/禁用 */
+function ProviderModelSection({ providerId }: { providerId: string }) {
+  const { t } = useI18n();
+  const provider = useSettingsStore((s) => s.providers.find((p) => p.id === providerId));
+  const updateProvider = useSettingsStore((s) => s.updateProvider);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  if (!provider) return null;
+
+  const fetchModels = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await window.electronAPI.providers.listModels({
+      api: provider.api,
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+    });
+    setBusy(false);
+    if (result.ok) {
+      const known = new Set(provider.models.map((m) => m.id));
+      const fresh = result.models
+        .filter((id) => !known.has(id))
+        .map((id) => ({ id, enabled: true }));
+      updateProvider(providerId, { models: [...provider.models, ...fresh] });
+    } else {
+      setError(result.error ?? t('Fetch failed'));
+    }
+  };
+
+  const toggleModel = (modelId: string) =>
+    updateProvider(providerId, {
+      models: provider.models.map((m) =>
+        m.id === modelId ? { ...m, enabled: m.enabled === false } : m
+      ),
+    });
+
+  return (
+    <div className="rounded-md border">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{provider.name}</span>
+        <Badge variant="outline" className="shrink-0 text-[11px]">
+          {provider.api}
+        </Badge>
+        <Button variant="outline" size="sm" onClick={fetchModels} disabled={busy}>
+          {busy ? (
+            <Spinner className="mr-1.5 size-3.5" />
+          ) : (
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {t('Fetch models')}
+        </Button>
+      </div>
+      {error && <p className="px-3 py-2 text-xs text-destructive">{error}</p>}
+      {provider.models.length > 0 && (
+        <div className="max-h-40 space-y-0.5 overflow-y-auto p-1.5">
+          {provider.models.map((model) => (
+            <label
+              key={model.id}
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-accent/50"
+            >
+              <Checkbox
+                checked={model.enabled !== false}
+                onCheckedChange={() => toggleModel(model.id)}
+              />
+              <span className="min-w-0 flex-1 truncate text-sm">{model.id}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      {provider.models.length === 0 && !error && (
+        <p className="px-3 py-2 text-xs text-muted-foreground">{t('No models yet')}</p>
+      )}
+    </div>
   );
 }

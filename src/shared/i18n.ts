@@ -49,6 +49,11 @@ export const zhTranslations: Record<string, string> = {
   Next: '下一步',
   'Get started': '开始',
   Close: '关闭',
+  'No new providers imported': '没有新导入的模型服务',
+  'Fetch models for each provider, then enable the ones you want.':
+    '为每个模型服务拉取模型，再启用你需要的。',
+  'Fetch failed': '拉取失败',
+  'No models yet': '暂无模型，点击拉取',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',
