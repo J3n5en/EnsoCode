@@ -90,6 +90,17 @@ function extractEdits(name: string, args: unknown): EditBlock[] | null {
 const partText = (message: ProjectedMessage): string =>
   message.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
+/** content 中最后一个「有内容」的 part（空白 text / unknown 不算）；全空返回 -1 */
+function findLastActivePartIndex(content: ProjectedMessage['content']): number {
+  for (let i = content.length - 1; i >= 0; i--) {
+    const part = content[i];
+    if (part.type === 'text' && part.text.trim()) return i;
+    if (part.type === 'thinking' && part.text) return i;
+    if (part.type === 'toolCall' || part.type === 'image') return i;
+  }
+  return -1;
+}
+
 /** 从该 step 的计时打点算 hover 操作条读数；打点不全则无对应字段 */
 function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
   const timing = message.timing;
@@ -140,10 +151,13 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     if (message.role === 'toolResult') return;
     if (message.role !== 'assistant') return;
 
+    // 「流式中」= 最后一个有内容的 part：pi 流式时 thinking/text 后面常已跟着
+    // 空占位 part，按「最后一个 part」判会把正在生成的块误判为已完结
+    const lastActiveIndex = findLastActivePartIndex(message.content);
     message.content.forEach((part, partIndex) => {
       const key = `${messageIndex}-${partIndex}`;
-      const isLastPart = isLastMessage && partIndex === message.content.length - 1;
-      const streaming = running && isLastPart && !message.stopReason;
+      const isStreamingPart = isLastMessage && partIndex === lastActiveIndex;
+      const streaming = running && isStreamingPart && !message.stopReason;
       switch (part.type) {
         case 'text':
           // trim：纯空白正文（工具轮的空 text part）不产出——否则显示为幽灵空行
