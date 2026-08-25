@@ -21,6 +21,8 @@ interface ComposerProps {
   focusKey?: string;
   /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
+  /** 有待处理审批时锁定输入（ref-chat-a 语义：先处理审批再继续） */
+  locked?: boolean;
   onSend: (text: string, images: AttachedImage[]) => void;
   onAbort: () => void;
 }
@@ -55,6 +57,7 @@ export function Composer({
   busy,
   focusKey,
   toolbar,
+  locked = false,
   onSend,
   onAbort,
 }: ComposerProps) {
@@ -359,7 +362,14 @@ export function Composer({
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
-          placeholder={running ? t('Steer the running agent…') : t('Ask the agent…')}
+          placeholder={
+            locked
+              ? t('Resolve the pending approval to continue')
+              : running
+                ? t('Steer the running agent…')
+                : t('Ask the agent…')
+          }
+          disabled={locked}
           rows={2}
           className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
         />

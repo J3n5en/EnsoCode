@@ -3,6 +3,8 @@ import path from 'node:path';
 import {
   type AgentCommand,
   type AgentSpawnRequest,
+  type ApprovalDecision,
+  type ApprovalMode,
   type AttachedImage,
   type McpServerSpawnConfig,
   parseAgentWorkerEvent,
@@ -103,6 +105,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
       const mcpServers = enabledMcpServers(preset);
       return mcpServers.length > 0 ? { mcpServers } : {};
     })(),
+    ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
   });
 }
 
@@ -182,6 +185,21 @@ export function steerSession(
 
 export function abortSession(sessionId: string): { ok: boolean; error?: string } {
   return sendCommand({ type: 'abort', sessionId });
+}
+
+export function respondApproval(
+  sessionId: string,
+  requestId: string,
+  decision: ApprovalDecision
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'approval-respond', sessionId, requestId, decision });
+}
+
+export function setSessionApprovalMode(
+  sessionId: string,
+  mode: ApprovalMode
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'set-approval-mode', sessionId, mode });
 }
 
 /** 请求 worker 全量投影快照，结果经 AGENT_EVENT 广播回来 */

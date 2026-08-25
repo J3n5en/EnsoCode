@@ -1,14 +1,22 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
-import type { AgentActionResult, AgentSpawnRequest, ThinkingLevel } from '@shared/types/agent';
-import { THINKING_LEVELS } from '@shared/types/agent';
+import type {
+  AgentActionResult,
+  AgentSpawnRequest,
+  ApprovalDecision,
+  ApprovalMode,
+  ThinkingLevel,
+} from '@shared/types/agent';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agent';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
   promptSession,
   requestSnapshot,
+  respondApproval,
   setAgentEventListener,
+  setSessionApprovalMode,
   setSessionReasoning,
   setSessionThinking,
   spawnSession,
@@ -117,6 +125,30 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid thinking level' };
       }
       return setSessionReasoning(sessionId, enabled, level as ThinkingLevel | undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_APPROVAL_RESPOND,
+    (_event, sessionId: unknown, requestId: unknown, decision: unknown): AgentActionResult => {
+      if (
+        !isNonEmptyString(sessionId) ||
+        !isNonEmptyString(requestId) ||
+        (decision !== 'allow' && decision !== 'allowSession' && decision !== 'deny')
+      ) {
+        return { ok: false, error: 'invalid approval response' };
+      }
+      return respondApproval(sessionId, requestId, decision as ApprovalDecision);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SET_APPROVAL_MODE,
+    (_event, sessionId: unknown, mode: unknown): AgentActionResult => {
+      if (!isNonEmptyString(sessionId) || !APPROVAL_MODES.includes(mode as ApprovalMode)) {
+        return { ok: false, error: 'invalid approval mode' };
+      }
+      return setSessionApprovalMode(sessionId, mode as ApprovalMode);
     }
   );
 

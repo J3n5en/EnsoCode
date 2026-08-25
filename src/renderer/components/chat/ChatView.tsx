@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { ApprovalBar } from './ApprovalBar';
+import { ApprovalModePicker } from './ApprovalModePicker';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
@@ -91,11 +93,18 @@ export function ChatView() {
 
       <div className="@container px-4 pt-1">
         <div className={CHAT_COL}>
+          <ApprovalBar
+            approvals={conversation.pendingApprovals ?? []}
+            onRespond={(requestId, decision) =>
+              void window.electronAPI.agent.respondApproval(conversation.id, requestId, decision)
+            }
+          />
           <Composer
             cwd={project?.path}
             commands={conversation.commands}
             running={running}
             busy={busy}
+            locked={(conversation.pendingApprovals ?? []).length > 0}
             focusKey={conversation.id}
             toolbar={
               <>
@@ -121,6 +130,12 @@ export function ChatView() {
                   }
                   onThinkingChange={(level) =>
                     useSessionsStore.getState().setThinking(conversation.id, level)
+                  }
+                />
+                <ApprovalModePicker
+                  mode={conversation.approvalMode ?? 'supervised'}
+                  onSelect={(mode) =>
+                    useSessionsStore.getState().setApprovalMode(conversation.id, mode)
                   }
                 />
                 <ContextMeter messages={conversation.messages} />

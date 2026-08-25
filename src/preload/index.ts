@@ -11,6 +11,8 @@ import { IPC_CHANNELS } from '@shared/types';
 import type {
   AgentActionResult,
   AgentSpawnRequest,
+  ApprovalDecision,
+  ApprovalMode,
   AttachedImage,
   RendererAgentEvent,
   ThinkingLevel,
@@ -136,6 +138,14 @@ const electronAPI = {
       level?: ThinkingLevel
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_REASONING, sessionId, enabled, level),
+    respondApproval: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, sessionId, requestId, decision),
+    setApprovalMode: (sessionId: string, mode: ApprovalMode): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode),
     onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);

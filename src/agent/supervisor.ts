@@ -2,6 +2,8 @@ import path from 'node:path';
 import {
   type AgentSession,
   createAgentSession,
+  createBashToolDefinition,
+  createWriteToolDefinition,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -9,6 +11,7 @@ import {
 import type {
   AgentCommand,
   AgentWorkerEvent,
+  ApprovalMode,
   McpServerSpawnConfig,
   MessageTiming,
   NodeStatus,
@@ -19,6 +22,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
+import { ApprovalGate, withApproval } from './approval';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
@@ -40,6 +44,8 @@ interface ManagedSession {
   /** 工具执行计时：start 时记起点，end 时落耗时（toolCallId → ms） */
   toolStartAt: Map<string, number>;
   toolDurations: Map<string, number>;
+  /** 工具审批门 */
+  gate: ApprovalGate;
   unsubscribe: () => void;
 }
 
@@ -103,7 +109,8 @@ export class SessionSupervisor {
           command.thinkingLevel,
           command.loadLocalSkills,
           command.skillPaths,
-          command.mcpServers
+          command.mcpServers,
+          command.approvalMode
         );
         return;
       case 'prompt': {
@@ -138,9 +145,19 @@ export class SessionSupervisor {
         }
         return;
       }
-      case 'abort':
-        await this.must(command.sessionId).session.abort();
+      case 'approval-respond':
+        this.must(command.sessionId).gate.respond(command.requestId, command.decision);
         return;
+      case 'set-approval-mode':
+        this.must(command.sessionId).gate.mode = command.mode;
+        return;
+      case 'abort': {
+        const managed = this.must(command.sessionId);
+        // 先取消挂起审批（fail-closed），再中断 turn
+        managed.gate.cancelAll();
+        await managed.session.abort();
+        return;
+      }
     }
   }
 
@@ -153,7 +170,8 @@ export class SessionSupervisor {
     thinkingLevel?: ThinkingLevel,
     loadLocalSkills = true,
     skillPaths: string[] = [],
-    mcpServers: McpServerSpawnConfig[] = []
+    mcpServers: McpServerSpawnConfig[] = [],
+    approvalMode: ApprovalMode = 'supervised'
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
@@ -212,8 +230,50 @@ export class SessionSupervisor {
       mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
     const toolsMs = Date.now() - toolsStart;
-    // 工具注入：宽容版 edit（顶替内置，兜住模型双重编码 edits 的场景）+ todo + MCP
-    const customTools = [createLenientEditTool(cwd), createTodoTool(), ...mcpTools];
+
+    // 审批门：gate 回调经 managedRef 取 seq（managed 建立于 createAgentSession 之后，
+    // 而审批只可能发生在工具执行期，彼时必已赋值）
+    let managedRef: ManagedSession | undefined;
+    const gate = new ApprovalGate(
+      approvalMode,
+      (request) => {
+        if (managedRef) {
+          this.options.emit({
+            type: 'approval-request',
+            sessionId,
+            seq: ++managedRef.seq,
+            request,
+          });
+        }
+      },
+      (requestId) => {
+        if (managedRef) {
+          this.options.emit({
+            type: 'approval-resolved',
+            sessionId,
+            seq: ++managedRef.seq,
+            requestId,
+          });
+        }
+      }
+    );
+    // 工具注入：bash/edit/write 顶替内置并包审批门（edit 叠在宽容版之上），
+    // MCP 工具同门，todo 与只读内置工具免审
+    const customTools = [
+      withApproval(
+        gate,
+        'command',
+        createBashToolDefinition(cwd) as unknown as Parameters<typeof withApproval>[2]
+      ),
+      withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
+      withApproval(
+        gate,
+        'file-write',
+        createWriteToolDefinition(cwd) as unknown as Parameters<typeof withApproval>[2]
+      ),
+      createTodoTool(),
+      ...mcpTools.map((tool) => withApproval(gate, 'mcp', tool)),
+    ];
 
     const { session } = await createAgentSession({
       cwd,
@@ -222,7 +282,7 @@ export class SessionSupervisor {
       model: piModel,
       thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
       resourceLoader,
-      excludeTools: ['edit'],
+      excludeTools: ['edit', 'bash', 'write'],
       ...(customTools.length > 0 ? { customTools } : {}),
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
@@ -244,11 +304,13 @@ export class SessionSupervisor {
       timings: [],
       toolStartAt: new Map(),
       toolDurations: new Map(),
+      gate,
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
       this.onSessionEvent(sessionId, managed, event);
     });
+    managedRef = managed;
     this.sessions.set(sessionId, managed);
     this.emitStatus(sessionId, managed);
     this.options.emit({
@@ -485,6 +547,7 @@ export class SessionSupervisor {
       status: managed.status,
       messages: managed.messages,
       commands: managed.commands,
+      ...(managed.gate.snapshot().length > 0 ? { pendingApprovals: managed.gate.snapshot() } : {}),
     }));
   }
 

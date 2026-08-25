@@ -1,4 +1,4 @@
-import type { AttachedImage, ThinkingLevel } from '@shared/types/agent';
+import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useSettingsStore } from '@/stores/settings';
@@ -24,6 +24,8 @@ export interface Conversation extends SessionProjection {
   thinkingLevel?: ThinkingLevel;
   /** 注入组合预设（per 会话记忆）；缺省 = 默认预设。下次 spawn 生效 */
   presetId?: string;
+  /** 审批档位（per 会话记忆）；缺省 supervised */
+  approvalMode?: ApprovalMode;
 }
 
 interface SendTarget {
@@ -55,6 +57,8 @@ interface SessionsState {
   setThinking(id: string, level: ThinkingLevel): void;
   /** 设置注入预设；下次 spawn 生效 */
   setPreset(id: string, presetId: string): void;
+  /** 设置审批档位；已 spawn 的会话即时下发 */
+  setApprovalMode(id: string, mode: ApprovalMode): void;
   abort(): Promise<void>;
 }
 
@@ -104,6 +108,7 @@ export const useSessionsStore = create<SessionsState>()(
                   status: snapshot.status,
                   messages: snapshot.messages,
                   commands: snapshot.commands,
+                  pendingApprovals: snapshot.pendingApprovals ?? [],
                   lastSeq: 0,
                   error: undefined,
                 };
@@ -247,6 +252,7 @@ export const useSessionsStore = create<SessionsState>()(
               thinkingLevel: conversation.thinkingLevel,
               loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
               presetId: conversation.presetId,
+              approvalMode: conversation.approvalMode ?? 'supervised',
             });
             if (!result.ok) {
               set((state) =>
@@ -306,6 +312,7 @@ export const useSessionsStore = create<SessionsState>()(
             thinkingLevel: conversation.thinkingLevel,
             loadLocalSkills: settings.loadLocalSkills,
             presetId: conversation.presetId,
+            approvalMode: conversation.approvalMode ?? 'supervised',
           });
           set((state) =>
             result.ok
@@ -369,6 +376,13 @@ export const useSessionsStore = create<SessionsState>()(
           if (!get().conversations[id]) return;
           set((state) => patch(state, id, { presetId }));
         },
+        setApprovalMode(id, mode) {
+          set((state) => patch(state, id, { approvalMode: mode }));
+          const conversation = get().conversations[id];
+          if (conversation?.started) {
+            void window.electronAPI.agent.setApprovalMode(id, mode);
+          }
+        },
 
         async abort() {
           const id = get().activeId;
@@ -393,6 +407,8 @@ export const useSessionsStore = create<SessionsState>()(
               spawning: false,
               error: undefined,
               runStartedAt: undefined,
+              // 旧持久化数据可能缺该字段，rehydrate 时兜底为空数组
+              pendingApprovals: [],
             },
           ])
         ),

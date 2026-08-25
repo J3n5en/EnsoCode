@@ -15,6 +15,25 @@ export interface SpawnModelConfig {
 export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/** 审批档位：supervised 写操作全审 / auto-edits 仅命令与 MCP 审 / full 全放行 */
+export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full'] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+/** 审批请求的操作类别 */
+export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
+
+/** 待审批请求（worker → 渲染层） */
+export interface ApprovalRequestInfo {
+  requestId: string;
+  tool: string;
+  kind: ApprovalKind;
+  /** 命令全文 / 文件路径 / 参数预览 */
+  summary: string;
+}
+
+/** 审批决策 */
+export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
+
 /** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
 export interface McpServerSpawnConfig {
   name: string;
@@ -43,11 +62,20 @@ export type AgentCommand =
       skillPaths?: string[];
       /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
       mcpServers?: McpServerSpawnConfig[];
+      /** 审批档位；缺省 supervised */
+      approvalMode?: ApprovalMode;
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
   | { type: 'set-reasoning'; sessionId: string; enabled: boolean; level?: ThinkingLevel }
+  | {
+      type: 'approval-respond';
+      sessionId: string;
+      requestId: string;
+      decision: ApprovalDecision;
+    }
+  | { type: 'set-approval-mode'; sessionId: string; mode: ApprovalMode }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' }
   /** 预热 MCP 连接（worker 启动时下发；连接进缓存，spawn 即取即用） */
@@ -128,6 +156,8 @@ export interface SessionSnapshot {
   status: NodeStatus;
   messages: ProjectedMessage[];
   commands: SlashCommand[];
+  /** 挂起的审批请求（渲染层刷新后恢复审批条） */
+  pendingApprovals?: ApprovalRequestInfo[];
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -149,6 +179,8 @@ export interface AgentSpawnRequest {
   loadLocalSkills?: boolean;
   /** 注入组合预设；缺省/default 走各条目 enabled 过滤（现行为） */
   presetId?: string;
+  /** 审批档位；缺省 supervised */
+  approvalMode?: ApprovalMode;
 }
 
 export interface AgentActionResult {
@@ -177,6 +209,8 @@ export type AgentWorkerEvent =
   | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
   | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
+  | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
+  | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
   | { type: 'snapshot'; sessions: SessionSnapshot[]; partial?: boolean };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -239,6 +273,25 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         isNonEmptyString(value.sessionId) &&
         typeof value.enabled === 'boolean' &&
         (value.level === undefined || THINKING_LEVELS.includes(value.level as ThinkingLevel))
+      ) {
+        return value as unknown as AgentCommand;
+      }
+      return null;
+    case 'approval-respond':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        isNonEmptyString(value.requestId) &&
+        (value.decision === 'allow' ||
+          value.decision === 'allowSession' ||
+          value.decision === 'deny')
+      ) {
+        return value as unknown as AgentCommand;
+      }
+      return null;
+    case 'set-approval-mode':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        APPROVAL_MODES.includes(value.mode as ApprovalMode)
       ) {
         return value as unknown as AgentCommand;
       }
@@ -314,6 +367,25 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
         typeof value.error === 'string'
+      ) {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'approval-request':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isRecord(value.request) &&
+        isNonEmptyString(value.request.requestId)
+      ) {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'approval-resolved':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isNonEmptyString(value.requestId)
       ) {
         return value as unknown as AgentWorkerEvent;
       }

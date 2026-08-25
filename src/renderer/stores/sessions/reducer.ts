@@ -1,4 +1,5 @@
 import type {
+  ApprovalRequestInfo,
   NodeStatus,
   ProjectedMessage,
   RendererAgentEvent,
@@ -13,6 +14,8 @@ export interface SessionProjection {
   lastSeq: number;
   /** 累计 running 时长（统计条的吞吐分母，含工具执行时间） */
   activeMs: number;
+  /** 挂起的工具审批请求（审批条与输入框锁定依赖） */
+  pendingApprovals: ApprovalRequestInfo[];
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
 }
@@ -23,6 +26,7 @@ export const emptyProjection: SessionProjection = {
   commands: [],
   lastSeq: 0,
   activeMs: 0,
+  pendingApprovals: [],
 };
 
 /**
@@ -36,7 +40,12 @@ export function applyAgentEvent(
   now: number = Date.now()
 ): SessionProjection {
   if (event.type === 'worker-exited') {
-    return { ...settleTiming(state, now), status: 'failed', error: 'agent worker exited' };
+    return {
+      ...settleTiming(state, now),
+      status: 'failed',
+      error: 'agent worker exited',
+      pendingApprovals: [],
+    };
   }
   if (event.type === 'snapshot') {
     const snapshot = event.sessions.find((s) => s.sessionId === sessionId);
@@ -47,6 +56,7 @@ export function applyAgentEvent(
       commands: snapshot.commands,
       lastSeq: 0,
       activeMs: state.activeMs,
+      pendingApprovals: snapshot.pendingApprovals ?? [],
     };
   }
   if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
@@ -69,6 +79,20 @@ export function applyAgentEvent(
       messages[event.index] = event.message;
       return { ...state, messages, lastSeq: event.seq };
     }
+    case 'approval-request':
+      return {
+        ...state,
+        pendingApprovals: [...state.pendingApprovals, event.request],
+        lastSeq: event.seq,
+      };
+    case 'approval-resolved':
+      return {
+        ...state,
+        pendingApprovals: state.pendingApprovals.filter(
+          (request) => request.requestId !== event.requestId
+        ),
+        lastSeq: event.seq,
+      };
     case 'turn-completed':
       return { ...settleTiming(state, now), lastSeq: event.seq };
     case 'messages-truncated':
