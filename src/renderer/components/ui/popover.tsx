@@ -15,6 +15,7 @@ function PopoverTrigger(props: PopoverPrimitive.Trigger.Props) {
 function PopoverPopup({
   children,
   className,
+  positionerClassName,
   side = 'bottom',
   align = 'center',
   sideOffset = 4,
@@ -27,13 +28,18 @@ function PopoverPopup({
   sideOffset?: PopoverPrimitive.Positioner.Props['sideOffset'];
   alignOffset?: PopoverPrimitive.Positioner.Props['alignOffset'];
   tooltipStyle?: boolean;
+  /** 覆盖定位层样式（如在 Dialog 内需提升 z-index 越过 modal content） */
+  positionerClassName?: string;
 }) {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
-        className="z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+        className={cn(
+          'z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none',
+          positionerClassName
+        )}
         data-slot="popover-positioner"
         side={side}
         sideOffset={sideOffset}

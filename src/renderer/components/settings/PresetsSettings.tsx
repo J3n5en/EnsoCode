@@ -273,7 +273,8 @@ function DetailPopover({ children }: { children: React.ReactNode }) {
       <PopoverTrigger className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
         <Eye className="h-3.5 w-3.5" />
       </PopoverTrigger>
-      <PopoverPopup side="left" align="start" className="w-80 p-3">
+      {/* 在 Dialog 内，需越过 modal content（z 51）才不被遮挡 */}
+      <PopoverPopup side="left" align="start" className="w-80 p-3" positionerClassName="z-[60]">
         {children}
       </PopoverPopup>
     </Popover>
