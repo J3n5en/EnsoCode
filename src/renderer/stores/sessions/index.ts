@@ -2,6 +2,7 @@ import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/a
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useSettingsStore } from '@/stores/settings';
+import { electronStorage } from '@/stores/settings/storage';
 import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
 
 export interface Conversation extends SessionProjection {
@@ -397,7 +398,8 @@ export const useSessionsStore = create<SessionsState>()(
     },
     {
       name: 'enso-conversations',
-      storage: createJSONStorage(() => localStorage),
+      // 存 settings.json（localStorage 按 origin 隔离，dev 与打包版会分家）
+      storage: createJSONStorage(() => electronStorage),
       // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
       partialize: (state) => ({
         conversations: Object.fromEntries(
