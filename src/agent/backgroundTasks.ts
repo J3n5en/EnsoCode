@@ -153,6 +153,9 @@ export function withBackground(
   return {
     ...definition,
     parameters,
+    promptSnippet:
+      'bash: run shell commands; pass background=true for long-running commands ' +
+      '(dev servers, watchers) to get a task id immediately instead of blocking',
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
       if (record.background && typeof record.command === 'string') {
@@ -184,6 +187,7 @@ export function createTaskTools(manager: BackgroundTaskManager): ToolDefinition[
       name: 'task_output',
       label: 'Task output',
       description: 'Read the accumulated output and status of a background task.',
+      promptSnippet: 'task_output: check output/status of a background task by id',
       parameters: idParam,
       async execute(_id, params) {
         const taskId = (params as { taskId?: string }).taskId ?? '';
@@ -205,6 +209,7 @@ export function createTaskTools(manager: BackgroundTaskManager): ToolDefinition[
       name: 'task_stop',
       label: 'Task stop',
       description: 'Stop a running background task.',
+      promptSnippet: 'task_stop: stop a running background task by id',
       parameters: idParam,
       async execute(_id, params) {
         const taskId = (params as { taskId?: string }).taskId ?? '';
