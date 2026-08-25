@@ -42,11 +42,21 @@ export const emptyProjection: SessionProjection = {
  * seq 单调守卫：过期事件（seq <= lastSeq）直接丢弃，重连/重放时保证不回退。
  */
 export function applyAgentEvent(
-  state: SessionProjection,
+  rawState: SessionProjection,
   sessionId: string,
   event: RendererAgentEvent,
   now: number = Date.now()
 ): SessionProjection {
+  // persist 旧数据可能缺后加字段（undefined.map 会炸掉事件处理），入口统一归一
+  const state: SessionProjection =
+    rawState.pendingApprovals && rawState.backgroundTasks && rawState.subagents
+      ? rawState
+      : {
+          ...rawState,
+          pendingApprovals: rawState.pendingApprovals ?? [],
+          backgroundTasks: rawState.backgroundTasks ?? [],
+          subagents: rawState.subagents ?? [],
+        };
   if (event.type === 'worker-exited') {
     return {
       ...settleTiming(state, now),

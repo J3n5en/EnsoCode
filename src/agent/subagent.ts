@@ -7,6 +7,8 @@ const UPDATE_INTERVAL_MS = 500;
 export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
   createSubSession(): Promise<AgentSession>;
+  /** 子会话使用的模型 id（展示用） */
+  modelId: string;
   /** 进度/状态上报（覆盖式,按 id 幂等） */
   emitUpdate(agent: SubagentInfo): void;
 }
@@ -75,6 +77,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         status: 'running',
         steps: 0,
         currentActivity: 'starting…',
+        modelId: deps.modelId,
         startedAt: Date.now(),
       };
       deps.emitUpdate({ ...info });
@@ -92,6 +95,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           if (role === 'assistant') {
             info.steps += 1;
             info.currentActivity = 'thinking…';
+            dirty = true;
+          }
+        } else if (event.type === 'message_end') {
+          const usage = (event.message as { usage?: { output?: number } }).usage;
+          if (typeof usage?.output === 'number') {
+            info.outputTokens = (info.outputTokens ?? 0) + usage.output;
             dirty = true;
           }
         } else if (event.type === 'tool_execution_start') {

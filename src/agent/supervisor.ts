@@ -347,6 +347,7 @@ export class SessionSupervisor {
     ];
     // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
     const taskTool = createSubagentTool({
+      modelId: model.modelId,
       createSubSession: async () => {
         const { session } = await createAgentSession({
           cwd,

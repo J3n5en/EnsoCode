@@ -62,6 +62,7 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
           <div className="flex items-center gap-2 border-b px-3 py-1.5 text-xs">
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
               {openTask ? openTask.command : openAgent?.description}
+              {openAgent?.modelId ? ` · ${openAgent.modelId}` : ''}
             </span>
             <button
               type="button"
@@ -180,6 +181,7 @@ function AgentMeta({ agent }: { agent: SubagentInfo }) {
   return (
     <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
       {agent.steps > 0 ? `${agent.steps} steps · ` : ''}
+      {agent.outputTokens ? `${agent.outputTokens} tok · ` : ''}
       {agent.status === 'running' ? formatDuration(Date.now() - agent.startedAt) : agent.status}
     </span>
   );

@@ -56,6 +56,10 @@ export interface SubagentInfo {
   currentActivity: string;
   /** 完成后的最终产出（markdown） */
   resultText?: string;
+  /** 使用的模型 */
+  modelId?: string;
+  /** 累计输出 token */
+  outputTokens?: number;
   startedAt: number;
 }
 
