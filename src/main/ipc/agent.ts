@@ -23,6 +23,7 @@ import {
   steerSession,
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
+import { maybeNotify } from '../services/notifications';
 import {
   importExternalSession,
   listExternalSessions,
@@ -54,6 +55,7 @@ export function registerAgentHandlers(): void {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
     }
+    maybeNotify(event);
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SPAWN, (_event, request: unknown): AgentActionResult => {

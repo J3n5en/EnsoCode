@@ -146,6 +146,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, sessionId, requestId, decision),
     setApprovalMode: (sessionId: string, mode: ApprovalMode): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode),
+    /** 系统通知点击后由 main 下发：切到对应会话 */
+    onFocusSession: (callback: (sessionId: string) => void): (() => void) => {
+      const listener = (_: unknown, sessionId: string) => callback(sessionId);
+      ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION, listener);
+    },
     onEvent: (callback: (event: RendererAgentEvent) => void): (() => void) => {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);

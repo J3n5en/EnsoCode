@@ -73,6 +73,9 @@ const patch = (
 export const useSessionsStore = create<SessionsState>()(
   persist(
     (set, get) => {
+      window.electronAPI.agent.onFocusSession((sessionId) => {
+        if (get().conversations[sessionId]) set({ activeId: sessionId });
+      });
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {

@@ -42,6 +42,7 @@ export const IPC_CHANNELS = {
   AGENT_SET_REASONING: 'agent:set-reasoning',
   AGENT_APPROVAL_RESPOND: 'agent:approval-respond',
   AGENT_SET_APPROVAL_MODE: 'agent:set-approval-mode',
+  NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
