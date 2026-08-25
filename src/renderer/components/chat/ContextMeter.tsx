@@ -5,11 +5,14 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { formatTokens } from '@/stores/sessions/stats';
 
-/** 最近一条带 usage 的 assistant 消息的整段 prompt+输出 ≈ 当前上下文水位 */
+/** 最近一条带非零 usage 的 assistant 消息的整段 prompt+输出 ≈ 当前上下文水位。
+ *  流式中的消息 usage 是空对象（投影成全 0），须跳过，否则对话中显示 0% */
 function latestContextTokens(messages: ProjectedMessage[]): number | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const usage = messages[i].role === 'assistant' ? messages[i].usage : undefined;
-    if (usage) return usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
+    if (!usage) continue;
+    const total = usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
+    if (total > 0) return total;
   }
   return null;
 }

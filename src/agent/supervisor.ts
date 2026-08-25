@@ -19,6 +19,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
+import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
 import { projectMessage } from './projection';
@@ -211,8 +212,8 @@ export class SessionSupervisor {
       mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
     const toolsMs = Date.now() - toolsStart;
-    // 工具注入：todo（会话任务清单，状态存 toolResult.details）+ MCP
-    const customTools = [createTodoTool(), ...mcpTools];
+    // 工具注入：宽容版 edit（顶替内置，兜住模型双重编码 edits 的场景）+ todo + MCP
+    const customTools = [createLenientEditTool(cwd), createTodoTool(), ...mcpTools];
 
     const { session } = await createAgentSession({
       cwd,
@@ -221,6 +222,7 @@ export class SessionSupervisor {
       model: piModel,
       thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
       resourceLoader,
+      excludeTools: ['edit'],
       ...(customTools.length > 0 ? { customTools } : {}),
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
