@@ -15,6 +15,16 @@ export interface SpawnModelConfig {
 export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
+export interface McpServerSpawnConfig {
+  name: string;
+  transport: 'stdio' | 'http' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
 /** Main → worker 命令 */
 export type AgentCommand =
   | {
@@ -31,6 +41,8 @@ export type AgentCommand =
       loadLocalSkills?: boolean;
       /** 应用内登记的 skill 目录（设置里启用的条目），注入给 pi 的 resourceLoader */
       skillPaths?: string[];
+      /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
+      mcpServers?: McpServerSpawnConfig[];
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }

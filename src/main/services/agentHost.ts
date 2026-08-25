@@ -4,6 +4,7 @@ import {
   type AgentCommand,
   type AgentSpawnRequest,
   type AttachedImage,
+  type McpServerSpawnConfig,
   parseAgentWorkerEvent,
   type RendererAgentEvent,
   type SpawnModelConfig,
@@ -85,6 +86,10 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
       const skillPaths = enabledSkillPaths();
       return skillPaths.length > 0 ? { skillPaths } : {};
     })(),
+    ...(() => {
+      const mcpServers = enabledMcpServers();
+      return mcpServers.length > 0 ? { mcpServers } : {};
+    })(),
   });
 }
 
@@ -97,6 +102,24 @@ function enabledSkillPaths(): string[] {
   return skills
     .filter((skill) => skill.enabled !== false && typeof skill.path === 'string' && skill.path)
     .map((skill) => skill.path as string);
+}
+
+/** 设置里启用的 MCP server（剥掉 id/source，只带运行所需字段） */
+function enabledMcpServers(): McpServerSpawnConfig[] {
+  const state = readSettingsState();
+  const servers = Array.isArray(state?.mcpServers)
+    ? (state.mcpServers as (McpServerSpawnConfig & { enabled?: boolean })[])
+    : [];
+  return servers
+    .filter((server) => server.enabled !== false && server.name && server.transport)
+    .map(({ name, transport, command, args, env, url }) => ({
+      name,
+      transport,
+      ...(command ? { command } : {}),
+      ...(args?.length ? { args } : {}),
+      ...(env && Object.keys(env).length > 0 ? { env } : {}),
+      ...(url ? { url } : {}),
+    }));
 }
 
 export function setSessionThinking(
