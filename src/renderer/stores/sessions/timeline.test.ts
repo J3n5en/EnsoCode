@@ -199,4 +199,11 @@ describe('foldTimeline', () => {
     const expanded = foldTimeline(items, false, new Set([groupKey]));
     expect(expanded.map((i) => i.key)).toEqual([groupKey, 't1', 'th', 't2', 't3']);
   });
+
+  it('todo 行不进组，平铺在组头之后', () => {
+    const items = [toolItem('t1'), toolItem('td', 'todo'), toolItem('t2'), toolItem('t3')];
+    const folded = foldTimeline(items, false, new Set());
+    expect(folded.map((i) => i.kind)).toEqual(['tool-group', 'tool']);
+    expect((folded[1] as Extract<TimelineItem, { kind: 'tool' }>).name).toBe('todo');
+  });
 });

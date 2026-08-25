@@ -22,6 +22,7 @@ import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
 import { projectMessage } from './projection';
+import { createTodoTool } from './todo';
 
 interface ManagedSession {
   session: AgentSession;
@@ -194,8 +195,12 @@ export class SessionSupervisor {
       await resourceLoader.reload();
     }
 
-    // MCP 工具：worker 级共享连接，单 server 失败降级跳过（不阻塞 spawn）
-    const customTools = mcpServers.length > 0 ? await this.mcp.toolsFor(mcpServers) : [];
+    // 工具注入：todo（会话任务清单，状态存 toolResult.details）+ MCP（worker 级共享连接，
+    // 单 server 失败降级跳过，不阻塞 spawn）
+    const customTools = [
+      createTodoTool(),
+      ...(mcpServers.length > 0 ? await this.mcp.toolsFor(mcpServers) : []),
+    ];
 
     const { session } = await createAgentSession({
       cwd,

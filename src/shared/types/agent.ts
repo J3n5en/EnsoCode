@@ -93,6 +93,12 @@ export interface MessageTiming {
   completedMs?: number;
 }
 
+/** todo 工具的清单项（toolResult.details 透出，整表替换语义） */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
 export interface ProjectedMessage {
   role: string;
@@ -107,6 +113,8 @@ export interface ProjectedMessage {
   usage?: TokenUsage;
   /** 该 step 的计时打点（仅 assistant 消息带） */
   timing?: MessageTiming;
+  /** todo 工具 toolResult 的清单快照 */
+  todos?: TodoItem[];
 }
 
 export interface SessionSnapshot {

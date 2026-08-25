@@ -1,4 +1,18 @@
-import type { ProjectedMessage, ProjectedPart } from '@shared/types/agent';
+import type { ProjectedMessage, ProjectedPart, TodoItem } from '@shared/types/agent';
+
+const TODO_STATUSES = ['pending', 'in_progress', 'completed'];
+
+/** todo 工具 toolResult.details 的清单快照（白名单校验，脏数据丢弃） */
+function projectTodos(value: unknown): TodoItem[] | null {
+  if (!isRecord(value) || !Array.isArray(value.todos)) return null;
+  const todos = value.todos.filter(
+    (item): item is TodoItem =>
+      isRecord(item) &&
+      typeof item.content === 'string' &&
+      TODO_STATUSES.includes(item.status as string)
+  );
+  return todos.map((item) => ({ content: item.content, status: item.status }));
+}
 
 /**
  * 把 pi 的 AgentMessage 投影为渲染层可见的白名单结构。
@@ -20,6 +34,10 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.timestamp === 'number') projected.timestamp = value.timestamp;
   const usage = projectUsage(value.usage);
   if (usage) projected.usage = usage;
+  if (value.role === 'toolResult' && value.toolName === 'todo') {
+    const todos = projectTodos(value.details);
+    if (todos) projected.todos = todos;
+  }
   return projected;
 }
 

@@ -1,5 +1,15 @@
-import type { TurnPerf } from '@shared/types/agent';
-import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle } from 'lucide-react';
+import type { TodoItem, TurnPerf } from '@shared/types/agent';
+import {
+  Brain,
+  Check,
+  ChevronRight,
+  Circle,
+  CircleAlert,
+  CircleDot,
+  Copy,
+  ListTodo,
+  LoaderCircle,
+} from 'lucide-react';
 import { memo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -51,7 +61,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.name === b.name &&
         a.summary === b.summary &&
         a.output === b.output &&
-        a.edits === b.edits
+        a.edits === b.edits &&
+        a.todos === b.todos
       );
     case 'tool-group':
       return (
@@ -226,6 +237,8 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   // edit 的 diff 默认展开（「直接看到」），其余保持收起
   const [expanded, setExpanded] = useState(hasDiff);
 
+  if (item.todos) return <TodoRow todos={item.todos} />;
+
   return (
     <div className="rounded-lg border border-border/60 bg-muted/30">
       <button
@@ -279,6 +292,47 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** todo 清单行：进度摘要 + ✓/●/○ 列表；清单即产物，恒展开 */
+function TodoRow({ todos }: { todos: TodoItem[] }) {
+  const { t } = useI18n();
+  const done = todos.filter((todo) => todo.status === 'completed').length;
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <ListTodo className="h-3.5 w-3.5 shrink-0" />
+        <span className="font-medium">{t('Todos')}</span>
+        <span>
+          {done}/{todos.length}
+        </span>
+      </div>
+      <ul className="space-y-0.5 text-xs">
+        {todos.map((todo) => (
+          <li key={todo.content} className="flex items-start gap-1.5">
+            {todo.status === 'completed' ? (
+              <Check className="mt-0.5 h-3 w-3 shrink-0 text-green-600 dark:text-green-500" />
+            ) : todo.status === 'in_progress' ? (
+              <CircleDot className="mt-0.5 h-3 w-3 shrink-0 text-blue-500" />
+            ) : (
+              <Circle className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
+            )}
+            <span
+              className={cn(
+                todo.status === 'completed'
+                  ? 'text-muted-foreground line-through'
+                  : todo.status === 'in_progress'
+                    ? 'font-medium'
+                    : 'text-muted-foreground'
+              )}
+            >
+              {todo.content}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

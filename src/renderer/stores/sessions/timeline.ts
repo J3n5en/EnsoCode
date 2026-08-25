@@ -1,4 +1,4 @@
-import type { ProjectedMessage, TurnPerf } from '@shared/types/agent';
+import type { ProjectedMessage, TodoItem, TurnPerf } from '@shared/types/agent';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
 export interface EditBlock {
@@ -26,6 +26,8 @@ export type TimelineItem =
       state: 'running' | 'ok' | 'error';
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
       edits: EditBlock[] | null;
+      /** todo 工具的清单快照；非 todo 为 null */
+      todos: TodoItem[] | null;
     }
   | {
       kind: 'tool-group';
@@ -99,12 +101,13 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
  * 纯函数，输入不被修改。
  */
 export function buildTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
-  const results = new Map<string, { output: string; isError: boolean }>();
+  const results = new Map<string, { output: string; isError: boolean; todos: TodoItem[] | null }>();
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolCallId) {
       results.set(message.toolCallId, {
         output: partText(message),
         isError: message.isError === true,
+        todos: message.todos ?? null,
       });
     }
   }
@@ -153,6 +156,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             output: result ? result.output : null,
             state: result ? (result.isError ? 'error' : 'ok') : running ? 'running' : 'ok',
             edits: extractEdits(part.name, part.arguments),
+            todos: result?.todos ?? null,
           });
           return;
         }
@@ -209,8 +213,11 @@ export function foldTimeline(
     }
     const segment = items.slice(i, end);
     const liveSegment = running && lastUserIndex >= 0 && i > lastUserIndex;
-    const editRows = segment.filter((s) => s.kind === 'tool' && s.edits !== null);
-    const groupRows = segment.filter((s) => !(s.kind === 'tool' && s.edits !== null));
+    // 钉住的行不进组：edit 的 diff 与 todo 清单都是核心产物，不折进黑盒
+    const pinned = (s: TimelineItem): boolean =>
+      s.kind === 'tool' && (s.edits !== null || s.name === 'todo');
+    const editRows = segment.filter(pinned);
+    const groupRows = segment.filter((s) => !pinned(s));
     const toolCount = groupRows.filter((s) => s.kind === 'tool').length;
     if (liveSegment || toolCount < FOLD_MIN_TOOLS) {
       result.push(...segment);
