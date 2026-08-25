@@ -87,7 +87,8 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     ...(request.resumeFile ? { resumeFile: request.resumeFile } : {}),
     ...(request.reasoningEnabled ? { reasoningEnabled: true } : {}),
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-    ...(request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
+    // 自定义预设即完整边界：关掉本机 skill 自动发现，只注入预设选定的
+    ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(() => {
       const skillPaths = enabledSkillPaths(preset);
       return skillPaths.length > 0 ? { skillPaths } : {};
