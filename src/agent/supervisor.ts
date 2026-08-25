@@ -84,7 +84,8 @@ export class SessionSupervisor {
           command.resumeFile,
           command.reasoningEnabled ?? false,
           command.thinkingLevel,
-          command.loadLocalSkills
+          command.loadLocalSkills,
+          command.skillPaths
         );
         return;
       case 'prompt': {
@@ -132,7 +133,8 @@ export class SessionSupervisor {
     resumeFile?: string,
     reasoningEnabled = false,
     thinkingLevel?: ThinkingLevel,
-    loadLocalSkills = true
+    loadLocalSkills = true,
+    skillPaths: string[] = []
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
@@ -169,21 +171,27 @@ export class SessionSupervisor {
       model.modelId
     );
 
+    // 定制资源加载：noSkills 关掉本机自动发现（.agents/skills、.pi/skills），
+    // additionalSkillPaths 注入应用内登记的 skill——两者独立，noSkills 下注入仍生效。
+    // 注意：createAgentSession 只对自建 loader 调 reload，传入的必须先自行 reload
+    let resourceLoader: DefaultResourceLoader | undefined;
+    if (loadLocalSkills === false || skillPaths.length > 0) {
+      resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir: this.options.agentDir,
+        noSkills: loadLocalSkills === false,
+        ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+      });
+      await resourceLoader.reload();
+    }
+
     const { session } = await createAgentSession({
       cwd,
       agentDir: this.options.agentDir,
       modelRuntime: runtime,
       model: piModel,
       thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
-      // 关闭 skill：resourceLoader 传 noSkills，pi 就不扫描 .agents/skills、.pi/skills
-      resourceLoader:
-        loadLocalSkills === false
-          ? new DefaultResourceLoader({
-              cwd,
-              agentDir: this.options.agentDir,
-              noSkills: true,
-            })
-          : undefined,
+      resourceLoader,
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),

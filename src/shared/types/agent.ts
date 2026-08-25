@@ -29,6 +29,8 @@ export type AgentCommand =
       thinkingLevel?: ThinkingLevel;
       /** 是否加载本机 skill（.agents/skills、.pi/skills）；默认 true */
       loadLocalSkills?: boolean;
+      /** 应用内登记的 skill 目录（设置里启用的条目），注入给 pi 的 resourceLoader */
+      skillPaths?: string[];
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }

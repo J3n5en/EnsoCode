@@ -81,7 +81,22 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     ...(request.reasoningEnabled ? { reasoningEnabled: true } : {}),
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
+    ...(() => {
+      const skillPaths = enabledSkillPaths();
+      return skillPaths.length > 0 ? { skillPaths } : {};
+    })(),
   });
+}
+
+/** 设置里启用的 skill 目录（引用登记，注入给 pi） */
+function enabledSkillPaths(): string[] {
+  const state = readSettingsState();
+  const skills = Array.isArray(state?.skills)
+    ? (state.skills as { path?: string; enabled?: boolean }[])
+    : [];
+  return skills
+    .filter((skill) => skill.enabled !== false && typeof skill.path === 'string' && skill.path)
+    .map((skill) => skill.path as string);
 }
 
 export function setSessionThinking(
@@ -124,10 +139,13 @@ export function requestSnapshot(): { ok: boolean; error?: string } {
   return sendCommand({ type: 'snapshot' });
 }
 
-function findProvider(providerId: string): ModelProvider | null {
+function readSettingsState(): Record<string, unknown> | undefined {
   const settings = readSettings();
-  const state = (settings?.['enso-settings'] as { state?: { providers?: unknown } } | undefined)
-    ?.state;
+  return (settings?.['enso-settings'] as { state?: Record<string, unknown> } | undefined)?.state;
+}
+
+function findProvider(providerId: string): ModelProvider | null {
+  const state = readSettingsState();
   const providers = Array.isArray(state?.providers) ? (state.providers as ModelProvider[]) : [];
   return providers.find((provider) => provider?.id === providerId) ?? null;
 }
