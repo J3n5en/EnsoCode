@@ -22,11 +22,11 @@ const LANGS = [
   'text',
 ] as const;
 
-/** 主题跟随系统深浅色，unified 视图 + 词级高亮，纯 JS 高亮器（免 WASM，适配 electron-vite） */
+/** 主题跟随系统深浅色，split 左右分栏 + 词级高亮，纯 JS 高亮器（免 WASM，适配 electron-vite） */
 const DIFF_OPTIONS = {
   themeType: 'system',
   theme: { dark: 'github-dark', light: 'github-light' },
-  diffStyle: 'unified',
+  diffStyle: 'split',
   lineDiffType: 'word',
   disableFileHeader: true,
   preferredHighlighter: 'shiki-js',
