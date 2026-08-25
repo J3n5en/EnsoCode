@@ -88,7 +88,13 @@ export function PresetsSettings() {
   );
 }
 
-function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose: () => void }) {
+export function PresetEditDialog({
+  preset,
+  onClose,
+}: {
+  preset: Preset | null;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const skills = useSettingsStore((state) => state.skills);
   const mcpServers = useSettingsStore((state) => state.mcpServers);

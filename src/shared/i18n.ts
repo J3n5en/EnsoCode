@@ -54,6 +54,9 @@ export const zhTranslations: Record<string, string> = {
     '为每个模型服务拉取模型，再启用你需要的。',
   'Fetch failed': '拉取失败',
   'No models yet': '暂无模型，点击拉取',
+  'Bundle skills, MCP servers and an instruction file into a preset (optional)':
+    '把技能、MCP 服务和一份指令组合成预设（可选）',
+  '{{count}} presets': '已有 {{count}} 个预设',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',
