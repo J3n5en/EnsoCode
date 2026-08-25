@@ -115,7 +115,7 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl" disableNestedTransform>
         <DialogHeader>
           <DialogTitle>{preset ? t('Edit preset') : t('New preset')}</DialogTitle>
         </DialogHeader>
