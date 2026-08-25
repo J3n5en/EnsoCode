@@ -178,7 +178,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                     for (const id of projectConversations) removeConversation(id);
                     removeProject(project.id);
                   }}
-                  className="hidden shrink-0 rounded p-1 text-muted-foreground group-hover:block hover:bg-muted hover:text-destructive"
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
                   title={t('Remove project')}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
