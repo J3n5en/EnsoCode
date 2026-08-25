@@ -13,6 +13,7 @@ import {
 import type { ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { readSettings } from '../ipc/settings';
+import { syncGlobalInstruction } from './instructionStore';
 
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
@@ -67,6 +68,8 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
   }
+  // 启用的指令文件（单主源）落到 pi agentDir 的 AGENTS.md，pi 会话自动读取
+  syncGlobalInstruction();
   const model: SpawnModelConfig = {
     api: provider.api,
     baseUrl: provider.baseUrl,

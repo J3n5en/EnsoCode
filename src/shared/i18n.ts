@@ -92,6 +92,8 @@ export const zhTranslations: Record<string, string> = {
   'Global CLAUDE.md / AGENTS.md style files from local AI tools':
     '本机 AI 工具的全局 CLAUDE.md / AGENTS.md 类文件',
   'No instruction files yet': '暂无指令文件',
+  'Only one file is active at a time; enabling one disables the others':
+    '同一时间仅一份生效（注入会话）；启用一份会自动关闭其余',
   'Import global instruction files configured in local AI tools':
     '导入本机 AI 工具中已配置的全局指令文件',
   'Import instruction files': '导入指令文件',

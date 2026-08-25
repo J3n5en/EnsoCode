@@ -29,6 +29,9 @@ export function InstructionsSettings() {
           <p className="text-muted-foreground text-sm">
             {t('Global CLAUDE.md / AGENTS.md style files from local AI tools')}
           </p>
+          <p className="text-muted-foreground text-xs">
+            {t('Only one file is active at a time; enabling one disables the others')}
+          </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
           <HardDriveDownload className="mr-1.5 h-4 w-4" />

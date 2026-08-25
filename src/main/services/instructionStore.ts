@@ -93,3 +93,37 @@ export function deleteInstruction(id: string): void {
     // 忽略
   }
 }
+
+/** pi 全局 context 文件：agentDir 下的 AGENTS.md，pi 每次会话自动读取 */
+function globalContextFile(): string {
+  return path.join(app.getPath('userData'), 'agent', 'pi-agent', 'AGENTS.md');
+}
+
+/**
+ * 把启用的指令条目（单主源，最多一条）落到 pi agentDir 的 AGENTS.md；
+ * 无启用条目或读取失败则移除该文件。spawn 前调用，保证会话拿到最新内容。
+ */
+export function syncGlobalInstruction(): void {
+  const settings = readSettings();
+  const state = (settings?.['enso-settings'] as { state?: { instructions?: unknown } } | undefined)
+    ?.state;
+  const instructions = Array.isArray(state?.instructions) ? state.instructions : [];
+  const enabled = instructions.find((item) => (item as { enabled?: boolean }).enabled === true) as
+    | { id: string; local: boolean; sourcePath?: string }
+    | undefined;
+
+  const target = globalContextFile();
+  const result = enabled
+    ? readInstruction(enabled.id, enabled.local, enabled.sourcePath)
+    : undefined;
+  try {
+    if (result?.ok && result.content.trim()) {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, result.content, 'utf8');
+    } else {
+      fs.rmSync(target, { force: true });
+    }
+  } catch (error) {
+    console.error('syncGlobalInstruction failed:', error);
+  }
+}

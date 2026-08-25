@@ -219,14 +219,29 @@ export const useSettingsStore = create<SettingsState>()(
           return true;
         });
         if (fresh.length > 0) {
-          set((state) => ({ instructions: [...state.instructions, ...fresh] }));
+          // 单主源：已有启用条目时新导入的全部关闭；否则只留第一条启用
+          set((state) => {
+            const hasEnabled = state.instructions.some((i) => i.enabled);
+            const normalized = fresh.map((item, index) => ({
+              ...item,
+              enabled: !hasEnabled && index === 0,
+            }));
+            return { instructions: [...state.instructions, ...normalized] };
+          });
         }
         return fresh.length;
       },
 
+      // 指令文件单主源：启用一条时其余自动关闭（同一时间只有一份注入会话）
       updateInstruction: (id, updates) =>
         set((state) => ({
-          instructions: state.instructions.map((i) => (i.id === id ? { ...i, ...updates } : i)),
+          instructions: state.instructions.map((i) =>
+            i.id === id
+              ? { ...i, ...updates }
+              : updates.enabled === true
+                ? { ...i, enabled: false }
+                : i
+          ),
         })),
 
       removeInstruction: (id) => {
