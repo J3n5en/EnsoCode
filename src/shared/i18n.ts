@@ -143,8 +143,6 @@ export const zhTranslations: Record<string, string> = {
   Import: '导入',
   'Show {{count}} earlier': '显示更早的 {{count}} 条',
   'Scroll to bottom': '滚动到底部',
-  'Show rendered': '预览',
-  'Show source': '查看源码',
   'Thinking level': '思考深度',
   Reasoning: '推理',
   'Takes effect in a new conversation': '新对话生效',
