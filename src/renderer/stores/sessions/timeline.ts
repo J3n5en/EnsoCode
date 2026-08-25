@@ -48,7 +48,9 @@ export type TimelineItem =
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
-  | { kind: 'error'; key: string; text: string };
+  | { kind: 'error'; key: string; text: string }
+  /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
+  | { kind: 'task-note'; key: string; summary: string; detail: string };
 
 export interface ToolGroupStats {
   commands: number;
@@ -150,6 +152,19 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     if (message.role === 'user') {
       const text = partText(message);
       const images = message.content.filter((part) => part.type === 'image');
+      // 后台任务完成的合成注入：不按用户气泡渲染，转为系统通知行
+      const noteMatch =
+        /^<background-task-update>\n?([\s\S]*?)\n?<\/background-task-update>\s*$/.exec(text.trim());
+      if (noteMatch && images.length === 0) {
+        const detail = noteMatch[1].trim();
+        items.push({
+          kind: 'task-note',
+          key: `${messageIndex}`,
+          summary: detail.split('\n', 1)[0] ?? detail,
+          detail,
+        });
+        return;
+      }
       if (text || images.length > 0) {
         items.push({ kind: 'user', key: `${messageIndex}`, text, images });
       }
