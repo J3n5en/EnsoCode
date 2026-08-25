@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '@/stores/sessions/stats';
+import { Markdown } from './Markdown';
 
 interface TaskBarProps {
   sessionId: string;
@@ -73,17 +74,14 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
             </button>
           </div>
           {openTask && <TailView tail={openTask.tail} />}
-          {openAgent && (
-            <TailView
-              tail={
-                openAgent.status === 'running'
-                  ? (openAgent.activityLog ?? []).join('\n')
-                  : openAgent.resultText ||
-                    (openAgent.activityLog ?? []).join('\n') ||
-                    openAgent.status
-              }
-            />
-          )}
+          {openAgent &&
+            (openAgent.status !== 'running' && openAgent.resultText ? (
+              <div className="max-h-56 overflow-auto px-3 py-2 text-sm">
+                <Markdown text={openAgent.resultText} />
+              </div>
+            ) : (
+              <TailView tail={(openAgent.activityLog ?? []).join('\n') || openAgent.status} />
+            ))}
         </div>
       )}
       {visible.map((task) => {
