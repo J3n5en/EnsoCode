@@ -34,12 +34,14 @@ export function computeStats(messages: ProjectedMessage[]): SessionStats {
   let ttftSteps = 0;
   let decodeMs = 0;
   let decodeTokens = 0;
-  // 工具间隙：上一 step 的完成时刻与它是否为轮尾（轮尾之后的间隙是用户等待，不计）
+  // 工具间隙基准：上一 step 的完成时刻；遇到 user 消息重置（轮尾后的间隙是用户等待，不计）
   let prevStepEndMs: number | null = null;
-  let prevWasTurnTail = false;
 
   for (const message of messages) {
-    if (message.role === 'user') turns += 1;
+    if (message.role === 'user') {
+      turns += 1;
+      prevStepEndMs = null;
+    }
     if (message.role !== 'assistant') continue;
     steps += 1;
     if (message.usage) {
@@ -61,12 +63,11 @@ export function computeStats(messages: ProjectedMessage[]): SessionStats {
         decodeMs += Math.max(0, completedMs - firstTokenMs);
         decodeTokens += out;
       }
-      // 与上一 step 的间隙 = 工具执行墙钟（跨轮尾不计）
-      if (prevStepEndMs !== null && !prevWasTurnTail) {
+      // 与上一 step 的间隙 = 工具执行墙钟
+      if (prevStepEndMs !== null) {
         toolMs += Math.max(0, stepStartMs - prevStepEndMs);
       }
       prevStepEndMs = completedMs ?? null;
-      prevWasTurnTail = Boolean(message.stopReason);
     }
   }
 

@@ -6,7 +6,13 @@ const assistant = (
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number },
   stopReason = 'stop',
   timing?: MessageTiming
-): ProjectedMessage => ({ role: 'assistant', content: [], stopReason, usage, ...(timing ? { timing } : {}) });
+): ProjectedMessage => ({
+  role: 'assistant',
+  content: [],
+  stopReason,
+  usage,
+  ...(timing ? { timing } : {}),
+});
 
 const user = (): ProjectedMessage => ({ role: 'user', content: [] });
 
@@ -31,7 +37,9 @@ describe('computeStats', () => {
   });
 
   it('从 timing 聚合 LLM/TTFT/吞吐；无 timing 时相关字段为 0/null', () => {
-    const noTiming = computeStats([assistant({ input: 1, output: 5, cacheRead: 0, cacheWrite: 0 })]);
+    const noTiming = computeStats([
+      assistant({ input: 1, output: 5, cacheRead: 0, cacheWrite: 0 }),
+    ]);
     expect(noTiming.llmMs).toBe(0);
     expect(noTiming.ttftAvgMs).toBeNull();
     expect(noTiming.tokensPerSecond).toBeNull();
@@ -79,7 +87,11 @@ describe('computeStats', () => {
 
   it('流式中（无 stopReason）的消息计入步数与用量', () => {
     const stats = computeStats([
-      { role: 'assistant', content: [], usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      {
+        role: 'assistant',
+        content: [],
+        usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 },
+      },
     ]);
     expect(stats.steps).toBe(1);
     expect(stats.outputTokens).toBe(2);

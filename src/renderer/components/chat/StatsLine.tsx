@@ -48,7 +48,9 @@ export function StatsLine({ messages }: StatsLineProps) {
   return (
     <div data-slot="stats-line" className="flex h-7 items-center justify-center px-1">
       {groups.length > 0 && (
-        <span className="truncate text-[11px] text-muted-foreground/70">{groups.join('  |  ')}</span>
+        <span className="truncate text-[11px] text-muted-foreground/70">
+          {groups.join('  |  ')}
+        </span>
       )}
     </div>
   );
