@@ -1,31 +1,13 @@
-import { parseDiffFromFile, preloadHighlighter } from '@pierre/diffs';
+import { parseDiffFromFile } from '@pierre/diffs';
 import { FileDiff } from '@pierre/diffs/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { EditBlock } from '@/stores/sessions/timeline';
-
-const THEMES = ['github-dark', 'github-light'] as const;
-/** 预热覆盖常见源码类型；未列出的语言回退纯文本 */
-const LANGS = [
-  'markdown',
-  'typescript',
-  'tsx',
-  'javascript',
-  'jsx',
-  'json',
-  'css',
-  'html',
-  'python',
-  'rust',
-  'go',
-  'shellscript',
-  'yaml',
-  'text',
-] as const;
+import { CODE_THEME, ensureHighlighter } from './codeHighlighter';
 
 /** 主题跟随系统深浅色，split 左右分栏 + 词级高亮，纯 JS 高亮器（免 WASM，适配 electron-vite） */
 const DIFF_OPTIONS = {
   themeType: 'system',
-  theme: { dark: 'github-dark', light: 'github-light' },
+  theme: CODE_THEME,
   diffStyle: 'split',
   lineDiffType: 'word',
   disableFileHeader: true,
@@ -59,14 +41,7 @@ export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }
 
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      preloadHighlighter({
-        themes: [...THEMES],
-        langs: [...LANGS],
-        preferredHighlighter: 'shiki-js',
-      }).catch(() => {}),
-      window.electronAPI.files.read(path),
-    ]).then(([, current]) => {
+    Promise.all([ensureHighlighter(), window.electronAPI.files.read(path)]).then(([, current]) => {
       if (!alive) return;
       const old = current != null ? reconstructOld(current, blocks) : null;
       setState(

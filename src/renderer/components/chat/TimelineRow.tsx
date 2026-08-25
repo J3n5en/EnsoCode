@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
+import { ReadFileView } from './ReadFileView';
+import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
 
 /**
@@ -168,9 +170,17 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         </div>
       )}
       {expanded && !hasDiff && item.output && (
-        <pre className="max-h-64 overflow-auto border-t border-border/60 px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
-          {item.output}
-        </pre>
+        <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
+          {item.name === 'bash' ? (
+            <TerminalOutput command={item.summary} output={item.output} />
+          ) : item.name === 'read' ? (
+            <ReadFileView path={item.summary} contents={item.output} />
+          ) : (
+            <pre className="px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+              {item.output}
+            </pre>
+          )}
+        </div>
       )}
     </div>
   );
