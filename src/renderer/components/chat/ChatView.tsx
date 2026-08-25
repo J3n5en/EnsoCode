@@ -5,6 +5,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { Composer } from './Composer';
+import { ContextMeter } from './ContextMeter';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
@@ -122,6 +123,7 @@ export function ChatView() {
                     useSessionsStore.getState().setThinking(conversation.id, level)
                   }
                 />
+                <ContextMeter messages={conversation.messages} />
               </>
             }
             onSend={(content, images) => {

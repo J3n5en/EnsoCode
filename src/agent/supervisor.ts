@@ -18,6 +18,7 @@ import type {
   SpawnModelConfig,
   ThinkingLevel,
 } from '@shared/types/agent';
+import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
 import { projectMessage } from './projection';
@@ -164,7 +165,7 @@ export class SessionSupervisor {
           thinkingLevelMap: { max: 'max' },
           input: ['text', 'image'],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 200_000,
+          contextWindow: MODEL_CONTEXT_WINDOW,
           // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
           maxTokens: 32_000,
         },

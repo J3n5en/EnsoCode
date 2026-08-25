@@ -160,6 +160,7 @@ export const zhTranslations: Record<string, string> = {
   'Collapse sidebar': '折叠侧边栏',
   'Expand sidebar': '展开侧边栏',
   '{{count}} turns': '{{count}} 轮',
+  'Context {{used}} / {{window}} tok': '上下文 {{used}} / {{window}} tok',
   '{{count}} tool calls': '{{count}} 个工具调用',
   'ran {{count}} commands': '跑了 {{count}} 条命令',
   'read {{count}} files': '读了 {{count}} 个文件',
