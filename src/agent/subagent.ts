@@ -71,7 +71,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         prompt?: string;
       };
       if (!prompt.trim()) throw new Error('task prompt is required');
-      const id = `agent-${++counter}`;
+      const id = `agent-${++counter}-${Date.now().toString(36)}`;
       const info: SubagentInfo = {
         id,
         description: description || prompt.slice(0, 40),

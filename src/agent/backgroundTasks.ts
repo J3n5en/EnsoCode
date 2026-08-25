@@ -77,7 +77,7 @@ export class BackgroundTaskManager {
           `Known task ids: [${[...this.tasks.keys()].join(', ')}]`
       );
     }
-    const taskId = `task-${++this.counter}`;
+    const taskId = `task-${++this.counter}-${Date.now().toString(36)}`;
     // detached：独立进程组，kill 时整棵树一起清
     const child = spawn(command, { shell: true, cwd, env: process.env, detached: true });
     const logPath = path.join(this.logDir, `${taskId}.log`);
