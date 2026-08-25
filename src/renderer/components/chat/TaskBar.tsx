@@ -74,11 +74,15 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
           </div>
           {openTask && <TailView tail={openTask.tail} />}
           {openAgent && (
-            <pre className="max-h-56 overflow-auto px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-              {openAgent.status === 'running'
-                ? `[${openAgent.steps} steps] ${openAgent.currentActivity}`
-                : openAgent.resultText || openAgent.status}
-            </pre>
+            <TailView
+              tail={
+                openAgent.status === 'running'
+                  ? (openAgent.activityLog ?? []).join('\n')
+                  : openAgent.resultText ||
+                    (openAgent.activityLog ?? []).join('\n') ||
+                    openAgent.status
+              }
+            />
           )}
         </div>
       )}

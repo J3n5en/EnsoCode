@@ -35,6 +35,14 @@ function lastAssistantText(session: AgentSession): string {
 
 let counter = 0;
 
+/** 活动历史追加,capped 防内存/IPC 膨胀 */
+function pushLog(info: SubagentInfo, line: string): void {
+  if (!info.activityLog) info.activityLog = [];
+  const log = info.activityLog;
+  log.push(line);
+  if (log.length > 200) log.splice(0, log.length - 200);
+}
+
 /**
  * task 工具：把独立子任务委派给同 worker 内的子会话（隔离上下文,可并行）。
  * 父会话 abort 经 signal 传播终止子会话。
@@ -112,6 +120,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         status: 'running',
         steps: 0,
         currentActivity: 'starting…',
+        activityLog: [],
         modelId: agentType?.model?.modelId ?? deps.modelId,
         ...(agentType ? { agentType: agentType.name } : {}),
         startedAt: Date.now(),
@@ -134,10 +143,26 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
             dirty = true;
           }
         } else if (event.type === 'message_end') {
-          const usage = (event.message as { usage?: { output?: number } }).usage;
-          if (typeof usage?.output === 'number') {
-            info.outputTokens = (info.outputTokens ?? 0) + usage.output;
+          const message = event.message as {
+            role?: string;
+            usage?: { output?: number };
+            content?: unknown;
+          };
+          if (typeof message.usage?.output === 'number') {
+            info.outputTokens = (info.outputTokens ?? 0) + message.usage.output;
             dirty = true;
+          }
+          // 子代理阶段性文本进历史（首行,截断）
+          if (message.role === 'assistant' && Array.isArray(message.content)) {
+            const text = message.content
+              .map((part) =>
+                (part as { type?: string; text?: string }).type === 'text'
+                  ? ((part as { text?: string }).text ?? '')
+                  : ''
+              )
+              .join('')
+              .trim();
+            if (text) pushLog(info, text.slice(0, 200));
           }
         } else if (event.type === 'tool_execution_start') {
           const args = event.args as Record<string, unknown> | undefined;
@@ -148,6 +173,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
                 ? args.path
                 : '';
           info.currentActivity = `${event.toolName} ${summary}`.trim().slice(0, 80);
+          pushLog(info, `→ ${event.toolName} ${summary}`.trim().slice(0, 160));
           dirty = true;
         }
       });

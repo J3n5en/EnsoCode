@@ -68,6 +68,8 @@ export interface SubagentInfo {
   steps: number;
   /** 当前动作摘要（工具名+参数 / writing…） */
   currentActivity: string;
+  /** 活动历史（工具调用与阶段性文本,capped） */
+  activityLog?: string[];
   /** 完成后的最终产出（markdown） */
   resultText?: string;
   /** 使用的模型 */
