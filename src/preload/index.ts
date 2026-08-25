@@ -30,6 +30,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_READ),
     write: (data: Record<string, unknown>): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE, data),
+    /** 只更新单个顶层键（多 store 并发写不互相覆盖）；value undefined 表示删除该键 */
+    writeKey: (name: string, value: unknown): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, name, value),
     /** 其他窗口修改设置后触发，用于多窗口同步 */
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();

@@ -10,21 +10,12 @@ export const electronStorage = {
     return null;
   },
 
+  // 按键写：主进程合并到最新全量,避免与其他 store/窗口的写互相覆盖
   setItem: async (name: string, value: string): Promise<void> => {
-    const existingData = (await window.electronAPI.settings.read()) || {};
-    const newData = {
-      ...(typeof existingData === 'object' ? existingData : {}),
-      [name]: JSON.parse(value),
-    };
-    await window.electronAPI.settings.write(newData);
+    await window.electronAPI.settings.writeKey(name, JSON.parse(value));
   },
 
   removeItem: async (name: string): Promise<void> => {
-    const existingData = (await window.electronAPI.settings.read()) || {};
-    if (typeof existingData === 'object' && existingData !== null) {
-      const newData = { ...existingData } as Record<string, unknown>;
-      delete newData[name];
-      await window.electronAPI.settings.write(newData);
-    }
+    await window.electronAPI.settings.writeKey(name, undefined);
   },
 };

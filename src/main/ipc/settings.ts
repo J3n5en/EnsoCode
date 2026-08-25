@@ -62,54 +62,68 @@ export function flushSettings(): boolean {
   return true;
 }
 
+/** 更新缓存、广播其他窗口、debounce 落盘（SETTINGS_WRITE / WRITE_KEY 共用） */
+function scheduleWrite(data: Record<string, unknown>, sender: Electron.WebContents): boolean {
+  try {
+    cachedSettings = data;
+    isDirty = true;
+
+    // 多窗口同步：广播给除发起窗口外的所有窗口
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.webContents !== sender && !win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED);
+      }
+    }
+
+    if (pendingWrite) {
+      clearTimeout(pendingWrite);
+    }
+
+    if (!maxWaitTimer) {
+      maxWaitTimer = setTimeout(() => {
+        if (cachedSettings !== null) {
+          isDirty = false;
+          atomicWriteSettings(cachedSettings);
+        }
+        maxWaitTimer = null;
+        pendingWrite = null;
+      }, MAX_WAIT_MS);
+    }
+
+    pendingWrite = setTimeout(() => {
+      if (maxWaitTimer) {
+        clearTimeout(maxWaitTimer);
+        maxWaitTimer = null;
+      }
+      if (cachedSettings !== null) {
+        isDirty = false;
+        atomicWriteSettings(cachedSettings);
+      }
+      pendingWrite = null;
+    }, DEBOUNCE_MS);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function registerSettingsHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_READ, async () => {
     return readSettings();
   });
 
+  // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE_KEY, async (event, name: string, value: unknown) => {
+    const current = readSettings() ?? {};
+    const next = { ...current };
+    if (value === undefined) delete next[name];
+    else next[name] = value;
+    return scheduleWrite(next, event.sender);
+  });
+
   ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE, async (event, data: unknown) => {
-    try {
-      cachedSettings = data as Record<string, unknown>;
-      isDirty = true;
-
-      // 多窗口同步：广播给除发起窗口外的所有窗口
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (win.webContents !== event.sender && !win.isDestroyed()) {
-          win.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED);
-        }
-      }
-
-      if (pendingWrite) {
-        clearTimeout(pendingWrite);
-      }
-
-      if (!maxWaitTimer) {
-        maxWaitTimer = setTimeout(() => {
-          if (cachedSettings !== null) {
-            isDirty = false;
-            atomicWriteSettings(cachedSettings);
-          }
-          maxWaitTimer = null;
-          pendingWrite = null;
-        }, MAX_WAIT_MS);
-      }
-
-      pendingWrite = setTimeout(() => {
-        if (maxWaitTimer) {
-          clearTimeout(maxWaitTimer);
-          maxWaitTimer = null;
-        }
-        if (cachedSettings !== null) {
-          isDirty = false;
-          atomicWriteSettings(cachedSettings);
-        }
-        pendingWrite = null;
-      }, DEBOUNCE_MS);
-
-      return true;
-    } catch {
-      return false;
-    }
+    return scheduleWrite(data as Record<string, unknown>, event.sender);
   });
 
   app.on('before-quit', () => {

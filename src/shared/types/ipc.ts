@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   // Settings persistence
   SETTINGS_READ: 'settings:read',
   SETTINGS_WRITE: 'settings:write',
+  SETTINGS_WRITE_KEY: 'settings:write-key',
   SETTINGS_CHANGED: 'settings:changed',
 
   // Window controls
