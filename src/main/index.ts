@@ -5,6 +5,11 @@ import { registerIpcHandlers } from './ipc';
 import { startAgentWorker } from './services/agentHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
+// 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();

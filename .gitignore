@@ -24,3 +24,6 @@ build/cer.p12
 
 # 设计文档不入库
 docs/plans/
+
+# Playwright MCP 输出
+.playwright-mcp/
