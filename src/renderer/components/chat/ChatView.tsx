@@ -115,6 +115,12 @@ export function ChatView() {
                     useSessionsStore.getState().setPreset(conversation.id, presetId)
                   }
                 />
+                <ApprovalModePicker
+                  mode={conversation.approvalMode ?? 'supervised'}
+                  onSelect={(mode) =>
+                    useSessionsStore.getState().setApprovalMode(conversation.id, mode)
+                  }
+                />
                 <ModelPicker
                   providers={enabledProviders}
                   providerId={provider?.id ?? ''}
@@ -130,12 +136,6 @@ export function ChatView() {
                   }
                   onThinkingChange={(level) =>
                     useSessionsStore.getState().setThinking(conversation.id, level)
-                  }
-                />
-                <ApprovalModePicker
-                  mode={conversation.approvalMode ?? 'supervised'}
-                  onSelect={(mode) =>
-                    useSessionsStore.getState().setApprovalMode(conversation.id, mode)
                   }
                 />
                 <ContextMeter messages={conversation.messages} />
