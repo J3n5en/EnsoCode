@@ -157,7 +157,9 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     message.content.forEach((part, partIndex) => {
       const key = `${messageIndex}-${partIndex}`;
       const isStreamingPart = isLastMessage && partIndex === lastActiveIndex;
-      const streaming = running && isStreamingPart && !message.stopReason;
+      // pi 流式中的消息 stopReason 是 "pending"（非空！），只有真正的终止原因才算完结
+      const settled = Boolean(message.stopReason) && message.stopReason !== 'pending';
+      const streaming = running && isStreamingPart && !settled;
       switch (part.type) {
         case 'text':
           // trim：纯空白正文（工具轮的空 text part）不产出——否则显示为幽灵空行
