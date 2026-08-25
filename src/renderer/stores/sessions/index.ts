@@ -262,10 +262,17 @@ export const useSessionsStore = create<SessionsState>()(
           const fallbackProvider = settings.providers.find(
             (p) => p.enabled && p.apiKey && p.models.some((m) => m.enabled !== false)
           );
-          const providerId = conversation.lastProviderId ?? fallbackProvider?.id;
-          const modelId =
-            conversation.lastModelId ??
-            fallbackProvider?.models.find((m) => m.enabled !== false)?.id;
+          // 上次用的 provider 可能已被删除/禁用，校验有效性，失效则回退默认（不报错）
+          const lastProvider = settings.providers.find(
+            (p) => p.id === conversation.lastProviderId && p.enabled && p.apiKey
+          );
+          const provider = lastProvider ?? fallbackProvider;
+          const providerId = provider?.id;
+          const lastModelValid =
+            lastProvider && lastProvider.models.some((m) => m.id === conversation.lastModelId);
+          const modelId = lastModelValid
+            ? conversation.lastModelId
+            : provider?.models.find((m) => m.enabled !== false)?.id;
           if (!providerId || !modelId) return;
           set((state) => patch(state, id, { spawning: true }));
           const result = await window.electronAPI.agent.spawn({
