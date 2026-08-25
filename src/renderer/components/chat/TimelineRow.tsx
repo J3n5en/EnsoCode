@@ -1,5 +1,5 @@
 import { Brain, Check, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { TimelineItem } from '@/stores/sessions/timeline';
@@ -111,26 +111,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const expandable = hasDiff || Boolean(item.output);
   // edit 的 diff 默认展开（「直接看到」），其余保持收起
   const [expanded, setExpanded] = useState(hasDiff);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // diff 滚出视口后自动折叠为单行；再次滚回保持折叠，需要时点开
-  useEffect(() => {
-    if (!hasDiff) return;
-    const el = ref.current;
-    if (!el) return;
-    const root = el.closest('[data-slot="scroll-area-viewport"]');
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) setExpanded(false);
-      },
-      { root, threshold: 0 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasDiff]);
 
   return (
-    <div ref={ref} className="rounded-lg border border-border/60 bg-muted/30">
+    <div className="rounded-lg border border-border/60 bg-muted/30">
       <button
         type="button"
         disabled={!expandable}
