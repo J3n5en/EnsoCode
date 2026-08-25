@@ -6,7 +6,8 @@ export type SettingsCategory =
   | 'providers'
   | 'skills'
   | 'mcp'
-  | 'instructions';
+  | 'instructions'
+  | 'presets';
 
 export const fontWeightOptions: { value: FontWeight; label: string }[] = [
   { value: 'normal', label: 'Normal' },

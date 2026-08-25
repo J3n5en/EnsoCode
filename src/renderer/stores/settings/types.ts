@@ -3,6 +3,7 @@ import type {
   InstructionEntry,
   McpServerEntry,
   ModelProvider,
+  Preset,
   Project,
   SkillEntry,
 } from '@shared/types';
@@ -46,6 +47,9 @@ export interface SettingsState {
   mcpServers: McpServerEntry[];
   instructions: InstructionEntry[];
 
+  // 注入组合预设（默认预设不入库，运行时合成）
+  presets: Preset[];
+
   // Projects（本地目录引用，作为会话工作目录）
   projects: Project[];
 
@@ -83,6 +87,11 @@ export interface SettingsState {
   addInstructions: (instructions: InstructionEntry[]) => number;
   updateInstruction: (id: string, updates: Partial<Omit<InstructionEntry, 'id'>>) => void;
   removeInstruction: (id: string) => void;
+
+  // Preset actions
+  addPreset: (preset: Omit<Preset, 'id'>) => Preset;
+  updatePreset: (id: string, updates: Partial<Omit<Preset, 'id'>>) => void;
+  removePreset: (id: string) => void;
 
   // Project actions
   /** 按目录路径去重；已存在时返回已有项 */

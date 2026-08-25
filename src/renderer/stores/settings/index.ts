@@ -77,6 +77,7 @@ const initialState = {
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
+  presets: [] as import('@shared/types').Preset[],
   projects: [] as import('@shared/types').Project[],
 };
 
@@ -249,6 +250,19 @@ export const useSettingsStore = create<SettingsState>()(
         void window.electronAPI.instructions.delete(id);
         set((state) => ({ instructions: state.instructions.filter((i) => i.id !== id) }));
       },
+
+      addPreset: (preset) => {
+        const created = { ...preset, id: crypto.randomUUID() };
+        set((state) => ({ presets: [...state.presets, created] }));
+        return created;
+      },
+
+      updatePreset: (id, updates) =>
+        set((state) => ({
+          presets: state.presets.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+        })),
+
+      removePreset: (id) => set((state) => ({ presets: state.presets.filter((p) => p.id !== id) })),
 
       // 按目录路径去重；已存在时返回已有项
       addProject: (path) => {

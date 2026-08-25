@@ -149,6 +149,19 @@ export const zhTranslations: Record<string, string> = {
   Reasoning: '推理',
   'Takes effect in a new conversation': '新对话生效',
   'Load local skills': '加载本机 skill',
+  // Presets
+  Presets: '预设',
+  'New preset': '新建预设',
+  'Edit preset': '编辑预设',
+  'Default preset': '默认预设',
+  Default: '默认',
+  None: '不注入',
+  'Injection bundles of skills, MCP servers and instruction files, chosen per conversation':
+    'skill / MCP / 指令文件的注入组合，按对话选用',
+  'Follows the enabled switches on the Skills / MCP / Instructions pages':
+    '跟随技能 / MCP / 指令文件页的启用开关',
+  '{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction':
+    '{{skills}} 个技能 · {{mcp}} 个 MCP · {{instruction}} 份指令',
   'Let the agent auto-discover skills under .agents/skills and .pi/skills':
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
 };
