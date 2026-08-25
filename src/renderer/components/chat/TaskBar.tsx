@@ -49,8 +49,27 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
     if (openTaskId === taskId) setOpenTaskId(null);
   };
 
+  const openTask = visible.find((task) => task.taskId === openTaskId) ?? null;
+
   return (
-    <div className="mb-1 flex flex-col gap-0.5">
+    <div className="relative mb-1 flex flex-col gap-0.5">
+      {openTask && (
+        <div className="absolute bottom-full left-0 right-0 z-30 mb-1.5 rounded-xl border bg-background/95 shadow-xl backdrop-blur-sm">
+          <div className="flex items-center gap-2 border-b px-3 py-1.5 text-xs">
+            <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+              {openTask.command}
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpenTaskId(null)}
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <TailView tail={openTask.tail} />
+        </div>
+      )}
       {visible.map((task) => {
         const open = openTaskId === task.taskId;
         return (
@@ -93,7 +112,6 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
                 </button>
               )}
             </div>
-            {open && <TailView tail={task.tail} />}
           </div>
         );
       })}

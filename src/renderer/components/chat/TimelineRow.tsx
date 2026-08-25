@@ -222,18 +222,47 @@ function ThinkingRow({
   );
 }
 
-/** 后台任务完成事件：分隔线嵌字（极轻量），悬停看全文 */
+/** 后台任务完成事件：分隔线嵌字；点击展开详情与完整日志 */
 function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note' }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [log, setLog] = useState<string | null>(null);
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
   const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
+  const logPath = /read (\/[^\s]+\.log) for the complete log/.exec(item.detail)?.[1] ?? null;
+
+  useEffect(() => {
+    if (!expanded || !logPath || log !== null) return;
+    void window.electronAPI.files.read(logPath).then((content) => {
+      setLog(content ?? '(log unavailable)');
+    });
+  }, [expanded, logPath, log]);
+
   return (
-    <div className="flex items-center gap-3" title={item.detail}>
-      <span className="h-px flex-1 bg-border" />
-      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Check className="h-3 w-3 text-green-600 dark:text-green-500" />
-        {text}
-      </span>
-      <span className="h-px flex-1 bg-border" />
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3"
+        title={item.detail}
+      >
+        <span className="h-px flex-1 bg-border" />
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+          <Check className="h-3 w-3 text-green-600 dark:text-green-500" />
+          {text}
+          <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </button>
+      {expanded && (
+        <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/20">
+          <pre className="border-b border-border/60 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+            {item.detail}
+          </pre>
+          <pre className="max-h-64 overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+            {logPath ? (log ?? 'Loading…') : '(no log available)'}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
