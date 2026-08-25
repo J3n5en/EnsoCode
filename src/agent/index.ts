@@ -21,4 +21,11 @@ port.on('message', (event) => {
   if (command) supervisor.handleCommand(command);
 });
 
+// utilityProcess.kill() 发 SIGTERM：退出前断开 MCP 连接，别留孤儿子进程
+const shutdown = () => {
+  void supervisor.shutdown().finally(() => process.exit(0));
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
 port.postMessage({ type: 'ready' });

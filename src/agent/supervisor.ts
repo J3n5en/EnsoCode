@@ -9,6 +9,7 @@ import {
 import type {
   AgentCommand,
   AgentWorkerEvent,
+  McpServerSpawnConfig,
   NodeStatus,
   ProjectedMessage,
   SessionSnapshot,
@@ -17,6 +18,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { OperationGate } from './gate';
+import { McpManager } from './mcp';
 import { projectMessage } from './projection';
 
 interface ManagedSession {
@@ -44,6 +46,7 @@ export interface SupervisorOptions {
 export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly gate = new OperationGate();
+  private readonly mcp = new McpManager();
   private runtimePromise: Promise<ModelRuntime> | null = null;
 
   constructor(private readonly options: SupervisorOptions) {}
@@ -85,7 +88,8 @@ export class SessionSupervisor {
           command.reasoningEnabled ?? false,
           command.thinkingLevel,
           command.loadLocalSkills,
-          command.skillPaths
+          command.skillPaths,
+          command.mcpServers
         );
         return;
       case 'prompt': {
@@ -134,7 +138,8 @@ export class SessionSupervisor {
     reasoningEnabled = false,
     thinkingLevel?: ThinkingLevel,
     loadLocalSkills = true,
-    skillPaths: string[] = []
+    skillPaths: string[] = [],
+    mcpServers: McpServerSpawnConfig[] = []
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const runtime = await this.getRuntime();
@@ -185,6 +190,9 @@ export class SessionSupervisor {
       await resourceLoader.reload();
     }
 
+    // MCP 工具：worker 级共享连接，单 server 失败降级跳过（不阻塞 spawn）
+    const customTools = mcpServers.length > 0 ? await this.mcp.toolsFor(mcpServers) : [];
+
     const { session } = await createAgentSession({
       cwd,
       agentDir: this.options.agentDir,
@@ -192,6 +200,7 @@ export class SessionSupervisor {
       model: piModel,
       thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
       resourceLoader,
+      ...(customTools.length > 0 ? { customTools } : {}),
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
@@ -375,6 +384,11 @@ export class SessionSupervisor {
     const managed = this.sessions.get(sessionId);
     if (!managed) throw new Error(`unknown session: ${sessionId}`);
     return managed;
+  }
+
+  /** worker 退出前的清理：断开 MCP 连接（stdio 子进程随之终止） */
+  shutdown(): Promise<void> {
+    return this.mcp.closeAll();
   }
 
   private getRuntime(): Promise<ModelRuntime> {
