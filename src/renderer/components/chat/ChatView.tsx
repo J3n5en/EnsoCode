@@ -26,15 +26,15 @@ export function ChatView() {
     () => providers.filter((provider) => provider.enabled && provider.apiKey),
     [providers]
   );
-  const [providerId, setProviderId] = useState('');
-  const provider = enabledProviders.find((p) => p.id === providerId) ?? enabledProviders[0];
+  // 模型选择读写会话记忆（lastProviderId/lastModelId,持久化）,重启/切会话不丢
+  const provider =
+    enabledProviders.find((p) => p.id === conversation?.lastProviderId) ?? enabledProviders[0];
   const enabledModels = useMemo(
     () => (provider?.models ?? []).filter((model) => model.enabled !== false),
     [provider]
   );
-  const [modelId, setModelId] = useState('');
-  const effectiveModelId = enabledModels.some((m) => m.id === modelId)
-    ? modelId
+  const effectiveModelId = enabledModels.some((m) => m.id === conversation?.lastModelId)
+    ? (conversation?.lastModelId ?? '')
     : (enabledModels[0]?.id ?? '');
 
   const project = projects.find((p) => p.id === conversation?.projectId);
@@ -134,10 +134,9 @@ export function ChatView() {
                   modelId={effectiveModelId}
                   reasoningEnabled={conversation.reasoningEnabled ?? false}
                   thinkingLevel={conversation.thinkingLevel ?? 'medium'}
-                  onSelect={(pid, mid) => {
-                    setProviderId(pid);
-                    setModelId(mid);
-                  }}
+                  onSelect={(pid, mid) =>
+                    useSessionsStore.getState().setModel(conversation.id, pid, mid)
+                  }
                   onReasoningChange={(enabled) =>
                     useSessionsStore.getState().setReasoning(conversation.id, enabled)
                   }

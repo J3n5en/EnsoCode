@@ -58,6 +58,8 @@ interface SessionsState {
   setThinking(id: string, level: ThinkingLevel): void;
   /** 设置注入预设；下次 spawn 生效 */
   setPreset(id: string, presetId: string): void;
+  /** 记忆会话选用的模型（选择器读写;send/resume 沿用） */
+  setModel(id: string, providerId: string, modelId: string): void;
   /** 设置审批档位；已 spawn 的会话即时下发 */
   setApprovalMode(id: string, mode: ApprovalMode): void;
   abort(): Promise<void>;
@@ -380,6 +382,10 @@ export const useSessionsStore = create<SessionsState>()(
           if (!get().conversations[id]) return;
           set((state) => patch(state, id, { presetId }));
         },
+        setModel(id, providerId, modelId) {
+          set((state) => patch(state, id, { lastProviderId: providerId, lastModelId: modelId }));
+        },
+
         setApprovalMode(id, mode) {
           set((state) => patch(state, id, { approvalMode: mode }));
           const conversation = get().conversations[id];
