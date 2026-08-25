@@ -1,5 +1,18 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { CodeBlock } from './CodeBlock';
+
+/**
+ * 解析代码围栏的 info 串。除了纯语言名（```ts），agent 常输出
+ * "8:8:README.md" 这类「行号:行号:文件名」格式——取文件扩展名当语言。
+ */
+function parseFenceLang(info?: string): string | undefined {
+  if (!info) return undefined;
+  const last = info.split(':').at(-1) ?? info;
+  const ext = /\.(\w+)$/.exec(last)?.[1];
+  if (ext) return ext;
+  return /^[\w-]+$/.test(info) ? info : undefined;
+}
 
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
 export function Markdown({ text }: { text: string }) {
@@ -30,17 +43,22 @@ export function Markdown({ text }: { text: string }) {
             {children}
           </blockquote>
         ),
-        code: ({ children, className }) =>
-          className ? (
-            <code className={`${className} font-mono text-xs`}>{children}</code>
-          ) : (
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{children}</code>
-          ),
-        pre: ({ children }) => (
-          <pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 text-xs leading-relaxed">
-            {children}
-          </pre>
+        // 行内 code 的 pill 样式；块级 code 由下面的 pre 渲染器接管（用 hast node 取原文）
+        code: ({ children }) => (
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{children}</code>
         ),
+        // 块级代码交给 shiki 高亮（含单行缩进块）；语言取自 ```lang 标记，无标记按纯文本
+        pre: ({ node }) => {
+          const codeNode = node?.children?.[0];
+          const props =
+            codeNode && 'properties' in codeNode
+              ? (codeNode.properties as { className?: string[] })
+              : undefined;
+          const info = /language-(\S+)/.exec(props?.className?.join(' ') ?? '')?.[1];
+          const textNode = codeNode && 'children' in codeNode ? codeNode.children?.[0] : undefined;
+          const raw = textNode && 'value' in textNode ? String(textNode.value) : '';
+          return <CodeBlock code={raw.replace(/\n$/, '')} language={parseFenceLang(info)} />;
+        },
         table: ({ children }) => (
           <div className="my-2 overflow-x-auto">
             <table className="w-full border-collapse text-xs">{children}</table>

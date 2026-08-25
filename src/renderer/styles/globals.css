@@ -208,3 +208,10 @@
     box-shadow: none;
   }
 }
+
+/* shiki dual-theme 代码块：深色模式切到 --shiki-dark 变量 */
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
