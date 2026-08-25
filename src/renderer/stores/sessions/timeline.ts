@@ -129,7 +129,8 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
       const streaming = running && isLastPart && !message.stopReason;
       switch (part.type) {
         case 'text':
-          if (part.text)
+          // trim：纯空白正文（工具轮的空 text part）不产出——否则显示为幽灵空行
+          if (part.text.trim())
             items.push({
               kind: 'text',
               key,
