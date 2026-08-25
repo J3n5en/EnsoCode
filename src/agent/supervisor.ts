@@ -294,21 +294,20 @@ export class SessionSupervisor {
         }
       }
     );
-    // 工具注入：bash/edit/write 顶替内置并包审批门（edit 叠在宽容版之上），
-    // MCP 工具同门，todo 与只读内置工具免审
+    // 工具注入：noTools:'builtin' 下 read 也需重注册（免审）；bash 叠 background 能力
+    // 后包审批门（审批先问，批准后分流后台），edit 叠宽容版，MCP 同门，todo/task_* 免审
+    type Def = Parameters<typeof withApproval>[2];
     const customTools = [
+      createReadToolDefinition(cwd) as unknown as Def,
       withApproval(
         gate,
         'command',
-        createBashToolDefinition(cwd) as unknown as Parameters<typeof withApproval>[2]
+        withBackground(createBashToolDefinition(cwd) as unknown as Def, this.bgTasks, sessionId, cwd)
       ),
       withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
-      withApproval(
-        gate,
-        'file-write',
-        createWriteToolDefinition(cwd) as unknown as Parameters<typeof withApproval>[2]
-      ),
+      withApproval(gate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
       createTodoTool(),
+      ...createTaskTools(this.bgTasks),
       ...mcpTools.map((tool) => withApproval(gate, 'mcp', tool)),
     ];
 
