@@ -37,6 +37,12 @@ export function startAgentWorker(): void {
   });
   worker = child;
 
+  // 进程就绪即预热 MCP 连接（stdio 子进程冷启动是 spawn 延迟大头，提前到 app 启动时段）
+  child.once('spawn', () => {
+    const servers = enabledMcpServers();
+    if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
+  });
+
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
     if (event) onEvent?.(event);

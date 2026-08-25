@@ -1,4 +1,4 @@
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, LoaderCircle } from 'lucide-react';
 import type { ReactNode, Ref } from 'react';
 import {
   Component,
@@ -115,6 +115,12 @@ export function MessageTimeline({
         <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
           <p className="text-lg font-medium">{emptyTitle}</p>
           <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
+        </div>
+      ) : items.length === 0 ? (
+        // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
+        <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
+          <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
         </div>
       ) : (
         <Virtuoso

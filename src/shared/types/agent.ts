@@ -49,7 +49,9 @@ export type AgentCommand =
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
   | { type: 'set-reasoning'; sessionId: string; enabled: boolean; level?: ThinkingLevel }
   | { type: 'abort'; sessionId: string }
-  | { type: 'snapshot' };
+  | { type: 'snapshot' }
+  /** 预热 MCP 连接（worker 启动时下发；连接进缓存，spawn 即取即用） */
+  | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
 
 /** 随消息附带的图片（base64） */
 export interface AttachedImage {
@@ -239,6 +241,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return null;
     case 'snapshot':
       return { type: 'snapshot' };
+    case 'warm-mcp':
+      return Array.isArray(value.servers) ? (value as unknown as AgentCommand) : null;
     default:
       return null;
   }

@@ -61,6 +61,11 @@ export class SessionSupervisor {
       this.options.emit({ type: 'snapshot', sessions: this.snapshotSessions() });
       return;
     }
+    if (command.type === 'warm-mcp') {
+      // 预热：连接进 McpManager 缓存，spawn 时即取即用；失败静默（spawn 会重试）
+      void this.mcp.toolsFor(command.servers);
+      return;
+    }
     const sessionId = command.sessionId;
     void this.gate
       .run(sessionId, () => this.execute(command))
@@ -192,15 +197,15 @@ export class SessionSupervisor {
         noSkills: loadLocalSkills === false,
         ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
       });
-      await resourceLoader.reload();
     }
 
-    // 工具注入：todo（会话任务清单，状态存 toolResult.details）+ MCP（worker 级共享连接，
-    // 单 server 失败降级跳过，不阻塞 spawn）
-    const customTools = [
-      createTodoTool(),
-      ...(mcpServers.length > 0 ? await this.mcp.toolsFor(mcpServers) : []),
-    ];
+    // skill 扫盘与 MCP 连接互不依赖，并行降低 spawn 延迟（MCP 预热命中缓存时近乎零耗时）
+    const [, mcpTools] = await Promise.all([
+      resourceLoader?.reload(),
+      mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers) : Promise.resolve([]),
+    ]);
+    // 工具注入：todo（会话任务清单，状态存 toolResult.details）+ MCP
+    const customTools = [createTodoTool(), ...mcpTools];
 
     const { session } = await createAgentSession({
       cwd,
