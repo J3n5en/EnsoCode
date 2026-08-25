@@ -19,10 +19,10 @@ export function SettingsContent() {
     { id: 'general', icon: Settings, label: t('General') },
     { id: 'appearance', icon: Palette, label: t('Appearance') },
     { id: 'providers', icon: Server, label: t('Model Providers') },
+    { id: 'presets', icon: Layers, label: t('Presets') },
     { id: 'skills', icon: Sparkles, label: t('Skills') },
     { id: 'mcp', icon: Plug, label: t('MCP Servers') },
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
-    { id: 'presets', icon: Layers, label: t('Presets') },
   ];
 
   return (

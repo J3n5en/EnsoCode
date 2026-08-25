@@ -29,7 +29,7 @@ export const zhTranslations: Record<string, string> = {
   'Terminal appearance': '终端外观',
   'Theme mode': '主题模式',
   // Model providers
-  'Model Providers': '模型服务',
+  'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',
   'Scan providers configured in local AI apps and import them.':
