@@ -136,6 +136,9 @@ export class BackgroundTaskManager {
     task.info.exitCode = exitCode;
     task.info.tail = task.output.slice(-TAIL_LIMIT);
     task.logStream?.end();
+    // 有阻塞等待者 = 结束态将经工具返回值送达模型（blockWaited 语义），无需再通知
+    const hadWaiters = task.waiters.length > 0;
+    if (hadWaiters) task.consumed = true;
     for (const wake of task.waiters.splice(0)) wake();
     this.events.onOutput(task.sessionId, task.info.taskId, task.info.tail, status);
     this.events.onEnded(task.sessionId, task.info.taskId, status, exitCode);
