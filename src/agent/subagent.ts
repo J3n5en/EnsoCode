@@ -129,7 +129,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         if (signal?.aborted) throw new Error('Subagent aborted');
         return {
           content: [{ type: 'text', text: result || '(subagent produced no output)' }],
-          details: undefined,
+          details: { modelId: info.modelId, outputTokens: info.outputTokens, steps: info.steps },
         };
       } catch (error) {
         info.status = 'failed';

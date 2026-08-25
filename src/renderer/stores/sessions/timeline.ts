@@ -37,6 +37,8 @@ export type TimelineItem =
       todos: TodoItem[] | null;
       /** 工具执行耗时（完成后显示）；未知为 null */
       durationMs: number | null;
+      /** subagent 工具的执行元数据（模型/token/步数）；非 subagent 为 null */
+      agentMeta: { modelId?: string; outputTokens?: number; steps?: number } | null;
     }
   | {
       kind: 'tool-group';
@@ -133,7 +135,13 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
 export function buildTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
   const results = new Map<
     string,
-    { output: string; isError: boolean; todos: TodoItem[] | null; durationMs: number | null }
+    {
+      output: string;
+      isError: boolean;
+      todos: TodoItem[] | null;
+      durationMs: number | null;
+      agentMeta: { modelId?: string; outputTokens?: number; steps?: number } | null;
+    }
   >();
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolCallId) {
@@ -142,6 +150,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
         isError: message.isError === true,
         todos: message.todos ?? null,
         durationMs: message.toolDurationMs ?? null,
+        agentMeta: message.subagentMeta ?? null,
       });
     }
   }
@@ -222,6 +231,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             edits: extractEdits(part.name, part.arguments),
             todos: result?.todos ?? null,
             durationMs: result?.durationMs ?? null,
+            agentMeta: result?.agentMeta ?? null,
           });
           return;
         }

@@ -38,6 +38,14 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     const todos = projectTodos(value.details);
     if (todos) projected.todos = todos;
   }
+  if (value.role === 'toolResult' && value.toolName === 'subagent' && isRecord(value.details)) {
+    const details = value.details as { modelId?: unknown; outputTokens?: unknown; steps?: unknown };
+    projected.subagentMeta = {
+      ...(typeof details.modelId === 'string' ? { modelId: details.modelId } : {}),
+      ...(typeof details.outputTokens === 'number' ? { outputTokens: details.outputTokens } : {}),
+      ...(typeof details.steps === 'number' ? { steps: details.steps } : {}),
+    };
+  }
   return projected;
 }
 

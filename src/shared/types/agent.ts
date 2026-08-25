@@ -179,6 +179,8 @@ export interface ProjectedMessage {
   todos?: TodoItem[];
   /** 工具执行耗时（仅 toolResult 消息带；worker 按 tool_execution_start/end 打点） */
   toolDurationMs?: number;
+  /** subagent 工具 toolResult 的执行元数据 */
+  subagentMeta?: { modelId?: string; outputTokens?: number; steps?: number };
 }
 
 export interface SessionSnapshot {

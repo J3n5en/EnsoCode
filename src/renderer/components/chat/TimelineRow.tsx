@@ -66,7 +66,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.output === b.output &&
         a.edits === b.edits &&
         a.todos === b.todos &&
-        a.durationMs === b.durationMs
+        a.durationMs === b.durationMs &&
+        a.agentMeta === b.agentMeta
       );
     case 'tool-group':
       return (
@@ -341,9 +342,15 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         {item.state === 'running' ? (
           <RunningElapsed />
         ) : (
-          item.durationMs !== null && (
+          (item.agentMeta || item.durationMs !== null) && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
-              {formatDuration(item.durationMs)}
+              {[
+                item.agentMeta?.modelId,
+                item.agentMeta?.outputTokens ? `${item.agentMeta.outputTokens} tok` : null,
+                item.durationMs !== null ? formatDuration(item.durationMs) : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           )
         )}
