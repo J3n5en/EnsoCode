@@ -46,6 +46,7 @@ export const IPC_CHANNELS = {
 
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
+  FILES_READ: 'files:read',
 
   // External session import
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',

@@ -87,6 +87,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
     /** 取粘贴/拖入的 File 对象的磁盘路径（渲染层拿不到，需经 webUtils） */
     pathForFile: (file: File): string => webUtils.getPathForFile(file),
+    /** 读取文件内容（edit diff 还原上下文/行号用）；失败返回 null */
+    read: (filePath: string): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, filePath),
   },
 
   sessionImport: {

@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AgentActionResult, AgentSpawnRequest, ThinkingLevel } from '@shared/types/agent';
@@ -122,6 +123,18 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.FILES_SEARCH, (_event, root: unknown, query: unknown) => {
     if (!isNonEmptyString(root) || typeof query !== 'string') return [];
     return searchFiles(root, query);
+  });
+
+  // 读取单个文件内容（edit diff 用于还原上下文与行号）。超大文件返回 null 兜底
+  ipcMain.handle(IPC_CHANNELS.FILES_READ, (_event, filePath: unknown): string | null => {
+    if (!isNonEmptyString(filePath)) return null;
+    try {
+      const stat = statSync(filePath);
+      if (!stat.isFile() || stat.size > 2_000_000) return null;
+      return readFileSync(filePath, 'utf8');
+    } catch {
+      return null;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_SCAN_EXTERNAL, (_event, projectPath: unknown) => {

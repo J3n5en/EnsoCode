@@ -29,34 +29,58 @@ const DIFF_OPTIONS = {
   diffStyle: 'unified',
   lineDiffType: 'word',
   disableFileHeader: true,
-  disableLineNumbers: true,
-  overflow: 'wrap',
   preferredHighlighter: 'shiki-js',
 } as const;
 
-/** 用 @pierre/diffs 渲染 edit 工具的替换块（每块一段 old→new 迷你文件 diff） */
+/**
+ * 从当前文件内容反向套用 edits 还原编辑前内容。
+ * 逆序 undo（newText→oldText）；任一块在当前内容里找不到就放弃（可能被后续编辑改动过）。
+ */
+function reconstructOld(current: string, blocks: EditBlock[]): string | null {
+  let text = current;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const { oldText, newText } = blocks[i];
+    const idx = text.indexOf(newText);
+    if (idx === -1) return null;
+    text = text.slice(0, idx) + oldText + text.slice(idx + newText.length);
+  }
+  return text;
+}
+
+type Loaded =
+  | { kind: 'loading' }
+  | { kind: 'full'; oldText: string; newText: string }
+  | { kind: 'blocks' };
+
+/** 用 @pierre/diffs 渲染 edit 工具的改动：优先读实际文件给出真实行号+上下文，否则回退片段 diff */
 export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }) {
   const name = path.split('/').pop() || 'file';
-  const [ready, setReady] = useState(false);
+  const [state, setState] = useState<Loaded>({ kind: 'loading' });
 
-  // Shiki 高亮器一次性预热；失败也放行（回退无高亮）
   useEffect(() => {
     let alive = true;
-    preloadHighlighter({
-      themes: [...THEMES],
-      langs: [...LANGS],
-      preferredHighlighter: 'shiki-js',
-    })
-      .catch(() => {})
-      .finally(() => {
-        if (alive) setReady(true);
-      });
+    Promise.all([
+      preloadHighlighter({
+        themes: [...THEMES],
+        langs: [...LANGS],
+        preferredHighlighter: 'shiki-js',
+      }).catch(() => {}),
+      window.electronAPI.files.read(path),
+    ]).then(([, current]) => {
+      if (!alive) return;
+      const old = current != null ? reconstructOld(current, blocks) : null;
+      setState(
+        old != null && current != null
+          ? { kind: 'full', oldText: old, newText: current }
+          : { kind: 'blocks' }
+      );
+    });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [path, blocks]);
 
-  if (!ready) {
+  if (state.kind === 'loading') {
     return (
       <div className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
         加载 diff…
@@ -66,18 +90,23 @@ export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }
 
   return (
     <div className="border-t border-border/60 text-xs">
-      {blocks.map((block, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: edits 随消息整体快照替换，无独立 id
-        <DiffOne key={index} name={name} block={block} />
-      ))}
+      {state.kind === 'full' ? (
+        <DiffView name={name} oldText={state.oldText} newText={state.newText} />
+      ) : (
+        // 读不到文件时的兜底：每个替换块单独一段片段 diff（无真实行号/上下文）
+        blocks.map((block, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: edits 随消息整体快照替换，无独立 id
+          <DiffView key={index} name={name} oldText={block.oldText} newText={block.newText} />
+        ))
+      )}
     </div>
   );
 }
 
-function DiffOne({ name, block }: { name: string; block: EditBlock }) {
+function DiffView({ name, oldText, newText }: { name: string; oldText: string; newText: string }) {
   const fileDiff = useMemo(
-    () => parseDiffFromFile({ name, contents: block.oldText }, { name, contents: block.newText }),
-    [name, block]
+    () => parseDiffFromFile({ name, contents: oldText }, { name, contents: newText }),
+    [name, oldText, newText]
   );
   return <FileDiff fileDiff={fileDiff} disableWorkerPool options={DIFF_OPTIONS} />;
 }
