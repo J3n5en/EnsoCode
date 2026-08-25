@@ -152,6 +152,7 @@ export class SessionSupervisor {
     mcpServers: McpServerSpawnConfig[] = []
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
+    const spawnStart = Date.now();
     const runtime = await this.getRuntime();
     const providerId = `enso-${model.api}-${model.baseUrl}`;
     // 注册基础模型恒 reasoning:true（放开全部档位能力）。开关/adaptive 由 per-session
@@ -199,11 +200,14 @@ export class SessionSupervisor {
       });
     }
 
-    // skill 扫盘与 MCP 连接互不依赖，并行降低 spawn 延迟（MCP 预热命中缓存时近乎零耗时）
+    // skill 扫盘与 MCP 连接互不依赖，并行降低 spawn 延迟。MCP 给 3s 预算：
+    // 预热命中缓存时近乎零耗时；慢/坏 server 本次不注入，不拖死 spawn
+    const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
       resourceLoader?.reload(),
-      mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers) : Promise.resolve([]),
+      mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
+    const toolsMs = Date.now() - toolsStart;
     // 工具注入：todo（会话任务清单，状态存 toolResult.details）+ MCP
     const customTools = [createTodoTool(), ...mcpTools];
 
@@ -219,6 +223,10 @@ export class SessionSupervisor {
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
     });
+    console.log(
+      `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
+        ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
+    );
 
     const managed: ManagedSession = {
       session,

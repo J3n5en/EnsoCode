@@ -40,9 +40,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export class McpManager {
   private readonly connections = new Map<string, Promise<Connection | null>>();
 
-  /** 为一组 server 配置解析工具列表；单个 server 失败只跳过并留痕，不抛 */
-  async toolsFor(servers: McpServerSpawnConfig[]): Promise<ToolDefinition[]> {
-    const results = await Promise.all(servers.map((server) => this.connectionFor(server)));
+  /**
+   * 为一组 server 配置解析工具列表；单个 server 失败只跳过并留痕，不抛。
+   * budgetMs：spawn 场景的等待预算——超时的 server 本次不注入，连接在后台继续
+   * （缓存保留），下次 spawn 即命中；不给则等到连接结束（预热场景）。
+   */
+  async toolsFor(servers: McpServerSpawnConfig[], budgetMs?: number): Promise<ToolDefinition[]> {
+    const results = await Promise.all(
+      servers.map((server) => {
+        const pending = this.connectionFor(server);
+        if (budgetMs === undefined) return pending;
+        return Promise.race([
+          pending,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
+        ]);
+      })
+    );
     return results.flatMap((connection) => connection?.tools ?? []);
   }
 

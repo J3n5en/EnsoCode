@@ -100,6 +100,7 @@ export const useSessionsStore = create<SessionsState>()(
                 conversations[id] = {
                   ...conversation,
                   started: true,
+                  spawning: false,
                   status: snapshot.status,
                   messages: snapshot.messages,
                   commands: snapshot.commands,
@@ -136,8 +137,9 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = state.conversations[id];
           if (!conversation) return state;
           const next = applyAgentEvent(conversation, id, event);
-          if (next === conversation) return state;
-          return patch(state, id, next);
+          if (next === conversation && !conversation.spawning) return state;
+          // 该会话的首个 worker 事件即 spawn 完成信号，清掉 spawning（resume 的 loading 依赖它）
+          return patch(state, id, { ...next, spawning: false });
         });
       });
 
@@ -289,8 +291,9 @@ export const useSessionsStore = create<SessionsState>()(
           });
           set((state) =>
             result.ok
-              ? patch(state, id, {
-                  spawning: false,
+              ? // spawning 不在此清除——worker 侧 spawn 要跑几秒到几十秒（runtime/skill/MCP/回放），
+                // IPC 只是命令入队的同步 ack；等该会话首个 worker 事件（status/snapshot）到达再清
+                patch(state, id, {
                   started: true,
                   lastProviderId: providerId,
                   lastModelId: modelId,
