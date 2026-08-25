@@ -31,26 +31,9 @@ export function Onboarding() {
   const next = () => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1));
   const prev = () => setStepIndex((i) => Math.max(0, i - 1));
 
-  // 批量启用/禁用某类条目（enabled 无副作用，直接 setState）
-  const setAllProviders = (enabled: boolean) =>
-    useSettingsStore.setState((s) => ({ providers: s.providers.map((p) => ({ ...p, enabled })) }));
-  const setAllSkills = (enabled: boolean) =>
-    useSettingsStore.setState((s) => ({ skills: s.skills.map((x) => ({ ...x, enabled })) }));
-  const setAllMcp = (enabled: boolean) =>
-    useSettingsStore.setState((s) => ({
-      mcpServers: s.mcpServers.map((x) => ({ ...x, enabled })),
-    }));
-
   const importStep: Record<
     'provider' | 'skill' | 'mcp' | 'instruction',
-    {
-      icon: React.ElementType;
-      title: string;
-      desc: string;
-      count: number;
-      onImport: () => void;
-      onSetAll?: (enabled: boolean) => void;
-    }
+    { icon: React.ElementType; title: string; desc: string; count: number; onImport: () => void }
   > = {
     provider: {
       icon: Server,
@@ -58,7 +41,6 @@ export function Onboarding() {
       desc: t('Import model API providers from local AI apps to start chatting'),
       count: providers.length,
       onImport: () => setProviderOpen(true),
-      onSetAll: setAllProviders,
     },
     skill: {
       icon: Sparkles,
@@ -66,7 +48,6 @@ export function Onboarding() {
       desc: t('Import skills from Claude Code, Codex or Cursor'),
       count: skills.length,
       onImport: () => setImportKind('skill'),
-      onSetAll: setAllSkills,
     },
     mcp: {
       icon: Plug,
@@ -74,7 +55,6 @@ export function Onboarding() {
       desc: t('Import MCP servers configured in local AI apps'),
       count: mcpServers.length,
       onImport: () => setImportKind('mcp'),
-      onSetAll: setAllMcp,
     },
     instruction: {
       icon: Layers,
@@ -82,7 +62,6 @@ export function Onboarding() {
       desc: t('Import global instruction files configured in local AI tools'),
       count: instructions.length,
       onImport: () => setImportKind('instruction'),
-      // 指令单主源（同一时间仅一份生效），批量启用无意义，不提供
     },
   };
 
@@ -201,7 +180,6 @@ function ImportStepView({
   desc,
   count,
   onImport,
-  onSetAll,
   importedLabel,
   importLabel,
 }: {
@@ -210,11 +188,9 @@ function ImportStepView({
   desc: string;
   count: number;
   onImport: () => void;
-  onSetAll?: (enabled: boolean) => void;
   importedLabel: string;
   importLabel: string;
 }) {
-  const { t } = useI18n();
   return (
     <div className="flex flex-col items-center gap-3 py-6 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -225,21 +201,7 @@ function ImportStepView({
       <Button variant="outline" size="sm" onClick={onImport} className="mt-1">
         {importLabel}
       </Button>
-      {count > 0 && (
-        <div className="flex flex-col items-center gap-1.5">
-          <p className="text-xs text-primary">{importedLabel}</p>
-          {onSetAll && (
-            <div className="flex gap-2">
-              <Button variant="ghost" size="sm" onClick={() => onSetAll(true)}>
-                {t('Enable all')}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => onSetAll(false)}>
-                {t('Disable all')}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      {count > 0 && <p className="text-xs text-primary">{importedLabel}</p>}
     </div>
   );
 }

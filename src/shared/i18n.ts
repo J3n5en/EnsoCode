@@ -89,6 +89,8 @@ export const zhTranslations: Record<string, string> = {
   'No models match': '没有匹配的模型',
   'Enable all': '全部启用',
   'Disable all': '全部禁用',
+  'Select all': '全选',
+  'Deselect all': '全不选',
   '{{enabled}}/{{total}} enabled': '已启用 {{enabled}}/{{total}}',
   'Fetch models': '拉取模型',
   'Test connection': '测试连接',

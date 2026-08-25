@@ -250,10 +250,22 @@ export function LocalAssetImportDialog({ kind, open, onOpenChange }: LocalAssetI
             </DialogPanel>
 
             <DialogFooter className="sm:justify-between">
-              <Button variant="ghost" size="sm" onClick={runScan}>
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                {t('Rescan')}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={runScan}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  {t('Rescan')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setChecked(new Set(candidates.map((c) => c.id)))}
+                >
+                  {t('Select all')}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setChecked(new Set())}>
+                  {t('Deselect all')}
+                </Button>
+              </div>
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground text-xs">
                   {t('{{count}} selected', { count: checked.size })}
