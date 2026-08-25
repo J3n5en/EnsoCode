@@ -72,15 +72,31 @@ export function LocalImportDialog({ open, onOpenChange }: LocalImportDialogProps
       scan.scanId,
       [...checked]
     );
-    const added = addProviders(
-      collected.map(({ candidateId: _candidateId, ...provider }) => ({
-        ...provider,
-        id: crypto.randomUUID(),
-        enabled: true,
-      }))
-    );
+    const toAdd = collected.map(({ candidateId: _candidateId, ...provider }) => ({
+      ...provider,
+      id: crypto.randomUUID(),
+      enabled: true,
+    }));
+    const added = addProviders(toAdd);
     setImportedCount(added);
     setPhase('done');
+
+    // 导入的 provider 常无模型列表（中转配置只存默认模型名）——对真正入库且无模型的后台拉取补全
+    const store = useSettingsStore.getState();
+    for (const provider of toAdd) {
+      if (provider.models.length > 0) continue;
+      if (!store.providers.some((p) => p.id === provider.id)) continue; // 被去重的跳过
+      void window.electronAPI.providers
+        .listModels({ api: provider.api, apiKey: provider.apiKey, baseUrl: provider.baseUrl })
+        .then((result) => {
+          if (result.ok && result.models.length > 0) {
+            useSettingsStore.getState().updateProvider(provider.id, {
+              models: result.models.map((id) => ({ id, enabled: true })),
+            });
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   const foundApps = scan?.apps.filter((app) => app.status !== 'not-found') ?? [];
