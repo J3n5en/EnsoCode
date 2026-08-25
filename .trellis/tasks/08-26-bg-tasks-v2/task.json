@@ -1,9 +1,9 @@
 {
-  "id": "bg-tasks-subagent",
-  "name": "bg-tasks-subagent",
-  "title": "后台任务与 subagent(父任务)",
+  "id": "bg-tasks-v2",
+  "name": "bg-tasks-v2",
+  "title": "background tasks v2(grok-build 对齐)",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -18,12 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "08-26-subagent",
-    "08-26-background-tasks",
-    "08-26-bg-tasks-v2"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "08-26-bg-tasks-subagent",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

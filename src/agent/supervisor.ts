@@ -24,7 +24,12 @@ import type {
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { ApprovalGate, withApproval } from './approval';
-import { BackgroundTaskManager, createTaskTools, withBackground } from './backgroundTasks';
+import {
+  BackgroundTaskManager,
+  createTaskTools,
+  withBackground,
+  withTaskReminders,
+} from './backgroundTasks';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
@@ -48,6 +53,8 @@ interface ManagedSession {
   toolDurations: Map<string, number>;
   /** 工具审批门 */
   gate: ApprovalGate;
+  /** 后台任务完成提醒（agent 忙时挂起,下次工具结果搭车投递） */
+  pendingTaskReminders: string[];
   unsubscribe: () => void;
 }
 
@@ -64,41 +71,60 @@ export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly gate = new OperationGate();
   private readonly mcp = new McpManager();
-  private readonly bgTasks = new BackgroundTaskManager({
-    onStarted: (sessionId, task) => {
-      const managed = this.sessions.get(sessionId);
-      if (managed) this.options.emit({ type: 'task-started', sessionId, seq: ++managed.seq, task });
-    },
-    onOutput: (sessionId, taskId, tail, status) => {
-      const managed = this.sessions.get(sessionId);
-      if (managed) {
-        this.options.emit({
-          type: 'task-output',
-          sessionId,
-          seq: ++managed.seq,
-          taskId,
-          tail,
-          status,
-        });
-      }
-    },
-    onEnded: (sessionId, taskId, status, exitCode) => {
-      const managed = this.sessions.get(sessionId);
-      if (managed) {
-        this.options.emit({
-          type: 'task-ended',
-          sessionId,
-          seq: ++managed.seq,
-          taskId,
-          status,
-          ...(exitCode !== undefined ? { exitCode } : {}),
-        });
-      }
-    },
-  });
+  private readonly bgTasks: BackgroundTaskManager;
   private runtimePromise: Promise<ModelRuntime> | null = null;
 
-  constructor(private readonly options: SupervisorOptions) {}
+  constructor(private readonly options: SupervisorOptions) {
+    this.bgTasks = new BackgroundTaskManager(
+      {
+        onStarted: (sessionId, task) => {
+          const managed = this.sessions.get(sessionId);
+          if (managed) {
+            this.options.emit({ type: 'task-started', sessionId, seq: ++managed.seq, task });
+          }
+        },
+        onOutput: (sessionId, taskId, tail, status) => {
+          const managed = this.sessions.get(sessionId);
+          if (managed) {
+            this.options.emit({
+              type: 'task-output',
+              sessionId,
+              seq: ++managed.seq,
+              taskId,
+              tail,
+              status,
+            });
+          }
+        },
+        onEnded: (sessionId, taskId, status, exitCode) => {
+          const managed = this.sessions.get(sessionId);
+          if (managed) {
+            this.options.emit({
+              type: 'task-ended',
+              sessionId,
+              seq: ++managed.seq,
+              taskId,
+              status,
+              ...(exitCode !== undefined ? { exitCode } : {}),
+            });
+          }
+        },
+        // 自动通知：agent 空闲注入合成提示唤醒续跑；忙则挂 pending 待下次工具结果搭车
+        onCompletionNotify: (sessionId, text) => {
+          const managed = this.sessions.get(sessionId);
+          if (!managed) return;
+          if (managed.status === 'idle') {
+            void managed.session
+              .prompt(`<background-task-update>\n${text}\n</background-task-update>`)
+              .catch(() => {});
+          } else {
+            managed.pendingTaskReminders.push(text);
+          }
+        },
+      },
+      path.join(options.agentDir, 'task-logs')
+    );
+  }
 
   handleCommand(command: AgentCommand): void {
     if (command.type === 'snapshot') {
@@ -295,21 +321,28 @@ export class SessionSupervisor {
       }
     );
     // 工具注入：noTools:'builtin' 下 read 也需重注册（免审）；bash 叠 background 能力
-    // 后包审批门（审批先问，批准后分流后台），edit 叠宽容版，MCP 同门，todo/task_* 免审
+    // 后包审批门（审批先问，批准后分流后台），edit 叠宽容版，MCP 同门，todo/task_* 免审。
+    // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
+    const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
     const customTools = [
       createReadToolDefinition(cwd) as unknown as Def,
       withApproval(
         gate,
         'command',
-        withBackground(createBashToolDefinition(cwd) as unknown as Def, this.bgTasks, sessionId, cwd)
+        withBackground(
+          createBashToolDefinition(cwd) as unknown as Def,
+          this.bgTasks,
+          sessionId,
+          cwd
+        )
       ),
       withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
       withApproval(gate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
       createTodoTool(),
       ...createTaskTools(this.bgTasks),
       ...mcpTools.map((tool) => withApproval(gate, 'mcp', tool)),
-    ];
+    ].map((tool) => withTaskReminders(tool, takePendingReminders));
 
     const { session } = await createAgentSession({
       cwd,
@@ -341,6 +374,7 @@ export class SessionSupervisor {
       toolStartAt: new Map(),
       toolDurations: new Map(),
       gate,
+      pendingTaskReminders: [],
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
