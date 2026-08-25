@@ -33,6 +33,22 @@ export const zhTranslations: Record<string, string> = {
   'No results': '无匹配结果',
   'Preset is locked after the conversation starts': '对话开始后预设已锁定，不能中途替换',
   Path: '路径',
+  // Onboarding
+  'Welcome to EnsoCode': '欢迎使用 EnsoCode',
+  'Import your providers and assets from local AI apps to get started. You can skip any step.':
+    '从本地 AI 应用导入模型服务与资源即可开始，每一步都可跳过。',
+  'Import model API providers from local AI apps to start chatting':
+    '从本地 AI 应用导入模型 API 服务，即可开始对话',
+  'Import skills from Claude Code, Codex or Cursor': '从 Claude Code、Codex 或 Cursor 导入技能',
+  'Scan and import': '扫描并导入',
+  '{{count}} imported': '已导入 {{count}} 个',
+  'All set': '全部就绪',
+  'You can always import more from Settings later.': '之后随时可在设置里导入更多。',
+  Back: '上一步',
+  Skip: '跳过',
+  Next: '下一步',
+  'Get started': '开始',
+  Close: '关闭',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',

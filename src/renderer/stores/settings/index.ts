@@ -78,6 +78,7 @@ const initialState = {
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
   presets: [] as import('@shared/types').Preset[],
+  onboarded: false,
   projects: [] as import('@shared/types').Project[],
 };
 
@@ -264,6 +265,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       removePreset: (id) => set((state) => ({ presets: state.presets.filter((p) => p.id !== id) })),
 
+      setOnboarded: (onboarded) => set({ onboarded }),
+
       // 按目录路径去重；已存在时返回已有项
       addProject: (path) => {
         const existing = get().projects.find((project) => project.path === path);
@@ -285,7 +288,18 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'enso-settings',
       storage: createJSONStorage(() => electronStorage),
       onRehydrateStorage: () => (state) => {
-        applySettings(state ?? useSettingsStore.getState());
+        const s = state ?? useSettingsStore.getState();
+        applySettings(s);
+        // 老用户（升级前已有配置）视为已完成引导，避免被打扰
+        if (
+          !s.onboarded &&
+          (s.providers.length > 0 ||
+            s.skills.length > 0 ||
+            s.mcpServers.length > 0 ||
+            s.instructions.length > 0)
+        ) {
+          useSettingsStore.setState({ onboarded: true });
+        }
       },
     }
   )

@@ -3,6 +3,8 @@ import { TitleBar } from '@/components/app/TitleBar';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { Onboarding } from '@/components/onboarding/Onboarding';
+import { useSettingsStore } from '@/stores/settings';
 
 const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
@@ -10,6 +12,7 @@ const MIN_WIDTH = 180;
 const MAX_WIDTH = 420;
 
 export default function App() {
+  const onboarded = useSettingsStore((s) => s.onboarded);
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 240;
@@ -39,6 +42,7 @@ export default function App() {
         {!collapsed && <ResizeHandle onResize={handleResize} />}
         <ChatView />
       </div>
+      {!onboarded && <Onboarding />}
     </div>
   );
 }
