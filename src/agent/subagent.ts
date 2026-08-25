@@ -69,7 +69,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     promptSnippet:
       'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
       'give it a complete prompt and it returns a final report; ' +
-      'multiple subagent calls in one message run in parallel',
+      'multiple subagent calls in one message run in parallel' +
+      (deps.agentTypes.length > 0
+        ? `; agent_type options: ${deps.agentTypes
+            .map((type) => `${type.name} (${type.description || 'custom'})`)
+            .join(', ')} — pick the cheapest type that fits the subtask`
+        : ''),
     parameters: {
       type: 'object',
       properties: {
