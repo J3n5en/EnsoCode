@@ -207,3 +207,41 @@ describe('foldTimeline', () => {
     expect((folded[1] as Extract<TimelineItem, { kind: 'tool' }>).name).toBe('todo');
   });
 });
+
+describe('streaming 判定(最后一个有内容的 part)', () => {
+  it('thinking 是唯一有内容的 part 且 running 时,thinking 处于流式中', () => {
+    const timeline = buildTimeline(
+      [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: '思考内容...' },
+            { type: 'text', text: '' },
+          ],
+        },
+      ],
+      true
+    );
+    expect(timeline).toMatchObject([{ kind: 'user' }, { kind: 'thinking', streaming: true }]);
+  });
+
+  it('thinking 后有非空 text 时,text 流式、thinking 已完结', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 't' },
+            { type: 'text', text: 'answer' },
+          ],
+        },
+      ],
+      true
+    );
+    expect(timeline).toMatchObject([
+      { kind: 'thinking', streaming: false },
+      { kind: 'text', streaming: true },
+    ]);
+  });
+});
