@@ -26,7 +26,11 @@ export function AgentTypesSettings() {
   const disabledBuiltins = useSettingsStore((state) => state.disabledBuiltinAgentTypes);
   const toggleBuiltin = useSettingsStore((state) => state.toggleBuiltinAgentType);
   const providers = useSettingsStore((state) => state.providers);
-  const [editing, setEditing] = React.useState<AgentTypeEntry | 'new' | null>(null);
+  const [editing, setEditing] = React.useState<
+    AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
+  >(null);
+  // 被自定义同名覆盖的内置隐藏；编辑内置＝创建同名自定义副本（删除副本即恢复默认）
+  const overridden = new Set(agentTypes.map((entry) => entry.name));
 
   return (
     <div className="space-y-6">
@@ -59,7 +63,7 @@ export function AgentTypesSettings() {
           </div>
         </div>
 
-        {BUILTIN_AGENT_TYPES.map((type) => (
+        {BUILTIN_AGENT_TYPES.filter((type) => !overridden.has(type.name)).map((type) => (
           <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
             <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
@@ -70,6 +74,9 @@ export function AgentTypesSettings() {
               </p>
               <p className="truncate text-muted-foreground text-xs">{type.description}</p>
             </div>
+            <Button variant="ghost" size="icon" onClick={() => setEditing({ defaults: type })}>
+              <Pencil className="h-4 w-4" />
+            </Button>
             <Switch
               checked={!disabledBuiltins.includes(type.name)}
               onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
@@ -112,7 +119,8 @@ export function AgentTypesSettings() {
 
       {editing && (
         <AgentTypeEditDialog
-          entry={editing === 'new' ? null : editing}
+          entry={editing !== 'new' && 'id' in editing ? editing : null}
+          defaults={editing !== 'new' && 'defaults' in editing ? editing.defaults : undefined}
           onClose={() => setEditing(null)}
         />
       )}
@@ -129,9 +137,12 @@ const slugify = (value: string): string =>
 
 function AgentTypeEditDialog({
   entry,
+  defaults,
   onClose,
 }: {
   entry: AgentTypeEntry | null;
+  /** 编辑内置时的预填内容（保存生成同名自定义覆盖） */
+  defaults?: Omit<AgentTypeEntry, 'id'>;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -139,14 +150,15 @@ function AgentTypeEditDialog({
   const addAgentType = useSettingsStore((state) => state.addAgentType);
   const updateAgentType = useSettingsStore((state) => state.updateAgentType);
 
-  const [name, setName] = React.useState(entry?.name ?? '');
-  const [description, setDescription] = React.useState(entry?.description ?? '');
-  const [systemPrompt, setSystemPrompt] = React.useState(entry?.systemPrompt ?? '');
-  const [providerId, setProviderId] = React.useState(entry?.providerId ?? '');
-  const [modelId, setModelId] = React.useState(entry?.modelId ?? '');
-  const [tools, setTools] = React.useState<'all' | 'readonly'>(entry?.tools ?? 'all');
-  const [skillIds, setSkillIds] = React.useState<string[]>(entry?.skillIds ?? []);
-  const [mcpServerIds, setMcpServerIds] = React.useState<string[]>(entry?.mcpServerIds ?? []);
+  const seed = entry ?? defaults;
+  const [name, setName] = React.useState(seed?.name ?? '');
+  const [description, setDescription] = React.useState(seed?.description ?? '');
+  const [systemPrompt, setSystemPrompt] = React.useState(seed?.systemPrompt ?? '');
+  const [providerId, setProviderId] = React.useState(seed?.providerId ?? '');
+  const [modelId, setModelId] = React.useState(seed?.modelId ?? '');
+  const [tools, setTools] = React.useState<'all' | 'readonly'>(seed?.tools ?? 'all');
+  const [skillIds, setSkillIds] = React.useState<string[]>(seed?.skillIds ?? []);
+  const [mcpServerIds, setMcpServerIds] = React.useState<string[]>(seed?.mcpServerIds ?? []);
   const skills = useSettingsStore((state) => state.skills);
   const mcpServers = useSettingsStore((state) => state.mcpServers);
   const toggleId = (list: string[], id: string): string[] =>
