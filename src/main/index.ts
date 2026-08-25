@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow } from 'electron';
 
@@ -24,6 +25,11 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     electronApp.setAppUserModelId('com.j3n5en.enso-code');
+
+    // dev 下 dock 显示 Electron 默认图标；手动设为 app 图标（打包由 electron-builder 处理）
+    if (!app.isPackaged && process.platform === 'darwin') {
+      app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
+    }
 
     // Default open/close DevTools by F12 in development
     app.on('browser-window-created', (_, window) => {
