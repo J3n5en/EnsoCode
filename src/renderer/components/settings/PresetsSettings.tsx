@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -132,6 +131,7 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
             emptyText={t('No skills yet')}
             items={skills}
             getName={(s) => s.name}
+            getSource={(s) => s.source}
             isChecked={(s) => skillIds.includes(s.id)}
             onToggle={(s) => setSkillIds((list) => toggle(list, s.id))}
             renderDetail={(s) => (
@@ -150,6 +150,7 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
             emptyText={t('No MCP servers yet')}
             items={mcpServers}
             getName={(m) => m.name}
+            getSource={(m) => m.source}
             isChecked={(m) => mcpServerIds.includes(m.id)}
             onToggle={(m) => setMcpServerIds((list) => toggle(list, m.id))}
             renderDetail={(m) => (
@@ -169,7 +170,7 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
             emptyText={t('No instruction files yet')}
             items={instructions}
             getName={(i) => i.name}
-            getMeta={(i) => i.source}
+            getSource={(i) => i.source}
             isChecked={(i) => instructionId === i.id}
             onToggle={(i) => setInstructionId((cur) => (cur === i.id ? undefined : i.id))}
             leading={
@@ -196,13 +197,13 @@ function PresetEditDialog({ preset, onClose }: { preset: Preset | null; onClose:
   );
 }
 
-/** 带搜索的可勾选列表：每项 checkbox + 名字 + 眼睛（detail popover） */
+/** 带搜索的可勾选列表：每项 checkbox + 名字 + 来源角标 + 眼睛（居中 detail 弹窗） */
 function PickList<T extends { id: string }>({
   title,
   emptyText,
   items,
   getName,
-  getMeta,
+  getSource,
   isChecked,
   onToggle,
   renderDetail,
@@ -212,7 +213,7 @@ function PickList<T extends { id: string }>({
   emptyText: string;
   items: T[];
   getName: (item: T) => string;
-  getMeta?: (item: T) => string;
+  getSource?: (item: T) => string;
   isChecked: (item: T) => boolean;
   onToggle: (item: T) => void;
   renderDetail: (item: T) => React.ReactNode;
@@ -220,6 +221,7 @@ function PickList<T extends { id: string }>({
 }) {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
+  const [detail, setDetail] = React.useState<T | null>(null);
   const filtered = query
     ? items.filter((item) => getName(item).toLowerCase().includes(query.toLowerCase()))
     : items;
@@ -251,33 +253,34 @@ function PickList<T extends { id: string }>({
             >
               <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                 <Checkbox checked={isChecked(item)} onCheckedChange={() => onToggle(item)} />
-                <span className="min-w-0 flex-1 truncate text-sm">
-                  {getName(item)}
-                  {getMeta && (
-                    <span className="ml-1.5 text-xs text-muted-foreground">{getMeta(item)}</span>
-                  )}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-sm">{getName(item)}</span>
+                {getSource && (
+                  <Badge variant="secondary" className="shrink-0 text-[11px]">
+                    {getSource(item)}
+                  </Badge>
+                )}
               </label>
-              <DetailPopover>{renderDetail(item)}</DetailPopover>
+              <button
+                type="button"
+                onClick={() => setDetail(item)}
+                className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
             </div>
           ))}
         </div>
       </div>
-    </div>
-  );
-}
 
-function DetailPopover({ children }: { children: React.ReactNode }) {
-  return (
-    <Popover>
-      <PopoverTrigger className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-        <Eye className="h-3.5 w-3.5" />
-      </PopoverTrigger>
-      {/* 在 Dialog 内，需越过 modal content（z 51）才不被遮挡 */}
-      <PopoverPopup side="left" align="start" className="w-80 p-3" positionerClassName="z-[60]">
-        {children}
-      </PopoverPopup>
-    </Popover>
+      <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent className="max-w-lg" zIndexLevel="nested">
+          <DialogHeader>
+            <DialogTitle>{detail ? getName(detail) : ''}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>{detail && renderDetail(detail)}</DialogPanel>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

@@ -31,6 +31,7 @@ export const zhTranslations: Record<string, string> = {
   // Model providers
   Search: '搜索',
   'No results': '无匹配结果',
+  'Preset is locked after the conversation starts': '对话开始后预设已锁定，不能中途替换',
   Path: '路径',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',

@@ -252,6 +252,7 @@ export function ChatView() {
               <>
                 <PresetPicker
                   presetId={conversation.presetId ?? 'default'}
+                  disabled={conversation.started}
                   onSelect={(presetId) =>
                     useSessionsStore.getState().setPreset(conversation.id, presetId)
                   }
