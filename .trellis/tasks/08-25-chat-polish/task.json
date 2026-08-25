@@ -3,7 +3,7 @@
   "name": "chat-polish",
   "title": "会话打磨(轮次计时器/错误边界/高亮LRU缓存)",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

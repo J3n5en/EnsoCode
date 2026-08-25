@@ -110,7 +110,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
 function TextRow({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   return (
     <div className="group text-sm">
-      <Markdown text={item.text} />
+      <Markdown text={item.text} streaming={item.streaming} />
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <CopyButton text={item.text} />

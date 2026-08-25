@@ -1,6 +1,15 @@
 import { ArrowDown } from 'lucide-react';
-import type { Ref } from 'react';
-import { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { ReactNode, Ref } from 'react';
+import {
+  Component,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -26,6 +35,8 @@ interface MessageTimelineProps {
   busy: boolean;
   /** 会话 running：进行中的最后一轮工具行不折叠 */
   running: boolean;
+  /** 本次 running 的起点，驱动运行中计时器 */
+  runStartedAt?: number;
   error?: string;
   /** 空态标题（项目名） */
   emptyTitle: string;
@@ -40,6 +51,7 @@ export function MessageTimeline({
   items,
   busy,
   running,
+  runStartedAt,
   error,
   emptyTitle,
 }: MessageTimelineProps) {
@@ -128,7 +140,12 @@ export function MessageTimeline({
             Header: () => <div className="h-6" />,
             Footer: () => (
               <div className={cn(CHAT_COL, 'px-4 pb-6 [overflow-wrap:anywhere]')}>
-                {busy && <LoadingDots />}
+                {busy && (
+                  <div className="flex items-center gap-2.5">
+                    <LoadingDots />
+                    {runStartedAt !== undefined && <ElapsedTimer since={runStartedAt} />}
+                  </div>
+                )}
                 {error && <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>}
               </div>
             ),
@@ -138,7 +155,9 @@ export function MessageTimeline({
               className={cn(CHAT_COL, 'px-4 pb-4 [overflow-wrap:anywhere]')}
               {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
             >
-              <TimelineRow item={item} onToggleGroup={toggleGroup} />
+              <RowErrorBoundary itemKey={item.key}>
+                <TimelineRow item={item} onToggleGroup={toggleGroup} />
+              </RowErrorBoundary>
             </div>
           )}
         />
@@ -169,4 +188,55 @@ function LoadingDots() {
       ))}
     </div>
   );
+}
+
+/** 秒级时长：45s / 2m42s */
+const formatElapsed = (ms: number): string => {
+  const whole = Math.max(0, Math.round(ms / 1000));
+  if (whole < 60) return `${whole}s`;
+  return `${Math.floor(whole / 60)}m${whole % 60}s`;
+};
+
+/** 运行中计时器：memo 隔离，每秒只重渲染这一个小组件，不波及 Virtuoso 列表 */
+const ElapsedTimer = memo(function ElapsedTimer({ since }: { since: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+      {formatElapsed(Date.now() - since)}
+    </span>
+  );
+});
+
+/** 单行渲染兜底：一条消息渲染崩溃不拖垮整个时间线 */
+class RowErrorBoundary extends Component<
+  { itemKey: string; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidUpdate(prev: { itemKey: string }): void {
+    // 行内容更换（同槽位新消息）时给新内容重试机会
+    if (prev.itemKey !== this.props.itemKey && this.state.failed) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+          message render failed · {this.props.itemKey}
+        </p>
+      );
+    }
+    return this.props.children;
+  }
 }

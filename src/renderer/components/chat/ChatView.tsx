@@ -83,6 +83,7 @@ export function ChatView() {
         items={timeline}
         busy={busy}
         running={running}
+        runStartedAt={conversation.runStartedAt}
         error={conversation.error}
         emptyTitle={project?.name ?? 'EnsoCode'}
       />

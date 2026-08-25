@@ -11,18 +11,27 @@ function guessLanguage(code: string): string {
 }
 
 /** markdown 代码块的语法高亮；语言取自 ```lang 标记，未标记做轻量猜测 */
-export function CodeBlock({ code, language }: { code: string; language?: string }) {
+export function CodeBlock({
+  code,
+  language,
+  streaming = false,
+}: {
+  code: string;
+  language?: string;
+  /** 流式中内容还在变，不写高亮缓存 */
+  streaming?: boolean;
+}) {
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    codeToHtml(code, language ?? guessLanguage(code)).then((out) => {
+    codeToHtml(code, language ?? guessLanguage(code), !streaming).then((out) => {
       if (alive) setHtml(out);
     });
     return () => {
       alive = false;
     };
-  }, [code, language]);
+  }, [code, language, streaming]);
 
   if (html == null) {
     return (

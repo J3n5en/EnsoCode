@@ -15,7 +15,7 @@ function parseFenceLang(info?: string): string | undefined {
 }
 
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -57,7 +57,13 @@ export function Markdown({ text }: { text: string }) {
           const info = /language-(\S+)/.exec(props?.className?.join(' ') ?? '')?.[1];
           const textNode = codeNode && 'children' in codeNode ? codeNode.children?.[0] : undefined;
           const raw = textNode && 'value' in textNode ? String(textNode.value) : '';
-          return <CodeBlock code={raw.replace(/\n$/, '')} language={parseFenceLang(info)} />;
+          return (
+            <CodeBlock
+              code={raw.replace(/\n$/, '')}
+              language={parseFenceLang(info)}
+              streaming={streaming}
+            />
+          );
         },
         table: ({ children }) => (
           <div className="my-2 overflow-x-auto">
