@@ -13,6 +13,7 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -254,6 +255,7 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
   const updateProvider = useSettingsStore((s) => s.updateProvider);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState('');
 
   if (!provider) return null;
 
@@ -284,6 +286,13 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
       ),
     });
 
+  const setAll = (enabled: boolean) =>
+    updateProvider(providerId, { models: provider.models.map((m) => ({ ...m, enabled })) });
+
+  const filtered = query
+    ? provider.models.filter((m) => m.id.toLowerCase().includes(query.toLowerCase()))
+    : provider.models;
+
   return (
     <div className="rounded-md border">
       <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -291,6 +300,16 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
         <Badge variant="outline" className="shrink-0 text-[11px]">
           {provider.api}
         </Badge>
+        {provider.models.length > 0 && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setAll(true)}>
+              {t('Enable all')}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setAll(false)}>
+              {t('Disable all')}
+            </Button>
+          </>
+        )}
         <Button variant="outline" size="sm" onClick={fetchModels} disabled={busy}>
           {busy ? (
             <Spinner className="mr-1.5 size-3.5" />
@@ -302,20 +321,33 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
       </div>
       {error && <p className="px-3 py-2 text-xs text-destructive">{error}</p>}
       {provider.models.length > 0 && (
-        <div className="max-h-40 space-y-0.5 overflow-y-auto p-1.5">
-          {provider.models.map((model) => (
-            <label
-              key={model.id}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-accent/50"
-            >
-              <Checkbox
-                checked={model.enabled !== false}
-                onCheckedChange={() => toggleModel(model.id)}
-              />
-              <span className="min-w-0 flex-1 truncate text-sm">{model.id}</span>
-            </label>
-          ))}
-        </div>
+        <>
+          <div className="border-b p-1.5">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('Filter models...')}
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="max-h-40 space-y-0.5 overflow-y-auto p-1.5">
+            {filtered.map((model) => (
+              <label
+                key={model.id}
+                className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-accent/50"
+              >
+                <Checkbox
+                  checked={model.enabled !== false}
+                  onCheckedChange={() => toggleModel(model.id)}
+                />
+                <span className="min-w-0 flex-1 truncate text-sm">{model.id}</span>
+              </label>
+            ))}
+            {filtered.length === 0 && (
+              <p className="px-1.5 py-2 text-xs text-muted-foreground">{t('No models match')}</p>
+            )}
+          </div>
+        </>
       )}
       {provider.models.length === 0 && !error && (
         <p className="px-3 py-2 text-xs text-muted-foreground">{t('No models yet')}</p>
