@@ -172,15 +172,16 @@ function formatPerf(perf: TurnPerf): string {
   return parts.join(' · ');
 }
 
-/** deepseek-harness 的 Think 行：单行摘要，点击展开为灰色缩进文本 */
+/** deepseek-harness 的 Think 行：流式中自动展开跟看，结束自动收起；手动点击覆盖默认 */
 function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [userToggled, setUserToggled] = useState<boolean | null>(null);
+  const expanded = userToggled ?? streaming;
   return (
     <div>
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setUserToggled(!expanded)}
         className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <Brain className={cn('h-3.5 w-3.5', streaming && 'animate-pulse')} />
