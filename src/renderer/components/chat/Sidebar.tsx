@@ -188,48 +188,41 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 <div className="mt-0.5 flex flex-col gap-y-0.5">
                   {projectConversations.map((id) => {
                     const conversation = conversations[id];
-                    const selected = activeId === id;
                     return (
-                      <div key={id} className="flex items-center">
-                        {/* 状态点槽与项目行 chevron 对齐 */}
-                        <span className="ml-2 flex h-5 w-5 shrink-0 items-center justify-center">
-                          <ConversationDot conversation={conversation} />
+                      <div
+                        key={id}
+                        className={cn(
+                          'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-4 text-sm transition-colors',
+                          activeId === id ? 'bg-muted' : 'hover:bg-muted/50'
+                        )}
+                        onClick={() => selectConversation(id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') selectConversation(id);
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <ConversationDot conversation={conversation} />
+                        <span className="min-w-0 flex-1 truncate">
+                          {conversation.title || t('New conversation')}
                         </span>
-                        <div
-                          className={cn(
-                            'group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-sm transition-colors',
-                            selected
-                              ? 'border-primary bg-primary/10'
-                              : 'border-transparent hover:bg-accent/50'
+                        <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+                          {formatRelativeTime(
+                            conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
+                            locale,
+                            nowTick
                           )}
-                          onClick={() => selectConversation(id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') selectConversation(id);
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeConversation(id);
                           }}
-                          role="button"
-                          tabIndex={0}
+                          className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
                         >
-                          <span className="min-w-0 flex-1 truncate">
-                            {conversation.title || t('New conversation')}
-                          </span>
-                          <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
-                            {formatRelativeTime(
-                              conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
-                              locale,
-                              nowTick
-                            )}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeConversation(id);
-                            }}
-                            className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     );
                   })}
@@ -269,19 +262,19 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   );
 }
 
-/** 活动状态点（EnsoAI ActivityIndicator）：running 绿、failed 红、idle 不渲染 */
 function ConversationDot({
   conversation,
 }: {
   conversation: { status: string; spawning: boolean };
 }) {
   const running = conversation.status === 'running' || conversation.spawning;
-  if (!running && conversation.status !== 'failed') return null;
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        running ? 'animate-pulse bg-green-500' : 'bg-destructive'
+        running && 'animate-pulse bg-blue-500',
+        conversation.status === 'failed' && 'bg-destructive',
+        !running && conversation.status !== 'failed' && 'bg-muted-foreground/30'
       )}
     />
   );
