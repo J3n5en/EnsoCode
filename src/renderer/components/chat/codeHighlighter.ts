@@ -1,6 +1,6 @@
 import { preloadHighlighter } from '@pierre/diffs';
 
-export const CODE_THEME = { dark: 'github-dark', light: 'github-light' } as const;
+export const CODE_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
 
 /** 预热覆盖常见源码类型；未列出的语言回退纯文本 */
 const LANGS = [
@@ -28,6 +28,9 @@ export function ensureHighlighter(): Promise<void> {
     themes: [CODE_THEME.dark, CODE_THEME.light],
     langs: [...LANGS],
     preferredHighlighter: 'shiki-js',
-  }).catch(() => {});
+  }).catch((error) => {
+    // 失败也 resolve（回退无高亮）；报错留痕便于诊断主题/语言加载问题
+    console.error('preloadHighlighter failed:', error);
+  });
   return warmup;
 }
