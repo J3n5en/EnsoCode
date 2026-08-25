@@ -73,6 +73,16 @@ export interface TokenUsage {
   cacheWrite: number;
 }
 
+/** 一轮的性能读数，挂在该轮最后一条 assistant 消息上（供 hover 操作条显示） */
+export interface TurnPerf {
+  /** 整轮墙钟耗时（ms） */
+  runMs: number;
+  /** 首 token 延迟（ms） */
+  ttftMs?: number;
+  /** 解码吞吐（tok/s） */
+  tps?: number;
+}
+
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
 export interface ProjectedMessage {
   role: string;
@@ -85,6 +95,8 @@ export interface ProjectedMessage {
   errorMessage?: string;
   timestamp?: number;
   usage?: TokenUsage;
+  /** 该轮性能（仅每轮最后一条 assistant 消息带） */
+  perf?: TurnPerf;
 }
 
 export interface SessionSnapshot {

@@ -1,4 +1,5 @@
-import { Brain, Check, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
+import type { TurnPerf } from '@shared/types/agent';
+import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -26,7 +27,13 @@ function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): 
     }
     case 'text':
     case 'thinking':
-      return b.kind === a.kind && a.text === b.text && a.streaming === b.streaming;
+      return (
+        b.kind === a.kind &&
+        a.text === b.text &&
+        a.streaming === b.streaming &&
+        (a.kind !== 'text' ||
+          (b.kind === 'text' && a.perf === b.perf && a.timestamp === b.timestamp))
+      );
     case 'tool':
       return (
         b.kind === 'tool' &&
@@ -62,11 +69,7 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
         </div>
       );
     case 'text':
-      return (
-        <div className="text-sm">
-          <Markdown text={item.text} />
-        </div>
-      );
+      return <TextRow item={item} />;
     case 'thinking':
       return <ThinkingRow text={item.text} streaming={item.streaming} />;
     case 'tool':
@@ -80,6 +83,59 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
       );
   }
 }, itemEqual);
+
+/** assistant 正文：markdown + hover 操作条（复制 / 时间 / 该轮耗时·TTFT·tok/s） */
+function TextRow({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
+  return (
+    <div className="group text-sm">
+      <Markdown text={item.text} />
+      {!item.streaming && (
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+          <CopyButton text={item.text} />
+          {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
+          {item.perf && <span>· {formatPerf(item.perf)}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1000);
+        });
+      }}
+      className="flex items-center gap-1 transition-colors hover:text-foreground"
+      title={t('Copy')}
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const formatClock = (ms: number): string => {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+/** 秒：<10s 一位小数，否则整数 */
+const secs = (ms: number): string => {
+  const s = ms / 1000;
+  return s < 10 ? String(Math.round(s * 10) / 10) : String(Math.round(s));
+};
+function formatPerf(perf: TurnPerf): string {
+  const parts = [`${secs(perf.runMs)}s`];
+  if (perf.ttftMs !== undefined) parts.push(`TTFT ${secs(perf.ttftMs)}s`);
+  if (perf.tps !== undefined) parts.push(`${Math.round(perf.tps)} tok/s`);
+  return parts.join(' · ');
+}
 
 /** deepseek-harness 的 Think 行：单行摘要，点击展开为灰色缩进文本 */
 function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) {

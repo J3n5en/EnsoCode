@@ -1,4 +1,4 @@
-import type { ProjectedMessage } from '@shared/types/agent';
+import type { ProjectedMessage, TurnPerf } from '@shared/types/agent';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
 export interface EditBlock {
@@ -8,7 +8,14 @@ export interface EditBlock {
 
 export type TimelineItem =
   | { kind: 'user'; key: string; text: string; images: { data: string; mimeType: string }[] }
-  | { kind: 'text'; key: string; text: string; streaming: boolean }
+  | {
+      kind: 'text';
+      key: string;
+      text: string;
+      streaming: boolean;
+      timestamp?: number;
+      perf?: TurnPerf;
+    }
   | { kind: 'thinking'; key: string; text: string; streaming: boolean }
   | {
       kind: 'tool';
@@ -91,7 +98,15 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
       const streaming = running && isLastPart && !message.stopReason;
       switch (part.type) {
         case 'text':
-          if (part.text) items.push({ kind: 'text', key, text: part.text, streaming });
+          if (part.text)
+            items.push({
+              kind: 'text',
+              key,
+              text: part.text,
+              streaming,
+              timestamp: message.timestamp,
+              perf: message.perf,
+            });
           return;
         case 'thinking':
           if (part.text) items.push({ kind: 'thinking', key, text: part.text, streaming });

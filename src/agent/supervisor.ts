@@ -31,6 +31,10 @@ interface ManagedSession {
   modelId: string;
   /** adaptive→budget 的自动降级每会话只做一次，防重试循环 */
   adaptiveDowngraded: boolean;
+  /** 本轮墙钟起点（agent_start） */
+  turnStartAt?: number;
+  /** 本轮首个 token 到达时间（首次 message_update） */
+  firstTokenAt?: number;
   unsubscribe: () => void;
 }
 
@@ -262,12 +266,17 @@ export class SessionSupervisor {
     switch (event.type) {
       case 'agent_start':
         managed.status = 'running';
+        managed.turnStartAt = Date.now();
+        managed.firstTokenAt = undefined;
         this.emitStatus(sessionId, managed);
         return;
       case 'message_start':
         this.upsertLocalMessage(sessionId, managed, projectMessage(event.message));
         return;
       case 'message_update':
+        managed.firstTokenAt ??= Date.now();
+        this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
+        return;
       case 'message_end':
         this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
         return;
@@ -277,6 +286,7 @@ export class SessionSupervisor {
         // 用它对齐会把历史轮次抹掉；session.messages 才是全量权威源。
         this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
         if (this.tryAdaptiveDowngrade(sessionId, managed)) return;
+        this.attachTurnPerf(sessionId, managed);
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
@@ -285,6 +295,32 @@ export class SessionSupervisor {
       default:
         return;
     }
+  }
+
+  /** 把本轮性能（耗时/TTFT/tok/s）挂到最后一条 assistant 消息并单条 upsert */
+  private attachTurnPerf(sessionId: string, managed: ManagedSession): void {
+    const start = managed.turnStartAt;
+    managed.turnStartAt = undefined;
+    if (start === undefined) return;
+    const end = Date.now();
+    const index = findLastIndex(managed.messages, (m) => m.role === 'assistant');
+    if (index < 0) return;
+    const message = managed.messages[index];
+    const outTokens = message.usage?.output ?? 0;
+    const decodeMs = managed.firstTokenAt ? end - managed.firstTokenAt : 0;
+    const perf = {
+      runMs: end - start,
+      ...(managed.firstTokenAt ? { ttftMs: managed.firstTokenAt - start } : {}),
+      ...(outTokens > 0 && decodeMs > 0 ? { tps: outTokens / (decodeMs / 1000) } : {}),
+    };
+    managed.messages[index] = { ...message, perf };
+    this.options.emit({
+      type: 'message-upsert',
+      sessionId,
+      seq: ++managed.seq,
+      index,
+      message: managed.messages[index],
+    });
   }
 
   /**
@@ -344,8 +380,10 @@ export class SessionSupervisor {
     const projected = rawMessages
       .map(projectMessage)
       .filter((message): message is ProjectedMessage => message !== null);
-    projected.forEach((message, index) => {
+    projected.forEach((rawMessage, index) => {
       const known = managed.messages[index];
+      // perf 是 supervisor 后加的（不在 pi message 里），重投影会丢——合并保留
+      const message = known?.perf ? { ...rawMessage, perf: known.perf } : rawMessage;
       if (known && JSON.stringify(known) === JSON.stringify(message)) return;
       managed.messages[index] = message;
       this.options.emit({ type: 'message-upsert', sessionId, seq: ++managed.seq, index, message });
@@ -404,6 +442,14 @@ export class SessionSupervisor {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** Array.findLastIndex 的兜底（目标运行时若缺该方法） */
+function findLastIndex<T>(arr: T[], pred: (item: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (pred(arr[i])) return i;
+  }
+  return -1;
+}
 
 /** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
 const ENSO_USER_AGENT = 'enso-code';
