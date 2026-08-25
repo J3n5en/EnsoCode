@@ -10,6 +10,9 @@ import { ReadFileView } from './ReadFileView';
 import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
 
+const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
+  a === b || (!!a && !!b && a.runMs === b.runMs && a.ttftMs === b.ttftMs && a.tps === b.tps);
+
 /**
  * 按内容字段比较：buildTimeline 每次产出新 item 对象，直接 memo 无效。
  * 长对话下这层比较挡住了未变行的 markdown 重解析与 DOM 重建。
@@ -32,7 +35,7 @@ function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): 
         a.text === b.text &&
         a.streaming === b.streaming &&
         (a.kind !== 'text' ||
-          (b.kind === 'text' && a.perf === b.perf && a.timestamp === b.timestamp))
+          (b.kind === 'text' && perfEqual(a.perf, b.perf) && a.timestamp === b.timestamp))
       );
     case 'tool':
       return (

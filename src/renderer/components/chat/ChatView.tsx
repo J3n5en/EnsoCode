@@ -292,7 +292,7 @@ export function ChatView() {
             }}
             onAbort={() => void useSessionsStore.getState().abort()}
           />
-          <StatsLine messages={conversation.messages} activeMs={conversation.activeMs} />
+          <StatsLine messages={conversation.messages} />
         </div>
       </div>
     </div>

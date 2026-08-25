@@ -10,6 +10,7 @@ import type {
   AgentCommand,
   AgentWorkerEvent,
   McpServerSpawnConfig,
+  MessageTiming,
   NodeStatus,
   ProjectedMessage,
   SessionSnapshot,
@@ -31,10 +32,8 @@ interface ManagedSession {
   modelId: string;
   /** adaptive→budget 的自动降级每会话只做一次，防重试循环 */
   adaptiveDowngraded: boolean;
-  /** 本轮墙钟起点（agent_start） */
-  turnStartAt?: number;
-  /** 本轮首个 token 到达时间（首次 message_update） */
-  firstTokenAt?: number;
+  /** 与 messages 平行的 per-step 计时打点（按 index 对齐；非 assistant 项为 undefined） */
+  timings: (MessageTiming | undefined)[];
   unsubscribe: () => void;
 }
 
@@ -218,6 +217,7 @@ export class SessionSupervisor {
       commands: collectSlashCommands(session),
       modelId: model.modelId,
       adaptiveDowngraded: false,
+      timings: [],
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
@@ -266,27 +266,38 @@ export class SessionSupervisor {
     switch (event.type) {
       case 'agent_start':
         managed.status = 'running';
-        managed.turnStartAt = Date.now();
-        managed.firstTokenAt = undefined;
         this.emitStatus(sessionId, managed);
         return;
-      case 'message_start':
-        this.upsertLocalMessage(sessionId, managed, projectMessage(event.message));
+      case 'message_start': {
+        // 打点须在 push 之前：新消息落在 messages.length 处
+        const index = managed.messages.length;
+        const message = projectMessage(event.message);
+        if (message?.role === 'assistant') {
+          managed.timings[index] = { stepStartMs: Date.now() };
+        }
+        this.upsertLocalMessage(sessionId, managed, message);
         return;
-      case 'message_update':
-        managed.firstTokenAt ??= Date.now();
+      }
+      case 'message_update': {
+        const index = managed.messages.length - 1;
+        const timing = managed.timings[index];
+        if (timing && timing.firstTokenMs === undefined) timing.firstTokenMs = Date.now();
         this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
         return;
-      case 'message_end':
+      }
+      case 'message_end': {
+        const index = managed.messages.length - 1;
+        const timing = managed.timings[index];
+        if (timing) timing.completedMs = Date.now();
         this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
         return;
+      }
       case 'agent_end': {
         // 全量对齐兜住未经 message_* 事件出现的消息（steer 注入等）。
         // 注意：agent_end 事件的 messages 只是本次 run 的消息，多轮会话下
         // 用它对齐会把历史轮次抹掉；session.messages 才是全量权威源。
         this.reconcileMessages(sessionId, managed, managed.session.messages as unknown[]);
         if (this.tryAdaptiveDowngrade(sessionId, managed)) return;
-        this.attachTurnPerf(sessionId, managed);
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
@@ -297,30 +308,14 @@ export class SessionSupervisor {
     }
   }
 
-  /** 把本轮性能（耗时/TTFT/tok/s）挂到最后一条 assistant 消息并单条 upsert */
-  private attachTurnPerf(sessionId: string, managed: ManagedSession): void {
-    const start = managed.turnStartAt;
-    managed.turnStartAt = undefined;
-    if (start === undefined) return;
-    const end = Date.now();
-    const index = findLastIndex(managed.messages, (m) => m.role === 'assistant');
-    if (index < 0) return;
-    const message = managed.messages[index];
-    const outTokens = message.usage?.output ?? 0;
-    const decodeMs = managed.firstTokenAt ? end - managed.firstTokenAt : 0;
-    const perf = {
-      runMs: end - start,
-      ...(managed.firstTokenAt ? { ttftMs: managed.firstTokenAt - start } : {}),
-      ...(outTokens > 0 && decodeMs > 0 ? { tps: outTokens / (decodeMs / 1000) } : {}),
-    };
-    managed.messages[index] = { ...message, perf };
-    this.options.emit({
-      type: 'message-upsert',
-      sessionId,
-      seq: ++managed.seq,
-      index,
-      message: managed.messages[index],
-    });
+  /** 合并 per-step 计时打点到投影消息（timing 不在 pi message 里，投影会丢，须回填） */
+  private withTiming(
+    managed: ManagedSession,
+    index: number,
+    message: ProjectedMessage
+  ): ProjectedMessage {
+    const timing = managed.timings[index];
+    return timing ? { ...message, timing } : message;
   }
 
   /**
@@ -353,8 +348,15 @@ export class SessionSupervisor {
   ): void {
     if (!message) return;
     const index = managed.messages.length;
-    managed.messages.push(message);
-    this.options.emit({ type: 'message-upsert', sessionId, seq: ++managed.seq, index, message });
+    const decorated = this.withTiming(managed, index, message);
+    managed.messages.push(decorated);
+    this.options.emit({
+      type: 'message-upsert',
+      sessionId,
+      seq: ++managed.seq,
+      index,
+      message: decorated,
+    });
   }
 
   private replaceLastMessage(
@@ -368,8 +370,15 @@ export class SessionSupervisor {
       return;
     }
     const index = managed.messages.length - 1;
-    managed.messages[index] = message;
-    this.options.emit({ type: 'message-upsert', sessionId, seq: ++managed.seq, index, message });
+    const decorated = this.withTiming(managed, index, message);
+    managed.messages[index] = decorated;
+    this.options.emit({
+      type: 'message-upsert',
+      sessionId,
+      seq: ++managed.seq,
+      index,
+      message: decorated,
+    });
   }
 
   private reconcileMessages(
@@ -382,14 +391,15 @@ export class SessionSupervisor {
       .filter((message): message is ProjectedMessage => message !== null);
     projected.forEach((rawMessage, index) => {
       const known = managed.messages[index];
-      // perf 是 supervisor 后加的（不在 pi message 里），重投影会丢——合并保留
-      const message = known?.perf ? { ...rawMessage, perf: known.perf } : rawMessage;
+      // timing 是 supervisor 后加的（不在 pi message 里），重投影会丢——合并保留
+      const message = this.withTiming(managed, index, rawMessage);
       if (known && JSON.stringify(known) === JSON.stringify(message)) return;
       managed.messages[index] = message;
       this.options.emit({ type: 'message-upsert', sessionId, seq: ++managed.seq, index, message });
     });
     if (managed.messages.length > projected.length) {
       managed.messages.length = projected.length;
+      managed.timings.length = projected.length;
       this.options.emit({
         type: 'messages-truncated',
         sessionId,
@@ -442,14 +452,6 @@ export class SessionSupervisor {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Array.findLastIndex 的兜底（目标运行时若缺该方法） */
-function findLastIndex<T>(arr: T[], pred: (item: T) => boolean): number {
-  for (let i = arr.length - 1; i >= 0; i--) {
-    if (pred(arr[i])) return i;
-  }
-  return -1;
-}
 
 /** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
 const ENSO_USER_AGENT = 'enso-code';

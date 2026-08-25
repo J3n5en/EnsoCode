@@ -73,14 +73,24 @@ export interface TokenUsage {
   cacheWrite: number;
 }
 
-/** 一轮的性能读数，挂在该轮最后一条 assistant 消息上（供 hover 操作条显示） */
+/** 一条 assistant step 的性能读数（hover 操作条显示；由渲染层从 timing 现算） */
 export interface TurnPerf {
-  /** 整轮墙钟耗时（ms） */
+  /** 该 step 墙钟耗时（ms） */
   runMs: number;
   /** 首 token 延迟（ms） */
   ttftMs?: number;
   /** 解码吞吐（tok/s） */
   tps?: number;
+}
+
+/** 单条 assistant step 的计时打点（worker 侧填，随 message-upsert 下发） */
+export interface MessageTiming {
+  /** step 开始：message_start 到达时刻 */
+  stepStartMs: number;
+  /** 首 token：首个 message_update 时刻 */
+  firstTokenMs?: number;
+  /** step 完成：message_end 时刻 */
+  completedMs?: number;
 }
 
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
@@ -95,8 +105,8 @@ export interface ProjectedMessage {
   errorMessage?: string;
   timestamp?: number;
   usage?: TokenUsage;
-  /** 该轮性能（仅每轮最后一条 assistant 消息带） */
-  perf?: TurnPerf;
+  /** 该 step 的计时打点（仅 assistant 消息带） */
+  timing?: MessageTiming;
 }
 
 export interface SessionSnapshot {

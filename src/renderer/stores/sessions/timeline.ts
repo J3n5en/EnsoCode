@@ -61,6 +61,20 @@ function extractEdits(name: string, args: unknown): EditBlock[] | null {
 const partText = (message: ProjectedMessage): string =>
   message.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
+/** 从该 step 的计时打点算 hover 操作条读数；打点不全则无对应字段 */
+function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
+  const timing = message.timing;
+  if (!timing?.completedMs) return undefined;
+  const { stepStartMs, firstTokenMs, completedMs } = timing;
+  const out = message.usage?.output ?? 0;
+  const decodeMs = firstTokenMs !== undefined ? completedMs - firstTokenMs : 0;
+  return {
+    runMs: Math.max(0, completedMs - stepStartMs),
+    ...(firstTokenMs !== undefined ? { ttftMs: Math.max(0, firstTokenMs - stepStartMs) } : {}),
+    ...(out > 0 && decodeMs > 0 ? { tps: out / (decodeMs / 1000) } : {}),
+  };
+}
+
 /**
  * 把消息投影聚合为渲染时间线：
  * - toolResult 不单独成行，折进对应 toolCall 条目（按 toolCallId 关联）
@@ -105,7 +119,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
               text: part.text,
               streaming,
               timestamp: message.timestamp,
-              perf: message.perf,
+              perf: perfFromTiming(message),
             });
           return;
         case 'thinking':
