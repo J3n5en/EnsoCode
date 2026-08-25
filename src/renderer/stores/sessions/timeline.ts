@@ -27,7 +27,24 @@ export type TimelineItem =
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
       edits: EditBlock[] | null;
     }
+  | {
+      kind: 'tool-group';
+      key: string;
+      expanded: boolean;
+      /** 组内工具数（不含 edit——它平铺在组外） */
+      count: number;
+      stats: ToolGroupStats;
+      /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
+      children: TimelineItem[];
+    }
   | { kind: 'error'; key: string; text: string };
+
+export interface ToolGroupStats {
+  commands: number;
+  reads: number;
+  searches: number;
+  others: number;
+}
 
 /** 从工具参数里挑一个最能说明「对什么操作」的字段做摘要 */
 const SUMMARY_KEYS = ['path', 'file_path', 'command', 'pattern', 'query', 'url', 'description'];
@@ -147,4 +164,75 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     }
   });
   return items;
+}
+
+/** 折叠门槛：段内非 edit 工具数达到该值才收拢 */
+const FOLD_MIN_TOOLS = 3;
+
+const SEARCH_TOOLS = new Set(['grep', 'find', 'glob', 'ls']);
+
+function classifyTool(name: string, stats: ToolGroupStats): void {
+  if (name === 'bash') stats.commands += 1;
+  else if (name === 'read') stats.reads += 1;
+  else if (SEARCH_TOOLS.has(name)) stats.searches += 1;
+  else stats.others += 1;
+}
+
+/**
+ * 工具行分组折叠（折中方案）：
+ * - 段 = 连续的 tool/thinking 行（text/user/error 打断）；thinking 收进段内，门槛只数 tool。
+ * - 带 diff 的 edit 行不进组，紧跟组头之后平铺（改动是核心产物，不折）。
+ * - running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
+ * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
+ * 纯函数。
+ */
+export function foldTimeline(
+  items: TimelineItem[],
+  running: boolean,
+  expandedKeys: ReadonlySet<string>
+): TimelineItem[] {
+  const lastUserIndex = items.findLastIndex((item) => item.kind === 'user');
+  const result: TimelineItem[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    if (item.kind !== 'tool' && item.kind !== 'thinking') {
+      result.push(item);
+      i += 1;
+      continue;
+    }
+    // 收集连续段
+    let end = i;
+    while (end < items.length && (items[end].kind === 'tool' || items[end].kind === 'thinking')) {
+      end += 1;
+    }
+    const segment = items.slice(i, end);
+    const liveSegment = running && lastUserIndex >= 0 && i > lastUserIndex;
+    const editRows = segment.filter((s) => s.kind === 'tool' && s.edits !== null);
+    const groupRows = segment.filter((s) => !(s.kind === 'tool' && s.edits !== null));
+    const toolCount = groupRows.filter((s) => s.kind === 'tool').length;
+    if (liveSegment || toolCount < FOLD_MIN_TOOLS) {
+      result.push(...segment);
+    } else {
+      const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
+      for (const row of groupRows) {
+        if (row.kind === 'tool') classifyTool(row.name, stats);
+      }
+      const key = `group-${segment[0].key}`;
+      const expanded = expandedKeys.has(key);
+      result.push({
+        kind: 'tool-group',
+        key,
+        expanded,
+        count: toolCount,
+        stats,
+        children: groupRows,
+      });
+      // 展开：原始顺序全量平铺；收拢：仅 edit 行（diff）跟在组头后
+      if (expanded) result.push(...segment);
+      else result.push(...editRows);
+    }
+    i = end;
+  }
+  return result;
 }

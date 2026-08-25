@@ -1,10 +1,10 @@
 import { ArrowDown } from 'lucide-react';
 import type { Ref } from 'react';
-import { useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import type { TimelineItem } from '@/stores/sessions/timeline';
+import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
 import { NavRail } from './NavRail';
 import { TimelineRow } from './TimelineRow';
 
@@ -24,6 +24,8 @@ interface MessageTimelineProps {
   ref?: Ref<MessageTimelineHandle>;
   items: TimelineItem[];
   busy: boolean;
+  /** 会话 running：进行中的最后一轮工具行不折叠 */
+  running: boolean;
   error?: string;
   /** 空态标题（项目名） */
   emptyTitle: string;
@@ -33,11 +35,33 @@ interface MessageTimelineProps {
  * 虚拟化消息时间线：Virtuoso 动态测高 + 贴底跟随。
  * 跟随语义（ref-chat-b）：贴底时内容更新自动滚底；用户上滚脱离后停止，滚回底部恢复。
  */
-export function MessageTimeline({ ref, items, busy, error, emptyTitle }: MessageTimelineProps) {
+export function MessageTimeline({
+  ref,
+  items,
+  busy,
+  running,
+  error,
+  emptyTitle,
+}: MessageTimelineProps) {
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
+
+  // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
+  const toggleGroup = useCallback((key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const folded = useMemo(
+    () => foldTimeline(items, running, expandedGroups),
+    [items, running, expandedGroups]
+  );
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要
   const navItems = useMemo(() => {
@@ -66,7 +90,7 @@ export function MessageTimeline({ ref, items, busy, error, emptyTitle }: Message
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
   const jumpTo = (key: string) => {
-    const index = items.findIndex((item) => item.key === key);
+    const index = folded.findIndex((item) => item.key === key);
     if (index >= 0) {
       virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
     }
@@ -83,7 +107,7 @@ export function MessageTimeline({ ref, items, busy, error, emptyTitle }: Message
       ) : (
         <Virtuoso
           ref={virtuosoRef}
-          data={items}
+          data={folded}
           computeItemKey={(_, item) => item.key}
           // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
           followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
@@ -94,8 +118,8 @@ export function MessageTimeline({ ref, items, busy, error, emptyTitle }: Message
           // 可视范围起点附近的 user 轮次作为导航条高亮
           rangeChanged={({ startIndex }) => {
             let current: string | null = null;
-            for (let i = 0; i <= Math.min(startIndex + 1, items.length - 1); i++) {
-              if (items[i]?.kind === 'user') current = items[i].key;
+            for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
+              if (folded[i]?.kind === 'user') current = folded[i].key;
             }
             setActiveNavKey(current);
           }}
@@ -114,7 +138,7 @@ export function MessageTimeline({ ref, items, busy, error, emptyTitle }: Message
               className={cn(CHAT_COL, 'px-4 pb-4 [overflow-wrap:anywhere]')}
               {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
             >
-              <TimelineRow item={item} />
+              <TimelineRow item={item} onToggleGroup={toggleGroup} />
             </div>
           )}
         />

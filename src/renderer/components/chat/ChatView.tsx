@@ -82,6 +82,7 @@ export function ChatView() {
         ref={timelineRef}
         items={timeline}
         busy={busy}
+        running={running}
         error={conversation.error}
         emptyTitle={project?.name ?? 'EnsoCode'}
       />

@@ -13,11 +13,18 @@ import { ZoomableImage } from './ZoomableImage';
 const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
   a === b || (!!a && !!b && a.runMs === b.runMs && a.ttftMs === b.ttftMs && a.tps === b.tps);
 
+interface TimelineRowProps {
+  item: TimelineItem;
+  /** tool-group 组头点击展开/收拢 */
+  onToggleGroup?: (key: string) => void;
+}
+
 /**
  * 按内容字段比较：buildTimeline 每次产出新 item 对象，直接 memo 无效。
  * 长对话下这层比较挡住了未变行的 markdown 重解析与 DOM 重建。
+ * onToggleGroup 引用不参与比较（父级保证语义稳定）。
  */
-function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): boolean {
+function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   const a = prev.item;
   const b = next.item;
   if (a === b) return true;
@@ -46,12 +53,22 @@ function itemEqual(prev: { item: TimelineItem }, next: { item: TimelineItem }): 
         a.output === b.output &&
         a.edits === b.edits
       );
+    case 'tool-group':
+      return (
+        b.kind === 'tool-group' &&
+        a.expanded === b.expanded &&
+        a.count === b.count &&
+        a.stats.commands === b.stats.commands &&
+        a.stats.reads === b.stats.reads &&
+        a.stats.searches === b.stats.searches &&
+        a.stats.others === b.stats.others
+      );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
   }
 }
 
-export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
+export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   switch (item.kind) {
     case 'user':
       return (
@@ -77,6 +94,8 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
       return <ThinkingRow text={item.text} streaming={item.streaming} />;
     case 'tool':
       return <ToolRow item={item} />;
+    case 'tool-group':
+      return <ToolGroupRow item={item} onToggle={onToggleGroup} />;
     case 'error':
       return (
         <p className="flex items-start gap-1.5 text-sm text-destructive whitespace-pre-wrap">
@@ -161,6 +180,42 @@ function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) 
         </p>
       )}
     </div>
+  );
+}
+
+/** 收拢的工具组头：摘要统计 + chevron；点击展开为组内原始行 */
+function ToolGroupRow({
+  item,
+  onToggle,
+}: {
+  item: Extract<TimelineItem, { kind: 'tool-group' }>;
+  onToggle?: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  const parts: string[] = [];
+  if (item.stats.commands > 0)
+    parts.push(t('ran {{count}} commands', { count: item.stats.commands }));
+  if (item.stats.reads > 0) parts.push(t('read {{count}} files', { count: item.stats.reads }));
+  if (item.stats.searches > 0)
+    parts.push(t('searched {{count}} times', { count: item.stats.searches }));
+  if (item.stats.others > 0) parts.push(t('{{count}} other calls', { count: item.stats.others }));
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle?.(item.key)}
+      className="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+    >
+      <ChevronRight
+        className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
+      />
+      <span className="font-medium">{t('{{count}} tool calls', { count: item.count })}</span>
+      {parts.length > 0 && (
+        <>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="min-w-0 flex-1 truncate">{parts.join(' · ')}</span>
+        </>
+      )}
+    </button>
   );
 }
 
