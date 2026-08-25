@@ -78,6 +78,7 @@ const initialState = {
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
   presets: [] as import('@shared/types').Preset[],
+  agentTypes: [] as import('@shared/types').AgentTypeEntry[],
   onboarded: false,
   projects: [] as import('@shared/types').Project[],
 };
@@ -264,6 +265,20 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       removePreset: (id) => set((state) => ({ presets: state.presets.filter((p) => p.id !== id) })),
+
+      addAgentType: (entry) => {
+        const created = { ...entry, id: crypto.randomUUID() };
+        set((state) => ({ agentTypes: [...state.agentTypes, created] }));
+        return created;
+      },
+
+      updateAgentType: (id, updates) =>
+        set((state) => ({
+          agentTypes: state.agentTypes.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+        })),
+
+      removeAgentType: (id) =>
+        set((state) => ({ agentTypes: state.agentTypes.filter((t) => t.id !== id) })),
 
       setOnboarded: (onboarded) => set({ onboarded }),
 

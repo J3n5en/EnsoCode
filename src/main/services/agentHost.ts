@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   type AgentCommand,
   type AgentSpawnRequest,
+  type AgentTypeSpawnConfig,
   type ApprovalDecision,
   type ApprovalMode,
   type AttachedImage,
@@ -106,7 +107,47 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
       return mcpServers.length > 0 ? { mcpServers } : {};
     })(),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
+    ...(() => {
+      const agentTypes = configuredAgentTypes();
+      return agentTypes.length > 0 ? { agentTypes } : {};
+    })(),
   });
+}
+
+/** 自定义 subagent 类型：解析绑定模型（补 apiKey）,无效绑定回落跟随父会话 */
+function configuredAgentTypes(): AgentTypeSpawnConfig[] {
+  const state = readSettingsState();
+  const entries = Array.isArray(state?.agentTypes)
+    ? (state.agentTypes as {
+        name?: string;
+        description?: string;
+        systemPrompt?: string;
+        providerId?: string;
+        modelId?: string;
+        tools?: string;
+      }[])
+    : [];
+  return entries
+    .filter((entry) => entry.name)
+    .map((entry) => {
+      const provider = entry.providerId ? findProvider(entry.providerId) : null;
+      const model =
+        provider && entry.modelId
+          ? {
+              api: provider.api,
+              baseUrl: provider.baseUrl,
+              apiKey: provider.apiKey,
+              modelId: entry.modelId,
+            }
+          : undefined;
+      return {
+        name: String(entry.name),
+        description: String(entry.description ?? ''),
+        systemPrompt: String(entry.systemPrompt ?? ''),
+        tools: entry.tools === 'readonly' ? ('readonly' as const) : ('all' as const),
+        ...(model ? { model } : {}),
+      };
+    });
 }
 
 /** 解析自定义预设；缺省 / default / 找不到（已删）都返回 undefined = 走 enabled 过滤 */

@@ -7,7 +7,8 @@ export type SettingsCategory =
   | 'skills'
   | 'mcp'
   | 'instructions'
-  | 'presets';
+  | 'presets'
+  | 'agents';
 
 export const fontWeightOptions: { value: FontWeight; label: string }[] = [
   { value: 'normal', label: 'Normal' },

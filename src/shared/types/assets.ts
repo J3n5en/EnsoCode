@@ -42,6 +42,22 @@ export interface Preset {
 
 export const DEFAULT_PRESET_ID = 'default';
 
+/** 自定义 subagent 类型：绑定系统提示/模型/工具集,经 subagent 工具的 agent_type 参数选用 */
+export interface AgentTypeEntry {
+  id: string;
+  /** slug（工具参数值,如 scout） */
+  name: string;
+  /** 模型选型依据（注入工具描述） */
+  description: string;
+  /** 子会话系统提示（前置进任务 prompt） */
+  systemPrompt: string;
+  /** 绑定模型；缺省 = 跟随父会话 */
+  providerId?: string;
+  modelId?: string;
+  /** 工具集：all 全部 / readonly 仅只读（read+grep/find/ls,无 bash/edit/write/MCP） */
+  tools: 'all' | 'readonly';
+}
+
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等
  *  默认指向源应用的原文件（跟随其更新）；一旦在应用内编辑，
  *  先复制为本地副本再改，不回写源文件 */

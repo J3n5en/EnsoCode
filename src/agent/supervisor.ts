@@ -11,6 +11,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type {
   AgentCommand,
+  AgentTypeSpawnConfig,
   AgentWorkerEvent,
   ApprovalMode,
   McpServerSpawnConfig,
@@ -174,7 +175,8 @@ export class SessionSupervisor {
           command.loadLocalSkills,
           command.skillPaths,
           command.mcpServers,
-          command.approvalMode
+          command.approvalMode,
+          command.agentTypes
         );
         return;
       case 'prompt': {
@@ -238,7 +240,8 @@ export class SessionSupervisor {
     loadLocalSkills = true,
     skillPaths: string[] = [],
     mcpServers: McpServerSpawnConfig[] = [],
-    approvalMode: ApprovalMode = 'full'
+    approvalMode: ApprovalMode = 'full',
+    agentTypes: AgentTypeSpawnConfig[] = []
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
@@ -348,15 +351,53 @@ export class SessionSupervisor {
     // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
     const taskTool = createSubagentTool({
       modelId: model.modelId,
-      createSubSession: async () => {
+      agentTypes,
+      createSubSession: async (agentType) => {
+        // 类型绑定模型：注册其 provider 并取克隆副本；缺省跟随父会话模型
+        let subModel = { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined };
+        if (agentType?.model) {
+          const typeModel = agentType.model;
+          const typeProviderId = `enso-${typeModel.api}-${typeModel.baseUrl}`;
+          runtime.registerProvider(typeProviderId, {
+            baseUrl: typeModel.baseUrl,
+            api: typeModel.api,
+            apiKey: typeModel.apiKey,
+            headers: { 'User-Agent': ENSO_USER_AGENT },
+            models: [
+              {
+                id: typeModel.modelId,
+                name: typeModel.modelId,
+                reasoning: true,
+                thinkingLevelMap: { max: 'max' },
+                input: ['text', 'image'],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: MODEL_CONTEXT_WINDOW,
+                maxTokens: 32_000,
+              },
+            ],
+          });
+          const base = runtime.getModel(typeProviderId, typeModel.modelId);
+          if (base) {
+            subModel = applyReasoningToModel(
+              { ...base, compat: base.compat ? { ...base.compat } : undefined },
+              reasoningEnabled,
+              typeModel.modelId
+            );
+          }
+        }
+        // readonly 类型：仅 read（内置 grep/find/ls 保留）,无 bash/edit/write/MCP
+        const subTools =
+          agentType?.tools === 'readonly'
+            ? [createReadToolDefinition(cwd) as unknown as Def]
+            : buildCoreTools();
         const { session } = await createAgentSession({
           cwd,
           agentDir: this.options.agentDir,
           modelRuntime: runtime,
-          model: { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined },
+          model: subModel,
           thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
           noTools: 'builtin',
-          customTools: buildCoreTools(),
+          customTools: subTools,
           sessionManager: SessionManager.create(cwd, this.options.sessionDir),
         });
         return session;

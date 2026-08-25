@@ -45,6 +45,16 @@ export interface BackgroundTaskInfo {
   exitCode?: number;
 }
 
+/** 下发 worker 的 subagent 类型配置（model 由 main 补全 apiKey） */
+export interface AgentTypeSpawnConfig {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: 'all' | 'readonly';
+  /** 绑定模型；缺省 = 跟随父会话 */
+  model?: SpawnModelConfig;
+}
+
 /** 子代理状态（渲染层状态行与 snapshot 共用） */
 export interface SubagentInfo {
   id: string;
@@ -93,6 +103,8 @@ export type AgentCommand =
       mcpServers?: McpServerSpawnConfig[];
       /** 审批档位；缺省 full（完全放行） */
       approvalMode?: ApprovalMode;
+      /** 自定义 subagent 类型表 */
+      agentTypes?: AgentTypeSpawnConfig[];
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }

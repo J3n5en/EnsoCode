@@ -1,14 +1,16 @@
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { SubagentInfo } from '@shared/types/agent';
+import type { AgentTypeSpawnConfig, SubagentInfo } from '@shared/types/agent';
 
 /** 进度事件节流 */
 const UPDATE_INTERVAL_MS = 500;
 
 export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
-  createSubSession(): Promise<AgentSession>;
-  /** 子会话使用的模型 id（展示用） */
+  createSubSession(agentType?: AgentTypeSpawnConfig): Promise<AgentSession>;
+  /** 父会话模型 id（general 类型展示用） */
   modelId: string;
+  /** 自定义 agent 类型表（空 = 仅 general） */
+  agentTypes: AgentTypeSpawnConfig[];
   /** 进度/状态上报（覆盖式,按 id 幂等） */
   emitUpdate(agent: SubagentInfo): void;
 }
@@ -38,6 +40,22 @@ let counter = 0;
  * 父会话 abort 经 signal 传播终止子会话。
  */
 export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
+  const typeList = deps.agentTypes
+    .map(
+      (type) =>
+        `"${type.name}" — ${type.description || 'custom agent'}` +
+        `${type.model ? ` (model: ${type.model.modelId})` : ''}${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
+    )
+    .join('; ');
+  const typeParam =
+    deps.agentTypes.length > 0
+      ? {
+          agent_type: {
+            type: 'string',
+            description: `Agent type to use. Available: ${typeList}. Omit for a general agent using the session model.`,
+          },
+        }
+      : {};
   return {
     name: 'subagent',
     label: 'Subagent',
@@ -46,7 +64,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
       'Use for parallelizable or context-heavy subtasks (research a module, implement an isolated change); ' +
       'multiple task calls in one message run in parallel. ' +
-      'The subagent cannot ask you questions — include all needed context in the prompt.',
+      'The subagent cannot ask you questions — include all needed context in the prompt.' +
+      (deps.agentTypes.length > 0 ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
       'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
       'give it a complete prompt and it returns a final report; ' +
@@ -54,6 +73,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     parameters: {
       type: 'object',
       properties: {
+        ...typeParam,
         description: {
           type: 'string',
           description: 'Short (3-8 words) label of the subtask, shown in the UI',
@@ -66,11 +86,20 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       required: ['description', 'prompt'],
     } as unknown as ToolDefinition['parameters'],
     async execute(_toolCallId, params, signal) {
-      const { description = '', prompt = '' } = params as {
-        description?: string;
-        prompt?: string;
-      };
+      const {
+        description = '',
+        prompt = '',
+        agent_type: agentTypeName,
+      } = params as { description?: string; prompt?: string; agent_type?: string };
       if (!prompt.trim()) throw new Error('task prompt is required');
+      const agentType = agentTypeName
+        ? deps.agentTypes.find((type) => type.name === agentTypeName)
+        : undefined;
+      if (agentTypeName && !agentType) {
+        throw new Error(
+          `unknown agent_type "${agentTypeName}". Available: [${deps.agentTypes.map((t) => t.name).join(', ')}] or omit for general.`
+        );
+      }
       const id = `agent-${++counter}-${Date.now().toString(36)}`;
       const info: SubagentInfo = {
         id,
@@ -78,12 +107,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         status: 'running',
         steps: 0,
         currentActivity: 'starting…',
-        modelId: deps.modelId,
+        modelId: agentType?.model?.modelId ?? deps.modelId,
         startedAt: Date.now(),
       };
       deps.emitUpdate({ ...info });
 
-      const session = await deps.createSubSession();
+      const session = await deps.createSubSession(agentType);
       let dirty = false;
       const timer = setInterval(() => {
         if (!dirty) return;
@@ -120,7 +149,10 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       signal?.addEventListener('abort', onAbort, { once: true });
 
       try {
-        await session.prompt(prompt);
+        const fullPrompt = agentType?.systemPrompt
+          ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${prompt}`
+          : prompt;
+        await session.prompt(fullPrompt);
         const result = lastAssistantText(session);
         info.status = signal?.aborted ? 'failed' : 'done';
         info.resultText = result;

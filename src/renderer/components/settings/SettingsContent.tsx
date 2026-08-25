@@ -1,7 +1,8 @@
-import { FileText, Layers, Palette, Plug, Server, Settings, Sparkles } from 'lucide-react';
+import { Bot, FileText, Layers, Palette, Plug, Server, Settings, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { AgentTypesSettings } from './AgentTypesSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import type { SettingsCategory } from './constants';
 import { GeneralSettings } from './GeneralSettings';
@@ -20,6 +21,7 @@ export function SettingsContent() {
     { id: 'appearance', icon: Palette, label: t('Appearance') },
     { id: 'providers', icon: Server, label: t('Model Providers') },
     { id: 'presets', icon: Layers, label: t('Presets') },
+    { id: 'agents', icon: Bot, label: t('Agent types') },
     { id: 'skills', icon: Sparkles, label: t('Skills') },
     { id: 'mcp', icon: Plug, label: t('MCP Servers') },
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
@@ -56,6 +58,7 @@ export function SettingsContent() {
         {activeCategory === 'mcp' && <McpSettings />}
         {activeCategory === 'instructions' && <InstructionsSettings />}
         {activeCategory === 'presets' && <PresetsSettings />}
+        {activeCategory === 'agents' && <AgentTypesSettings />}
       </div>
     </div>
   );
