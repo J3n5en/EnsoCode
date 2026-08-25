@@ -62,7 +62,7 @@ export type AgentCommand =
       skillPaths?: string[];
       /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
       mcpServers?: McpServerSpawnConfig[];
-      /** 审批档位；缺省 supervised */
+      /** 审批档位；缺省 full（完全放行） */
       approvalMode?: ApprovalMode;
     }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
@@ -179,7 +179,7 @@ export interface AgentSpawnRequest {
   loadLocalSkills?: boolean;
   /** 注入组合预设；缺省/default 走各条目 enabled 过滤（现行为） */
   presetId?: string;
-  /** 审批档位；缺省 supervised */
+  /** 审批档位；缺省 full（完全放行） */
   approvalMode?: ApprovalMode;
 }
 

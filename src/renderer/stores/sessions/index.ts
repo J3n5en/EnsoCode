@@ -24,7 +24,7 @@ export interface Conversation extends SessionProjection {
   thinkingLevel?: ThinkingLevel;
   /** 注入组合预设（per 会话记忆）；缺省 = 默认预设。下次 spawn 生效 */
   presetId?: string;
-  /** 审批档位（per 会话记忆）；缺省 supervised */
+  /** 审批档位（per 会话记忆）；缺省 full（完全放行） */
   approvalMode?: ApprovalMode;
 }
 
@@ -252,7 +252,7 @@ export const useSessionsStore = create<SessionsState>()(
               thinkingLevel: conversation.thinkingLevel,
               loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
               presetId: conversation.presetId,
-              approvalMode: conversation.approvalMode ?? 'supervised',
+              approvalMode: conversation.approvalMode ?? 'full',
             });
             if (!result.ok) {
               set((state) =>
@@ -312,7 +312,7 @@ export const useSessionsStore = create<SessionsState>()(
             thinkingLevel: conversation.thinkingLevel,
             loadLocalSkills: settings.loadLocalSkills,
             presetId: conversation.presetId,
-            approvalMode: conversation.approvalMode ?? 'supervised',
+            approvalMode: conversation.approvalMode ?? 'full',
           });
           set((state) =>
             result.ok

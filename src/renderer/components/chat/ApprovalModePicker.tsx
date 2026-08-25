@@ -43,7 +43,7 @@ export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) 
         <span className="hidden @min-[28rem]:inline">{t(MODE_META[mode].labelKey)}</span>
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
-      <PopoverPopup side="top" align="start" className="w-64 [&_[data-slot=popover-viewport]]:p-1">
+      <PopoverPopup side="top" align="start" className="w-80 [&_[data-slot=popover-viewport]]:p-1">
         {MODES.map((option) => {
           const meta = MODE_META[option];
           const Icon = meta.icon;

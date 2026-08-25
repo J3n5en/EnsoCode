@@ -116,7 +116,7 @@ export function ChatView() {
                   }
                 />
                 <ApprovalModePicker
-                  mode={conversation.approvalMode ?? 'supervised'}
+                  mode={conversation.approvalMode ?? 'full'}
                   onSelect={(mode) =>
                     useSessionsStore.getState().setApprovalMode(conversation.id, mode)
                   }

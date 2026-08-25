@@ -172,7 +172,7 @@ export class SessionSupervisor {
     loadLocalSkills = true,
     skillPaths: string[] = [],
     mcpServers: McpServerSpawnConfig[] = [],
-    approvalMode: ApprovalMode = 'supervised'
+    approvalMode: ApprovalMode = 'full'
   ): Promise<void> {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
