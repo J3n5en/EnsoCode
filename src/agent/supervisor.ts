@@ -24,6 +24,7 @@ import type {
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { ApprovalGate, withApproval } from './approval';
+import { BackgroundTaskManager, createTaskTools, withBackground } from './backgroundTasks';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
@@ -63,6 +64,38 @@ export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly gate = new OperationGate();
   private readonly mcp = new McpManager();
+  private readonly bgTasks = new BackgroundTaskManager({
+    onStarted: (sessionId, task) => {
+      const managed = this.sessions.get(sessionId);
+      if (managed) this.options.emit({ type: 'task-started', sessionId, seq: ++managed.seq, task });
+    },
+    onOutput: (sessionId, taskId, tail, status) => {
+      const managed = this.sessions.get(sessionId);
+      if (managed) {
+        this.options.emit({
+          type: 'task-output',
+          sessionId,
+          seq: ++managed.seq,
+          taskId,
+          tail,
+          status,
+        });
+      }
+    },
+    onEnded: (sessionId, taskId, status, exitCode) => {
+      const managed = this.sessions.get(sessionId);
+      if (managed) {
+        this.options.emit({
+          type: 'task-ended',
+          sessionId,
+          seq: ++managed.seq,
+          taskId,
+          status,
+          ...(exitCode !== undefined ? { exitCode } : {}),
+        });
+      }
+    },
+  });
   private runtimePromise: Promise<ModelRuntime> | null = null;
 
   constructor(private readonly options: SupervisorOptions) {}
@@ -151,6 +184,9 @@ export class SessionSupervisor {
         return;
       case 'set-approval-mode':
         this.must(command.sessionId).gate.mode = command.mode;
+        return;
+      case 'task-stop':
+        this.bgTasks.stop(command.taskId);
         return;
       case 'abort': {
         const managed = this.must(command.sessionId);
@@ -560,6 +596,7 @@ export class SessionSupervisor {
 
   /** worker 退出前的清理：断开 MCP 连接（stdio 子进程随之终止） */
   shutdown(): Promise<void> {
+    this.bgTasks.stopAll();
     return this.mcp.closeAll();
   }
 

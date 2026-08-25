@@ -1,0 +1,29 @@
+{
+  "id": "bg-tasks-subagent",
+  "name": "bg-tasks-subagent",
+  "title": "后台任务与 subagent(父任务)",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "J3n5en",
+  "assignee": "J3n5en",
+  "createdAt": "2026-08-26",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "cursor/enso-code-design-v4",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-26-subagent",
+    "08-26-background-tasks"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

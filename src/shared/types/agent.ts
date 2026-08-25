@@ -34,6 +34,17 @@ export interface ApprovalRequestInfo {
 /** 审批决策 */
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
+/** 后台任务状态（渲染层胶囊/面板与 snapshot 共用） */
+export interface BackgroundTaskInfo {
+  taskId: string;
+  command: string;
+  status: 'running' | 'done' | 'failed';
+  /** 输出尾部快照（覆盖式,≤8KB） */
+  tail: string;
+  startedAt: number;
+  exitCode?: number;
+}
+
 /** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
 export interface McpServerSpawnConfig {
   name: string;
@@ -76,6 +87,7 @@ export type AgentCommand =
       decision: ApprovalDecision;
     }
   | { type: 'set-approval-mode'; sessionId: string; mode: ApprovalMode }
+  | { type: 'task-stop'; sessionId: string; taskId: string }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' }
   /** 预热 MCP 连接（worker 启动时下发；连接进缓存，spawn 即取即用） */
@@ -158,6 +170,8 @@ export interface SessionSnapshot {
   commands: SlashCommand[];
   /** 挂起的审批请求（渲染层刷新后恢复审批条） */
   pendingApprovals?: ApprovalRequestInfo[];
+  /** 后台任务（渲染层刷新后恢复胶囊条） */
+  backgroundTasks?: BackgroundTaskInfo[];
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -211,6 +225,23 @@ export type AgentWorkerEvent =
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
   | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
+  | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
+  | {
+      type: 'task-output';
+      sessionId: string;
+      seq: number;
+      taskId: string;
+      tail: string;
+      status: BackgroundTaskInfo['status'];
+    }
+  | {
+      type: 'task-ended';
+      sessionId: string;
+      seq: number;
+      taskId: string;
+      status: BackgroundTaskInfo['status'];
+      exitCode?: number;
+    }
   | { type: 'snapshot'; sessions: SessionSnapshot[]; partial?: boolean };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -296,6 +327,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         return value as unknown as AgentCommand;
       }
       return null;
+    case 'task-stop':
+      return isNonEmptyString(value.sessionId) && isNonEmptyString(value.taskId)
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'snapshot':
       return { type: 'snapshot' };
     case 'warm-mcp':
@@ -390,6 +425,19 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         return value as unknown as AgentWorkerEvent;
       }
       return null;
+    case 'task-started':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isRecord(value.task)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'task-output':
+    case 'task-ended':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isNonEmptyString(value.taskId)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'snapshot':
       return Array.isArray(value.sessions) ? (value as unknown as AgentWorkerEvent) : null;
     default:

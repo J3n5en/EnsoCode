@@ -12,6 +12,7 @@ import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './Message
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
 import { StatsLine } from './StatsLine';
+import { TaskBar } from './TaskBar';
 
 export function ChatView() {
   const { t } = useI18n();
@@ -80,16 +81,19 @@ export function ChatView() {
       </div>
 
       {/* key 换会话强制重挂：Virtuoso 的 initialTopMostItemIndex 只在挂载时生效，天然实现切会话回底 */}
-      <MessageTimeline
-        key={conversation.id}
-        ref={timelineRef}
-        items={timeline}
-        busy={busy}
-        running={running}
-        runStartedAt={conversation.runStartedAt}
-        error={conversation.error}
-        emptyTitle={project?.name ?? 'EnsoCode'}
-      />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <TaskBar sessionId={conversation.id} tasks={conversation.backgroundTasks ?? []} />
+        <MessageTimeline
+          key={conversation.id}
+          ref={timelineRef}
+          items={timeline}
+          busy={busy}
+          running={running}
+          runStartedAt={conversation.runStartedAt}
+          error={conversation.error}
+          emptyTitle={project?.name ?? 'EnsoCode'}
+        />
+      </div>
 
       <div className="@container px-4 pt-1">
         <div className={CHAT_COL}>

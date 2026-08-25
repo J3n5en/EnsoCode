@@ -21,6 +21,7 @@ import {
   setSessionThinking,
   spawnSession,
   steerSession,
+  stopBackgroundTask,
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
 import { maybeNotify } from '../services/notifications';
@@ -151,6 +152,16 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid approval mode' };
       }
       return setSessionApprovalMode(sessionId, mode as ApprovalMode);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_TASK_STOP,
+    (_event, sessionId: unknown, taskId: unknown): AgentActionResult => {
+      if (!isNonEmptyString(sessionId) || !isNonEmptyString(taskId)) {
+        return { ok: false, error: 'invalid task stop' };
+      }
+      return stopBackgroundTask(sessionId, taskId);
     }
   );
 

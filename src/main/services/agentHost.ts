@@ -195,6 +195,13 @@ export function respondApproval(
   return sendCommand({ type: 'approval-respond', sessionId, requestId, decision });
 }
 
+export function stopBackgroundTask(
+  sessionId: string,
+  taskId: string
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'task-stop', sessionId, taskId });
+}
+
 export function setSessionApprovalMode(
   sessionId: string,
   mode: ApprovalMode

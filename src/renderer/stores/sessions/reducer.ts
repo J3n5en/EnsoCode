@@ -1,5 +1,6 @@
 import type {
   ApprovalRequestInfo,
+  BackgroundTaskInfo,
   NodeStatus,
   ProjectedMessage,
   RendererAgentEvent,
@@ -16,6 +17,8 @@ export interface SessionProjection {
   activeMs: number;
   /** 挂起的工具审批请求（审批条与输入框锁定依赖） */
   pendingApprovals: ApprovalRequestInfo[];
+  /** 后台任务（任务胶囊条数据） */
+  backgroundTasks: BackgroundTaskInfo[];
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
 }
@@ -27,6 +30,7 @@ export const emptyProjection: SessionProjection = {
   lastSeq: 0,
   activeMs: 0,
   pendingApprovals: [],
+  backgroundTasks: [],
 };
 
 /**
@@ -45,6 +49,9 @@ export function applyAgentEvent(
       status: 'failed',
       error: 'agent worker exited',
       pendingApprovals: [],
+      backgroundTasks: state.backgroundTasks.map((task) =>
+        task.status === 'running' ? { ...task, status: 'failed' as const } : task
+      ),
     };
   }
   if (event.type === 'snapshot') {
@@ -57,6 +64,7 @@ export function applyAgentEvent(
       lastSeq: 0,
       activeMs: state.activeMs,
       pendingApprovals: snapshot.pendingApprovals ?? [],
+      backgroundTasks: snapshot.backgroundTasks ?? [],
     };
   }
   if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
@@ -90,6 +98,30 @@ export function applyAgentEvent(
         ...state,
         pendingApprovals: state.pendingApprovals.filter(
           (request) => request.requestId !== event.requestId
+        ),
+        lastSeq: event.seq,
+      };
+    case 'task-started':
+      return {
+        ...state,
+        backgroundTasks: [...state.backgroundTasks, event.task],
+        lastSeq: event.seq,
+      };
+    case 'task-output':
+      return {
+        ...state,
+        backgroundTasks: state.backgroundTasks.map((task) =>
+          task.taskId === event.taskId ? { ...task, tail: event.tail, status: event.status } : task
+        ),
+        lastSeq: event.seq,
+      };
+    case 'task-ended':
+      return {
+        ...state,
+        backgroundTasks: state.backgroundTasks.map((task) =>
+          task.taskId === event.taskId
+            ? { ...task, status: event.status, exitCode: event.exitCode }
+            : task
         ),
         lastSeq: event.seq,
       };
