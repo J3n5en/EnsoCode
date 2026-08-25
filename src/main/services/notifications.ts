@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { BrowserWindow, Notification } from 'electron';
@@ -43,6 +44,16 @@ function notify(sessionId: string, title: string, body: string): void {
   if (!Notification.isSupported()) return;
   const notification = new Notification({ title, body, silent: false });
   notification.on('click', () => focusSession(sessionId));
+  // dev 模式未签名 app 会被 macOS 拒绝（UNErrorDomain 1），退回 osascript 通知
+  // （无点击跳转，但至少可见；打包签名后走原生路径）
+  notification.on('failed', () => {
+    if (process.platform !== 'darwin') return;
+    const escape = (text: string) => text.replace(/[\\"]/g, ' ');
+    execFile('osascript', [
+      '-e',
+      `display notification "${escape(body)}" with title "${escape(title)}"`,
+    ]);
+  });
   notification.show();
 }
 
