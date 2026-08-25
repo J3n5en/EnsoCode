@@ -8,14 +8,14 @@ import { useSettingsStore } from '@/stores/settings';
 
 const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
-const MIN_WIDTH = 180;
+const MIN_WIDTH = 200;
 const MAX_WIDTH = 420;
 
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
-    return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 240;
+    return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;
   });
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1');
 

@@ -1,6 +1,7 @@
 import type { Project } from '@shared/types';
 import {
-  ChevronDown,
+  ChevronRight,
+  FolderGit2,
   FolderPlus,
   HardDriveDownload,
   MessageSquarePlus,
@@ -19,7 +20,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
 const ICON_BUTTON_CLASS =
-  'rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
 
 interface SidebarProps {
   width?: number;
@@ -73,7 +74,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
 
   if (collapsed) {
     return (
-      <aside className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/20 py-2">
+      <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
         <button
           type="button"
           onClick={() => void handleAddProject()}
@@ -104,25 +105,25 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   }
 
   return (
-    <aside className="flex shrink-0 flex-col bg-muted/20" style={{ width }}>
-      <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
-        <span className="text-xs font-medium text-muted-foreground">{t('Projects')}</span>
+    <aside className="flex shrink-0 flex-col border-r bg-background" style={{ width }}>
+      <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
+        <span className="text-sm font-medium">{t('Projects')}</span>
         <button
           type="button"
           onClick={() => void handleAddProject()}
           className={ICON_BUTTON_CLASS}
           title={t('Add project')}
         >
-          <FolderPlus className="h-3.5 w-3.5" />
+          <FolderPlus className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         {projects.length === 0 && (
           <button
             type="button"
             onClick={() => void handleAddProject()}
-            className="mt-1 w-full rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+            className="w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
           >
             {t('Add a project to start')}
           </button>
@@ -133,28 +134,32 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           );
           const folded = collapsedProjects[project.id] === true;
           return (
-            <div key={project.id} className="mt-1">
-              <div className="group flex items-center gap-1 rounded-md px-1.5 py-1">
+            <div key={project.id}>
+              {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸） */}
+              <div className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30">
                 <button
                   type="button"
                   onClick={() => toggleProject(project.id)}
                   className="flex min-w-0 flex-1 items-center gap-1 text-left"
                   title={project.path}
                 >
-                  <ChevronDown
-                    className={cn(
-                      'h-3 w-3 shrink-0 text-muted-foreground transition-transform',
-                      folded && '-rotate-90'
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    <ChevronRight
+                      className={cn(
+                        'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                        !folded && 'rotate-90'
+                      )}
+                    />
+                  </span>
+                  <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
                     {project.name}
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={() => newConversation(project.id)}
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   title={t('New conversation')}
                 >
                   <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -162,7 +167,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 <button
                   type="button"
                   onClick={() => setImportProject(project)}
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   title={t('Import session')}
                 >
                   <HardDriveDownload className="h-3.5 w-3.5" />
@@ -173,59 +178,74 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                     for (const id of projectConversations) removeConversation(id);
                     removeProject(project.id);
                   }}
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                  className="hidden shrink-0 rounded p-1 text-muted-foreground group-hover:block hover:bg-muted hover:text-destructive"
                   title={t('Remove project')}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
-              {!folded &&
-                projectConversations.map((id) => {
-                  const conversation = conversations[id];
-                  return (
-                    <div
-                      key={id}
-                      className={cn(
-                        'group flex cursor-pointer items-center gap-1.5 rounded-md py-1 pl-3 pr-1.5',
-                        activeId === id ? 'bg-muted' : 'hover:bg-muted/50'
-                      )}
-                      onClick={() => selectConversation(id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') selectConversation(id);
-                      }}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <ConversationDot conversation={conversation} />
-                      <span className="min-w-0 flex-1 truncate text-xs">
-                        {conversation.title || t('New conversation')}
-                      </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground/70 group-hover:hidden">
-                        {formatRelativeTime(
-                          conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
-                          locale,
-                          nowTick
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeConversation(id);
-                        }}
-                        className="hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:block"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  );
-                })}
+              {!folded && (
+                <div className="mt-0.5 flex flex-col gap-y-0.5">
+                  {projectConversations.map((id) => {
+                    const conversation = conversations[id];
+                    const selected = activeId === id;
+                    return (
+                      <div key={id} className="flex items-center">
+                        {/* 状态点槽与项目行 chevron 对齐 */}
+                        <span className="ml-2 flex h-5 w-5 shrink-0 items-center justify-center">
+                          <ConversationDot conversation={conversation} />
+                        </span>
+                        <div
+                          className={cn(
+                            'group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-sm transition-colors',
+                            selected
+                              ? 'border-primary bg-primary/10'
+                              : 'border-transparent hover:bg-accent/50'
+                          )}
+                          onClick={() => selectConversation(id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') selectConversation(id);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <span className="min-w-0 flex-1 truncate">
+                            {conversation.title || t('New conversation')}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+                            {formatRelativeTime(
+                              conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
+                              locale,
+                              nowTick
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeConversation(id);
+                            }}
+                            className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {projectConversations.length === 0 && (
+                    <p className="py-1.5 pl-9 text-xs text-muted-foreground">
+                      {t('No conversations yet')}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      <div className="flex items-center justify-between border-t px-2 py-1.5">
+      <div className="flex shrink-0 items-center justify-between border-t p-2">
         <button
           type="button"
           onClick={onToggleCollapse}
@@ -249,19 +269,19 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   );
 }
 
+/** 活动状态点（EnsoAI ActivityIndicator）：running 绿、failed 红、idle 不渲染 */
 function ConversationDot({
   conversation,
 }: {
   conversation: { status: string; spawning: boolean };
 }) {
   const running = conversation.status === 'running' || conversation.spawning;
+  if (!running && conversation.status !== 'failed') return null;
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        running && 'animate-pulse bg-blue-500',
-        conversation.status === 'failed' && 'bg-destructive',
-        !running && conversation.status !== 'failed' && 'bg-muted-foreground/30'
+        running ? 'animate-pulse bg-green-500' : 'bg-destructive'
       )}
     />
   );
