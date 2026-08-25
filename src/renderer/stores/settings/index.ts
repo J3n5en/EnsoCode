@@ -79,6 +79,7 @@ const initialState = {
   instructions: [] as import('@shared/types').InstructionEntry[],
   presets: [] as import('@shared/types').Preset[],
   agentTypes: [] as import('@shared/types').AgentTypeEntry[],
+  disabledBuiltinAgentTypes: [] as string[],
   onboarded: false,
   projects: [] as import('@shared/types').Project[],
 };
@@ -279,6 +280,13 @@ export const useSettingsStore = create<SettingsState>()(
 
       removeAgentType: (id) =>
         set((state) => ({ agentTypes: state.agentTypes.filter((t) => t.id !== id) })),
+
+      toggleBuiltinAgentType: (name, enabled) =>
+        set((state) => ({
+          disabledBuiltinAgentTypes: enabled
+            ? state.disabledBuiltinAgentTypes.filter((n) => n !== name)
+            : [...new Set([...state.disabledBuiltinAgentTypes, name])],
+        })),
 
       setOnboarded: (onboarded) => set({ onboarded }),
 

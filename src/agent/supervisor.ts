@@ -332,7 +332,7 @@ export class SessionSupervisor {
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
-    const buildCoreTools = (): Def[] => [
+    const buildBaseTools = (): Def[] => [
       createReadToolDefinition(cwd) as unknown as Def,
       withApproval(
         gate,
@@ -346,8 +346,9 @@ export class SessionSupervisor {
       ),
       withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
       withApproval(gate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
-      ...mcpTools.map((tool) => withApproval(gate, 'mcp', tool)),
     ];
+    const wrappedMcpTools = (): Def[] => mcpTools.map((tool) => withApproval(gate, 'mcp', tool));
+    const buildCoreTools = (): Def[] => [...buildBaseTools(), ...wrappedMcpTools()];
     // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
     const taskTool = createSubagentTool({
       modelId: model.modelId,
@@ -385,11 +386,23 @@ export class SessionSupervisor {
             );
           }
         }
-        // readonly 类型：仅 read（内置 grep/find/ls 保留）,无 bash/edit/write/MCP
-        const subTools =
-          agentType?.tools === 'readonly'
+        // 工具集：readonly 仅 read（内置 grep/find/ls 保留）；MCP 仅在类型显式开启时注入
+        // （general 无类型时跟随父会话＝全量）；skill 同理,默认不加载保持子代理精简
+        const includeMcp = agentType ? agentType.enableMcp === true : true;
+        const subTools = [
+          ...(agentType?.tools === 'readonly'
             ? [createReadToolDefinition(cwd) as unknown as Def]
-            : buildCoreTools();
+            : buildBaseTools()),
+          ...(includeMcp ? wrappedMcpTools() : []),
+        ];
+        const enableSkills = agentType ? agentType.enableSkills === true : true;
+        const subLoader = new DefaultResourceLoader({
+          cwd,
+          agentDir: this.options.agentDir,
+          noSkills: enableSkills ? loadLocalSkills === false : true,
+          ...(enableSkills && skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+        });
+        await subLoader.reload();
         const { session } = await createAgentSession({
           cwd,
           agentDir: this.options.agentDir,
@@ -398,6 +411,7 @@ export class SessionSupervisor {
           thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
           noTools: 'builtin',
           customTools: subTools,
+          resourceLoader: subLoader,
           sessionManager: SessionManager.create(cwd, this.options.sessionDir),
         });
         return session;

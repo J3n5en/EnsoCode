@@ -42,6 +42,34 @@ export interface Preset {
 
 export const DEFAULT_PRESET_ID = 'default';
 
+/** 内置 subagent 类型（默认启用,可关闭不可删；模型跟随会话） */
+export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
+  {
+    name: 'scout',
+    description: 'Fast read-only recon; returns compressed findings',
+    systemPrompt:
+      'You are a fast reconnaissance agent. Read and search only — never modify files or run commands with side effects. ' +
+      'Return a compact, well-structured report of findings with concrete file paths.',
+    tools: 'readonly',
+  },
+  {
+    name: 'worker',
+    description: 'Implements a self-contained coding subtask end to end',
+    systemPrompt:
+      'You are an implementation agent. Complete the assigned coding subtask end to end: read the relevant code, ' +
+      'make the changes, and verify them (typecheck/tests where available). Report what you changed and any follow-ups.',
+    tools: 'all',
+  },
+  {
+    name: 'reviewer',
+    description: 'Reviews code or diffs; read-only, returns prioritized issues',
+    systemPrompt:
+      'You are a code review agent. Read the relevant code or diff and return a prioritized list of concrete issues ' +
+      '(correctness first), each with file:line and a suggested fix. Do not modify anything.',
+    tools: 'readonly',
+  },
+];
+
 /** 自定义 subagent 类型：绑定系统提示/模型/工具集,经 subagent 工具的 agent_type 参数选用 */
 export interface AgentTypeEntry {
   id: string;
@@ -56,6 +84,10 @@ export interface AgentTypeEntry {
   modelId?: string;
   /** 工具集：all 全部 / readonly 仅只读（read+grep/find/ls,无 bash/edit/write/MCP） */
   tools: 'all' | 'readonly';
+  /** 高级：注入会话启用的 MCP 工具（默认不注入,保持子代理精简） */
+  enableMcp?: boolean;
+  /** 高级：加载 skill（会话同款注入;默认不加载） */
+  enableSkills?: boolean;
 }
 
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等

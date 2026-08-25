@@ -13,7 +13,7 @@ import {
   type SpawnModelConfig,
   type ThinkingLevel,
 } from '@shared/types/agent';
-import { DEFAULT_PRESET_ID, type Preset } from '@shared/types/assets';
+import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID, type Preset } from '@shared/types/assets';
 import type { ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { readSettings } from '../ipc/settings';
@@ -114,9 +114,14 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   });
 }
 
-/** 自定义 subagent 类型：解析绑定模型（补 apiKey）,无效绑定回落跟随父会话 */
+/** subagent 类型：内置（过滤已关闭）+ 自定义（同名覆盖内置）；绑定模型补 apiKey */
 function configuredAgentTypes(): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
+  const disabled = new Set(
+    Array.isArray(state?.disabledBuiltinAgentTypes)
+      ? (state.disabledBuiltinAgentTypes as string[])
+      : []
+  );
   const entries = Array.isArray(state?.agentTypes)
     ? (state.agentTypes as {
         name?: string;
@@ -127,7 +132,16 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
         tools?: string;
       }[])
     : [];
-  return entries
+  const customNames = new Set(entries.map((entry) => entry.name));
+  const builtins: AgentTypeSpawnConfig[] = BUILTIN_AGENT_TYPES.filter(
+    (type) => !disabled.has(type.name) && !customNames.has(type.name)
+  ).map((type) => ({
+    name: type.name,
+    description: type.description,
+    systemPrompt: type.systemPrompt,
+    tools: type.tools,
+  }));
+  const custom = entries
     .filter((entry) => entry.name)
     .map((entry) => {
       const provider = entry.providerId ? findProvider(entry.providerId) : null;
@@ -145,9 +159,12 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
         description: String(entry.description ?? ''),
         systemPrompt: String(entry.systemPrompt ?? ''),
         tools: entry.tools === 'readonly' ? ('readonly' as const) : ('all' as const),
+        ...((entry as { enableMcp?: boolean }).enableMcp ? { enableMcp: true } : {}),
+        ...((entry as { enableSkills?: boolean }).enableSkills ? { enableSkills: true } : {}),
         ...(model ? { model } : {}),
       };
     });
+  return [...builtins, ...custom];
 }
 
 /** 解析自定义预设；缺省 / default / 找不到（已删）都返回 undefined = 走 enabled 过滤 */

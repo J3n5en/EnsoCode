@@ -51,6 +51,8 @@ export interface SettingsState {
   // 注入组合预设（默认预设不入库，运行时合成）
   presets: Preset[];
   agentTypes: AgentTypeEntry[];
+  /** 被关闭的内置子代理类型（name 集合） */
+  disabledBuiltinAgentTypes: string[];
 
   /** 是否已完成首次运行引导；老用户（已有配置）视为已完成 */
   onboarded: boolean;
@@ -102,6 +104,7 @@ export interface SettingsState {
   addAgentType: (entry: Omit<AgentTypeEntry, 'id'>) => AgentTypeEntry;
   updateAgentType: (id: string, updates: Partial<Omit<AgentTypeEntry, 'id'>>) => void;
   removeAgentType: (id: string) => void;
+  toggleBuiltinAgentType: (name: string, enabled: boolean) => void;
 
   // Onboarding
   setOnboarded: (value: boolean) => void;
