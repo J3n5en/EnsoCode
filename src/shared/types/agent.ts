@@ -51,10 +51,10 @@ export interface AgentTypeSpawnConfig {
   description: string;
   systemPrompt: string;
   tools: 'all' | 'readonly';
-  /** 注入会话启用的 MCP 工具（默认否） */
-  enableMcp?: boolean;
-  /** 加载 skill（默认否） */
-  enableSkills?: boolean;
+  /** 精选注入的 skill 目录（main 已按 id 解析） */
+  skillPaths?: string[];
+  /** 精选注入的 MCP server（main 已按 id 解析） */
+  mcpServers?: McpServerSpawnConfig[];
   /** 绑定模型；缺省 = 跟随父会话 */
   model?: SpawnModelConfig;
 }

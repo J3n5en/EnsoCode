@@ -84,10 +84,10 @@ export interface AgentTypeEntry {
   modelId?: string;
   /** 工具集：all 全部 / readonly 仅只读（read+grep/find/ls,无 bash/edit/write/MCP） */
   tools: 'all' | 'readonly';
-  /** 高级：注入会话启用的 MCP 工具（默认不注入,保持子代理精简） */
-  enableMcp?: boolean;
-  /** 高级：加载 skill（会话同款注入;默认不加载） */
-  enableSkills?: boolean;
+  /** 启用的 skill（按 SkillEntry id 精选；缺省无） */
+  skillIds?: string[];
+  /** 启用的 MCP server（按 McpServerEntry id 精选；缺省无） */
+  mcpServerIds?: string[];
 }
 
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等

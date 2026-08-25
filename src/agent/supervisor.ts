@@ -386,21 +386,32 @@ export class SessionSupervisor {
             );
           }
         }
-        // 工具集：readonly 仅 read（内置 grep/find/ls 保留）；MCP 仅在类型显式开启时注入
-        // （general 无类型时跟随父会话＝全量）；skill 同理,默认不加载保持子代理精简
-        const includeMcp = agentType ? agentType.enableMcp === true : true;
+        // 工具集：readonly 仅 read（内置 grep/find/ls 保留）；MCP/skill 按类型精选注入
+        // （general 无类型时跟随父会话＝全量）,默认不带保持子代理精简
+        const typeMcpTools =
+          agentType && agentType.mcpServers?.length
+            ? (await this.mcp.toolsFor(agentType.mcpServers, 3000)).map((tool) =>
+                withApproval(gate, 'mcp', tool)
+              )
+            : [];
         const subTools = [
           ...(agentType?.tools === 'readonly'
             ? [createReadToolDefinition(cwd) as unknown as Def]
             : buildBaseTools()),
-          ...(includeMcp ? wrappedMcpTools() : []),
+          ...(agentType ? typeMcpTools : wrappedMcpTools()),
         ];
-        const enableSkills = agentType ? agentType.enableSkills === true : true;
+        const typeSkillPaths = agentType?.skillPaths ?? [];
         const subLoader = new DefaultResourceLoader({
           cwd,
           agentDir: this.options.agentDir,
-          noSkills: enableSkills ? loadLocalSkills === false : true,
-          ...(enableSkills && skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+          noSkills: agentType ? true : loadLocalSkills === false,
+          ...(agentType
+            ? typeSkillPaths.length > 0
+              ? { additionalSkillPaths: typeSkillPaths }
+              : {}
+            : skillPaths.length > 0
+              ? { additionalSkillPaths: skillPaths }
+              : {}),
         });
         await subLoader.reload();
         const { session } = await createAgentSession({

@@ -182,11 +182,6 @@ export const zhTranslations: Record<string, string> = {
   'Select model': '选择模型',
   Toolset: '工具集',
   'All tools (bash/edit/write)': '全部工具(bash/edit/write)',
-  Advanced: '高级设置',
-  'Enable MCP tools': '启用 MCP 工具',
-  'Inject the conversation MCP tools (heavier context)': '注入会话启用的 MCP 工具(上下文更重)',
-  'Enable skills': '启用 skill',
-  'Load local and configured skills in the subagent': '子代理内加载本机与已配置的 skill',
   'Read-only (read/grep/find/ls)': '只读(read/grep/find/ls)',
   'Background task {{id}} finished ({{outcome}} · {{duration}})':
     '后台任务 {{id}} 已完成（{{outcome}} · {{duration}}）',

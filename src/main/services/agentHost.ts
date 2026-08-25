@@ -130,8 +130,34 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
         providerId?: string;
         modelId?: string;
         tools?: string;
+        skillIds?: string[];
+        mcpServerIds?: string[];
       }[])
     : [];
+  const allSkills = Array.isArray(state?.skills)
+    ? (state.skills as { id?: string; path?: string }[])
+    : [];
+  const allMcp = Array.isArray(state?.mcpServers)
+    ? (state.mcpServers as (McpServerSpawnConfig & { id?: string })[])
+    : [];
+  const resolveSkillPaths = (ids?: string[]): string[] =>
+    (ids ?? [])
+      .map((id) => allSkills.find((skill) => skill.id === id)?.path)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0);
+  const resolveMcpServers = (ids?: string[]): McpServerSpawnConfig[] =>
+    (ids ?? [])
+      .map((id) => allMcp.find((server) => server.id === id))
+      .filter((server): server is McpServerSpawnConfig & { id?: string } =>
+        Boolean(server?.name && server?.transport)
+      )
+      .map(({ name, transport, command, args, env, url }) => ({
+        name,
+        transport,
+        ...(command ? { command } : {}),
+        ...(args?.length ? { args } : {}),
+        ...(env && Object.keys(env).length > 0 ? { env } : {}),
+        ...(url ? { url } : {}),
+      }));
   const customNames = new Set(entries.map((entry) => entry.name));
   const builtins: AgentTypeSpawnConfig[] = BUILTIN_AGENT_TYPES.filter(
     (type) => !disabled.has(type.name) && !customNames.has(type.name)
@@ -159,8 +185,14 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
         description: String(entry.description ?? ''),
         systemPrompt: String(entry.systemPrompt ?? ''),
         tools: entry.tools === 'readonly' ? ('readonly' as const) : ('all' as const),
-        ...((entry as { enableMcp?: boolean }).enableMcp ? { enableMcp: true } : {}),
-        ...((entry as { enableSkills?: boolean }).enableSkills ? { enableSkills: true } : {}),
+        ...(() => {
+          const skillPaths = resolveSkillPaths(entry.skillIds);
+          return skillPaths.length > 0 ? { skillPaths } : {};
+        })(),
+        ...(() => {
+          const servers = resolveMcpServers(entry.mcpServerIds);
+          return servers.length > 0 ? { mcpServers: servers } : {};
+        })(),
         ...(model ? { model } : {}),
       };
     });

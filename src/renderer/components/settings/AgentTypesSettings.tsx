@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { DetailRows, PickList } from './PresetsSettings';
 
 export function AgentTypesSettings() {
   const { t } = useI18n();
@@ -144,8 +145,12 @@ function AgentTypeEditDialog({
   const [providerId, setProviderId] = React.useState(entry?.providerId ?? '');
   const [modelId, setModelId] = React.useState(entry?.modelId ?? '');
   const [tools, setTools] = React.useState<'all' | 'readonly'>(entry?.tools ?? 'all');
-  const [enableMcp, setEnableMcp] = React.useState(entry?.enableMcp ?? false);
-  const [enableSkills, setEnableSkills] = React.useState(entry?.enableSkills ?? false);
+  const [skillIds, setSkillIds] = React.useState<string[]>(entry?.skillIds ?? []);
+  const [mcpServerIds, setMcpServerIds] = React.useState<string[]>(entry?.mcpServerIds ?? []);
+  const skills = useSettingsStore((state) => state.skills);
+  const mcpServers = useSettingsStore((state) => state.mcpServers);
+  const toggleId = (list: string[], id: string): string[] =>
+    list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
   const provider = providers.find((p) => p.id === providerId);
   const models = (provider?.models ?? []).filter((m) => m.enabled !== false);
@@ -158,8 +163,8 @@ function AgentTypeEditDialog({
       description,
       systemPrompt,
       tools,
-      enableMcp,
-      enableSkills,
+      skillIds,
+      mcpServerIds,
       ...(providerId && modelId ? { providerId, modelId } : {}),
     };
     if (entry) updateAgentType(entry.id, payload);
@@ -169,7 +174,7 @@ function AgentTypeEditDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" disableNestedTransform>
         <DialogHeader>
           <DialogTitle>{entry ? t('Edit agent type') : t('New agent type')}</DialogTitle>
         </DialogHeader>
@@ -245,29 +250,43 @@ function AgentTypeEditDialog({
               <option value="readonly">{t('Read-only (read/grep/find/ls)')}</option>
             </select>
           </Field>
-          <Field>
-            <FieldLabel>{t('Advanced')}</FieldLabel>
-            <div className="space-y-2 rounded-md border px-3 py-2.5">
-              <label className="flex items-center justify-between gap-3 text-sm">
-                <span>
-                  {t('Enable MCP tools')}
-                  <span className="block text-muted-foreground text-xs">
-                    {t('Inject the conversation MCP tools (heavier context)')}
-                  </span>
-                </span>
-                <Switch checked={enableMcp} onCheckedChange={setEnableMcp} />
-              </label>
-              <label className="flex items-center justify-between gap-3 text-sm">
-                <span>
-                  {t('Enable skills')}
-                  <span className="block text-muted-foreground text-xs">
-                    {t('Load local and configured skills in the subagent')}
-                  </span>
-                </span>
-                <Switch checked={enableSkills} onCheckedChange={setEnableSkills} />
-              </label>
-            </div>
-          </Field>
+          <PickList
+            title={t('Skills')}
+            emptyText={t('No skills yet')}
+            items={skills}
+            getName={(s) => s.name}
+            getSource={(s) => s.source}
+            isChecked={(s) => skillIds.includes(s.id)}
+            onToggle={(s) => setSkillIds((list) => toggleId(list, s.id))}
+            renderDetail={(s) => (
+              <DetailRows
+                rows={[
+                  [t('Source'), s.source],
+                  [t('Path'), s.path],
+                  [t('Description'), s.description],
+                ]}
+              />
+            )}
+          />
+          <PickList
+            title={t('MCP Servers')}
+            emptyText={t('No MCP servers yet')}
+            items={mcpServers}
+            getName={(m) => m.name}
+            getSource={(m) => m.source}
+            isChecked={(m) => mcpServerIds.includes(m.id)}
+            onToggle={(m) => setMcpServerIds((list) => toggleId(list, m.id))}
+            renderDetail={(m) => (
+              <DetailRows
+                rows={[
+                  [t('Source'), m.source],
+                  ['Transport', m.transport],
+                  ['Command', [m.command, ...(m.args ?? [])].filter(Boolean).join(' ')],
+                  ['URL', m.url],
+                ]}
+              />
+            )}
+          />
           <div className="h-2" />
         </DialogPanel>
         <DialogFooter>

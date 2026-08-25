@@ -204,7 +204,7 @@ export function PresetEditDialog({
 }
 
 /** 带搜索的可勾选列表：每项 checkbox + 名字 + 来源角标 + 眼睛（居中 detail 弹窗） */
-function PickList<T extends { id: string }>({
+export function PickList<T extends { id: string }>({
   title,
   emptyText,
   items,
@@ -290,7 +290,7 @@ function PickList<T extends { id: string }>({
   );
 }
 
-function DetailRows({ rows }: { rows: [string, string | undefined][] }) {
+export function DetailRows({ rows }: { rows: [string, string | undefined][] }) {
   return (
     <div className="space-y-2 text-xs">
       {rows
