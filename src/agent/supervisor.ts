@@ -3,6 +3,7 @@ import {
   type AgentSession,
   createAgentSession,
   createBashToolDefinition,
+  createReadToolDefinition,
   createWriteToolDefinition,
   DefaultResourceLoader,
   ModelRuntime,
@@ -282,7 +283,7 @@ export class SessionSupervisor {
       model: piModel,
       thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
       resourceLoader,
-      excludeTools: ['edit', 'bash', 'write'],
+      noTools: 'builtin',
       ...(customTools.length > 0 ? { customTools } : {}),
       sessionManager: resumeFile
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
