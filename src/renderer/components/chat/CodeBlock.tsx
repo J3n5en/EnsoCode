@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CopyButton } from './CopyButton';
 import { codeToHtml } from './snippetHighlighter';
 
 /** 无语言标记时的轻量猜测（缩进代码块常见）；猜错也只是配色不同 */
@@ -18,7 +19,7 @@ export function CodeBlock({
 }: {
   code: string;
   language?: string;
-  /** 流式中内容还在变，不写高亮缓存 */
+  /** 流式中内容还在变，不写高亮缓存、不显示复制按钮 */
   streaming?: boolean;
 }) {
   const [html, setHtml] = useState<string | null>(null);
@@ -33,18 +34,31 @@ export function CodeBlock({
     };
   }, [code, language, streaming]);
 
+  const copy = !streaming && (
+    <CopyButton
+      text={code}
+      className="absolute top-1.5 right-1.5 rounded-md border bg-background/80 p-1.5 text-muted-foreground opacity-0 backdrop-blur transition-opacity group-hover/code:opacity-100"
+    />
+  );
+
   if (html == null) {
     return (
-      <pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed">
-        <code>{code}</code>
-      </pre>
+      <div className="group/code relative">
+        <pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed">
+          <code>{code}</code>
+        </pre>
+        {copy}
+      </div>
     );
   }
   return (
-    <div
-      className="my-2 overflow-x-auto rounded-md border text-xs leading-relaxed [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:font-mono"
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="group/code relative">
+      <div
+        className="my-2 overflow-x-auto rounded-md border text-xs leading-relaxed [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:font-mono"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      {copy}
+    </div>
   );
 }
