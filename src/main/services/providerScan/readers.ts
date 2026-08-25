@@ -130,7 +130,21 @@ export async function readAlma(dbPath: string): Promise<DiscoveredProvider[]> {
 
 type CcParsed = { apiKey: string; baseUrl: string; api: ModelApiKind; models: ModelEntry[] };
 
-function parseCcSwitchConfig(appType: string, config: Record<string, unknown>): CcParsed | null {
+/** 解析 TOML 字符串，失败返回空对象 */
+async function parseTomlSafe(text: string): Promise<Record<string, unknown>> {
+  if (!text) return {};
+  try {
+    const { parse } = await import('smol-toml');
+    return obj(parse(text));
+  } catch {
+    return {};
+  }
+}
+
+async function parseCcSwitchConfig(
+  appType: string,
+  config: Record<string, unknown>
+): Promise<CcParsed | null> {
   switch (appType) {
     case 'claude':
     case 'claude-desktop': {
@@ -181,6 +195,34 @@ function parseCcSwitchConfig(appType: string, config: Record<string, unknown>): 
         api: toApiKind(str(config.api_mode), str(config.base_url)),
         models: toModelEntries(config.models),
       };
+    case 'codex': {
+      // config.config 是 codex 的 TOML 字符串，auth 里带 OPENAI_API_KEY
+      const toml = await parseTomlSafe(str(config.config));
+      const provider = Object.values(obj(toml.model_providers)).map(obj)[0];
+      if (!provider) return null;
+      return {
+        apiKey: str(obj(config.auth).OPENAI_API_KEY),
+        baseUrl: str(provider.base_url),
+        api: str(provider.wire_api) === 'responses' ? 'openai-responses' : 'openai-completions',
+        models: toModelEntries(str(toml.model) ? [str(toml.model)] : []),
+      };
+    }
+    case 'grokbuild': {
+      // TOML：[models].default 指向 [model."<name>"] 表，含 base_url/api_key/api_backend
+      const toml = await parseTomlSafe(str(config.config));
+      const def = str(obj(toml.models).default);
+      const entry = obj(obj(toml.model)[def]);
+      const baseUrl = str(entry.base_url);
+      const apiKey = str(entry.api_key);
+      // 仅 [models].default 无对应 model 定义（如官方账号）时无凭证，跳过
+      if (!baseUrl || !apiKey) return null;
+      return {
+        apiKey,
+        baseUrl,
+        api: str(entry.api_backend) === 'responses' ? 'openai-responses' : 'openai-completions',
+        models: toModelEntries([str(entry.model) || def].filter(Boolean)),
+      };
+    }
     default:
       return null;
   }
@@ -198,19 +240,19 @@ export async function readCcSwitch(dbPath: string): Promise<DiscoveredProvider[]
       .prepare('SELECT app_type, name, settings_config FROM providers')
       .all() as Record<string, unknown>[];
 
-    return rows.flatMap((row) => {
+    const providers: DiscoveredProvider[] = [];
+    for (const row of rows) {
       const appType = str(row.app_type).toLowerCase();
       const config = obj(parseJson(row.settings_config));
-      const parsed = parseCcSwitchConfig(appType, config);
-      if (!parsed) return [];
-      return [
-        {
-          appId: 'cc-switch' as const,
-          name: str(row.name) || `${appType} provider`,
-          ...parsed,
-        },
-      ];
-    });
+      const parsed = await parseCcSwitchConfig(appType, config);
+      if (!parsed) continue;
+      providers.push({
+        appId: 'cc-switch' as const,
+        name: str(row.name) || `${appType} provider`,
+        ...parsed,
+      });
+    }
+    return providers;
   } finally {
     db.close();
   }
