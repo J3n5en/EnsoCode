@@ -20,7 +20,7 @@ const TEXTS = {
   },
 } as const;
 
-const texts = (): (typeof TEXTS)['zh'] => {
+const texts = (): Record<keyof (typeof TEXTS)['zh'], string> => {
   const state = (readSettings()?.['enso-settings'] as { state?: { language?: string } } | undefined)
     ?.state;
   return (state?.language ?? 'zh').toLowerCase().startsWith('zh') ? TEXTS.zh : TEXTS.en;
