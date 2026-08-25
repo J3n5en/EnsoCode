@@ -117,6 +117,8 @@ export interface ProjectedMessage {
   timing?: MessageTiming;
   /** todo 工具 toolResult 的清单快照 */
   todos?: TodoItem[];
+  /** 工具执行耗时（仅 toolResult 消息带；worker 按 tool_execution_start/end 打点） */
+  toolDurationMs?: number;
 }
 
 export interface SessionSnapshot {

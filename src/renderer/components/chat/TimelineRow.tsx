@@ -10,9 +10,10 @@ import {
   ListTodo,
   LoaderCircle,
 } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
@@ -62,7 +63,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.summary === b.summary &&
         a.output === b.output &&
         a.edits === b.edits &&
-        a.todos === b.todos
+        a.todos === b.todos &&
+        a.durationMs === b.durationMs
       );
     case 'tool-group':
       return (
@@ -265,6 +267,15 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             </span>
           </>
         )}
+        {item.state === 'running' ? (
+          <RunningElapsed />
+        ) : (
+          item.durationMs !== null && (
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
+              {formatDuration(item.durationMs)}
+            </span>
+          )
+        )}
         {expandable && (
           <ChevronRight
             className={cn(
@@ -334,6 +345,21 @@ function TodoRow({ todos }: { todos: TodoItem[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/** running 工具行的实时计时：以挂载时刻为起点（≈执行起点；串行排队的会含排队时间） */
+function RunningElapsed() {
+  const startRef = useRef(Date.now());
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
+      {formatDuration(Date.now() - startRef.current)}
+    </span>
   );
 }
 

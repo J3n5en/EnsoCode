@@ -28,6 +28,8 @@ export type TimelineItem =
       edits: EditBlock[] | null;
       /** todo 工具的清单快照；非 todo 为 null */
       todos: TodoItem[] | null;
+      /** 工具执行耗时（完成后显示）；未知为 null */
+      durationMs: number | null;
     }
   | {
       kind: 'tool-group';
@@ -101,13 +103,17 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
  * 纯函数，输入不被修改。
  */
 export function buildTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
-  const results = new Map<string, { output: string; isError: boolean; todos: TodoItem[] | null }>();
+  const results = new Map<
+    string,
+    { output: string; isError: boolean; todos: TodoItem[] | null; durationMs: number | null }
+  >();
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolCallId) {
       results.set(message.toolCallId, {
         output: partText(message),
         isError: message.isError === true,
         todos: message.todos ?? null,
+        durationMs: message.toolDurationMs ?? null,
       });
     }
   }
@@ -157,6 +163,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             state: result ? (result.isError ? 'error' : 'ok') : running ? 'running' : 'ok',
             edits: extractEdits(part.name, part.arguments),
             todos: result?.todos ?? null,
+            durationMs: result?.durationMs ?? null,
           });
           return;
         }

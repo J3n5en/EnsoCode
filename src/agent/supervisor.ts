@@ -36,6 +36,9 @@ interface ManagedSession {
   adaptiveDowngraded: boolean;
   /** 与 messages 平行的 per-step 计时打点（按 index 对齐；非 assistant 项为 undefined） */
   timings: (MessageTiming | undefined)[];
+  /** 工具执行计时：start 时记起点，end 时落耗时（toolCallId → ms） */
+  toolStartAt: Map<string, number>;
+  toolDurations: Map<string, number>;
   unsubscribe: () => void;
 }
 
@@ -237,6 +240,8 @@ export class SessionSupervisor {
       modelId: model.modelId,
       adaptiveDowngraded: false,
       timings: [],
+      toolStartAt: new Map(),
+      toolDurations: new Map(),
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
@@ -311,6 +316,17 @@ export class SessionSupervisor {
         this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
         return;
       }
+      case 'tool_execution_start':
+        managed.toolStartAt.set(event.toolCallId, Date.now());
+        return;
+      case 'tool_execution_end': {
+        const start = managed.toolStartAt.get(event.toolCallId);
+        managed.toolStartAt.delete(event.toolCallId);
+        if (start !== undefined) {
+          managed.toolDurations.set(event.toolCallId, Date.now() - start);
+        }
+        return;
+      }
       case 'agent_end': {
         // 全量对齐兜住未经 message_* 事件出现的消息（steer 注入等）。
         // 注意：agent_end 事件的 messages 只是本次 run 的消息，多轮会话下
@@ -327,14 +343,22 @@ export class SessionSupervisor {
     }
   }
 
-  /** 合并 per-step 计时打点到投影消息（timing 不在 pi message 里，投影会丢，须回填） */
+  /** 合并 supervisor 侧的补充数据到投影消息（不在 pi message 里，重投影会丢，须回填）：
+   *  assistant 的 per-step 计时、toolResult 的工具执行耗时 */
   private withTiming(
     managed: ManagedSession,
     index: number,
     message: ProjectedMessage
   ): ProjectedMessage {
     const timing = managed.timings[index];
-    return timing ? { ...message, timing } : message;
+    let decorated = timing ? { ...message, timing } : message;
+    if (decorated.role === 'toolResult' && decorated.toolCallId) {
+      const durationMs = managed.toolDurations.get(decorated.toolCallId);
+      if (durationMs !== undefined && decorated.toolDurationMs === undefined) {
+        decorated = { ...decorated, toolDurationMs: durationMs };
+      }
+    }
+    return decorated;
   }
 
   /**
