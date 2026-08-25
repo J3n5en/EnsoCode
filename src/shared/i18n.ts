@@ -164,6 +164,7 @@ export const zhTranslations: Record<string, string> = {
   'Background task {{id}} finished ({{outcome}} · {{duration}})':
     '后台任务 {{id}} 已完成（{{outcome}} · {{duration}}）',
   'Stop task': '停止任务',
+  Output: '输出',
   Stop: '停止',
   '(no output yet)': '(暂无输出)',
   'Turn completed': '回复完成',

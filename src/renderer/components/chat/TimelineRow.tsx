@@ -222,27 +222,18 @@ function ThinkingRow({
   );
 }
 
-/** 后台任务完成的系统通知行：居中灰字胶囊,悬停看全文 */
+/** 后台任务完成事件：分隔线嵌字（极轻量），悬停看全文 */
 function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note' }> }) {
-  const { t } = useI18n();
-  // 「Background task task-1 finished (exit 0, ran 8s).」→ 中文摘要;解析失败回退原文
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
-  const text = match
-    ? t('Background task {{id}} finished ({{outcome}} · {{duration}})', {
-        id: match[1],
-        outcome: match[2],
-        duration: match[3],
-      })
-    : item.summary;
+  const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
   return (
-    <div className="flex justify-center">
-      <span
-        title={item.detail}
-        className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs text-muted-foreground"
-      >
-        <TerminalSquare className="h-3 w-3 shrink-0" />
+    <div className="flex items-center gap-3" title={item.detail}>
+      <span className="h-px flex-1 bg-border" />
+      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Check className="h-3 w-3 text-green-600 dark:text-green-500" />
         {text}
       </span>
+      <span className="h-px flex-1 bg-border" />
     </div>
   );
 }
