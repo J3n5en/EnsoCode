@@ -25,10 +25,11 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
-  // done 的任务 5s 后自动收起（展开中的不收）；failed 保留让用户看到,手动关闭
+  // 结束的任务(done/failed)5s 后自动收起（展开中的不收）
   useEffect(() => {
     const doneTasks = tasks.filter(
-      (task) => task.status === 'done' && !dismissed.has(task.taskId) && task.taskId !== openTaskId
+      (task) =>
+        task.status !== 'running' && !dismissed.has(task.taskId) && task.taskId !== openTaskId
     );
     if (doneTasks.length === 0) return;
     const timer = setTimeout(() => {

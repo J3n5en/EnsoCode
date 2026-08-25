@@ -228,7 +228,7 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   const [log, setLog] = useState<string | null>(null);
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
   const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
-  const logPath = /read (\/[^\s]+\.log) for the complete log/.exec(item.detail)?.[1] ?? null;
+  const logPath = /read (\/.+?\.log) for the complete log/.exec(item.detail)?.[1] ?? null;
 
   useEffect(() => {
     if (!expanded || !logPath || log !== null) return;
