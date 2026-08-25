@@ -1,13 +1,29 @@
-import { getTranslation, type Locale, normalizeLocale } from '@shared/i18n';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { BrowserWindow, Notification } from 'electron';
 import { readSettings } from '../ipc/settings';
 
-const locale = (): Locale => {
+// 文案本地内联：main 段引入 @shared/i18n 会触发 rollup 多入口 chunk 异常
+// （index.js 被打成 0 字节空产物），故不走共享 i18n
+const TEXTS = {
+  zh: {
+    approval: '需要审批',
+    turnDone: '回复完成',
+    turnDoneBody: 'agent 已完成,等你查看。',
+    failed: '会话失败',
+  },
+  en: {
+    approval: 'Approval required',
+    turnDone: 'Turn completed',
+    turnDoneBody: 'The agent finished and is waiting for you.',
+    failed: 'Session failed',
+  },
+} as const;
+
+const texts = (): (typeof TEXTS)['zh'] => {
   const state = (readSettings()?.['enso-settings'] as { state?: { language?: string } } | undefined)
     ?.state;
-  return normalizeLocale(state?.language ?? 'zh');
+  return (state?.language ?? 'zh').toLowerCase().startsWith('zh') ? TEXTS.zh : TEXTS.en;
 };
 
 const mainWindowFocused = (): boolean =>
@@ -36,25 +52,21 @@ function notify(sessionId: string, title: string, body: string): void {
  */
 export function maybeNotify(event: RendererAgentEvent): void {
   if (mainWindowFocused()) return;
-  const l = locale();
+  const t = texts();
   switch (event.type) {
     case 'approval-request':
       notify(
         event.sessionId,
-        getTranslation(l, 'Approval required'),
+        t.approval,
         `${event.request.tool} · ${event.request.summary.slice(0, 80)}`
       );
       return;
     case 'turn-completed':
-      notify(
-        event.sessionId,
-        getTranslation(l, 'Turn completed'),
-        getTranslation(l, 'The agent finished and is waiting for you.')
-      );
+      notify(event.sessionId, t.turnDone, t.turnDoneBody);
       return;
     case 'status':
       if (event.status === 'failed' && event.error) {
-        notify(event.sessionId, getTranslation(l, 'Session failed'), event.error.slice(0, 100));
+        notify(event.sessionId, t.failed, event.error.slice(0, 100));
       }
       return;
     default:
