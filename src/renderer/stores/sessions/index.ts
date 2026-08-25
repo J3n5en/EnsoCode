@@ -268,8 +268,9 @@ export const useSessionsStore = create<SessionsState>()(
           );
           const provider = lastProvider ?? fallbackProvider;
           const providerId = provider?.id;
-          const lastModelValid =
-            lastProvider && lastProvider.models.some((m) => m.id === conversation.lastModelId);
+          const lastModelValid = lastProvider?.models.some(
+            (m) => m.id === conversation.lastModelId
+          );
           const modelId = lastModelValid
             ? conversation.lastModelId
             : provider?.models.find((m) => m.enabled !== false)?.id;
