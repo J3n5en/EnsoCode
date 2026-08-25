@@ -39,8 +39,8 @@ let counter = 0;
  */
 export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
   return {
-    name: 'task',
-    label: 'Subagent task',
+    name: 'subagent',
+    label: 'Subagent',
     description:
       'Delegate a self-contained task to a subagent that runs in an isolated context with its own tools ' +
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
@@ -48,8 +48,9 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       'multiple task calls in one message run in parallel. ' +
       'The subagent cannot ask you questions — include all needed context in the prompt.',
     promptSnippet:
-      'task: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
-      'give it a complete prompt and it returns a final report',
+      'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
+      'give it a complete prompt and it returns a final report; ' +
+      'multiple subagent calls in one message run in parallel',
     parameters: {
       type: 'object',
       properties: {
