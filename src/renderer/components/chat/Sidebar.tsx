@@ -10,9 +10,10 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { useI18n } from '@/i18n';
+import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -27,7 +28,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
   const addProject = useSettingsStore((state) => state.addProject);
   const removeProject = useSettingsStore((state) => state.removeProject);
@@ -62,6 +63,13 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
+
+  // 相对时间每分钟自刷（“3 分钟前”不随时间僵住）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   if (collapsed) {
     return (
@@ -192,13 +200,20 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                       <span className="min-w-0 flex-1 truncate text-xs">
                         {conversation.title || t('New conversation')}
                       </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground/70 group-hover:hidden">
+                        {formatRelativeTime(
+                          conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
+                          locale,
+                          nowTick
+                        )}
+                      </span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeConversation(id);
                         }}
-                        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                        className="hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:block"
                       >
                         <X className="h-3 w-3" />
                       </button>
