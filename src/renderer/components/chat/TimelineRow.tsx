@@ -53,7 +53,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.text === b.text &&
         a.streaming === b.streaming &&
         (a.kind !== 'text' ||
-          (b.kind === 'text' && perfEqual(a.perf, b.perf) && a.timestamp === b.timestamp))
+          (b.kind === 'text' && perfEqual(a.perf, b.perf) && a.timestamp === b.timestamp)) &&
+        (a.kind !== 'thinking' || (b.kind === 'thinking' && a.durationMs === b.durationMs))
       );
     case 'tool':
       return (
@@ -104,7 +105,9 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
     case 'text':
       return <TextRow item={item} />;
     case 'thinking':
-      return <ThinkingRow text={item.text} streaming={item.streaming} />;
+      return (
+        <ThinkingRow text={item.text} streaming={item.streaming} durationMs={item.durationMs} />
+      );
     case 'tool':
       return <ToolRow item={item} />;
     case 'tool-group':
@@ -173,7 +176,15 @@ function formatPerf(perf: TurnPerf): string {
 }
 
 /** deepseek-harness 的 Think 行：流式中自动展开跟看，结束自动收起；手动点击覆盖默认 */
-function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) {
+function ThinkingRow({
+  text,
+  streaming,
+  durationMs,
+}: {
+  text: string;
+  streaming: boolean;
+  durationMs: number | null;
+}) {
   const { t } = useI18n();
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const expanded = userToggled ?? streaming;
@@ -186,6 +197,15 @@ function ThinkingRow({ text, streaming }: { text: string; streaming: boolean }) 
       >
         <Brain className={cn('h-3.5 w-3.5', streaming && 'animate-pulse')} />
         <span>{streaming ? t('Thinking…') : t('Thought process')}</span>
+        {streaming ? (
+          <RunningElapsed />
+        ) : (
+          durationMs !== null && (
+            <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums">
+              {formatDuration(durationMs)}
+            </span>
+          )
+        )}
         <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
       </button>
       {expanded && (

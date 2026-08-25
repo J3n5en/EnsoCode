@@ -120,6 +120,7 @@ const thinkingItem = (key: string): TimelineItem => ({
   key,
   text: 't',
   streaming: false,
+  durationMs: null,
 });
 
 describe('foldTimeline', () => {

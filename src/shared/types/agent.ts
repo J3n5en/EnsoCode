@@ -91,6 +91,8 @@ export interface MessageTiming {
   stepStartMs: number;
   /** 首 token：首个 message_update 时刻 */
   firstTokenMs?: number;
+  /** 思考结束：首个非 thinking 的可见输出（正文/工具调用）出现时刻 */
+  thinkingEndMs?: number;
   /** step 完成：message_end 时刻 */
   completedMs?: number;
 }

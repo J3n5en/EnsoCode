@@ -16,7 +16,14 @@ export type TimelineItem =
       timestamp?: number;
       perf?: TurnPerf;
     }
-  | { kind: 'thinking'; key: string; text: string; streaming: boolean }
+  | {
+      kind: 'thinking';
+      key: string;
+      text: string;
+      streaming: boolean;
+      /** 思考耗时（结束后显示）；无打点为 null */
+      durationMs: number | null;
+    }
   | {
       kind: 'tool';
       key: string;
@@ -174,7 +181,19 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             });
           return;
         case 'thinking':
-          if (part.text) items.push({ kind: 'thinking', key, text: part.text, streaming });
+          if (part.text) {
+            // 思考耗时：step 起点到首个非 thinking 输出（无则到 step 完成）
+            const timing = message.timing;
+            const end = timing?.thinkingEndMs ?? timing?.completedMs;
+            items.push({
+              kind: 'thinking',
+              key,
+              text: part.text,
+              streaming,
+              durationMs:
+                timing && end !== undefined ? Math.max(0, end - timing.stepStartMs) : null,
+            });
+          }
           return;
         case 'toolCall': {
           const result = results.get(part.id);

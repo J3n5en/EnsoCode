@@ -307,8 +307,23 @@ export class SessionSupervisor {
       case 'message_update': {
         const index = managed.messages.length - 1;
         const timing = managed.timings[index];
-        if (timing && timing.firstTokenMs === undefined) timing.firstTokenMs = Date.now();
-        this.replaceLastMessage(sessionId, managed, projectMessage(event.message));
+        const projected = projectMessage(event.message);
+        if (timing) {
+          if (timing.firstTokenMs === undefined) timing.firstTokenMs = Date.now();
+          // 首个非 thinking 可见输出出现 = 思考结束（ThinkingRow 计时用）
+          if (
+            timing.thinkingEndMs === undefined &&
+            projected?.content.some(
+              (part) =>
+                (part.type === 'text' && part.text.trim()) ||
+                part.type === 'toolCall' ||
+                part.type === 'image'
+            )
+          ) {
+            timing.thinkingEndMs = Date.now();
+          }
+        }
+        this.replaceLastMessage(sessionId, managed, projected);
         return;
       }
       case 'message_end': {
