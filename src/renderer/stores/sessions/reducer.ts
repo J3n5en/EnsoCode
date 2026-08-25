@@ -5,6 +5,7 @@ import type {
   ProjectedMessage,
   RendererAgentEvent,
   SlashCommand,
+  SubagentInfo,
 } from '@shared/types/agent';
 
 export interface SessionProjection {
@@ -19,6 +20,8 @@ export interface SessionProjection {
   pendingApprovals: ApprovalRequestInfo[];
   /** 后台任务（任务胶囊条数据） */
   backgroundTasks: BackgroundTaskInfo[];
+  /** 子代理（状态行数据） */
+  subagents: SubagentInfo[];
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
 }
@@ -31,6 +34,7 @@ export const emptyProjection: SessionProjection = {
   activeMs: 0,
   pendingApprovals: [],
   backgroundTasks: [],
+  subagents: [],
 };
 
 /**
@@ -52,6 +56,9 @@ export function applyAgentEvent(
       backgroundTasks: state.backgroundTasks.map((task) =>
         task.status === 'running' ? { ...task, status: 'failed' as const } : task
       ),
+      subagents: state.subagents.map((agent) =>
+        agent.status === 'running' ? { ...agent, status: 'failed' as const } : agent
+      ),
     };
   }
   if (event.type === 'snapshot') {
@@ -65,6 +72,7 @@ export function applyAgentEvent(
       activeMs: state.activeMs,
       pendingApprovals: snapshot.pendingApprovals ?? [],
       backgroundTasks: snapshot.backgroundTasks ?? [],
+      subagents: snapshot.subagents ?? [],
     };
   }
   if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
@@ -101,6 +109,16 @@ export function applyAgentEvent(
         ),
         lastSeq: event.seq,
       };
+    case 'subagent-update': {
+      const exists = state.subagents.some((agent) => agent.id === event.agent.id);
+      return {
+        ...state,
+        subagents: exists
+          ? state.subagents.map((agent) => (agent.id === event.agent.id ? event.agent : agent))
+          : [...state.subagents, event.agent],
+        lastSeq: event.seq,
+      };
+    }
     case 'task-started':
       return {
         ...state,

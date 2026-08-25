@@ -45,6 +45,20 @@ export interface BackgroundTaskInfo {
   exitCode?: number;
 }
 
+/** 子代理状态（渲染层状态行与 snapshot 共用） */
+export interface SubagentInfo {
+  id: string;
+  description: string;
+  status: 'running' | 'done' | 'failed';
+  /** assistant step 数 */
+  steps: number;
+  /** 当前动作摘要（工具名+参数 / writing…） */
+  currentActivity: string;
+  /** 完成后的最终产出（markdown） */
+  resultText?: string;
+  startedAt: number;
+}
+
 /** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
 export interface McpServerSpawnConfig {
   name: string;
@@ -172,6 +186,8 @@ export interface SessionSnapshot {
   pendingApprovals?: ApprovalRequestInfo[];
   /** 后台任务（渲染层刷新后恢复胶囊条） */
   backgroundTasks?: BackgroundTaskInfo[];
+  /** 子代理（渲染层刷新后恢复状态行） */
+  subagents?: SubagentInfo[];
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -225,6 +241,7 @@ export type AgentWorkerEvent =
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
   | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
+  | { type: 'subagent-update'; sessionId: string; seq: number; agent: SubagentInfo }
   | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
   | {
       type: 'task-output';
@@ -425,6 +442,12 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         return value as unknown as AgentWorkerEvent;
       }
       return null;
+    case 'subagent-update':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isRecord(value.agent)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'task-started':
       return isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&

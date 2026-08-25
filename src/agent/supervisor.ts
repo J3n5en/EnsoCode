@@ -20,6 +20,7 @@ import type {
   SessionSnapshot,
   SlashCommand,
   SpawnModelConfig,
+  SubagentInfo,
   ThinkingLevel,
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
@@ -34,6 +35,7 @@ import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
 import { projectMessage } from './projection';
+import { createSubagentTool } from './subagent';
 import { createTodoTool } from './todo';
 
 interface ManagedSession {
@@ -55,6 +57,8 @@ interface ManagedSession {
   gate: ApprovalGate;
   /** 后台任务完成提醒（agent 忙时挂起,下次工具结果搭车投递） */
   pendingTaskReminders: string[];
+  /** 子代理状态（覆盖式 upsert,snapshot 恢复用） */
+  subagents: Map<string, SubagentInfo>;
   unsubscribe: () => void;
 }
 
@@ -325,7 +329,7 @@ export class SessionSupervisor {
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
-    const customTools = [
+    const buildCoreTools = (): Def[] => [
       createReadToolDefinition(cwd) as unknown as Def,
       withApproval(
         gate,
@@ -339,9 +343,35 @@ export class SessionSupervisor {
       ),
       withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
       withApproval(gate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
-      createTodoTool(),
-      ...createTaskTools(this.bgTasks),
       ...mcpTools.map((tool) => withApproval(gate, 'mcp', tool)),
+    ];
+    // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
+    const taskTool = createSubagentTool({
+      createSubSession: async () => {
+        const { session } = await createAgentSession({
+          cwd,
+          agentDir: this.options.agentDir,
+          modelRuntime: runtime,
+          model: { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined },
+          thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
+          noTools: 'builtin',
+          customTools: buildCoreTools(),
+          sessionManager: SessionManager.create(cwd, this.options.sessionDir),
+        });
+        return session;
+      },
+      emitUpdate: (agent) => {
+        const managed = managedRef ?? this.sessions.get(sessionId);
+        if (!managed) return;
+        managed.subagents.set(agent.id, agent);
+        this.options.emit({ type: 'subagent-update', sessionId, seq: ++managed.seq, agent });
+      },
+    });
+    const customTools = [
+      ...buildCoreTools(),
+      createTodoTool(),
+      taskTool,
+      ...createTaskTools(this.bgTasks),
     ].map((tool) => withTaskReminders(tool, takePendingReminders));
 
     const { session } = await createAgentSession({
@@ -375,6 +405,7 @@ export class SessionSupervisor {
       toolDurations: new Map(),
       gate,
       pendingTaskReminders: [],
+      subagents: new Map(),
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {

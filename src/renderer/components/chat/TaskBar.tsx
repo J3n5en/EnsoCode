@@ -1,5 +1,5 @@
-import type { BackgroundTaskInfo } from '@shared/types/agent';
-import { ChevronDown, Circle, Square, X } from 'lucide-react';
+import type { BackgroundTaskInfo, SubagentInfo } from '@shared/types/agent';
+import { Bot, ChevronDown, Circle, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -8,6 +8,7 @@ import { formatDuration } from '@/stores/sessions/stats';
 interface TaskBarProps {
   sessionId: string;
   tasks: BackgroundTaskInfo[];
+  subagents: SubagentInfo[];
 }
 
 const STATUS_DOT = {
@@ -20,30 +21,31 @@ const STATUS_DOT = {
  * 后台任务状态行（grok-build 风）：输入框上方每任务一行；
  * 点「查看」在行下内嵌展开输出;done 5s 自动移除,failed 手动关闭。
  */
-export function TaskBar({ sessionId, tasks }: TaskBarProps) {
+export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
   const { t } = useI18n();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
-  // 结束的任务(done/failed)5s 后自动收起（展开中的不收）
+  // 结束的条目(done/failed)5s 后自动收起（展开中的不收）
   useEffect(() => {
-    const doneTasks = tasks.filter(
-      (task) =>
-        task.status !== 'running' && !dismissed.has(task.taskId) && task.taskId !== openTaskId
-    );
-    if (doneTasks.length === 0) return;
+    const finished = [
+      ...tasks.filter((task) => task.status !== 'running').map((task) => task.taskId),
+      ...subagents.filter((agent) => agent.status !== 'running').map((agent) => agent.id),
+    ].filter((id) => !dismissed.has(id) && id !== openTaskId);
+    if (finished.length === 0) return;
     const timer = setTimeout(() => {
       setDismissed((prev) => {
         const next = new Set(prev);
-        for (const task of doneTasks) next.add(task.taskId);
+        for (const id of finished) next.add(id);
         return next;
       });
     }, 5000);
     return () => clearTimeout(timer);
-  }, [tasks, dismissed, openTaskId]);
+  }, [tasks, subagents, dismissed, openTaskId]);
 
   const visible = tasks.filter((task) => !dismissed.has(task.taskId));
-  if (visible.length === 0) return null;
+  const visibleAgents = subagents.filter((agent) => !dismissed.has(agent.id));
+  if (visible.length === 0 && visibleAgents.length === 0) return null;
 
   const dismiss = (taskId: string) => {
     setDismissed((prev) => new Set(prev).add(taskId));
@@ -51,14 +53,15 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
   };
 
   const openTask = visible.find((task) => task.taskId === openTaskId) ?? null;
+  const openAgent = visibleAgents.find((agent) => agent.id === openTaskId) ?? null;
 
   return (
     <div className="relative mb-1 flex flex-col gap-0.5">
-      {openTask && (
+      {(openTask || openAgent) && (
         <div className="absolute bottom-full left-0 right-0 z-30 mb-1.5 rounded-xl border bg-background/95 shadow-xl backdrop-blur-sm">
           <div className="flex items-center gap-2 border-b px-3 py-1.5 text-xs">
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
-              {openTask.command}
+              {openTask ? openTask.command : openAgent?.description}
             </span>
             <button
               type="button"
@@ -68,7 +71,14 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          <TailView tail={openTask.tail} />
+          {openTask && <TailView tail={openTask.tail} />}
+          {openAgent && (
+            <pre className="max-h-56 overflow-auto px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+              {openAgent.status === 'running'
+                ? `[${openAgent.steps} steps] ${openAgent.currentActivity}`
+                : openAgent.resultText || openAgent.status}
+            </pre>
+          )}
         </div>
       )}
       {visible.map((task) => {
@@ -116,7 +126,62 @@ export function TaskBar({ sessionId, tasks }: TaskBarProps) {
           </div>
         );
       })}
+      {visibleAgents.map((agent) => {
+        const open = openTaskId === agent.id;
+        return (
+          <div key={agent.id} className="rounded-lg border border-border/60 bg-muted/20">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+              <Circle
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full border-0',
+                  STATUS_DOT[agent.status]
+                )}
+              />
+              <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {agent.description}
+                {agent.status === 'running' && agent.currentActivity && (
+                  <span className="text-muted-foreground/60"> · {agent.currentActivity}</span>
+                )}
+              </span>
+              <AgentMeta agent={agent} />
+              <button
+                type="button"
+                onClick={() => setOpenTaskId(open ? null : agent.id)}
+                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {t('Output')}
+                <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+              </button>
+              {agent.status !== 'running' && (
+                <button
+                  type="button"
+                  onClick={() => dismiss(agent.id)}
+                  className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function AgentMeta({ agent }: { agent: SubagentInfo }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (agent.status !== 'running') return;
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [agent.status]);
+  return (
+    <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+      {agent.steps > 0 ? `${agent.steps} steps · ` : ''}
+      {agent.status === 'running' ? formatDuration(Date.now() - agent.startedAt) : agent.status}
+    </span>
   );
 }
 
