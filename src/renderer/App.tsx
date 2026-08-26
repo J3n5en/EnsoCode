@@ -4,6 +4,8 @@ import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
 const WIDTH_KEY = 'enso-sidebar-width';
@@ -29,6 +31,31 @@ export default function App() {
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
   }, []);
+
+  // 全局快捷键(可在设置中改绑):折叠侧栏 / 打开设置 / 新对话
+  const keybindings = useSettingsStore((s) => s.keybindings);
+  useEffect(() => {
+    const bindings = effectiveKeybindings(keybindings);
+    const onKeyDown = (e: KeyboardEvent) => {
+      const pressed = eventToBinding(e);
+      if (!pressed) return;
+      if (pressed === bindings['toggle-sidebar']) {
+        e.preventDefault();
+        setCollapsed((v) => !v);
+      } else if (pressed === bindings['open-settings']) {
+        e.preventDefault();
+        void window.electronAPI.window.openSettings();
+      } else if (pressed === bindings['new-conversation']) {
+        e.preventDefault();
+        const sessions = useSessionsStore.getState();
+        const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+        const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
+        if (projectId) sessions.newConversation(projectId);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [keybindings]);
 
   return (
     <div className="flex h-screen flex-col">

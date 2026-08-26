@@ -82,6 +82,7 @@ const initialState = {
   disabledBuiltinAgentTypes: [] as string[],
   disabledBuiltinTools: [] as string[],
   onboarded: false,
+  keybindings: {} as Record<string, string>,
   projects: [] as import('@shared/types').Project[],
 };
 
@@ -297,6 +298,14 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       setOnboarded: (onboarded) => set({ onboarded }),
+
+      setKeybinding: (action, binding) =>
+        set((state) => ({ keybindings: { ...state.keybindings, [action]: binding } })),
+      resetKeybinding: (action) =>
+        set((state) => {
+          const { [action]: _removed, ...rest } = state.keybindings;
+          return { keybindings: rest };
+        }),
 
       // 按目录路径去重；已存在时返回已有项
       addProject: (path) => {

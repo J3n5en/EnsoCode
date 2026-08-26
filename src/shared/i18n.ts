@@ -13,6 +13,13 @@ export const zhTranslations: Record<string, string> = {
   'Font weight': '字重',
   General: '通用',
   'General application settings': '应用通用设置',
+  Shortcuts: '快捷键',
+  'Click a shortcut to rebind it; press Esc to cancel.': '点击键位改绑;Esc 取消。',
+  'Toggle sidebar': '折叠/展开侧栏',
+  'Open settings': '打开设置',
+  'Press shortcut…': '按下新快捷键…',
+  'Already used by "{{label}}"': '已被「{{label}}」占用',
+  'Reset to default': '恢复默认',
   Language: '语言',
   Light: '浅色',
   'No favorite themes yet. Click the heart icon to add favorites.':

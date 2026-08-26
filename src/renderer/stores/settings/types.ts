@@ -59,6 +59,9 @@ export interface SettingsState {
   /** 是否已完成首次运行引导；老用户（已有配置）视为已完成 */
   onboarded: boolean;
 
+  /** 快捷键覆盖(action → 绑定串);只存与默认不同的项 */
+  keybindings: Record<string, string>;
+
   // Projects（本地目录引用，作为会话工作目录）
   projects: Project[];
 
@@ -111,6 +114,10 @@ export interface SettingsState {
 
   // Onboarding
   setOnboarded: (value: boolean) => void;
+
+  // Keybinding actions
+  setKeybinding: (action: string, binding: string) => void;
+  resetKeybinding: (action: string) => void;
 
   // Project actions
   /** 按目录路径去重；已存在时返回已有项 */
