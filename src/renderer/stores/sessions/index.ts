@@ -27,6 +27,14 @@ import { useSettingsStore } from '@/stores/settings';
 import { electronStorage } from '@/stores/settings/storage';
 import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
 
+function startGoalPrompt(objective: string): string {
+  return (
+    `<goal-continuation>\nSession goal: ${objective}\n` +
+    'Work toward this goal autonomously. When done call goal_complete with evidence; ' +
+    'if blocked call goal_blocked; if waiting on something external call goal_wait.\n</goal-continuation>'
+  );
+}
+
 export interface Conversation extends SessionProjection {
   id: string;
   projectId: string;
@@ -61,6 +69,8 @@ export interface Conversation extends SessionProjection {
   queuedMessages?: QueuedMessage[];
   /** 会话目标(设定后空闲自动续跑) */
   goal?: SessionGoal;
+  /** 回退后待预填输入框的文本(rewind-done 回流,ChatInput 消费一次) */
+  draftText?: string;
 }
 
 interface SendTarget {
@@ -107,6 +117,10 @@ interface SessionsState {
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
   sendQueuedNow(conversationId: string, messageId: string): void;
+  /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流 */
+  rewind(conversationId: string, userIndexFromEnd: number): void;
+  /** ChatInput 消费预填文本后清除 */
+  clearDraft(conversationId: string): void;
   /** 设定会话目标并立即开跑 */
   setGoal(conversationId: string, text: string): void;
   /** 暂停/继续/清除目标 */
@@ -213,6 +227,12 @@ export const useSessionsStore = create<SessionsState>()(
             }
             return { conversations };
           });
+          // resume 回放后会话已 idle:active goal 不会再等到 turn-completed,这里补一次续跑
+          if (event.partial) {
+            for (const session of event.sessions) {
+              continueGoal(session.sessionId);
+            }
+          }
           return;
         }
         if (event.type === 'goal-signal') {
@@ -277,6 +297,17 @@ export const useSessionsStore = create<SessionsState>()(
             }
             return { conversations };
           });
+          return;
+        }
+        if (event.type === 'rewind-done') {
+          // 截断已由随行的 message-upsert/messages-truncated 落定,这里只接编辑文本
+          if (event.editorText) {
+            set((state) =>
+              state.conversations[event.sessionId]
+                ? patch(state, event.sessionId, { draftText: event.editorText })
+                : state
+            );
+          }
           return;
         }
         if (event.type === 'session-meta') {
@@ -493,14 +524,28 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
+          let spawnTitle: string | undefined;
           if (goalMatch) {
             const arg = goalMatch[1]?.trim();
             if (!arg) return 'usage: /goal <objective> | /goal pause|resume|clear';
-            if (arg === 'clear') get().clearGoal(id);
-            else if (arg === 'pause') get().pauseGoal(id);
-            else if (arg === 'resume') get().resumeGoal(id);
-            else get().setGoal(id, arg);
-            return null;
+            if (arg === 'clear') {
+              get().clearGoal(id);
+              return null;
+            }
+            if (arg === 'pause') {
+              get().pauseGoal(id);
+              return null;
+            }
+            if (arg === 'resume') {
+              get().resumeGoal(id);
+              return null;
+            }
+            get().setGoal(id, arg);
+            // 已 spawn:空闲由 setGoal kickoff,忙碌等本轮收束 continueGoal
+            if (conversation.started) return null;
+            // 未 spawn:把 kickoff 当首条消息走下面的 spawn+prompt,否则 GoalBar 会一直停在「推进中」
+            spawnTitle = arg.slice(0, 40);
+            text = startGoalPrompt(arg);
           }
           // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
           if (conversation.started && conversation.status === 'running') {
@@ -541,7 +586,7 @@ export const useSessionsStore = create<SessionsState>()(
             set((state) =>
               patch(state, id, {
                 spawning: true,
-                title: conversation.title || (text || '[image]').slice(0, 40),
+                title: conversation.title || spawnTitle || (text || '[image]').slice(0, 40),
               })
             );
             const result = await window.electronAPI.agent.spawn({
@@ -741,10 +786,7 @@ export const useSessionsStore = create<SessionsState>()(
           );
           // kickoff:目标说明 + 终止工具指引;后续每轮收束由 continueGoal 续跑
           if (conversation.started && conversation.status === 'idle') {
-            const kickoff =
-              `<goal-continuation>\nSession goal: ${text.trim()}\n` +
-              'Work toward this goal autonomously. When done call goal_complete with evidence; ' +
-              'if blocked call goal_blocked; if waiting on something external call goal_wait.\n</goal-continuation>';
+            const kickoff = startGoalPrompt(text.trim());
             set((state) =>
               patch(state, conversationId, {
                 messages: [
@@ -839,6 +881,17 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
+        rewind(conversationId, userIndexFromEnd) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation?.started || conversation.status !== 'idle') return;
+          void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd);
+        },
+
+        clearDraft(conversationId) {
+          if (get().conversations[conversationId]?.draftText === undefined) return;
+          set((state) => patch(state, conversationId, { draftText: undefined }));
+        },
+
         sendQueuedNow(conversationId, messageId) {
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
@@ -922,6 +975,7 @@ export const useSessionsStore = create<SessionsState>()(
               backgroundTasks: [],
               subagents: [],
               activeTabId: undefined,
+              draftText: undefined,
             },
           ])
         ),

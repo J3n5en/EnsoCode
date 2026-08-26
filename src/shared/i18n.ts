@@ -261,6 +261,8 @@ export const zhTranslations: Record<string, string> = {
   Import: '导入',
   'Show {{count}} earlier': '显示更早的 {{count}} 条',
   'Scroll to bottom': '滚动到底部',
+  Rewind: '回退',
+  'Rewind to this message': '回退到这条消息（其后的消息移出当前分支,文本回填输入框）',
   'Thinking level': '思考深度',
   Reasoning: '推理',
   'Takes effect in a new conversation': '新对话生效',

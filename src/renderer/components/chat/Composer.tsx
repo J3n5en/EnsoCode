@@ -23,6 +23,9 @@ interface ComposerProps {
   toolbar?: React.ReactNode;
   /** 有待处理审批时锁定输入（ref-chat-a 语义：先处理审批再继续） */
   locked?: boolean;
+  /** 外部注入的草稿（回退预填）；写入输入框后经 onDraftConsumed 清除来源 */
+  injectedDraft?: string;
+  onDraftConsumed?: () => void;
   onSend: (text: string, images: AttachedImage[]) => void;
   onAbort: () => void;
 }
@@ -61,6 +64,8 @@ export function Composer({
   focusKey,
   toolbar,
   locked = false,
+  injectedDraft,
+  onDraftConsumed,
   onSend,
   onAbort,
 }: ComposerProps) {
@@ -90,6 +95,15 @@ export function Composer({
     }
     textareaRef.current?.focus();
   }, [focusKey]);
+
+  // 回退预填：覆盖当前输入并聚焦；消费即通知来源清除，避免重复注入
+  // biome-ignore lint/correctness/useExhaustiveDependencies: injectedDraft 是触发信号
+  useEffect(() => {
+    if (!injectedDraft) return;
+    setText(injectedDraft);
+    onDraftConsumed?.();
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [injectedDraft]);
 
   const slashResults =
     slashQuery === null

@@ -148,6 +148,8 @@ export function ChatView() {
             busy={busy}
             locked={(conversation.pendingApprovals ?? []).length > 0}
             focusKey={conversation.id}
+            injectedDraft={conversation.draftText}
+            onDraftConsumed={() => useSessionsStore.getState().clearDraft(conversation.id)}
             toolbar={
               <>
                 {!conversation.parentId && (

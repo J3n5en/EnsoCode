@@ -12,10 +12,12 @@ import {
   LoaderCircle,
   Target,
   TerminalSquare,
+  Undo2,
 } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { EditDiff } from './EditDiff';
@@ -138,7 +140,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
   switch (item.kind) {
     case 'user':
       return (
-        <div className="flex flex-col items-end gap-1.5">
+        <div className="group/user flex flex-col items-end gap-1.5">
           {item.images.map((image, index) => (
             <ZoomableImage
               // biome-ignore lint/suspicious/noArrayIndexKey: 图片无稳定 id，消息整体快照替换
@@ -148,6 +150,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
             />
           ))}
           {item.text && <UserText text={item.text} />}
+          <RewindButton messageIndex={Number(item.key)} />
         </div>
       );
     case 'text':
@@ -171,6 +174,46 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       return <TaskNoteRow item={item} />;
   }
 }, itemEqual);
+
+/** 当前展示的会话(主会话或激活的 coworker tab),与 ChatView 的选取逻辑一致 */
+function displayedConversation(state: ReturnType<typeof useSessionsStore.getState>) {
+  const active = state.activeId ? state.conversations[state.activeId] : null;
+  if (!active) return null;
+  return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
+}
+
+/** 回退入口:仅 idle 且已 spawn 的会话显示;点击后该 user 消息及之后移出分支,文本回填输入框 */
+function RewindButton({ messageIndex }: { messageIndex: number }) {
+  const { t } = useI18n();
+  const canRewind = useSessionsStore((state) => {
+    const conversation = displayedConversation(state);
+    return Boolean(
+      conversation?.started && !conversation.spawning && conversation.status === 'idle'
+    );
+  });
+  if (!canRewind) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const state = useSessionsStore.getState();
+        const conversation = displayedConversation(state);
+        if (!conversation) return;
+        if (conversation.messages[messageIndex]?.role !== 'user') return;
+        // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
+        const userIndexFromEnd = conversation.messages
+          .slice(messageIndex + 1)
+          .filter((message) => message.role === 'user').length;
+        state.rewind(conversation.id, userIndexFromEnd);
+      }}
+      className="flex items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/user:opacity-100 hover:text-foreground"
+      title={t('Rewind to this message')}
+    >
+      <Undo2 className="h-3 w-3" />
+      {t('Rewind')}
+    </button>
+  );
+}
 
 /** assistant 正文：markdown + hover 操作条（复制 / 时间 / 该轮耗时·TTFT·tok/s） */
 function TextRow({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
