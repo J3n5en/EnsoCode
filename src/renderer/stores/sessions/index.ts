@@ -268,37 +268,35 @@ export const useSessionsStore = create<SessionsState>()(
         }
       });
 
-      /** 合并投递该会话的全部排队消息(按入队顺序拼接为一条) */
+      /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
         const conversation = get().conversations[id];
         if (!conversation?.started || conversation.status !== 'idle') return;
-        const queued = conversation.queuedMessages ?? [];
-        if (queued.length === 0) return;
+        const [next, ...rest] = conversation.queuedMessages ?? [];
+        if (!next) return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
           (conversation.pendingAsks ?? []).length > 0
         ) {
           return;
         }
-        const text = queued.map((message) => message.text).join('\n\n');
-        const images = queued.flatMap((message) => message.images ?? []);
         set((state) =>
           patch(state, id, {
-            queuedMessages: [],
+            queuedMessages: rest,
             messages: [
               ...state.conversations[id].messages,
               {
                 role: 'user',
                 content: [
-                  ...(text ? [{ type: 'text' as const, text }] : []),
-                  ...images.map((image) => ({ type: 'image' as const, ...image })),
+                  ...(next.text ? [{ type: 'text' as const, text: next.text }] : []),
+                  ...(next.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
                 ],
                 timestamp: Date.now(),
               },
             ],
           })
         );
-        void window.electronAPI.agent.prompt(id, text, images.length > 0 ? images : undefined);
+        void window.electronAPI.agent.prompt(id, next.text, next.images);
       }
 
       return {
