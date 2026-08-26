@@ -8,6 +8,7 @@ import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
+import { CoworkerTabs } from './CoworkerTabs';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
@@ -18,9 +19,15 @@ export function ChatView() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
   const projects = useSettingsStore((state) => state.projects);
-  const conversation = useSessionsStore((state) =>
+  const parent = useSessionsStore((state) =>
     state.activeId ? state.conversations[state.activeId] : null
   );
+  // 当前 tab 的会话投影(主会话或某个 coworker);coworker 被删后回落主会话
+  const conversation = useSessionsStore((state) => {
+    const active = state.activeId ? state.conversations[state.activeId] : null;
+    if (!active) return null;
+    return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
+  });
 
   const enabledProviders = useMemo(
     () => providers.filter((provider) => provider.enabled && provider.apiKey),
@@ -50,10 +57,10 @@ export function ChatView() {
 
   // app 重启后选中可恢复的对话时自动 resume（历史消息由 worker 回放）
   useEffect(() => {
-    if (conversation && !conversation.started && conversation.sessionFile) {
-      void useSessionsStore.getState().resumeConversation(conversation.id);
+    if (parent && !parent.started && parent.sessionFile) {
+      void useSessionsStore.getState().resumeConversation(parent.id);
     }
-  }, [conversation]);
+  }, [parent]);
 
   if (!conversation) {
     return (
@@ -66,19 +73,25 @@ export function ChatView() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-1.5 border-b px-3 py-1.5">
-        <span className="min-w-0 truncate text-xs font-medium">
-          {conversation.title || t('New conversation')}
-        </span>
-        <div className="flex min-w-0 items-center gap-1.5">
-          {project && (
-            <span className="truncate font-mono text-xs text-muted-foreground" title={project.path}>
-              {project.name}
-            </span>
-          )}
-          <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
-        </div>
-      </div>
+      {parent && (
+        <CoworkerTabs
+          parent={parent}
+          displayedId={conversation.id}
+          trailing={
+            <div className="flex min-w-0 shrink-0 items-center gap-1.5 pl-1.5">
+              {project && (
+                <span
+                  className="truncate font-mono text-xs text-muted-foreground"
+                  title={project.path}
+                >
+                  {project.name}
+                </span>
+              )}
+              <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
+            </div>
+          }
+        />
+      )}
 
       {/* key 换会话强制重挂：Virtuoso 的 initialTopMostItemIndex 只在挂载时生效，天然实现切会话回底 */}
       <MessageTimeline
@@ -115,46 +128,57 @@ export function ChatView() {
             focusKey={conversation.id}
             toolbar={
               <>
-                <PresetPicker
-                  presetId={conversation.presetId ?? 'default'}
-                  disabled={conversation.started}
-                  onSelect={(presetId) =>
-                    useSessionsStore.getState().setPreset(conversation.id, presetId)
-                  }
-                />
-                <ApprovalModePicker
-                  mode={conversation.approvalMode ?? 'full'}
-                  onSelect={(mode) =>
-                    useSessionsStore.getState().setApprovalMode(conversation.id, mode)
-                  }
-                />
-                <ModelPicker
-                  providers={enabledProviders}
-                  providerId={provider?.id ?? ''}
-                  modelId={effectiveModelId}
-                  reasoningEnabled={conversation.reasoningEnabled ?? false}
-                  thinkingLevel={conversation.thinkingLevel ?? 'medium'}
-                  onSelect={(pid, mid) =>
-                    useSessionsStore.getState().setModel(conversation.id, pid, mid)
-                  }
-                  onReasoningChange={(enabled) =>
-                    useSessionsStore.getState().setReasoning(conversation.id, enabled)
-                  }
-                  onThinkingChange={(level) =>
-                    useSessionsStore.getState().setThinking(conversation.id, level)
-                  }
-                />
+                {!conversation.parentId && (
+                  <>
+                    <PresetPicker
+                      presetId={conversation.presetId ?? 'default'}
+                      disabled={conversation.started}
+                      onSelect={(presetId) =>
+                        useSessionsStore.getState().setPreset(conversation.id, presetId)
+                      }
+                    />
+                    <ApprovalModePicker
+                      mode={conversation.approvalMode ?? 'full'}
+                      onSelect={(mode) =>
+                        useSessionsStore.getState().setApprovalMode(conversation.id, mode)
+                      }
+                    />
+                    <ModelPicker
+                      providers={enabledProviders}
+                      providerId={provider?.id ?? ''}
+                      modelId={effectiveModelId}
+                      reasoningEnabled={conversation.reasoningEnabled ?? false}
+                      thinkingLevel={conversation.thinkingLevel ?? 'medium'}
+                      onSelect={(pid, mid) =>
+                        useSessionsStore.getState().setModel(conversation.id, pid, mid)
+                      }
+                      onReasoningChange={(enabled) =>
+                        useSessionsStore.getState().setReasoning(conversation.id, enabled)
+                      }
+                      onThinkingChange={(level) =>
+                        useSessionsStore.getState().setThinking(conversation.id, level)
+                      }
+                    />
+                  </>
+                )}
+                {conversation.parentId && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {conversation.agentType ?? 'coworker'}
+                    {conversation.lastModelId ? ` · ${conversation.lastModelId}` : ''}
+                  </span>
+                )}
                 <ContextMeter messages={conversation.messages} />
               </>
             }
             onSend={(content, images) => {
-              if (!provider || !effectiveModelId || !project) return;
+              if (!project) return;
+              if (!conversation.parentId && (!provider || !effectiveModelId)) return;
               // 发送后强制回到跟随（ref-chat-b 的 post-submit scroll）
               timelineRef.current?.scrollToBottom();
               void useSessionsStore.getState().send(
                 content,
                 {
-                  providerId: provider.id,
+                  providerId: provider?.id ?? '',
                   modelId: effectiveModelId,
                   cwd: project.path,
                 },
