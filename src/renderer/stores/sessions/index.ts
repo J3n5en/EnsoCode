@@ -27,6 +27,14 @@ export interface Conversation extends SessionProjection {
   presetId?: string;
   /** 审批档位（per 会话记忆）；缺省 full（完全放行） */
   approvalMode?: ApprovalMode;
+  /** coworker 会话专有：父会话 id（有值则不进 order/侧栏） */
+  parentId?: string;
+  coworkerName?: string;
+  agentType?: string;
+  /** 父会话专有：在编 coworker id 列表（驱动 tab 条） */
+  coworkerIds?: string[];
+  /** 父会话专有：当前 tab（undefined = 主会话） */
+  activeTabId?: string;
 }
 
 interface SendTarget {
@@ -63,6 +71,10 @@ interface SessionsState {
   /** 设置审批档位；已 spawn 的会话即时下发 */
   setApprovalMode(id: string, mode: ApprovalMode): void;
   abort(): Promise<void>;
+  /** 切换聊天区 tab（undefined = 主会话） */
+  selectTab(parentId: string, tabId?: string): void;
+  /** 解雇 coworker（删除靠 coworker-update 回流,单一数据流） */
+  dismissCoworkerFromUI(parentId: string, coworkerId: string): void;
 }
 
 const patch = (
@@ -77,7 +89,17 @@ export const useSessionsStore = create<SessionsState>()(
   persist(
     (set, get) => {
       window.electronAPI.agent.onFocusSession((sessionId) => {
-        if (get().conversations[sessionId]) set({ activeId: sessionId });
+        const conversation = get().conversations[sessionId];
+        if (!conversation) return;
+        const parentId = conversation.parentId;
+        if (parentId) {
+          set((state) => ({
+            activeId: parentId,
+            conversations: patch(state, parentId, { activeTabId: sessionId }).conversations,
+          }));
+        } else {
+          set({ activeId: sessionId });
+        }
       });
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
@@ -101,6 +123,27 @@ export const useSessionsStore = create<SessionsState>()(
             const alive = new Map(event.sessions.map((s) => [s.sessionId, s]));
             const partial = event.partial === true;
             const conversations = { ...state.conversations };
+            // persist 丢失时按 worker 快照重建 coworker 并挂回父(worker 是父子关系的权威)
+            for (const [sid, snapshot] of alive) {
+              const parentId = snapshot.parentSessionId;
+              if (conversations[sid] || !parentId || !conversations[parentId]) continue;
+              const parent = conversations[parentId];
+              conversations[sid] = {
+                ...emptyProjection,
+                id: sid,
+                projectId: parent.projectId,
+                parentId,
+                coworkerName: snapshot.coworkerName,
+                title: snapshot.coworkerName ?? 'coworker',
+                started: true,
+                spawning: false,
+                createdAt: Date.now(),
+              };
+              conversations[parentId] = {
+                ...parent,
+                coworkerIds: [...(parent.coworkerIds ?? []), sid],
+              };
+            }
             for (const id of Object.keys(conversations)) {
               const conversation = conversations[id];
               const snapshot = alive.get(id);
@@ -129,6 +172,54 @@ export const useSessionsStore = create<SessionsState>()(
                     status: 'failed',
                     error: 'Session ended — history not restored',
                   };
+            }
+            return { conversations };
+          });
+          return;
+        }
+        if (event.type === 'coworker-update') {
+          set((state) => {
+            const parent = state.conversations[event.sessionId];
+            if (!parent) return state;
+            const cw = event.coworker;
+            const conversations = { ...state.conversations };
+            if (cw.status === 'dismissed') {
+              delete conversations[cw.id];
+              conversations[event.sessionId] = {
+                ...parent,
+                coworkerIds: (parent.coworkerIds ?? []).filter((x) => x !== cw.id),
+                activeTabId: parent.activeTabId === cw.id ? undefined : parent.activeTabId,
+              };
+              return { conversations };
+            }
+            const existing = conversations[cw.id];
+            conversations[cw.id] = existing
+              ? {
+                  ...existing,
+                  started: true,
+                  spawning: false,
+                  sessionFile: cw.sessionFile ?? existing.sessionFile,
+                  ...(cw.agentType ? { agentType: cw.agentType } : {}),
+                }
+              : {
+                  ...emptyProjection,
+                  id: cw.id,
+                  projectId: parent.projectId,
+                  parentId: event.sessionId,
+                  coworkerName: cw.name,
+                  ...(cw.agentType ? { agentType: cw.agentType } : {}),
+                  title: cw.name,
+                  started: true,
+                  spawning: false,
+                  createdAt: cw.createdAt,
+                  ...(cw.sessionFile ? { sessionFile: cw.sessionFile } : {}),
+                  ...(cw.modelId ? { lastModelId: cw.modelId } : {}),
+                };
+            if (!(parent.coworkerIds ?? []).includes(cw.id)) {
+              conversations[event.sessionId] = {
+                ...parent,
+                coworkerIds: [...(parent.coworkerIds ?? []), cw.id],
+              };
             }
             return { conversations };
           });
@@ -204,11 +295,20 @@ export const useSessionsStore = create<SessionsState>()(
         removeConversation(id) {
           const conversation = get().conversations[id];
           if (!conversation) return;
+          // 级联解雇 coworker,防 worker 侧孤儿泄漏
+          for (const coworkerId of conversation.coworkerIds ?? []) {
+            if (conversation.started) {
+              void window.electronAPI.agent.dismissCoworker(id, coworkerId);
+            }
+          }
           if (conversation.started && conversation.status === 'running') {
             void window.electronAPI.agent.abort(id);
           }
           set((state) => {
             const conversations = { ...state.conversations };
+            for (const coworkerId of conversation.coworkerIds ?? []) {
+              delete conversations[coworkerId];
+            }
             delete conversations[id];
             const order = state.order.filter((entry) => entry !== id);
             return {
@@ -220,8 +320,10 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async send(text, target, images) {
-          const id = get().activeId;
-          if (!id) return 'no conversation';
+          const activeId = get().activeId;
+          if (!activeId) return 'no conversation';
+          const activeTab = get().conversations[activeId]?.activeTabId;
+          const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
           const conversation = get().conversations[id];
           // 乐观回显：立即上屏，不等 spawn/prompt 往返。worker 会为这条 user 消息
           // 发同 index 的 message-upsert（其 messages.length 与本地一致），自然覆盖对齐；
@@ -242,6 +344,10 @@ export const useSessionsStore = create<SessionsState>()(
             })
           );
           if (!conversation.started) {
+            // coworker 由 worker 侧创建/恢复,永不走 spawn 分支
+            if (conversation.parentId) {
+              return 'coworker not restored yet — resume the conversation first';
+            }
             set((state) =>
               patch(state, id, {
                 spawning: true,
@@ -331,6 +437,32 @@ export const useSessionsStore = create<SessionsState>()(
                 })
               : patch(state, id, { spawning: false, status: 'failed', error: result.error })
           );
+          if (!result.ok) return;
+          // 级联恢复 coworker：命令 sessionId 都是父 id,OperationGate 保证排在父 spawn 之后
+          for (const coworkerId of conversation.coworkerIds ?? []) {
+            const coworker = get().conversations[coworkerId];
+            if (!coworker?.sessionFile || coworker.started || coworker.spawning) continue;
+            set((state) => patch(state, coworkerId, { spawning: true }));
+            void window.electronAPI.agent
+              .spawnCoworker(
+                id,
+                coworkerId,
+                coworker.coworkerName ?? coworker.title,
+                coworker.agentType,
+                coworker.sessionFile
+              )
+              .then((res) => {
+                set((state) =>
+                  res.ok
+                    ? patch(state, coworkerId, { started: true })
+                    : patch(state, coworkerId, {
+                        spawning: false,
+                        status: 'failed',
+                        error: res.error,
+                      })
+                );
+              });
+          }
         },
 
         addImportedConversation(projectId, imported) {
@@ -395,10 +527,22 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async abort() {
-          const id = get().activeId;
-          if (id && get().conversations[id]?.started) {
+          const activeId = get().activeId;
+          if (!activeId) return;
+          const activeTab = get().conversations[activeId]?.activeTabId;
+          const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
+          if (get().conversations[id]?.started) {
             await window.electronAPI.agent.abort(id);
           }
+        },
+
+        selectTab(parentId, tabId) {
+          if (!get().conversations[parentId]) return;
+          set((state) => patch(state, parentId, { activeTabId: tabId }));
+        },
+
+        dismissCoworkerFromUI(parentId, coworkerId) {
+          void window.electronAPI.agent.dismissCoworker(parentId, coworkerId);
         },
       };
     },
@@ -422,6 +566,7 @@ export const useSessionsStore = create<SessionsState>()(
               pendingApprovals: [],
               backgroundTasks: [],
               subagents: [],
+              activeTabId: undefined,
             },
           ])
         ),
