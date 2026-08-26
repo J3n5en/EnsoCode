@@ -33,10 +33,6 @@ export function BuiltinToolsSettings() {
           </div>
         ))}
       </div>
-
-      <p className="text-muted-foreground text-xs">
-        {t('Need web search? Add an MCP server (Tavily, Exa, Firecrawl…) on the MCP page.')}
-      </p>
     </div>
   );
 }
