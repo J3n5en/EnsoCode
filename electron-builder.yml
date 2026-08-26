@@ -16,8 +16,15 @@ mac:
 win:
   target:
     - nsis
+nsis:
+  artifactName: ${productName}-Setup-${version}.exe
 linux:
   target:
     - AppImage
     - deb
 npmRebuild: false
+publish:
+  provider: github
+  owner: J3n5en
+  repo: EnsoCode
+  releaseType: draft
