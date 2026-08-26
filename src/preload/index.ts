@@ -18,6 +18,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
+import type { UpdateStatus } from '@shared/types/updater';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
@@ -197,6 +198,19 @@ const electronAPI = {
       const listener = (_: unknown, event: RendererAgentEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_EVENT, listener);
+    },
+  },
+
+  updater: {
+    checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
+    downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
+    quitAndInstall: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
+    setAutoUpdateEnabled: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
+    onStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
+      const listener = (_: unknown, status: UpdateStatus) => callback(status);
+      ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATER_STATUS, listener);
     },
   },
 

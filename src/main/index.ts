@@ -3,6 +3,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { app, BrowserWindow } from 'electron';
 
 import { registerIpcHandlers } from './ipc';
+import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
@@ -42,7 +43,8 @@ if (!gotTheLock) {
 
     registerIpcHandlers();
     startAgentWorker();
-    createMainWindow();
+    const mainWindow = createMainWindow();
+    void initAutoUpdater(mainWindow);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -56,4 +58,17 @@ if (!gotTheLock) {
       app.quit();
     }
   });
+}
+
+/** 打包环境下启动自动更新(dev 无 app-update.yml,electron-updater 会报错;Linux deb 由 IPC 层守卫) */
+async function initAutoUpdater(window: BrowserWindow): Promise<void> {
+  if (!app.isPackaged) return;
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return;
+  // 读持久化设置里的 autoUpdate(zustand persist 形状:{ state: {...} });缺省 true
+  const persisted = readSettings()?.['enso-settings'] as
+    | { state?: { autoUpdate?: boolean } }
+    | undefined;
+  const autoUpdate = persisted?.state?.autoUpdate ?? true;
+  const { autoUpdaterService } = await import('./services/updater/AutoUpdater');
+  autoUpdaterService.init(window, autoUpdate);
 }

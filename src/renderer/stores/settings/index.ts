@@ -73,6 +73,7 @@ const initialState = {
   terminalFontWeightBold: '500' as FontWeight,
   favoriteTerminalThemes: [] as string[],
   loadLocalSkills: true,
+  autoUpdate: true,
   providers: [] as import('@shared/types').ModelProvider[],
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
@@ -135,6 +136,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
+      setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
 
       // 按 baseUrl+apiKey 指纹去重，返回实际新增数量
       addProviders: (providers) => {

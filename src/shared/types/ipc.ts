@@ -61,6 +61,13 @@ export const IPC_CHANNELS = {
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',
   SESSIONS_READ_EXTERNAL: 'sessions:read-external',
   SESSIONS_IMPORT_EXTERNAL: 'sessions:import-external',
+
+  // Auto updater
+  UPDATER_CHECK: 'updater:check',
+  UPDATER_DOWNLOAD_UPDATE: 'updater:downloadUpdate',
+  UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
+  UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
+  UPDATER_STATUS: 'updater:status',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

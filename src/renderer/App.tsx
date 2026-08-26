@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TitleBar } from '@/components/app/TitleBar';
+import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
@@ -77,6 +78,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col">
       <TitleBar title="EnsoCode" />
+      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar
           width={collapsed ? undefined : width}
