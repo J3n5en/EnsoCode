@@ -11,6 +11,7 @@
 | [dialog-layering.md](dialog-layering.md) | 弹窗内的下拉点开没反应 |
 | [dedupe-identity.md](dedupe-identity.md) | 去重没生效，同一个东西导入了三份 |
 | [agent-end-run-scoped-messages.md](agent-end-run-scoped-messages.md) | 多轮对话后历史消息消失，只剩最近一轮 |
+| [checkpoint-cross-session-wipe.md](checkpoint-cross-session-wipe.md) | 「回退+文件」不还原文件，无报错 |
 
 ## 共同教训
 
