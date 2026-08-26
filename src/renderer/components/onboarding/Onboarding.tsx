@@ -1,15 +1,33 @@
-import { Check, Layers, Plug, Server, Sparkles, Wand2, X } from 'lucide-react';
+import { Bot, Check, Layers, Plug, Server, Sparkles, Wand2, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { AgentTypeEditDialog } from '../settings/AgentTypesSettings';
 import { LocalAssetImportDialog } from '../settings/LocalAssetImportDialog';
 import { LocalImportDialog } from '../settings/LocalImportDialog';
 import { PresetEditDialog } from '../settings/PresetsSettings';
 
-type StepId = 'welcome' | 'provider' | 'skill' | 'mcp' | 'instruction' | 'preset' | 'done';
-const STEPS: StepId[] = ['welcome', 'provider', 'skill', 'mcp', 'instruction', 'preset', 'done'];
+type StepId =
+  | 'welcome'
+  | 'provider'
+  | 'skill'
+  | 'mcp'
+  | 'instruction'
+  | 'preset'
+  | 'agentType'
+  | 'done';
+const STEPS: StepId[] = [
+  'welcome',
+  'provider',
+  'skill',
+  'mcp',
+  'instruction',
+  'preset',
+  'agentType',
+  'done',
+];
 
 /** 首次运行引导：欢迎 → 四类导入 → 完成；每步可跳过，随时可关闭 */
 export function Onboarding() {
@@ -20,11 +38,13 @@ export function Onboarding() {
   const mcpServers = useSettingsStore((s) => s.mcpServers);
   const instructions = useSettingsStore((s) => s.instructions);
   const presets = useSettingsStore((s) => s.presets);
+  const agentTypes = useSettingsStore((s) => s.agentTypes);
 
   const [stepIndex, setStepIndex] = React.useState(0);
   const [importKind, setImportKind] = React.useState<'skill' | 'mcp' | 'instruction' | null>(null);
   const [providerOpen, setProviderOpen] = React.useState(false);
   const [presetOpen, setPresetOpen] = React.useState(false);
+  const [agentTypeOpen, setAgentTypeOpen] = React.useState(false);
   const step = STEPS[stepIndex];
 
   const finish = () => setOnboarded(true);
@@ -104,7 +124,7 @@ export function Onboarding() {
           </div>
         )}
 
-        {step !== 'welcome' && step !== 'done' && step !== 'preset' && (
+        {step !== 'welcome' && step !== 'done' && step !== 'preset' && step !== 'agentType' && (
           <ImportStepView
             {...importStep[step]}
             importedLabel={t('{{count}} imported', { count: importStep[step].count })}
@@ -121,6 +141,18 @@ export function Onboarding() {
             onImport={() => setPresetOpen(true)}
             importedLabel={t('{{count}} presets', { count: presets.length })}
             importLabel={t('New preset')}
+          />
+        )}
+
+        {step === 'agentType' && (
+          <ImportStepView
+            icon={Bot}
+            title={t('Agent types')}
+            desc={t('Give subagents their own model, skills and MCP servers (optional)')}
+            count={agentTypes.length}
+            onImport={() => setAgentTypeOpen(true)}
+            importedLabel={t('{{count}} agent types', { count: agentTypes.length })}
+            importLabel={t('New agent type')}
           />
         )}
 
@@ -170,6 +202,9 @@ export function Onboarding() {
         />
       )}
       {presetOpen && <PresetEditDialog preset={null} onClose={() => setPresetOpen(false)} />}
+      {agentTypeOpen && (
+        <AgentTypeEditDialog entry={null} onClose={() => setAgentTypeOpen(false)} />
+      )}
     </div>
   );
 }

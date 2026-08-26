@@ -135,7 +135,7 @@ const slugify = (value: string): string =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 32);
 
-function AgentTypeEditDialog({
+export function AgentTypeEditDialog({
   entry,
   defaults,
   onClose,

@@ -56,6 +56,9 @@ export const zhTranslations: Record<string, string> = {
   'No models yet': '暂无模型，点击拉取',
   'Bundle skills, MCP servers and an instruction file into a preset (optional)':
     '把技能、MCP 服务和一份指令组合成预设（可选）',
+  'Give subagents their own model, skills and MCP servers (optional)':
+    '为子代理配置专属模型、技能与 MCP 服务（可选）',
+  '{{count}} agent types': '已有 {{count}} 个类型',
   '{{count}} presets': '已有 {{count}} 个预设',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
