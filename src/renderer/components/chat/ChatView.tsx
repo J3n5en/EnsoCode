@@ -10,10 +10,12 @@ import { AskBar } from './AskBar';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
 import { CoworkerTabs } from './CoworkerTabs';
+import { GoalBar } from './GoalBar';
 import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
+import { SetGoalButton } from './SetGoalButton';
 import { StatsLine } from './StatsLine';
 import { TaskBar } from './TaskBar';
 
@@ -131,6 +133,9 @@ export function ChatView() {
             conversationId={conversation.id}
             queued={conversation.queuedMessages ?? []}
           />
+          {conversation.goal && (
+            <GoalBar conversationId={conversation.id} goal={conversation.goal} />
+          )}
           <Composer
             cwd={project?.path}
             commands={conversation.commands}
@@ -172,6 +177,9 @@ export function ChatView() {
                       }
                     />
                   </>
+                )}
+                {!conversation.parentId && !conversation.goal && conversation.started && (
+                  <SetGoalButton conversationId={conversation.id} />
                 )}
                 {conversation.parentId && (
                   <span className="text-[11px] text-muted-foreground">

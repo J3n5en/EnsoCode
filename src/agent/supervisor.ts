@@ -42,6 +42,7 @@ import {
 import { createCoworkerTool } from './coworker';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
+import { createGoalTools } from './goal';
 import { McpManager } from './mcp';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
@@ -596,6 +597,19 @@ export class SessionSupervisor {
       ...(toolEnabled('subagent') ? [taskTool] : []),
       ...(toolEnabled('coworker') ? [coworkerTool] : []),
       ...(toolEnabled('background_tasks') ? createTaskTools(this.bgTasks) : []),
+      ...(toolEnabled('goal')
+        ? createGoalTools((kind, note) => {
+            const managed = managedRef ?? this.sessions.get(sessionId);
+            if (!managed) return;
+            this.options.emit({
+              type: 'goal-signal',
+              sessionId,
+              seq: ++managed.seq,
+              kind,
+              note,
+            });
+          })
+        : []),
     ].map((tool) => withTaskReminders(tool, takePendingReminders));
 
     const { session } = await createAgentSession({

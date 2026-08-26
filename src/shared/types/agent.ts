@@ -314,6 +314,13 @@ export type AgentWorkerEvent =
   | { type: 'ask-resolved'; sessionId: string; seq: number; requestId: string }
   | { type: 'subagent-update'; sessionId: string; seq: number; agent: SubagentInfo }
   | { type: 'coworker-update'; sessionId: string; seq: number; coworker: CoworkerInfo }
+  | {
+      type: 'goal-signal';
+      sessionId: string;
+      seq: number;
+      kind: 'complete' | 'blocked' | 'wait';
+      note: string;
+    }
   | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
   | {
       type: 'task-output';
@@ -554,6 +561,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
         isNonEmptyString(value.requestId)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'goal-signal':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
+        typeof value.note === 'string'
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'coworker-update':

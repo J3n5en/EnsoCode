@@ -1,5 +1,19 @@
 import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
 
+/** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
+export interface SessionGoal {
+  text: string;
+  status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
+  /** 终止/暂停原因(goal 信号的 note 或安全限制说明) */
+  note?: string;
+  /** 已自动续跑的轮数(安全上限 25) */
+  autoTurns: number;
+  /** 连续无进展轮数(上一轮最终文本归一化后相同/为空;3 次暂停) */
+  noProgressRuns: number;
+  /** 上一轮最终 assistant 文本的归一化指纹 */
+  lastOutput?: string;
+}
+
 /** 排队待发的用户消息(agent running 时入队,轮次结束自动投递) */
 export interface QueuedMessage {
   id: string;
@@ -45,6 +59,8 @@ export interface Conversation extends SessionProjection {
   activeTabId?: string;
   /** 排队待发消息(running 时用户消息先入队) */
   queuedMessages?: QueuedMessage[];
+  /** 会话目标(设定后空闲自动续跑) */
+  goal?: SessionGoal;
 }
 
 interface SendTarget {
@@ -91,6 +107,12 @@ interface SessionsState {
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
   sendQueuedNow(conversationId: string, messageId: string): void;
+  /** 设定会话目标并立即开跑 */
+  setGoal(conversationId: string, text: string): void;
+  /** 暂停/继续/清除目标 */
+  pauseGoal(conversationId: string): void;
+  resumeGoal(conversationId: string): void;
+  clearGoal(conversationId: string): void;
 }
 
 const patch = (
@@ -193,6 +215,22 @@ export const useSessionsStore = create<SessionsState>()(
           });
           return;
         }
+        if (event.type === 'goal-signal') {
+          set((state) => {
+            const conversation = state.conversations[event.sessionId];
+            if (!conversation?.goal) return state;
+            const status =
+              event.kind === 'complete'
+                ? ('completed' as const)
+                : event.kind === 'blocked'
+                  ? ('blocked' as const)
+                  : ('waiting' as const);
+            return patch(state, event.sessionId, {
+              goal: { ...conversation.goal, status, note: event.note },
+            });
+          });
+          return;
+        }
         if (event.type === 'coworker-update') {
           set((state) => {
             const parent = state.conversations[event.sessionId];
@@ -264,8 +302,83 @@ export const useSessionsStore = create<SessionsState>()(
         // 两者都触发会在 running 事件回来前把下一条也投出去(双触发竞态)
         if (event.type === 'turn-completed') {
           flushQueue(id);
+          continueGoal(id);
         }
       });
+
+      /** goal 续跑:轮次收束且空闲、无排队消息/挂起项时,自动注入一条继续指令(带安全限制) */
+      function continueGoal(id: string): void {
+        const conversation = get().conversations[id];
+        const goal = conversation?.goal;
+        if (!conversation?.started || conversation.status !== 'idle') return;
+        if (!goal || goal.status !== 'active') return;
+        if ((conversation.queuedMessages ?? []).length > 0) return;
+        if (
+          (conversation.pendingApprovals ?? []).length > 0 ||
+          (conversation.pendingAsks ?? []).length > 0
+        ) {
+          return;
+        }
+        // 无进展守卫:最终 assistant 文本归一化比对,连续 3 次相同/为空即暂停
+        const lastAssistant = [...conversation.messages]
+          .reverse()
+          .find((message) => message.role === 'assistant');
+        const output = (lastAssistant?.content ?? [])
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join('')
+          .normalize('NFKC')
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+        const noProgress = output === '' || output === goal.lastOutput;
+        const noProgressRuns = noProgress ? goal.noProgressRuns + 1 : 0;
+        if (noProgressRuns >= 3) {
+          set((state) =>
+            patch(state, id, {
+              goal: {
+                ...goal,
+                status: 'paused',
+                note: 'no progress in 3 consecutive runs',
+                noProgressRuns,
+              },
+            })
+          );
+          return;
+        }
+        // 自动轮数上限:防无界烧钱
+        if (goal.autoTurns >= 25) {
+          set((state) =>
+            patch(state, id, {
+              goal: { ...goal, status: 'paused', note: 'automatic-turn limit (25) reached' },
+            })
+          );
+          return;
+        }
+        set((state) =>
+          patch(state, id, {
+            goal: {
+              ...goal,
+              autoTurns: goal.autoTurns + 1,
+              noProgressRuns,
+              lastOutput: output,
+            },
+          })
+        );
+        const text =
+          `<goal-continuation>\nSession goal: ${goal.text}\n` +
+          'Continue working toward it. If it is genuinely done, call goal_complete with evidence; ' +
+          'if you cannot proceed without the user, call goal_blocked; if waiting on something ' +
+          'external, call goal_wait. Otherwise take the next concrete step now.\n</goal-continuation>';
+        set((state) =>
+          patch(state, id, {
+            messages: [
+              ...state.conversations[id].messages,
+              { role: 'user', content: [{ type: 'text' as const, text }], timestamp: Date.now() },
+            ],
+          })
+        );
+        void window.electronAPI.agent.prompt(id, text, undefined);
+      }
 
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
@@ -600,6 +713,90 @@ export const useSessionsStore = create<SessionsState>()(
           if (get().conversations[id]?.started) {
             await window.electronAPI.agent.abort(id);
           }
+        },
+
+        setGoal(conversationId, text) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation || !text.trim()) return;
+          set((state) =>
+            patch(state, conversationId, {
+              goal: {
+                text: text.trim(),
+                status: 'active',
+                autoTurns: 0,
+                noProgressRuns: 0,
+              },
+            })
+          );
+          // kickoff:目标说明 + 终止工具指引;后续每轮收束由 continueGoal 续跑
+          if (conversation.started && conversation.status === 'idle') {
+            const kickoff =
+              `<goal-continuation>\nSession goal: ${text.trim()}\n` +
+              'Work toward this goal autonomously. When done call goal_complete with evidence; ' +
+              'if blocked call goal_blocked; if waiting on something external call goal_wait.\n</goal-continuation>';
+            set((state) =>
+              patch(state, conversationId, {
+                messages: [
+                  ...state.conversations[conversationId].messages,
+                  {
+                    role: 'user',
+                    content: [{ type: 'text' as const, text: kickoff }],
+                    timestamp: Date.now(),
+                  },
+                ],
+              })
+            );
+            void window.electronAPI.agent.prompt(conversationId, kickoff, undefined);
+          }
+        },
+
+        pauseGoal(conversationId) {
+          const goal = get().conversations[conversationId]?.goal;
+          if (!goal) return;
+          set((state) =>
+            patch(state, conversationId, { goal: { ...goal, status: 'paused', note: undefined } })
+          );
+        },
+
+        resumeGoal(conversationId) {
+          const goal = get().conversations[conversationId]?.goal;
+          if (!goal) return;
+          // 恢复即重置安全计数(与 pi-goal 的 guided review 语义一致:人已过目)
+          set((state) =>
+            patch(state, conversationId, {
+              goal: {
+                ...goal,
+                status: 'active',
+                note: undefined,
+                autoTurns: 0,
+                noProgressRuns: 0,
+              },
+            })
+          );
+          const conversation = get().conversations[conversationId];
+          if (conversation?.started && conversation.status === 'idle') {
+            const text =
+              `<goal-continuation>\nSession goal resumed: ${goal.text}\n` +
+              'Continue working toward it (goal_complete / goal_blocked / goal_wait to stop).\n</goal-continuation>';
+            set((state) =>
+              patch(state, conversationId, {
+                messages: [
+                  ...state.conversations[conversationId].messages,
+                  {
+                    role: 'user',
+                    content: [{ type: 'text' as const, text }],
+                    timestamp: Date.now(),
+                  },
+                ],
+              })
+            );
+            void window.electronAPI.agent.prompt(conversationId, text, undefined);
+          }
+        },
+
+        clearGoal(conversationId) {
+          if (!get().conversations[conversationId]) return;
+          set((state) => patch(state, conversationId, { goal: undefined }));
         },
 
         selectTab(parentId, tabId) {

@@ -89,7 +89,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
 
 /** 系统合成的整块注入消息（coworker 雇佣通知 / 后台任务提醒） */
 const SYNTHETIC_BLOCK =
-  /^<(agent-notification|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
+  /^<(agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 /** coworker 首条的角色前缀 */
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 主 agent 发给 coworker 的消息包裹 */
