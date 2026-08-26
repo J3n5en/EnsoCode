@@ -117,8 +117,9 @@ interface SessionsState {
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
   sendQueuedNow(conversationId: string, messageId: string): void;
-  /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流 */
-  rewind(conversationId: string, userIndexFromEnd: number): void;
+  /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
+   *  restoreFiles 同时还原工作树文件 */
+  rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   /** ChatInput 消费预填文本后清除 */
   clearDraft(conversationId: string): void;
   /** 设定会话目标并立即开跑 */
@@ -881,10 +882,10 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        rewind(conversationId, userIndexFromEnd) {
+        rewind(conversationId, userIndexFromEnd, restoreFiles) {
           const conversation = get().conversations[conversationId];
           if (!conversation?.started || conversation.status !== 'idle') return;
-          void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd);
+          void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
         },
 
         clearDraft(conversationId) {

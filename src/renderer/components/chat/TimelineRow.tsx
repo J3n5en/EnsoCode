@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleDot,
   Copy,
+  History,
   ListTodo,
   LoaderCircle,
   Target,
@@ -182,7 +183,7 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
   return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
 }
 
-/** 回退入口:仅 idle 且已 spawn 的会话显示;点击后该 user 消息及之后移出分支,文本回填输入框 */
+/** 回退入口:仅 idle 且已 spawn 的会话显示;「回退」只截对话,「回退+文件」同时还原工作树 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
   const canRewind = useSessionsStore((state) => {
@@ -192,26 +193,40 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
     );
   });
   if (!canRewind) return null;
+  const rewind = (restoreFiles: boolean) => {
+    const state = useSessionsStore.getState();
+    const conversation = displayedConversation(state);
+    if (!conversation) return;
+    if (conversation.messages[messageIndex]?.role !== 'user') return;
+    // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
+    const userIndexFromEnd = conversation.messages
+      .slice(messageIndex + 1)
+      .filter((message) => message.role === 'user').length;
+    state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
+  };
+  const buttonClass =
+    'flex items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/user:opacity-100 hover:text-foreground';
   return (
-    <button
-      type="button"
-      onClick={() => {
-        const state = useSessionsStore.getState();
-        const conversation = displayedConversation(state);
-        if (!conversation) return;
-        if (conversation.messages[messageIndex]?.role !== 'user') return;
-        // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
-        const userIndexFromEnd = conversation.messages
-          .slice(messageIndex + 1)
-          .filter((message) => message.role === 'user').length;
-        state.rewind(conversation.id, userIndexFromEnd);
-      }}
-      className="flex items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/user:opacity-100 hover:text-foreground"
-      title={t('Rewind to this message')}
-    >
-      <Undo2 className="h-3 w-3" />
-      {t('Rewind')}
-    </button>
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => rewind(false)}
+        className={buttonClass}
+        title={t('Rewind to this message')}
+      >
+        <Undo2 className="h-3 w-3" />
+        {t('Rewind')}
+      </button>
+      <button
+        type="button"
+        onClick={() => rewind(true)}
+        className={buttonClass}
+        title={t('Rewind and restore files to before this turn')}
+      >
+        <History className="h-3 w-3" />
+        {t('Rewind + files')}
+      </button>
+    </div>
   );
 }
 

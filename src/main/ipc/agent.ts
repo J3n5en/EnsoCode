@@ -212,15 +212,21 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_REWIND,
-    (_event, sessionId: unknown, userIndexFromEnd: unknown): AgentActionResult => {
+    (
+      _event,
+      sessionId: unknown,
+      userIndexFromEnd: unknown,
+      restoreFiles: unknown
+    ): AgentActionResult => {
       if (
         !isNonEmptyString(sessionId) ||
         typeof userIndexFromEnd !== 'number' ||
-        userIndexFromEnd < 0
+        userIndexFromEnd < 0 ||
+        (restoreFiles !== undefined && typeof restoreFiles !== 'boolean')
       ) {
         return { ok: false, error: 'invalid rewind' };
       }
-      return rewindSession(sessionId, userIndexFromEnd);
+      return rewindSession(sessionId, userIndexFromEnd, restoreFiles);
     }
   );
 

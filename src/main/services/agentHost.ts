@@ -336,9 +336,15 @@ export function respondAsk(
 
 export function rewindSession(
   sessionId: string,
-  userIndexFromEnd: number
+  userIndexFromEnd: number,
+  restoreFiles?: boolean
 ): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'rewind', sessionId, userIndexFromEnd });
+  return sendCommand({
+    type: 'rewind',
+    sessionId,
+    userIndexFromEnd,
+    ...(restoreFiles ? { restoreFiles } : {}),
+  });
 }
 
 export function stopBackgroundTask(
