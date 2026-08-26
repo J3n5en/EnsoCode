@@ -84,6 +84,8 @@ interface ManagedSession {
   /** coworker 会话专有：父会话 id 与雇佣名 */
   parentId?: string;
   coworkerName?: string;
+  /** coworker 首条消息待注入的角色提示（agent 类型 systemPrompt,消费一次;resume 不设） */
+  pendingRole?: string;
   /** 父会话专有：在编 coworker（name → info,status 以 sessions 现值为准） */
   coworkers: Map<string, CoworkerInfo>;
   unsubscribe: () => void;
@@ -205,17 +207,40 @@ export class SessionSupervisor {
           command.agentTypes
         );
         return;
-      case 'spawn-coworker':
+      case 'spawn-coworker': {
         // resume 级联可能重复下发,已存在即幂等跳过
         if (this.sessions.has(command.coworkerId)) return;
-        await this.spawnCoworker(
-          command.sessionId,
-          command.coworkerId,
-          command.name,
-          command.agentType,
-          command.resumeFile
-        );
+        try {
+          await this.spawnCoworker(
+            command.sessionId,
+            command.coworkerId,
+            command.name,
+            command.agentType,
+            command.resumeFile
+          );
+        } catch (error) {
+          // 重名等失败不污染父会话状态（渲染层已前置查重,此处兜底）
+          console.error('[spawn-coworker]', toErrorMessage(error));
+          return;
+        }
+        // 用户手动雇佣时让主 agent 感知（与后台任务完成通知同款：闲则唤醒,忙则搭车）
+        if (!command.resumeFile) {
+          const parent = this.sessions.get(command.sessionId);
+          if (!parent) return;
+          const notice =
+            `The user hired a new coworker "${command.name}"` +
+            `${command.agentType ? ` (${command.agentType})` : ''}. ` +
+            'It shares your workspace; use coworker send/list to engage it when useful.';
+          if (parent.status === 'idle') {
+            void parent.session
+              .prompt(`<coworker-hired>\n${notice}\n</coworker-hired>`)
+              .catch(() => {});
+          } else {
+            parent.pendingTaskReminders.push(notice);
+          }
+        }
         return;
+      }
       case 'dismiss-coworker':
         await this.dismissCoworker(command.sessionId, command.coworkerId);
         return;
@@ -225,7 +250,7 @@ export class SessionSupervisor {
         // user 消息不本地 upsert——agent 会为它发 message_start，本地再发一份会错位
         // prompt 的 promise 覆盖整个 turn，不 await——否则门会把 steer/abort 排到 turn 之后
         void managed.session
-          .prompt(command.text, images ? { images } : undefined)
+          .prompt(consumeRole(managed, command.text), images ? { images } : undefined)
           .catch((error) => {
             managed.status = 'failed';
             this.emitStatus(command.sessionId, managed, toErrorMessage(error));
@@ -680,11 +705,15 @@ export class SessionSupervisor {
       seq: ++parent.seq,
       coworker: info,
     });
-    this.registerManagedSession(coworkerId, session, gate, modelId, {
+    const managed = this.registerManagedSession(coworkerId, session, gate, modelId, {
       parentId,
       coworkerName: name,
       ...(resumeFile ? { resumeFile } : {}),
     });
+    // 角色提示在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
+    if (!resumeFile && agentType?.systemPrompt) {
+      managed.pendingRole = agentType.systemPrompt;
+    }
     parent.coworkers.set(name, info);
     return info;
   }
@@ -744,7 +773,7 @@ export class SessionSupervisor {
         if (managed.status === 'running') {
           await managed.session.steer(text);
         } else {
-          void managed.session.prompt(text).catch((error) => {
+          void managed.session.prompt(consumeRole(managed, text)).catch((error) => {
             managed.status = 'failed';
             this.emitStatus(coworkerId, managed, toErrorMessage(error));
             resolveDone();
@@ -994,6 +1023,14 @@ export class SessionSupervisor {
     });
     return this.runtimePromise;
   }
+}
+
+/** coworker 首条消息前缀注入角色提示,消费一次 */
+function consumeRole(managed: { pendingRole?: string }, text: string): string {
+  if (!managed.pendingRole) return text;
+  const role = managed.pendingRole;
+  managed.pendingRole = undefined;
+  return `<role>\n${role}\n</role>\n\n${text}`;
 }
 
 const slugify = (value: string): string =>

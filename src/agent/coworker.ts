@@ -93,12 +93,8 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
             );
           }
           const info = await deps.spawn(name.trim(), agentTypeName);
-          // role 只在首次雇佣的首条注入;resume 后的 send 不再带(jsonl 里已有)
-          const agentType = deps.agentTypes.find((type) => type.name === info.agentType);
-          const firstPrompt = agentType?.systemPrompt
-            ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${task}`
-            : task;
-          const result = await deps.send(info.name, firstPrompt, signal);
+          // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
+          const result = await deps.send(info.name, task, signal);
           return text(
             `Coworker "${info.name}" hired${info.agentType ? ` (${info.agentType})` : ''}.\n\n${truncate(result)}`
           );

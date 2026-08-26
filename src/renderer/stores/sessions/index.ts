@@ -75,6 +75,8 @@ interface SessionsState {
   selectTab(parentId: string, tabId?: string): void;
   /** 解雇 coworker（删除靠 coworker-update 回流,单一数据流） */
   dismissCoworkerFromUI(parentId: string, coworkerId: string): void;
+  /** 手动雇佣 coworker（会话建立靠 coworker-update 回流;主 agent 经 worker 通知感知） */
+  hireCoworker(parentId: string, name: string, agentType?: string): Promise<string | null>;
 }
 
 const patch = (
@@ -543,6 +545,32 @@ export const useSessionsStore = create<SessionsState>()(
 
         dismissCoworkerFromUI(parentId, coworkerId) {
           void window.electronAPI.agent.dismissCoworker(parentId, coworkerId);
+        },
+
+        async hireCoworker(parentId, name, agentType) {
+          const parent = get().conversations[parentId];
+          if (!parent?.started) return 'conversation not started';
+          const slug = name
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 32);
+          if (!slug) return 'invalid name';
+          const coworkerId = `${parentId}::cw-${slug}`;
+          const taken = (parent.coworkerIds ?? []).some(
+            (id) => id === coworkerId || get().conversations[id]?.coworkerName === name
+          );
+          if (taken) return 'name already in use';
+          const result = await window.electronAPI.agent.spawnCoworker(
+            parentId,
+            coworkerId,
+            name,
+            agentType
+          );
+          if (!result.ok) return result.error ?? 'hire failed';
+          // 会话对象由 coworker-update 回流建立;先切过去,displayed 在此之前回落父会话
+          set((state) => patch(state, parentId, { activeTabId: coworkerId }));
+          return null;
         },
       };
     },
