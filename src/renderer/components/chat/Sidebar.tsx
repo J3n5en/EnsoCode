@@ -243,7 +243,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                           [project.id]: !prev[project.id],
                         }))
                       }
-                      className="rounded-lg py-1 pl-9 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                      className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                     >
                       {expandedProjects[project.id]
                         ? t('Collapse')
