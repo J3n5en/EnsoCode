@@ -119,16 +119,23 @@ export class SessionSupervisor {
   private runtimePromise: Promise<ModelRuntime> | null = null;
   /** 父会话通知(合并投递):闲则注入合成提示唤醒,忙则挂 pending 搭下次工具结果 */
   private readonly notifier = new ParentNotifier((sessionId, text) => {
+    this.deliverNotification(sessionId, text);
+  });
+
+  private deliverNotification(sessionId: string, text: string): void {
     const managed = this.sessions.get(sessionId);
     if (!managed) return;
     if (managed.status === 'idle') {
       void managed.session
         .prompt(`<agent-notification>\n${text}\n</agent-notification>`)
-        .catch(() => {});
+        .catch(() => {
+          // status 是我们的投影,pi loop 可能仍在收尾拒绝 prompt——退回 pending 待搭车/轮末重投,绝不静默丢
+          managed.pendingTaskReminders.push(text);
+        });
     } else {
       managed.pendingTaskReminders.push(text);
     }
-  });
+  }
 
   constructor(private readonly options: SupervisorOptions) {
     this.bgTasks = new BackgroundTaskManager(
@@ -1002,12 +1009,14 @@ export class SessionSupervisor {
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
-        // 忙时挂起的通知若没能搭上工具结果(本轮无后续工具调用),轮末冲刷唤醒
+        // 忙时挂起的通知若没能搭上工具结果(本轮无后续工具调用),轮末冲刷唤醒。
+        // 延迟一拍:agent_end 回调里 pi loop 尚在收尾,立刻 prompt 会被拒
         if (managed.pendingTaskReminders.length > 0) {
-          const texts = managed.pendingTaskReminders.splice(0);
-          void managed.session
-            .prompt(`<agent-notification>\n${texts.join('\n\n---\n\n')}\n</agent-notification>`)
-            .catch(() => {});
+          setTimeout(() => {
+            if (managed.status !== 'idle' || managed.pendingTaskReminders.length === 0) return;
+            const texts = managed.pendingTaskReminders.splice(0);
+            this.deliverNotification(sessionId, texts.join('\n\n---\n\n'));
+          }, 150);
         }
         return;
       }
