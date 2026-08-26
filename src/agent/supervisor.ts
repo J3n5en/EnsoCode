@@ -264,6 +264,11 @@ export class SessionSupervisor {
       case 'prompt': {
         const managed = this.must(command.sessionId);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
+        // 竞态兜底:渲染层按 idle 视角发的 prompt 可能与通知唤醒赛跑,撞 running 转 steer 汇入
+        if (managed.status === 'running') {
+          await managed.session.steer(command.text, images);
+          return;
+        }
         // user 消息不本地 upsert——agent 会为它发 message_start，本地再发一份会错位
         // prompt 的 promise 覆盖整个 turn，不 await——否则门会把 steer/abort 排到 turn 之后
         void managed.session
@@ -537,6 +542,7 @@ export class SessionSupervisor {
       createSubSession: async (agentType) =>
         (await factory.createChildSession({ agentType, gate })).session,
       runGate: (gateCommand) => runGateCommand(cwd, gateCommand),
+      notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
       emitUpdate: (agent) => {
         const managed = managedRef ?? this.sessions.get(sessionId);
         if (!managed) return;
@@ -996,6 +1002,13 @@ export class SessionSupervisor {
         managed.status = 'idle';
         this.emitStatus(sessionId, managed);
         this.options.emit({ type: 'turn-completed', sessionId, seq: ++managed.seq });
+        // 忙时挂起的通知若没能搭上工具结果(本轮无后续工具调用),轮末冲刷唤醒
+        if (managed.pendingTaskReminders.length > 0) {
+          const texts = managed.pendingTaskReminders.splice(0);
+          void managed.session
+            .prompt(`<agent-notification>\n${texts.join('\n\n---\n\n')}\n</agent-notification>`)
+            .catch(() => {});
+        }
         return;
       }
       default:

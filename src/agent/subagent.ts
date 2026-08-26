@@ -15,6 +15,8 @@ export interface SubagentDeps {
   emitUpdate(agent: SubagentInfo): void;
   /** gate 验收:在会话 cwd 跑命令,返回 PASSED/FAILED 文本 */
   runGate(gate: string): Promise<string>;
+  /** 异步模式完成时回传报告(running 搭车/轮末冲刷/idle 唤醒由 notifier 决定) */
+  notify(text: string, urgent?: boolean): void;
 }
 
 /** 从 pi 会话消息取最后一条 assistant 文本 */
@@ -74,7 +76,9 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
       'Use for parallelizable or context-heavy subtasks (research a module, implement an isolated change); ' +
       'multiple task calls in one message run in parallel. ' +
-      'The subagent cannot ask you questions — include all needed context in the prompt.' +
+      'The subagent cannot ask you questions — include all needed context in the prompt. ' +
+      'Pass wait:false for long tasks to keep working — the final report is delivered to you ' +
+      'automatically when it finishes (and the parent abort no longer kills it). ' +
       (deps.agentTypes.length > 0 ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
       'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
@@ -103,6 +107,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
             'Shell command to verify the work after the subagent finishes ' +
             '(run in the workspace; exit code decides pass/fail), e.g. "pnpm test"',
         },
+        wait: {
+          type: 'boolean',
+          description:
+            'Default true: block until the report is ready. Pass false to dispatch and keep ' +
+            'working — the report is delivered to you when done',
+        },
       },
       required: ['description', 'prompt'],
     } as unknown as ToolDefinition['parameters'],
@@ -112,7 +122,14 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         prompt = '',
         agent_type: agentTypeName,
         gate,
-      } = params as { description?: string; prompt?: string; agent_type?: string; gate?: string };
+        wait = true,
+      } = params as {
+        description?: string;
+        prompt?: string;
+        agent_type?: string;
+        gate?: string;
+        wait?: boolean;
+      };
       if (!prompt.trim()) throw new Error('task prompt is required');
       const agentType = agentTypeName
         ? deps.agentTypes.find((type) => type.name === agentTypeName)
@@ -186,39 +203,74 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           dirty = true;
         }
       });
+      // 阻塞模式下父 abort 连坐杀子;异步模式派发后独立跑,不受父 abort 影响
       const onAbort = () => void session.abort();
-      signal?.addEventListener('abort', onAbort, { once: true });
+      if (wait) signal?.addEventListener('abort', onAbort, { once: true });
 
-      try {
+      const run = async (): Promise<string> => {
         const fullPrompt = agentType?.systemPrompt
           ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${prompt}`
           : prompt;
-        await session.prompt(fullPrompt);
-        let result = lastAssistantText(session);
-        // gate 验收:退出码说了算,不信子代理自称完成
-        if (gate && !signal?.aborted) {
-          result += `\n\n${await deps.runGate(gate)}`;
+        try {
+          await session.prompt(fullPrompt);
+          let result = lastAssistantText(session);
+          // gate 验收:退出码说了算,不信子代理自称完成
+          if (gate && !(wait && signal?.aborted)) {
+            result += `\n\n${await deps.runGate(gate)}`;
+          }
+          const aborted = wait && signal?.aborted;
+          info.status = aborted ? 'failed' : 'done';
+          info.resultText = result;
+          info.currentActivity = '';
+          deps.emitUpdate({ ...info });
+          if (aborted) throw new Error('Subagent aborted');
+          return result || '(subagent produced no output)';
+        } catch (error) {
+          info.status = 'failed';
+          info.currentActivity = '';
+          deps.emitUpdate({ ...info });
+          throw error;
+        } finally {
+          clearInterval(timer);
+          unsubscribe();
+          if (wait) signal?.removeEventListener('abort', onAbort);
+          session.dispose();
         }
-        info.status = signal?.aborted ? 'failed' : 'done';
-        info.resultText = result;
-        info.currentActivity = '';
-        deps.emitUpdate({ ...info });
-        if (signal?.aborted) throw new Error('Subagent aborted');
+      };
+
+      if (!wait) {
+        // 派发即返回;完成后报告经通知回传(失败立即,成功合并投递)
+        void run()
+          .then((result) => {
+            deps.notify(
+              `Subagent "${info.description}" finished:\n${result.slice(0, 1500)}`,
+              false
+            );
+          })
+          .catch((error) => {
+            deps.notify(
+              `Subagent "${info.description}" FAILED: ${error instanceof Error ? error.message : String(error)}`,
+              true
+            );
+          });
         return {
-          content: [{ type: 'text', text: result || '(subagent produced no output)' }],
-          details: { modelId: info.modelId, outputTokens: info.outputTokens, steps: info.steps },
+          content: [
+            {
+              type: 'text',
+              text:
+                `(dispatched subagent "${info.description}" [${id}] — the report will be delivered ` +
+                'to you when it finishes; keep working or return to the user meanwhile)',
+            },
+          ],
+          details: { modelId: info.modelId },
         };
-      } catch (error) {
-        info.status = 'failed';
-        info.currentActivity = '';
-        deps.emitUpdate({ ...info });
-        throw error;
-      } finally {
-        clearInterval(timer);
-        unsubscribe();
-        signal?.removeEventListener('abort', onAbort);
-        session.dispose();
       }
+
+      const result = await run();
+      return {
+        content: [{ type: 'text', text: result }],
+        details: { modelId: info.modelId, outputTokens: info.outputTokens, steps: info.steps },
+      };
     },
   };
 }
