@@ -33,6 +33,8 @@ export type TimelineItem =
       state: 'running' | 'ok' | 'error';
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
       edits: EditBlock[] | null;
+      /** write 工具写入的文件内容,展开即可查看;非 write 为 null */
+      writeContent: string | null;
       /** todo 工具的清单快照；非 todo 为 null */
       todos: TodoItem[] | null;
       /** 工具执行耗时（完成后显示）；未知为 null */
@@ -83,6 +85,13 @@ function summarizeArgs(args: unknown): string {
   }
   const json = JSON.stringify(record);
   return json === '{}' ? '' : json.slice(0, 80);
+}
+
+/** write 工具参数里取出写入内容 */
+function extractWriteContent(name: string, args: unknown): string | null {
+  if (name !== 'write' || !args || typeof args !== 'object') return null;
+  const content = (args as Record<string, unknown>).content;
+  return typeof content === 'string' && content ? content : null;
 }
 
 /** edit 工具参数里取出替换块（保持同一数组引用，供 memo 做引用比较） */
@@ -239,6 +248,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
             output: result ? result.output : null,
             state: result ? (result.isError ? 'error' : 'ok') : running ? 'running' : 'ok',
             edits: extractEdits(part.name, part.arguments),
+            writeContent: extractWriteContent(part.name, part.arguments),
             todos: result?.todos ?? null,
             durationMs: result?.durationMs ?? null,
             agentMeta: result?.agentMeta ?? null,
@@ -298,9 +308,9 @@ export function foldTimeline(
     }
     const segment = items.slice(i, end);
     const liveSegment = running && lastUserIndex >= 0 && i > lastUserIndex;
-    // 钉住的行不进组：edit 的 diff 与 todo 清单都是核心产物，不折进黑盒
+    // 钉住的行不进组：edit 的 diff、write 的内容与 todo 清单都是核心产物，不折进黑盒
     const pinned = (s: TimelineItem): boolean =>
-      s.kind === 'tool' && (s.edits !== null || s.name === 'todo');
+      s.kind === 'tool' && (s.edits !== null || !!s.writeContent || s.name === 'todo');
     const editRows = segment.filter(pinned);
     const groupRows = segment.filter((s) => !pinned(s));
     const toolCount = groupRows.filter((s) => s.kind === 'tool').length;

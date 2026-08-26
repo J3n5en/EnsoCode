@@ -72,6 +72,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.summary === b.summary &&
         a.output === b.output &&
         a.edits === b.edits &&
+        a.writeContent === b.writeContent &&
         a.todos === b.todos &&
         a.durationMs === b.durationMs &&
         a.agentMeta === b.agentMeta
@@ -472,12 +473,13 @@ function ToolGroupRow({
   );
 }
 
-/** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff，其余展开为输出 */
+/** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
-  const expandable = hasDiff || Boolean(item.output);
-  // edit 的 diff 默认展开（「直接看到」），其余保持收起
-  const [expanded, setExpanded] = useState(hasDiff);
+  const hasWrite = Boolean(item.writeContent);
+  const expandable = hasDiff || hasWrite || Boolean(item.output);
+  // edit 的 diff 与 write 的内容默认展开（「直接看到」），其余保持收起
+  const [expanded, setExpanded] = useState(hasDiff || hasWrite);
 
   if (item.todos) return <TodoRow todos={item.todos} />;
   if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
@@ -537,7 +539,12 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           <EditDiff path={item.summary} blocks={item.edits} />
         </div>
       )}
-      {expanded && !hasDiff && item.output && (
+      {expanded && hasWrite && item.writeContent && (
+        <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
+          <ReadFileView path={item.summary} contents={item.writeContent} />
+        </div>
+      )}
+      {expanded && !hasDiff && !hasWrite && item.output && (
         <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
           {item.name === 'bash' ? (
             <TerminalOutput command={item.summary} output={item.output} />
