@@ -483,6 +483,7 @@ export function AppearanceSettings() {
           onChange={(e) => setLocalFontFamily(e.target.value)}
           onBlur={applyFontFamilyChange}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
             if (e.key === 'Enter') {
               applyFontFamilyChange();
               e.currentTarget.blur();

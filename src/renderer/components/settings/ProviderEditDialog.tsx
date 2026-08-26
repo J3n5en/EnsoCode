@@ -322,6 +322,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                 value={newModel}
                 onChange={(e) => setNewModel(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     addModel(newModel);

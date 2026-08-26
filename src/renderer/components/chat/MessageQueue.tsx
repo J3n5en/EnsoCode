@@ -42,6 +42,7 @@ export function MessageQueue({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
                 if (e.key === 'Enter') saveEdit(message.id);
                 if (e.key === 'Escape') setEditingId(null);
               }}
