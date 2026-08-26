@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
@@ -67,6 +68,12 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
+  // 待确认的删除动作(项目连带其对话 / 单个对话)
+  const [pendingRemove, setPendingRemove] = useState<
+    | { kind: 'project'; project: Project; conversationIds: string[] }
+    | { kind: 'conversation'; id: string }
+    | null
+  >(null);
   // 展开显示全部会话的项目(会话级状态,重启回到折叠)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
@@ -179,10 +186,13 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    for (const id of projectConversations) removeConversation(id);
-                    removeProject(project.id);
-                  }}
+                  onClick={() =>
+                    setPendingRemove({
+                      kind: 'project',
+                      project,
+                      conversationIds: projectConversations,
+                    })
+                  }
                   className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
                   title={t('Remove project')}
                 >
@@ -225,7 +235,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            removeConversation(id);
+                            setPendingRemove({ kind: 'conversation', id });
                           }}
                           className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
                         >
@@ -284,6 +294,31 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       </div>
 
       <ImportSessionDialog project={importProject} onClose={() => setImportProject(null)} />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={pendingRemove?.kind === 'project' ? t('Remove project?') : t('Delete conversation?')}
+        description={
+          pendingRemove?.kind === 'project'
+            ? t('"{{name}}" and its {{count}} conversations will be removed from the list.', {
+                name: pendingRemove.project.name,
+                count: pendingRemove.conversationIds.length,
+              })
+            : t('This conversation will be removed from the list.')
+        }
+        confirmLabel={t('Remove')}
+        onConfirm={() => {
+          if (!pendingRemove) return;
+          if (pendingRemove.kind === 'project') {
+            for (const id of pendingRemove.conversationIds) removeConversation(id);
+            removeProject(pendingRemove.project.id);
+          } else {
+            removeConversation(pendingRemove.id);
+          }
+        }}
+      />
     </aside>
   );
 }

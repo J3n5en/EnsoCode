@@ -267,6 +267,16 @@ export const zhTranslations: Record<string, string> = {
   'Conversation + files': '对话+还原文件',
   'Rewind and restore files to before this turn':
     '回退对话并把工作树还原到这一轮之前（git 项目有效）',
+  'Rewind to this message?': '回退到这条消息?',
+  'Later messages leave the current branch; the text returns to the input box.':
+    '其后的消息将移出当前分支,该消息文本回填输入框。',
+  'Later messages leave the current branch and working-tree files are restored to before this turn.':
+    '其后的消息将移出当前分支,并把工作树文件还原到这一轮开始之前。',
+  'Remove project?': '移除项目?',
+  'Delete conversation?': '删除对话?',
+  '"{{name}}" and its {{count}} conversations will be removed from the list.':
+    '将从列表移除「{{name}}」及其 {{count}} 个对话。',
+  'This conversation will be removed from the list.': '该对话将从列表移除。',
   'Thinking level': '思考深度',
   Reasoning: '推理',
   'Takes effect in a new conversation': '新对话生效',

@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
+import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { ReadFileView } from './ReadFileView';
@@ -184,10 +185,12 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
   return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
 }
 
-/** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选 */
+/** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选,选后再确认 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  /** 待确认的回退(值 = restoreFiles);null = 无 */
+  const [pendingRestoreFiles, setPendingRestoreFiles] = useState<boolean | null>(null);
   const canRewind = useSessionsStore((state) => {
     const conversation = displayedConversation(state);
     return Boolean(
@@ -196,7 +199,6 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   });
   if (!canRewind) return null;
   const rewind = (restoreFiles: boolean) => {
-    setOpen(false);
     const state = useSessionsStore.getState();
     const conversation = displayedConversation(state);
     if (!conversation) return;
@@ -239,7 +241,10 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
           <button
             key={option.label}
             type="button"
-            onClick={() => rewind(option.restoreFiles)}
+            onClick={() => {
+              setOpen(false);
+              setPendingRestoreFiles(option.restoreFiles);
+            }}
             className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
           >
             <option.icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -250,6 +255,24 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
           </button>
         ))}
       </PopoverPopup>
+      <ConfirmDialog
+        open={pendingRestoreFiles !== null}
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) setPendingRestoreFiles(null);
+        }}
+        title={t('Rewind to this message?')}
+        description={
+          pendingRestoreFiles
+            ? t(
+                'Later messages leave the current branch and working-tree files are restored to before this turn.'
+              )
+            : t('Later messages leave the current branch; the text returns to the input box.')
+        }
+        confirmLabel={t('Rewind')}
+        onConfirm={() => {
+          if (pendingRestoreFiles !== null) rewind(pendingRestoreFiles);
+        }}
+      />
     </Popover>
   );
 }
