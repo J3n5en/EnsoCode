@@ -1,7 +1,8 @@
-import type { ApprovalDecision, ApprovalRequestInfo } from '@shared/types/agent';
+import type { ApprovalDecision, ApprovalKind, ApprovalRequestInfo } from '@shared/types/agent';
 import { FileEdit, FilePlus, Plug, ShieldAlert, TerminalSquare } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { codeToHtml } from './snippetHighlighter';
 
 const KIND_ICONS = {
   command: TerminalSquare,
@@ -15,6 +16,36 @@ interface ApprovalBarProps {
   onRespond: (requestId: string, decision: ApprovalDecision) => void;
 }
 
+/** 审批详情:command 走 shell 语法高亮,其余(文件路径/MCP 参数)素文本。
+ *  刻意不截断:长命令可滚动查看全文（ref-chat-a 语义） */
+function SummaryView({ kind, summary }: { kind: ApprovalKind; summary: string }) {
+  const [html, setHtml] = useState<string | null>(null);
+  useEffect(() => {
+    if (kind !== 'command') return;
+    let alive = true;
+    codeToHtml(summary, 'shellscript').then((out) => {
+      if (alive) setHtml(out);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [kind, summary]);
+
+  if (kind === 'command' && html != null) {
+    return (
+      <div
+        className="mt-1.5 max-h-24 overflow-auto rounded-md text-xs leading-relaxed [&_pre]:m-0 [&_pre]:px-2 [&_pre]:py-1.5 [&_pre]:font-mono [&_pre]:whitespace-pre-wrap"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return (
+    <pre className="mt-1.5 max-h-24 overflow-auto rounded-md bg-muted/50 px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">
+      {summary}
+    </pre>
+  );
+}
 /** composer 上方的审批条（ref-chat-a 形态）：只渲染队首，>1 显示 1/N；summary 全文可滚动 */
 export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
   const { t } = useI18n();
@@ -45,12 +76,7 @@ export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
           </span>
         )}
       </div>
-      {active.summary && (
-        // 刻意不截断:长命令可滚动查看全文（ref-chat-a 语义）
-        <pre className="mt-1.5 max-h-24 overflow-auto rounded-md bg-muted/50 px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">
-          {active.summary}
-        </pre>
-      )}
+      {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       <div className="mt-2 flex items-center justify-end gap-1.5">
         <button
           type="button"
