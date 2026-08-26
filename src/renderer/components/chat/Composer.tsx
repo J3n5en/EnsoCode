@@ -366,7 +366,7 @@ export function Composer({
             locked
               ? t('Resolve the pending approval to continue')
               : running
-                ? t('Steer the running agent…')
+                ? t('Message will queue until this round finishes…')
                 : t('Ask the agent…')
           }
           disabled={locked}

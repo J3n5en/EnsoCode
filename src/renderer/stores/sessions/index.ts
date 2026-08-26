@@ -1,4 +1,12 @@
 import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
+
+/** 排队待发的用户消息(agent running 时入队,轮次结束自动投递) */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  images?: AttachedImage[];
+}
+
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useSettingsStore } from '@/stores/settings';
@@ -35,6 +43,8 @@ export interface Conversation extends SessionProjection {
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
   activeTabId?: string;
+  /** 排队待发消息(running 时用户消息先入队) */
+  queuedMessages?: QueuedMessage[];
 }
 
 interface SendTarget {
@@ -77,6 +87,10 @@ interface SessionsState {
   dismissCoworkerFromUI(parentId: string, coworkerId: string): void;
   /** 手动雇佣 coworker（会话建立靠 coworker-update 回流;主 agent 经 worker 通知感知） */
   hireCoworker(parentId: string, name: string, agentType?: string): Promise<string | null>;
+  removeQueuedMessage(conversationId: string, messageId: string): void;
+  updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
+  /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
+  sendQueuedNow(conversationId: string, messageId: string): void;
 }
 
 const patch = (
@@ -245,7 +259,47 @@ export const useSessionsStore = create<SessionsState>()(
           // 该会话的首个 worker 事件即 spawn 完成信号，清掉 spawning（resume 的 loading 依赖它）
           return patch(state, id, { ...next, spawning: false });
         });
+        // 轮次收束后投递排队消息(审批/提问挂起时不投,等其解除后的下一次收束)
+        if (
+          (event.type === 'status' && event.status === 'idle') ||
+          event.type === 'turn-completed'
+        ) {
+          flushQueue(id);
+        }
       });
+
+      /** 合并投递该会话的全部排队消息(按入队顺序拼接为一条) */
+      function flushQueue(id: string): void {
+        const conversation = get().conversations[id];
+        if (!conversation?.started || conversation.status !== 'idle') return;
+        const queued = conversation.queuedMessages ?? [];
+        if (queued.length === 0) return;
+        if (
+          (conversation.pendingApprovals ?? []).length > 0 ||
+          (conversation.pendingAsks ?? []).length > 0
+        ) {
+          return;
+        }
+        const text = queued.map((message) => message.text).join('\n\n');
+        const images = queued.flatMap((message) => message.images ?? []);
+        set((state) =>
+          patch(state, id, {
+            queuedMessages: [],
+            messages: [
+              ...state.conversations[id].messages,
+              {
+                role: 'user',
+                content: [
+                  ...(text ? [{ type: 'text' as const, text }] : []),
+                  ...images.map((image) => ({ type: 'image' as const, ...image })),
+                ],
+                timestamp: Date.now(),
+              },
+            ],
+          })
+        );
+        void window.electronAPI.agent.prompt(id, text, images.length > 0 ? images : undefined);
+      }
 
       return {
         conversations: {},
@@ -327,6 +381,19 @@ export const useSessionsStore = create<SessionsState>()(
           const activeTab = get().conversations[activeId]?.activeTabId;
           const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
           const conversation = get().conversations[id];
+          // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
+          if (conversation.started && conversation.status === 'running') {
+            const queuedId = crypto.randomUUID();
+            set((state) =>
+              patch(state, id, {
+                queuedMessages: [
+                  ...(state.conversations[id].queuedMessages ?? []),
+                  { id: queuedId, text, ...(images?.length ? { images } : {}) },
+                ],
+              })
+            );
+            return null;
+          }
           // 乐观回显：立即上屏，不等 spawn/prompt 往返。worker 会为这条 user 消息
           // 发同 index 的 message-upsert（其 messages.length 与本地一致），自然覆盖对齐；
           // 万一错位由 agent_end 的全量 reconcile 兜底。
@@ -545,6 +612,60 @@ export const useSessionsStore = create<SessionsState>()(
 
         dismissCoworkerFromUI(parentId, coworkerId) {
           void window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
+        },
+
+        removeQueuedMessage(conversationId, messageId) {
+          set((state) =>
+            patch(state, conversationId, {
+              queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
+                (message) => message.id !== messageId
+              ),
+            })
+          );
+        },
+
+        updateQueuedMessage(conversationId, messageId, text) {
+          set((state) =>
+            patch(state, conversationId, {
+              queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).map(
+                (message) => (message.id === messageId ? { ...message, text } : message)
+              ),
+            })
+          );
+        },
+
+        sendQueuedNow(conversationId, messageId) {
+          const conversation = get().conversations[conversationId];
+          const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
+          if (!conversation || !item) return;
+          set((state) =>
+            patch(state, conversationId, {
+              queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
+                (message) => message.id !== messageId
+              ),
+            })
+          );
+          if (conversation.status === 'running') {
+            // steer 插入当前轮;消息回显由 worker 的 reconcile 补齐
+            void window.electronAPI.agent.steer(conversationId, item.text, item.images);
+          } else {
+            set((state) =>
+              patch(state, conversationId, {
+                messages: [
+                  ...state.conversations[conversationId].messages,
+                  {
+                    role: 'user',
+                    content: [
+                      ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+                      ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+                    ],
+                    timestamp: Date.now(),
+                  },
+                ],
+              })
+            );
+            void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
+          }
         },
 
         async hireCoworker(parentId, name, agentType) {

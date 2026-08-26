@@ -164,6 +164,11 @@ export const zhTranslations: Record<string, string> = {
   '{{count}} turns': '{{count}} 轮',
   'Approval required': '需要审批',
   'Type an answer…': '输入回答…',
+  'Message will queue until this round finishes…': '消息将排队,本轮结束后发送…',
+  Queued: '排队',
+  Edit: '编辑',
+  'Send now': '立即发送',
+  Remove: '移除',
   'Agent types': '子代理类型',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',

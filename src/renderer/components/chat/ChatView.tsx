@@ -10,6 +10,7 @@ import { AskBar } from './AskBar';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
 import { CoworkerTabs } from './CoworkerTabs';
+import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
@@ -125,6 +126,10 @@ export function ChatView() {
             onAnswer={(requestId, answer) =>
               void window.electronAPI.agent.respondAsk(conversation.id, requestId, answer)
             }
+          />
+          <MessageQueue
+            conversationId={conversation.id}
+            queued={conversation.queuedMessages ?? []}
           />
           <Composer
             cwd={project?.path}
