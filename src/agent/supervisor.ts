@@ -242,8 +242,7 @@ export class SessionSupervisor {
         return;
       }
       case 'dismiss-coworker': {
-        const name = this.sessions.get(command.coworkerId)?.coworkerName ?? command.coworkerId;
-        await this.dismissCoworker(command.sessionId, command.coworkerId);
+        const name = await this.dismissCoworker(command.sessionId, command.coworkerId);
         // 用户单独解雇时让主 agent 感知,避免它后续 send 已不存在的同事
         if (command.notify) {
           const parent = this.sessions.get(command.sessionId);
@@ -733,8 +732,8 @@ export class SessionSupervisor {
     return info;
   }
 
-  /** 解雇 coworker：中断并销毁会话,jsonl 留盘 */
-  private async dismissCoworker(parentId: string, coworkerId: string): Promise<void> {
+  /** 解雇 coworker：中断并销毁会话,jsonl 留盘。返回解雇名(通知/事件用) */
+  private async dismissCoworker(parentId: string, coworkerId: string): Promise<string> {
     const parent = this.must(parentId);
     const managed = this.sessions.get(coworkerId);
     if (managed) {
@@ -748,7 +747,7 @@ export class SessionSupervisor {
       } catch {}
       this.sessions.delete(coworkerId);
     }
-    let dismissedName = managed?.coworkerName ?? coworkerId;
+    let dismissedName = managed?.coworkerName ?? coworkerId.split('::cw-').at(-1) ?? coworkerId;
     for (const [name, info] of parent.coworkers) {
       if (info.id === coworkerId) {
         dismissedName = name;
@@ -762,6 +761,7 @@ export class SessionSupervisor {
       seq: ++parent.seq,
       coworker: { id: coworkerId, name: dismissedName, status: 'dismissed', createdAt: 0 },
     });
+    return dismissedName;
   }
 
   /**
