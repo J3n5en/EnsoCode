@@ -12,6 +12,8 @@ const DIFF_OPTIONS = {
   lineDiffType: 'word',
   disableFileHeader: true,
   preferredHighlighter: 'shiki-js',
+  // 聊天窄栏内长行必须换行:默认横向溢出会冲出卡片,且行尾的改动完全不可见
+  overflow: 'wrap',
 } as const;
 
 /**
