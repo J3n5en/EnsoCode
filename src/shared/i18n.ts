@@ -199,10 +199,8 @@ export const zhTranslations: Record<string, string> = {
   'Stop task': '停止任务',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',
-  'Set a goal': '设定目标',
-  'Session goal': '会话目标',
-  'What should the agent keep working toward?': '希望 agent 持续推进什么目标?',
-  Start: '开始',
+  'Set a session goal (/goal <objective> · pause · resume · clear)':
+    '设定会话目标(/goal <目标> · pause · resume · clear)',
   working: '推进中',
   paused: '已暂停',
   waiting: '等待中',

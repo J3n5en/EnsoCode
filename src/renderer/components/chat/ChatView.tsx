@@ -15,7 +15,6 @@ import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
-import { SetGoalButton } from './SetGoalButton';
 import { StatsLine } from './StatsLine';
 import { TaskBar } from './TaskBar';
 
@@ -138,7 +137,13 @@ export function ChatView() {
           )}
           <Composer
             cwd={project?.path}
-            commands={conversation.commands}
+            commands={[
+              {
+                name: '/goal',
+                description: t('Set a session goal (/goal <objective> · pause · resume · clear)'),
+              },
+              ...conversation.commands,
+            ]}
             running={running}
             busy={busy}
             locked={(conversation.pendingApprovals ?? []).length > 0}
@@ -177,9 +182,6 @@ export function ChatView() {
                       }
                     />
                   </>
-                )}
-                {!conversation.parentId && !conversation.goal && conversation.started && (
-                  <SetGoalButton conversationId={conversation.id} />
                 )}
                 {conversation.parentId && (
                   <span className="text-[11px] text-muted-foreground">

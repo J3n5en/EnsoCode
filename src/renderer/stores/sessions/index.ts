@@ -491,6 +491,17 @@ export const useSessionsStore = create<SessionsState>()(
           const activeTab = get().conversations[activeId]?.activeTabId;
           const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
           const conversation = get().conversations[id];
+          // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
+          const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
+          if (goalMatch) {
+            const arg = goalMatch[1]?.trim();
+            if (!arg) return 'usage: /goal <objective> | /goal pause|resume|clear';
+            if (arg === 'clear') get().clearGoal(id);
+            else if (arg === 'pause') get().pauseGoal(id);
+            else if (arg === 'resume') get().resumeGoal(id);
+            else get().setGoal(id, arg);
+            return null;
+          }
           // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
           if (conversation.started && conversation.status === 'running') {
             const queuedId = crypto.randomUUID();
