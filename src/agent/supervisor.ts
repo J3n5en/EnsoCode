@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   type AgentSession,
@@ -328,7 +329,7 @@ export class SessionSupervisor {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
-    const providerId = `enso-${model.api}-${model.baseUrl}`;
+    const providerId = providerKeyFor(model);
     // 注册基础模型恒 reasoning:true（放开全部档位能力）。开关/adaptive 由 per-session
     // 克隆的 applyReasoningToModel 决定，避免同 provider 多会话共享引用而串台或被后开会话覆盖。
     runtime.registerProvider(providerId, {
@@ -449,7 +450,7 @@ export class SessionSupervisor {
         let subModel = { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined };
         if (agentType?.model) {
           const typeModel = agentType.model;
-          const typeProviderId = `enso-${typeModel.api}-${typeModel.baseUrl}`;
+          const typeProviderId = providerKeyFor(typeModel);
           runtime.registerProvider(typeProviderId, {
             baseUrl: typeModel.baseUrl,
             api: typeModel.api,
@@ -1065,6 +1066,13 @@ const slugify = (value: string): string =>
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** provider 注册 id：掺 apiKey 指纹——同一中转 baseUrl 下多个 provider 条目(不同 key)
+ *  不能共用注册槽,否则后 spawn 会话覆盖 apiKey 导致请求串账号 */
+function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string }): string {
+  const keyFp = createHash('sha256').update(model.apiKey).digest('hex').slice(0, 8);
+  return `enso-${model.api}-${model.baseUrl}-${keyFp}`;
+}
 
 /** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
 const ENSO_USER_AGENT = 'enso-code';
