@@ -219,12 +219,12 @@ export const useSessionsStore = create<SessionsState>()(
           set((state) => {
             const conversation = state.conversations[event.sessionId];
             if (!conversation?.goal) return state;
-            const status =
-              event.kind === 'complete'
-                ? ('completed' as const)
-                : event.kind === 'blocked'
-                  ? ('blocked' as const)
-                  : ('waiting' as const);
+            // 完成即收场:GoalBar 消失,痕迹留在时间线的 goal_complete 工具行里;
+            // blocked/waiting 保留条条(需要用户行动)
+            if (event.kind === 'complete') {
+              return patch(state, event.sessionId, { goal: undefined });
+            }
+            const status = event.kind === 'blocked' ? ('blocked' as const) : ('waiting' as const);
             return patch(state, event.sessionId, {
               goal: { ...conversation.goal, status, note: event.note },
             });

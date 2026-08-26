@@ -62,7 +62,17 @@ export interface ToolGroupStats {
 }
 
 /** 从工具参数里挑一个最能说明「对什么操作」的字段做摘要 */
-const SUMMARY_KEYS = ['path', 'file_path', 'command', 'pattern', 'query', 'url', 'description'];
+const SUMMARY_KEYS = [
+  'path',
+  'file_path',
+  'command',
+  'pattern',
+  'query',
+  'url',
+  'description',
+  'summary',
+  'reason',
+];
 
 function summarizeArgs(args: unknown): string {
   if (!args || typeof args !== 'object') return '';

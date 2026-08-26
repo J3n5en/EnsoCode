@@ -10,6 +10,7 @@ import {
   Copy,
   ListTodo,
   LoaderCircle,
+  Target,
   TerminalSquare,
 } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
@@ -355,6 +356,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const [expanded, setExpanded] = useState(hasDiff);
 
   if (item.todos) return <TodoRow todos={item.todos} />;
+  if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
 
   return (
     <div className="rounded-lg border border-border/60 bg-muted/30">
@@ -428,6 +430,43 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** goal 终止信号行:目标完成/受阻/等待的醒目标记(摘要即 agent 给的证据/原因) */
+function GoalSignalRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
+  const { t } = useI18n();
+  const kind = item.name.replace('goal_', '');
+  const label =
+    kind === 'complete'
+      ? t('Goal completed')
+      : kind === 'blocked'
+        ? t('Goal blocked')
+        : t('Goal waiting');
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
+        kind === 'complete' && 'border-green-500/50 bg-green-500/5',
+        kind === 'blocked' && 'border-destructive/50 bg-destructive/5',
+        kind === 'wait' && 'border-amber-500/50 bg-amber-500/5'
+      )}
+    >
+      <Target
+        className={cn(
+          'mt-0.5 h-4 w-4 shrink-0',
+          kind === 'complete' && 'text-green-600 dark:text-green-500',
+          kind === 'blocked' && 'text-destructive',
+          kind === 'wait' && 'text-amber-500'
+        )}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">{label}</p>
+        {item.summary && (
+          <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground text-xs">{item.summary}</p>
+        )}
+      </div>
     </div>
   );
 }
