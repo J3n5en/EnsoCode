@@ -32,10 +32,21 @@ export default function App() {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
   }, []);
 
-  // 全局快捷键(可在设置中改绑):折叠侧栏 / 打开设置 / 新对话
+  // 全局快捷键(可在设置中改绑):折叠侧栏 / 打开设置 / 新对话 / coworker 标签切换
   const keybindings = useSettingsStore((s) => s.keybindings);
   useEffect(() => {
     const bindings = effectiveKeybindings(keybindings);
+    // 主会话 + coworker 循环切换;无 coworker 时不动
+    const cycleTab = (direction: 1 | -1) => {
+      const sessions = useSessionsStore.getState();
+      const parent = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+      if (!parent) return;
+      const tabs: (string | undefined)[] = [undefined, ...(parent.coworkerIds ?? [])];
+      if (tabs.length <= 1) return;
+      // activeTabId 指向已删 coworker 时 indexOf = -1,+1 后回落主会话
+      const current = tabs.indexOf(parent.activeTabId);
+      sessions.selectTab(parent.id, tabs[(current + direction + tabs.length) % tabs.length]);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
@@ -51,6 +62,12 @@ export default function App() {
         const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
         const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
         if (projectId) sessions.newConversation(projectId);
+      } else if (pressed === bindings['next-tab']) {
+        e.preventDefault();
+        cycleTab(1);
+      } else if (pressed === bindings['prev-tab']) {
+        e.preventDefault();
+        cycleTab(-1);
       }
     };
     window.addEventListener('keydown', onKeyDown);

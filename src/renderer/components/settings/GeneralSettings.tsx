@@ -53,6 +53,8 @@ const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'Toggle sidebar',
   'open-settings': 'Open settings',
   'new-conversation': 'New conversation',
+  'next-tab': 'Next coworker tab',
+  'prev-tab': 'Previous coworker tab',
 };
 
 /** 快捷键改绑:点击当前键位进入录制,按下新组合保存;Esc 取消;与其它动作冲突时拒绝并提示 */
