@@ -39,6 +39,7 @@ import {
   withBackground,
   withTaskReminders,
 } from './backgroundTasks';
+import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
@@ -98,6 +99,8 @@ interface ManagedSession {
   coworkerName?: string;
   /** coworker 首条消息待注入的角色提示（agent 类型 systemPrompt,消费一次;resume 不设） */
   pendingRole?: string;
+  /** 仅顶级会话有:工作树 checkpoint 管理(git 项目下写盘工具触发快照,回退可还原文件) */
+  checkpoints?: CheckpointManager;
   /** 父会话专有：在编 coworker（name → info,status 以 sessions 现值为准） */
   coworkers: Map<string, CoworkerInfo>;
   unsubscribe: () => void;
@@ -344,6 +347,25 @@ export class SessionSupervisor {
           });
           return;
         }
+        // 文件还原放 navigateTree 之前:失败(如 git 分支已切换)时对话也不回退,
+        // 保持「文件与对话一致」;无快照/非 git 项目静默降级为仅回退对话
+        let filesRestored = false;
+        if (command.restoreFiles && managed.checkpoints) {
+          try {
+            filesRestored = await managed.checkpoints.restoreForEntry(
+              target.id,
+              new Date(target.timestamp).getTime()
+            );
+          } catch (error) {
+            console.error('[rewind] file restore failed:', toErrorMessage(error));
+            this.options.emit({
+              type: 'rewind-done',
+              sessionId: command.sessionId,
+              seq: ++managed.seq,
+            });
+            return;
+          }
+        }
         // 目标为 user 消息时 leaf 移到其 parent(该消息也退出路径),文本经 editorText 回填输入框
         const result = await managed.session.navigateTree(target.id);
         this.reconcileMessages(command.sessionId, managed, managed.session.messages as unknown[]);
@@ -352,6 +374,7 @@ export class SessionSupervisor {
           sessionId: command.sessionId,
           seq: ++managed.seq,
           ...(!result.cancelled && result.editorText ? { editorText: result.editorText } : {}),
+          ...(filesRestored ? { filesRestored } : {}),
         });
         return;
       }
@@ -465,6 +488,16 @@ export class SessionSupervisor {
         }
       }
     );
+    // 工作树 checkpoint:写盘工具首次执行前打快照,关联本轮 user entry(经 managedRef 现取,
+    // 工具只在会话建立后执行,彼时必已赋值)。仅顶级会话;非 git 项目自动禁用
+    const checkpoints = new CheckpointManager(cwd, sessionId, () => {
+      const managed = managedRef ?? this.sessions.get(sessionId);
+      const last = managed?.session.sessionManager
+        .getBranch()
+        .filter((entry) => entry.type === 'message' && entry.message.role === 'user')
+        .at(-1);
+      return last ? { entryId: last.id, entryTimestamp: new Date(last.timestamp).getTime() } : {};
+    });
     // 工具注入：noTools:'builtin' 下 read 也需重注册（免审）；bash 叠 background 能力
     // 后包审批门（审批先问，批准后分流后台），edit 叠宽容版，MCP 同门，todo/task_* 免审。
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
@@ -477,24 +510,36 @@ export class SessionSupervisor {
       createFindToolDefinition(cwd) as unknown as Def,
       createLsToolDefinition(cwd) as unknown as Def,
     ];
-    const buildBaseTools = (toolGate: ApprovalGate): Def[] => [
-      ...readOnlyTools(),
-      withApproval(
-        toolGate,
-        'command',
-        withBackground(
-          createBashToolDefinition(cwd) as unknown as Def,
-          this.bgTasks,
-          sessionId,
-          cwd
-        )
-      ),
-      withApproval(toolGate, 'file-edit', createLenientEditTool(cwd)),
-      withApproval(toolGate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
-    ];
+    const buildBaseTools = (toolGate: ApprovalGate, cp?: CheckpointManager): Def[] => {
+      const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
+      return [
+        ...readOnlyTools(),
+        withApproval(
+          toolGate,
+          'command',
+          guarded(
+            withBackground(
+              createBashToolDefinition(cwd) as unknown as Def,
+              this.bgTasks,
+              sessionId,
+              cwd
+            )
+          )
+        ),
+        withApproval(toolGate, 'file-edit', guarded(createLenientEditTool(cwd))),
+        withApproval(
+          toolGate,
+          'file-write',
+          guarded(createWriteToolDefinition(cwd) as unknown as Def)
+        ),
+      ];
+    };
     const wrapMcpTools = (toolGate: ApprovalGate): Def[] =>
       mcpTools.map((tool) => withApproval(toolGate, 'mcp', tool));
-    const buildCoreTools = (): Def[] => [...buildBaseTools(gate), ...wrapMcpTools(gate)];
+    const buildCoreTools = (): Def[] => [
+      ...buildBaseTools(gate, checkpoints),
+      ...wrapMcpTools(gate),
+    ];
     // 会话工厂：一次性 subagent 与持久 coworker 共用。gate 参数化——subagent 复用父门,
     // coworker 用独立门(否则审批条落错 tab、allowSession 白名单跨会话泄漏)
     const factory: SessionFactory = {
@@ -670,7 +715,9 @@ export class SessionSupervisor {
       factory,
       resumeFile,
       asks: askManager,
+      checkpoints,
     });
+    checkpoints.cleanupOldSessions();
   }
 
   /** 为会话建提问管理器:请求/解除经事件上抛(sessionId 即本会话,主会话或 coworker tab 均自然路由) */
@@ -703,6 +750,7 @@ export class SessionSupervisor {
       coworkerName?: string;
       resumeFile?: string;
       asks?: AskManager;
+      checkpoints?: CheckpointManager;
     } = {}
   ): ManagedSession {
     const managed: ManagedSession = {
@@ -724,6 +772,7 @@ export class SessionSupervisor {
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
       ...(opts.coworkerName ? { coworkerName: opts.coworkerName } : {}),
+      ...(opts.checkpoints ? { checkpoints: opts.checkpoints } : {}),
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
@@ -1001,6 +1050,7 @@ export class SessionSupervisor {
     switch (event.type) {
       case 'agent_start':
         managed.status = 'running';
+        managed.checkpoints?.resetTurn();
         this.emitStatus(sessionId, managed);
         return;
       case 'message_start': {
