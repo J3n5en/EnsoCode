@@ -102,6 +102,12 @@ const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 const MAIN_AGENT_BLOCK =
   /^<message-from-main-agent>\n?([\s\S]*?)\n?<\/message-from-main-agent>\s*$/;
 
+/** 是否为主 agent 发来的消息(决定气泡靠左与配色;role 前缀在前时也识别) */
+function isFromMainAgent(text: string): boolean {
+  const role = ROLE_PREFIX.exec(text);
+  return MAIN_AGENT_BLOCK.test(role ? text.slice(role[0].length) : text);
+}
+
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({ text }: { text: string }) {
   const { t } = useI18n();
@@ -122,10 +128,19 @@ function UserText({ text }: { text: string }) {
   const rest = role ? text.slice(role[0].length) : text;
   const fromMain = MAIN_AGENT_BLOCK.exec(rest);
   const body = fromMain ? fromMain[1] : rest;
+  // 主 agent 的消息:左侧气泡 + 蓝色弱底 + markdown 渲染,与用户(右侧灰底纯文本)区分
   return (
-    <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
+    <div
+      className={cn(
+        'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm',
+        fromMain
+          ? 'rounded-bl-md border border-blue-500/20 bg-blue-500/8'
+          : 'rounded-br-md bg-muted whitespace-pre-wrap'
+      )}
+    >
       {fromMain && (
-        <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="mb-1 flex items-center gap-1 text-[10px] font-medium tracking-wide text-blue-600 uppercase dark:text-blue-400">
+          <Bot className="h-3 w-3" />
           {t('From main agent')}
         </p>
       )}
@@ -134,16 +149,19 @@ function UserText({ text }: { text: string }) {
           <span className="font-semibold">{t('Role')}</span> · {role[1]}
         </div>
       )}
-      {body}
+      {fromMain ? <Markdown text={body} /> : body}
     </div>
   );
 }
 
 export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   switch (item.kind) {
-    case 'user':
+    case 'user': {
+      const fromMain = item.text ? isFromMainAgent(item.text) : false;
       return (
-        <div className="group/user flex flex-col items-end gap-1.5">
+        <div
+          className={cn('group/user flex flex-col gap-1.5', fromMain ? 'items-start' : 'items-end')}
+        >
           {item.images.map((image, index) => (
             <ZoomableImage
               // biome-ignore lint/suspicious/noArrayIndexKey: 图片无稳定 id，消息整体快照替换
@@ -156,6 +174,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
           <RewindButton messageIndex={Number(item.key)} />
         </div>
       );
+    }
     case 'text':
       return <TextRow item={item} />;
     case 'thinking':
