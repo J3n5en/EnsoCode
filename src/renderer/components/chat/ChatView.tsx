@@ -108,7 +108,7 @@ export function ChatView() {
         emptyTitle={project?.name ?? 'EnsoCode'}
       />
 
-      <div className="@container px-4 pt-1">
+      <div className="@container pt-1">
         <div className={CHAT_COL}>
           <TaskBar
             key={conversation.id}

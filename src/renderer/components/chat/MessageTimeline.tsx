@@ -17,9 +17,9 @@ import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
 import { NavRail } from './NavRail';
 import { TimelineRow } from './TimelineRow';
 
-/** 消息列/输入区共用的列宽：随容器宽度阶梯放宽，宽屏不留大片空白 */
+/** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。 */
 export const CHAT_COL =
-  'mx-auto w-full max-w-2xl @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[96rem]:max-w-5xl';
+  'mx-auto w-full max-w-2xl px-4 @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[96rem]:max-w-5xl';
 
 /** 贴底判定阈值（px）：与旧实现一致，离底 40px 内视为贴底 */
 const AT_BOTTOM_THRESHOLD = 40;
@@ -145,7 +145,7 @@ export function MessageTimeline({
           components={{
             Header: () => <div className="h-6" />,
             Footer: () => (
-              <div className={cn(CHAT_COL, 'px-4 pb-6 [overflow-wrap:anywhere]')}>
+              <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
                 {busy && (
                   <div className="flex items-center gap-2.5">
                     <LoadingDots />
@@ -158,7 +158,7 @@ export function MessageTimeline({
           }}
           itemContent={(_, item) => (
             <div
-              className={cn(CHAT_COL, 'px-4 pb-4 [overflow-wrap:anywhere]')}
+              className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
               {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
             >
               <RowErrorBoundary itemKey={item.key}>
