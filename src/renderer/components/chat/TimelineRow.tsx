@@ -16,6 +16,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
+import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -183,9 +184,10 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
   return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
 }
 
-/** 回退入口:仅 idle 且已 spawn 的会话显示;「回退」只截对话,「回退+文件」同时还原工作树 */
+/** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
+  const [open, setOpen] = useState(false);
   const canRewind = useSessionsStore((state) => {
     const conversation = displayedConversation(state);
     return Boolean(
@@ -194,6 +196,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   });
   if (!canRewind) return null;
   const rewind = (restoreFiles: boolean) => {
+    setOpen(false);
     const state = useSessionsStore.getState();
     const conversation = displayedConversation(state);
     if (!conversation) return;
@@ -204,29 +207,50 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
       .filter((message) => message.role === 'user').length;
     state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
   };
-  const buttonClass =
-    'flex items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover/user:opacity-100 hover:text-foreground';
+  const options = [
+    {
+      icon: Undo2,
+      label: t('Conversation only'),
+      desc: t('Rewind to this message'),
+      restoreFiles: false,
+    },
+    {
+      icon: History,
+      label: t('Conversation + files'),
+      desc: t('Rewind and restore files to before this turn'),
+      restoreFiles: true,
+    },
+  ];
   return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={() => rewind(false)}
-        className={buttonClass}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className={cn(
+          'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground',
+          // popover 打开期间保持可见,否则 hover 移开触发按钮会随组隐藏
+          open ? 'opacity-100' : 'opacity-0 group-hover/user:opacity-100'
+        )}
         title={t('Rewind to this message')}
       >
         <Undo2 className="h-3 w-3" />
         {t('Rewind')}
-      </button>
-      <button
-        type="button"
-        onClick={() => rewind(true)}
-        className={buttonClass}
-        title={t('Rewind and restore files to before this turn')}
-      >
-        <History className="h-3 w-3" />
-        {t('Rewind + files')}
-      </button>
-    </div>
+      </PopoverTrigger>
+      <PopoverPopup side="bottom" align="end" className="w-72 [&_[data-slot=popover-viewport]]:p-1">
+        {options.map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            onClick={() => rewind(option.restoreFiles)}
+            className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
+          >
+            <option.icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block">{option.label}</span>
+              <span className="block text-xs text-muted-foreground">{option.desc}</span>
+            </span>
+          </button>
+        ))}
+      </PopoverPopup>
+    </Popover>
   );
 }
 

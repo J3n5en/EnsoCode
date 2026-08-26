@@ -263,7 +263,8 @@ export const zhTranslations: Record<string, string> = {
   'Scroll to bottom': '滚动到底部',
   Rewind: '回退',
   'Rewind to this message': '回退到这条消息（其后的消息移出当前分支,文本回填输入框）',
-  'Rewind + files': '回退+文件',
+  'Conversation only': '仅回退对话',
+  'Conversation + files': '对话+还原文件',
   'Rewind and restore files to before this turn':
     '回退对话并把工作树还原到这一轮之前（git 项目有效）',
   'Thinking level': '思考深度',
