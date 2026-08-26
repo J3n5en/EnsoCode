@@ -319,6 +319,14 @@ export function respondApproval(
   return sendCommand({ type: 'approval-respond', sessionId, requestId, decision });
 }
 
+export function respondAsk(
+  sessionId: string,
+  requestId: string,
+  answer: string
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'ask-respond', sessionId, requestId, answer });
+}
+
 export function stopBackgroundTask(
   sessionId: string,
   taskId: string

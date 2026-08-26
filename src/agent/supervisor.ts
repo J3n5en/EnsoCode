@@ -32,6 +32,7 @@ import type {
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { ApprovalGate, withApproval } from './approval';
+import { AskManager, createAskTool } from './ask';
 import {
   BackgroundTaskManager,
   createTaskTools,
@@ -62,6 +63,7 @@ interface SessionFactory {
     agentType?: AgentTypeSpawnConfig;
     gate: ApprovalGate;
     resumeFile?: string;
+    extraTools?: unknown[];
   }): Promise<ChildSessionResult>;
 }
 
@@ -82,6 +84,8 @@ interface ManagedSession {
   toolDurations: Map<string, number>;
   /** 工具审批门 */
   gate: ApprovalGate;
+  /** 挂起的用户提问(ask_user 工具) */
+  asks: AskManager;
   /** 后台任务完成提醒（agent 忙时挂起,下次工具结果搭车投递） */
   pendingTaskReminders: string[];
   /** 子代理状态（覆盖式 upsert,snapshot 恢复用） */
@@ -295,13 +299,17 @@ export class SessionSupervisor {
       case 'set-approval-mode':
         this.must(command.sessionId).gate.mode = command.mode;
         return;
+      case 'ask-respond':
+        this.must(command.sessionId).asks.respond(command.requestId, command.answer);
+        return;
       case 'task-stop':
         this.bgTasks.stop(command.taskId);
         return;
       case 'abort': {
         const managed = this.must(command.sessionId);
-        // 先取消挂起审批（fail-closed），再中断 turn
+        // 先取消挂起审批与提问（fail-closed），再中断 turn
         managed.gate.cancelAll();
+        managed.asks.cancelAll();
         await managed.session.abort();
         return;
       }
@@ -441,7 +449,12 @@ export class SessionSupervisor {
       cwd,
       agentTypes,
       modelId: model.modelId,
-      createChildSession: async ({ agentType, gate: childGate, resumeFile: childResume }) => {
+      createChildSession: async ({
+        agentType,
+        gate: childGate,
+        resumeFile: childResume,
+        extraTools = [],
+      }) => {
         // 类型绑定模型：注册其 provider 并取克隆副本；缺省跟随父会话模型
         let subModel = { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined };
         if (agentType?.model) {
@@ -485,6 +498,7 @@ export class SessionSupervisor {
         const subTools = [
           ...(agentType?.tools === 'readonly' ? readOnlyTools() : buildBaseTools(childGate)),
           ...(agentType ? typeMcpTools : wrapMcpTools(childGate)),
+          ...(extraTools as Def[]),
         ];
         const typeSkillPaths = agentType?.skillPaths ?? [];
         const subLoader = new DefaultResourceLoader({
@@ -558,9 +572,11 @@ export class SessionSupervisor {
         await this.dismissCoworker(sessionId, info.id);
       },
     });
+    const askManager = this.createAskManager(sessionId);
     const customTools = [
       ...buildCoreTools(),
       createTodoTool(),
+      createAskTool(askManager),
       taskTool,
       coworkerTool,
       ...createTaskTools(this.bgTasks),
@@ -587,7 +603,26 @@ export class SessionSupervisor {
     managedRef = this.registerManagedSession(sessionId, session, gate, model.modelId, {
       factory,
       resumeFile,
+      asks: askManager,
     });
+  }
+
+  /** 为会话建提问管理器:请求/解除经事件上抛(sessionId 即本会话,主会话或 coworker tab 均自然路由) */
+  private createAskManager(sessionId: string): AskManager {
+    return new AskManager(
+      (ask) => {
+        const managed = this.sessions.get(sessionId);
+        if (managed) {
+          this.options.emit({ type: 'ask-request', sessionId, seq: ++managed.seq, ask });
+        }
+      },
+      (requestId) => {
+        const managed = this.sessions.get(sessionId);
+        if (managed) {
+          this.options.emit({ type: 'ask-resolved', sessionId, seq: ++managed.seq, requestId });
+        }
+      }
+    );
   }
 
   /** 登记会话进 sessions map 并发出初始事件（status/commands/session-meta,resume 时回放快照） */
@@ -601,6 +636,7 @@ export class SessionSupervisor {
       parentId?: string;
       coworkerName?: string;
       resumeFile?: string;
+      asks?: AskManager;
     } = {}
   ): ManagedSession {
     const managed: ManagedSession = {
@@ -615,6 +651,7 @@ export class SessionSupervisor {
       toolStartAt: new Map(),
       toolDurations: new Map(),
       gate,
+      asks: opts.asks ?? this.createAskManager(sessionId),
       pendingTaskReminders: [],
       subagents: new Map(),
       coworkers: new Map(),
@@ -713,7 +750,13 @@ export class SessionSupervisor {
         }
       }
     );
-    const { session, modelId } = await factory.createChildSession({ agentType, gate, resumeFile });
+    const askManager = this.createAskManager(coworkerId);
+    const { session, modelId } = await factory.createChildSession({
+      agentType,
+      gate,
+      resumeFile,
+      extraTools: [createAskTool(askManager)],
+    });
     const info: CoworkerInfo = {
       id: coworkerId,
       name,
@@ -733,6 +776,7 @@ export class SessionSupervisor {
     const managed = this.registerManagedSession(coworkerId, session, gate, modelId, {
       parentId,
       coworkerName: name,
+      asks: askManager,
       ...(resumeFile ? { resumeFile } : {}),
     });
     // 角色提示在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
@@ -749,6 +793,7 @@ export class SessionSupervisor {
     const managed = this.sessions.get(coworkerId);
     if (managed) {
       managed.gate.cancelAll();
+      managed.asks.cancelAll();
       try {
         await managed.session.abort();
       } catch {}
@@ -1084,6 +1129,7 @@ export class SessionSupervisor {
       messages: managed.messages,
       commands: managed.commands,
       ...(managed.gate.snapshot().length > 0 ? { pendingApprovals: managed.gate.snapshot() } : {}),
+      ...(managed.asks.snapshot().length > 0 ? { pendingAsks: managed.asks.snapshot() } : {}),
       ...(managed.parentId
         ? { parentSessionId: managed.parentId, coworkerName: managed.coworkerName }
         : {}),

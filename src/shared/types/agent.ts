@@ -31,6 +31,14 @@ export interface ApprovalRequestInfo {
   summary: string;
 }
 
+/** agent 向用户的提问（ask_user 工具,阻塞等答复） */
+export interface AskRequestInfo {
+  requestId: string;
+  question: string;
+  /** 可选快捷选项（用户也可自由输入） */
+  options?: string[];
+}
+
 /** 审批决策 */
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
@@ -151,6 +159,7 @@ export type AgentCommand =
       decision: ApprovalDecision;
     }
   | { type: 'set-approval-mode'; sessionId: string; mode: ApprovalMode }
+  | { type: 'ask-respond'; sessionId: string; requestId: string; answer: string }
   | { type: 'task-stop'; sessionId: string; taskId: string }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' }
@@ -236,6 +245,8 @@ export interface SessionSnapshot {
   commands: SlashCommand[];
   /** 挂起的审批请求（渲染层刷新后恢复审批条） */
   pendingApprovals?: ApprovalRequestInfo[];
+  /** 挂起的用户提问（渲染层刷新后恢复提问条） */
+  pendingAsks?: AskRequestInfo[];
   /** 后台任务（渲染层刷新后恢复胶囊条） */
   backgroundTasks?: BackgroundTaskInfo[];
   /** 子代理（渲染层刷新后恢复状态行） */
@@ -296,6 +307,8 @@ export type AgentWorkerEvent =
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
   | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
+  | { type: 'ask-request'; sessionId: string; seq: number; ask: AskRequestInfo }
+  | { type: 'ask-resolved'; sessionId: string; seq: number; requestId: string }
   | { type: 'subagent-update'; sessionId: string; seq: number; agent: SubagentInfo }
   | { type: 'coworker-update'; sessionId: string; seq: number; coworker: CoworkerInfo }
   | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
@@ -415,6 +428,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         return value as unknown as AgentCommand;
       }
       return null;
+    case 'ask-respond':
+      return isNonEmptyString(value.sessionId) &&
+        isNonEmptyString(value.requestId) &&
+        typeof value.answer === 'string' &&
+        value.answer.length > 0
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'task-stop':
       return isNonEmptyString(value.sessionId) && isNonEmptyString(value.taskId)
         ? (value as unknown as AgentCommand)
@@ -517,6 +537,20 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
         isRecord(value.agent)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'ask-request':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isRecord(value.ask) &&
+        isNonEmptyString(value.ask.requestId) &&
+        isNonEmptyString(value.ask.question)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'ask-resolved':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isNonEmptyString(value.requestId)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'coworker-update':

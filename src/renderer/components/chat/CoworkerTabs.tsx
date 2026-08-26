@@ -54,7 +54,8 @@ export function CoworkerTabs({
           <span className="max-w-48 truncate">{parent.title || t('New conversation')}</span>
         </button>
         {coworkers.map((coworker) => {
-          const needsAttention = (coworker.pendingApprovals ?? []).length > 0;
+          const needsAttention =
+            (coworker.pendingApprovals ?? []).length > 0 || (coworker.pendingAsks ?? []).length > 0;
           return (
             <div key={coworker.id} className="group/tab relative shrink-0">
               <button

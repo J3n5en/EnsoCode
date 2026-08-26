@@ -13,14 +13,15 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
   dismissCoworker,
-  spawnCoworkerSession,
   promptSession,
   requestSnapshot,
   respondApproval,
+  respondAsk,
   setAgentEventListener,
   setSessionApprovalMode,
   setSessionReasoning,
   setSessionThinking,
+  spawnCoworkerSession,
   spawnSession,
   steerSession,
   stopBackgroundTask,
@@ -109,6 +110,20 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_ASK_RESPOND,
+    (_event, sessionId: unknown, requestId: unknown, answer: unknown): AgentActionResult => {
+      if (
+        !isNonEmptyString(sessionId) ||
+        !isNonEmptyString(requestId) ||
+        !isNonEmptyString(answer)
+      ) {
+        return { ok: false, error: 'invalid ask response' };
+      }
+      return respondAsk(sessionId, requestId, answer);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SPAWN_COWORKER,

@@ -47,6 +47,7 @@ export const IPC_CHANNELS = {
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_SPAWN_COWORKER: 'agent:spawn-coworker',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
+  AGENT_ASK_RESPOND: 'agent:ask-respond',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

@@ -163,6 +163,7 @@ export const zhTranslations: Record<string, string> = {
   'Expand sidebar': '展开侧边栏',
   '{{count}} turns': '{{count}} 轮',
   'Approval required': '需要审批',
+  'Type an answer…': '输入回答…',
   'Agent types': '子代理类型',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',

@@ -1,5 +1,6 @@
 import type {
   ApprovalRequestInfo,
+  AskRequestInfo,
   BackgroundTaskInfo,
   NodeStatus,
   ProjectedMessage,
@@ -18,6 +19,8 @@ export interface SessionProjection {
   activeMs: number;
   /** 挂起的工具审批请求（审批条与输入框锁定依赖） */
   pendingApprovals: ApprovalRequestInfo[];
+  /** 挂起的用户提问（提问条数据） */
+  pendingAsks: AskRequestInfo[];
   /** 后台任务（任务胶囊条数据） */
   backgroundTasks: BackgroundTaskInfo[];
   /** 子代理（状态行数据） */
@@ -33,6 +36,7 @@ export const emptyProjection: SessionProjection = {
   lastSeq: 0,
   activeMs: 0,
   pendingApprovals: [],
+  pendingAsks: [],
   backgroundTasks: [],
   subagents: [],
 };
@@ -49,11 +53,15 @@ export function applyAgentEvent(
 ): SessionProjection {
   // persist 旧数据可能缺后加字段（undefined.map 会炸掉事件处理），入口统一归一
   const state: SessionProjection =
-    rawState.pendingApprovals && rawState.backgroundTasks && rawState.subagents
+    rawState.pendingApprovals &&
+    rawState.pendingAsks &&
+    rawState.backgroundTasks &&
+    rawState.subagents
       ? rawState
       : {
           ...rawState,
           pendingApprovals: rawState.pendingApprovals ?? [],
+          pendingAsks: rawState.pendingAsks ?? [],
           backgroundTasks: rawState.backgroundTasks ?? [],
           subagents: rawState.subagents ?? [],
         };
@@ -63,6 +71,7 @@ export function applyAgentEvent(
       status: 'failed',
       error: 'agent worker exited',
       pendingApprovals: [],
+      pendingAsks: [],
       backgroundTasks: state.backgroundTasks.map((task) =>
         task.status === 'running' ? { ...task, status: 'failed' as const } : task
       ),
@@ -81,6 +90,7 @@ export function applyAgentEvent(
       lastSeq: 0,
       activeMs: state.activeMs,
       pendingApprovals: snapshot.pendingApprovals ?? [],
+      pendingAsks: snapshot.pendingAsks ?? [],
       backgroundTasks: snapshot.backgroundTasks ?? [],
       subagents: snapshot.subagents ?? [],
     };
@@ -117,6 +127,18 @@ export function applyAgentEvent(
         pendingApprovals: state.pendingApprovals.filter(
           (request) => request.requestId !== event.requestId
         ),
+        lastSeq: event.seq,
+      };
+    case 'ask-request':
+      return {
+        ...state,
+        pendingAsks: [...state.pendingAsks, event.ask],
+        lastSeq: event.seq,
+      };
+    case 'ask-resolved':
+      return {
+        ...state,
+        pendingAsks: state.pendingAsks.filter((ask) => ask.requestId !== event.requestId),
         lastSeq: event.seq,
       };
     case 'subagent-update': {

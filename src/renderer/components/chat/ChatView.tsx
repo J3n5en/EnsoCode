@@ -6,6 +6,7 @@ import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
+import { AskBar } from './AskBar';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
 import { CoworkerTabs } from './CoworkerTabs';
@@ -117,6 +118,12 @@ export function ChatView() {
             approvals={conversation.pendingApprovals ?? []}
             onRespond={(requestId, decision) =>
               void window.electronAPI.agent.respondApproval(conversation.id, requestId, decision)
+            }
+          />
+          <AskBar
+            asks={conversation.pendingAsks ?? []}
+            onAnswer={(requestId, answer) =>
+              void window.electronAPI.agent.respondAsk(conversation.id, requestId, answer)
             }
           />
           <Composer

@@ -146,6 +146,12 @@ const electronAPI = {
         agentType,
         resumeFile
       ),
+    respondAsk: (
+      sessionId: string,
+      requestId: string,
+      answer: string
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_ASK_RESPOND, sessionId, requestId, answer),
     dismissCoworker: (
       parentSessionId: string,
       coworkerId: string,
