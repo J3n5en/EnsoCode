@@ -158,6 +158,8 @@ export const zhTranslations: Record<string, string> = {
   'Remove project': '移除项目',
   'Select or create a conversation': '选择或新建一个对话',
   'Collapse sidebar': '折叠侧边栏',
+  'Show {{n}} more': '展开其余 {{n}} 条',
+  Collapse: '收起',
   'Expand sidebar': '展开侧边栏',
   '{{count}} turns': '{{count}} 轮',
   'Approval required': '需要审批',

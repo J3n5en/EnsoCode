@@ -19,6 +19,9 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
+/** 每个项目默认露出的会话数,超过折叠进「展开」 */
+const COLLAPSED_SESSION_LIMIT = 5;
+
 const ICON_BUTTON_CLASS =
   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
 
@@ -64,6 +67,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
+  // 展开显示全部会话的项目(会话级状态,重启回到折叠)
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
   // 相对时间每分钟自刷（“3 分钟前”不随时间僵住）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -186,7 +191,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               </div>
               {!folded && (
                 <div className="mt-0.5 flex flex-col gap-y-0.5">
-                  {projectConversations.map((id) => {
+                  {(expandedProjects[project.id]
+                    ? projectConversations
+                    : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
+                  ).map((id) => {
                     const conversation = conversations[id];
                     return (
                       <div
@@ -226,6 +234,24 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                       </div>
                     );
                   })}
+                  {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedProjects((prev) => ({
+                          ...prev,
+                          [project.id]: !prev[project.id],
+                        }))
+                      }
+                      className="rounded-lg py-1 pl-9 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                    >
+                      {expandedProjects[project.id]
+                        ? t('Collapse')
+                        : t('Show {{n}} more', {
+                            n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
+                          })}
+                    </button>
+                  )}
                   {projectConversations.length === 0 && (
                     <p className="py-1.5 pl-9 text-xs text-muted-foreground">
                       {t('No conversations yet')}
