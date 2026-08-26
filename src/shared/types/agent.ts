@@ -81,6 +81,21 @@ export interface SubagentInfo {
   startedAt: number;
 }
 
+/** coworker 元数据（worker → 渲染层,覆盖式 upsert;dismissed 表示已解雇） */
+export interface CoworkerInfo {
+  /** `${parentId}::cw-${slug}` */
+  id: string;
+  /** 雇佣时的名字,coworker 工具按名寻址 */
+  name: string;
+  /** agent 类型名（缺省 general） */
+  agentType?: string;
+  status: NodeStatus | 'dismissed';
+  modelId?: string;
+  /** coworker 自己的 jsonl,渲染层持久化 resume 用 */
+  sessionFile?: string;
+  createdAt: number;
+}
+
 /** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
 export interface McpServerSpawnConfig {
   name: string;
@@ -114,6 +129,16 @@ export type AgentCommand =
       /** 自定义 subagent 类型表 */
       agentTypes?: AgentTypeSpawnConfig[];
     }
+  /** 雇佣/恢复 coworker。sessionId 填父会话 id：借 OperationGate 串到父 spawn 之后 */
+  | {
+      type: 'spawn-coworker';
+      sessionId: string;
+      coworkerId: string;
+      name: string;
+      agentType?: string;
+      resumeFile?: string;
+    }
+  | { type: 'dismiss-coworker'; sessionId: string; coworkerId: string }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
@@ -214,6 +239,9 @@ export interface SessionSnapshot {
   backgroundTasks?: BackgroundTaskInfo[];
   /** 子代理（渲染层刷新后恢复状态行） */
   subagents?: SubagentInfo[];
+  /** coworker 会话专有：父会话 id（渲染层刷新后重建挂回父） */
+  parentSessionId?: string;
+  coworkerName?: string;
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -268,6 +296,7 @@ export type AgentWorkerEvent =
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
   | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
   | { type: 'subagent-update'; sessionId: string; seq: number; agent: SubagentInfo }
+  | { type: 'coworker-update'; sessionId: string; seq: number; coworker: CoworkerInfo }
   | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
   | {
       type: 'task-output';
@@ -313,6 +342,21 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       }
       return null;
     }
+    case 'spawn-coworker':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        isNonEmptyString(value.coworkerId) &&
+        isNonEmptyString(value.name) &&
+        (value.agentType === undefined || isNonEmptyString(value.agentType)) &&
+        (value.resumeFile === undefined || isNonEmptyString(value.resumeFile))
+      ) {
+        return value as unknown as AgentCommand;
+      }
+      return null;
+    case 'dismiss-coworker':
+      return isNonEmptyString(value.sessionId) && isNonEmptyString(value.coworkerId)
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'prompt':
     case 'steer': {
       const hasImages =
@@ -472,6 +516,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
         isRecord(value.agent)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'coworker-update':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        isRecord(value.coworker) &&
+        isNonEmptyString(value.coworker.id)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'task-started':
