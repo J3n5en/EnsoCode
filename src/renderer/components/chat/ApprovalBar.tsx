@@ -29,13 +29,15 @@ export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
   };
 
   return (
-    <div className="mb-1 rounded-lg border border-amber-500/50 bg-amber-500/5 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500" />
-        <span className="text-xs font-medium">{t('Approval required')}</span>
-        <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+    <div className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+      <div className="flex items-center gap-2 text-xs">
+        <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t('Approval required')}
+        </span>
+        <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
           <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{active.tool}</span>
+          <span className="truncate font-mono">{active.tool}</span>
         </span>
         {approvals.length > 1 && (
           <span className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums">
@@ -62,7 +64,7 @@ export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
           type="button"
           disabled={disabled}
           onClick={() => respond('allowSession')}
-          className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-muted disabled:opacity-50"
+          className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
         >
           {t('Always allow this session')}
         </button>

@@ -24,10 +24,12 @@ export function AskBar({ asks, onAnswer }: AskBarProps) {
   };
 
   return (
-    <div className="mb-1 rounded-lg border border-blue-500/50 bg-blue-500/5 px-3 py-2">
+    <div className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
       <div className="flex items-start gap-2">
-        <MessageCircleQuestion className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-        <span className="min-w-0 flex-1 text-sm whitespace-pre-wrap">{active.question}</span>
+        <MessageCircleQuestion className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
+        <span className="min-w-0 flex-1 text-xs leading-relaxed whitespace-pre-wrap">
+          {active.question}
+        </span>
         {asks.length > 1 && (
           <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
             1/{asks.length}
@@ -42,7 +44,7 @@ export function AskBar({ asks, onAnswer }: AskBarProps) {
               type="button"
               disabled={disabled}
               onClick={() => answer(option)}
-              className="rounded-md border border-blue-500/40 px-2.5 py-1 text-xs transition-colors hover:bg-blue-500/10 disabled:opacity-50"
+              className="rounded-md border border-border/60 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               {option}
             </button>
