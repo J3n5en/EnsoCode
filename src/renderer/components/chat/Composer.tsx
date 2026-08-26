@@ -50,6 +50,9 @@ function findSlashStart(text: string, cursor: number): number | null {
   return null;
 }
 
+/** 各会话未发送的输入草稿（切会话时暂存/恢复;仅内存,不持久化） */
+const drafts = new Map<string, { text: string; images: AttachedImage[] }>();
+
 export function Composer({
   cwd,
   commands,
@@ -64,6 +67,7 @@ export function Composer({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,9 +77,17 @@ export function Composer({
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // 新建/切换会话（focusKey 变化）时自动聚焦输入框
-  // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey 是触发信号，非计算依赖
+  // 切换会话（focusKey 变化）:保存旧会话草稿、恢复新会话草稿（未发送内容不串会话、切回不丢），并聚焦
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey 是触发信号，text/images 取切换瞬间的旧值
   useEffect(() => {
+    const previous = prevFocusKeyRef.current;
+    if (previous !== focusKey) {
+      if (previous) drafts.set(previous, { text, images });
+      const draft = focusKey ? drafts.get(focusKey) : undefined;
+      setText(draft?.text ?? '');
+      setImages(draft?.images ?? []);
+      prevFocusKeyRef.current = focusKey;
+    }
     textareaRef.current?.focus();
   }, [focusKey]);
 
