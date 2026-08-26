@@ -170,6 +170,11 @@ export const zhTranslations: Record<string, string> = {
   'Send now': '立即发送',
   Remove: '移除',
   'Agent types': '子代理类型',
+  'Built-in tools': '内置工具',
+  'Toggle the built-in tools available to agents. All enabled by default.':
+    '开关 agent 可用的内置工具,默认全部启用。',
+  'Need web search? Add an MCP server (Tavily, Exa, Firecrawl…) on the MCP page.':
+    '需要联网搜索?在 MCP 页添加一个 MCP server(Tavily、Exa、Firecrawl 等)。',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',

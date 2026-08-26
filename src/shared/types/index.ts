@@ -1,6 +1,7 @@
 export * from './agent';
 export * from './assetScan';
 export * from './assets';
+export * from './builtinTools';
 export * from './ipc';
 export * from './llm';
 export * from './project';

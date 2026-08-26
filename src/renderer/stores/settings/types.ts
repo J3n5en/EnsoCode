@@ -53,6 +53,8 @@ export interface SettingsState {
   agentTypes: AgentTypeEntry[];
   /** 被关闭的内置子代理类型（name 集合） */
   disabledBuiltinAgentTypes: string[];
+  /** 被关闭的内置工具（id 集合;默认全开） */
+  disabledBuiltinTools: string[];
 
   /** 是否已完成首次运行引导；老用户（已有配置）视为已完成 */
   onboarded: boolean;
@@ -105,6 +107,7 @@ export interface SettingsState {
   updateAgentType: (id: string, updates: Partial<Omit<AgentTypeEntry, 'id'>>) => void;
   removeAgentType: (id: string) => void;
   toggleBuiltinAgentType: (name: string, enabled: boolean) => void;
+  toggleBuiltinTool: (id: string, enabled: boolean) => void;
 
   // Onboarding
   setOnboarded: (value: boolean) => void;

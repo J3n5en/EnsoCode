@@ -226,7 +226,8 @@ export class SessionSupervisor {
           command.skillPaths,
           command.mcpServers,
           command.approvalMode,
-          command.agentTypes
+          command.agentTypes,
+          command.disabledTools
         );
         return;
       case 'spawn-coworker': {
@@ -339,8 +340,10 @@ export class SessionSupervisor {
     skillPaths: string[] = [],
     mcpServers: McpServerSpawnConfig[] = [],
     approvalMode: ApprovalMode = 'full',
-    agentTypes: AgentTypeSpawnConfig[] = []
+    agentTypes: AgentTypeSpawnConfig[] = [],
+    disabledTools: string[] = []
   ): Promise<void> {
+    const toolEnabled = (id: string) => !disabledTools.includes(id);
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
@@ -588,11 +591,11 @@ export class SessionSupervisor {
     const askManager = this.createAskManager(sessionId);
     const customTools = [
       ...buildCoreTools(),
-      createTodoTool(),
-      createAskTool(askManager),
-      taskTool,
-      coworkerTool,
-      ...createTaskTools(this.bgTasks),
+      ...(toolEnabled('todo') ? [createTodoTool()] : []),
+      ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
+      ...(toolEnabled('subagent') ? [taskTool] : []),
+      ...(toolEnabled('coworker') ? [coworkerTool] : []),
+      ...(toolEnabled('background_tasks') ? createTaskTools(this.bgTasks) : []),
     ].map((tool) => withTaskReminders(tool, takePendingReminders));
 
     const { session } = await createAgentSession({

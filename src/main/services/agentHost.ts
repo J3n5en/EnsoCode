@@ -111,6 +111,13 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
       const agentTypes = configuredAgentTypes();
       return agentTypes.length > 0 ? { agentTypes } : {};
     })(),
+    ...(() => {
+      const state = readSettingsState();
+      const disabled = Array.isArray(state?.disabledBuiltinTools)
+        ? (state.disabledBuiltinTools as string[])
+        : [];
+      return disabled.length > 0 ? { disabledTools: disabled } : {};
+    })(),
   });
 }
 

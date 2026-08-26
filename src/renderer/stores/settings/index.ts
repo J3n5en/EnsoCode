@@ -80,6 +80,7 @@ const initialState = {
   presets: [] as import('@shared/types').Preset[],
   agentTypes: [] as import('@shared/types').AgentTypeEntry[],
   disabledBuiltinAgentTypes: [] as string[],
+  disabledBuiltinTools: [] as string[],
   onboarded: false,
   projects: [] as import('@shared/types').Project[],
 };
@@ -286,6 +287,13 @@ export const useSettingsStore = create<SettingsState>()(
           disabledBuiltinAgentTypes: enabled
             ? state.disabledBuiltinAgentTypes.filter((n) => n !== name)
             : [...new Set([...state.disabledBuiltinAgentTypes, name])],
+        })),
+
+      toggleBuiltinTool: (id, enabled) =>
+        set((state) => ({
+          disabledBuiltinTools: enabled
+            ? state.disabledBuiltinTools.filter((n) => n !== id)
+            : [...new Set([...state.disabledBuiltinTools, id])],
         })),
 
       setOnboarded: (onboarded) => set({ onboarded }),

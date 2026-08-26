@@ -8,7 +8,8 @@ export type SettingsCategory =
   | 'mcp'
   | 'instructions'
   | 'presets'
-  | 'agents';
+  | 'agents'
+  | 'tools';
 
 export const fontWeightOptions: { value: FontWeight; label: string }[] = [
   { value: 'normal', label: 'Normal' },

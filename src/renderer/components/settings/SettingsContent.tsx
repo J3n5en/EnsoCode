@@ -1,9 +1,20 @@
-import { Bot, FileText, Layers, Palette, Plug, Server, Settings, Sparkles } from 'lucide-react';
+import {
+  Bot,
+  FileText,
+  Layers,
+  Palette,
+  Plug,
+  Server,
+  Settings,
+  Sparkles,
+  Wrench,
+} from 'lucide-react';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { AgentTypesSettings } from './AgentTypesSettings';
 import { AppearanceSettings } from './AppearanceSettings';
+import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 import type { SettingsCategory } from './constants';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
@@ -22,6 +33,7 @@ export function SettingsContent() {
     { id: 'providers', icon: Server, label: t('Model Providers') },
     { id: 'presets', icon: Layers, label: t('Presets') },
     { id: 'agents', icon: Bot, label: t('Agent types') },
+    { id: 'tools', icon: Wrench, label: t('Built-in tools') },
     { id: 'skills', icon: Sparkles, label: t('Skills') },
     { id: 'mcp', icon: Plug, label: t('MCP Servers') },
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
@@ -59,6 +71,7 @@ export function SettingsContent() {
         {activeCategory === 'instructions' && <InstructionsSettings />}
         {activeCategory === 'presets' && <PresetsSettings />}
         {activeCategory === 'agents' && <AgentTypesSettings />}
+        {activeCategory === 'tools' && <BuiltinToolsSettings />}
       </div>
     </div>
   );

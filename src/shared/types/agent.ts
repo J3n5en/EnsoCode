@@ -136,6 +136,8 @@ export type AgentCommand =
       approvalMode?: ApprovalMode;
       /** 自定义 subagent 类型表 */
       agentTypes?: AgentTypeSpawnConfig[];
+      /** 禁用的内置工具 id(设置页开关;禁用则不注册,模型看不到) */
+      disabledTools?: string[];
     }
   /** 雇佣/恢复 coworker。sessionId 填父会话 id：借 OperationGate 串到父 spawn 之后 */
   | {
@@ -273,6 +275,7 @@ export interface AgentSpawnRequest {
   reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
   loadLocalSkills?: boolean;
+  disabledTools?: string[];
   /** 注入组合预设；缺省/default 走各条目 enabled 过滤（现行为） */
   presetId?: string;
   /** 审批档位；缺省 full（完全放行） */
