@@ -59,7 +59,12 @@ export function CoworkerTabs({
             <div key={coworker.id} className="group/tab relative shrink-0">
               <button
                 type="button"
-                className={cn(tabClass(displayedId === coworker.id), 'group-hover/tab:pr-6')}
+                className={cn(
+                  tabClass(displayedId === coworker.id),
+                  'group-hover/tab:pr-6',
+                  // hover 在解雇按钮(兄弟节点)上时 tab 本体也保持高亮
+                  displayedId !== coworker.id && 'group-hover/tab:bg-muted/50'
+                )}
                 onClick={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
               >
                 <Bot className="h-3 w-3 shrink-0" />
