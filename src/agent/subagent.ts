@@ -13,6 +13,8 @@ export interface SubagentDeps {
   agentTypes: AgentTypeSpawnConfig[];
   /** 进度/状态上报（覆盖式,按 id 幂等） */
   emitUpdate(agent: SubagentInfo): void;
+  /** gate 验收:在会话 cwd 跑命令,返回 PASSED/FAILED 文本 */
+  runGate(gate: string): Promise<string>;
 }
 
 /** 从 pi 会话消息取最后一条 assistant 文本 */
@@ -95,6 +97,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           type: 'string',
           description: 'Full task instructions for the subagent, self-contained',
         },
+        gate: {
+          type: 'string',
+          description:
+            'Shell command to verify the work after the subagent finishes ' +
+            '(run in the workspace; exit code decides pass/fail), e.g. "pnpm test"',
+        },
       },
       required: ['description', 'prompt'],
     } as unknown as ToolDefinition['parameters'],
@@ -103,7 +111,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         description = '',
         prompt = '',
         agent_type: agentTypeName,
-      } = params as { description?: string; prompt?: string; agent_type?: string };
+        gate,
+      } = params as { description?: string; prompt?: string; agent_type?: string; gate?: string };
       if (!prompt.trim()) throw new Error('task prompt is required');
       const agentType = agentTypeName
         ? deps.agentTypes.find((type) => type.name === agentTypeName)
@@ -185,7 +194,11 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${prompt}`
           : prompt;
         await session.prompt(fullPrompt);
-        const result = lastAssistantText(session);
+        let result = lastAssistantText(session);
+        // gate 验收:退出码说了算,不信子代理自称完成
+        if (gate && !signal?.aborted) {
+          result += `\n\n${await deps.runGate(gate)}`;
+        }
         info.status = signal?.aborted ? 'failed' : 'done';
         info.resultText = result;
         info.currentActivity = '';

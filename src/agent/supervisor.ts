@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
@@ -41,6 +42,7 @@ import { createCoworkerTool } from './coworker';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
+import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
 import { createSubagentTool, lastAssistantText } from './subagent';
 import { createTodoTool } from './todo';
@@ -53,6 +55,7 @@ interface ChildSessionResult {
 
 /** 会话工厂：spawn 闭包依赖的收口,子代理(一次性)与 coworker(持久)共用 */
 interface SessionFactory {
+  cwd: string;
   agentTypes: AgentTypeSpawnConfig[];
   modelId: string;
   createChildSession(opts: {
@@ -110,6 +113,18 @@ export class SessionSupervisor {
   private readonly mcp = new McpManager();
   private readonly bgTasks: BackgroundTaskManager;
   private runtimePromise: Promise<ModelRuntime> | null = null;
+  /** 父会话通知(合并投递):闲则注入合成提示唤醒,忙则挂 pending 搭下次工具结果 */
+  private readonly notifier = new ParentNotifier((sessionId, text) => {
+    const managed = this.sessions.get(sessionId);
+    if (!managed) return;
+    if (managed.status === 'idle') {
+      void managed.session
+        .prompt(`<agent-notification>\n${text}\n</agent-notification>`)
+        .catch(() => {});
+    } else {
+      managed.pendingTaskReminders.push(text);
+    }
+  });
 
   constructor(private readonly options: SupervisorOptions) {
     this.bgTasks = new BackgroundTaskManager(
@@ -146,17 +161,9 @@ export class SessionSupervisor {
             });
           }
         },
-        // 自动通知：agent 空闲注入合成提示唤醒续跑；忙则挂 pending 待下次工具结果搭车
+        // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
         onCompletionNotify: (sessionId, text) => {
-          const managed = this.sessions.get(sessionId);
-          if (!managed) return;
-          if (managed.status === 'idle') {
-            void managed.session
-              .prompt(`<background-task-update>\n${text}\n</background-task-update>`)
-              .catch(() => {});
-          } else {
-            managed.pendingTaskReminders.push(text);
-          }
+          this.notifier.notify(sessionId, text);
         },
       },
       path.join(options.agentDir, 'task-logs')
@@ -235,13 +242,7 @@ export class SessionSupervisor {
             `The user hired a new coworker "${command.name}"` +
             `${command.agentType ? ` (${command.agentType})` : ''}. ` +
             'It shares your workspace; use coworker send/list to engage it when useful.';
-          if (parent.status === 'idle') {
-            void parent.session
-              .prompt(`<coworker-hired>\n${notice}\n</coworker-hired>`)
-              .catch(() => {});
-          } else {
-            parent.pendingTaskReminders.push(notice);
-          }
+          this.notifier.notify(command.sessionId, notice, { urgent: true });
         }
         return;
       }
@@ -252,13 +253,7 @@ export class SessionSupervisor {
           const parent = this.sessions.get(command.sessionId);
           if (!parent) return;
           const notice = `The user dismissed coworker "${name}". Its session is closed; do not send to it again.`;
-          if (parent.status === 'idle') {
-            void parent.session
-              .prompt(`<coworker-dismissed>\n${notice}\n</coworker-dismissed>`)
-              .catch(() => {});
-          } else {
-            parent.pendingTaskReminders.push(notice);
-          }
+          this.notifier.notify(command.sessionId, notice, { urgent: true });
         }
         return;
       }
@@ -443,6 +438,7 @@ export class SessionSupervisor {
     // 会话工厂：一次性 subagent 与持久 coworker 共用。gate 参数化——subagent 复用父门,
     // coworker 用独立门(否则审批条落错 tab、allowSession 白名单跨会话泄漏)
     const factory: SessionFactory = {
+      cwd,
       agentTypes,
       modelId: model.modelId,
       createChildSession: async ({ agentType, gate: childGate, resumeFile: childResume }) => {
@@ -526,6 +522,7 @@ export class SessionSupervisor {
       agentTypes,
       createSubSession: async (agentType) =>
         (await factory.createChildSession({ agentType, gate })).session,
+      runGate: (gateCommand) => runGateCommand(cwd, gateCommand),
       emitUpdate: (agent) => {
         const managed = managedRef ?? this.sessions.get(sessionId);
         if (!managed) return;
@@ -537,7 +534,7 @@ export class SessionSupervisor {
       agentTypes,
       spawn: (name, agentTypeName) =>
         this.spawnCoworker(sessionId, `${sessionId}::cw-${slugify(name)}`, name, agentTypeName),
-      send: (name, message, signal) => {
+      send: (name, message, opts) => {
         const parent = this.must(sessionId);
         const info = parent.coworkers.get(name);
         if (!info) {
@@ -545,7 +542,7 @@ export class SessionSupervisor {
             `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
           );
         }
-        return this.coworkerSend(info.id, message, signal);
+        return this.coworkerSend(info.id, message, opts);
       },
       list: () => {
         const parent = this.must(sessionId);
@@ -680,6 +677,11 @@ export class SessionSupervisor {
     const factory = parent.factory;
     if (!factory) throw new Error(`session cannot hire coworkers: ${parentId}`);
     if (parent.coworkers.has(name)) throw new Error(`coworker name already in use: ${name}`);
+    if (!resumeFile && parent.coworkers.size >= MAX_ACTIVE_COWORKERS) {
+      throw new Error(
+        `coworker limit reached (${MAX_ACTIVE_COWORKERS} active) — dismiss one before hiring more`
+      );
+    }
     if (this.sessions.has(coworkerId)) throw new Error(`coworker already exists: ${coworkerId}`);
     // 类型找不到降级 general(resume 时配置漂移不毁恢复;工具路径在 coworker.ts 已前置校验)
     const agentType = agentTypeName
@@ -774,15 +776,17 @@ export class SessionSupervisor {
   }
 
   /**
-   * 向 coworker 发消息并等本轮结束。经命令门串行启动(与用户 tab 的 prompt 一致排队);
-   * running 时 steer 汇入当前轮。父 abort(signal)只提前返回,不杀 coworker(持久实体)。
+   * 向 coworker 发消息。经命令门串行启动(与用户 tab 的 prompt 一致排队);
+   * running 时 steer 汇入当前轮。wait=false(默认)投递即返回,完成后经 notifier 通知父;
+   * wait=true 阻塞至该轮结束返回结果。父 abort(signal)只提前返回,不杀 coworker(持久实体)。
    */
   private async coworkerSend(
     coworkerId: string,
     text: string,
-    signal?: AbortSignal
+    opts: { signal?: AbortSignal; wait?: boolean; gate?: string } = {}
   ): Promise<string> {
     const managed = this.must(coworkerId);
+    const { signal } = opts;
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => {
       resolveDone = resolve;
@@ -791,31 +795,91 @@ export class SessionSupervisor {
     const unsubscribe = managed.session.subscribe((event) => {
       if (event.type === 'agent_end') resolveDone();
     });
-    signal?.addEventListener('abort', resolveDone, { once: true });
-    try {
-      await this.gate.run(coworkerId, async () => {
-        if (managed.status === 'running') {
-          await managed.session.steer(text);
-        } else {
-          void managed.session.prompt(consumeRole(managed, text)).catch((error) => {
-            managed.status = 'failed';
-            this.emitStatus(coworkerId, managed, toErrorMessage(error));
-            resolveDone();
-          });
-        }
-      });
-      await done;
-    } finally {
-      unsubscribe();
-      signal?.removeEventListener('abort', resolveDone);
+    const start = async () => {
+      if (managed.status === 'running') {
+        await managed.session.steer(text);
+      } else {
+        void managed.session.prompt(consumeRole(managed, text)).catch((error) => {
+          managed.status = 'failed';
+          this.emitStatus(coworkerId, managed, toErrorMessage(error));
+          resolveDone();
+        });
+      }
+    };
+
+    if (opts.wait) {
+      signal?.addEventListener('abort', resolveDone, { once: true });
+      try {
+        await this.gate.run(coworkerId, start);
+        await done;
+      } finally {
+        unsubscribe();
+        signal?.removeEventListener('abort', resolveDone);
+      }
+      if (signal?.aborted) {
+        return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
+      }
+      return await this.coworkerRoundSummary(managed, opts.gate);
     }
-    if (signal?.aborted) {
-      return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
+
+    // 非阻塞:投递即返回;轮次完成后组摘要经 notifier 回父(失败立即,成功合并)
+    void (async () => {
+      try {
+        await this.gate.run(coworkerId, start);
+        await done;
+      } finally {
+        unsubscribe();
+      }
+      const parentId = managed.parentId;
+      // 已被 dismiss 的不再通知
+      if (!parentId || !this.sessions.has(coworkerId)) return;
+      const summary = await this.coworkerRoundSummary(managed, opts.gate);
+      const failed = managed.status === 'failed';
+      this.notifier.notify(
+        parentId,
+        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}`,
+        { urgent: failed }
+      );
+    })().catch(() => {});
+    const label = managed.coworkerName ?? coworkerId;
+    return (
+      `(dispatched to coworker "${label}" — you'll be notified when the round completes; ` +
+      'keep working or return to the user meanwhile)'
+    );
+  }
+
+  /** 轮次结果摘要:最终文本 + 输出截断/上下文水位警告 + gate 验收结果 */
+  private async coworkerRoundSummary(
+    managed: ManagedSession,
+    gateCommand?: string
+  ): Promise<string> {
+    let summary =
+      managed.status === 'failed'
+        ? '(coworker turn failed — check its tab for details)'
+        : lastAssistantText(managed.session) || '(coworker produced no output)';
+    const last = [
+      ...(managed.session.messages as {
+        role?: string;
+        stopReason?: string;
+        usage?: { input?: number; output?: number };
+      }[]),
+    ]
+      .reverse()
+      .find((message) => message.role === 'assistant');
+    // 输出被模型上限截断的轮次按不完整处理,不当部分成功接受
+    if (last?.stopReason === 'length') {
+      summary = `(WARNING: output hit the model limit — treat this round as incomplete)\n${summary}`;
     }
-    if (managed.status === 'failed') {
-      return `(coworker turn failed — check its tab for details)`;
+    const used = (last?.usage?.input ?? 0) + (last?.usage?.output ?? 0);
+    if (used > MODEL_CONTEXT_WINDOW * 0.85) {
+      const pct = Math.round((used / MODEL_CONTEXT_WINDOW) * 100);
+      summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
-    return lastAssistantText(managed.session) || '(coworker produced no output)';
+    if (gateCommand) {
+      const cwd = this.sessions.get(managed.parentId ?? '')?.factory?.cwd ?? process.cwd();
+      summary += `\n\n${await runGateCommand(cwd, gateCommand)}`;
+    }
+    return summary;
   }
 
   private onSessionEvent(
@@ -1047,6 +1111,28 @@ export class SessionSupervisor {
     });
     return this.runtimePromise;
   }
+}
+
+/** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
+const MAX_ACTIVE_COWORKERS = 5;
+
+/** gate 验收:在会话 cwd 跑命令,退出码即结论(比再叫一个模型评审便宜且诚实) */
+export function runGateCommand(cwd: string, gate: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      '/bin/sh',
+      ['-c', gate],
+      { cwd, timeout: 300_000, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve(`GATE PASSED: \`${gate}\``);
+          return;
+        }
+        const tail = `${stdout}\n${stderr}`.trim().slice(-1500);
+        resolve(`GATE FAILED \`${gate}\` (${error.code ?? 'timeout'}):\n${tail}`);
+      }
+    );
+  });
 }
 
 /** coworker 首条消息前缀注入角色提示,消费一次 */

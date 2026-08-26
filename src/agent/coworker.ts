@@ -4,12 +4,20 @@ import type { AgentTypeSpawnConfig, CoworkerInfo } from '@shared/types/agent';
 /** 回传主 agent 的结果上限,全文永远在 coworker tab 里 */
 const RESULT_LIMIT = 4000;
 
+export interface CoworkerSendOptions {
+  signal?: AbortSignal;
+  /** true = 阻塞至该轮结束返回结果;false(默认)= 投递即返回,完成后经通知回来 */
+  wait?: boolean;
+  /** 轮次完成后在会话 cwd 执行的验收命令,退出码即结论 */
+  gate?: string;
+}
+
 export interface CoworkerToolDeps {
   agentTypes: AgentTypeSpawnConfig[];
   /** 雇佣:创建持久子会话并登记(不发首条消息) */
   spawn(name: string, agentTypeName?: string): Promise<CoworkerInfo>;
-  /** 发消息并阻塞至该轮结束,返回最终 assistant 文本;父 abort 时提前返回、不杀 coworker */
-  send(name: string, message: string, signal?: AbortSignal): Promise<string>;
+  /** 发消息。wait=false 时立即返回投递回执,轮次完成后自动通知主 agent */
+  send(name: string, message: string, opts?: CoworkerSendOptions): Promise<string>;
   list(): CoworkerInfo[];
   dismiss(name: string): Promise<void>;
 }
@@ -32,17 +40,21 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       'Hire a persistent coworker agent that keeps its own context across multiple send calls. ' +
       'Unlike `subagent` (one-shot, disposed after a single report), a coworker stays alive: ' +
       'spawn it once with a role and initial task, then send follow-ups that build on everything it has seen. ' +
-      'The user watches each coworker in its own tab and may reply there directly — ' +
-      'replies you get may reflect user interventions. ' +
+      'The user watches each coworker in its own tab and may reply there directly. ' +
       'Operations: spawn {name, agent_type?, task} / send {name, message} / list / dismiss {name}. ' +
-      'Results are truncated; the full transcript lives in the coworker tab.' +
+      'spawn and send are ASYNC by default: they return immediately and you are notified automatically ' +
+      'when the round completes — do NOT poll or wait idle; keep working or return to the user. ' +
+      'Pass wait:true only when you must have the result before continuing. ' +
+      'Optional gate: a shell command run after the round; its exit code verifies the work ' +
+      '(e.g. "pnpm test"). Results are truncated; the full transcript lives in the coworker tab.' +
       (typeList ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
       'coworker: hire a persistent named agent (own tab, own accumulating context, multi-round). ' +
-      'Use subagent for self-contained one-shot subtasks (cheaper, no lingering context); ' +
-      'use coworker when work needs multiple rounds against the same accumulated context ' +
-      '(a reviewer consulted repeatedly, an implementer assigned related tasks in sequence) ' +
-      'or when the user should watch and join the side conversation. ' +
+      'Use subagent for self-contained one-shot subtasks; use coworker for multi-round work on the same ' +
+      'accumulated context or when the user should watch and join. ' +
+      'spawn/send are async by default — you get notified on completion, so never block waiting; ' +
+      'pass wait:true only when the result is needed immediately. ' +
+      'Verify delegated work with gate:"<command>" (exit code speaks, not the coworker). ' +
       'Coworkers cost resources while alive — dismiss them when done; prefer few with clear roles',
     parameters: {
       type: 'object',
@@ -62,6 +74,18 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         },
         task: { type: 'string', description: 'Initial task for spawn, self-contained' },
         message: { type: 'string', description: 'Message for send' },
+        wait: {
+          type: 'boolean',
+          description:
+            'Block until the round completes and return the result inline (default false: ' +
+            'return immediately, get notified on completion)',
+        },
+        gate: {
+          type: 'string',
+          description:
+            'Shell command to verify the round (run in the workspace after completion; ' +
+            'exit code decides pass/fail), e.g. "pnpm test"',
+        },
       },
       required: ['operation'],
     } as unknown as ToolDefinition['parameters'],
@@ -72,17 +96,26 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         agent_type: agentTypeName,
         task = '',
         message = '',
+        wait = false,
+        gate,
       } = params as {
         operation?: string;
         name?: string;
         agent_type?: string;
         task?: string;
         message?: string;
+        wait?: boolean;
+        gate?: string;
       };
       const text = (value: string) => ({
         content: [{ type: 'text' as const, text: value }],
         details: undefined,
       });
+      const sendOptions: CoworkerSendOptions = {
+        signal,
+        wait,
+        ...(gate ? { gate } : {}),
+      };
       switch (operation) {
         case 'spawn': {
           if (!name.trim()) throw new Error('spawn requires a name');
@@ -94,7 +127,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           }
           const info = await deps.spawn(name.trim(), agentTypeName);
           // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
-          const result = await deps.send(info.name, task, signal);
+          const result = await deps.send(info.name, task, sendOptions);
           return text(
             `Coworker "${info.name}" hired${info.agentType ? ` (${info.agentType})` : ''}.\n\n${truncate(result)}`
           );
@@ -105,7 +138,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           const result = await deps.send(
             name.trim(),
             `<message-from-main-agent>\n${message}\n</message-from-main-agent>`,
-            signal
+            sendOptions
           );
           return text(truncate(result));
         }

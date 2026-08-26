@@ -89,7 +89,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
 
 /** 系统合成的整块注入消息（coworker 雇佣通知 / 后台任务提醒） */
 const SYNTHETIC_BLOCK =
-  /^<(coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
+  /^<(agent-notification|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 /** coworker 首条的角色前缀 */
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 主 agent 发给 coworker 的消息包裹 */
@@ -103,7 +103,7 @@ function UserText({ text }: { text: string }) {
   if (block) {
     return (
       <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
-        {block[1].startsWith('coworker-') ? (
+        {block[1].startsWith('coworker-') || block[1] === 'agent-notification' ? (
           <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         ) : (
           <TerminalSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
