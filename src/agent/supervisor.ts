@@ -45,6 +45,7 @@ import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
 import { McpManager } from './mcp';
+import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
 import { createSubagentTool, lastAssistantText } from './subagent';
@@ -870,7 +871,14 @@ export class SessionSupervisor {
       agentType,
       gate,
       resumeFile,
-      extraTools: [createAskTool(askManager)],
+      extraTools: [
+        createAskTool(askManager),
+        // coworker → 父的主动通路(派活轮的自动摘要之外,tab 直聊的轮也能上报/移交)
+        createMessageMainTool(
+          (text, urgent) => this.notifier.notify(parentId, text, { urgent }),
+          name
+        ),
+      ],
     });
     const info: CoworkerInfo = {
       id: coworkerId,
