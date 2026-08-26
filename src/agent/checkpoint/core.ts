@@ -528,12 +528,17 @@ export async function pruneCheckpoints(
   return toDelete.length;
 }
 
-/** 清理其它会话遗留的全部 checkpoint(spawn 时调用) */
-export async function pruneOldSessions(root: string, currentSessionId: string): Promise<number> {
+/** 清理过期 checkpoint(spawn 时调用)。
+ *  不能按「非当前会话」清:同一 repo 下多个会话并存,互相 spawn 会把对方的快照全抹掉 */
+export async function pruneStaleCheckpoints(
+  root: string,
+  maxAgeMs: number = 7 * 24 * 60 * 60 * 1000
+): Promise<number> {
   const all = await loadAllCheckpoints(root);
+  const cutoff = Date.now() - maxAgeMs;
   let deleted = 0;
   for (const cp of all) {
-    if (cp.sessionId === currentSessionId) continue;
+    if (cp.timestamp >= cutoff) continue;
     await deleteCheckpoint(root, cp.id);
     deleted++;
   }

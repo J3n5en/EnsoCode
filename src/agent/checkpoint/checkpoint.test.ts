@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createCheckpoint, loadAllCheckpoints, pruneOldSessions, restoreCheckpoint } from './core';
+import {
+  createCheckpoint,
+  loadAllCheckpoints,
+  pruneStaleCheckpoints,
+  restoreCheckpoint,
+} from './core';
 import { CheckpointManager } from './manager';
 
 const runGit = (cwd: string, ...args: string[]): string =>
@@ -76,12 +81,18 @@ describe('createCheckpoint / restoreCheckpoint', () => {
     expect(all[0].branch).toBe('main');
   });
 
-  it('pruneOldSessions 清掉其它会话的 refs,保留当前会话', async () => {
+  it('pruneStaleCheckpoints 只清过期快照,其它会话的近期快照保留', async () => {
     await createCheckpoint({ root, id: 'tool-old-1', sessionId: 'old', trigger: 'tool' });
     await createCheckpoint({ root, id: 'tool-cur-1', sessionId: 'cur', trigger: 'tool' });
-    await pruneOldSessions(root, 'cur');
-    const remaining = await loadAllCheckpoints(root);
-    expect(remaining.map((cp) => cp.sessionId)).toEqual(['cur']);
+    // 全部都是刚创建的:即便属于其它会话也不能删(多会话共存同一 repo)
+    expect(await pruneStaleCheckpoints(root)).toBe(0);
+    expect((await loadAllCheckpoints(root)).map((cp) => cp.sessionId).sort()).toEqual([
+      'cur',
+      'old',
+    ]);
+    // maxAge 为 0:全部过期,应清空
+    expect(await pruneStaleCheckpoints(root, 0)).toBe(2);
+    expect(await loadAllCheckpoints(root)).toHaveLength(0);
   });
 });
 

@@ -4,7 +4,7 @@ import {
   getRepoRoot,
   loadAllCheckpoints,
   pruneCheckpoints,
-  pruneOldSessions,
+  pruneStaleCheckpoints,
   restoreCheckpoint,
 } from './core';
 
@@ -98,10 +98,10 @@ export class CheckpointManager {
     return true;
   }
 
-  /** spawn 后清理其它会话遗留的 refs(fire-and-forget) */
+  /** spawn 后清理过期快照(fire-and-forget;不按会话清,同 repo 多会话并存) */
   cleanupOldSessions(): void {
     void this.resolveRoot().then((root) => {
-      if (root) void pruneOldSessions(root, this.sessionId).catch(() => {});
+      if (root) void pruneStaleCheckpoints(root).catch(() => {});
     });
   }
 }
