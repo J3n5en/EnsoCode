@@ -39,6 +39,23 @@ import { projectMessage } from './projection';
 import { createSubagentTool } from './subagent';
 import { createTodoTool } from './todo';
 
+/** 子会话产物：session + 实际使用的模型 id */
+interface ChildSessionResult {
+  session: AgentSession;
+  modelId: string;
+}
+
+/** 会话工厂：spawn 闭包依赖的收口,子代理(一次性)与 coworker(持久)共用 */
+interface SessionFactory {
+  agentTypes: AgentTypeSpawnConfig[];
+  modelId: string;
+  createChildSession(opts: {
+    agentType?: AgentTypeSpawnConfig;
+    gate: ApprovalGate;
+    resumeFile?: string;
+  }): Promise<ChildSessionResult>;
+}
+
 interface ManagedSession {
   session: AgentSession;
   status: NodeStatus;
@@ -60,6 +77,8 @@ interface ManagedSession {
   pendingTaskReminders: string[];
   /** 子代理状态（覆盖式 upsert,snapshot 恢复用） */
   subagents: Map<string, SubagentInfo>;
+  /** 仅顶级会话有：创建子会话/coworker 的工厂 */
+  factory?: SessionFactory;
   unsubscribe: () => void;
 }
 
@@ -332,10 +351,10 @@ export class SessionSupervisor {
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
-    const buildBaseTools = (): Def[] => [
+    const buildBaseTools = (toolGate: ApprovalGate): Def[] => [
       createReadToolDefinition(cwd) as unknown as Def,
       withApproval(
-        gate,
+        toolGate,
         'command',
         withBackground(
           createBashToolDefinition(cwd) as unknown as Def,
@@ -344,16 +363,18 @@ export class SessionSupervisor {
           cwd
         )
       ),
-      withApproval(gate, 'file-edit', createLenientEditTool(cwd)),
-      withApproval(gate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
+      withApproval(toolGate, 'file-edit', createLenientEditTool(cwd)),
+      withApproval(toolGate, 'file-write', createWriteToolDefinition(cwd) as unknown as Def),
     ];
-    const wrappedMcpTools = (): Def[] => mcpTools.map((tool) => withApproval(gate, 'mcp', tool));
-    const buildCoreTools = (): Def[] => [...buildBaseTools(), ...wrappedMcpTools()];
-    // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
-    const taskTool = createSubagentTool({
-      modelId: model.modelId,
+    const wrapMcpTools = (toolGate: ApprovalGate): Def[] =>
+      mcpTools.map((tool) => withApproval(toolGate, 'mcp', tool));
+    const buildCoreTools = (): Def[] => [...buildBaseTools(gate), ...wrapMcpTools(gate)];
+    // 会话工厂：一次性 subagent 与持久 coworker 共用。gate 参数化——subagent 复用父门,
+    // coworker 用独立门(否则审批条落错 tab、allowSession 白名单跨会话泄漏)
+    const factory: SessionFactory = {
       agentTypes,
-      createSubSession: async (agentType) => {
+      modelId: model.modelId,
+      createChildSession: async ({ agentType, gate: childGate, resumeFile: childResume }) => {
         // 类型绑定模型：注册其 provider 并取克隆副本；缺省跟随父会话模型
         let subModel = { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined };
         if (agentType?.model) {
@@ -391,14 +412,14 @@ export class SessionSupervisor {
         const typeMcpTools =
           agentType && agentType.mcpServers?.length
             ? (await this.mcp.toolsFor(agentType.mcpServers, 3000)).map((tool) =>
-                withApproval(gate, 'mcp', tool)
+                withApproval(childGate, 'mcp', tool)
               )
             : [];
         const subTools = [
           ...(agentType?.tools === 'readonly'
             ? [createReadToolDefinition(cwd) as unknown as Def]
-            : buildBaseTools()),
-          ...(agentType ? typeMcpTools : wrappedMcpTools()),
+            : buildBaseTools(childGate)),
+          ...(agentType ? typeMcpTools : wrapMcpTools(childGate)),
         ];
         const typeSkillPaths = agentType?.skillPaths ?? [];
         const subLoader = new DefaultResourceLoader({
@@ -423,10 +444,19 @@ export class SessionSupervisor {
           noTools: 'builtin',
           customTools: subTools,
           resourceLoader: subLoader,
-          sessionManager: SessionManager.create(cwd, this.options.sessionDir),
+          sessionManager: childResume
+            ? SessionManager.open(childResume, this.options.sessionDir, cwd)
+            : SessionManager.create(cwd, this.options.sessionDir),
         });
-        return session;
+        return { session, modelId: agentType?.model?.modelId ?? model.modelId };
       },
+    };
+    // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
+    const taskTool = createSubagentTool({
+      modelId: model.modelId,
+      agentTypes,
+      createSubSession: async (agentType) =>
+        (await factory.createChildSession({ agentType, gate })).session,
       emitUpdate: (agent) => {
         const managed = managedRef ?? this.sessions.get(sessionId);
         if (!managed) return;
@@ -459,13 +489,32 @@ export class SessionSupervisor {
         ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
     );
 
+    managedRef = this.registerManagedSession(sessionId, session, gate, model.modelId, {
+      factory,
+      resumeFile,
+    });
+  }
+
+  /** 登记会话进 sessions map 并发出初始事件（status/commands/session-meta,resume 时回放快照） */
+  private registerManagedSession(
+    sessionId: string,
+    session: AgentSession,
+    gate: ApprovalGate,
+    modelId: string,
+    opts: {
+      factory?: SessionFactory;
+      parentId?: string;
+      coworkerName?: string;
+      resumeFile?: string;
+    } = {}
+  ): ManagedSession {
     const managed: ManagedSession = {
       session,
       status: 'idle',
       seq: 0,
       messages: [],
       commands: collectSlashCommands(session),
-      modelId: model.modelId,
+      modelId,
       adaptiveDowngraded: false,
       timings: [],
       toolStartAt: new Map(),
@@ -473,12 +522,14 @@ export class SessionSupervisor {
       gate,
       pendingTaskReminders: [],
       subagents: new Map(),
+      ...(opts.factory ? { factory: opts.factory } : {}),
+      ...(opts.parentId ? { parentId: opts.parentId } : {}),
+      ...(opts.coworkerName ? { coworkerName: opts.coworkerName } : {}),
       unsubscribe: () => {},
     };
     managed.unsubscribe = session.subscribe((event) => {
       this.onSessionEvent(sessionId, managed, event);
     });
-    managedRef = managed;
     this.sessions.set(sessionId, managed);
     this.emitStatus(sessionId, managed);
     this.options.emit({
@@ -494,7 +545,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       sessionFile: managed.session.sessionFile,
     });
-    if (resumeFile) {
+    if (opts.resumeFile) {
       // 恢复的会话历史一次性快照回放——逐条 upsert 会打出上千条 IPC 事件，渲染层每条都重渲染
       managed.messages = (managed.session.messages as unknown[])
         .map(projectMessage)
@@ -508,10 +559,14 @@ export class SessionSupervisor {
             status: managed.status,
             messages: managed.messages,
             commands: managed.commands,
+            ...(opts.parentId
+              ? { parentSessionId: opts.parentId, coworkerName: opts.coworkerName }
+              : {}),
           },
         ],
       });
     }
+    return managed;
   }
 
   private onSessionEvent(
