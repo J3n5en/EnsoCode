@@ -163,6 +163,8 @@ export type AgentCommand =
   | { type: 'set-approval-mode'; sessionId: string; mode: ApprovalMode }
   | { type: 'ask-respond'; sessionId: string; requestId: string; answer: string }
   | { type: 'task-stop'; sessionId: string; taskId: string }
+  /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；worker 侧换算 entry 并 navigateTree */
+  | { type: 'rewind'; sessionId: string; userIndexFromEnd: number }
   | { type: 'abort'; sessionId: string }
   | { type: 'snapshot' }
   /** 预热 MCP 连接（worker 启动时下发；连接进缓存，spawn 即取即用） */
@@ -306,6 +308,8 @@ export type AgentWorkerEvent =
   | { type: 'turn-completed'; sessionId: string; seq: number }
   | { type: 'turn-failed'; sessionId: string; seq: number; error: string }
   | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
+  /** 回退完成；editorText = 被回退 user 消息的文本（预填输入框），失败/取消时缺省 */
+  | { type: 'rewind-done'; sessionId: string; seq: number; editorText?: string }
   | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
   | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
@@ -449,6 +453,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return isNonEmptyString(value.sessionId) && isNonEmptyString(value.taskId)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'rewind':
+      return isNonEmptyString(value.sessionId) &&
+        typeof value.userIndexFromEnd === 'number' &&
+        value.userIndexFromEnd >= 0
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'snapshot':
       return { type: 'snapshot' };
     case 'warm-mcp':
@@ -484,6 +494,15 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return null;
     case 'turn-completed':
       if (isNonEmptyString(value.sessionId) && typeof value.seq === 'number') {
+        return value as unknown as AgentWorkerEvent;
+      }
+      return null;
+    case 'rewind-done':
+      if (
+        isNonEmptyString(value.sessionId) &&
+        typeof value.seq === 'number' &&
+        (value.editorText === undefined || typeof value.editorText === 'string')
+      ) {
         return value as unknown as AgentWorkerEvent;
       }
       return null;
