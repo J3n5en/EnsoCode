@@ -259,11 +259,10 @@ export const useSessionsStore = create<SessionsState>()(
           // 该会话的首个 worker 事件即 spawn 完成信号，清掉 spawning（resume 的 loading 依赖它）
           return patch(state, id, { ...next, spawning: false });
         });
-        // 轮次收束后投递排队消息(审批/提问挂起时不投,等其解除后的下一次收束)
-        if (
-          (event.type === 'status' && event.status === 'idle') ||
-          event.type === 'turn-completed'
-        ) {
+        // 轮次收束后投递排队消息(审批/提问挂起时不投,等其解除后的下一次收束)。
+        // 只挂 turn-completed 单一触发点:worker 在它之前必先发 status idle,
+        // 两者都触发会在 running 事件回来前把下一条也投出去(双触发竞态)
+        if (event.type === 'turn-completed') {
           flushQueue(id);
         }
       });
