@@ -56,10 +56,10 @@ export function CoworkerTabs({
         {coworkers.map((coworker) => {
           const needsAttention = (coworker.pendingApprovals ?? []).length > 0;
           return (
-            <div key={coworker.id} className="group/tab flex shrink-0 items-center">
+            <div key={coworker.id} className="group/tab relative shrink-0">
               <button
                 type="button"
-                className={tabClass(displayedId === coworker.id)}
+                className={cn(tabClass(displayedId === coworker.id), 'group-hover/tab:pr-6')}
                 onClick={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
               >
                 <Bot className="h-3 w-3 shrink-0" />
@@ -77,10 +77,11 @@ export function CoworkerTabs({
                   )}
                 />
               </button>
+              {/* 关闭钉在 tab 内右端(hover 现身,button 让出留白),避免游离在 tab 外 */}
               <button
                 type="button"
                 title={t('Dismiss coworker')}
-                className="hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover/tab:block"
+                className="absolute top-1/2 right-1.5 hidden -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-destructive group-hover/tab:block"
                 onClick={() => {
                   if (window.confirm(t('Dismiss this coworker? Its session will be closed.'))) {
                     useSessionsStore.getState().dismissCoworkerFromUI(parent.id, coworker.id);

@@ -1,5 +1,6 @@
 import type { TodoItem, TurnPerf } from '@shared/types/agent';
 import {
+  Bot,
   Brain,
   Check,
   ChevronRight,
@@ -86,6 +87,51 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   }
 }
 
+/** 系统合成的整块注入消息（coworker 雇佣通知 / 后台任务提醒） */
+const SYNTHETIC_BLOCK = /^<(coworker-hired|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
+/** coworker 首条的角色前缀 */
+const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
+/** 主 agent 发给 coworker 的消息包裹 */
+const MAIN_AGENT_BLOCK =
+  /^<message-from-main-agent>\n?([\s\S]*?)\n?<\/message-from-main-agent>\s*$/;
+
+/** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
+function UserText({ text }: { text: string }) {
+  const { t } = useI18n();
+  const block = SYNTHETIC_BLOCK.exec(text);
+  if (block) {
+    return (
+      <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+        {block[1] === 'coworker-hired' ? (
+          <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <TerminalSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        )}
+        <span className="whitespace-pre-wrap">{block[2]}</span>
+      </div>
+    );
+  }
+  const role = ROLE_PREFIX.exec(text);
+  const rest = role ? text.slice(role[0].length) : text;
+  const fromMain = MAIN_AGENT_BLOCK.exec(rest);
+  const body = fromMain ? fromMain[1] : rest;
+  return (
+    <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
+      {fromMain && (
+        <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t('From main agent')}
+        </p>
+      )}
+      {role && (
+        <div className="mb-2 rounded-md bg-background/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+          <span className="font-semibold">{t('Role')}</span> · {role[1]}
+        </div>
+      )}
+      {body}
+    </div>
+  );
+}
+
 export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   switch (item.kind) {
     case 'user':
@@ -99,11 +145,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
               className="max-h-48 max-w-full rounded-lg border object-contain"
             />
           ))}
-          {item.text && (
-            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
-              {item.text}
-            </div>
-          )}
+          {item.text && <UserText text={item.text} />}
         </div>
       );
     case 'text':

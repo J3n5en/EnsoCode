@@ -188,6 +188,8 @@ export const zhTranslations: Record<string, string> = {
   'Stop task': '停止任务',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',
+  'From main agent': '来自主 agent',
+  Role: '角色',
   'Agent type': '类型',
   Hire: '雇佣',
   'Dismiss this coworker? Its session will be closed.': '解雇这个 coworker?其会话将被关闭。',
