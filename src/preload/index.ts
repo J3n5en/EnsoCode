@@ -130,6 +130,24 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images),
     abort: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
+    /** 恢复 coworker（父会话 resume 级联;spawn 命令排在父 spawn 之后） */
+    spawnCoworker: (
+      parentSessionId: string,
+      coworkerId: string,
+      name: string,
+      agentType?: string,
+      resumeFile?: string
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.AGENT_SPAWN_COWORKER,
+        parentSessionId,
+        coworkerId,
+        name,
+        agentType,
+        resumeFile
+      ),
+    dismissCoworker: (parentSessionId: string, coworkerId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISMISS_COWORKER, parentSessionId, coworkerId),
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
     requestSnapshot: (): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),

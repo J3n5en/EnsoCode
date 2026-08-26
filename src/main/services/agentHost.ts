@@ -242,6 +242,34 @@ function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
     }));
 }
 
+/** 恢复/重建 coworker（渲染层 resume 级联调用;新建由 worker 内工具路径完成） */
+export function spawnCoworkerSession(
+  parentSessionId: string,
+  coworkerId: string,
+  name: string,
+  agentType?: string,
+  resumeFile?: string
+): { ok: boolean; error?: string } {
+  if (resumeFile && !existsSync(resumeFile)) {
+    return { ok: false, error: 'coworker 会话文件已丢失，无法恢复' };
+  }
+  return sendCommand({
+    type: 'spawn-coworker',
+    sessionId: parentSessionId,
+    coworkerId,
+    name,
+    ...(agentType ? { agentType } : {}),
+    ...(resumeFile ? { resumeFile } : {}),
+  });
+}
+
+export function dismissCoworker(
+  parentSessionId: string,
+  coworkerId: string
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'dismiss-coworker', sessionId: parentSessionId, coworkerId });
+}
+
 export function setSessionThinking(
   sessionId: string,
   level: ThinkingLevel

@@ -12,6 +12,8 @@ import { APPROVAL_MODES, THINKING_LEVELS } from '@shared/types/agent';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import {
   abortSession,
+  dismissCoworker,
+  spawnCoworkerSession,
   promptSession,
   requestSnapshot,
   respondApproval,
@@ -107,6 +109,43 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SPAWN_COWORKER,
+    (
+      _event,
+      parentSessionId: unknown,
+      coworkerId: unknown,
+      name: unknown,
+      agentType: unknown,
+      resumeFile: unknown
+    ): AgentActionResult => {
+      if (
+        !isNonEmptyString(parentSessionId) ||
+        !isNonEmptyString(coworkerId) ||
+        !isNonEmptyString(name)
+      ) {
+        return { ok: false, error: 'invalid spawn-coworker' };
+      }
+      return spawnCoworkerSession(
+        parentSessionId,
+        coworkerId,
+        name,
+        typeof agentType === 'string' && agentType ? agentType : undefined,
+        typeof resumeFile === 'string' && resumeFile ? resumeFile : undefined
+      );
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_DISMISS_COWORKER,
+    (_event, parentSessionId: unknown, coworkerId: unknown): AgentActionResult => {
+      if (!isNonEmptyString(parentSessionId) || !isNonEmptyString(coworkerId)) {
+        return { ok: false, error: 'invalid dismiss-coworker' };
+      }
+      return dismissCoworker(parentSessionId, coworkerId);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_THINKING,

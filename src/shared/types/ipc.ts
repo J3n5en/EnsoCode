@@ -45,6 +45,8 @@ export const IPC_CHANNELS = {
   AGENT_SET_APPROVAL_MODE: 'agent:set-approval-mode',
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
   AGENT_TASK_STOP: 'agent:task-stop',
+  AGENT_SPAWN_COWORKER: 'agent:spawn-coworker',
+  AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

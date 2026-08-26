@@ -73,6 +73,8 @@ export function maybeNotify(event: RendererAgentEvent): void {
       );
       return;
     case 'turn-completed':
+      // coworker 每轮完成不弹系统通知(主 agent/用户在 tab 内自会看到)
+      if (event.sessionId.includes('::cw-')) return;
       notify(event.sessionId, t.turnDone, t.turnDoneBody);
       return;
     case 'status':
