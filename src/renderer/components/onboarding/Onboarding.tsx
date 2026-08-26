@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { AgentTypeEditDialog } from '../settings/AgentTypesSettings';
+import { AgentTypeList } from '../settings/AgentTypesSettings';
 import { LocalAssetImportDialog } from '../settings/LocalAssetImportDialog';
 import { LocalImportDialog } from '../settings/LocalImportDialog';
 import { PresetEditDialog } from '../settings/PresetsSettings';
@@ -38,13 +38,11 @@ export function Onboarding() {
   const mcpServers = useSettingsStore((s) => s.mcpServers);
   const instructions = useSettingsStore((s) => s.instructions);
   const presets = useSettingsStore((s) => s.presets);
-  const agentTypes = useSettingsStore((s) => s.agentTypes);
 
   const [stepIndex, setStepIndex] = React.useState(0);
   const [importKind, setImportKind] = React.useState<'skill' | 'mcp' | 'instruction' | null>(null);
   const [providerOpen, setProviderOpen] = React.useState(false);
   const [presetOpen, setPresetOpen] = React.useState(false);
-  const [agentTypeOpen, setAgentTypeOpen] = React.useState(false);
   const step = STEPS[stepIndex];
 
   const finish = () => setOnboarded(true);
@@ -145,15 +143,20 @@ export function Onboarding() {
         )}
 
         {step === 'agentType' && (
-          <ImportStepView
-            icon={Bot}
-            title={t('Agent types')}
-            desc={t('Give subagents their own model, skills and MCP servers (optional)')}
-            count={agentTypes.length}
-            onImport={() => setAgentTypeOpen(true)}
-            importedLabel={t('{{count}} agent types', { count: agentTypes.length })}
-            importLabel={t('New agent type')}
-          />
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <Bot className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <h2 className="text-lg font-semibold">{t('Agent types')}</h2>
+              <p className="text-sm text-muted-foreground">
+                {t('Give subagents their own model, skills and MCP servers (optional)')}
+              </p>
+            </div>
+            <div className="max-h-64 overflow-y-auto pr-1">
+              <AgentTypeList />
+            </div>
+          </div>
         )}
 
         {step === 'done' && (
@@ -202,9 +205,6 @@ export function Onboarding() {
         />
       )}
       {presetOpen && <PresetEditDialog preset={null} onClose={() => setPresetOpen(false)} />}
-      {agentTypeOpen && (
-        <AgentTypeEditDialog entry={null} onClose={() => setAgentTypeOpen(false)} />
-      )}
     </div>
   );
 }

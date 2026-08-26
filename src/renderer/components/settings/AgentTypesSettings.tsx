@@ -21,6 +21,24 @@ import { DetailRows, PickList } from './PresetsSettings';
 
 export function AgentTypesSettings() {
   const { t } = useI18n();
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="font-medium text-lg">{t('Agent types')}</h3>
+        <p className="text-muted-foreground text-sm">
+          {t(
+            'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.'
+          )}
+        </p>
+      </div>
+      <AgentTypeList />
+    </div>
+  );
+}
+
+/** 类型清单(设置页与 onboarding 共用):内置可编辑成同名覆盖/开关禁用,自定义可增删改;编辑弹窗自足 */
+export function AgentTypeList() {
+  const { t } = useI18n();
   const agentTypes = useSettingsStore((state) => state.agentTypes);
   const removeAgentType = useSettingsStore((state) => state.removeAgentType);
   const disabledBuiltins = useSettingsStore((state) => state.disabledBuiltinAgentTypes);
@@ -33,89 +51,76 @@ export function AgentTypesSettings() {
   const overridden = new Set(agentTypes.map((entry) => entry.name));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h3 className="font-medium text-lg">{t('Agent types')}</h3>
-          <p className="text-muted-foreground text-sm">
-            {t(
-              'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.'
-            )}
+    <div className="space-y-2">
+      <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            general
+            <Badge variant="secondary">{t('Built-in')}</Badge>
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t('Follows the conversation model, full toolset')}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          {t('New agent type')}
-        </Button>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+      {BUILTIN_AGENT_TYPES.filter((type) => !overridden.has(type.name)).map((type) => (
+        <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-2 text-sm font-medium">
-              general
+              {type.name}
               <Badge variant="secondary">{t('Built-in')}</Badge>
+              {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
             </p>
-            <p className="text-muted-foreground text-xs">
-              {t('Follows the conversation model, full toolset')}
-            </p>
+            <p className="truncate text-muted-foreground text-xs">{type.description}</p>
           </div>
+          <Button variant="ghost" size="icon" onClick={() => setEditing({ defaults: type })}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Switch
+            checked={!disabledBuiltins.includes(type.name)}
+            onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
+          />
         </div>
+      ))}
 
-        {BUILTIN_AGENT_TYPES.filter((type) => !overridden.has(type.name)).map((type) => (
-          <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+      {agentTypes.map((entry) => {
+        const provider = providers.find((p) => p.id === entry.providerId);
+        return (
+          <div key={entry.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
             <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 text-sm font-medium">
-                {type.name}
-                <Badge variant="secondary">{t('Built-in')}</Badge>
-                {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
+              <p className="flex items-center gap-2 truncate text-sm font-medium">
+                {entry.name}
+                {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
               </p>
-              <p className="truncate text-muted-foreground text-xs">{type.description}</p>
+              <p className="truncate text-muted-foreground text-xs">
+                {entry.modelId
+                  ? `${provider?.name ?? '?'} / ${entry.modelId}`
+                  : t('Follows the conversation model')}
+                {entry.description ? ` · ${entry.description}` : ''}
+              </p>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => setEditing({ defaults: type })}>
+            <Button variant="ghost" size="icon" onClick={() => setEditing(entry)}>
               <Pencil className="h-4 w-4" />
             </Button>
-            <Switch
-              checked={!disabledBuiltins.includes(type.name)}
-              onCheckedChange={(checked) => toggleBuiltin(type.name, checked)}
-            />
+            <Button variant="ghost" size="icon" onClick={() => removeAgentType(entry.id)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
-        ))}
+        );
+      })}
 
-        {agentTypes.map((entry) => {
-          const provider = providers.find((p) => p.id === entry.providerId);
-          return (
-            <div key={entry.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
-              <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-2 truncate text-sm font-medium">
-                  {entry.name}
-                  {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
-                </p>
-                <p className="truncate text-muted-foreground text-xs">
-                  {entry.modelId
-                    ? `${provider?.name ?? '?'} / ${entry.modelId}`
-                    : t('Follows the conversation model')}
-                  {entry.description ? ` · ${entry.description}` : ''}
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setEditing(entry)}>
-                <Pencil className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" onClick={() => removeAgentType(entry.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          );
-        })}
-        {agentTypes.length === 0 && (
-          <p className="rounded-md border border-dashed px-3 py-6 text-center text-muted-foreground text-sm">
-            {t('No custom agent types yet — subagents follow the conversation model.')}
-          </p>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => setEditing('new')}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+      >
+        <Plus className="h-4 w-4" />
+        {t('New agent type')}
+      </button>
 
       {editing && (
         <AgentTypeEditDialog

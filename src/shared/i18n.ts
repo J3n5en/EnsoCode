@@ -58,7 +58,6 @@ export const zhTranslations: Record<string, string> = {
     '把技能、MCP 服务和一份指令组合成预设（可选）',
   'Give subagents their own model, skills and MCP servers (optional)':
     '为子代理配置专属模型、技能与 MCP 服务（可选）',
-  '{{count}} agent types': '已有 {{count}} 个类型',
   '{{count}} presets': '已有 {{count}} 个预设',
   'Model Providers': '模型中心',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
@@ -183,8 +182,6 @@ export const zhTranslations: Record<string, string> = {
   'Follows the conversation model, full toolset': '跟随会话模型,全部工具',
   'Follows the conversation model': '跟随会话模型',
   'Read-only': '只读',
-  'No custom agent types yet — subagents follow the conversation model.':
-    '暂无自定义类型 —— 子代理默认跟随会话模型。',
   'Edit agent type': '编辑类型',
   'Name (slug)': '名称(slug)',
   'Description (helps the agent pick this type)': '描述(帮助主 agent 选型)',
