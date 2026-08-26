@@ -265,9 +265,15 @@ export function spawnCoworkerSession(
 
 export function dismissCoworker(
   parentSessionId: string,
-  coworkerId: string
+  coworkerId: string,
+  notify = false
 ): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'dismiss-coworker', sessionId: parentSessionId, coworkerId });
+  return sendCommand({
+    type: 'dismiss-coworker',
+    sessionId: parentSessionId,
+    coworkerId,
+    ...(notify ? { notify: true } : {}),
+  });
 }
 
 export function setSessionThinking(

@@ -241,9 +241,24 @@ export class SessionSupervisor {
         }
         return;
       }
-      case 'dismiss-coworker':
+      case 'dismiss-coworker': {
+        const name = this.sessions.get(command.coworkerId)?.coworkerName ?? command.coworkerId;
         await this.dismissCoworker(command.sessionId, command.coworkerId);
+        // 用户单独解雇时让主 agent 感知,避免它后续 send 已不存在的同事
+        if (command.notify) {
+          const parent = this.sessions.get(command.sessionId);
+          if (!parent) return;
+          const notice = `The user dismissed coworker "${name}". Its session is closed; do not send to it again.`;
+          if (parent.status === 'idle') {
+            void parent.session
+              .prompt(`<coworker-dismissed>\n${notice}\n</coworker-dismissed>`)
+              .catch(() => {});
+          } else {
+            parent.pendingTaskReminders.push(notice);
+          }
+        }
         return;
+      }
       case 'prompt': {
         const managed = this.must(command.sessionId);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));

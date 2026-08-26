@@ -544,7 +544,7 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         dismissCoworkerFromUI(parentId, coworkerId) {
-          void window.electronAPI.agent.dismissCoworker(parentId, coworkerId);
+          void window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
         },
 
         async hireCoworker(parentId, name, agentType) {

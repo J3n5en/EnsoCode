@@ -146,8 +146,12 @@ const electronAPI = {
         agentType,
         resumeFile
       ),
-    dismissCoworker: (parentSessionId: string, coworkerId: string): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISMISS_COWORKER, parentSessionId, coworkerId),
+    dismissCoworker: (
+      parentSessionId: string,
+      coworkerId: string,
+      notify?: boolean
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISMISS_COWORKER, parentSessionId, coworkerId, notify),
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
     requestSnapshot: (): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),

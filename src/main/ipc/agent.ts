@@ -139,11 +139,11 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_DISMISS_COWORKER,
-    (_event, parentSessionId: unknown, coworkerId: unknown): AgentActionResult => {
+    (_event, parentSessionId: unknown, coworkerId: unknown, notify: unknown): AgentActionResult => {
       if (!isNonEmptyString(parentSessionId) || !isNonEmptyString(coworkerId)) {
         return { ok: false, error: 'invalid dismiss-coworker' };
       }
-      return dismissCoworker(parentSessionId, coworkerId);
+      return dismissCoworker(parentSessionId, coworkerId, notify === true);
     }
   );
 

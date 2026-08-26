@@ -138,7 +138,8 @@ export type AgentCommand =
       agentType?: string;
       resumeFile?: string;
     }
-  | { type: 'dismiss-coworker'; sessionId: string; coworkerId: string }
+  /** notify=true 时通知主 agent(用户单独解雇);级联删除不通知 */
+  | { type: 'dismiss-coworker'; sessionId: string; coworkerId: string; notify?: boolean }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
