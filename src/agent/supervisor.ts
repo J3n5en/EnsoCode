@@ -14,6 +14,7 @@ import type {
   AgentTypeSpawnConfig,
   AgentWorkerEvent,
   ApprovalMode,
+  CoworkerInfo,
   McpServerSpawnConfig,
   MessageTiming,
   NodeStatus,
@@ -32,11 +33,12 @@ import {
   withBackground,
   withTaskReminders,
 } from './backgroundTasks';
+import { createCoworkerTool } from './coworker';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { McpManager } from './mcp';
 import { projectMessage } from './projection';
-import { createSubagentTool } from './subagent';
+import { createSubagentTool, lastAssistantText } from './subagent';
 import { createTodoTool } from './todo';
 
 /** 子会话产物：session + 实际使用的模型 id */
@@ -79,6 +81,11 @@ interface ManagedSession {
   subagents: Map<string, SubagentInfo>;
   /** 仅顶级会话有：创建子会话/coworker 的工厂 */
   factory?: SessionFactory;
+  /** coworker 会话专有：父会话 id 与雇佣名 */
+  parentId?: string;
+  coworkerName?: string;
+  /** 父会话专有：在编 coworker（name → info,status 以 sessions 现值为准） */
+  coworkers: Map<string, CoworkerInfo>;
   unsubscribe: () => void;
 }
 
@@ -197,6 +204,20 @@ export class SessionSupervisor {
           command.approvalMode,
           command.agentTypes
         );
+        return;
+      case 'spawn-coworker':
+        // resume 级联可能重复下发,已存在即幂等跳过
+        if (this.sessions.has(command.coworkerId)) return;
+        await this.spawnCoworker(
+          command.sessionId,
+          command.coworkerId,
+          command.name,
+          command.agentType,
+          command.resumeFile
+        );
+        return;
+      case 'dismiss-coworker':
+        await this.dismissCoworker(command.sessionId, command.coworkerId);
         return;
       case 'prompt': {
         const managed = this.must(command.sessionId);
@@ -464,10 +485,39 @@ export class SessionSupervisor {
         this.options.emit({ type: 'subagent-update', sessionId, seq: ++managed.seq, agent });
       },
     });
+    const coworkerTool = createCoworkerTool({
+      agentTypes,
+      spawn: (name, agentTypeName) =>
+        this.spawnCoworker(sessionId, `${sessionId}::cw-${slugify(name)}`, name, agentTypeName),
+      send: (name, message, signal) => {
+        const parent = this.must(sessionId);
+        const info = parent.coworkers.get(name);
+        if (!info) {
+          throw new Error(
+            `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
+          );
+        }
+        return this.coworkerSend(info.id, message, signal);
+      },
+      list: () => {
+        const parent = this.must(sessionId);
+        return [...parent.coworkers.values()].map((info) => ({
+          ...info,
+          status: this.sessions.get(info.id)?.status ?? info.status,
+        }));
+      },
+      dismiss: async (name) => {
+        const parent = this.must(sessionId);
+        const info = parent.coworkers.get(name);
+        if (!info) throw new Error(`unknown coworker "${name}"`);
+        await this.dismissCoworker(sessionId, info.id);
+      },
+    });
     const customTools = [
       ...buildCoreTools(),
       createTodoTool(),
       taskTool,
+      coworkerTool,
       ...createTaskTools(this.bgTasks),
     ].map((tool) => withTaskReminders(tool, takePendingReminders));
 
@@ -522,6 +572,7 @@ export class SessionSupervisor {
       gate,
       pendingTaskReminders: [],
       subagents: new Map(),
+      coworkers: new Map(),
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
       ...(opts.coworkerName ? { coworkerName: opts.coworkerName } : {}),
@@ -567,6 +618,151 @@ export class SessionSupervisor {
       });
     }
     return managed;
+  }
+
+  /** 雇佣 coworker：独立审批门 + 完整 ManagedSession(prompt/abort/审批通路全复用) */
+  private async spawnCoworker(
+    parentId: string,
+    coworkerId: string,
+    name: string,
+    agentTypeName?: string,
+    resumeFile?: string
+  ): Promise<CoworkerInfo> {
+    const parent = this.must(parentId);
+    const factory = parent.factory;
+    if (!factory) throw new Error(`session cannot hire coworkers: ${parentId}`);
+    if (parent.coworkers.has(name)) throw new Error(`coworker name already in use: ${name}`);
+    if (this.sessions.has(coworkerId)) throw new Error(`coworker already exists: ${coworkerId}`);
+    // 类型找不到降级 general(resume 时配置漂移不毁恢复;工具路径在 coworker.ts 已前置校验)
+    const agentType = agentTypeName
+      ? factory.agentTypes.find((type) => type.name === agentTypeName)
+      : undefined;
+    // 独立审批门:mode 继承父当前档;回调经 sessions 现取(审批只发生在工具执行期,彼时已注册)
+    const gate = new ApprovalGate(
+      parent.gate.mode,
+      (request) => {
+        const managed = this.sessions.get(coworkerId);
+        if (managed) {
+          this.options.emit({
+            type: 'approval-request',
+            sessionId: coworkerId,
+            seq: ++managed.seq,
+            request,
+          });
+        }
+      },
+      (requestId) => {
+        const managed = this.sessions.get(coworkerId);
+        if (managed) {
+          this.options.emit({
+            type: 'approval-resolved',
+            sessionId: coworkerId,
+            seq: ++managed.seq,
+            requestId,
+          });
+        }
+      }
+    );
+    const { session, modelId } = await factory.createChildSession({ agentType, gate, resumeFile });
+    const info: CoworkerInfo = {
+      id: coworkerId,
+      name,
+      ...(agentType ? { agentType: agentType.name } : {}),
+      status: 'idle',
+      modelId,
+      ...(session.sessionFile ? { sessionFile: session.sessionFile } : {}),
+      createdAt: Date.now(),
+    };
+    // coworker-update 必须先于该 coworker 的任何事件:渲染层凭它先建 Conversation
+    this.options.emit({
+      type: 'coworker-update',
+      sessionId: parentId,
+      seq: ++parent.seq,
+      coworker: info,
+    });
+    this.registerManagedSession(coworkerId, session, gate, modelId, {
+      parentId,
+      coworkerName: name,
+      ...(resumeFile ? { resumeFile } : {}),
+    });
+    parent.coworkers.set(name, info);
+    return info;
+  }
+
+  /** 解雇 coworker：中断并销毁会话,jsonl 留盘 */
+  private async dismissCoworker(parentId: string, coworkerId: string): Promise<void> {
+    const parent = this.must(parentId);
+    const managed = this.sessions.get(coworkerId);
+    if (managed) {
+      managed.gate.cancelAll();
+      try {
+        await managed.session.abort();
+      } catch {}
+      managed.unsubscribe();
+      try {
+        managed.session.dispose();
+      } catch {}
+      this.sessions.delete(coworkerId);
+    }
+    let dismissedName = managed?.coworkerName ?? coworkerId;
+    for (const [name, info] of parent.coworkers) {
+      if (info.id === coworkerId) {
+        dismissedName = name;
+        parent.coworkers.delete(name);
+        break;
+      }
+    }
+    this.options.emit({
+      type: 'coworker-update',
+      sessionId: parentId,
+      seq: ++parent.seq,
+      coworker: { id: coworkerId, name: dismissedName, status: 'dismissed', createdAt: 0 },
+    });
+  }
+
+  /**
+   * 向 coworker 发消息并等本轮结束。经命令门串行启动(与用户 tab 的 prompt 一致排队);
+   * running 时 steer 汇入当前轮。父 abort(signal)只提前返回,不杀 coworker(持久实体)。
+   */
+  private async coworkerSend(
+    coworkerId: string,
+    text: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const managed = this.must(coworkerId);
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    // 先订阅再启动,防 agent_end 竞态
+    const unsubscribe = managed.session.subscribe((event) => {
+      if (event.type === 'agent_end') resolveDone();
+    });
+    signal?.addEventListener('abort', resolveDone, { once: true });
+    try {
+      await this.gate.run(coworkerId, async () => {
+        if (managed.status === 'running') {
+          await managed.session.steer(text);
+        } else {
+          void managed.session.prompt(text).catch((error) => {
+            managed.status = 'failed';
+            this.emitStatus(coworkerId, managed, toErrorMessage(error));
+            resolveDone();
+          });
+        }
+      });
+      await done;
+    } finally {
+      unsubscribe();
+      signal?.removeEventListener('abort', resolveDone);
+    }
+    if (signal?.aborted) {
+      return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
+    }
+    if (managed.status === 'failed') {
+      return `(coworker turn failed — check its tab for details)`;
+    }
+    return lastAssistantText(managed.session) || '(coworker produced no output)';
   }
 
   private onSessionEvent(
@@ -771,6 +967,9 @@ export class SessionSupervisor {
       messages: managed.messages,
       commands: managed.commands,
       ...(managed.gate.snapshot().length > 0 ? { pendingApprovals: managed.gate.snapshot() } : {}),
+      ...(managed.parentId
+        ? { parentSessionId: managed.parentId, coworkerName: managed.coworkerName }
+        : {}),
     }));
   }
 
@@ -796,6 +995,13 @@ export class SessionSupervisor {
     return this.runtimePromise;
   }
 }
+
+const slugify = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'coworker';
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);

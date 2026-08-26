@@ -16,7 +16,7 @@ export interface SubagentDeps {
 }
 
 /** 从 pi 会话消息取最后一条 assistant 文本 */
-function lastAssistantText(session: AgentSession): string {
+export function lastAssistantText(session: AgentSession): string {
   const messages = session.messages as { role?: string; content?: unknown }[];
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
