@@ -3,6 +3,9 @@ import {
   type AgentSession,
   createAgentSession,
   createBashToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
   DefaultResourceLoader,
@@ -411,8 +414,15 @@ export class SessionSupervisor {
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
-    const buildBaseTools = (toolGate: ApprovalGate): Def[] => [
+    // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座
+    const readOnlyTools = (): Def[] => [
       createReadToolDefinition(cwd) as unknown as Def,
+      createGrepToolDefinition(cwd) as unknown as Def,
+      createFindToolDefinition(cwd) as unknown as Def,
+      createLsToolDefinition(cwd) as unknown as Def,
+    ];
+    const buildBaseTools = (toolGate: ApprovalGate): Def[] => [
+      ...readOnlyTools(),
       withApproval(
         toolGate,
         'command',
@@ -476,9 +486,7 @@ export class SessionSupervisor {
               )
             : [];
         const subTools = [
-          ...(agentType?.tools === 'readonly'
-            ? [createReadToolDefinition(cwd) as unknown as Def]
-            : buildBaseTools(childGate)),
+          ...(agentType?.tools === 'readonly' ? readOnlyTools() : buildBaseTools(childGate)),
           ...(agentType ? typeMcpTools : wrapMcpTools(childGate)),
         ];
         const typeSkillPaths = agentType?.skillPaths ?? [];
