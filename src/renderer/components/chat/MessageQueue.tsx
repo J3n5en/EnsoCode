@@ -61,7 +61,7 @@ export function MessageQueue({
               <Check className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+            <div className="pointer-events-none flex shrink-0 items-center gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
               <button
                 type="button"
                 title={t('Edit')}
