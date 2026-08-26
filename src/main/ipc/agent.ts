@@ -17,6 +17,7 @@ import {
   requestSnapshot,
   respondApproval,
   respondAsk,
+  rewindSession,
   setAgentEventListener,
   setSessionApprovalMode,
   setSessionReasoning,
@@ -206,6 +207,20 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid approval mode' };
       }
       return setSessionApprovalMode(sessionId, mode as ApprovalMode);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_REWIND,
+    (_event, sessionId: unknown, userIndexFromEnd: unknown): AgentActionResult => {
+      if (
+        !isNonEmptyString(sessionId) ||
+        typeof userIndexFromEnd !== 'number' ||
+        userIndexFromEnd < 0
+      ) {
+        return { ok: false, error: 'invalid rewind' };
+      }
+      return rewindSession(sessionId, userIndexFromEnd);
     }
   );
 

@@ -179,6 +179,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode),
     stopTask: (sessionId: string, taskId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_TASK_STOP, sessionId, taskId),
+    /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；结果经 rewind-done 事件回来 */
+    rewind: (sessionId: string, userIndexFromEnd: number): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_REWIND, sessionId, userIndexFromEnd),
     /** 系统通知点击后由 main 下发：切到对应会话 */
     onFocusSession: (callback: (sessionId: string) => void): (() => void) => {
       const listener = (_: unknown, sessionId: string) => callback(sessionId);

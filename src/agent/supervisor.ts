@@ -319,6 +319,42 @@ export class SessionSupervisor {
       case 'task-stop':
         this.bgTasks.stop(command.taskId);
         return;
+      case 'rewind': {
+        const managed = this.must(command.sessionId);
+        // UI 已在非 idle 时不给入口,这里是竞态兜底:静默拒绝,不污染会话状态
+        if (managed.status !== 'idle') {
+          this.options.emit({
+            type: 'rewind-done',
+            sessionId: command.sessionId,
+            seq: ++managed.seq,
+          });
+          return;
+        }
+        // 投影经 compaction 后老消息可能被摘要合并,绝对序号会错位;
+        // compaction 保留尾部消息,从末尾对齐在渲染层与分支两侧恒成立
+        const userEntries = managed.session.sessionManager
+          .getBranch()
+          .filter((entry) => entry.type === 'message' && entry.message.role === 'user');
+        const target = userEntries[userEntries.length - 1 - command.userIndexFromEnd];
+        if (!target) {
+          this.options.emit({
+            type: 'rewind-done',
+            sessionId: command.sessionId,
+            seq: ++managed.seq,
+          });
+          return;
+        }
+        // 目标为 user 消息时 leaf 移到其 parent(该消息也退出路径),文本经 editorText 回填输入框
+        const result = await managed.session.navigateTree(target.id);
+        this.reconcileMessages(command.sessionId, managed, managed.session.messages as unknown[]);
+        this.options.emit({
+          type: 'rewind-done',
+          sessionId: command.sessionId,
+          seq: ++managed.seq,
+          ...(!result.cancelled && result.editorText ? { editorText: result.editorText } : {}),
+        });
+        return;
+      }
       case 'abort': {
         const managed = this.must(command.sessionId);
         // 先取消挂起审批与提问（fail-closed），再中断 turn

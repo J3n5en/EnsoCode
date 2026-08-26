@@ -334,6 +334,13 @@ export function respondAsk(
   return sendCommand({ type: 'ask-respond', sessionId, requestId, answer });
 }
 
+export function rewindSession(
+  sessionId: string,
+  userIndexFromEnd: number
+): { ok: boolean; error?: string } {
+  return sendCommand({ type: 'rewind', sessionId, userIndexFromEnd });
+}
+
 export function stopBackgroundTask(
   sessionId: string,
   taskId: string
