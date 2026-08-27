@@ -89,17 +89,24 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const modelIdKey = models.map((model) => model.id).join('\0');
   React.useEffect(() => {
     if (isOauth || !modelIdKey) return;
+    const queryMeta = window.electronAPI.providers.modelMeta;
+    // catalog 未接线或旧 preload 没有 modelMeta：徽章停在 inherit（跟随），不要猜 catalog vs 默认
+    if (typeof queryMeta !== 'function') return;
     const modelIds = modelIdKey.split('\0');
     let cancelled = false;
-    void window.electronAPI.providers.modelMeta({ modelIds }).then((result) => {
-      if (cancelled || !result.ok) return;
-      const next: Record<string, boolean> = {};
-      for (const meta of result.models) {
-        const matched = catalogMatchedFromMeta(meta);
-        if (matched !== undefined) next[meta.modelId] = matched;
-      }
-      setCatalogMatch(next);
-    });
+    void queryMeta({ modelIds })
+      .then((result) => {
+        if (cancelled || !result.ok) return;
+        const next: Record<string, boolean> = {};
+        for (const meta of result.models) {
+          const matched = catalogMatchedFromMeta(meta);
+          if (matched !== undefined) next[meta.modelId] = matched;
+        }
+        setCatalogMatch(next);
+      })
+      .catch(() => {
+        /* 查询失败不挡覆盖编辑 */
+      });
     return () => {
       cancelled = true;
     };
