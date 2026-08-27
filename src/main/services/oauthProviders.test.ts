@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OauthLoginEvent } from '@shared/types';
+import { OAUTH_LABEL_MAX_LENGTH, type OauthLoginEvent } from '@shared/types';
 import type { WebContents } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -127,6 +127,28 @@ describe('listOauthProviders 的账号枚举', () => {
       { key: 'google-antigravity', providerId: 'google-antigravity', email: 'ag@example.com' },
     ]);
   });
+
+  it('JWT 里超长 plan 按共享上限截断', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 'huge@example.com',
+          'https://api.openai.com/auth': { chatgpt_plan_type: 'P'.repeat(200) },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts[0]?.plan).toBe('P'.repeat(OAUTH_LABEL_MAX_LENGTH));
+    } finally {
+      restore();
+    }
+  });
 });
 
 /** 收集 OAUTH_LOGIN_EVENT 的假 WebContents */
@@ -248,6 +270,34 @@ describe('Antigravity 额度探测', () => {
     expect(seenAuth).toContain('Bearer ya29.access-token');
     expect(seenAuth.some((value) => value.includes('projectId'))).toBe(false);
     fetchSpy.mockRestore();
+  });
+
+  it('厂商 windowLabel 超长时按共享上限截断', async () => {
+    const { getOauthAccountUsage } = await import('./oauthProviders');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          models: {
+            'gemini-3-pro': {
+              quotaInfo: {
+                remainingFraction: 0.4,
+                resetTime: new Date(expires).toISOString(),
+                windowLabel: 'W'.repeat(200),
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    try {
+      const usage = await getOauthAccountUsage('google-antigravity');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toHaveLength(1);
+      expect(usage.windows[0]?.label).toBe('W'.repeat(OAUTH_LABEL_MAX_LENGTH));
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('凭证缺 projectId 时落到 error 而不是静默空窗口', async () => {

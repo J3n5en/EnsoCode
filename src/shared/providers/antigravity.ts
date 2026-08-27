@@ -11,7 +11,7 @@
  * 不引入额外校验依赖；运行时校验用手写窄化函数完成。
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { OauthUsageWindow } from '@shared/types';
+import { type OauthUsageWindow, sanitizeOauthLabel } from '@shared/types';
 import { startOauthCallbackServer } from './callbackServer';
 import {
   createEventStream,
@@ -1825,9 +1825,10 @@ function quotaLabel(entry: QuotaEntry, resetsAt: number | undefined, nowMs: numb
         ? 'OpenAI'
         : '';
   // 后端很少给 windowLabel，按 resetTime 距今是否超过一天区分 daily / weekly
-  const window =
-    entry.windowLabel ?? (resetsAt !== undefined && resetsAt - nowMs > DAY_MS ? 'Weekly' : 'Daily');
-  return vendor ? `${vendor} ${window}` : window;
+  const fallback = resetsAt !== undefined && resetsAt - nowMs > DAY_MS ? 'Weekly' : 'Daily';
+  const window = entry.windowLabel ?? fallback;
+  const raw = vendor ? `${vendor} ${window}` : window;
+  return sanitizeOauthLabel(raw) || fallback;
 }
 
 function collectQuotas(entry: Record<string, unknown>): QuotaEntry[] {
