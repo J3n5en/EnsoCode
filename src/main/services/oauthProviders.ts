@@ -288,6 +288,14 @@ export async function getOauthAccountInfo(providerId: string): Promise<OauthAcco
         const planType = obj(claims?.['https://api.openai.com/auth']).chatgpt_plan_type;
         if (typeof planType === 'string') info.plan = planType;
       }
+    } else if (providerId === 'xai') {
+      // access token 无 email claim；走标准 OIDC userinfo。套餐只有数字 tier claim
+      const userinfo = await fetchJson('https://auth.x.ai/oauth2/userinfo', {
+        Authorization: `Bearer ${token}`,
+      });
+      if (typeof userinfo?.email === 'string') info.email = userinfo.email;
+      const tier = claims?.tier;
+      if (typeof tier === 'number' || typeof tier === 'string') info.plan = `tier ${tier}`;
     }
   } catch {
     // best-effort：任何失败都返回已收集到的部分
