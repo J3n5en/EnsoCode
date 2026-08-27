@@ -37,6 +37,15 @@ const MAPPED_I18N_KEYS = [
   'Minimal',
   'Default',
   'Full',
+  // ProviderModelRow.BADGE_LABEL_KEYS + tri-state / number inherit labels
+  'Overridden',
+  'Catalog',
+  'Inherit',
+  'On',
+  'Off',
+  'Thinking level',
+  'Context',
+  'Max tokens',
   // GeneralSettings.ACTION_LABEL_KEYS
   'Toggle sidebar',
   'Open settings',

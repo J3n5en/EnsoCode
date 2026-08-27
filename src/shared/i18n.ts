@@ -363,6 +363,15 @@ export const zhTranslations: Record<string, string> = {
   'Sign-out failed: {{message}}': '退登失败：{{message}}',
   Retry: '重试',
   'Delete anyway': '仍要删除',
+  // Provider model-row overrides（自定义 apiKey 条目展开编辑）
+  Overridden: '已覆盖',
+  Catalog: 'catalog',
+  Inherit: '跟随',
+  On: '开',
+  Off: '关',
+  'Thinking level': '思考档位',
+  Context: '上下文',
+  'Max tokens': '最大输出',
   // Model picker · 上下文窗口与思考档支持性
   'Context window': '上下文窗口',
   'Estimated context window (catalog fallback)': '上下文窗口为估算值（取自模型目录回退）',

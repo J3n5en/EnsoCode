@@ -1,3 +1,4 @@
+import { catalogMatchedFromMeta } from '@shared/modelEntry';
 import type { ModelEntry, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import {
@@ -9,7 +10,6 @@ import {
   Loader2,
   Plus,
   Search,
-  Trash2,
   Zap,
 } from 'lucide-react';
 import * as React from 'react';
@@ -31,12 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 import { API_KIND_LABELS } from './constants';
+import { ProviderModelRow } from './ProviderModelRow';
 
 interface ProviderEditDialogProps {
   /** 'new' 表示手动新建 */
@@ -65,6 +65,9 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const [showKey, setShowKey] = React.useState(false);
   const [busy, setBusy] = React.useState<'fetch' | 'test' | null>(null);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  /** model id → catalog 是否命中。未查到的 id 不进表，徽章走 inherit（跟随）。 */
+  const [catalogMatch, setCatalogMatch] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
     if (!provider) return;
@@ -79,7 +82,28 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
     setTestModel(base ? (base.models.find(isEnabled)?.id ?? base.models[0]?.id ?? '') : '');
     setShowKey(false);
     setStatus(null);
+    setExpandedId(null);
+    setCatalogMatch({});
   }, [provider]);
+
+  const modelIdKey = models.map((model) => model.id).join('\0');
+  React.useEffect(() => {
+    if (isOauth || !modelIdKey) return;
+    const modelIds = modelIdKey.split('\0');
+    let cancelled = false;
+    void window.electronAPI.providers.modelMeta({ modelIds }).then((result) => {
+      if (cancelled || !result.ok) return;
+      const next: Record<string, boolean> = {};
+      for (const meta of result.models) {
+        const matched = catalogMatchedFromMeta(meta);
+        if (matched !== undefined) next[meta.modelId] = matched;
+      }
+      setCatalogMatch(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOauth, modelIdKey]);
 
   const apiConfig = () => ({ api, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() });
 
@@ -108,6 +132,11 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const removeModel = (id: string) => {
     setModels((prev) => prev.filter((model) => model.id !== id));
     setTestModel((prev) => (prev === id ? '' : prev));
+    setExpandedId((prev) => (prev === id ? null : prev));
+  };
+
+  const replaceModel = (id: string, next: ModelEntry) => {
+    setModels((prev) => prev.map((model) => (model.id === id ? next : model)));
   };
 
   const addModel = (id: string) => {
@@ -302,34 +331,21 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                   </Button>
                 </div>
 
-                <div className="max-h-48 w-full space-y-0.5 overflow-y-auto rounded-md border p-1">
+                <div className="max-h-72 w-full space-y-0.5 overflow-y-auto rounded-md border p-1">
                   {visibleModels.map((model) => (
-                    <div
+                    <ProviderModelRow
                       key={model.id}
-                      className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
-                    >
-                      <Switch
-                        checked={isEnabled(model)}
-                        onCheckedChange={() => toggleModel(model.id)}
-                      />
-                      <span
-                        className={cn(
-                          'min-w-0 flex-1 truncate font-mono text-xs',
-                          !isEnabled(model) && 'text-muted-foreground line-through'
-                        )}
-                      >
-                        {model.id}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                        onClick={() => removeModel(model.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      model={model}
+                      expanded={expandedId === model.id}
+                      canOverride={!isOauth}
+                      catalogMatched={catalogMatch[model.id]}
+                      onToggleExpand={() =>
+                        setExpandedId((prev) => (prev === model.id ? null : model.id))
+                      }
+                      onToggleEnabled={() => toggleModel(model.id)}
+                      onRemove={() => removeModel(model.id)}
+                      onChange={(next) => replaceModel(model.id, next)}
+                    />
                   ))}
                   {visibleModels.length === 0 && (
                     <p className="py-4 text-center text-muted-foreground text-xs">
