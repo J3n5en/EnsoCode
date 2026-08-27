@@ -28,6 +28,18 @@ export function ProvidersSettings() {
   const [oauthOpen, setOauthOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
 
+  // 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）
+  const handleRemove = async (provider: ModelProvider) => {
+    if (provider.oauthProviderId) {
+      try {
+        await window.electronAPI.providers.oauthLogout(provider.oauthProviderId);
+      } catch {
+        // 退登失败不阻塞条目删除
+      }
+    }
+    removeProvider(provider.id);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
@@ -115,7 +127,7 @@ export function ProvidersSettings() {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                  onClick={() => removeProvider(provider.id)}
+                  onClick={() => handleRemove(provider)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
