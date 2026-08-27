@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { version } from '../../package.json';
 import {
   type AgentSession,
   createAgentSession,
@@ -32,6 +31,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
+import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
 import {

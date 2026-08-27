@@ -242,7 +242,9 @@ async function codexAccount(
   const windowLabel = (window: Record<string, unknown>, fallback: string): string => {
     const seconds = window.limit_window_seconds;
     if (typeof seconds !== 'number' || seconds <= 0) return fallback;
-    return seconds >= 86_400 ? `${Math.round(seconds / 86_400)}d` : `${Math.round(seconds / 3600)}h`;
+    return seconds >= 86_400
+      ? `${Math.round(seconds / 86_400)}d`
+      : `${Math.round(seconds / 3600)}h`;
   };
   const windows: OauthUsageWindow[] = [];
   const rateLimit = obj(data.rate_limit);

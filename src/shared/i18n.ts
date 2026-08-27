@@ -117,6 +117,7 @@ export const zhTranslations: Record<string, string> = {
   'Open authorization page': '打开授权页面',
   'Enter code': '输入代码',
   'Verifying...': '正在验证…',
+  'resets {{time}}': '{{time}} 重置',
   Submit: '提交',
   'Edit Provider': '编辑模型服务',
   Name: '名称',

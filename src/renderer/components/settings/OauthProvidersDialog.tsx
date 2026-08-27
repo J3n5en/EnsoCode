@@ -1,4 +1,9 @@
-import type { OauthLoginEvent, OauthLoginPrompt, OauthProviderInfo } from '@shared/types';
+import type {
+  OauthAccountInfo,
+  OauthLoginEvent,
+  OauthLoginPrompt,
+  OauthProviderInfo,
+} from '@shared/types';
 import { CircleAlert, CircleCheck, ExternalLink, Loader2, LogIn, LogOut } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -34,15 +39,29 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
   const [prompt, setPrompt] = React.useState<OauthLoginPrompt | null>(null);
   const [promptValue, setPromptValue] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  /** providerId → 账户信息（best-effort，无数据的不展示） */
+  const [accounts, setAccounts] = React.useState<Record<string, OauthAccountInfo>>({});
 
   const refresh = React.useCallback(async () => {
     setProviders(await window.electronAPI.providers.listOauth());
   }, []);
 
+  // 已登录条目并发拉取账户信息（列表变化时对缺失项补拉）
+  React.useEffect(() => {
+    if (!providers) return;
+    for (const provider of providers) {
+      if (!provider.loggedIn || accounts[provider.id]) continue;
+      void window.electronAPI.providers.oauthAccountInfo(provider.id).then((info) => {
+        setAccounts((prev) => ({ ...prev, [provider.id]: info }));
+      });
+    }
+  }, [providers, accounts]);
+
   React.useEffect(() => {
     if (open) {
       setProviders(null);
       setError(null);
+      setAccounts({});
       void refresh();
     }
   }, [open, refresh]);
@@ -107,6 +126,12 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
         case 'done': {
           const info = providers?.find((p) => p.id === event.providerId);
           if (info) upsertProvider(info);
+          // 清缓存触发重拉账户信息
+          setAccounts((prev) => {
+            const next = { ...prev };
+            delete next[event.providerId];
+            return next;
+          });
           resetFlow();
           void refresh();
           break;
@@ -133,6 +158,11 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
 
   const handleLogout = async (providerId: string) => {
     await window.electronAPI.providers.oauthLogout(providerId);
+    setAccounts((prev) => {
+      const next = { ...prev };
+      delete next[providerId];
+      return next;
+    });
     await refresh();
   };
 
@@ -179,6 +209,9 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
                   <span className="truncate text-xs text-muted-foreground">
                     {provider.loginLabel}
                   </span>
+                )}
+                {provider.loggedIn && accounts[provider.id] && (
+                  <AccountInfoBlock info={accounts[provider.id]} />
                 )}
               </div>
               <div className="shrink-0">
@@ -296,5 +329,53 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 已登录账户的身份与额度窗口（字段缺失即不渲染对应行） */
+function AccountInfoBlock({ info }: { info: OauthAccountInfo }) {
+  const { t } = useI18n();
+  const identity = [info.email, info.plan].filter(Boolean).join(' · ');
+  if (!identity && info.windows.length === 0) return null;
+
+  const resetLabel = (resetsAt?: number) => {
+    if (!resetsAt) return null;
+    return t('resets {{time}}', {
+      time: new Date(resetsAt).toLocaleString(undefined, {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    });
+  };
+
+  return (
+    <div className="mt-1 space-y-1">
+      {identity && <p className="truncate text-xs text-muted-foreground">{identity}</p>}
+      {info.windows.map((window) => (
+        <div key={window.label} className="flex items-center gap-2 text-[11px]">
+          <span className="w-6 shrink-0 font-mono text-muted-foreground">{window.label}</span>
+          <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-muted">
+            <div
+              className={
+                window.usedPercent >= 85
+                  ? 'h-full bg-destructive'
+                  : window.usedPercent >= 50
+                    ? 'h-full bg-amber-500'
+                    : 'h-full bg-emerald-500'
+              }
+              style={{ width: `${window.usedPercent}%` }}
+            />
+          </div>
+          <span className="shrink-0 tabular-nums text-muted-foreground">
+            {Math.round(window.usedPercent)}%
+          </span>
+          {window.resetsAt && (
+            <span className="truncate text-muted-foreground/70">{resetLabel(window.resetsAt)}</span>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
