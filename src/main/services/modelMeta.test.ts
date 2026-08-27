@@ -53,14 +53,19 @@ describe('queryModelMeta', () => {
     expect(Array.isArray(meta.thinkingLevels)).toBe(true);
   });
 
-  it('API-key 反查命中时不带 reasoning / thinkingLevels', async () => {
+  it('API-key 反查命中时带 catalog 的 reasoning / thinkingLevels（与 spawn 同表）', async () => {
     const { queryModelMeta } = await import('./modelMeta');
+    const { getRuntime } = await import('./oauthProviders');
+    const runtime = await getRuntime();
+    const catalog = runtime.getModels().find((entry) => entry.id === 'claude-sonnet-4-5');
+    expect(catalog).toBeDefined();
+
     const result = await queryModelMeta({ modelIds: ['claude-sonnet-4-5'] });
     expect(result.ok).toBe(true);
     expect(result.models[0]?.source).toBe('catalog-fallback');
-    expect(result.models[0]).not.toHaveProperty('reasoning');
-    expect(result.models[0]).not.toHaveProperty('thinkingLevels');
-    expect(result.models[0]?.contextWindow).toBeGreaterThan(0);
+    expect(result.models[0]?.reasoning).toBe(catalog?.reasoning);
+    expect(Array.isArray(result.models[0]?.thinkingLevels)).toBe(true);
+    expect(result.models[0]?.contextWindow).toBe(catalog?.contextWindow);
   });
 
   it('catalog 未命中时 source=unknown，可选字段缺失', async () => {

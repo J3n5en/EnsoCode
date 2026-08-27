@@ -14,6 +14,11 @@ import {
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
+import {
+  findCatalogModelById,
+  positiveContextWindow,
+  resolveCustomModelCapabilities,
+} from '@shared/modelCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import type {
@@ -473,7 +478,7 @@ export class SessionSupervisor {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
-    // 注册基础模型恒 reasoning:true（放开全部档位能力）。开关/adaptive 由 per-session
+    // 基础模型按行覆盖 > catalog > 乐观默认注册。开关/adaptive 由 per-session
     // 克隆的 applyReasoningToModel 决定，避免同 provider 多会话共享引用而串台或被后开会话覆盖。
     const baseModel = resolveBaseModel(runtime, model);
     // per-session 独立副本：set-reasoning 就地改它，不污染其它会话
@@ -1343,11 +1348,6 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
   return `<role>\n${role}\n</role>\n\n${text}`;
 }
 
-function positiveContextWindow(model: { contextWindow?: number } | undefined): number | undefined {
-  const value = model?.contextWindow;
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
 const slugify = (value: string): string =>
   value
     .toLowerCase()
@@ -1367,10 +1367,10 @@ function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string })
 
 /**
  * 解析 spawn 模型：oauth 直取 pi 内置 catalog（凭证由 runtime 从共享 auth.json 解析，
- * 不注册自定义 provider、不覆盖 UA——订阅端点保持 pi 原生标识）；
- * apiKey 注册自定义 provider（恒 reasoning:true，档位由 per-session 克隆决定）。
+ * 不注册自定义 provider、不覆盖 UA、不读行覆盖——订阅端点保持 pi 原生标识）；
+ * apiKey 注册自定义 provider：行覆盖 > 精确 catalog id > 乐观默认。
  */
-function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
+export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
   if (model.oauthAccountKey) {
     // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
     // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到
@@ -1382,14 +1382,10 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
     return oauthModel;
   }
   const providerId = providerKeyFor(model);
-  const catalog = runtime.getModels().find((entry) => entry.id === model.modelId);
-  const contextWindow = positiveContextWindow(catalog) ?? 128_000;
-  const maxTokens =
-    typeof catalog?.maxTokens === 'number' &&
-    Number.isFinite(catalog.maxTokens) &&
-    catalog.maxTokens > 0
-      ? Math.floor(catalog.maxTokens)
-      : 32_000;
+  const catalog = findCatalogModelById(runtime.getModels(), model.modelId);
+  const resolved = resolveCustomModelCapabilities(catalog, model);
+  const contextWindow = resolved.contextWindow ?? 128_000;
+  const maxTokens = resolved.maxTokens ?? 32_000;
   runtime.registerProvider(providerId, {
     baseUrl: model.baseUrl,
     api: model.api,
@@ -1400,9 +1396,8 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
       {
         id: model.modelId,
         name: model.modelId,
-        reasoning: true,
-        // max 档需显式声明，否则被钳到 high
-        thinkingLevelMap: { max: 'max' },
+        reasoning: resolved.reasoning,
+        ...(resolved.thinkingLevelMap ? { thinkingLevelMap: resolved.thinkingLevelMap } : {}),
         input: ['text', 'image'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         // applyExtension 原样展开定义，不填默认值；缺 contextWindow 时 pi 会把 max_tokens 钳成 NaN

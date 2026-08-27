@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import {
   type AgentCommand,
   type AgentSpawnRequest,
@@ -14,7 +15,7 @@ import {
   type ThinkingLevel,
 } from '@shared/types/agent';
 import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID, type Preset } from '@shared/types/assets';
-import type { ModelProvider } from '@shared/types/llm';
+import type { ModelEntry, ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { readSettings } from '../ipc/settings';
 import { resolveGlobalInstruction } from './instructionStore';
@@ -84,13 +85,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   const instruction = resolveGlobalInstruction(
     preset ? { instructionId: preset.instructionId } : undefined
   );
-  const model: SpawnModelConfig = {
-    api: provider.api,
-    baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
-    modelId: request.modelId,
-    ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
-  };
+  const model = spawnModelConfig(provider, request.modelId);
   return sendCommand({
     type: 'spawn',
     sessionId: request.sessionId,
@@ -183,17 +178,7 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
     .map((entry) => {
       const provider = entry.providerId ? findProvider(entry.providerId) : null;
       const model =
-        provider && entry.modelId
-          ? {
-              api: provider.api,
-              baseUrl: provider.baseUrl,
-              apiKey: provider.apiKey,
-              modelId: entry.modelId,
-              // 订阅条目的凭证在 auth.json 里，不透传这个 key 的话 worker 侧
-              // 会当成「空 apiKey 的自定义 provider」注册，subagent 绑订阅模型直接失效
-              ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
-            }
-          : undefined;
+        provider && entry.modelId ? spawnModelConfig(provider, entry.modelId) : undefined;
       return {
         name: String(entry.name),
         description: String(entry.description ?? ''),
@@ -382,4 +367,17 @@ function findProvider(providerId: string): ModelProvider | null {
   const state = readSettingsState();
   const providers = Array.isArray(state?.providers) ? (state.providers as ModelProvider[]) : [];
   return providers.find((provider) => provider?.id === providerId) ?? null;
+}
+
+/** oauth 只走 catalog；apiKey 才把行覆盖带进 spawn。 */
+function spawnModelConfig(provider: ModelProvider, modelId: string): SpawnModelConfig {
+  const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
+  return {
+    api: provider.api,
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
+    modelId,
+    ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
+    ...(!provider.oauthAccountKey ? pickModelCapabilityOverrides(entry) : {}),
+  };
 }

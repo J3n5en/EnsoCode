@@ -1,4 +1,13 @@
-import type { ModelMeta, ModelProvider } from '@shared/types';
+import {
+  type CustomModelResolveSource,
+  type ResolvedCustomModelCapabilities,
+  resolveCustomModelView,
+} from '@shared/modelCatalog';
+import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
+
+export type { CustomModelResolveSource, ResolvedCustomModelCapabilities };
+export { resolveCustomModelView };
+
 import { useEffect, useMemo } from 'react';
 import { create } from 'zustand';
 import { useSettingsStore } from '@/stores/settings';
@@ -88,4 +97,15 @@ export function useModelMeta(provider: ModelProvider | undefined): Record<string
     }
     return models;
   }, [cache, provider]);
+}
+
+/**
+ * 自定义 apiKey 行的能力分层。OAuth 行不要用这个——订阅只读 catalog。
+ * `catalogMeta` 来自 `useModelMeta`；未加载时按 catalog 未命中（乐观默认）处理。
+ */
+export function resolveCustomModelMeta(
+  entry: ModelEntry | undefined,
+  catalogMeta: ModelMeta | undefined
+): ResolvedCustomModelCapabilities {
+  return resolveCustomModelView(entry, catalogMeta);
 }

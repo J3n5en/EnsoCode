@@ -1,10 +1,10 @@
-import type { ModelApiKind } from './llm';
+import type { ModelApiKind, ModelCapabilityOverrides } from './llm';
 
 /** 会话状态。waiting/done 属权限门与 subagent 刀，M1 不引入 */
 export type NodeStatus = 'idle' | 'running' | 'failed';
 
 /** spawn 下发的模型配置。apiKey 只在 Main → worker 方向出现，事件类型不给 auth 位置 */
-export interface SpawnModelConfig {
+export interface SpawnModelConfig extends ModelCapabilityOverrides {
   api: ModelApiKind;
   baseUrl: string;
   apiKey: string;
