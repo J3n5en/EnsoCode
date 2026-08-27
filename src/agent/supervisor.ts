@@ -1350,6 +1350,12 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
     return oauthModel;
   }
   const providerId = providerKeyFor(model);
+  const catalog = runtime.getModels().find((entry) => entry.id === model.modelId);
+  const contextWindow = positiveContextWindow(catalog) ?? 128_000;
+  const maxTokens =
+    typeof catalog?.maxTokens === 'number' && Number.isFinite(catalog.maxTokens) && catalog.maxTokens > 0
+      ? Math.floor(catalog.maxTokens)
+      : 32_000;
   runtime.registerProvider(providerId, {
     baseUrl: model.baseUrl,
     api: model.api,
@@ -1365,8 +1371,10 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
         thinkingLevelMap: { max: 'max' },
         input: ['text', 'image'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        // applyExtension 原样展开定义，不填默认值；缺 contextWindow 时 pi 会把 max_tokens 钳成 NaN
+        contextWindow,
         // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
-        maxTokens: 32_000,
+        maxTokens,
       },
     ],
   });
