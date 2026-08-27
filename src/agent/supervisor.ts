@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { version } from '../../package.json';
 import {
   type AgentSession,
   createAgentSession,
@@ -1334,8 +1335,8 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
   return registered;
 }
 
-/** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
-const ENSO_USER_AGENT = 'enso-code';
+/** 统一的客户端标识，格式对齐 pi-coding-agent 的 getPiUserAgent（<name>/<ver> (<platform>; <runtime>; <arch>)） */
+const ENSO_USER_AGENT = `enso-code/${version} (${process.platform}; node/${process.version}; ${process.arch})`;
 
 /**
  * adaptive thinking（output_config.effort）的判定：乐观默认支持——未来新模型都支持，
