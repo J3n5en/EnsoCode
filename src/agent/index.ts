@@ -3,7 +3,7 @@ import { parseAgentCommand } from '@shared/types/agent';
 import { installPiCursorExecHook } from './cursor/installHook';
 import { SessionSupervisor } from './supervisor';
 
-// h2-bridge 不能从 asar 当脚本 spawn；Ju/hi 挂到本进程
+// pi-cursor 的 h2-bridge spawn 改进程内 HTTP/2；Ju/hi 挂本进程
 installPiCursorExecHook();
 
 // agent worker 入口：跑在 utilityProcess 里，与 Main 通过 parentPort 通信。

@@ -1,12 +1,7 @@
 import type { SpawnOptions } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
-import os from 'node:os';
-import path from 'node:path';
+import { startCursorH2Bridge } from './h2Bridge';
 import { handlePiCursorExec, handlePiCursorInteraction } from './sessionBridge';
-
-const ASAR_DIR = `${path.sep}app.asar${path.sep}`;
-const ASAR_UNPACKED_DIR = `${path.sep}app.asar.unpacked${path.sep}`;
 
 declare global {
   // pi-cursor Ju/hi 钩子（pnpm patch）：有会话桥才接管，否则走原 reject
@@ -30,9 +25,9 @@ declare global {
     | undefined;
 }
 
-/** Ju/hi 入口挂上本进程；h2-bridge 的脚本路径从 asar 改到真实文件。 */
+/** Ju/hi 挂本进程；pi-cursor 的 h2-bridge spawn 改成进程内 HTTP/2。 */
 export function installPiCursorExecHook(): void {
-  wrapSpawnForH2BridgePath();
+  wrapSpawnWithInProcessH2();
   globalThis.__ensoCursorHandleExec = (execCase, execMsg, write) =>
     handlePiCursorExec(execCase, execMsg, write);
   globalThis.__ensoCursorHandleInteraction = (query, write) =>
@@ -40,9 +35,8 @@ export function installPiCursorExecHook(): void {
 }
 
 let spawnWrapped = false;
-let h2BridgeScript: string | undefined;
 
-function wrapSpawnForH2BridgePath(): void {
+function wrapSpawnWithInProcessH2(): void {
   if (spawnWrapped) return;
   spawnWrapped = true;
   const cp = nodeModule.createRequire(import.meta.url)(
@@ -54,13 +48,9 @@ function wrapSpawnForH2BridgePath(): void {
     args?: readonly string[] | SpawnOptions,
     options?: SpawnOptions
   ) => {
-    const argv = Array.isArray(args) ? [...args] : [];
-    const isH2 = argv.some((arg) => typeof arg === 'string' && arg.includes('h2-bridge'));
-    if (isH2 && process.versions.electron && command === process.execPath) {
-      const nextArgs = argv.map((arg) =>
-        typeof arg === 'string' && arg.includes('h2-bridge') ? realH2BridgePath(arg) : arg
-      );
-      return original(command, nextArgs, options ?? {});
+    const argv = Array.isArray(args) ? args : [];
+    if (argv.some((arg) => typeof arg === 'string' && arg.includes('h2-bridge'))) {
+      return startCursorH2Bridge() as unknown as ReturnType<typeof original>;
     }
     if (Array.isArray(args)) return original(command, args as string[], options ?? {});
     return original(command, (args ?? {}) as SpawnOptions);
@@ -70,31 +60,5 @@ function wrapSpawnForH2BridgePath(): void {
     nodeModule.syncBuiltinESMExports();
   } catch {
     // CJS 侧已替换
-  }
-}
-
-/** Node ESM loader 不能执行 asar 内脚本。 */
-function realH2BridgePath(script: string): string {
-  if (h2BridgeScript && existsSync(h2BridgeScript)) return h2BridgeScript;
-  if (!script.includes(ASAR_DIR) && existsSync(script)) {
-    h2BridgeScript = script;
-    return script;
-  }
-  const unpacked = script.replaceAll(ASAR_DIR, ASAR_UNPACKED_DIR);
-  if (unpacked !== script && existsSync(unpacked)) {
-    h2BridgeScript = unpacked;
-    return unpacked;
-  }
-  const src = existsSync(script) ? script : undefined;
-  if (!src) return unpacked !== script ? unpacked : script;
-  try {
-    const destDir = path.join(process.env.ENSO_AGENT_DATA_DIR || os.tmpdir(), 'cursor-h2-bridge');
-    mkdirSync(destDir, { recursive: true });
-    const dest = path.join(destDir, 'h2-bridge.mjs');
-    writeFileSync(dest, readFileSync(src));
-    h2BridgeScript = dest;
-    return dest;
-  } catch {
-    return unpacked !== script ? unpacked : script;
   }
 }
