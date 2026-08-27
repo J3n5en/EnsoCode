@@ -47,6 +47,18 @@ describe('vendorOf', () => {
     expect(vendorOf({ baseUrl: 'not a url' })).toBe(CUSTOM_VENDOR_ID);
     expect(vendorOf({ baseUrl: '   ' })).toBe(CUSTOM_VENDOR_ID);
   });
+
+  it('IPv6 loopback 归 local', () => {
+    expect(vendorOf({ baseUrl: 'http://[::1]/v1' })).toBe('local');
+  });
+
+  it('baseUrl 带端口时仍按 hostname 归组', () => {
+    expect(vendorOf({ baseUrl: 'https://api.anthropic.com:8443/v1' })).toBe('anthropic');
+  });
+
+  it('oauthAccountKey 两位序号同样反解基础 providerId', () => {
+    expect(vendorOf({ oauthAccountKey: 'anthropic#10', baseUrl: '' })).toBe('anthropic');
+  });
 });
 
 describe('groupProviders', () => {

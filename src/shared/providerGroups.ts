@@ -30,6 +30,8 @@ const VENDOR_BY_HOST: Readonly<Record<string, string>> = {
   'api.mistral.ai': 'mistral',
   localhost: 'local',
   '127.0.0.1': 'local',
+  // WHATWG hostname 对 IPv6 带方括号；::1 与 127.0.0.1 同属 loopback
+  '[::1]': 'local',
 };
 
 /** 后缀表，处理子域形态（顺序无关：命中即返回，键互不为前缀） */
