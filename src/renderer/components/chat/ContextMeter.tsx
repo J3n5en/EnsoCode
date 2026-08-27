@@ -1,5 +1,4 @@
 import type { ProjectedMessage } from '@shared/types/agent';
-import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { useMemo } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -17,13 +16,20 @@ function latestContextTokens(messages: ProjectedMessage[]): number | null {
   return null;
 }
 
-/** composer 工具栏的上下文占用环：>90% 变红；无 usage 数据时不渲染 */
-export function ContextMeter({ messages }: { messages: ProjectedMessage[] }) {
+/** composer 工具栏的上下文占用环：窗口取当前模型 catalog；未知则显示 ?，不拿常数凑百分比 */
+export function ContextMeter({
+  messages,
+  contextWindow,
+}: {
+  messages: ProjectedMessage[];
+  contextWindow?: number;
+}) {
   const { t } = useI18n();
   const used = useMemo(() => latestContextTokens(messages), [messages]);
   if (used === null) return null;
-  const percent = Math.min(100, Math.round((used / MODEL_CONTEXT_WINDOW) * 100));
-  const critical = percent >= 90;
+  const window = contextWindow && contextWindow > 0 ? contextWindow : 0;
+  const percent = window > 0 ? Math.min(100, Math.round((used / window) * 100)) : null;
+  const critical = percent !== null && percent >= 90;
   const radius = 5.5;
   const circumference = 2 * Math.PI * radius;
   return (
@@ -34,7 +40,7 @@ export function ContextMeter({ messages }: { messages: ProjectedMessage[] }) {
       )}
       title={t('Context {{used}} / {{window}} tok', {
         used: formatTokens(used),
-        window: formatTokens(MODEL_CONTEXT_WINDOW),
+        window: window > 0 ? formatTokens(window) : '?',
       })}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" className="-rotate-90" aria-hidden>
@@ -54,11 +60,11 @@ export function ContextMeter({ messages }: { messages: ProjectedMessage[] }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - percent / 100)}
+          strokeDashoffset={circumference * (1 - (percent ?? 0) / 100)}
           className={critical ? 'stroke-destructive' : 'stroke-muted-foreground'}
         />
       </svg>
-      {percent}%
+      {percent === null ? '?' : `${percent}%`}
     </span>
   );
 }

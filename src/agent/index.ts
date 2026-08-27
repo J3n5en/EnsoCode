@@ -1,6 +1,10 @@
 import path from 'node:path';
 import { parseAgentCommand } from '@shared/types/agent';
+import { installPiCursorExecHook } from './cursor/installHook';
 import { SessionSupervisor } from './supervisor';
+
+// utilityProcess 的 execPath 是 Electron；pi-cursor 会拿它 spawn h2-bridge
+installPiCursorExecHook();
 
 // agent worker 入口：跑在 utilityProcess 里，与 Main 通过 parentPort 通信。
 const port = process.parentPort;

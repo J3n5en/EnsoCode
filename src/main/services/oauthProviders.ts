@@ -19,12 +19,17 @@ let runtimePromise: Promise<ModelRuntimeType> | null = null;
 
 function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
+    const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
+    process.env.PI_CODING_AGENT_DIR ??= agentDir;
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
-    return ModelRuntime.create({
-      authPath: path.join(app.getPath('userData'), 'agent', 'pi-agent', 'auth.json'),
+    const runtime = await ModelRuntime.create({
+      authPath: path.join(agentDir, 'auth.json'),
       modelsPath: null,
       refreshOnCreate: false,
     });
+    const { loadCursorProvider } = await import('../../agent/cursor/loadProvider');
+    await loadCursorProvider(runtime);
+    return runtime;
   })();
   return runtimePromise;
 }

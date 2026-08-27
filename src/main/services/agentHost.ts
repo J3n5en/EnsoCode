@@ -36,6 +36,7 @@ export function startAgentWorker(): void {
       ...process.env,
       // pi 的全局目录与会话目录都收进 userData，不碰用户的 ~/.pi
       ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
+      PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
     },
   });
   worker = child;

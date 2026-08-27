@@ -22,6 +22,8 @@ linux:
   target:
     - AppImage
     - deb
+asarUnpack:
+  - node_modules/@rahularya01/pi-cursor/**
 npmRebuild: false
 publish:
   provider: github

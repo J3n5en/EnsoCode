@@ -30,7 +30,6 @@ import type {
   SubagentInfo,
   ThinkingLevel,
 } from '@shared/types/agent';
-import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -42,6 +41,8 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
+import { loadCursorProvider } from './cursor/loadProvider';
+import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
@@ -581,6 +582,7 @@ export class SessionSupervisor {
             ? SessionManager.open(childResume, this.options.sessionDir, cwd)
             : SessionManager.create(cwd, this.options.sessionDir),
         });
+        if (isCursorModel(subModel)) attachCursorBridgeToSession(session, subTools, cwd);
         return { session, modelId: agentType?.model?.modelId ?? model.modelId };
       },
     };
@@ -663,6 +665,7 @@ export class SessionSupervisor {
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
     });
+    if (isCursorModel(piModel)) attachCursorBridgeToSession(session, customTools, cwd);
     console.log(
       `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
         ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
@@ -744,11 +747,13 @@ export class SessionSupervisor {
       commands: managed.commands,
     });
     // jsonl 路径回传给 renderer 持久化，app 重启后凭它 resume
+    const contextWindow = positiveContextWindow(session.model);
     this.options.emit({
       type: 'session-meta',
       sessionId,
       seq: ++managed.seq,
       sessionFile: managed.session.sessionFile,
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
     });
     if (opts.resumeFile) {
       // 恢复的会话历史一次性快照回放——逐条 upsert 会打出上千条 IPC 事件，渲染层每条都重渲染
@@ -995,8 +1000,9 @@ export class SessionSupervisor {
       summary = `(WARNING: output hit the model limit — treat this round as incomplete)\n${summary}`;
     }
     const used = (last?.usage?.input ?? 0) + (last?.usage?.output ?? 0);
-    if (used > MODEL_CONTEXT_WINDOW * 0.85) {
-      const pct = Math.round((used / MODEL_CONTEXT_WINDOW) * 100);
+    const window = positiveContextWindow(managed.session.model);
+    if (window !== undefined && used > window * 0.85) {
+      const pct = Math.round((used / window) * 100);
       summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
     if (gateCommand) {
@@ -1243,6 +1249,9 @@ export class SessionSupervisor {
       authPath: path.join(this.options.agentDir, 'auth.json'),
       modelsPath: null,
       refreshOnCreate: false,
+    }).then(async (runtime) => {
+      await loadCursorProvider(runtime);
+      return runtime;
     });
     return this.runtimePromise;
   }
@@ -1276,6 +1285,11 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
   const role = managed.pendingRole;
   managed.pendingRole = undefined;
   return `<role>\n${role}\n</role>\n\n${text}`;
+}
+
+function positiveContextWindow(model: { contextWindow?: number } | undefined): number | undefined {
+  const value = model?.contextWindow;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 const slugify = (value: string): string =>
@@ -1324,7 +1338,6 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
         thinkingLevelMap: { max: 'max' },
         input: ['text', 'image'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: MODEL_CONTEXT_WINDOW,
         // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
         maxTokens: 32_000,
       },

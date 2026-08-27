@@ -192,7 +192,10 @@ export function ChatView() {
                     {conversation.lastModelId ? ` · ${conversation.lastModelId}` : ''}
                   </span>
                 )}
-                <ContextMeter messages={conversation.messages} />
+                <ContextMeter
+                  messages={conversation.messages}
+                  contextWindow={conversation.contextWindow}
+                />
               </>
             }
             onSend={(content, images) => {
