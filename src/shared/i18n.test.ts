@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { getTranslation, normalizeLocale, translate } from './i18n';
+import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
+
+/** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
+const MAPPED_I18N_KEYS = [
+  // ModelPicker.LEVEL_LABEL_KEYS + StatsLine.THINKING_LEVEL_SHORT_KEYS
+  'Low',
+  'Med',
+  'High',
+  'Max',
+  // StatsLine.THINKING_LEVEL_FULL_KEYS（medium 档用 'Medium'，不是 'Med'）
+  'Medium',
+  // StatsLine.SEGMENT_LABEL_KEYS
+  'Model',
+  'Approval mode',
+  'Working directory',
+  'Session name',
+  'Coworkers',
+  'Tokens',
+  'Cache hit rate',
+  'Context window',
+  'Turns',
+  'Speed',
+  'Duration',
+  'Session time',
+  'Subscription usage',
+  // StatsLine.APPROVAL_LABEL_KEYS + ApprovalModePicker.MODE_META.labelKey
+  'Supervised',
+  'Auto-accept edits',
+  'Full access',
+  // ApprovalModePicker.MODE_META.descKey
+  'Approve every command and file change',
+  'Edits run freely; commands and MCP still ask',
+  'Run everything without asking',
+  // StatusLineSettings.PRESET_LABEL_KEYS
+  'Minimal',
+  'Default',
+  'Full',
+  // GeneralSettings.ACTION_LABEL_KEYS
+  'Toggle sidebar',
+  'Open settings',
+  'New conversation',
+  'Next coworker tab',
+  'Previous coworker tab',
+] as const;
 
 describe('normalizeLocale', () => {
   it('zh 开头的一律归为中文', () => {
@@ -13,6 +56,15 @@ describe('normalizeLocale', () => {
     expect(normalizeLocale('ja')).toBe('en');
     expect(normalizeLocale(undefined)).toBe('en');
     expect(normalizeLocale('')).toBe('en');
+  });
+});
+
+describe('mapped i18n keys', () => {
+  it('间接映射表用到的词条都在字典里，且中文不是原文回退', () => {
+    for (const key of MAPPED_I18N_KEYS) {
+      expect(zhTranslations[key], `missing mapped key: ${key}`).toBeTypeOf('string');
+      expect(getTranslation('zh', key)).not.toBe(key);
+    }
   });
 });
 
