@@ -9,6 +9,8 @@ export interface SpawnModelConfig {
   baseUrl: string;
   apiKey: string;
   modelId: string;
+  /** pi 内置 OAuth provider id；存在时 worker 直取内置 catalog 模型，凭证由 pi runtime 解析 */
+  oauthProviderId?: string;
 }
 
 /** 思考努力档位（reasoning 开启时有效），值域对齐 pi 的 ThinkingLevel。off 由 reasoningEnabled 表达 */

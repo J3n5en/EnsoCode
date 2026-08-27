@@ -29,4 +29,6 @@ export interface ModelProvider {
   models: ModelEntry[];
   /** 从哪个本地应用导入（手动创建时为空） */
   importedFrom?: string;
+  /** pi 内置 OAuth provider id（如 'xai'）；存在即订阅条目，apiKey/baseUrl 为空 */
+  oauthProviderId?: string;
 }

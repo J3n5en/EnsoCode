@@ -22,6 +22,14 @@ export const IPC_CHANNELS = {
   PROVIDERS_LIST_MODELS: 'providers:list-models',
   PROVIDERS_TEST: 'providers:test',
 
+  // OAuth subscription providers (pi builtin)
+  OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
+  OAUTH_LOGIN: 'oauth-providers:login',
+  OAUTH_LOGIN_RESPOND: 'oauth-providers:login-respond',
+  OAUTH_LOGIN_CANCEL: 'oauth-providers:login-cancel',
+  OAUTH_LOGOUT: 'oauth-providers:logout',
+  OAUTH_LOGIN_EVENT: 'oauth-providers:login-event',
+
   // Local skill / MCP scan/import
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
   ASSETS_COLLECT_IMPORT: 'assets:collect-import',
