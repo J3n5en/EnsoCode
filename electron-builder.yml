@@ -8,6 +8,11 @@ files:
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  # 动态 import，收集器可能漏掉；pnpm symlink 也要跟进拷进包
+  - from: node_modules/@rahularya01/pi-cursor
+    to: node_modules/@rahularya01/pi-cursor
+  - from: node_modules/@bufbuild/protobuf
+    to: node_modules/@bufbuild/protobuf
 mac:
   category: public.app-category.developer-tools
   target:
