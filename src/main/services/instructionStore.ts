@@ -94,45 +94,40 @@ export function deleteInstruction(id: string): void {
   }
 }
 
-/** pi 全局 context 文件：agentDir 下的 AGENTS.md，pi 每次会话自动读取 */
-function globalContextFile(): string {
-  return path.join(app.getPath('userData'), 'agent', 'pi-agent', 'AGENTS.md');
-}
+type InstructionPick = {
+  id: string;
+  local: boolean;
+  sourcePath?: string;
+  enabled?: boolean;
+};
 
-/**
- * 把指令内容落到 pi agentDir 的 AGENTS.md（pi 每次会话自动读取）。
- * 不传 explicit → 取启用条目（单主源，现行为）；
- * 传 explicit → 自定义预设：注入指定 instructionId（无视 enabled），未指定则不注入。
- * 无可注入内容或读取失败则移除该文件。spawn 前调用，保证会话拿到最新内容。
- */
-export function syncGlobalInstruction(explicit?: { instructionId?: string }): void {
+function pickInstruction(explicit?: { instructionId?: string }): InstructionPick | undefined {
   const settings = readSettings();
   const state = (settings?.['enso-settings'] as { state?: { instructions?: unknown } } | undefined)
     ?.state;
   const instructions = Array.isArray(state?.instructions)
-    ? (state.instructions as {
-        id: string;
-        local: boolean;
-        sourcePath?: string;
-        enabled?: boolean;
-      }[])
+    ? (state.instructions as InstructionPick[])
     : [];
-  const target = explicit
+  return explicit
     ? explicit.instructionId
       ? instructions.find((item) => item.id === explicit.instructionId)
       : undefined
     : instructions.find((item) => item.enabled === true);
+}
 
-  const file = globalContextFile();
-  const result = target ? readInstruction(target.id, target.local, target.sourcePath) : undefined;
-  try {
-    if (result?.ok && result.content.trim()) {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, result.content, 'utf8');
-    } else {
-      fs.rmSync(file, { force: true });
-    }
-  } catch (error) {
-    console.error('syncGlobalInstruction failed:', error);
-  }
+/**
+ * 解析本会话要注入的指令（不落盘）。
+ * 不传 explicit → 取启用条目；传 explicit → 自定义预设指定的 instructionId（无视 enabled）。
+ */
+export function resolveGlobalInstruction(explicit?: {
+  instructionId?: string;
+}): { path: string; content: string } | undefined {
+  const target = pickInstruction(explicit);
+  if (!target) return undefined;
+  const result = readInstruction(target.id, target.local, target.sourcePath);
+  if (!result.ok || !result.content.trim()) return undefined;
+  const filePath = target.local
+    ? localFile(target.id)
+    : (target.sourcePath ?? localFile(target.id));
+  return { path: filePath, content: result.content };
 }

@@ -134,6 +134,8 @@ export type AgentCommand =
       skillPaths?: string[];
       /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
       mcpServers?: McpServerSpawnConfig[];
+      /** 本会话注入的全局指令。走命令载荷，不写共享 AGENTS.md，避免多 preset 抢同一文件 */
+      instruction?: { path: string; content: string };
       /** 审批档位；缺省 full（完全放行） */
       approvalMode?: ApprovalMode;
       /** 自定义 subagent 类型表 */

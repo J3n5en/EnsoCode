@@ -117,6 +117,38 @@ export interface SupervisorOptions {
   sessionDir: string;
 }
 
+/** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份。 */
+function sessionAgentsFilesOverride(
+  agentDir: string,
+  instruction?: { path: string; content: string }
+) {
+  const resolvedAgentDir = path.resolve(agentDir);
+  return (current: { agentsFiles: Array<{ path: string; content: string }> }) => ({
+    agentsFiles: [
+      ...(instruction ? [instruction] : []),
+      ...current.agentsFiles.filter(
+        (file) => path.resolve(path.dirname(file.path)) !== resolvedAgentDir
+      ),
+    ],
+  });
+}
+
+function createSessionResourceLoader(options: {
+  cwd: string;
+  agentDir: string;
+  noSkills: boolean;
+  skillPaths: string[];
+  instruction?: { path: string; content: string };
+}): DefaultResourceLoader {
+  return new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    noSkills: options.noSkills,
+    ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
+    agentsFilesOverride: sessionAgentsFilesOverride(options.agentDir, options.instruction),
+  });
+}
+
 /** 故障域 A：本进程持有全部活会话。同一会话的命令串行，不同会话并行。 */
 export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
@@ -234,7 +266,8 @@ export class SessionSupervisor {
           command.mcpServers,
           command.approvalMode,
           command.agentTypes,
-          command.disabledTools
+          command.disabledTools,
+          command.instruction
         );
         return;
       case 'spawn-coworker': {
@@ -404,7 +437,8 @@ export class SessionSupervisor {
     mcpServers: McpServerSpawnConfig[] = [],
     approvalMode: ApprovalMode = 'full',
     agentTypes: AgentTypeSpawnConfig[] = [],
-    disabledTools: string[] = []
+    disabledTools: string[] = [],
+    instruction?: { path: string; content: string }
   ): Promise<void> {
     const toolEnabled = (id: string) => !disabledTools.includes(id);
     if (this.sessions.has(sessionId)) return;
@@ -422,22 +456,20 @@ export class SessionSupervisor {
 
     // 定制资源加载：noSkills 关掉本机自动发现（.agents/skills、.pi/skills），
     // additionalSkillPaths 注入应用内登记的 skill——两者独立，noSkills 下注入仍生效。
-    // 注意：createAgentSession 只对自建 loader 调 reload，传入的必须先自行 reload
-    let resourceLoader: DefaultResourceLoader | undefined;
-    if (loadLocalSkills === false || skillPaths.length > 0) {
-      resourceLoader = new DefaultResourceLoader({
-        cwd,
-        agentDir: this.options.agentDir,
-        noSkills: loadLocalSkills === false,
-        ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
-      });
-    }
+    // 指令按会话注入，不读 agentDir/AGENTS.md。createAgentSession 只对自建 loader 调 reload。
+    const resourceLoader = createSessionResourceLoader({
+      cwd,
+      agentDir: this.options.agentDir,
+      noSkills: loadLocalSkills === false,
+      skillPaths,
+      instruction,
+    });
 
     // skill 扫盘与 MCP 连接互不依赖，并行降低 spawn 延迟。MCP 给 3s 预算：
     // 预热命中缓存时近乎零耗时；慢/坏 server 本次不注入，不拖死 spawn
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
-      resourceLoader?.reload(),
+      resourceLoader.reload(),
       mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
     const toolsMs = Date.now() - toolsStart;
@@ -556,17 +588,12 @@ export class SessionSupervisor {
           ...(extraTools as Def[]),
         ];
         const typeSkillPaths = agentType?.skillPaths ?? [];
-        const subLoader = new DefaultResourceLoader({
+        const subLoader = createSessionResourceLoader({
           cwd,
           agentDir: this.options.agentDir,
           noSkills: agentType ? true : loadLocalSkills === false,
-          ...(agentType
-            ? typeSkillPaths.length > 0
-              ? { additionalSkillPaths: typeSkillPaths }
-              : {}
-            : skillPaths.length > 0
-              ? { additionalSkillPaths: skillPaths }
-              : {}),
+          skillPaths: agentType ? typeSkillPaths : skillPaths,
+          instruction,
         });
         await subLoader.reload();
         const { session } = await createAgentSession({
