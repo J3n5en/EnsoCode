@@ -1,15 +1,14 @@
 /**
  * Google Antigravity 订阅 provider（Gemini 3.x / Claude 4.x / GPT-OSS，走 Cloud Code Assist）。
  *
- * 从 OMP（github.com/can1357/oh-my-pi，MIT）的 `@oh-my-pi/pi-ai` 改写而来：
- * - OAuth 主体 + 开通流程：`src/registry/oauth/google-antigravity.ts`、`google-oauth-shared.ts`
- * - 回调服务器：`src/registry/oauth/callback-server.ts`（Bun.serve → node:http，见 ./callbackServer.ts）
- * - 请求封装与 SSE 消费：`src/providers/google-gemini-cli.ts` + `google-shared.ts`（只取 antigravity 分支）
- * - 模型发现：`@oh-my-pi/pi-catalog/src/discovery/antigravity.ts`
- * - 额度窗口：`src/usage/google-antigravity.ts`
+ * 本文件覆盖：
+ * - OAuth 登录 / 刷新与开通流程
+ * - loopback 回调服务器（Bun.serve → node:http，见 ./callbackServer.ts）
+ * - Cloud Code Assist 请求封装与 SSE 消费
+ * - 模型发现（availableModels → 与本地逻辑模型表合并）
+ * - 额度窗口查询
  *
- * OMP 是 pi 的 fork（17.x vs 本项目的 0.84.3），类型体系已分叉，所以是「读懂后改写」，
- * 不引入任何 `@oh-my-pi/*` 依赖；OMP 用的校验库 `@oh-my-pi/omptype` 也换成手写窄化函数。
+ * 不引入额外校验依赖；运行时校验用手写窄化函数完成。
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { OauthUsageWindow } from '@shared/types';
@@ -44,7 +43,7 @@ export const ANTIGRAVITY_PROVIDER_ID = 'google-antigravity';
  */
 const ANTIGRAVITY_API_ID = 'google-antigravity-cca';
 
-// client id / secret 直接照搬 OMP 的 base64 字面量（Antigravity 客户端自带的公开凭证）
+// client id / secret 使用 Antigravity 客户端自带的公开凭证（base64 字面量）
 const CLIENT_ID = atob(
   'MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ=='
 );
@@ -479,7 +478,7 @@ async function fetchUserEmail(
 async function login(callbacks: PiLoginCallbacks): Promise<PiOauthCredentials> {
   const signal = callbacks.signal;
   const state = randomBytes(16).toString('hex');
-  // 不用 PKCE：照搬 OMP 参考实现的 installed-app + client_secret 形态。
+  // 不用 PKCE：走 installed-app + client_secret 形态。
   // 整条 OAuth 链路无法自测（要用户浏览器），在唯一已知可用的实现上做未验证的偏离不划算。
   void ensureAntigravityVersion(fetch, signal);
 
@@ -578,7 +577,7 @@ async function refreshToken(
 
 /**
  * Cloud Code Assist 的 `parameters` 只吃 Google 那套阉割版 JSON Schema。
- * OMP 用的是 2300 行的通用 normalizer，这里只落地实际会踩到的几条：
+ * 这里不引入通用 schema normalizer，只落地实际会踩到的几条：
  * 去掉 Google 不认的关键字、`const` → 单值 `enum`、`oneOf` → `anyOf`、
  * `type: [T, 'null']` → `type: T` + `nullable`、object 必须带 `properties`。
  */
@@ -624,7 +623,7 @@ export function normalizeToolSchema(value: unknown): unknown {
   return out;
 }
 
-// ---- 逻辑模型表（从 OMP 目录派生）----
+// ---- 逻辑模型表 ----
 
 /** 思考档位键，与 pi 的 `thinkingLevelMap` 同一值域；关闭思考算 `off` */
 export type AntigravityEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -662,9 +661,8 @@ export interface AntigravityLogicalModel {
 /**
  * ⛔ 本表与下面的 `ANTIGRAVITY_WIRE_MAX_OUTPUT_TOKENS` 都是**脚本生成的，不要手改**。
  *
- * 数据来自 OMP（github.com/can1357/oh-my-pi，MIT）的 `@oh-my-pi/pi-catalog`
- * （`src/models.json` 的 `google-antigravity` 段），那份 json 是 OMP 从真实
- * antigravity 客户端与后端离线生成的。要更新就跑
+ * 数据来自真实 Antigravity 客户端与后端的离线抓取（`google-antigravity` 段）。
+ * 要更新就跑
  *     node temp/gen-antigravity-models.mjs
  * 把输出整段替换进来，再跑 `npx biome check --write` 归一格式（脚本只保证内容，
  * 换行交给 biome）。`tab_*` / `chat_*`（补全用的 checkpoint 模型）在生成时已滤掉。
@@ -883,12 +881,11 @@ export const ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] = [
 
 /**
  * 每个 wire id 的固定 `generationConfig.maxOutputTokens`（真实客户端抓包值，与思考
- * 预算无关）。生成自 pi-catalog 的
- * `src/wire/gemini-headers.ts::ANTIGRAVITY_MODEL_WIRE_PROFILES`。
+ * 预算无关）。
  *
- * ⚠️ OMP 只抓到了一部分 wire id 的 profile（`gemini-3.1-flash-lite` 这种只做补全的
- * 一律缺）。缺 profile 时我们沿用逻辑模型自己的 `maxTokens` + Claude 的 64000 上限，
- * 与 OMP 的「有 profile 才重赋」（`google-gemini-cli.ts:1383-1386`）一致。
+ * ⚠️ 目前只收录到一部分 wire id 的 profile（`gemini-3.1-flash-lite` 这种只做补全的
+ * 一律缺）。缺 profile 时沿用逻辑模型自己的 `maxTokens` + Claude 的 64000 上限——
+ * 有 profile 才重赋。
  */
 export const ANTIGRAVITY_WIRE_MAX_OUTPUT_TOKENS: Readonly<Record<string, number>> = {
   'gemini-3.5-flash-extra-low': 65_536,
@@ -958,7 +955,7 @@ interface GeminiContent {
 }
 
 const NON_VISION_PLACEHOLDER = '(图片已省略：当前模型不支持图片输入)';
-/** Gemini 3 的 toolCall 没有真实 thoughtSignature 时的占位值，照搬 OMP */
+/** Gemini 3 的 toolCall 没有真实 thoughtSignature 时的占位值 */
 const SKIP_THOUGHT_SIGNATURE = 'skip_thought_signature_validator';
 const BASE64_SIGNATURE = /^[A-Za-z0-9+/]+={0,2}$/;
 

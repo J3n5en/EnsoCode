@@ -632,7 +632,7 @@ const REAL_BACKEND_MODEL_IDS = [
 ];
 
 /**
- * OMP 目录里有、但本账号 tier 一个 wire id 都拿不到的逻辑条目。
+ * 本地模型表里有、但本账号 tier 一个 wire id 都拿不到的逻辑条目。
  * 不静默从表里删掉（换账号 / 后端上线就会可用），运行时合并按可用性过滤。
  */
 const TIER_GAP_MODEL_IDS = ['claude-opus-4-5', 'claude-sonnet-4-5', 'gemini-3-pro'];
@@ -820,7 +820,7 @@ describe('mergeAntigravityModels', () => {
         'gemini-3.7-flash',
         'gemini-3.7-flash-tiered',
         'gpt-oss-120b',
-        // 后端有、OMP 目录没归属的：3.1-pro 的 high 走 gemini-pro-agent，
+        // 后端有、本地模型表没单独归属的：3.1-pro 的 high 走 gemini-pro-agent，
         // 所以 gemini-3.1-pro-high 是一条独立可选模型
         'gemini-3.1-pro-high',
         'gemini-3.6-flash-tiered',

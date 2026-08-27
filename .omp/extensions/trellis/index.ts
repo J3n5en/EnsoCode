@@ -513,6 +513,12 @@ export default function(pi: ExtensionAPI): void {
          projectRoot = findProjectRoot(ctx.cwd);
       }
       if (!projectRoot) return;
+      // Sub-agent 不拥有 task 生命周期：它执行的是主会话下发的任务书，
+      // 注入「先问用户要不要创建 Trellis task」的同意门对它是范畴错误——
+      // 弱模型会照着停下来等用户答复，而 subagent 面前根本没有用户。
+      // （实测：团队模式下连续拦停 3 个队员，每次赔一轮往返。）
+      // session_start 里给 subagent 注入的精确任务上下文（:467-479）不受影响。
+      if (isSubAgent) return;
       const contextKey = rememberContextKey(ctx);
 
       // Persistent injection: workflow state for this turn
@@ -533,6 +539,8 @@ export default function(pi: ExtensionAPI): void {
    // before_agent_start's persisted message was removed by compaction.
    pi.on("context", async (event, ctx) => {
       if (!projectRoot) return;
+      // 同 before_agent_start 的理由：subagent 不该收到 task 生命周期同意门
+      if (isSubAgent) return;
       const contextKey = rememberContextKey(ctx);
 
       // Fast path: no compaction since last injection — message is still present

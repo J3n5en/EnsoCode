@@ -39,8 +39,11 @@ const authPath = (): string => path.join(app.getPath('userData'), 'agent', 'pi-a
 // 与 agent worker 共用同一 auth.json（pi CredentialStore 文件锁保证跨进程互斥），
 // 登录/退出在 Main 完成后，worker 侧请求时经 getAuth 直接读到新凭证
 let runtimePromise: Promise<ModelRuntimeType> | null = null;
+const onlineCatalogProviderIds = new Set<string>([ANTIGRAVITY_PROVIDER_ID]);
+const onlineCatalogRefreshes = new Map<string, Promise<boolean>>();
 
-function getRuntime(): Promise<ModelRuntimeType> {
+/** 订阅设置与模型元数据查询共用同一份 Main 侧 runtime（catalog + auth.json） */
+export function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
     const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
     process.env.PI_CODING_AGENT_DIR ??= agentDir;
@@ -53,13 +56,17 @@ function getRuntime(): Promise<ModelRuntimeType> {
     // Antigravity / Cursor 都不在 pi 内置 catalog 里，先注册基础 provider 再对齐账号克隆；
     // Cursor 的合成账号会由 syncAccountProviders 按单账号能力显式排除
     runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
-    const { loadCursorProvider } = await import('../../agent/cursor/loadProvider');
+    const { CURSOR_PROVIDER_ID, loadCursorProvider } = await import(
+      '../../agent/cursor/loadProvider'
+    );
+    onlineCatalogProviderIds.add(CURSOR_PROVIDER_ID);
     await loadCursorProvider(runtime);
     await syncAccountProviders(runtime);
     // registerProvider 内部只会跑一次 allowNetwork:false 的 refresh（拿到的是兜底清单）。
-    // 已登录的账号在这里补一次联网拉取，让老用户不必重新登录就能拿到真实模型清单。
-    // 不 await：拉取要走网络，不能把设置页的首次打开阻塞在上面；失败自动留用兜底清单。
-    void refreshProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+    // 两个扩展 provider 分开预热；单路发现服务失败不会影响另一条，也不阻塞设置页首开。
+    // 元数据查询会 await 同一份 promise，避免首次查询抢在预热前把 unknown 永久写进缓存。
+    void ensureProviderModelsRefreshed(runtime, ANTIGRAVITY_PROVIDER_ID);
+    void ensureProviderModelsRefreshed(runtime, CURSOR_PROVIDER_ID);
     return runtime;
   })();
   return runtimePromise;
@@ -75,12 +82,45 @@ function getRuntime(): Promise<ModelRuntimeType> {
  *
  * 拉取失败不抛：清单退化成兜底表仍可用，不该因此让登录或启动失败。
  */
-async function refreshProviderModels(runtime: ModelRuntimeType, providerId: string): Promise<void> {
+async function refreshProviderModels(
+  runtime: ModelRuntimeType,
+  providerId: string
+): Promise<boolean> {
   try {
-    await runtime.refresh({ providers: [providerId], allowNetwork: true });
+    const result = await runtime.refresh({ providers: [providerId], allowNetwork: true });
+    return !result.aborted && result.errors.size === 0;
   } catch {
-    // 保持兜底清单
+    // 保持兜底清单；调用方可在下一次元数据查询时重试
+    return false;
   }
+}
+
+/**
+ * 等待扩展 provider 本进程第一次联网 catalog 刷新；内置 provider 无需额外刷新。
+ *
+ * promise 按基础 provider id 常驻复用：冷启动预热与元数据查询不会重复发请求。登录成功
+ * 仍会直接调用 refreshProviderModels，因为新凭证必须强制刷新，不能复用登录前的尝试。
+ */
+export async function ensureProviderModelsRefreshed(
+  runtime: ModelRuntimeType,
+  accountKey: string
+): Promise<void> {
+  const providerId = providerIdOfAccountKey(accountKey);
+  if (!onlineCatalogProviderIds.has(providerId)) return;
+  let refresh = onlineCatalogRefreshes.get(providerId);
+  if (!refresh) {
+    refresh = refreshProviderModels(runtime, providerId);
+    onlineCatalogRefreshes.set(providerId, refresh);
+    void refresh.then((succeeded) => {
+      // 成功结果常驻；失败只去重本轮并发，后续查询可重试。这里不另加定时退避：
+      // renderer 没有轮询；同波请求已由 promise 去重；provider 自己维护 freshness/backoff，
+      // 且这里没有传 force；应用层再延迟会在网络恢复后继续人为留用兜底清单。
+      if (!succeeded && onlineCatalogRefreshes.get(providerId) === refresh) {
+        onlineCatalogRefreshes.delete(providerId);
+      }
+    });
+  }
+  await refresh;
 }
 
 // ---- 账号身份缓存 ----
@@ -192,7 +232,10 @@ async function accountKeysOf(runtime: ModelRuntimeType): Promise<Map<string, str
  * Renderer 传来的 accountKey 会被直接当 auth.json 的键用（logout / getAuth），
  * 不收窄就等于把「任意键」的读写能力交给渲染层。
  */
-async function hasStoredAccount(runtime: ModelRuntimeType, accountKey: string): Promise<boolean> {
+export async function hasStoredAccount(
+  runtime: ModelRuntimeType,
+  accountKey: string
+): Promise<boolean> {
   const credentials = await runtime.listCredentials();
   return credentials.some((info) => info.type === 'oauth' && info.providerId === accountKey);
 }

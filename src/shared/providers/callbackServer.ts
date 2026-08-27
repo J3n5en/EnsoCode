@@ -1,19 +1,18 @@
 /**
  * OAuth 回调服务器（loopback）。
  *
- * 这是 OMP `pi-ai/src/registry/oauth/callback-server.ts` 的 `node:http` 改写版：
- * 原实现用 `Bun.serve({ port, hostname, fetch(req) -> Response })`，Electron 主进程
- * 没有 Bun，所以换成 `http.createServer` + `res.writeHead/res.end`，端口从
- * `server.address()` 读回，关闭走 `close()` + `closeAllConnections()`（Bun 的
- * `server.stop()` 默认就是断掉在途连接，node 需要显式调）。
+ * 用 `node:http`（`http.createServer` + `res.writeHead/res.end`）实现的 loopback
+ * OAuth 回调服务器。端口从 `server.address()` 读回，关闭走 `close()` +
+ * `closeAllConnections()`（对应 Bun `server.stop()` 默认断掉在途连接的行为；
+ * Electron 主进程没有 Bun，所以不能用 `Bun.serve`）。
  *
- * 同时砍掉了原实现的 IPv6 双栈伴随监听：Google 的 installed-app 回调固定发到
+ * 不启用 IPv6 双栈伴随监听：Google 的 installed-app 回调固定发到
  * `http://127.0.0.1:<port>`，只需要 IPv4 loopback 一条。
  */
 import http from 'node:http';
 
 const LOOPBACK_HOST = '127.0.0.1';
-/** 等浏览器回调的上限，和 OMP 的 callback flow 一致 */
+/** 等浏览器回调的上限 */
 const DEFAULT_WAIT_MS = 300_000;
 
 const SUCCESS_HTML = `<!doctype html><html lang="zh"><head><meta charset="utf-8">

@@ -4,6 +4,8 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
+  ModelMetaQuery,
+  ModelMetaResult,
   OauthAccountUsage,
   OauthLoginEvent,
   OauthProviderInfo,
@@ -54,6 +56,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_LIST_MODELS, config),
     test: (config: ProviderApiConfig, modelId?: string): Promise<TestProviderResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_TEST, config, modelId),
+    modelMeta: (query: ModelMetaQuery): Promise<ModelMetaResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_MODEL_META, query),
     listOauth: (): Promise<OauthProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
     /** 总是给该 provider 新增一个账号（不覆盖已登录的） */

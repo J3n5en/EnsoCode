@@ -353,6 +353,54 @@ export const zhTranslations: Record<string, string> = {
     '{{skills}} 个技能 · {{mcp}} 个 MCP · {{instruction}} 份指令',
   'Let the agent auto-discover skills under .agents/skills and .pi/skills':
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
+  // Model providers · 供应商分组与删除确认
+  Custom: '自定义',
+  '{{count}} providers': '{{count}} 项配置',
+  'Remove provider?': '删除该配置？',
+  'Removing this also signs out {{name}}. Other accounts for the same vendor stay signed in.':
+    '删除会同时退登「{{name}}」。同一厂商下的其他账号仍保持登录。',
+  'This permanently deletes the "{{name}}" provider configuration.':
+    '将永久删除「{{name}}」这项配置。',
+  'Sign-out failed: {{message}}': '退登失败：{{message}}',
+  Retry: '重试',
+  'Delete anyway': '仍要删除',
+  // Model picker · 上下文窗口与思考档支持性
+  'Context window': '上下文窗口',
+  'Estimated context window (catalog fallback)': '上下文窗口为估算值（取自模型目录回退）',
+  '{{model}} does not support reasoning': '{{model}} 不支持推理',
+  'Filter models in this entry': '在此配置内筛选模型',
+  'Showing {{shown}} of {{total}} models': '显示 {{shown}} / 共 {{total}} 个模型',
+  // Status line · 段位与预设
+  'Status line settings': '状态栏设置',
+  'No data yet': '暂无数据',
+  '{{count}} coworkers': '{{count}} 名队员',
+  'Drag to reorder': '拖动排序',
+  // 状态栏段名（设置弹层行标签 + 状态栏 hover title 前缀）
+  Turns: '轮次',
+  Duration: '耗时',
+  Speed: '速度',
+  Tokens: 'Token 用量',
+  'Cache hit rate': '缓存命中率',
+  'Session name': '会话名称',
+  'Approval mode': '审批档位',
+  Coworkers: '队员',
+  'Session time': '会话时长',
+  'Subscription usage': '订阅额度',
+  'resets in {{remaining}}': '{{remaining}} 后重置',
+  // 状态栏预设名（'Default' 已有译文「默认」，'Full access' 是审批档位、与 'Full' 不同 key）
+  Minimal: '简洁',
+  Full: '完整',
+  // 思考档位（模型段的档位后缀；'Med' 是状态栏用的缩写形式）
+  Low: '低',
+  Medium: '中',
+  Med: '中',
+  High: '高',
+  Max: '最高',
+  'Loading diff…': '加载 diff…',
+  // 补齐全 renderer 的中文覆盖（此前缺译文，中文界面下会静默显示英文）
+  Copy: '复制',
+  Description: '描述',
+  Source: '来源',
 };
 
 export function normalizeLocale(input?: string): Locale {

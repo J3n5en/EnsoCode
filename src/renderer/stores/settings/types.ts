@@ -1,4 +1,5 @@
 import type { Locale } from '@shared/i18n';
+import type { StatusLineSegmentId } from '@shared/statusLine';
 import type {
   AgentTypeEntry,
   InstructionEntry,
@@ -36,6 +37,15 @@ export interface SettingsState {
   terminalFontWeight: FontWeight;
   terminalFontWeightBold: FontWeight;
   favoriteTerminalThemes: string[];
+
+  /**
+   * 状态栏开启的段位序列。⚠️ **数组顺序即渲染顺序**（段位支持用户拖拽排序）；
+   * 关闭的段位直接不在数组里，重新开启时追加到末尾。
+   * 权威 id 全集与预设见 `@shared/statusLine`；「当前是哪个预设」由 `statusLinePresetOf`
+   * 按序列反推，不额外持久化 preset 字段。
+   * ⚠️ 外部可能手改 settings.json，rehydrate 时会做归一化（见 index.ts 的 onRehydrateStorage）。
+   */
+  statusLineSegments: StatusLineSegmentId[];
 
   /** 是否让 agent 加载本机 skill（.agents/skills、.pi/skills）；缺省视为 true */
   loadLocalSkills: boolean;
@@ -79,6 +89,8 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
+  setStatusLineSegments: (segments: StatusLineSegmentId[]) => void;
+  toggleStatusLineSegment: (id: StatusLineSegmentId, enabled: boolean) => void;
 
   // Provider actions
   /** 按 baseUrl+apiKey 指纹（订阅条目按 oauthAccountKey）与现有项去重，返回实际新增数量 */

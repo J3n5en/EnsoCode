@@ -1,6 +1,17 @@
-import type { ModelApiKind, ModelProvider } from '@shared/types';
-import { BadgeCheck, HardDriveDownload, Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
+import type { ModelApiKind, ModelProvider, OauthProviderInfo } from '@shared/types';
+import {
+  BadgeCheck,
+  HardDriveDownload,
+  KeyRound,
+  Loader2,
+  Pencil,
+  Plus,
+  Server,
+  Trash2,
+} from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -27,41 +38,72 @@ export function ProvidersSettings() {
   const [importOpen, setImportOpen] = React.useState(false);
   const [oauthOpen, setOauthOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
+  const [pendingRemove, setPendingRemove] = React.useState<ModelProvider | null>(null);
+  const [removingId, setRemovingId] = React.useState<string | null>(null);
+  const [removeError, setRemoveError] = React.useState<{
+    providerId: string;
+    message: string;
+  } | null>(null);
 
   /**
-   * 账号 key → 邮箱，只用来让订阅条目的 Badge 区分同厂商的多个账号。
-   * 订阅对话框关闭后重取，登录/登出后 Badge 立即跟上。
+   * 订阅 provider 展示信息：直接用官方 `OauthProviderInfo[]`（含 email/plan），
+   * 供 groupProviders 借官方名做分组标题，也供行内区分同厂商的多个账号。
+   * 单一事实源——不再另存一份 email 映射。订阅对话框关闭后重取，登录/登出后跟上。
    */
-  const [oauthEmails, setOauthEmails] = React.useState<Record<string, string>>({});
+  const [oauthInfos, setOauthInfos] = React.useState<OauthProviderInfo[]>([]);
   React.useEffect(() => {
     if (oauthOpen) return;
     let cancelled = false;
     void window.electronAPI.providers.listOauth().then((infos) => {
-      if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const info of infos) {
-        for (const account of info.accounts) {
-          if (account.email) next[account.key] = account.email;
-        }
-      }
-      setOauthEmails(next);
+      if (!cancelled) setOauthInfos(infos);
     });
     return () => {
       cancelled = true;
     };
   }, [oauthOpen]);
 
-  // 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）。
-  // 退登粒度是账号 key 而非基础 providerId——同一厂商的其他账号不该被连带登出
-  const handleRemove = async (provider: ModelProvider) => {
-    if (provider.oauthAccountKey) {
+  const groups = React.useMemo(
+    () => groupProviders(providers, oauthInfos),
+    [providers, oauthInfos]
+  );
+
+  /**
+   * 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）。
+   * 退登粒度是账号 key 而非基础 providerId——同一厂商的其他账号不该被连带登出。
+   * 取消不产生任何副作用：只有确认按钮会触发 performRemove。
+   *
+   * ⚠️ 这里曾经是「退登失败不阻塞条目删除」（fire-and-forget + 空 catch 吞异常，登出失败也照删）。
+   * 现在反过来：先 await oauthLogout 成功再 removeProvider；失败则保留条目、展示可重试的错误、
+   * 并给一个「仍要删除本地配置」的逃生口。原因：旧写法会让敏感凭证残留在磁盘，UI 却已经看不到
+   * 这个条目、用户没有任何入口能再触发一次退登——残留凭证的代价比「网络抖动时多等一下」高得多。
+   * accountKey 若本来就不在 auth.json 里（本来没登录 / 已被外部工具删掉），oauthLogout 对不存在
+   * 的键是 no-op（main 侧 oauthLogout 里 hasStoredAccount 未命中直接 return），会正常 resolve
+   * 直接往下走，不会卡在这——真正会走进下面 catch、需要重试或「仍要删除」的只有磁盘写入类真失败。
+   */
+  const performRemove = async (provider: ModelProvider, options?: { skipLogout?: boolean }) => {
+    setRemovingId(provider.id);
+    setRemoveError(null);
+    if (provider.oauthAccountKey && !options?.skipLogout) {
       try {
         await window.electronAPI.providers.oauthLogout(provider.oauthAccountKey);
-      } catch {
-        // 退登失败不阻塞条目删除
+      } catch (error) {
+        setRemovingId(null);
+        setRemoveError({
+          providerId: provider.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
       }
     }
     removeProvider(provider.id);
+    setRemovingId(null);
+    setRemoveError(null);
+  };
+
+  const confirmRemove = () => {
+    const provider = pendingRemove;
+    if (!provider) return;
+    void performRemove(provider);
   };
 
   return (
@@ -99,73 +141,165 @@ export function ProvidersSettings() {
         </div>
       ) : (
         <div className="space-y-1">
-          {providers.map((provider) => (
-            <div
-              key={provider.id}
-              className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  className={cn(
-                    'text-sm font-medium',
-                    !provider.enabled && 'text-muted-foreground line-through'
-                  )}
-                >
-                  {provider.name}
-                </span>
-                <Badge variant="outline" className="shrink-0 text-[11px]">
-                  {provider.oauthAccountKey
-                    ? [t('Subscription'), oauthEmails[provider.oauthAccountKey]]
-                        .filter(Boolean)
-                        .join(' · ')
-                    : (API_LABELS[provider.api] ?? provider.api)}
-                </Badge>
-                {provider.importedFrom && (
-                  <Badge variant="secondary" className="shrink-0 text-[11px]">
-                    {provider.importedFrom}
-                  </Badge>
-                )}
-                <span className="min-w-0 truncate text-xs text-muted-foreground">
-                  {[
-                    provider.baseUrl,
-                    provider.models.length > 0
-                      ? t('{{count}} models', { count: provider.models.length })
-                      : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
+          {groups.map((group) => {
+            const oauthInfo = oauthInfos.find((info) => info.id === group.vendorId);
+            const label = group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
+            return (
+              <div key={group.vendorId} className="rounded-md px-3 py-2">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+                    {label}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground/60">
+                    {group.providers.length}
+                  </span>
+                </div>
+                <div className="mt-1.5 space-y-1 border-l pl-3">
+                  {group.providers.map((provider) => {
+                    const isSubscription = Boolean(provider.oauthAccountKey);
+                    const account = provider.oauthAccountKey
+                      ? oauthInfo?.accounts.find((a) => a.key === provider.oauthAccountKey)
+                      : undefined;
+                    // 订阅行主位放账号身份（邮箱/账号 key），不是厂商名——厂商名已经是分组标题
+                    const primaryLabel = isSubscription
+                      ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
+                      : provider.name;
+                    return (
+                      <React.Fragment key={provider.id}>
+                        <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {isSubscription ? (
+                              <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            )}
+                            <span
+                              className={cn(
+                                'truncate text-sm font-medium',
+                                !provider.enabled && 'text-muted-foreground line-through'
+                              )}
+                            >
+                              {primaryLabel}
+                            </span>
+                            {isSubscription ? (
+                              account?.plan && (
+                                <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                                  {account.plan}
+                                </Badge>
+                              )
+                            ) : (
+                              <Badge variant="outline" className="shrink-0 text-[11px]">
+                                {API_LABELS[provider.api] ?? provider.api}
+                              </Badge>
+                            )}
+                            {provider.importedFrom && (
+                              <Badge variant="secondary" className="shrink-0 text-[11px]">
+                                {provider.importedFrom}
+                              </Badge>
+                            )}
+                            <span className="min-w-0 truncate text-xs text-muted-foreground">
+                              {[
+                                isSubscription ? undefined : provider.baseUrl,
+                                provider.models.length > 0
+                                  ? t('{{count}} models', { count: provider.models.length })
+                                  : undefined,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Switch
+                              checked={provider.enabled}
+                              onCheckedChange={(enabled) =>
+                                updateProvider(provider.id, { enabled })
+                              }
+                            />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                              onClick={() => setEditing(provider)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={removingId === provider.id}
+                              className={cn(
+                                'h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100',
+                                removingId === provider.id && 'opacity-100'
+                              )}
+                              onClick={() => setPendingRemove(provider)}
+                            >
+                              {removingId === provider.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                        {removeError?.providerId === provider.id && (
+                          <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+                            <span className="min-w-0 truncate">
+                              {t('Sign-out failed: {{message}}', { message: removeError.message })}
+                            </span>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => void performRemove(provider)}
+                              >
+                                {t('Retry')}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[11px] text-destructive hover:text-destructive"
+                                onClick={() => void performRemove(provider, { skipLogout: true })}
+                              >
+                                {t('Delete anyway')}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Switch
-                  checked={provider.enabled}
-                  onCheckedChange={(enabled) => updateProvider(provider.id, { enabled })}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={() => setEditing(provider)}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                  onClick={() => handleRemove(provider)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       <LocalImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <OauthProvidersDialog open={oauthOpen} onOpenChange={setOauthOpen} />
       <ProviderEditDialog provider={editing} onClose={() => setEditing(null)} />
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+        title={t('Remove provider?')}
+        description={
+          pendingRemove
+            ? pendingRemove.oauthAccountKey
+              ? t(
+                  'Removing this also signs out {{name}}. Other accounts for the same vendor stay signed in.',
+                  { name: pendingRemove.name }
+                )
+              : t('This permanently deletes the "{{name}}" provider configuration.', {
+                  name: pendingRemove.name,
+                })
+            : undefined
+        }
+        confirmLabel={t('Remove')}
+        onConfirm={confirmRemove}
+      />
     </div>
   );
 }

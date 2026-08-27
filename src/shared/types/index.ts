@@ -4,6 +4,7 @@ export * from './assets';
 export * from './builtinTools';
 export * from './ipc';
 export * from './llm';
+export * from './modelMeta';
 export * from './oauthProviders';
 export * from './project';
 export * from './providerApi';
