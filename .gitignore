@@ -27,3 +27,6 @@ docs/plans/
 
 # Playwright MCP 输出
 .playwright-mcp/
+
+# agent 与调查的 scratch 产物（约定：temp/<工作标识>/），不进版本库也不进门禁
+temp/
