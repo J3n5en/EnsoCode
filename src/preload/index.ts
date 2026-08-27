@@ -8,6 +8,7 @@ import type {
   OauthLoginEvent,
   OauthProviderInfo,
   ProviderApiConfig,
+  RecentProject,
   TestProviderResult,
 } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
@@ -108,6 +109,11 @@ const electronAPI = {
     /** 打开系统目录选择框，取消时返回 null */
     selectDirectory: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
+  },
+
+  projects: {
+    /** 从本机编辑器 / 编程应用读取最近打开的目录 */
+    getRecent: (): Promise<RecentProject[]> => ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_RECENT),
   },
 
   files: {

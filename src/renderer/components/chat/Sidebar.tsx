@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { useI18n } from '@/i18n';
@@ -60,9 +61,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     });
   };
 
-  const handleAddProject = async () => {
-    const path = await window.electronAPI.dialog.selectDirectory();
-    if (!path) return;
+  const [addOpen, setAddOpen] = useState(false);
+  const handleAddProject = (path: string) => {
     const project = addProject(path);
     newConversation(project.id);
   };
@@ -86,33 +86,36 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
 
   if (collapsed) {
     return (
-      <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
-        <button
-          type="button"
-          onClick={() => void handleAddProject()}
-          className={ICON_BUTTON_CLASS}
-          title={t('Add project')}
-        >
-          <FolderPlus className="h-4 w-4" />
-        </button>
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className={ICON_BUTTON_CLASS}
-          title={t('Expand sidebar')}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => window.electronAPI.window.openSettings()}
-          className={ICON_BUTTON_CLASS}
-          title={t('Settings')}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
-      </aside>
+      <>
+        <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className={ICON_BUTTON_CLASS}
+            title={t('Add project')}
+          >
+            <FolderPlus className="h-4 w-4" />
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className={ICON_BUTTON_CLASS}
+            title={t('Expand sidebar')}
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => window.electronAPI.window.openSettings()}
+            className={ICON_BUTTON_CLASS}
+            title={t('Settings')}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        </aside>
+        <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAddProject} />
+      </>
     );
   }
 
@@ -122,7 +125,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         <span className="text-sm font-medium">{t('Projects')}</span>
         <button
           type="button"
-          onClick={() => void handleAddProject()}
+          onClick={() => setAddOpen(true)}
           className={ICON_BUTTON_CLASS}
           title={t('Add project')}
         >
@@ -134,7 +137,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         {projects.length === 0 && (
           <button
             type="button"
-            onClick={() => void handleAddProject()}
+            onClick={() => setAddOpen(true)}
             className="w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
           >
             {t('Add a project to start')}
@@ -293,6 +296,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         </button>
       </div>
 
+      <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAddProject} />
       <ImportSessionDialog project={importProject} onClose={() => setImportProject(null)} />
       <ConfirmDialog
         open={pendingRemove !== null}

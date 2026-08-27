@@ -64,6 +64,9 @@ export const IPC_CHANNELS = {
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
 
+  // Recent projects from local apps
+  PROJECTS_GET_RECENT: 'projects:get-recent',
+
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
   FILES_READ: 'files:read',

@@ -213,6 +213,12 @@ export const zhTranslations: Record<string, string> = {
   Projects: '项目',
   'Add project': '添加项目',
   'Add a project to start': '添加一个项目开始',
+  'Add a local directory as the conversation working folder.':
+    '把本地目录加为对话的工作目录。',
+  'Type a path or select from recent projects...': '输入路径或从最近项目中选择...',
+  Browse: '浏览',
+  'No matching projects found': '没有匹配的项目',
+  Add: '添加',
   'New conversation': '新对话',
   'Remove project': '移除项目',
   'Select or create a conversation': '选择或新建一个对话',
