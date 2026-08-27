@@ -18,7 +18,7 @@ src/main/
     providerScan/       locations.ts + readers.ts + index.ts
     assetScan/          skills / mcp / instructions / ccSwitch + index.ts
     providerApi.ts      按协议分派的模型 API 调用
-    oauthProviders.ts   pi 内置 provider 的 OAuth 登录/退出/账户信息（Main 侧独立 runtime，与 agent worker 共享 auth.json）
+    oauthProviders.ts   pi 内置 provider 的 OAuth 登录/退出/账户信息（Main 侧独立 runtime，与 agent worker 共享 auth.json；含 Cursor 扩展 provider 加载）
     instructionStore.ts 指令文件本地副本存储
   windows/
     createAppWindow.ts  通用无边框窗口工厂
