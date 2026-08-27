@@ -41,15 +41,19 @@ let runtimePromise: Promise<ModelRuntimeType> | null = null;
 
 function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
+    const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
+    process.env.PI_CODING_AGENT_DIR ??= agentDir;
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
     const runtime = await ModelRuntime.create({
       authPath: authPath(),
       modelsPath: null,
       refreshOnCreate: false,
     });
-    // Antigravity 不在 pi 内置 catalog 里，先注册再对齐账号克隆，
-    // 否则它的第 2+ 个账号找不到可克隆的基础 provider
+    // Antigravity / Cursor 都不在 pi 内置 catalog 里，先注册再对齐账号克隆，
+    // 否则它们的第 2+ 个账号找不到可克隆的基础 provider
     runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+    const { loadCursorProvider } = await import('../../agent/cursor/loadProvider');
+    await loadCursorProvider(runtime);
     await syncAccountProviders(runtime);
     // registerProvider 内部只会跑一次 allowNetwork:false 的 refresh（拿到的是兜底清单）。
     // 已登录的账号在这里补一次联网拉取，让老用户不必重新登录就能拿到真实模型清单。

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface FileHit {
   relativePath: string;
@@ -13,7 +14,7 @@ interface FileHit {
 interface ComposerProps {
   /** 文件搜索根目录；无项目时禁用 @ */
   cwd?: string;
-  /** 会话可用斜杠命令（spawn 后由 worker 上报） */
+  /** 会话可用斜杠命令 */
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
@@ -54,7 +55,7 @@ function findSlashStart(text: string, cursor: number): number | null {
 }
 
 /** 各会话未发送的输入草稿（切会话时暂存/恢复;仅内存,不持久化） */
-const drafts = new Map<string, { text: string; images: AttachedImage[] }>();
+const drafts = new Map<string, { text: string; images: AttachedImage[]; slash: string | null }>();
 
 export function Composer({
   cwd,
@@ -72,6 +73,7 @@ export function Composer({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [slash, setSlash] = useState<string | null>(null);
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -86,23 +88,39 @@ export function Composer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey 是触发信号，text/images 取切换瞬间的旧值
   useEffect(() => {
     const previous = prevFocusKeyRef.current;
+    let nextText = text;
     if (previous !== focusKey) {
-      if (previous) drafts.set(previous, { text, images });
+      if (previous) drafts.set(previous, { text, images, slash });
       const draft = focusKey ? drafts.get(focusKey) : undefined;
-      setText(draft?.text ?? '');
+      nextText = draft?.text ?? '';
+      setText(nextText);
       setImages(draft?.images ?? []);
+      setSlash(draft?.slash ?? null);
       prevFocusKeyRef.current = focusKey;
+      // 斜杠/提及弹层是组件级 state，不随草稿走；不清就会把上一会话的 / 列表带到空输入框
+      setMentionQuery(null);
+      setSlashQuery(null);
+      setActiveIndex(0);
     }
     textareaRef.current?.focus();
+    if (previous !== focusKey) {
+      const restored = nextText;
+      setTimeout(() => detect(restored), 0);
+    }
   }, [focusKey]);
 
   // 回退预填：覆盖当前输入并聚焦；消费即通知来源清除，避免重复注入
   // biome-ignore lint/correctness/useExhaustiveDependencies: injectedDraft 是触发信号
   useEffect(() => {
     if (!injectedDraft) return;
-    setText(injectedDraft);
+    const parsed = splitSlashCommand(injectedDraft);
+    setSlash(parsed.slash);
+    setText(parsed.rest);
     onDraftConsumed?.();
-    setTimeout(() => textareaRef.current?.focus(), 0);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      detect(parsed.rest);
+    }, 0);
   }, [injectedDraft]);
 
   const slashResults =
@@ -193,7 +211,8 @@ export function Composer({
       if (popup.kind === 'mention') {
         replaceToken('@', `@${popup.items[index].relativePath} `);
       } else {
-        replaceToken('/', `${popup.items[index].name} `);
+        replaceToken('/', '');
+        setSlash(popup.items[index].name);
       }
     },
     [popup, replaceToken]
@@ -201,12 +220,14 @@ export function Composer({
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content && images.length === 0) return;
+    if (!content && !slash && images.length === 0) return;
+    const payload = slash ? (content ? `${slash} ${content}` : slash) : content;
     setText('');
     setImages([]);
+    setSlash(null);
     setMentionQuery(null);
     setSlashQuery(null);
-    onSend(content, images);
+    onSend(payload, images);
   };
 
   /** 在光标处插入文本片段 */
@@ -287,6 +308,11 @@ export function Composer({
         setSlashQuery(null);
         return;
       }
+    }
+    if (e.key === 'Backspace' && slash && text.length === 0) {
+      e.preventDefault();
+      setSlash(null);
+      return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -378,27 +404,52 @@ export function Composer({
             ))}
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            detect(e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
-          placeholder={
-            locked
-              ? t('Resolve the pending approval to continue')
-              : running
-                ? t('Message will queue until this round finishes…')
-                : t('Ask the agent…')
-          }
-          disabled={locked}
-          rows={2}
-          className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
-        />
+        <div
+          className={cn(
+            'flex items-start gap-1.5 px-3.5',
+            images.length > 0 ? 'pt-1.5' : 'pt-3'
+          )}
+        >
+          {slash && (
+            <SlashChip
+              name={slash}
+              className="mt-0.5 shrink-0"
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => setSlash(null)}
+                  className="rounded-sm opacity-70 hover:opacity-100"
+                  aria-label={t('Remove')}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              }
+            />
+          )}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              detect(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
+            placeholder={
+              slash
+                ? ''
+                : locked
+                  ? t('Resolve the pending approval to continue')
+                  : running
+                    ? t('Message will queue until this round finishes…')
+                    : t('Ask the agent…')
+            }
+            disabled={locked}
+            rows={2}
+            className="max-h-40 min-w-0 flex-1 resize-none bg-transparent pt-0.5 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
           {busy ? (
@@ -410,7 +461,7 @@ export function Composer({
               size="icon"
               className="h-7 w-7 rounded-lg"
               onClick={handleSend}
-              disabled={!text.trim() && images.length === 0}
+              disabled={!text.trim() && !slash && images.length === 0}
             >
               <ArrowUp className="h-4 w-4" />
             </Button>

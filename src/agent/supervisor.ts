@@ -32,7 +32,6 @@ import type {
   SubagentInfo,
   ThinkingLevel,
 } from '@shared/types/agent';
-import { MODEL_CONTEXT_WINDOW } from '@shared/types/llm';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -44,6 +43,8 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
+import { loadCursorProvider } from './cursor/loadProvider';
+import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
@@ -116,6 +117,38 @@ export interface SupervisorOptions {
   agentDir: string;
   /** 会话 jsonl 目录 */
   sessionDir: string;
+}
+
+/** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份。 */
+function sessionAgentsFilesOverride(
+  agentDir: string,
+  instruction?: { path: string; content: string }
+) {
+  const resolvedAgentDir = path.resolve(agentDir);
+  return (current: { agentsFiles: Array<{ path: string; content: string }> }) => ({
+    agentsFiles: [
+      ...(instruction ? [instruction] : []),
+      ...current.agentsFiles.filter(
+        (file) => path.resolve(path.dirname(file.path)) !== resolvedAgentDir
+      ),
+    ],
+  });
+}
+
+function createSessionResourceLoader(options: {
+  cwd: string;
+  agentDir: string;
+  noSkills: boolean;
+  skillPaths: string[];
+  instruction?: { path: string; content: string };
+}): DefaultResourceLoader {
+  return new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    noSkills: options.noSkills,
+    ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
+    agentsFilesOverride: sessionAgentsFilesOverride(options.agentDir, options.instruction),
+  });
 }
 
 /** 故障域 A：本进程持有全部活会话。同一会话的命令串行，不同会话并行。 */
@@ -235,7 +268,8 @@ export class SessionSupervisor {
           command.mcpServers,
           command.approvalMode,
           command.agentTypes,
-          command.disabledTools
+          command.disabledTools,
+          command.instruction
         );
         return;
       case 'spawn-coworker': {
@@ -405,7 +439,8 @@ export class SessionSupervisor {
     mcpServers: McpServerSpawnConfig[] = [],
     approvalMode: ApprovalMode = 'full',
     agentTypes: AgentTypeSpawnConfig[] = [],
-    disabledTools: string[] = []
+    disabledTools: string[] = [],
+    instruction?: { path: string; content: string }
   ): Promise<void> {
     const toolEnabled = (id: string) => !disabledTools.includes(id);
     if (this.sessions.has(sessionId)) return;
@@ -423,22 +458,20 @@ export class SessionSupervisor {
 
     // 定制资源加载：noSkills 关掉本机自动发现（.agents/skills、.pi/skills），
     // additionalSkillPaths 注入应用内登记的 skill——两者独立，noSkills 下注入仍生效。
-    // 注意：createAgentSession 只对自建 loader 调 reload，传入的必须先自行 reload
-    let resourceLoader: DefaultResourceLoader | undefined;
-    if (loadLocalSkills === false || skillPaths.length > 0) {
-      resourceLoader = new DefaultResourceLoader({
-        cwd,
-        agentDir: this.options.agentDir,
-        noSkills: loadLocalSkills === false,
-        ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
-      });
-    }
+    // 指令按会话注入，不读 agentDir/AGENTS.md。createAgentSession 只对自建 loader 调 reload。
+    const resourceLoader = createSessionResourceLoader({
+      cwd,
+      agentDir: this.options.agentDir,
+      noSkills: loadLocalSkills === false,
+      skillPaths,
+      instruction,
+    });
 
     // skill 扫盘与 MCP 连接互不依赖，并行降低 spawn 延迟。MCP 给 3s 预算：
     // 预热命中缓存时近乎零耗时；慢/坏 server 本次不注入，不拖死 spawn
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
-      resourceLoader?.reload(),
+      resourceLoader.reload(),
       mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
     const toolsMs = Date.now() - toolsStart;
@@ -557,17 +590,12 @@ export class SessionSupervisor {
           ...(extraTools as Def[]),
         ];
         const typeSkillPaths = agentType?.skillPaths ?? [];
-        const subLoader = new DefaultResourceLoader({
+        const subLoader = createSessionResourceLoader({
           cwd,
           agentDir: this.options.agentDir,
           noSkills: agentType ? true : loadLocalSkills === false,
-          ...(agentType
-            ? typeSkillPaths.length > 0
-              ? { additionalSkillPaths: typeSkillPaths }
-              : {}
-            : skillPaths.length > 0
-              ? { additionalSkillPaths: skillPaths }
-              : {}),
+          skillPaths: agentType ? typeSkillPaths : skillPaths,
+          instruction,
         });
         await subLoader.reload();
         const { session } = await createAgentSession({
@@ -583,6 +611,7 @@ export class SessionSupervisor {
             ? SessionManager.open(childResume, this.options.sessionDir, cwd)
             : SessionManager.create(cwd, this.options.sessionDir),
         });
+        if (isCursorModel(subModel)) attachCursorBridgeToSession(session, subTools, cwd);
         return { session, modelId: agentType?.model?.modelId ?? model.modelId };
       },
     };
@@ -665,6 +694,7 @@ export class SessionSupervisor {
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
     });
+    if (isCursorModel(piModel)) attachCursorBridgeToSession(session, customTools, cwd);
     console.log(
       `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
         ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
@@ -746,11 +776,13 @@ export class SessionSupervisor {
       commands: managed.commands,
     });
     // jsonl 路径回传给 renderer 持久化，app 重启后凭它 resume
+    const contextWindow = positiveContextWindow(session.model);
     this.options.emit({
       type: 'session-meta',
       sessionId,
       seq: ++managed.seq,
       sessionFile: managed.session.sessionFile,
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
     });
     if (opts.resumeFile) {
       // 恢复的会话历史一次性快照回放——逐条 upsert 会打出上千条 IPC 事件，渲染层每条都重渲染
@@ -997,8 +1029,9 @@ export class SessionSupervisor {
       summary = `(WARNING: output hit the model limit — treat this round as incomplete)\n${summary}`;
     }
     const used = (last?.usage?.input ?? 0) + (last?.usage?.output ?? 0);
-    if (used > MODEL_CONTEXT_WINDOW * 0.85) {
-      const pct = Math.round((used / MODEL_CONTEXT_WINDOW) * 100);
+    const window = positiveContextWindow(managed.session.model);
+    if (window !== undefined && used > window * 0.85) {
+      const pct = Math.round((used / window) * 100);
       summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
     if (gateCommand) {
@@ -1250,6 +1283,7 @@ export class SessionSupervisor {
       // 推理发生在本进程：Antigravity 不在 pi 内置 catalog 里，Main 侧注册过不算，
       // worker 不注册就会以「未知 provider」流不起来
       runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+      await loadCursorProvider(runtime);
       // registerProvider 只触发一次 allowNetwork:false 的 refresh，拿到的是兜底清单。
       // 而 Main 侧界面展示的是联网发现出来的真实清单——两边不一致时，用户选中的模型
       // 在这里 getModel 会 miss 并抛「oauth model not found」。所以本进程也拉一次。
@@ -1295,6 +1329,11 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
   return `<role>\n${role}\n</role>\n\n${text}`;
 }
 
+function positiveContextWindow(model: { contextWindow?: number } | undefined): number | undefined {
+  const value = model?.contextWindow;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 const slugify = (value: string): string =>
   value
     .toLowerCase()
@@ -1329,6 +1368,12 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
     return oauthModel;
   }
   const providerId = providerKeyFor(model);
+  const catalog = runtime.getModels().find((entry) => entry.id === model.modelId);
+  const contextWindow = positiveContextWindow(catalog) ?? 128_000;
+  const maxTokens =
+    typeof catalog?.maxTokens === 'number' && Number.isFinite(catalog.maxTokens) && catalog.maxTokens > 0
+      ? Math.floor(catalog.maxTokens)
+      : 32_000;
   runtime.registerProvider(providerId, {
     baseUrl: model.baseUrl,
     api: model.api,
@@ -1344,9 +1389,10 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
         thinkingLevelMap: { max: 'max' },
         input: ['text', 'image'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: MODEL_CONTEXT_WINDOW,
+        // applyExtension 原样展开定义，不填默认值；缺 contextWindow 时 pi 会把 max_tokens 钳成 NaN
+        contextWindow,
         // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
-        maxTokens: 32_000,
+        maxTokens,
       },
     ],
   });

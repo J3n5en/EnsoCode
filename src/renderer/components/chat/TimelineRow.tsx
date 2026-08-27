@@ -11,11 +11,20 @@ import {
   History,
   ListTodo,
   LoaderCircle,
+  Sparkles,
   Target,
   TerminalSquare,
   Undo2,
 } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogPanel,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -26,6 +35,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { ReadFileView } from './ReadFileView';
+import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
 
@@ -109,9 +119,70 @@ function isFromMainAgent(text: string): boolean {
   return MAIN_AGENT_BLOCK.test(role ? text.slice(role[0].length) : text);
 }
 
+/** pi 把 /skill:name 展开成整段 XML；气泡里显示高亮 tag，点击看正文 */
+const SKILL_BLOCK =
+  /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
+
+function SkillTag({ name, content }: { name: string; content: string }) {
+  const { t } = useI18n();
+  return (
+    <Dialog>
+      <DialogTrigger className={slashChipClass('skill', true)}>
+        <Sparkles className="h-3 w-3" />
+        {name}
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {t('Skill')} · {name}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogPanel className="max-h-[50vh] text-sm">
+          <Markdown text={content} />
+        </DialogPanel>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ChipBubble({
+  chip,
+  extra,
+}: {
+  chip: ReactNode;
+  extra?: string;
+}) {
+  return (
+    <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
+      {chip}
+      {extra ? <span className="ml-1.5 align-middle whitespace-pre-wrap">{extra}</span> : null}
+    </div>
+  );
+}
+
+function SkillInvocation({ text }: { text: string }) {
+  const match = SKILL_BLOCK.exec(text);
+  if (!match) return null;
+  const [, name, , content, userMessage] = match;
+  return (
+    <ChipBubble
+      chip={<SkillTag name={name} content={content} />}
+      extra={userMessage?.trim()}
+    />
+  );
+}
+
+function SlashInvocation({ text }: { text: string }) {
+  const parsed = splitSlashCommand(text);
+  if (!parsed.slash) return null;
+  return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
+}
+
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({ text }: { text: string }) {
   const { t } = useI18n();
+  if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
+  if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const block = SYNTHETIC_BLOCK.exec(text);
   if (block) {
     return (

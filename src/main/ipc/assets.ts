@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
 import { collectAssetImport, scanLocalAssets } from '../services/assetScan';
+import { listProjectSkills } from '../services/assetScan/skills';
 import {
   deleteInstruction,
   readInstruction,
@@ -21,6 +22,11 @@ export function registerAssetHandlers(): void {
       );
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, (_event, cwd: unknown) => {
+    if (typeof cwd !== 'string' || !cwd) return [];
+    return listProjectSkills(cwd);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.INSTRUCTIONS_READ,

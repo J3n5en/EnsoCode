@@ -51,6 +51,19 @@ export function ProvidersSettings() {
     };
   }, [oauthOpen]);
 
+  // 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）。
+  // 退登粒度是账号 key 而非基础 providerId——同一厂商的其他账号不该被连带登出
+  const handleRemove = async (provider: ModelProvider) => {
+    if (provider.oauthAccountKey) {
+      try {
+        await window.electronAPI.providers.oauthLogout(provider.oauthAccountKey);
+      } catch {
+        // 退登失败不阻塞条目删除
+      }
+    }
+    removeProvider(provider.id);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
@@ -140,7 +153,7 @@ export function ProvidersSettings() {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                  onClick={() => removeProvider(provider.id)}
+                  onClick={() => handleRemove(provider)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

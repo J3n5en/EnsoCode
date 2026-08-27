@@ -1,4 +1,5 @@
-import { HardDriveDownload, Plug, Trash2 } from 'lucide-react';
+import type { McpServerEntry } from '@shared/types';
+import { HardDriveDownload, Pencil, Plug, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,6 +8,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
+import { McpEditDialog } from './McpEditDialog';
 
 export function McpSettings() {
   const { t } = useI18n();
@@ -14,6 +16,7 @@ export function McpSettings() {
   const updateMcpServer = useSettingsStore((state) => state.updateMcpServer);
   const removeMcpServer = useSettingsStore((state) => state.removeMcpServer);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<McpServerEntry | 'new' | null>(null);
 
   return (
     <div className="space-y-6">
@@ -24,10 +27,16 @@ export function McpSettings() {
             {t('Model Context Protocol servers available to this app')}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-          <HardDriveDownload className="mr-1.5 h-4 w-4" />
-          {t('Import from local apps')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <HardDriveDownload className="mr-1.5 h-4 w-4" />
+            {t('Import from local apps')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            {t('Add MCP server')}
+          </Button>
+        </div>
       </div>
 
       {mcpServers.length === 0 ? (
@@ -35,7 +44,7 @@ export function McpSettings() {
           <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 font-medium text-sm">{t('No MCP servers yet')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
-            {t('Import MCP servers configured in local AI apps')}
+            {t('Import MCP servers from local apps or add one manually to get started')}
           </p>
         </div>
       ) : (
@@ -72,6 +81,14 @@ export function McpSettings() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => setEditing(server)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
                   onClick={() => removeMcpServer(server.id)}
                 >
@@ -84,6 +101,7 @@ export function McpSettings() {
       )}
 
       <LocalAssetImportDialog kind="mcp" open={importOpen} onOpenChange={setImportOpen} />
+      <McpEditDialog server={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

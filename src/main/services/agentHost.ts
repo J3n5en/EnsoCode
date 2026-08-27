@@ -17,7 +17,7 @@ import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID, type Preset } from '@shared/typ
 import type { ModelProvider } from '@shared/types/llm';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { readSettings } from '../ipc/settings';
-import { syncGlobalInstruction } from './instructionStore';
+import { resolveGlobalInstruction } from './instructionStore';
 
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
@@ -36,6 +36,7 @@ export function startAgentWorker(): void {
       ...process.env,
       // pi 的全局目录与会话目录都收进 userData，不碰用户的 ~/.pi
       ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
+      PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
     },
   });
   worker = child;
@@ -78,10 +79,11 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
   }
-  // 启用的指令文件（单主源）落到 pi agentDir 的 AGENTS.md，pi 会话自动读取；
-  // 自定义预设则显式指定注入哪份（或不注入）
+  // 指令随 spawn 命令下发，不写共享 AGENTS.md（多会话不同 preset 会抢同一文件）
   const preset = resolvePreset(request.presetId);
-  syncGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
+  const instruction = resolveGlobalInstruction(
+    preset ? { instructionId: preset.instructionId } : undefined
+  );
   const model: SpawnModelConfig = {
     api: provider.api,
     baseUrl: provider.baseUrl,
@@ -119,6 +121,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
         : [];
       return disabled.length > 0 ? { disabledTools: disabled } : {};
     })(),
+    ...(instruction ? { instruction } : {}),
   });
 }
 

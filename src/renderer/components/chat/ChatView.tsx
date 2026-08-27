@@ -49,6 +49,57 @@ export function ChatView() {
     : (enabledModels[0]?.id ?? '');
 
   const project = projects.find((p) => p.id === conversation?.projectId);
+  const skills = useSettingsStore((state) => state.skills);
+  const loadLocalSkills = useSettingsStore((state) => state.loadLocalSkills);
+  const [projectSkills, setProjectSkills] = useState<{ name: string; description: string }[]>([]);
+
+  useEffect(() => {
+    if (!project?.path || !loadLocalSkills) {
+      setProjectSkills([]);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI.assets
+      .listProjectSkills(project.path)
+      .then((listed) => {
+        if (!cancelled) setProjectSkills(listed);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.path, loadLocalSkills]);
+
+  const slashCommands = useMemo(() => {
+    if (!conversation) return [];
+    const goal = {
+      name: '/goal',
+      description: t('Set a session goal (/goal <objective> · pause · resume · clear)'),
+    };
+    const fromSettings = skills
+      .filter((skill) => skill.enabled !== false)
+      .map((skill) => ({
+        name: `/skill:${skill.name}`,
+        description: skill.description,
+      }));
+    const fromProject = projectSkills.map((skill) => ({
+      name: `/skill:${skill.name}`,
+      description: skill.description,
+    }));
+    const seen = new Set([
+      goal.name,
+      ...fromSettings.map((command) => command.name),
+      ...fromProject.map((command) => command.name),
+    ]);
+    return [
+      goal,
+      ...fromSettings,
+      ...fromProject,
+      ...conversation.commands.filter((command) => !seen.has(command.name)),
+    ];
+  }, [t, skills, projectSkills, conversation]);
 
   const timelineRef = useRef<MessageTimelineHandle>(null);
 
@@ -138,13 +189,7 @@ export function ChatView() {
           )}
           <Composer
             cwd={project?.path}
-            commands={[
-              {
-                name: '/goal',
-                description: t('Set a session goal (/goal <objective> · pause · resume · clear)'),
-              },
-              ...conversation.commands,
-            ]}
+            commands={slashCommands}
             running={running}
             busy={busy}
             locked={(conversation.pendingApprovals ?? []).length > 0}
@@ -192,7 +237,10 @@ export function ChatView() {
                     {conversation.lastModelId ? ` · ${conversation.lastModelId}` : ''}
                   </span>
                 )}
-                <ContextMeter messages={conversation.messages} />
+                <ContextMeter
+                  messages={conversation.messages}
+                  contextWindow={conversation.contextWindow}
+                />
               </>
             }
             onSend={(content, images) => {

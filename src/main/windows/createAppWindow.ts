@@ -89,17 +89,28 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     win.on('close', () => saveWindowState(win, options.stateFile as string));
   }
 
-  // 可编辑区域启用原生右键菜单（剪切/复制/粘贴/全选）
+  // 可编辑区域启用原生右键菜单（剪切/复制/粘贴/全选）；非编辑区选中文本时提供复制
   win.webContents.on('context-menu', (event, params) => {
-    if (!params.isEditable) return;
-    event.preventDefault();
-    Menu.buildFromTemplate([
-      { role: 'cut', enabled: params.editFlags.canCut },
-      { role: 'copy', enabled: params.editFlags.canCopy },
-      { role: 'paste', enabled: params.editFlags.canPaste },
-      { type: 'separator' },
-      { role: 'selectAll', enabled: params.editFlags.canSelectAll },
-    ]).popup({ window: win, x: params.x, y: params.y });
+    if (params.isEditable) {
+      event.preventDefault();
+      Menu.buildFromTemplate([
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll },
+      ]).popup({ window: win, x: params.x, y: params.y });
+      return;
+    }
+    // 对话区域等只读内容：有选中文本时给复制
+    if (params.selectionText) {
+      event.preventDefault();
+      Menu.buildFromTemplate([{ role: 'copy', enabled: params.editFlags.canCopy }]).popup({
+        window: win,
+        x: params.x,
+        y: params.y,
+      });
+    }
   });
 
   // 外链跳转系统浏览器

@@ -7,9 +7,6 @@ export const MODEL_API_KINDS = [
   'ollama',
 ] as const;
 
-/** 注册模型时统一声明的上下文窗口（worker spawn 与渲染层水位表共用） */
-export const MODEL_CONTEXT_WINDOW = 200_000;
-
 export type ModelApiKind = (typeof MODEL_API_KINDS)[number];
 
 export interface ModelEntry {

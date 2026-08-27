@@ -144,6 +144,7 @@ export const zhTranslations: Record<string, string> = {
   Save: '保存',
   // Skills & MCP
   Skills: '技能',
+  Skill: '技能',
   'Skills registered by reference; files stay in their original location':
     '以引用方式登记,文件仍留在原应用目录',
   'No skills yet': '暂无技能',
@@ -154,6 +155,17 @@ export const zhTranslations: Record<string, string> = {
   'Model Context Protocol servers available to this app': '应用可用的 MCP 服务器',
   'No MCP servers yet': '暂无 MCP 服务器',
   'Import MCP servers configured in local AI apps': '导入本机 AI 应用中已配置的 MCP 服务器',
+  'Import MCP servers from local apps or add one manually to get started':
+    '从本地应用导入或手动添加 MCP 服务器以开始使用',
+  'Add MCP server': '添加 MCP',
+  'Add MCP Server': '添加 MCP 服务器',
+  'Edit MCP Server': '编辑 MCP 服务器',
+  Transport: '传输方式',
+  Command: '命令',
+  'Arguments (one per line)': '参数（每行一条）',
+  'Environment variables (KEY=VALUE, one per line)': '环境变量（KEY=VALUE，每行一条）',
+  URL: 'URL',
+  'This MCP server already exists': '该 MCP 服务器已存在',
   'Import MCP servers': '导入 MCP 服务器',
   'Scan local AI apps and register the entries you want to reuse.':
     '扫描本机 AI 应用,登记你想复用的条目。',
@@ -168,6 +180,11 @@ export const zhTranslations: Record<string, string> = {
     '同一时间仅一份生效（注入会话）；启用一份会自动关闭其余',
   'Import global instruction files configured in local AI tools':
     '导入本机 AI 工具中已配置的全局指令文件',
+  'Import instruction files from local apps or add one manually to get started':
+    '从本地应用导入或手动添加指令文件以开始使用',
+  'Add instruction': '添加指令',
+  'Add Instruction': '添加指令文件',
+  'An instruction with this name already exists': '已有同名指令文件',
   'Import instruction files': '导入指令文件',
   'Same content': '内容相同',
   'Same name': '同名',

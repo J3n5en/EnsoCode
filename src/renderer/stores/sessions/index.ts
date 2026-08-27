@@ -47,6 +47,8 @@ export interface Conversation extends SessionProjection {
   createdAt: number;
   /** pi 会话 jsonl 路径，app 重启后凭它 resume */
   sessionFile?: string;
+  /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
+  contextWindow?: number;
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
@@ -315,7 +317,12 @@ export const useSessionsStore = create<SessionsState>()(
         if (event.type === 'session-meta') {
           set((state) =>
             state.conversations[event.sessionId]
-              ? patch(state, event.sessionId, { sessionFile: event.sessionFile })
+              ? patch(state, event.sessionId, {
+                  sessionFile: event.sessionFile,
+                  ...(event.contextWindow !== undefined
+                    ? { contextWindow: event.contextWindow }
+                    : {}),
+                })
               : state
           );
           return;

@@ -137,6 +137,8 @@ export type AgentCommand =
       skillPaths?: string[];
       /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
       mcpServers?: McpServerSpawnConfig[];
+      /** 本会话注入的全局指令。走命令载荷，不写共享 AGENTS.md，避免多 preset 抢同一文件 */
+      instruction?: { path: string; content: string };
       /** 审批档位；缺省 full（完全放行） */
       approvalMode?: ApprovalMode;
       /** 自定义 subagent 类型表 */
@@ -324,7 +326,14 @@ export type AgentWorkerEvent =
       filesRestored?: boolean;
     }
   | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
-  | { type: 'session-meta'; sessionId: string; seq: number; sessionFile?: string }
+  | {
+      type: 'session-meta';
+      sessionId: string;
+      seq: number;
+      sessionFile?: string;
+      /** 当前模型 catalog 的上下文窗口；缺省/非正数 = 未知 */
+      contextWindow?: number;
+    }
   | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
   | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
   | { type: 'ask-request'; sessionId: string; seq: number; ask: AskRequestInfo }
@@ -544,7 +553,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       if (
         isNonEmptyString(value.sessionId) &&
         typeof value.seq === 'number' &&
-        (value.sessionFile === undefined || typeof value.sessionFile === 'string')
+        (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
+        (value.contextWindow === undefined ||
+          (typeof value.contextWindow === 'number' &&
+            Number.isFinite(value.contextWindow) &&
+            value.contextWindow > 0))
       ) {
         return value as unknown as AgentWorkerEvent;
       }
