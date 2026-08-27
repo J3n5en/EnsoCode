@@ -4,3 +4,10 @@ export interface Project {
   name: string;
   path: string;
 }
+
+/** 从本地编辑器 / 编程应用读到的最近打开目录 */
+export interface RecentProject {
+  path: string;
+  displayPath: string;
+  sourceName: string;
+}
