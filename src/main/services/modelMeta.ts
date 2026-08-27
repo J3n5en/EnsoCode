@@ -1,47 +1,46 @@
+import {
+  type CatalogModelEntry,
+  findCatalogModelById,
+  positiveFiniteNumber,
+} from '@shared/modelCatalog';
 import { supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import type { ModelMeta, ModelMetaQuery, ModelMetaResult } from '@shared/types';
 import { ensureProviderModelsRefreshed, getRuntime, hasStoredAccount } from './oauthProviders';
 
-type CatalogEntry = {
-  id: string;
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning: boolean;
-  thinkingLevelMap?: Record<string, string | null | undefined>;
-};
-
-/**
- * 与 `supervisor.ts` 的 `positiveContextWindow` 同口径：非正 / 非有限视为缺失。
- * 未知不得用 128K 凑数——那是 spawn 的运行时兜底，不是元数据。
- */
-function positiveNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function attachWindow(meta: ModelMeta, model: CatalogEntry): void {
-  const contextWindow = positiveNumber(model.contextWindow);
+function attachWindow(meta: ModelMeta, model: CatalogModelEntry): void {
+  const contextWindow = positiveFiniteNumber(model.contextWindow);
   if (contextWindow !== undefined) meta.contextWindow = contextWindow;
-  const maxTokens = positiveNumber(model.maxTokens);
+  const maxTokens = positiveFiniteNumber(model.maxTokens);
   if (maxTokens !== undefined) meta.maxTokens = maxTokens;
 }
 
-function mapOauthModel(model: CatalogEntry): ModelMeta {
+function mapOauthModel(model: CatalogModelEntry): ModelMeta {
   const meta: ModelMeta = {
     modelId: model.id,
     reasoning: model.reasoning,
-    thinkingLevels: supportedProjectThinkingLevels(model),
+    thinkingLevels: supportedProjectThinkingLevels({
+      reasoning: model.reasoning === true,
+      thinkingLevelMap: model.thinkingLevelMap,
+    }),
     source: 'catalog',
   };
   attachWindow(meta, model);
   return meta;
 }
 
-function mapCatalogFallback(modelId: string, catalog: CatalogEntry | undefined): ModelMeta {
+function mapCatalogFallback(modelId: string, catalog: CatalogModelEntry | undefined): ModelMeta {
   if (!catalog) return { modelId, source: 'unknown' };
-  // 自定义 API 命中 catalog 只借窗口；reasoning / thinkingLevels 留给「未知」——
-  // spawn 走的是硬编码 reasoning:true + {max:'max'}，报 catalog 档会和线上不一致。
+  // 与 spawn 同表精确 id 反查：命中则带上 catalog 的 reasoning / 档位 / 窗口。
+  // 行覆盖由 renderer 用 resolveCustomModelCapabilities 叠，不在这条查询里算。
   const meta: ModelMeta = { modelId, source: 'catalog-fallback' };
+  if (typeof catalog.reasoning === 'boolean') {
+    meta.reasoning = catalog.reasoning;
+    meta.thinkingLevels = supportedProjectThinkingLevels({
+      reasoning: catalog.reasoning,
+      thinkingLevelMap: catalog.thinkingLevelMap,
+    });
+  }
   attachWindow(meta, catalog);
   return meta;
 }
@@ -64,7 +63,7 @@ export async function queryModelMeta(query: ModelMetaQuery): Promise<ModelMetaRe
       // getRuntime 在后台预热扩展 catalog；这里 await 同一份 promise，保证冷启动首查
       // 不会抢先把 unknown 写进 renderer 的无 TTL 缓存。
       await ensureProviderModelsRefreshed(runtime, query.oauthAccountKey);
-      const catalog = runtime.getModels(query.oauthAccountKey) as readonly CatalogEntry[];
+      const catalog = runtime.getModels(query.oauthAccountKey) as readonly CatalogModelEntry[];
       const wanted = query.modelIds.length === 0 ? null : new Set(query.modelIds);
       const models: ModelMeta[] = [];
       const seen = new Set<string>();
@@ -86,14 +85,11 @@ export async function queryModelMeta(query: ModelMetaQuery): Promise<ModelMetaRe
       return { ok: false, models: [], error: 'Invalid query' };
     }
 
-    const catalog = runtime.getModels() as readonly CatalogEntry[];
+    const catalog = runtime.getModels() as readonly CatalogModelEntry[];
     return {
       ok: true,
       models: query.modelIds.map((modelId) =>
-        mapCatalogFallback(
-          modelId,
-          catalog.find((entry) => entry.id === modelId)
-        )
+        mapCatalogFallback(modelId, findCatalogModelById(catalog, modelId))
       ),
     };
   } catch (error) {

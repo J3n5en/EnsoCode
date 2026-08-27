@@ -24,7 +24,11 @@ export interface ModelMeta {
    * ⚠️「缺失」与「空数组」语义不同，序列化/反序列化都不许把 undefined 归一成 []。
    */
   thinkingLevels?: ThinkingLevel[];
-  /** 仅用于 UI 打「估算」标记与排障，⛔ 不参与任何逻辑判定 */
+  /**
+   * 查询路径来源：订阅 catalog / 自定义 id 反查 / 未命中。
+   * 自定义行的能力分层（override / catalog / default）见 `resolveCustomModelCapabilities`，
+   * 不挤进这个字段——OAuth 路径保持 catalog-only。
+   */
   source: 'catalog' | 'catalog-fallback' | 'unknown';
 }
 
