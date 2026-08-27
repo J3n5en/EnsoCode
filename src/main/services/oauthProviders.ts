@@ -52,11 +52,13 @@ interface ActiveLogin {
 let activeLogin: ActiveLogin | null = null;
 
 export async function startOauthLogin(providerId: string, sender: WebContents): Promise<void> {
-  if (activeLogin) throw new Error('login already in progress');
-
   const emit = (event: OauthLoginEvent) => {
     if (!sender.isDestroyed()) sender.send(IPC_CHANNELS.OAUTH_LOGIN_EVENT, event);
   };
+  if (activeLogin) {
+    emit({ type: 'error', message: 'login already in progress' });
+    return;
+  }
 
   const abort = new AbortController();
   const pendingPrompts: ActiveLogin['pendingPrompts'] = new Map();
