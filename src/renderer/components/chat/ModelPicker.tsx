@@ -365,8 +365,9 @@ export function ModelPicker({
     };
   }, [open]);
 
-  // 打开时只清搜索词，不把焦点抢进搜索框。级联态焦点必须留在 Menu item 上，Esc 才能逐级退；
-  // 搜索模式（输入框有焦点 / 关键词非空）没有级联，Esc 一次关整棵。
+  // 打开时只清搜索词。搜索框 tabIndex=-1，避免根菜单 initialFocus 落到第一个可聚焦的
+  // input 上；级联态焦点必须留在 Menu item，Esc 才能逐级退。点进搜索框 / 有关键词才是
+  // 搜索模式，那时没有级联，Esc 一次关整棵。
   useEffect(() => {
     if (!open) return;
     setKeyword('');
@@ -539,6 +540,7 @@ export function ModelPicker({
         <div className="-mx-1 -mt-1 mb-1 border-b p-2">
           <input
             data-model-picker="search"
+            tabIndex={-1}
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onFocus={() => {
@@ -659,6 +661,7 @@ export function ModelPicker({
               {t('Reasoning')}
             </span>
             <Switch
+              tabIndex={-1}
               checked={reasoningEnabled}
               onCheckedChange={onReasoningChange}
               disabled={reasoningUnsupported}
@@ -673,6 +676,7 @@ export function ModelPicker({
           {reasoningEnabled && !reasoningUnsupported && (
             <div className="mt-3">
               <Slider
+                tabIndex={-1}
                 min={0}
                 max={THINKING_LEVELS.length - 1}
                 step={1}
@@ -691,6 +695,7 @@ export function ModelPicker({
                     <button
                       key={entry}
                       type="button"
+                      tabIndex={-1}
                       disabled={disabled}
                       onClick={disabled ? undefined : () => onThinkingChange(entry)}
                       className={cn(

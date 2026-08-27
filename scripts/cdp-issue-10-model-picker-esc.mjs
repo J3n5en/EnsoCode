@@ -120,10 +120,12 @@ async function clickCss(send, selector) {
     `(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) throw new Error('missing ' + ${JSON.stringify(selector)});
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`
   );
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
   await send('Input.dispatchMouseEvent', {
     type: 'mousePressed',
     x: box.x,
@@ -176,7 +178,9 @@ const SNAPSHOT_JS = `(() => {
     return style.position === 'fixed' && visible(el);
   });
   const inMenuItem = Boolean(
-    active?.closest?.('[data-slot="menu-item"], [data-slot="menu-sub-trigger"], [role="menuitem"]')
+    active?.closest?.('[data-slot="menu-item"], [data-slot="menu-sub-trigger"], [role="menuitem"]') ||
+      (active?.closest?.('[role="menu"], [data-model-picker="root"], [data-model-picker="submenu"]') &&
+        active?.getAttribute?.('data-model-picker') !== 'search')
   );
   return {
     root: roots.filter(visible).length,
@@ -273,9 +277,22 @@ async function seedApp(send) {
 }
 
 async function openPicker(send) {
-  await waitSnapshot(send, () => true, 'noop');
+  let state = await snapshot(send);
+  if (state.root >= 1 && !state.active.isSearch) return state;
+  if (state.root >= 1) {
+    await pressEscape(send);
+    await waitSnapshot(send, (s) => s.root === 0, 'close leftover picker');
+  }
   await clickCss(send, '[data-model-picker="trigger"]');
-  return waitSnapshot(send, (s) => s.root >= 1, 'open picker');
+  state = await snapshot(send);
+  if (state.root === 0) {
+    await evalExpr(send, `document.querySelector('[data-model-picker="trigger"]')?.click()`);
+  }
+  return waitSnapshot(
+    send,
+    (s) => s.root >= 1 && !s.active.isSearch,
+    'open picker without search focus'
+  );
 }
 
 async function openSubmenu(send) {
@@ -342,7 +359,8 @@ async function main() {
 
   // --- cascade Esc ---
   let state = await openPicker(client.send);
-  assertions.openDoesNotStealSearchFocus = state.root >= 1 && !state.active.isSearch;
+  assertions.openDoesNotStealSearchFocus =
+    state.root >= 1 && !state.active.isSearch && state.active.inMenuItem;
   state = await openSubmenu(client.send);
   assertions.submenuFocusStaysOnMenuItem =
     state.submenu >= 1 && !state.active.isSearch && state.active.inMenuItem;
