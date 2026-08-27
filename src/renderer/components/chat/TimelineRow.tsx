@@ -467,17 +467,18 @@ function ThinkingRow({
 function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note' }> }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const [log, setLog] = useState<string | null>(null);
+  /** undefined=未读, null=文件不存在, string=内容。占位文案在渲染时 t()，切语言才会更新 */
+  const [log, setLog] = useState<string | null | undefined>(undefined);
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
   const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
   const logPath = /read (\/.+?\.log) for the complete log/.exec(item.detail)?.[1] ?? null;
 
   useEffect(() => {
-    if (!expanded || !logPath || log !== null) return;
+    if (!expanded || !logPath || log !== undefined) return;
     void window.electronAPI.files.read(logPath).then((content) => {
-      setLog(content ?? t('(log unavailable)'));
+      setLog(content);
     });
-  }, [expanded, logPath, log, t]);
+  }, [expanded, logPath, log]);
 
   return (
     <div>
@@ -501,7 +502,11 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
             {item.detail}
           </pre>
           <pre className="max-h-64 overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-            {logPath ? (log ?? t('Loading…')) : t('(no log available)')}
+            {logPath
+              ? log === undefined
+                ? t('Loading…')
+                : (log ?? t('(log unavailable)'))
+              : t('(no log available)')}
           </pre>
         </div>
       )}

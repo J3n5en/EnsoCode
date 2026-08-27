@@ -48,9 +48,14 @@ function remarkGithubAlerts() {
       text.value = text.value.slice(match[0].length);
       // 标记后正文为空时去掉空 text 节点
       if (!text.value) first.children.shift();
+      const kind = match[1].toLowerCase();
       node.data = {
         ...node.data,
-        hProperties: { ...node.data?.hProperties, 'data-alert': match[1].toLowerCase() },
+        hProperties: {
+          ...node.data?.hProperties,
+          'data-alert': kind,
+          dataAlert: kind,
+        },
       };
     });
   };
@@ -86,7 +91,9 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
         h2: ({ children }) => <h2 className="mt-3 mb-1.5 text-base font-semibold">{children}</h2>,
         h3: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold">{children}</h3>,
         blockquote: ({ children, node }) => {
-          const alert = ALERT_STYLES[String(node?.properties?.dataAlert ?? '')];
+          const props = node?.properties as Record<string, unknown> | undefined;
+          const kind = String(props?.dataAlert ?? props?.['data-alert'] ?? '');
+          const alert = ALERT_STYLES[kind];
           if (alert) {
             return (
               <blockquote className={cn('my-1.5 border-l-2 pl-3', alert.border)}>
