@@ -51,7 +51,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const addProviders = useSettingsStore((state) => state.addProviders);
   const creating = provider === 'new';
   /** OAuth 订阅条目：无 key/baseUrl 概念，仅编辑名称与模型开关 */
-  const isOauth = provider !== null && provider !== 'new' && Boolean(provider.oauthProviderId);
+  const isOauth = provider !== null && provider !== 'new' && Boolean(provider.oauthAccountKey);
 
   const [name, setName] = React.useState('');
   const [api, setApi] = React.useState<ModelProvider['api']>('openai-completions');

@@ -7,6 +7,7 @@ import {
   clearTerminalThemeFromApp,
   isTerminalThemeDark,
 } from '@/lib/ghosttyTheme';
+import { migrateSettings, SETTINGS_VERSION } from './migrate';
 import { electronStorage } from './storage';
 import type { FontWeight, SettingsState, Theme } from './types';
 
@@ -138,11 +139,12 @@ export const useSettingsStore = create<SettingsState>()(
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
 
-      // 按 baseUrl+apiKey 指纹去重（OAuth 订阅条目按 oauthProviderId），返回实际新增数量
+      // 按 baseUrl+apiKey 指纹去重；订阅条目按 oauthAccountKey——同一厂商的多个账号
+      // key 各异，用基础 providerId 会把第二个账号当重复项吞掉
       addProviders: (providers) => {
-        const fingerprint = (p: { baseUrl: string; apiKey: string; oauthProviderId?: string }) =>
-          p.oauthProviderId
-            ? `oauth::${p.oauthProviderId}`
+        const fingerprint = (p: { baseUrl: string; apiKey: string; oauthAccountKey?: string }) =>
+          p.oauthAccountKey
+            ? `oauth::${p.oauthAccountKey}`
             : `${p.baseUrl.trim().replace(/\/+$/, '')}::${p.apiKey.trim()}`;
         const known = new Set(get().providers.map(fingerprint));
         const fresh = providers.filter((provider) => {
@@ -331,6 +333,8 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'enso-settings',
       storage: createJSONStorage(() => electronStorage),
+      version: SETTINGS_VERSION,
+      migrate: (persisted, version) => migrateSettings(persisted, version) as SettingsState,
       onRehydrateStorage: () => (state) => {
         const s = state ?? useSettingsStore.getState();
         applySettings(s);

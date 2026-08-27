@@ -3,9 +3,10 @@ import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
 import {
   cancelOauthLogin,
-  getOauthAccountInfo,
+  getOauthAccountUsage,
   listOauthProviders,
   oauthLogout,
+  reopenOauthLogin,
   respondOauthPrompt,
   startOauthLogin,
 } from '../services/oauthProviders';
@@ -64,14 +65,15 @@ export function registerProviderHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_CANCEL, () => cancelOauthLogin());
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_REOPEN, () => reopenOauthLogin());
 
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGOUT, (_event, providerId: unknown) => {
-    if (typeof providerId !== 'string') return;
-    return oauthLogout(providerId);
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGOUT, (_event, accountKey: unknown) => {
+    if (typeof accountKey !== 'string') return;
+    return oauthLogout(accountKey);
   });
 
-  ipcMain.handle(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, (_event, providerId: unknown) => {
-    if (typeof providerId !== 'string') return { windows: [] };
-    return getOauthAccountInfo(providerId);
+  ipcMain.handle(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, (_event, accountKey: unknown) => {
+    if (typeof accountKey !== 'string') return { key: '', windows: [], error: 'Invalid account' };
+    return getOauthAccountUsage(accountKey);
   });
 }

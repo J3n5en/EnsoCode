@@ -11,5 +11,9 @@
       "@shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*"],
+  // src/shared/providers/ 是主进程 + agent worker 专用（依赖 node:http / node:crypto），
+  // 渲染层不得引用。排除在 web 段之外：谁要在渲染层 import 它，pnpm typecheck 立刻
+  // 报「找不到模块」——守卫前移到类型检查，而不是等 vite 打包 renderer 时炸在 node 内置模块上。
+  "exclude": ["src/shared/providers/**"]
 }

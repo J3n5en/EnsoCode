@@ -28,11 +28,35 @@ export function ProvidersSettings() {
   const [oauthOpen, setOauthOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
 
-  // 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）
+  /**
+   * 账号 key → 邮箱，只用来让订阅条目的 Badge 区分同厂商的多个账号。
+   * 订阅对话框关闭后重取，登录/登出后 Badge 立即跟上。
+   */
+  const [oauthEmails, setOauthEmails] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (oauthOpen) return;
+    let cancelled = false;
+    void window.electronAPI.providers.listOauth().then((infos) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const info of infos) {
+        for (const account of info.accounts) {
+          if (account.email) next[account.key] = account.email;
+        }
+      }
+      setOauthEmails(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [oauthOpen]);
+
+  // 删除订阅条目时联动退登（凭证与条目一体，否则订阅登录仍显示已登录）。
+  // 退登粒度是账号 key 而非基础 providerId——同一厂商的其他账号不该被连带登出
   const handleRemove = async (provider: ModelProvider) => {
-    if (provider.oauthProviderId) {
+    if (provider.oauthAccountKey) {
       try {
-        await window.electronAPI.providers.oauthLogout(provider.oauthProviderId);
+        await window.electronAPI.providers.oauthLogout(provider.oauthAccountKey);
       } catch {
         // 退登失败不阻塞条目删除
       }
@@ -90,8 +114,10 @@ export function ProvidersSettings() {
                   {provider.name}
                 </span>
                 <Badge variant="outline" className="shrink-0 text-[11px]">
-                  {provider.oauthProviderId
-                    ? t('Subscription')
+                  {provider.oauthAccountKey
+                    ? [t('Subscription'), oauthEmails[provider.oauthAccountKey]]
+                        .filter(Boolean)
+                        .join(' · ')
                     : (API_LABELS[provider.api] ?? provider.api)}
                 </Badge>
                 {provider.importedFrom && (

@@ -59,7 +59,8 @@
       "!.codex",
       "!.cursor",
       "!.omp",
-      "!.pi"
+      "!.pi",
+      "!temp"
     ]
   }
 }

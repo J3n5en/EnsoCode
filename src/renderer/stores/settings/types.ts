@@ -81,7 +81,7 @@ export interface SettingsState {
   setAutoUpdate: (value: boolean) => void;
 
   // Provider actions
-  /** 按 baseUrl+apiKey 指纹与现有项去重，返回实际新增数量 */
+  /** 按 baseUrl+apiKey 指纹（订阅条目按 oauthAccountKey）与现有项去重，返回实际新增数量 */
   addProviders: (providers: ModelProvider[]) => number;
   updateProvider: (id: string, updates: Partial<Omit<ModelProvider, 'id'>>) => void;
   removeProvider: (id: string) => void;

@@ -14,6 +14,8 @@ import {
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
+import { ensureAccountProvider } from '@shared/piAccounts';
+import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import type {
   AgentCommand,
   AgentTypeSpawnConfig,
@@ -41,7 +43,7 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
-import { loadCursorProvider } from './cursor/loadProvider';
+import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
@@ -147,6 +149,33 @@ function createSessionResourceLoader(options: {
     ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
     agentsFilesOverride: sessionAgentsFilesOverride(options.agentDir, options.instruction),
   });
+}
+
+async function refreshWorkerProviderModels(
+  runtime: ModelRuntime,
+  providerId: string
+): Promise<void> {
+  try {
+    await runtime.refresh({ providers: [providerId], allowNetwork: true });
+  } catch {
+    // 拉不到就留用该 provider 的兜底清单，不该让 worker 起不来
+  }
+}
+
+/**
+ * 注册 worker 自己的订阅 provider，并在解析会话模型前补齐联网发现的真实清单。
+ */
+export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<ModelRuntime> {
+  // 推理发生在本进程：Main 侧注册过不算，worker 不注册就会以「未知 provider」流不起来
+  runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+  await loadCursorProvider(runtime);
+  // registerProvider 只触发 allowNetwork:false 的 refresh，拿到的是兜底清单；Main 侧界面
+  // 展示的却是联网发现结果。必须拆成两次并各自吞错，避免一个 provider 的发现服务异常
+  // 连带另一个拿不到清单；失败方只回退自己的兜底，worker 仍能启动。
+  // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
+  await refreshWorkerProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+  await refreshWorkerProviderModels(runtime, CURSOR_PROVIDER_ID);
+  return runtime;
 }
 
 /** 故障域 A：本进程持有全部活会话。同一会话的命令串行，不同会话并行。 */
@@ -1272,14 +1301,14 @@ export class SessionSupervisor {
 
   private getRuntime(): Promise<ModelRuntime> {
     // 共享 ModelRuntime（M0 验证项 2 已实测双会话共享可行）
-    this.runtimePromise ??= ModelRuntime.create({
-      authPath: path.join(this.options.agentDir, 'auth.json'),
-      modelsPath: null,
-      refreshOnCreate: false,
-    }).then(async (runtime) => {
-      await loadCursorProvider(runtime);
-      return runtime;
-    });
+    this.runtimePromise ??= (async () => {
+      const runtime = await ModelRuntime.create({
+        authPath: path.join(this.options.agentDir, 'auth.json'),
+        modelsPath: null,
+        refreshOnCreate: false,
+      });
+      return initializeWorkerRuntime(runtime);
+    })();
     return this.runtimePromise;
   }
 }
@@ -1342,10 +1371,13 @@ function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string })
  * apiKey 注册自定义 provider（恒 reasoning:true，档位由 per-session 克隆决定）。
  */
 function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
-  if (model.oauthProviderId) {
-    const oauthModel = runtime.getModel(model.oauthProviderId, model.modelId);
+  if (model.oauthAccountKey) {
+    // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
+    // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到
+    ensureAccountProvider(runtime, model.oauthAccountKey);
+    const oauthModel = runtime.getModel(model.oauthAccountKey, model.modelId);
     if (!oauthModel) {
-      throw new Error(`oauth model not found: ${model.oauthProviderId}/${model.modelId}`);
+      throw new Error(`oauth model not found: ${model.oauthAccountKey}/${model.modelId}`);
     }
     return oauthModel;
   }
@@ -1353,7 +1385,9 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
   const catalog = runtime.getModels().find((entry) => entry.id === model.modelId);
   const contextWindow = positiveContextWindow(catalog) ?? 128_000;
   const maxTokens =
-    typeof catalog?.maxTokens === 'number' && Number.isFinite(catalog.maxTokens) && catalog.maxTokens > 0
+    typeof catalog?.maxTokens === 'number' &&
+    Number.isFinite(catalog.maxTokens) &&
+    catalog.maxTokens > 0
       ? Math.floor(catalog.maxTokens)
       : 32_000;
   runtime.registerProvider(providerId, {
