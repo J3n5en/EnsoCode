@@ -1,5 +1,5 @@
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
-import { ArrowUp, CircleStop, FileText, SlashSquare, X } from 'lucide-react';
+import { ArrowUp, CircleStop, FileText, SlashSquare, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
@@ -53,8 +53,15 @@ function findSlashStart(text: string, cursor: number): number | null {
   return null;
 }
 
+/** 把句首 /skill:name 拆成胶囊 + 其余正文（pi 只认整段以此开头） */
+function splitSkillCommand(text: string): { skill: string | null; rest: string } {
+  const match = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (!match) return { skill: null, rest: text };
+  return { skill: match[1], rest: match[2] ?? '' };
+}
+
 /** 各会话未发送的输入草稿（切会话时暂存/恢复;仅内存,不持久化） */
-const drafts = new Map<string, { text: string; images: AttachedImage[] }>();
+const drafts = new Map<string, { text: string; images: AttachedImage[]; skill: string | null }>();
 
 export function Composer({
   cwd,
@@ -72,6 +79,7 @@ export function Composer({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [skill, setSkill] = useState<string | null>(null);
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -88,11 +96,12 @@ export function Composer({
     const previous = prevFocusKeyRef.current;
     let nextText = text;
     if (previous !== focusKey) {
-      if (previous) drafts.set(previous, { text, images });
+      if (previous) drafts.set(previous, { text, images, skill });
       const draft = focusKey ? drafts.get(focusKey) : undefined;
       nextText = draft?.text ?? '';
       setText(nextText);
       setImages(draft?.images ?? []);
+      setSkill(draft?.skill ?? null);
       prevFocusKeyRef.current = focusKey;
       // 斜杠/提及弹层是组件级 state，不随草稿走；不清就会把上一会话的 / 列表带到空输入框
       setMentionQuery(null);
@@ -110,11 +119,13 @@ export function Composer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: injectedDraft 是触发信号
   useEffect(() => {
     if (!injectedDraft) return;
-    setText(injectedDraft);
+    const parsed = splitSkillCommand(injectedDraft);
+    setSkill(parsed.skill);
+    setText(parsed.rest);
     onDraftConsumed?.();
     setTimeout(() => {
       textareaRef.current?.focus();
-      detect(injectedDraft);
+      detect(parsed.rest);
     }, 0);
   }, [injectedDraft]);
 
@@ -206,7 +217,13 @@ export function Composer({
       if (popup.kind === 'mention') {
         replaceToken('@', `@${popup.items[index].relativePath} `);
       } else {
-        replaceToken('/', `${popup.items[index].name} `);
+        const name = popup.items[index].name;
+        if (name.startsWith('/skill:')) {
+          replaceToken('/', '');
+          setSkill(name.slice('/skill:'.length));
+        } else {
+          replaceToken('/', `${name} `);
+        }
       }
     },
     [popup, replaceToken]
@@ -214,12 +231,14 @@ export function Composer({
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content && images.length === 0) return;
+    if (!content && !skill && images.length === 0) return;
+    const payload = skill ? (content ? `/skill:${skill} ${content}` : `/skill:${skill}`) : content;
     setText('');
     setImages([]);
+    setSkill(null);
     setMentionQuery(null);
     setSlashQuery(null);
-    onSend(content, images);
+    onSend(payload, images);
   };
 
   /** 在光标处插入文本片段 */
@@ -300,6 +319,11 @@ export function Composer({
         setSlashQuery(null);
         return;
       }
+    }
+    if (e.key === 'Backspace' && skill && text.length === 0) {
+      e.preventDefault();
+      setSkill(null);
+      return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -391,27 +415,55 @@ export function Composer({
             ))}
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            detect(e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
-          placeholder={
-            locked
-              ? t('Resolve the pending approval to continue')
-              : running
-                ? t('Message will queue until this round finishes…')
-                : t('Ask the agent…')
-          }
-          disabled={locked}
-          rows={2}
-          className="max-h-40 w-full resize-none bg-transparent px-3.5 pt-3 text-sm outline-none placeholder:text-muted-foreground"
-        />
+        <div
+          className={cn(
+            'flex items-start gap-1.5 px-3.5',
+            images.length > 0 ? 'pt-1.5' : 'pt-3'
+          )}
+        >
+          {skill && (
+            <span
+              className={cn(
+                'mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium',
+                'bg-info/15 text-info'
+              )}
+            >
+              <Sparkles className="h-3 w-3" />
+              {skill}
+              <button
+                type="button"
+                onClick={() => setSkill(null)}
+                className="rounded-sm text-info/70 hover:text-info"
+                aria-label={t('Remove')}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              detect(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
+            placeholder={
+              skill
+                ? ''
+                : locked
+                  ? t('Resolve the pending approval to continue')
+                  : running
+                    ? t('Message will queue until this round finishes…')
+                    : t('Ask the agent…')
+            }
+            disabled={locked}
+            rows={2}
+            className="max-h-40 min-w-0 flex-1 resize-none bg-transparent pt-0.5 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
           {busy ? (
@@ -423,7 +475,7 @@ export function Composer({
               size="icon"
               className="h-7 w-7 rounded-lg"
               onClick={handleSend}
-              disabled={!text.trim() && images.length === 0}
+              disabled={!text.trim() && !skill && images.length === 0}
             >
               <ArrowUp className="h-4 w-4" />
             </Button>

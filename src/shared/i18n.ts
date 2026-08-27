@@ -144,6 +144,7 @@ export const zhTranslations: Record<string, string> = {
   Save: '保存',
   // Skills & MCP
   Skills: '技能',
+  Skill: '技能',
   'Skills registered by reference; files stay in their original location':
     '以引用方式登记,文件仍留在原应用目录',
   'No skills yet': '暂无技能',
