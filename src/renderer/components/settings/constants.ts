@@ -1,3 +1,4 @@
+import type { ModelApiKind } from '@shared/types';
 import type { FontWeight } from '@/stores/settings';
 
 export type SettingsCategory =
@@ -10,6 +11,15 @@ export type SettingsCategory =
   | 'presets'
   | 'agents'
   | 'tools';
+
+/** API 协议取值 → 设置页展示名；列表徽章与编辑弹窗共用。 */
+export const API_KIND_LABELS: Record<ModelApiKind, string> = {
+  'openai-completions': 'OpenAI Completions',
+  'openai-responses': 'OpenAI Responses',
+  'anthropic-messages': 'Anthropic',
+  'google-generative-ai': 'Gemini',
+  ollama: 'Ollama',
+};
 
 export const fontWeightOptions: { value: FontWeight; label: string }[] = [
   { value: 'normal', label: 'Normal' },

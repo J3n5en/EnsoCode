@@ -36,6 +36,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
+import { API_KIND_LABELS } from './constants';
 
 interface ProviderEditDialogProps {
   /** 'new' 表示手动新建 */
@@ -187,14 +188,18 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
             <>
               <Field>
                 <FieldLabel>{t('API Type')}</FieldLabel>
-                <Select value={api} onValueChange={(v) => setApi(v as ModelProvider['api'])}>
+                <Select
+                  items={API_KIND_LABELS}
+                  value={api}
+                  onValueChange={(v) => setApi(v as ModelProvider['api'])}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                     {MODEL_API_KINDS.map((kind) => (
                       <SelectItem key={kind} value={kind}>
-                        {kind}
+                        {API_KIND_LABELS[kind]}
                       </SelectItem>
                     ))}
                   </SelectPopup>
@@ -382,14 +387,21 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
               </Button>
             )}
             {!isOauth && models.length > 0 && (
-              <Select value={testModel} onValueChange={(v) => setTestModel(v ?? '')}>
+              <Select
+                items={models.map((model) => ({
+                  value: model.id,
+                  label: model.label ?? model.id,
+                }))}
+                value={testModel}
+                onValueChange={(v) => setTestModel(v ?? '')}
+              >
                 <SelectTrigger className="h-8 w-36">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                   {models.map((model) => (
                     <SelectItem key={model.id} value={model.id}>
-                      {model.id}
+                      {model.label ?? model.id}
                     </SelectItem>
                   ))}
                 </SelectPopup>
