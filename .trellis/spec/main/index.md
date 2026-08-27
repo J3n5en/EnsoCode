@@ -12,12 +12,13 @@ src/main/
     index.ts            registerIpcHandlers() 统一注册
     settings.ts         settings.json 读写（含缓存与防抖）
     window.ts           窗口控制
-    providers.ts        模型服务扫描 / 拉取模型 / 连通性测试
+    providers.ts        模型服务扫描 / 拉取模型 / 连通性测试 / OAuth 订阅登录
     assets.ts           技能 / MCP / 指令文件扫描与内容读写
   services/             纯逻辑，不碰 ipcMain
     providerScan/       locations.ts + readers.ts + index.ts
     assetScan/          skills / mcp / instructions / ccSwitch + index.ts
     providerApi.ts      按协议分派的模型 API 调用
+    oauthProviders.ts   pi 内置 provider 的 OAuth 登录/退出（Main 侧独立 runtime，与 agent worker 共享 auth.json）
     instructionStore.ts 指令文件本地副本存储
   windows/
     createAppWindow.ts  通用无边框窗口工厂
