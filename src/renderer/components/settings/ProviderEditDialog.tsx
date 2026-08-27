@@ -38,7 +38,8 @@ import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 
 interface ProviderEditDialogProps {
-  provider: ModelProvider | null;
+  /** 'new' 表示手动新建 */
+  provider: ModelProvider | 'new' | null;
   onClose: () => void;
 }
 
@@ -47,6 +48,8 @@ const isEnabled = (model: ModelEntry) => model.enabled !== false;
 export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProps) {
   const { t } = useI18n();
   const updateProvider = useSettingsStore((state) => state.updateProvider);
+  const addProviders = useSettingsStore((state) => state.addProviders);
+  const creating = provider === 'new';
 
   const [name, setName] = React.useState('');
   const [api, setApi] = React.useState<ModelProvider['api']>('openai-completions');
@@ -61,18 +64,18 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   React.useEffect(() => {
-    if (provider) {
-      setName(provider.name);
-      setApi(provider.api);
-      setApiKey(provider.apiKey);
-      setBaseUrl(provider.baseUrl);
-      setModels(provider.models);
-      setNewModel('');
-      setFilter('');
-      setTestModel(provider.models.find(isEnabled)?.id ?? provider.models[0]?.id ?? '');
-      setShowKey(false);
-      setStatus(null);
-    }
+    if (!provider) return;
+    const base = provider === 'new' ? null : provider;
+    setName(base?.name ?? '');
+    setApi(base?.api ?? 'openai-completions');
+    setApiKey(base?.apiKey ?? '');
+    setBaseUrl(base?.baseUrl ?? '');
+    setModels(base?.models ?? []);
+    setNewModel('');
+    setFilter('');
+    setTestModel(base ? (base.models.find(isEnabled)?.id ?? base.models[0]?.id ?? '') : '');
+    setShowKey(false);
+    setStatus(null);
   }, [provider]);
 
   const apiConfig = () => ({ api, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() });
@@ -148,13 +151,18 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
 
   const handleSave = () => {
     if (!provider || !name.trim()) return;
-    updateProvider(provider.id, {
+    const data = {
       name: name.trim(),
       api,
       apiKey: apiKey.trim(),
       baseUrl: baseUrl.trim(),
       models,
-    });
+    };
+    if (creating) {
+      addProviders([{ ...data, id: crypto.randomUUID(), enabled: true }]);
+    } else {
+      updateProvider(provider.id, data);
+    }
     onClose();
   };
 
@@ -162,7 +170,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
     <Dialog open={provider !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('Edit Provider')}</DialogTitle>
+          <DialogTitle>{creating ? t('Add Provider') : t('Edit Provider')}</DialogTitle>
         </DialogHeader>
 
         <DialogPanel className="space-y-4">

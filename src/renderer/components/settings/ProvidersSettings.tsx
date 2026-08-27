@@ -1,5 +1,5 @@
 import type { ModelApiKind, ModelProvider } from '@shared/types';
-import { HardDriveDownload, Pencil, Server, Trash2 } from 'lucide-react';
+import { HardDriveDownload, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ export function ProvidersSettings() {
   const updateProvider = useSettingsStore((state) => state.updateProvider);
   const removeProvider = useSettingsStore((state) => state.removeProvider);
   const [importOpen, setImportOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<ModelProvider | null>(null);
+  const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
 
   return (
     <div className="space-y-6">
@@ -35,10 +35,16 @@ export function ProvidersSettings() {
             {t('Manage model API providers for this app')}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-          <HardDriveDownload className="h-4 w-4 mr-1.5" />
-          {t('Import from local apps')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <HardDriveDownload className="h-4 w-4 mr-1.5" />
+            {t('Import from local apps')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+            <Plus className="h-4 w-4 mr-1.5" />
+            {t('Add provider')}
+          </Button>
+        </div>
       </div>
 
       {providers.length === 0 ? (
@@ -46,7 +52,7 @@ export function ProvidersSettings() {
           <Server className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium">{t('No providers yet')}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t('Import providers from local apps to get started')}
+            {t('Import providers from local apps or add one manually to get started')}
           </p>
         </div>
       ) : (
