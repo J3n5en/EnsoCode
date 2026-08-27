@@ -1,5 +1,3 @@
-import type { ThinkingLevel } from './agent';
-
 /** 模型 API 协议类型，值域对齐 pi sdk 的 Api，便于后续直接接入 */
 export const MODEL_API_KINDS = [
   'openai-completions',
@@ -35,14 +33,6 @@ export interface ModelEntry extends ModelCapabilityOverrides {
   label?: string;
   /** 是否启用（缺省视为启用） */
   enabled?: boolean;
-  /**
-   * 自定义（apiKey）条目的模型级覆盖。缺失 = 跟随：catalog 按 id 命中，否则乐观默认。
-   * 由后续 `resolveBaseModel` 消费；设置 UI 只负责把这些字段写进条目并随 `updateProvider` 落盘。
-   */
-  reasoning?: boolean;
-  thinkingLevel?: ThinkingLevel;
-  contextWindow?: number;
-  maxTokens?: number;
 }
 
 export interface ModelProvider {

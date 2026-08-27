@@ -1,6 +1,12 @@
 import { applyModelOverrides, modelRowBadge } from '@shared/modelEntry';
-import type { ModelEntry, ThinkingLevel } from '@shared/types';
-import { THINKING_LEVELS } from '@shared/types';
+import type {
+  ModelCapabilityOverrides,
+  ModelEntry,
+  ModelMeta,
+  ModelReasoningOverride,
+  ModelThinkingLevelOverride,
+} from '@shared/types';
+import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
 import { ChevronDown, Trash2 } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +26,7 @@ import { Z_INDEX } from '@/lib/z-index';
 
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
 
-const LEVEL_LABEL_KEYS: Record<ThinkingLevel, string> = {
+const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
   low: 'Low',
   medium: 'Med',
   high: 'High',
@@ -31,14 +37,12 @@ const BADGE_LABEL_KEYS = {
   override: 'Overridden',
   catalog: 'Catalog',
   default: 'Default',
-  inherit: 'Inherit',
 } as const;
 
 const BADGE_VARIANTS = {
   override: 'secondary',
   catalog: 'outline',
   default: 'outline',
-  inherit: 'outline',
 } as const;
 
 interface ProviderModelRowProps {
@@ -46,7 +50,7 @@ interface ProviderModelRowProps {
   expanded: boolean;
   /** OAuth 订阅行只读 catalog，不展开、不写覆盖 */
   canOverride: boolean;
-  catalogMatched?: boolean;
+  catalogMeta?: ModelMeta;
   onToggleExpand: () => void;
   onToggleEnabled: () => void;
   onRemove: () => void;
@@ -57,17 +61,17 @@ export function ProviderModelRow({
   model,
   expanded,
   canOverride,
-  catalogMatched,
+  catalogMeta,
   onToggleExpand,
   onToggleEnabled,
   onRemove,
   onChange,
 }: ProviderModelRowProps) {
   const { t } = useI18n();
-  const badge = modelRowBadge(model, catalogMatched);
+  const badge = modelRowBadge(model, catalogMeta);
   const showEditors = canOverride && expanded;
 
-  const patch = (updates: Parameters<typeof applyModelOverrides>[1]) => {
+  const patch = (updates: Partial<ModelCapabilityOverrides>) => {
     onChange(applyModelOverrides(model, updates));
   };
 
@@ -149,12 +153,12 @@ export function ProviderModelRow({
             />
           </OverrideField>
 
-          {model.reasoning === true && (
+          {model.reasoning === 'on' && (
             <OverrideField label={t('Thinking level')}>
               <Select
                 items={[
                   { value: 'inherit', label: t('Inherit') },
-                  ...THINKING_LEVELS.map((level) => ({
+                  ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
                     value: level,
                     label: t(LEVEL_LABEL_KEYS[level]),
                   })),
@@ -162,7 +166,9 @@ export function ProviderModelRow({
                 value={model.thinkingLevel ?? 'inherit'}
                 onValueChange={(value) => {
                   const next =
-                    value && value !== 'inherit' && isThinkingLevel(value) ? value : undefined;
+                    value && value !== 'inherit' && isThinkingLevelOverride(value)
+                      ? value
+                      : undefined;
                   patch({ thinkingLevel: next });
                 }}
               >
@@ -175,7 +181,7 @@ export function ProviderModelRow({
                 </SelectTrigger>
                 <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                   <SelectItem value="inherit">{t('Inherit')}</SelectItem>
-                  {THINKING_LEVELS.map((level) => (
+                  {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
                     <SelectItem key={level} value={level}>
                       {t(LEVEL_LABEL_KEYS[level])}
                     </SelectItem>
@@ -227,17 +233,17 @@ function TriState({
   inheritLabel,
 }: {
   slot: string;
-  value: boolean | undefined;
-  onChange: (next: boolean | undefined) => void;
+  value: ModelReasoningOverride | undefined;
+  onChange: (next: ModelReasoningOverride | undefined) => void;
   onLabel: string;
   offLabel: string;
   inheritLabel: string;
 }) {
   const options = [
-    { key: 'on', value: true, label: onLabel },
-    { key: 'off', value: false, label: offLabel },
-    { key: 'inherit', value: undefined, label: inheritLabel },
-  ] as const;
+    { key: 'on' as const, value: 'on' as const, label: onLabel },
+    { key: 'off' as const, value: 'off' as const, label: offLabel },
+    { key: 'inherit' as const, value: undefined, label: inheritLabel },
+  ];
 
   return (
     <div data-slot={slot} className="flex w-full rounded-md border bg-background p-0.5">
@@ -299,6 +305,6 @@ function InheritNumberInput({
   );
 }
 
-function isThinkingLevel(value: string): value is ThinkingLevel {
-  return (THINKING_LEVELS as readonly string[]).includes(value);
+function isThinkingLevelOverride(value: string): value is ModelThinkingLevelOverride {
+  return (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value);
 }

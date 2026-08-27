@@ -1,5 +1,4 @@
-import { catalogMatchedFromMeta } from '@shared/modelEntry';
-import type { ModelEntry, ModelProvider } from '@shared/types';
+import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import {
   CircleCheck,
@@ -66,8 +65,8 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const [busy, setBusy] = React.useState<'fetch' | 'test' | null>(null);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
-  /** model id → catalog 是否命中。未查到的 id 不进表，徽章走 inherit（跟随）。 */
-  const [catalogMatch, setCatalogMatch] = React.useState<Record<string, boolean>>({});
+  /** model id → queryModelMeta 结果，交给 `resolveCustomModelView` 分层徽章。 */
+  const [catalogMeta, setCatalogMeta] = React.useState<Record<string, ModelMeta>>({});
 
   React.useEffect(() => {
     if (!provider) return;
@@ -83,26 +82,23 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
     setShowKey(false);
     setStatus(null);
     setExpandedId(null);
-    setCatalogMatch({});
+    setCatalogMeta({});
   }, [provider]);
 
   const modelIdKey = models.map((model) => model.id).join('\0');
   React.useEffect(() => {
     if (isOauth || !modelIdKey) return;
     const queryMeta = window.electronAPI.providers.modelMeta;
-    // catalog 未接线或旧 preload 没有 modelMeta：徽章停在 inherit（跟随），不要猜 catalog vs 默认
+    // catalog 未接线或旧 preload 没有 modelMeta：徽章走 resolveCustomModelView(undefined) → default
     if (typeof queryMeta !== 'function') return;
     const modelIds = modelIdKey.split('\0');
     let cancelled = false;
     void queryMeta({ modelIds })
       .then((result) => {
         if (cancelled || !result.ok) return;
-        const next: Record<string, boolean> = {};
-        for (const meta of result.models) {
-          const matched = catalogMatchedFromMeta(meta);
-          if (matched !== undefined) next[meta.modelId] = matched;
-        }
-        setCatalogMatch(next);
+        const next: Record<string, ModelMeta> = {};
+        for (const meta of result.models) next[meta.modelId] = meta;
+        setCatalogMeta(next);
       })
       .catch(() => {
         /* 查询失败不挡覆盖编辑 */
@@ -345,7 +341,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                       model={model}
                       expanded={expandedId === model.id}
                       canOverride={!isOauth}
-                      catalogMatched={catalogMatch[model.id]}
+                      catalogMeta={catalogMeta[model.id]}
                       onToggleExpand={() =>
                         setExpandedId((prev) => (prev === model.id ? null : model.id))
                       }

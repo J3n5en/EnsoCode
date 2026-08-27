@@ -1,21 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyModelOverrides,
-  catalogMatchedFromMeta,
-  hasModelOverrides,
-  modelRowBadge,
-} from './modelEntry';
-import type { ModelEntry } from './types';
+import { applyModelOverrides, hasModelOverrides, modelRowBadge } from './modelEntry';
+import type { ModelEntry, ModelMeta } from './types';
 
 const base: ModelEntry = { id: 'gpt-test', enabled: true };
+
+const catalogMeta: ModelMeta = {
+  modelId: 'gpt-test',
+  source: 'catalog-fallback',
+  reasoning: true,
+  thinkingLevels: ['low', 'medium', 'high', 'max'],
+  contextWindow: 200_000,
+  maxTokens: 64_000,
+};
+
+const unknownMeta: ModelMeta = { modelId: 'gpt-test', source: 'unknown' };
 
 describe('hasModelOverrides', () => {
   it('全缺失不算覆盖', () => {
     expect(hasModelOverrides(base)).toBe(false);
   });
 
-  it('reasoning:false 是显式覆盖，不是跟随', () => {
-    expect(hasModelOverrides({ ...base, reasoning: false })).toBe(true);
+  it("reasoning:'off' 是显式覆盖，不是跟随", () => {
+    expect(hasModelOverrides({ ...base, reasoning: 'off' })).toBe(true);
+  });
+
+  it("不把 'follow' 或非法值当成覆盖", () => {
+    expect(hasModelOverrides({ ...base, reasoning: 'follow' as never })).toBe(false);
+    expect(hasModelOverrides({ ...base, contextWindow: 0 })).toBe(false);
   });
 
   it('任一窗口/档位有值即覆盖', () => {
@@ -25,39 +36,33 @@ describe('hasModelOverrides', () => {
   });
 });
 
-describe('catalogMatchedFromMeta', () => {
-  it('不发明 catalog：没有 meta 就 unknown', () => {
-    expect(catalogMatchedFromMeta(undefined)).toBeUndefined();
-  });
-
-  it('沿用 queryModelMeta 的 source，不另造一份目录', () => {
-    expect(catalogMatchedFromMeta({ source: 'catalog' })).toBe(true);
-    expect(catalogMatchedFromMeta({ source: 'catalog-fallback' })).toBe(true);
-    expect(catalogMatchedFromMeta({ source: 'unknown' })).toBe(false);
-  });
-});
-
 describe('modelRowBadge', () => {
-  it('有覆盖优先 已覆盖', () => {
-    expect(modelRowBadge({ ...base, reasoning: true }, true)).toBe('override');
-    expect(modelRowBadge({ ...base, reasoning: true }, false)).toBe('override');
+  it('有覆盖优先 已覆盖（走 resolveCustomModelView）', () => {
+    expect(modelRowBadge({ ...base, reasoning: 'on' }, catalogMeta)).toBe('override');
+    expect(modelRowBadge({ ...base, reasoning: 'off' }, unknownMeta)).toBe('override');
   });
 
-  it('无覆盖时才区分 catalog / 默认', () => {
-    expect(modelRowBadge(base, true)).toBe('catalog');
-    expect(modelRowBadge(base, false)).toBe('default');
+  it('无覆盖时 catalog-fallback / catalog → catalog', () => {
+    expect(modelRowBadge(base, catalogMeta)).toBe('catalog');
+    expect(
+      modelRowBadge(base, {
+        modelId: 'gpt-test',
+        source: 'catalog',
+        reasoning: true,
+      })
+    ).toBe('catalog');
   });
 
-  it('lookup 未完成时回退跟随，不猜 catalog vs 默认', () => {
-    expect(modelRowBadge(base)).toBe('inherit');
-    expect(modelRowBadge(base, undefined)).toBe('inherit');
+  it('无覆盖且 unknown / 未查 → 默认（不另写 resolver）', () => {
+    expect(modelRowBadge(base, unknownMeta)).toBe('default');
+    expect(modelRowBadge(base)).toBe('default');
   });
 });
 
 describe('applyModelOverrides', () => {
-  it('设值后能清回缺失（跟随），不会留下 null', () => {
-    const set = applyModelOverrides(base, { reasoning: true, contextWindow: 32_000 });
-    expect(set).toMatchObject({ reasoning: true, contextWindow: 32_000 });
+  it("设 'on' 后能清回缺失（跟随），不会留下 follow/null", () => {
+    const set = applyModelOverrides(base, { reasoning: 'on', contextWindow: 32_000 });
+    expect(set).toMatchObject({ reasoning: 'on', contextWindow: 32_000 });
 
     const cleared = applyModelOverrides(set, { reasoning: undefined, contextWindow: undefined });
     expect(cleared).not.toHaveProperty('reasoning');
@@ -66,8 +71,13 @@ describe('applyModelOverrides', () => {
   });
 
   it('未出现在 patch 里的键保持原样', () => {
-    const prev = applyModelOverrides(base, { reasoning: false, maxTokens: 2048 });
+    const prev = applyModelOverrides(base, { reasoning: 'off', maxTokens: 2048 });
     const next = applyModelOverrides(prev, { contextWindow: 8000 });
-    expect(next).toMatchObject({ reasoning: false, maxTokens: 2048, contextWindow: 8000 });
+    expect(next).toMatchObject({ reasoning: 'off', maxTokens: 2048, contextWindow: 8000 });
+  });
+
+  it("不会把 'follow' 写进条目", () => {
+    const next = applyModelOverrides(base, { reasoning: 'follow' as never });
+    expect(next).not.toHaveProperty('reasoning');
   });
 });
