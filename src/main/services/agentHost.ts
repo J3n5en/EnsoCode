@@ -36,8 +36,6 @@ export function startAgentWorker(): void {
       ...process.env,
       // pi 的全局目录与会话目录都收进 userData，不碰用户的 ~/.pi
       ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
-      // pi 扩展（如 pi-cursor）经 getAgentDir() 读凭证，对齐到 enso 的 auth.json 目录
-      PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
     },
   });
   worker = child;

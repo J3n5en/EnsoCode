@@ -19,19 +19,12 @@ let runtimePromise: Promise<ModelRuntimeType> | null = null;
 
 function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
-    const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
-    // pi 扩展（pi-cursor）经 getAgentDir() 读凭证，对齐到 enso auth.json 目录
-    process.env.PI_CODING_AGENT_DIR ??= agentDir;
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
-    const runtime = await ModelRuntime.create({
-      authPath: path.join(agentDir, 'auth.json'),
+    return ModelRuntime.create({
+      authPath: path.join(app.getPath('userData'), 'agent', 'pi-agent', 'auth.json'),
       modelsPath: null,
       refreshOnCreate: false,
     });
-    // 注册 Cursor 订阅 provider（best-effort），使其出现在订阅登录列表
-    const { loadCursorProvider } = await import('../../agent/cursorExtension');
-    await loadCursorProvider(runtime);
-    return runtime;
   })();
   return runtimePromise;
 }

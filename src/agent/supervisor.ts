@@ -42,7 +42,6 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
-import { loadCursorProvider } from './cursorExtension';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
@@ -1244,10 +1243,6 @@ export class SessionSupervisor {
       authPath: path.join(this.options.agentDir, 'auth.json'),
       modelsPath: null,
       refreshOnCreate: false,
-    }).then(async (runtime) => {
-      // 注册 Cursor 订阅 provider（best-effort，失败不影响其它 provider）
-      await loadCursorProvider(runtime);
-      return runtime;
     });
     return this.runtimePromise;
   }
