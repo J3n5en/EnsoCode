@@ -5,6 +5,7 @@ import { visit } from 'unist-util-visit';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
+import { MermaidRenderer } from './MermaidRenderer';
 
 /**
  * 解析代码围栏的 info 串。除了纯语言名（```ts），agent 常输出
@@ -128,13 +129,12 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
           const info = /language-(\S+)/.exec(props?.className?.join(' ') ?? '')?.[1];
           const textNode = codeNode && 'children' in codeNode ? codeNode.children?.[0] : undefined;
           const raw = textNode && 'value' in textNode ? String(textNode.value) : '';
-          return (
-            <CodeBlock
-              code={raw.replace(/\n$/, '')}
-              language={parseFenceLang(info)}
-              streaming={streaming}
-            />
-          );
+          const source = raw.replace(/\n$/, '');
+          const language = parseFenceLang(info);
+          if (language?.toLowerCase() === 'mermaid') {
+            return <MermaidRenderer code={source} streaming={streaming} />;
+          }
+          return <CodeBlock code={source} language={language} streaming={streaming} />;
         },
         table: ({ children, node }) => {
           // 按 mdast position 从原文切出表格 markdown，hover 提供复制
