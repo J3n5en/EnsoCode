@@ -41,12 +41,21 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
 
-  const groups = useMemo(
-    () =>
-      providers
-        .map((provider) => ({
+  const groups = useMemo(() => {
+    // 同厂商的多个订阅账号是多条 provider，名称相同时分组标题无法区分，补序号
+    const total: Record<string, number> = {};
+    for (const provider of providers) total[provider.name] = (total[provider.name] ?? 0) + 1;
+    const seen: Record<string, number> = {};
+    return providers
+      .map((provider) => {
+        let name = provider.name;
+        if ((total[name] ?? 0) > 1) {
+          seen[name] = (seen[name] ?? 0) + 1;
+          name = `${provider.name} #${seen[name]}`;
+        }
+        return {
           id: provider.id,
-          name: provider.name,
+          name,
           models: (provider.models ?? []).filter(
             (model) =>
               model.enabled !== false &&
@@ -54,10 +63,10 @@ export function ModelPicker({
                 model.id.toLowerCase().includes(keyword.toLowerCase()) ||
                 (model.label ?? '').toLowerCase().includes(keyword.toLowerCase()))
           ),
-        }))
-        .filter((group) => group.models.length > 0),
-    [providers, keyword]
-  );
+        };
+      })
+      .filter((group) => group.models.length > 0);
+  }, [providers, keyword]);
 
   const current = providers.find((p) => p.id === providerId)?.models.find((m) => m.id === modelId);
   const levelIndex = Math.max(0, THINKING_LEVELS.indexOf(thinkingLevel));

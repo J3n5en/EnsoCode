@@ -60,8 +60,8 @@ export const zhTranslations: Record<string, string> = {
   'Welcome to EnsoCode': '欢迎使用 EnsoCode',
   'Import your providers and assets from local AI apps to get started. You can skip any step.':
     '从本地 AI 应用导入模型服务与资源即可开始，每一步都可跳过。',
-  'Import model API providers from local AI apps to start chatting':
-    '从本地 AI 应用导入模型 API 服务，即可开始对话',
+  'Sign in with a provider subscription, or import API providers from local AI apps':
+    '使用订阅账号登录，或从本地 AI 应用导入 API 服务',
   'Import skills from Claude Code, Codex or Cursor': '从 Claude Code、Codex 或 Cursor 导入技能',
   'Scan and import': '扫描并导入',
   '{{count}} imported': '已导入 {{count}} 个',
@@ -109,8 +109,8 @@ export const zhTranslations: Record<string, string> = {
   'Sign in with provider subscriptions (SuperGrok, Claude Pro, ChatGPT, etc.)':
     '使用订阅账号登录（SuperGrok、Claude Pro、ChatGPT 等）',
   Subscription: '订阅',
-  'Logged in': '已登录',
-  'Log in': '登录',
+  'Add account': '添加账号',
+  '{{count}} accounts': '{{count}} 个账号',
   'Log out': '退出登录',
   'Starting login...': '正在启动登录…',
   'Complete authorization in your browser': '请在浏览器中完成授权',

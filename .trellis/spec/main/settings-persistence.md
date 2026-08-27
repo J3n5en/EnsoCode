@@ -11,7 +11,7 @@
 {
   "enso-settings": {
     "state": { "theme": "...", "providers": [...], "skills": [...] },
-    "version": 0
+    "version": 1
   }
 }
 ```
@@ -19,6 +19,13 @@
 主进程直接读这个文件做去重比对时，路径是
 `settings['enso-settings'].state.<字段>`（见 `assetScan/index.ts` 的 `existingKeys()`）。
 **改字段名要同步改那里** —— 那里用的是 `unknown` 断言，类型检查抓不到。
+
+`version` 由 `src/renderer/stores/settings/migrate.ts` 的 `SETTINGS_VERSION` 决定。
+**改数据形状时 +1 并在 `migrateSettings` 里加一段**，不要靠读侧兜底：
+`migrate` 只在持久版本落后时跑一次且跑完会回写磁盘，旧字段就此消失；
+放 `onRehydrateStorage` 会变成每次 rehydrate（含多窗口同步广播）都执行且永不回写。
+已有的一段：v0 → v1 把 `ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`
+（订阅多账号方案，见 `src/shared/types/oauthProviders.ts`）。
 
 ## 写入策略
 

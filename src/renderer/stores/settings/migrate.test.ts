@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest';
+import { migrateSettings, SETTINGS_VERSION } from './migrate';
+
+/** v0 持久化数据里订阅条目的形状 */
+const legacyProvider = {
+  id: 'p1',
+  name: 'Anthropic',
+  api: 'anthropic-messages',
+  apiKey: '',
+  baseUrl: '',
+  enabled: true,
+  models: [{ id: 'claude-sonnet-4-5', enabled: true }],
+  oauthProviderId: 'anthropic',
+};
+
+describe('设置持久化 v0 → v1 迁移', () => {
+  it('旧的 oauthProviderId 搬到 oauthAccountKey，值不变（首个账号 key 即裸 providerId）', () => {
+    const migrated = migrateSettings({ providers: [legacyProvider] }, 0) as {
+      providers: Record<string, unknown>[];
+    };
+    expect(migrated.providers[0].oauthAccountKey).toBe('anthropic');
+    expect(migrated.providers[0]).not.toHaveProperty('oauthProviderId');
+  });
+
+  it('订阅条目的其余字段（含模型开关）原样保留，不让用户重登', () => {
+    const migrated = migrateSettings({ providers: [legacyProvider] }, 0) as {
+      providers: Record<string, unknown>[];
+    };
+    expect(migrated.providers[0]).toMatchObject({
+      id: 'p1',
+      name: 'Anthropic',
+      models: [{ id: 'claude-sonnet-4-5', enabled: true }],
+    });
+  });
+
+  it('API key 条目不带 oauth 字段，原对象直接透传', () => {
+    const apiKeyProvider = { id: 'p2', apiKey: 'sk-x', baseUrl: 'https://x.test' };
+    const migrated = migrateSettings({ providers: [apiKeyProvider] }, 0) as {
+      providers: unknown[];
+    };
+    expect(migrated.providers[0]).toEqual(apiKeyProvider);
+  });
+
+  it('已是当前版本时原样返回，不重复搬运', () => {
+    const current = { providers: [{ id: 'p1', oauthAccountKey: 'anthropic#2' }] };
+    expect(migrateSettings(current, SETTINGS_VERSION)).toBe(current);
+  });
+
+  // 持久化文件是用户机器上的真实文件，可能被手改坏或来自更早的残缺版本
+  it('providers 不是数组时不崩，其余键保留', () => {
+    expect(migrateSettings({ providers: null, theme: 'dark' }, 0)).toEqual({
+      providers: null,
+      theme: 'dark',
+    });
+  });
+
+  it('providers 里混入 null / 非对象条目时不崩', () => {
+    const migrated = migrateSettings({ providers: [null, 'x', legacyProvider] }, 0) as {
+      providers: unknown[];
+    };
+    expect(migrated.providers[0]).toBeNull();
+    expect(migrated.providers[1]).toBe('x');
+    expect(migrated.providers[2]).toMatchObject({ oauthAccountKey: 'anthropic' });
+  });
+
+  it('整个持久化状态不是对象时原样返回', () => {
+    expect(migrateSettings(null, 0)).toBeNull();
+    expect(migrateSettings('broken', 0)).toBe('broken');
+  });
+});

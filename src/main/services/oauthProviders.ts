@@ -1,17 +1,39 @@
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ModelRuntime as ModelRuntimeType } from '@earendil-works/pi-coding-agent';
+import {
+  ensureAccountProvider,
+  nextAccountKey,
+  ordinalOfAccountKey,
+  syncAccountProviders,
+} from '@shared/piAccounts';
+import {
+  ANTIGRAVITY_PROVIDER_ID,
+  antigravityProviderConfig,
+  fetchAntigravityUsage,
+  parseAntigravityApiKey,
+  sanitizeUpstreamBody,
+} from '@shared/providers/antigravity';
 import type {
-  OauthAccountInfo,
+  OauthAccount,
+  OauthAccountUsage,
   OauthLoginEvent,
   OauthProviderInfo,
   OauthUsageWindow,
 } from '@shared/types';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS, providerIdOfAccountKey } from '@shared/types';
 import { app, shell, type WebContents } from 'electron';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
 type AuthInteraction = Parameters<ModelRuntimeType['login']>[2];
 type AuthPrompt = Parameters<AuthInteraction['prompt']>[0];
+
+/**
+ * pi 走动态 import（而不是顶层静态引入）：它连带 pi-ai 的全量 provider catalog，
+ * 静态引入会把它挂到 Main 的启动路径上，而这里的功能只在用户打开订阅设置时才需要。
+ * ESM 模块注册表自带缓存，重复 `import()` 同一字面量不会重新解析，不必再包一层 memo。
+ */
+const authPath = (): string => path.join(app.getPath('userData'), 'agent', 'pi-agent', 'auth.json');
 
 // 与 agent worker 共用同一 auth.json（pi CredentialStore 文件锁保证跨进程互斥），
 // 登录/退出在 Main 完成后，worker 侧请求时经 getAuth 直接读到新凭证
@@ -20,42 +42,225 @@ let runtimePromise: Promise<ModelRuntimeType> | null = null;
 function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
-    return ModelRuntime.create({
-      authPath: path.join(app.getPath('userData'), 'agent', 'pi-agent', 'auth.json'),
+    const runtime = await ModelRuntime.create({
+      authPath: authPath(),
       modelsPath: null,
       refreshOnCreate: false,
     });
+    // Antigravity 不在 pi 内置 catalog 里，先注册再对齐账号克隆，
+    // 否则它的第 2+ 个账号找不到可克隆的基础 provider
+    runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+    await syncAccountProviders(runtime);
+    // registerProvider 内部只会跑一次 allowNetwork:false 的 refresh（拿到的是兜底清单）。
+    // 已登录的账号在这里补一次联网拉取，让老用户不必重新登录就能拿到真实模型清单。
+    // 不 await：拉取要走网络，不能把设置页的首次打开阻塞在上面；失败自动留用兜底清单。
+    void refreshProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+    return runtime;
   })();
   return runtimePromise;
+}
+
+/**
+ * 联网重拉某个 provider 的模型清单。
+ *
+ * 为什么必须单独调：`registerProvider` 触发的那次 refresh 是 `allowNetwork: false`，
+ * 于是 `refreshModels` 直接返回兜底清单。而 Antigravity 的模型 id 由后端按档位切分
+ * （见 `@shared/providers/antigravity` 的 wire id 说明），兜底清单只是近似——
+ * 不补这一次联网拉取，用户选到的 id 可能后端并不存在，推理时回 404。
+ *
+ * 拉取失败不抛：清单退化成兜底表仍可用，不该因此让登录或启动失败。
+ */
+async function refreshProviderModels(runtime: ModelRuntimeType, providerId: string): Promise<void> {
+  try {
+    await runtime.refresh({ providers: [providerId], allowNetwork: true });
+  } catch {
+    // 保持兜底清单
+  }
+}
+
+// ---- 账号身份缓存 ----
+
+/** 账号的身份信息；只做展示，缺省即界面不渲染对应字段 */
+interface AccountIdentity {
+  email?: string;
+  plan?: string;
+}
+
+/**
+ * 身份信息存在本应用自己的小文件里，不写进 pi 的 auth.json。
+ *
+ * 为什么：pi 只暴露 `login` / `logout` 两个写入口，`CredentialStore.modify` 是私有的。
+ * 要自己写 auth.json 就得复刻 pi 的 `proper-lockfile` 加锁协议（agent worker 会并发刷新
+ * token），代价与风险都远高于一个旁路缓存文件。这里存的全是可再次拉取的展示信息，
+ * 丢了只是界面少显示一行。
+ */
+const metaPath = (): string => path.join(app.getPath('userData'), 'oauth-accounts.json');
+
+let metaCache: Record<string, AccountIdentity> | null = null;
+
+async function readAccountMeta(): Promise<Record<string, AccountIdentity>> {
+  if (metaCache) return metaCache;
+  try {
+    const parsed = JSON.parse(readFileSync(metaPath(), 'utf8')) as unknown;
+    metaCache =
+      parsed && typeof parsed === 'object' ? (parsed as Record<string, AccountIdentity>) : {};
+  } catch {
+    // 文件不存在或损坏都当空缓存
+    metaCache = {};
+  }
+  return metaCache;
+}
+
+async function writeAccountMeta(
+  mutate: (meta: Record<string, AccountIdentity>) => void
+): Promise<void> {
+  const meta = await readAccountMeta();
+  mutate(meta);
+  try {
+    // 原子写：先写临时文件再重命名，避免崩溃留下半截 JSON
+    const target = metaPath();
+    const tmp = `${target}.tmp`;
+    writeFileSync(tmp, JSON.stringify(meta), { encoding: 'utf8', mode: 0o600 });
+    renameSync(tmp, target);
+  } catch {
+    // 缓存写失败不该影响登录/额度查询本身
+  }
+}
+
+// ---- 账号枚举 ----
+
+/** 解出 JWT payload；非 JWT / 解析失败返回 null */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const obj = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+
+/**
+ * 从**已存凭证本身**（不发网络请求）能读到的身份信息。
+ * 部分厂商的 access token 是 JWT（codex 带 email 与套餐、xai 带数字 tier），
+ * anthropic 的是不透明 token，读不出东西——那部分靠 sidecar 缓存补。
+ */
+function identityFromCredential(providerId: string, access: string): AccountIdentity {
+  const claims = decodeJwtPayload(access);
+  if (!claims) return {};
+  const identity: AccountIdentity = {};
+  if (typeof claims.email === 'string') identity.email = claims.email;
+  if (providerId === 'openai-codex') {
+    const planType = obj(claims['https://api.openai.com/auth']).chatgpt_plan_type;
+    if (typeof planType === 'string') identity.plan = planType;
+  } else if (providerId === 'xai') {
+    const tier = claims.tier;
+    if (typeof tier === 'number' || typeof tier === 'string') identity.plan = `tier ${tier}`;
+  }
+  return identity;
+}
+
+/** auth.json 里属于某基础 provider 的账号 key，按 key 排序 */
+async function accountKeysOf(runtime: ModelRuntimeType): Promise<Map<string, string[]>> {
+  const credentials = await runtime.listCredentials();
+  const byProvider = new Map<string, string[]>();
+  for (const info of credentials) {
+    if (info.type !== 'oauth') continue;
+    const providerId = providerIdOfAccountKey(info.providerId);
+    const keys = byProvider.get(providerId);
+    if (keys) keys.push(info.providerId);
+    else byProvider.set(providerId, [info.providerId]);
+  }
+  // 按序号排而不是字典序：`#10` 字典序会插到 `#2` 前面
+  for (const keys of byProvider.values()) {
+    keys.sort((left, right) => ordinalOfAccountKey(left) - ordinalOfAccountKey(right));
+  }
+  return byProvider;
+}
+
+/**
+ * 该 key 在 auth.json 里确有一条 oauth 凭证吗。
+ * Renderer 传来的 accountKey 会被直接当 auth.json 的键用（logout / getAuth），
+ * 不收窄就等于把「任意键」的读写能力交给渲染层。
+ */
+async function hasStoredAccount(runtime: ModelRuntimeType, accountKey: string): Promise<boolean> {
+  const credentials = await runtime.listCredentials();
+  return credentials.some((info) => info.type === 'oauth' && info.providerId === accountKey);
 }
 
 export async function listOauthProviders(): Promise<OauthProviderInfo[]> {
   const runtime = await getRuntime();
   // 登录态以 auth.json 为准（listCredentials 读文件），兼容外部（pi CLI）写入
-  const credentials = await runtime.listCredentials();
-  const loggedIn = new Set(
-    credentials.filter((info) => info.type === 'oauth').map((info) => info.providerId)
-  );
+  await syncAccountProviders(runtime);
+  const byProvider = await accountKeysOf(runtime);
+  const { readStoredCredential } = await import('@earendil-works/pi-coding-agent');
+  const meta = await readAccountMeta();
+  const file = authPath();
+
+  const toAccount = (providerId: string, key: string): OauthAccount => {
+    // readStoredCredential 是同步无锁读且不发网络请求——列表要快，不能走会触发
+    // token refresh 的 runtime.getAuth
+    const credential = readStoredCredential(key, file);
+    const oauth = credential?.type === 'oauth' ? credential : undefined;
+    // 凭证里自带的 email（Antigravity 登录时写进去的；pi 不拒绝额外字段）优先于 JWT 解码，
+    // sidecar 是网络探测结果最全，覆盖在最后
+    return {
+      key,
+      providerId,
+      ...(oauth ? identityFromCredential(providerId, oauth.access) : {}),
+      ...(typeof oauth?.email === 'string' ? { email: oauth.email } : {}),
+      ...meta[key],
+    };
+  };
+
   return runtime
     .getProviders()
-    .filter((provider) => provider.auth.oauth)
+    .filter((provider) => provider.auth.oauth && !provider.id.includes('#'))
     .map((provider) => ({
       id: provider.id,
       name: provider.auth.oauth?.name || provider.name,
       loginLabel: provider.auth.oauth?.loginLabel,
-      loggedIn: loggedIn.has(provider.id),
+      accounts: (byProvider.get(provider.id) ?? []).map((key) => toAccount(provider.id, key)),
       models: provider.getModels().map((model) => model.id),
     }));
 }
 
+// ---- 登录 / 登出 ----
+
 interface ActiveLogin {
   abort: AbortController;
   pendingPrompts: Map<string, { resolve: (value: string) => void; reject: (err: Error) => void }>;
+  /** 完整 URL 只留在 Main 内存里，Renderer 需要重开时经专用 IPC 请求 */
+  authUrl?: string;
 }
 
 // 同一时刻只允许一个进行中的登录流程
 let activeLogin: ActiveLogin | null = null;
 
+/** Renderer 只需要展示来源，不得拿到 OAuth 查询参数里的 state 等敏感值 */
+function authUrlForRenderer(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 给 `providerId` **新增**一个账号（不覆盖已登录的）。
+ *
+ * 实现要点：pi 把凭证写在传给 `login()` 的那个 id 上（pi-ai `models.js` 里
+ * `credentials.modify(providerId, …)`），而合成 id 只要先 `registerNativeProvider`
+ * 就是 login 认得的合法 provider（实测 `temp/multiaccount-probe/probe3.mjs`，
+ * 5 个内置 oauth provider 全部通过）。所以直接登到目标 key 即可——
+ * 全程不碰已有账号那一格，失败时也没有「原凭证被顶掉」的窗口，
+ * 唯一需要回滚的是白注册的克隆 provider，交给 finally 里的 syncAccountProviders 清掉。
+ */
 export async function startOauthLogin(providerId: string, sender: WebContents): Promise<void> {
   const emit = (event: OauthLoginEvent) => {
     if (!sender.isDestroyed()) sender.send(IPC_CHANNELS.OAUTH_LOGIN_EVENT, event);
@@ -67,11 +272,28 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
 
   const abort = new AbortController();
   const pendingPrompts: ActiveLogin['pendingPrompts'] = new Map();
-  activeLogin = { abort, pendingPrompts };
+  const login: ActiveLogin = { abort, pendingPrompts };
+  activeLogin = login;
+  let runtime: ModelRuntimeType | null = null;
 
   try {
-    const runtime = await getRuntime();
-    await runtime.login(providerId, 'oauth', {
+    runtime = await getRuntime();
+    // providerId 来自 Renderer，必须收窄成 listOauthProviders 暴露的那种「裸基础 id」：
+    // 放合成 id（anthropic#2）进来会让 nextAccountKey 原样返回它，
+    // 随后 login 直接覆盖那个已登录账号的凭证
+    const base = providerId.includes('#') ? undefined : runtime.getProvider(providerId);
+    if (!base?.auth.oauth) {
+      emit({ type: 'error', message: `unknown oauth provider: ${providerId}` });
+      return;
+    }
+    const credentials = await runtime.listCredentials();
+    const accountKey = nextAccountKey(
+      providerId,
+      credentials.map((info) => info.providerId)
+    );
+    ensureAccountProvider(runtime, accountKey);
+
+    await runtime.login(accountKey, 'oauth', {
       signal: abort.signal,
       notify: (event) => {
         switch (event.type) {
@@ -79,10 +301,16 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
             emit({ type: 'info', message: event.message });
             break;
           case 'auth_url':
+            login.authUrl = event.url;
             void shell.openExternal(event.url);
-            emit({ type: 'auth_url', url: event.url, instructions: event.instructions });
+            emit({
+              type: 'auth_url',
+              url: authUrlForRenderer(event.url),
+              instructions: event.instructions,
+            });
             break;
           case 'device_code':
+            login.authUrl = event.verificationUri;
             void shell.openExternal(event.verificationUri);
             emit({
               type: 'device_code',
@@ -122,13 +350,31 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
         });
       },
     });
-    emit({ type: 'done', providerId });
+
+    // 刚登进来时网络是通的，顺手探一次身份存进 sidecar；
+    // 否则同一厂商的两个账号在列表里只能靠 key 区分
+    const identity = await probeIdentity(runtime, accountKey);
+    if (identity.email || identity.plan) {
+      await writeAccountMeta((meta) => {
+        meta[accountKey] = identity;
+      });
+    }
+
+    // pi 在 registerProvider 之后只跑过一次 allowNetwork:false 的 refresh，那一轮拿到的
+    // 是兜底清单。登录成功后必须再拉一次真实清单：Antigravity 后端的模型 id 一律带档位
+    // 后缀（gemini-3.1-pro-high / claude-opus-4-6-thinking / gpt-oss-120b-medium），
+    // 用错 id 推理时后端回 404 Requested entity was not found。
+    await refreshProviderModels(runtime, providerId);
+    emit({ type: 'done', providerId, account: { key: accountKey, providerId, ...identity } });
   } catch (error) {
-    emit({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+    const message = error instanceof Error ? error.message : String(error);
+    emit({ type: 'error', message: sanitizeUpstreamBody(message).slice(0, 300) });
   } finally {
     for (const pending of pendingPrompts.values()) pending.reject(new Error('login finished'));
     pendingPrompts.clear();
     activeLogin = null;
+    // 登录失败/取消时把没拿到凭证的克隆 provider 注销掉，保持注册表与 auth.json 一致
+    if (runtime) await syncAccountProviders(runtime);
   }
 }
 
@@ -143,28 +389,37 @@ export function cancelOauthLogin(): void {
   activeLogin?.abort.abort();
 }
 
-export async function oauthLogout(providerId: string): Promise<void> {
-  const runtime = await getRuntime();
-  await runtime.logout(providerId);
+/** 重新打开当前登录流的完整授权地址；没有活动登录或系统打开失败时安全 no-op */
+export function reopenOauthLogin(): void {
+  const url = activeLogin?.authUrl;
+  if (!url) return;
+  void shell.openExternal(url).catch(() => {});
 }
 
-// ---- 账户信息（额度/身份，端点参照 @mtrojnar/pi-usage，MIT）----
+/**
+ * 登出单个账号。
+ *
+ * 不需要「把 `#n` 账号提升成裸 key」：克隆的基底是 pi **内置 catalog** 里的 provider，
+ * 它与凭证无关，auth.json 全空时依然存在（实测 probe3）。而新账号的 key 由
+ * `nextAccountKey` 递增分配、不回收空位，所以裸 key 空着也不会撞号。
+ */
+export async function oauthLogout(accountKey: string): Promise<void> {
+  const runtime = await getRuntime();
+  // accountKey 来自 Renderer，只接受 auth.json 里真实存在的键：
+  // 任意字符串都能当键传进 pi 的 logout/getAuth，先按已存凭证收窄
+  if (!(await hasStoredAccount(runtime, accountKey))) return;
+  await runtime.logout(accountKey);
+  await syncAccountProviders(runtime);
+  await writeAccountMeta((meta) => {
+    delete meta[accountKey];
+  });
+}
+
+// ---- 额度（端点参照 @mtrojnar/pi-usage，MIT）----
 
 const ACCOUNT_TIMEOUT_MS = 10_000;
 // anthropic 订阅端点要求 Claude Code 客户端标识
 const CLAUDE_CLI_VERSION = '2.1.75';
-
-/** 解出 JWT payload；非 JWT / 解析失败返回 null */
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
 
 async function fetchJson(
   url: string,
@@ -199,21 +454,31 @@ const toEpochMs = (value: unknown): number | undefined => {
 const clampPercent = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
 
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+/** 单个账号的探测结果：身份 + 额度窗口 */
+interface AccountProbe extends AccountIdentity {
+  windows: OauthUsageWindow[];
+}
 
 /** anthropic：/api/oauth/usage 的 five_hour/seven_day（utilization 0-100，resets_at ISO） */
-async function anthropicWindows(token: string): Promise<OauthUsageWindow[]> {
-  const data = await fetchJson('https://api.anthropic.com/api/oauth/usage', {
+async function anthropicProbe(token: string): Promise<AccountProbe> {
+  const probe: AccountProbe = { windows: [] };
+  const headers = {
     Authorization: `Bearer ${token}`,
     'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
     'anthropic-version': '2023-06-01',
     'user-agent': `claude-cli/${CLAUDE_CLI_VERSION}`,
     'x-app': 'cli',
     Accept: 'application/json',
-  });
-  if (!data) return [];
-  const windows: OauthUsageWindow[] = [];
+  };
+  // access token 是不透明串（非 JWT），身份只能问服务端。
+  // /api/oauth/profile 与 /api/oauth/usage 同属 Claude Code 的未公开端点，
+  // 取不到就不显示，不影响主流程
+  const profile = await fetchJson('https://api.anthropic.com/api/oauth/profile', headers);
+  const email = obj(profile?.account).email_address;
+  if (typeof email === 'string') probe.email = email;
+
+  const data = await fetchJson('https://api.anthropic.com/api/oauth/usage', headers);
+  if (!data) return probe;
   for (const [key, label] of [
     ['five_hour', '5h'],
     ['seven_day', '7d'],
@@ -221,23 +486,24 @@ async function anthropicWindows(token: string): Promise<OauthUsageWindow[]> {
     const window = obj(data[key]);
     const usedPercent = clampPercent(window.utilization);
     if (usedPercent === null) continue;
-    windows.push({ label, usedPercent, resetsAt: toEpochMs(window.resets_at) });
+    probe.windows.push({ label, usedPercent, resetsAt: toEpochMs(window.resets_at) });
   }
-  return windows;
+  return probe;
 }
 
 /** codex：backend-api/wham/usage 的 rate_limit 窗口 + plan_type，需 ChatGPT-Account-Id 头 */
-async function codexAccount(
+async function codexProbe(
   token: string,
   claims: Record<string, unknown> | null
-): Promise<Pick<OauthAccountInfo, 'plan' | 'windows'>> {
+): Promise<AccountProbe> {
+  const probe: AccountProbe = { windows: [] };
   const accountId = obj(claims?.['https://api.openai.com/auth']).chatgpt_account_id;
-  if (typeof accountId !== 'string' || !accountId) return { windows: [] };
+  if (typeof accountId !== 'string' || !accountId) return probe;
   const data = await fetchJson('https://chatgpt.com/backend-api/wham/usage', {
     Authorization: `Bearer ${token}`,
     'ChatGPT-Account-Id': accountId,
   });
-  if (!data) return { windows: [] };
+  if (!data) return probe;
 
   const windowLabel = (window: Record<string, unknown>, fallback: string): string => {
     const seconds = window.limit_window_seconds;
@@ -246,7 +512,6 @@ async function codexAccount(
       ? `${Math.round(seconds / 86_400)}d`
       : `${Math.round(seconds / 3600)}h`;
   };
-  const windows: OauthUsageWindow[] = [];
   const rateLimit = obj(data.rate_limit);
   for (const [key, fallback] of [
     ['primary_window', 'primary'],
@@ -255,50 +520,100 @@ async function codexAccount(
     const window = obj(rateLimit[key]);
     const usedPercent = clampPercent(window.used_percent);
     if (usedPercent === null) continue;
-    windows.push({
+    probe.windows.push({
       label: windowLabel(window, fallback),
       usedPercent,
       resetsAt: toEpochMs(window.reset_at),
     });
   }
-  const plan = typeof data.plan_type === 'string' ? data.plan_type : undefined;
-  return { plan, windows };
+  if (typeof data.plan_type === 'string') probe.plan = data.plan_type;
+  return probe;
 }
 
-export async function getOauthAccountInfo(providerId: string): Promise<OauthAccountInfo> {
-  const info: OauthAccountInfo = { windows: [] };
+/** xai：access token 无 email claim，走标准 OIDC userinfo */
+async function xaiProbe(token: string): Promise<AccountProbe> {
+  const probe: AccountProbe = { windows: [] };
+  const userinfo = await fetchJson('https://auth.x.ai/oauth2/userinfo', {
+    Authorization: `Bearer ${token}`,
+  });
+  if (typeof userinfo?.email === 'string') probe.email = userinfo.email;
+  return probe;
+}
+
+/**
+ * antigravity：`getApiKey` 把整条凭证序列化成 JSON 塞在 apiKey 里
+ * （projectId 必须随 access token 一起送到 streamSimple），所以这里要先解开，
+ * **不能把整段 JSON 当 Bearer 去打 Google 的额度接口**。email 也在这条 JSON 里，本地可得。
+ */
+async function antigravityProbe(apiKeyRaw: string): Promise<AccountProbe> {
+  const credentials = parseAntigravityApiKey(apiKeyRaw);
+  const probe: AccountProbe = {
+    windows: [],
+    ...(credentials.email ? { email: credentials.email } : {}),
+  };
+  probe.windows = await fetchAntigravityUsage(credentials.access);
+  return probe;
+}
+
+/** 按基础 provider 分派探测；未接入额度端点的 provider 返回空窗口而不是报错 */
+async function probeAccount(runtime: ModelRuntimeType, accountKey: string): Promise<AccountProbe> {
+  ensureAccountProvider(runtime, accountKey);
+  // getAuth 在 store 锁内自动 refresh，拿到的即该账号的有效 access token
+  const auth = await runtime.getAuth(accountKey);
+  const token = auth?.auth.apiKey;
+  if (!token) throw new Error(`no credential for account: ${accountKey}`);
+
+  const providerId = providerIdOfAccountKey(accountKey);
+  const claims = decodeJwtPayload(token);
+  const fromToken = identityFromCredential(providerId, token);
+  const probe =
+    providerId === 'anthropic'
+      ? await anthropicProbe(token)
+      : providerId === 'openai-codex'
+        ? await codexProbe(token, claims)
+        : providerId === 'xai'
+          ? await xaiProbe(token)
+          : providerId === ANTIGRAVITY_PROVIDER_ID
+            ? await antigravityProbe(token)
+            : { windows: [] as OauthUsageWindow[] };
+  // 网络结果优先，缺的字段用 token 里读到的兜底
+  return { ...fromToken, ...probe };
+}
+
+/** 身份探测：登录成功后写 sidecar 用，额度部分丢弃 */
+async function probeIdentity(
+  runtime: ModelRuntimeType,
+  accountKey: string
+): Promise<AccountIdentity> {
+  try {
+    const { windows: _windows, ...identity } = await probeAccount(runtime, accountKey);
+    return identity;
+  } catch {
+    // best-effort：探不到就不显示
+    return {};
+  }
+}
+
+/** 单个账号的额度详情；拉取失败填 error 而不是抛，界面才能区分「没数据」与「挂了」 */
+export async function getOauthAccountUsage(accountKey: string): Promise<OauthAccountUsage> {
   try {
     const runtime = await getRuntime();
-    // getAuth 在 store 锁内自动 refresh，拿到的即有效 access token
-    const auth = await runtime.getAuth(providerId);
-    const token = auth?.auth.apiKey;
-    if (!token) return info;
-
-    const claims = decodeJwtPayload(token);
-    if (typeof claims?.email === 'string') info.email = claims.email;
-
-    if (providerId === 'anthropic') {
-      info.windows = await anthropicWindows(token);
-    } else if (providerId === 'openai-codex') {
-      const account = await codexAccount(token, claims);
-      info.windows = account.windows;
-      if (account.plan) info.plan = account.plan;
-      // 额度接口不可达时退回 JWT 里的套餐字段
-      if (!info.plan) {
-        const planType = obj(claims?.['https://api.openai.com/auth']).chatgpt_plan_type;
-        if (typeof planType === 'string') info.plan = planType;
-      }
-    } else if (providerId === 'xai') {
-      // access token 无 email claim；走标准 OIDC userinfo。套餐只有数字 tier claim
-      const userinfo = await fetchJson('https://auth.x.ai/oauth2/userinfo', {
-        Authorization: `Bearer ${token}`,
-      });
-      if (typeof userinfo?.email === 'string') info.email = userinfo.email;
-      const tier = claims?.tier;
-      if (typeof tier === 'number' || typeof tier === 'string') info.plan = `tier ${tier}`;
+    // 同 oauthLogout：不收窄的话渲染层能拿任意 auth.json 键去触发 getAuth 与克隆注册
+    if (!(await hasStoredAccount(runtime, accountKey))) {
+      return { key: accountKey, windows: [], error: `unknown account: ${accountKey}` };
     }
-  } catch {
-    // best-effort：任何失败都返回已收集到的部分
+    const { windows, ...identity } = await probeAccount(runtime, accountKey);
+    if (identity.email || identity.plan) {
+      await writeAccountMeta((meta) => {
+        meta[accountKey] = { ...meta[accountKey], ...identity };
+      });
+    }
+    return { key: accountKey, windows };
+  } catch (error) {
+    return {
+      key: accountKey,
+      windows: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
-  return info;
 }

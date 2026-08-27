@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { AgentTypeList } from '../settings/AgentTypesSettings';
 import { LocalAssetImportDialog } from '../settings/LocalAssetImportDialog';
 import { LocalImportDialog } from '../settings/LocalImportDialog';
+import { OauthProvidersDialog } from '../settings/OauthProvidersDialog';
 import { PresetEditDialog } from '../settings/PresetsSettings';
 
 type StepId =
@@ -42,6 +43,7 @@ export function Onboarding() {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [importKind, setImportKind] = React.useState<'skill' | 'mcp' | 'instruction' | null>(null);
   const [providerOpen, setProviderOpen] = React.useState(false);
+  const [oauthOpen, setOauthOpen] = React.useState(false);
   const [presetOpen, setPresetOpen] = React.useState(false);
   const step = STEPS[stepIndex];
 
@@ -51,14 +53,26 @@ export function Onboarding() {
 
   const importStep: Record<
     'provider' | 'skill' | 'mcp' | 'instruction',
-    { icon: React.ElementType; title: string; desc: string; count: number; onImport: () => void }
+    {
+      icon: React.ElementType;
+      title: string;
+      desc: string;
+      count: number;
+      onImport: () => void;
+      importLabel: string;
+      /** 可选的第二入口，目前只有 provider 步骤用：订阅登录与本地导入并列 */
+      secondary?: { label: string; onClick: () => void };
+    }
   > = {
     provider: {
       icon: Server,
       title: t('Model Providers'),
-      desc: t('Import model API providers from local AI apps to start chatting'),
+      desc: t('Sign in with a provider subscription, or import API providers from local AI apps'),
       count: providers.length,
-      onImport: () => setProviderOpen(true),
+      // 订阅已是主要接入方式，占主按钮；本地导入退到次按钮
+      onImport: () => setOauthOpen(true),
+      importLabel: t('Subscription login'),
+      secondary: { label: t('Import from local apps'), onClick: () => setProviderOpen(true) },
     },
     skill: {
       icon: Sparkles,
@@ -66,6 +80,7 @@ export function Onboarding() {
       desc: t('Import skills from Claude Code, Codex or Cursor'),
       count: skills.length,
       onImport: () => setImportKind('skill'),
+      importLabel: t('Scan and import'),
     },
     mcp: {
       icon: Plug,
@@ -73,6 +88,7 @@ export function Onboarding() {
       desc: t('Import MCP servers configured in local AI apps'),
       count: mcpServers.length,
       onImport: () => setImportKind('mcp'),
+      importLabel: t('Scan and import'),
     },
     instruction: {
       icon: Layers,
@@ -80,6 +96,7 @@ export function Onboarding() {
       desc: t('Import global instruction files configured in local AI tools'),
       count: instructions.length,
       onImport: () => setImportKind('instruction'),
+      importLabel: t('Scan and import'),
     },
   };
 
@@ -126,7 +143,6 @@ export function Onboarding() {
           <ImportStepView
             {...importStep[step]}
             importedLabel={t('{{count}} imported', { count: importStep[step].count })}
-            importLabel={t('Scan and import')}
           />
         )}
 
@@ -197,6 +213,7 @@ export function Onboarding() {
 
       {/* 复用现有导入弹窗（受控） */}
       <LocalImportDialog open={providerOpen} onOpenChange={setProviderOpen} />
+      <OauthProvidersDialog open={oauthOpen} onOpenChange={setOauthOpen} />
       {importKind && (
         <LocalAssetImportDialog
           kind={importKind}
@@ -217,6 +234,7 @@ function ImportStepView({
   onImport,
   importedLabel,
   importLabel,
+  secondary,
 }: {
   icon: React.ElementType;
   title: string;
@@ -225,6 +243,7 @@ function ImportStepView({
   onImport: () => void;
   importedLabel: string;
   importLabel: string;
+  secondary?: { label: string; onClick: () => void };
 }) {
   return (
     <div className="flex flex-col items-center gap-3 py-6 text-center">
@@ -233,9 +252,16 @@ function ImportStepView({
       </div>
       <h2 className="text-lg font-semibold">{title}</h2>
       <p className="text-sm text-muted-foreground">{desc}</p>
-      <Button variant="outline" size="sm" onClick={onImport} className="mt-1">
-        {importLabel}
-      </Button>
+      <div className="mt-1 flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onImport}>
+          {importLabel}
+        </Button>
+        {secondary && (
+          <Button variant="ghost" size="sm" onClick={secondary.onClick}>
+            {secondary.label}
+          </Button>
+        )}
+      </div>
       {count > 0 && <p className="text-xs text-primary">{importedLabel}</p>}
     </div>
   );

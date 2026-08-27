@@ -29,11 +29,14 @@ export interface ModelProvider {
   models: ModelEntry[];
   /** 从哪个本地应用导入（手动创建时为空） */
   importedFrom?: string;
-  /** pi 内置 OAuth provider id（如 'xai'）；存在即订阅条目，apiKey/baseUrl 为空 */
-  oauthProviderId?: string;
+  /**
+   * 订阅账号 key（见 `oauthProviders.ts` 的多账号模型）；存在即订阅条目，apiKey/baseUrl 为空。
+   * 同一厂商的多个账号各占一条 ModelProvider，key 分别是 `anthropic`、`anthropic#2`…
+   */
+  oauthAccountKey?: string;
 }
 
-/** provider 是否具备可用凭证（API key 或 OAuth 订阅） */
+/** provider 是否具备可用凭证（API key 或订阅账号） */
 export const hasProviderCredentials = (
-  provider: Pick<ModelProvider, 'apiKey' | 'oauthProviderId'>
-): boolean => Boolean(provider.apiKey || provider.oauthProviderId);
+  provider: Pick<ModelProvider, 'apiKey' | 'oauthAccountKey'>
+): boolean => Boolean(provider.apiKey || provider.oauthAccountKey);

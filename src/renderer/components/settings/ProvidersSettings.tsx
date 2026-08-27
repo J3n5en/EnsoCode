@@ -28,6 +28,29 @@ export function ProvidersSettings() {
   const [oauthOpen, setOauthOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
 
+  /**
+   * 账号 key → 邮箱，只用来让订阅条目的 Badge 区分同厂商的多个账号。
+   * 订阅对话框关闭后重取，登录/登出后 Badge 立即跟上。
+   */
+  const [oauthEmails, setOauthEmails] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (oauthOpen) return;
+    let cancelled = false;
+    void window.electronAPI.providers.listOauth().then((infos) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const info of infos) {
+        for (const account of info.accounts) {
+          if (account.email) next[account.key] = account.email;
+        }
+      }
+      setOauthEmails(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [oauthOpen]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
@@ -78,8 +101,10 @@ export function ProvidersSettings() {
                   {provider.name}
                 </span>
                 <Badge variant="outline" className="shrink-0 text-[11px]">
-                  {provider.oauthProviderId
-                    ? t('Subscription')
+                  {provider.oauthAccountKey
+                    ? [t('Subscription'), oauthEmails[provider.oauthAccountKey]]
+                        .filter(Boolean)
+                        .join(' · ')
                     : (API_LABELS[provider.api] ?? provider.api)}
                 </Badge>
                 {provider.importedFrom && (

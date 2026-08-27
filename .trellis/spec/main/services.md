@@ -19,6 +19,12 @@
 worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared 平级，
 只准 import `@shared` 与 pi sdk），协议类型在 `src/shared/types/agent.ts`。
 
+⚠️ 「只准 import `@shared`」这条约束的一个后果：订阅 provider 的注册在主进程与 worker
+两侧各要做一遍（worker 不注册，选到该 provider 的模型推理起不来），于是这类
+**主进程 + worker 共用、渲染层碰不到**的运行时代码只能放 `src/shared/providers/`——
+那是 shared 层「不碰 `node:*`」的唯一例外，理由与守卫见
+[../shared/index.md](../shared/index.md)。
+
 
 ## 扫描器的三件套结构
 

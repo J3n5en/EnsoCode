@@ -4,7 +4,7 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
-  OauthAccountInfo,
+  OauthAccountUsage,
   OauthLoginEvent,
   OauthProviderInfo,
   ProviderApiConfig,
@@ -56,15 +56,17 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_TEST, config, modelId),
     listOauth: (): Promise<OauthProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
+    /** 总是给该 provider 新增一个账号（不覆盖已登录的） */
     oauthLogin: (providerId: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN, providerId),
     oauthLoginRespond: (requestId: string, value: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, requestId, value),
     oauthLoginCancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_CANCEL),
-    oauthLogout: (providerId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGOUT, providerId),
-    oauthAccountInfo: (providerId: string): Promise<OauthAccountInfo> =>
-      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, providerId),
+    oauthLoginReopen: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_REOPEN),
+    oauthLogout: (accountKey: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGOUT, accountKey),
+    oauthAccountUsage: (accountKey: string): Promise<OauthAccountUsage> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, accountKey),
     onOauthLoginEvent: (callback: (event: OauthLoginEvent) => void): (() => void) => {
       const listener = (_: unknown, event: OauthLoginEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);

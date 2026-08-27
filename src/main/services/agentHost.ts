@@ -87,7 +87,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId: request.modelId,
-    ...(provider.oauthProviderId ? { oauthProviderId: provider.oauthProviderId } : {}),
+    ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
   };
   return sendCommand({
     type: 'spawn',
@@ -186,6 +186,9 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
               baseUrl: provider.baseUrl,
               apiKey: provider.apiKey,
               modelId: entry.modelId,
+              // 订阅条目的凭证在 auth.json 里，不透传这个 key 的话 worker 侧
+              // 会当成「空 apiKey 的自定义 provider」注册，subagent 绑订阅模型直接失效
+              ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
             }
           : undefined;
       return {

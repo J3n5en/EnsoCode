@@ -14,6 +14,8 @@ import {
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
+import { ensureAccountProvider } from '@shared/piAccounts';
+import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import type {
   AgentCommand,
   AgentTypeSpawnConfig,
@@ -1239,11 +1241,26 @@ export class SessionSupervisor {
 
   private getRuntime(): Promise<ModelRuntime> {
     // 共享 ModelRuntime（M0 验证项 2 已实测双会话共享可行）
-    this.runtimePromise ??= ModelRuntime.create({
-      authPath: path.join(this.options.agentDir, 'auth.json'),
-      modelsPath: null,
-      refreshOnCreate: false,
-    });
+    this.runtimePromise ??= (async () => {
+      const runtime = await ModelRuntime.create({
+        authPath: path.join(this.options.agentDir, 'auth.json'),
+        modelsPath: null,
+        refreshOnCreate: false,
+      });
+      // 推理发生在本进程：Antigravity 不在 pi 内置 catalog 里，Main 侧注册过不算，
+      // worker 不注册就会以「未知 provider」流不起来
+      runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+      // registerProvider 只触发一次 allowNetwork:false 的 refresh，拿到的是兜底清单。
+      // 而 Main 侧界面展示的是联网发现出来的真实清单——两边不一致时，用户选中的模型
+      // 在这里 getModel 会 miss 并抛「oauth model not found」。所以本进程也拉一次。
+      // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
+      try {
+        await runtime.refresh({ providers: [ANTIGRAVITY_PROVIDER_ID], allowNetwork: true });
+      } catch {
+        // 拉不到就留用兜底清单，不该让 worker 起不来
+      }
+      return runtime;
+    })();
     return this.runtimePromise;
   }
 }
@@ -1301,10 +1318,13 @@ function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string })
  * apiKey 注册自定义 provider（恒 reasoning:true，档位由 per-session 克隆决定）。
  */
 function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
-  if (model.oauthProviderId) {
-    const oauthModel = runtime.getModel(model.oauthProviderId, model.modelId);
+  if (model.oauthAccountKey) {
+    // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
+    // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到
+    ensureAccountProvider(runtime, model.oauthAccountKey);
+    const oauthModel = runtime.getModel(model.oauthAccountKey, model.modelId);
     if (!oauthModel) {
-      throw new Error(`oauth model not found: ${model.oauthProviderId}/${model.modelId}`);
+      throw new Error(`oauth model not found: ${model.oauthAccountKey}/${model.modelId}`);
     }
     return oauthModel;
   }
