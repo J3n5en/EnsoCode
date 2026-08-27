@@ -13,7 +13,7 @@ interface FileHit {
 interface ComposerProps {
   /** 文件搜索根目录；无项目时禁用 @ */
   cwd?: string;
-  /** 会话可用斜杠命令（spawn 后由 worker 上报） */
+  /** 会话可用斜杠命令 */
   commands: SlashCommand[];
   running: boolean;
   busy: boolean;
@@ -86,14 +86,24 @@ export function Composer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey 是触发信号，text/images 取切换瞬间的旧值
   useEffect(() => {
     const previous = prevFocusKeyRef.current;
+    let nextText = text;
     if (previous !== focusKey) {
       if (previous) drafts.set(previous, { text, images });
       const draft = focusKey ? drafts.get(focusKey) : undefined;
-      setText(draft?.text ?? '');
+      nextText = draft?.text ?? '';
+      setText(nextText);
       setImages(draft?.images ?? []);
       prevFocusKeyRef.current = focusKey;
+      // 斜杠/提及弹层是组件级 state，不随草稿走；不清就会把上一会话的 / 列表带到空输入框
+      setMentionQuery(null);
+      setSlashQuery(null);
+      setActiveIndex(0);
     }
     textareaRef.current?.focus();
+    if (previous !== focusKey) {
+      const restored = nextText;
+      setTimeout(() => detect(restored), 0);
+    }
   }, [focusKey]);
 
   // 回退预填：覆盖当前输入并聚焦；消费即通知来源清除，避免重复注入
@@ -102,7 +112,10 @@ export function Composer({
     if (!injectedDraft) return;
     setText(injectedDraft);
     onDraftConsumed?.();
-    setTimeout(() => textareaRef.current?.focus(), 0);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      detect(injectedDraft);
+    }, 0);
   }, [injectedDraft]);
 
   const slashResults =

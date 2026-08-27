@@ -59,6 +59,27 @@ export function readSkillsRoot(root: string, groupName: string): DiscoveredSkill
   return skills;
 }
 
+/** 项目 cwd 下 agent 会自动发现的 skill（spawn 前斜杠菜单用） */
+export function listProjectSkills(cwd: string): { name: string; description: string }[] {
+  const seen = new Set<string>();
+  const skills: { name: string; description: string }[] = [];
+  for (const root of [path.join(cwd, '.agents', 'skills'), path.join(cwd, '.pi', 'skills')]) {
+    let found: DiscoveredSkill[];
+    try {
+      found = readSkillsRoot(root, '');
+    } catch {
+      continue;
+    }
+    for (const skill of found) {
+      const key = skill.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      skills.push({ name: skill.name, description: skill.description });
+    }
+  }
+  return skills;
+}
+
 interface InstalledPlugins {
   plugins?: Record<string, Array<{ installPath?: string }>>;
 }

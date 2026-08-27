@@ -34,6 +34,7 @@ export const IPC_CHANNELS = {
   // Local skill / MCP scan/import
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
   ASSETS_COLLECT_IMPORT: 'assets:collect-import',
+  ASSETS_LIST_PROJECT_SKILLS: 'assets:list-project-skills',
 
   // Instruction content (copy-on-write)
   INSTRUCTIONS_READ: 'instructions:read',
