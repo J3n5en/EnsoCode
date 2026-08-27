@@ -87,6 +87,7 @@ export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?:
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId: request.modelId,
+    ...(provider.oauthProviderId ? { oauthProviderId: provider.oauthProviderId } : {}),
   };
   return sendCommand({
     type: 'spawn',

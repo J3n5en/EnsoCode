@@ -408,32 +408,9 @@ export class SessionSupervisor {
     if (this.sessions.has(sessionId)) return;
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
-    const providerId = providerKeyFor(model);
     // 注册基础模型恒 reasoning:true（放开全部档位能力）。开关/adaptive 由 per-session
     // 克隆的 applyReasoningToModel 决定，避免同 provider 多会话共享引用而串台或被后开会话覆盖。
-    runtime.registerProvider(providerId, {
-      baseUrl: model.baseUrl,
-      api: model.api,
-      apiKey: model.apiKey,
-      // 统一伪装为 enso-code 客户端（覆盖 pi 默认的 "pi (darwin ...)"）
-      headers: { 'User-Agent': ENSO_USER_AGENT },
-      models: [
-        {
-          id: model.modelId,
-          name: model.modelId,
-          reasoning: true,
-          // max 档需显式声明，否则被钳到 high
-          thinkingLevelMap: { max: 'max' },
-          input: ['text', 'image'],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: MODEL_CONTEXT_WINDOW,
-          // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
-          maxTokens: 32_000,
-        },
-      ],
-    });
-    const baseModel = runtime.getModel(providerId, model.modelId);
-    if (!baseModel) throw new Error(`model not found after register: ${model.modelId}`);
+    const baseModel = resolveBaseModel(runtime, model);
     // per-session 独立副本：set-reasoning 就地改它，不污染其它会话
     const piModel = applyReasoningToModel(
       { ...baseModel, compat: baseModel.compat ? { ...baseModel.compat } : undefined },
@@ -553,37 +530,15 @@ export class SessionSupervisor {
         resumeFile: childResume,
         extraTools = [],
       }) => {
-        // 类型绑定模型：注册其 provider 并取克隆副本；缺省跟随父会话模型
+        // 类型绑定模型：解析并取克隆副本；缺省跟随父会话模型
         let subModel = { ...piModel, compat: piModel.compat ? { ...piModel.compat } : undefined };
         if (agentType?.model) {
-          const typeModel = agentType.model;
-          const typeProviderId = providerKeyFor(typeModel);
-          runtime.registerProvider(typeProviderId, {
-            baseUrl: typeModel.baseUrl,
-            api: typeModel.api,
-            apiKey: typeModel.apiKey,
-            headers: { 'User-Agent': ENSO_USER_AGENT },
-            models: [
-              {
-                id: typeModel.modelId,
-                name: typeModel.modelId,
-                reasoning: true,
-                thinkingLevelMap: { max: 'max' },
-                input: ['text', 'image'],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                contextWindow: MODEL_CONTEXT_WINDOW,
-                maxTokens: 32_000,
-              },
-            ],
-          });
-          const base = runtime.getModel(typeProviderId, typeModel.modelId);
-          if (base) {
-            subModel = applyReasoningToModel(
-              { ...base, compat: base.compat ? { ...base.compat } : undefined },
-              reasoningEnabled,
-              typeModel.modelId
-            );
-          }
+          const base = resolveBaseModel(runtime, agentType.model);
+          subModel = applyReasoningToModel(
+            { ...base, compat: base.compat ? { ...base.compat } : undefined },
+            reasoningEnabled,
+            agentType.model.modelId
+          );
         }
         // 工具集：readonly 仅 read（内置 grep/find/ls 保留）；MCP/skill 按类型精选注入
         // （general 无类型时跟随父会话＝全量）,默认不带保持子代理精简
@@ -1337,6 +1292,46 @@ const toErrorMessage = (error: unknown): string =>
 function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string }): string {
   const keyFp = createHash('sha256').update(model.apiKey).digest('hex').slice(0, 8);
   return `enso-${model.api}-${model.baseUrl}-${keyFp}`;
+}
+
+/**
+ * 解析 spawn 模型：oauth 直取 pi 内置 catalog（凭证由 runtime 从共享 auth.json 解析，
+ * 不注册自定义 provider、不覆盖 UA——订阅端点保持 pi 原生标识）；
+ * apiKey 注册自定义 provider（恒 reasoning:true，档位由 per-session 克隆决定）。
+ */
+function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
+  if (model.oauthProviderId) {
+    const oauthModel = runtime.getModel(model.oauthProviderId, model.modelId);
+    if (!oauthModel) {
+      throw new Error(`oauth model not found: ${model.oauthProviderId}/${model.modelId}`);
+    }
+    return oauthModel;
+  }
+  const providerId = providerKeyFor(model);
+  runtime.registerProvider(providerId, {
+    baseUrl: model.baseUrl,
+    api: model.api,
+    apiKey: model.apiKey,
+    // 统一伪装为 enso-code 客户端（覆盖 pi 默认的 "pi (darwin ...)"）
+    headers: { 'User-Agent': ENSO_USER_AGENT },
+    models: [
+      {
+        id: model.modelId,
+        name: model.modelId,
+        reasoning: true,
+        // max 档需显式声明，否则被钳到 high
+        thinkingLevelMap: { max: 'max' },
+        input: ['text', 'image'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: MODEL_CONTEXT_WINDOW,
+        // 太小会把 high/max 的思考预算压扁（预算被限制在 maxTokens-1024 内）
+        maxTokens: 32_000,
+      },
+    ],
+  });
+  const registered = runtime.getModel(providerId, model.modelId);
+  if (!registered) throw new Error(`model not found after register: ${model.modelId}`);
+  return registered;
 }
 
 /** 统一的客户端标识，替换 pi 默认发出的 "pi (darwin ...; arm64)" */
