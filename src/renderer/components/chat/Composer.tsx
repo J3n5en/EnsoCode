@@ -1,9 +1,10 @@
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
-import { ArrowUp, CircleStop, FileText, SlashSquare, Sparkles, X } from 'lucide-react';
+import { ArrowUp, CircleStop, FileText, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface FileHit {
   relativePath: string;
@@ -53,15 +54,8 @@ function findSlashStart(text: string, cursor: number): number | null {
   return null;
 }
 
-/** 把句首 /skill:name 拆成胶囊 + 其余正文（pi 只认整段以此开头） */
-function splitSkillCommand(text: string): { skill: string | null; rest: string } {
-  const match = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/.exec(text);
-  if (!match) return { skill: null, rest: text };
-  return { skill: match[1], rest: match[2] ?? '' };
-}
-
 /** 各会话未发送的输入草稿（切会话时暂存/恢复;仅内存,不持久化） */
-const drafts = new Map<string, { text: string; images: AttachedImage[]; skill: string | null }>();
+const drafts = new Map<string, { text: string; images: AttachedImage[]; slash: string | null }>();
 
 export function Composer({
   cwd,
@@ -79,7 +73,7 @@ export function Composer({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
-  const [skill, setSkill] = useState<string | null>(null);
+  const [slash, setSlash] = useState<string | null>(null);
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -96,12 +90,12 @@ export function Composer({
     const previous = prevFocusKeyRef.current;
     let nextText = text;
     if (previous !== focusKey) {
-      if (previous) drafts.set(previous, { text, images, skill });
+      if (previous) drafts.set(previous, { text, images, slash });
       const draft = focusKey ? drafts.get(focusKey) : undefined;
       nextText = draft?.text ?? '';
       setText(nextText);
       setImages(draft?.images ?? []);
-      setSkill(draft?.skill ?? null);
+      setSlash(draft?.slash ?? null);
       prevFocusKeyRef.current = focusKey;
       // 斜杠/提及弹层是组件级 state，不随草稿走；不清就会把上一会话的 / 列表带到空输入框
       setMentionQuery(null);
@@ -119,8 +113,8 @@ export function Composer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: injectedDraft 是触发信号
   useEffect(() => {
     if (!injectedDraft) return;
-    const parsed = splitSkillCommand(injectedDraft);
-    setSkill(parsed.skill);
+    const parsed = splitSlashCommand(injectedDraft);
+    setSlash(parsed.slash);
     setText(parsed.rest);
     onDraftConsumed?.();
     setTimeout(() => {
@@ -217,13 +211,8 @@ export function Composer({
       if (popup.kind === 'mention') {
         replaceToken('@', `@${popup.items[index].relativePath} `);
       } else {
-        const name = popup.items[index].name;
-        if (name.startsWith('/skill:')) {
-          replaceToken('/', '');
-          setSkill(name.slice('/skill:'.length));
-        } else {
-          replaceToken('/', `${name} `);
-        }
+        replaceToken('/', '');
+        setSlash(popup.items[index].name);
       }
     },
     [popup, replaceToken]
@@ -231,11 +220,11 @@ export function Composer({
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content && !skill && images.length === 0) return;
-    const payload = skill ? (content ? `/skill:${skill} ${content}` : `/skill:${skill}`) : content;
+    if (!content && !slash && images.length === 0) return;
+    const payload = slash ? (content ? `${slash} ${content}` : slash) : content;
     setText('');
     setImages([]);
-    setSkill(null);
+    setSlash(null);
     setMentionQuery(null);
     setSlashQuery(null);
     onSend(payload, images);
@@ -320,9 +309,9 @@ export function Composer({
         return;
       }
     }
-    if (e.key === 'Backspace' && skill && text.length === 0) {
+    if (e.key === 'Backspace' && slash && text.length === 0) {
       e.preventDefault();
-      setSkill(null);
+      setSlash(null);
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -421,24 +410,21 @@ export function Composer({
             images.length > 0 ? 'pt-1.5' : 'pt-3'
           )}
         >
-          {skill && (
-            <span
-              className={cn(
-                'mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium',
-                'bg-info/15 text-info'
-              )}
-            >
-              <Sparkles className="h-3 w-3" />
-              {skill}
-              <button
-                type="button"
-                onClick={() => setSkill(null)}
-                className="rounded-sm text-info/70 hover:text-info"
-                aria-label={t('Remove')}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
+          {slash && (
+            <SlashChip
+              name={slash}
+              className="mt-0.5 shrink-0"
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => setSlash(null)}
+                  className="rounded-sm opacity-70 hover:opacity-100"
+                  aria-label={t('Remove')}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              }
+            />
           )}
           <textarea
             ref={textareaRef}
@@ -451,7 +437,7 @@ export function Composer({
             onPaste={handlePaste}
             onCompositionEnd={(e) => detect((e.target as HTMLTextAreaElement).value)}
             placeholder={
-              skill
+              slash
                 ? ''
                 : locked
                   ? t('Resolve the pending approval to continue')
@@ -475,7 +461,7 @@ export function Composer({
               size="icon"
               className="h-7 w-7 rounded-lg"
               onClick={handleSend}
-              disabled={!text.trim() && !skill && images.length === 0}
+              disabled={!text.trim() && !slash && images.length === 0}
             >
               <ArrowUp className="h-4 w-4" />
             </Button>

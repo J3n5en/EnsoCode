@@ -16,7 +16,7 @@ import {
   TerminalSquare,
   Undo2,
 } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +35,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { ReadFileView } from './ReadFileView';
+import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
 
@@ -126,12 +127,7 @@ function SkillTag({ name, content }: { name: string; content: string }) {
   const { t } = useI18n();
   return (
     <Dialog>
-      <DialogTrigger
-        className={cn(
-          'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-xs font-medium',
-          'bg-info/15 text-info hover:bg-info/25'
-        )}
-      >
+      <DialogTrigger className={slashChipClass('skill', true)}>
         <Sparkles className="h-3 w-3" />
         {name}
       </DialogTrigger>
@@ -149,23 +145,44 @@ function SkillTag({ name, content }: { name: string; content: string }) {
   );
 }
 
+function ChipBubble({
+  chip,
+  extra,
+}: {
+  chip: ReactNode;
+  extra?: string;
+}) {
+  return (
+    <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
+      {chip}
+      {extra ? <span className="ml-1.5 align-middle whitespace-pre-wrap">{extra}</span> : null}
+    </div>
+  );
+}
+
 function SkillInvocation({ text }: { text: string }) {
   const match = SKILL_BLOCK.exec(text);
   if (!match) return null;
   const [, name, , content, userMessage] = match;
-  const extra = userMessage?.trim();
   return (
-    <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
-      <SkillTag name={name} content={content} />
-      {extra ? <span className="ml-1.5 align-middle whitespace-pre-wrap">{extra}</span> : null}
-    </div>
+    <ChipBubble
+      chip={<SkillTag name={name} content={content} />}
+      extra={userMessage?.trim()}
+    />
   );
+}
+
+function SlashInvocation({ text }: { text: string }) {
+  const parsed = splitSlashCommand(text);
+  if (!parsed.slash) return null;
+  return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
 }
 
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({ text }: { text: string }) {
   const { t } = useI18n();
   if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
+  if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const block = SYNTHETIC_BLOCK.exec(text);
   if (block) {
     return (
