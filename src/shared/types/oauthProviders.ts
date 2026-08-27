@@ -1,5 +1,3 @@
-import type { ModelApiKind } from './llm';
-
 /** pi 内置 OAuth provider 的展示信息（Main 汇总，Renderer 只读） */
 export interface OauthProviderInfo {
   id: string;
@@ -7,7 +5,8 @@ export interface OauthProviderInfo {
   /** 登录入口文案，如 "Sign in with SuperGrok or X Premium" */
   loginLabel?: string;
   loggedIn: boolean;
-  models: { id: string; api: ModelApiKind }[];
+  /** 内置 catalog 模型 id */
+  models: string[];
 }
 
 /** 登录流程中需要用户输入的 prompt（Main → Renderer，经 respond 回传） */

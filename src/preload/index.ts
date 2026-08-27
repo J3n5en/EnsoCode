@@ -4,6 +4,8 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
+  OauthLoginEvent,
+  OauthProviderInfo,
   ProviderApiConfig,
   TestProviderResult,
 } from '@shared/types';
@@ -51,6 +53,20 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_LIST_MODELS, config),
     test: (config: ProviderApiConfig, modelId?: string): Promise<TestProviderResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_TEST, config, modelId),
+    listOauth: (): Promise<OauthProviderInfo[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
+    oauthLogin: (providerId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN, providerId),
+    oauthLoginRespond: (requestId: string, value: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, requestId, value),
+    oauthLoginCancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_CANCEL),
+    oauthLogout: (providerId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGOUT, providerId),
+    onOauthLoginEvent: (callback: (event: OauthLoginEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: OauthLoginEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);
+    },
   },
 
   assets: {
