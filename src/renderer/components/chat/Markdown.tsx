@@ -2,6 +2,7 @@ import type { Root } from 'mdast';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
@@ -61,6 +62,7 @@ const FILE_PATH_RE =
 
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
 export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  const { t } = useI18n();
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkGithubAlerts]}
@@ -89,7 +91,7 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
             return (
               <blockquote className={cn('my-1.5 border-l-2 pl-3', alert.border)}>
                 <p className={cn('mt-1.5 mb-0.5 text-xs font-semibold', alert.text)}>
-                  {alert.label}
+                  {t(alert.label)}
                 </p>
                 {children}
               </blockquote>

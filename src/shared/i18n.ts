@@ -225,6 +225,23 @@ export const zhTranslations: Record<string, string> = {
   'Built-in tools': '内置工具',
   'Toggle the built-in tools available to agents. All enabled by default.':
     '开关 agent 可用的内置工具,默认全部启用。',
+  'One-shot subagent: delegate a self-contained task and return a final report (parallel or async)':
+    '一次性子代理:委派自包含子任务,返回最终报告(可并行、可异步)',
+  'Persistent subagent: hire for multi-turn dialogue; you can watch and intervene from a tab':
+    '持久子代理:雇佣后多轮对话,用户可在 tab 旁观介入',
+  'Task list: track progress on multi-step work': '任务清单:跟踪多步骤工作的进度',
+  'Ask the user a question and wait for an answer (options / timeout)':
+    '向用户提问并等待回答(带选项/超时)',
+  'Background shell task: run long commands in the background and notify on completion':
+    '后台 shell 任务:长命令挂后台跑,完成时通知',
+  '(log unavailable)': '(日志不可用)',
+  'Loading…': '加载中…',
+  '(no log available)': '(暂无日志)',
+  Note: '注意',
+  Tip: '提示',
+  Important: '重要',
+  Warning: '警告',
+  Caution: '小心',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',

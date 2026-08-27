@@ -465,6 +465,7 @@ function ThinkingRow({
 
 /** 后台任务完成事件：分隔线嵌字；点击展开详情与完整日志 */
 function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note' }> }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [log, setLog] = useState<string | null>(null);
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
@@ -474,9 +475,9 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   useEffect(() => {
     if (!expanded || !logPath || log !== null) return;
     void window.electronAPI.files.read(logPath).then((content) => {
-      setLog(content ?? '(log unavailable)');
+      setLog(content ?? t('(log unavailable)'));
     });
-  }, [expanded, logPath, log]);
+  }, [expanded, logPath, log, t]);
 
   return (
     <div>
@@ -500,7 +501,7 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
             {item.detail}
           </pre>
           <pre className="max-h-64 overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-            {logPath ? (log ?? 'Loading…') : '(no log available)'}
+            {logPath ? (log ?? t('Loading…')) : t('(no log available)')}
           </pre>
         </div>
       )}

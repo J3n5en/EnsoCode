@@ -24,7 +24,7 @@ export function BuiltinToolsSettings() {
             <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">{tool.name}</p>
-              <p className="text-muted-foreground text-xs">{tool.description}</p>
+              <p className="text-muted-foreground text-xs">{t(tool.description)}</p>
             </div>
             <Switch
               checked={!disabled.includes(tool.id)}
