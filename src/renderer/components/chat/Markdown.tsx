@@ -2,6 +2,7 @@ import type { Root } from 'mdast';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
@@ -47,9 +48,14 @@ function remarkGithubAlerts() {
       text.value = text.value.slice(match[0].length);
       // 标记后正文为空时去掉空 text 节点
       if (!text.value) first.children.shift();
+      const kind = match[1].toLowerCase();
       node.data = {
         ...node.data,
-        hProperties: { ...node.data?.hProperties, 'data-alert': match[1].toLowerCase() },
+        hProperties: {
+          ...node.data?.hProperties,
+          'data-alert': kind,
+          dataAlert: kind,
+        },
       };
     });
   };
@@ -61,6 +67,7 @@ const FILE_PATH_RE =
 
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
 export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  const { t } = useI18n();
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkGithubAlerts]}
@@ -84,12 +91,14 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
         h2: ({ children }) => <h2 className="mt-3 mb-1.5 text-base font-semibold">{children}</h2>,
         h3: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold">{children}</h3>,
         blockquote: ({ children, node }) => {
-          const alert = ALERT_STYLES[String(node?.properties?.dataAlert ?? '')];
+          const props = node?.properties as Record<string, unknown> | undefined;
+          const kind = String(props?.dataAlert ?? props?.['data-alert'] ?? '');
+          const alert = ALERT_STYLES[kind];
           if (alert) {
             return (
               <blockquote className={cn('my-1.5 border-l-2 pl-3', alert.border)}>
                 <p className={cn('mt-1.5 mb-0.5 text-xs font-semibold', alert.text)}>
-                  {alert.label}
+                  {t(alert.label)}
                 </p>
                 {children}
               </blockquote>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
+import { BUILTIN_TOOLS } from './types/builtinTools';
 
 /** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
 const MAPPED_I18N_KEYS = [
@@ -107,5 +108,27 @@ describe('translate', () => {
 
   it('数字参数正确转成字符串', () => {
     expect(translate('zh', 'Connected ({{ms}}ms)', { ms: 128 })).toBe('连接成功(128ms)');
+  });
+});
+
+describe('模块级常量的 i18n key（#5）', () => {
+  const alertLabels = ['Note', 'Tip', 'Important', 'Warning', 'Caution'] as const;
+  const taskNoteKeys = ['(log unavailable)', 'Loading…', '(no log available)'] as const;
+
+  it('内置工具说明存英文 key，中文表有对应译文', () => {
+    for (const tool of BUILTIN_TOOLS) {
+      expect(tool.description).not.toMatch(/[\u4e00-\u9fff]/);
+      expect(zhTranslations[tool.description]).toBeDefined();
+      expect(translate('en', tool.description)).toBe(tool.description);
+      expect(translate('zh', tool.description)).not.toBe(tool.description);
+    }
+  });
+
+  it('GitHub alert 标题与 task-note 占位文案两边 locale 都能解析', () => {
+    for (const key of [...alertLabels, ...taskNoteKeys]) {
+      expect(translate('en', key)).toBe(key);
+      expect(zhTranslations[key]).toBeDefined();
+      expect(translate('zh', key)).toBe(zhTranslations[key]);
+    }
   });
 });
