@@ -29,6 +29,8 @@ export interface OauthProviderInfo {
   name: string;
   /** 登录入口文案，如 "Sign in with SuperGrok or X Premium" */
   loginLabel?: string;
+  /** 是否允许同一厂商同时登录多个账号 */
+  supportsMultipleAccounts: boolean;
   /** 已登录账号；空数组即未登录。⚠️ 不要用布尔判断登录态 */
   accounts: OauthAccount[];
   /** 内置 catalog 模型 id */

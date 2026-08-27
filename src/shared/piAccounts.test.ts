@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountProviderRuntime } from './piAccounts';
-import { nextAccountKey, ordinalOfAccountKey, syncAccountProviders } from './piAccounts';
+import {
+  ensureAccountProvider,
+  nextAccountKey,
+  ordinalOfAccountKey,
+  syncAccountProviders,
+} from './piAccounts';
 import { accountKeyFor, providerIdOfAccountKey } from './types/oauthProviders';
 
 describe('账号 key 的生成与反解', () => {
@@ -91,6 +96,26 @@ describe('克隆 provider 的注册表对齐', () => {
     await syncAccountProviders(fake.runtime);
     expect(fake.registered()).toEqual(['anthropic', 'xai', 'anthropic#2']);
     expect(fake.unregistered).toEqual([]);
+  });
+
+  it('不安全的 Cursor 克隆会被清掉，支持多账号的 provider 仍正常注册', async () => {
+    const fake = fakeRuntime({
+      builtins: ['anthropic', 'cursor', 'cursor#2'],
+      credentials: ['anthropic#2', 'cursor#2'],
+    });
+    await syncAccountProviders(fake.runtime);
+    expect(fake.registered()).toEqual(['anthropic', 'cursor', 'anthropic#2']);
+    expect(fake.unregistered).toEqual(['cursor#2']);
+  });
+
+  // worker 不跑 syncAccountProviders，只按需 ensureAccountProvider——闸门漏在这里的话，
+  // settings 里残留的 cursor#2 条目会让 worker 注册出共用裸 cursor token 的克隆
+  it('worker 的按需注册同样拦住 Cursor 克隆，其他 provider 不受影响', () => {
+    const fake = fakeRuntime({ builtins: ['anthropic', 'cursor'], credentials: [] });
+    ensureAccountProvider(fake.runtime, 'cursor#2');
+    expect(fake.registered()).toEqual(['anthropic', 'cursor']);
+    ensureAccountProvider(fake.runtime, 'anthropic#2');
+    expect(fake.registered()).toEqual(['anthropic', 'cursor', 'anthropic#2']);
   });
 
   it('克隆返回的模型 provider 字段是合成 id（否则推理会串到别的账号）', async () => {

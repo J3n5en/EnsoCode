@@ -43,7 +43,7 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createCoworkerTool } from './coworker';
-import { loadCursorProvider } from './cursor/loadProvider';
+import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
 import { createLenientEditTool } from './editTool';
 import { OperationGate } from './gate';
@@ -149,6 +149,33 @@ function createSessionResourceLoader(options: {
     ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
     agentsFilesOverride: sessionAgentsFilesOverride(options.agentDir, options.instruction),
   });
+}
+
+async function refreshWorkerProviderModels(
+  runtime: ModelRuntime,
+  providerId: string
+): Promise<void> {
+  try {
+    await runtime.refresh({ providers: [providerId], allowNetwork: true });
+  } catch {
+    // 拉不到就留用该 provider 的兜底清单，不该让 worker 起不来
+  }
+}
+
+/**
+ * 注册 worker 自己的订阅 provider，并在解析会话模型前补齐联网发现的真实清单。
+ */
+export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<ModelRuntime> {
+  // 推理发生在本进程：Main 侧注册过不算，worker 不注册就会以「未知 provider」流不起来
+  runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
+  await loadCursorProvider(runtime);
+  // registerProvider 只触发 allowNetwork:false 的 refresh，拿到的是兜底清单；Main 侧界面
+  // 展示的却是联网发现结果。必须拆成两次并各自吞错，避免一个 provider 的发现服务异常
+  // 连带另一个拿不到清单；失败方只回退自己的兜底，worker 仍能启动。
+  // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
+  await refreshWorkerProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+  await refreshWorkerProviderModels(runtime, CURSOR_PROVIDER_ID);
+  return runtime;
 }
 
 /** 故障域 A：本进程持有全部活会话。同一会话的命令串行，不同会话并行。 */
@@ -1280,20 +1307,7 @@ export class SessionSupervisor {
         modelsPath: null,
         refreshOnCreate: false,
       });
-      // 推理发生在本进程：Antigravity 不在 pi 内置 catalog 里，Main 侧注册过不算，
-      // worker 不注册就会以「未知 provider」流不起来
-      runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
-      await loadCursorProvider(runtime);
-      // registerProvider 只触发一次 allowNetwork:false 的 refresh，拿到的是兜底清单。
-      // 而 Main 侧界面展示的是联网发现出来的真实清单——两边不一致时，用户选中的模型
-      // 在这里 getModel 会 miss 并抛「oauth model not found」。所以本进程也拉一次。
-      // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
-      try {
-        await runtime.refresh({ providers: [ANTIGRAVITY_PROVIDER_ID], allowNetwork: true });
-      } catch {
-        // 拉不到就留用兜底清单，不该让 worker 起不来
-      }
-      return runtime;
+      return initializeWorkerRuntime(runtime);
     })();
     return this.runtimePromise;
   }
@@ -1371,7 +1385,9 @@ function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
   const catalog = runtime.getModels().find((entry) => entry.id === model.modelId);
   const contextWindow = positiveContextWindow(catalog) ?? 128_000;
   const maxTokens =
-    typeof catalog?.maxTokens === 'number' && Number.isFinite(catalog.maxTokens) && catalog.maxTokens > 0
+    typeof catalog?.maxTokens === 'number' &&
+    Number.isFinite(catalog.maxTokens) &&
+    catalog.maxTokens > 0
       ? Math.floor(catalog.maxTokens)
       : 32_000;
   runtime.registerProvider(providerId, {

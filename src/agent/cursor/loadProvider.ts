@@ -1,6 +1,8 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { installPiCursorExecHook } from './installHook';
 
+export const CURSOR_PROVIDER_ID = 'cursor';
+
 let loaded = false;
 
 /** 幂等注册 Cursor 订阅 provider（OAuth + catalog）。失败不影响其它 provider。 */

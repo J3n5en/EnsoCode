@@ -28,6 +28,22 @@ export type AccountProviderRuntime = Pick<
 /** 只有本应用会造带 `#` 的 provider id，据此可无额外记账地识别克隆 */
 const isAccountClone = (providerId: string): boolean => providerId.includes('#');
 
+/** 模块级持有 token、无法按请求隔离凭证的 provider 只能保留一个账号 */
+export const SINGLE_ACCOUNT_PROVIDER_IDS: Readonly<Record<string, true>> = { cursor: true };
+
+/**
+ * 该 provider 是否支持同一厂商多账号并存。
+ *
+ * Cursor 的 `@rahularya01/pi-cursor` 在 `dist/index.js` 的 `WS()` 闭包中持有模块级
+ * access token，刷新时还固定读取 `readStoredCredential("cursor")`；它不会逐请求消费
+ * `options.apiKey`，所以克隆出的 `<id>#n` 会静默共用另一个账号的订阅与额度。
+ * Antigravity 则在 `src/shared/providers/antigravity.ts:1380-1395` 逐请求解析
+ * `options.apiKey`，因此可以安全隔离多个账号。
+ */
+export function supportsMultipleAccounts(providerId: string): boolean {
+  return SINGLE_ACCOUNT_PROVIDER_IDS[providerIdOfAccountKey(providerId)] !== true;
+}
+
 /**
  * 把账号 key 注册成基础 provider 的克隆。基础 provider 不存在时返回 false。
  *
@@ -56,6 +72,10 @@ export function registerAccountProvider(
 /** 确保该账号 key 可用（裸 key 直接用 pi 内置 provider，无需克隆） */
 export function ensureAccountProvider(runtime: AccountProviderRuntime, accountKey: string): void {
   if (!isAccountClone(accountKey)) return;
+  // 闸门落在这个入口而不只落在 syncAccountProviders：worker 侧按需注册走的是这里，
+  // 不经过全量对齐。少了这道判断，settings 里残留的 cursor#2 条目会让 worker 注册出
+  // 共用裸 cursor token 的克隆，请求与额度静默算到另一个订阅上。
+  if (!supportsMultipleAccounts(accountKey)) return;
   if (runtime.getProvider(accountKey)) return;
   registerAccountProvider(runtime, accountKey);
 }
@@ -66,8 +86,13 @@ export function ensureAccountProvider(runtime: AccountProviderRuntime, accountKe
  */
 export async function syncAccountProviders(runtime: AccountProviderRuntime): Promise<void> {
   const credentials = await runtime.listCredentials();
+  // 外部 pi CLI 仍可能写入 cursor#2；宁可让这条账号不可用，也不能注册一个会静默
+  // 共用裸 cursor token、进而把请求和额度算到另一个订阅上的克隆。此前注册过的克隆
+  // 因不在 wanted 中，会在下面统一注销。
   const wanted = new Set(
-    credentials.map((info) => info.providerId).filter((key) => isAccountClone(key))
+    credentials
+      .map((info) => info.providerId)
+      .filter((key) => isAccountClone(key) && supportsMultipleAccounts(key))
   );
   for (const provider of runtime.getProviders()) {
     if (isAccountClone(provider.id) && !wanted.has(provider.id)) {

@@ -251,7 +251,7 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
                       <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                       {t('Cancel')}
                     </Button>
-                  ) : (
+                  ) : provider.supportsMultipleAccounts || provider.accounts.length === 0 ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -262,7 +262,7 @@ export function OauthProvidersDialog({ open, onOpenChange }: OauthProvidersDialo
                       <Plus className="mr-1.5 h-3.5 w-3.5" />
                       {t('Add account')}
                     </Button>
-                  )}
+                  ) : null}
                 </div>
               </div>
 

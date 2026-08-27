@@ -5,6 +5,7 @@ import {
   ensureAccountProvider,
   nextAccountKey,
   ordinalOfAccountKey,
+  supportsMultipleAccounts,
   syncAccountProviders,
 } from '@shared/piAccounts';
 import {
@@ -49,8 +50,8 @@ function getRuntime(): Promise<ModelRuntimeType> {
       modelsPath: null,
       refreshOnCreate: false,
     });
-    // Antigravity / Cursor 都不在 pi 内置 catalog 里，先注册再对齐账号克隆，
-    // 否则它们的第 2+ 个账号找不到可克隆的基础 provider
+    // Antigravity / Cursor 都不在 pi 内置 catalog 里，先注册基础 provider 再对齐账号克隆；
+    // Cursor 的合成账号会由 syncAccountProviders 按单账号能力显式排除
     runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
     const { loadCursorProvider } = await import('../../agent/cursor/loadProvider');
     await loadCursorProvider(runtime);
@@ -228,6 +229,7 @@ export async function listOauthProviders(): Promise<OauthProviderInfo[]> {
       id: provider.id,
       name: provider.auth.oauth?.name || provider.name,
       loginLabel: provider.auth.oauth?.loginLabel,
+      supportsMultipleAccounts: supportsMultipleAccounts(provider.id),
       accounts: (byProvider.get(provider.id) ?? []).map((key) => toAccount(provider.id, key)),
       models: provider.getModels().map((model) => model.id),
     }));
@@ -256,7 +258,7 @@ function authUrlForRenderer(url: string): string {
 }
 
 /**
- * 给 `providerId` **新增**一个账号（不覆盖已登录的）。
+ * 登录一个账号；支持多账号的 provider 会新增且不覆盖已登录凭证，单账号 provider 已登录时拒绝。
  *
  * 实现要点：pi 把凭证写在传给 `login()` 的那个 id 上（pi-ai `models.js` 里
  * `credentials.modify(providerId, …)`），而合成 id 只要先 `registerNativeProvider`
@@ -295,6 +297,11 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
       providerId,
       credentials.map((info) => info.providerId)
     );
+    // Renderer 只负责隐藏入口；Main 必须独立阻止伪造调用把单账号 provider 登到合成 key。
+    if (accountKey !== providerId && !supportsMultipleAccounts(providerId)) {
+      emit({ type: 'error', message: `${providerId} does not support multiple accounts` });
+      return;
+    }
     ensureAccountProvider(runtime, accountKey);
 
     await runtime.login(accountKey, 'oauth', {

@@ -32,6 +32,12 @@ beforeAll(() => {
     JSON.stringify({
       anthropic: { type: 'oauth', access: 'sk-ant-oat01-one', refresh: 'r1', expires },
       'anthropic#2': { type: 'oauth', access: 'sk-ant-oat01-two', refresh: 'r2', expires },
+      cursor: {
+        type: 'oauth',
+        access: 'cursor-access-token',
+        refresh: 'cursor-refresh-token',
+        expires,
+      },
       'openai-codex': {
         type: 'oauth',
         access: fakeJwt({
@@ -67,6 +73,17 @@ describe('listOauthProviders 的账号枚举', () => {
     const anthropic = providers.find((provider) => provider.id === 'anthropic');
     expect(anthropic?.accounts.map((account) => account.key)).toEqual(['anthropic', 'anthropic#2']);
     expect(anthropic?.accounts.every((account) => account.providerId === 'anthropic')).toBe(true);
+  });
+
+  it('列表明确区分 Cursor 单账号限制与其他 provider 的多账号能力', async () => {
+    const { listOauthProviders } = await import('./oauthProviders');
+    const providers = await listOauthProviders();
+    expect(providers.find((provider) => provider.id === 'cursor')?.supportsMultipleAccounts).toBe(
+      false
+    );
+    expect(
+      providers.find((provider) => provider.id === 'anthropic')?.supportsMultipleAccounts
+    ).toBe(true);
   });
 
   it('access token 是 JWT 时，email 与套餐不发网络请求就能读出来', async () => {
@@ -133,6 +150,19 @@ describe('IPC 入参收窄', () => {
     const providers = await listOauthProviders();
     const anthropic = providers.find((provider) => provider.id === 'anthropic');
     expect(anthropic?.accounts.map((account) => account.key)).toEqual(['anthropic', 'anthropic#2']);
+  });
+
+  it('Cursor 已登录时拒绝再登一个账号，且不覆盖既有凭证', async () => {
+    const { startOauthLogin } = await import('./oauthProviders');
+    const file = path.join(userData, 'agent', 'pi-agent', 'auth.json');
+    const before = JSON.parse(readFileSync(file, 'utf8')).cursor;
+    const { sender, events } = fakeSender();
+    await startOauthLogin('cursor', sender);
+    expect(events).toEqual([
+      { type: 'error', message: 'cursor does not support multiple accounts' },
+    ]);
+    const after = JSON.parse(readFileSync(file, 'utf8')).cursor;
+    expect(after).toEqual(before);
   });
 
   it('登录时传不存在的 provider 被拒', async () => {
