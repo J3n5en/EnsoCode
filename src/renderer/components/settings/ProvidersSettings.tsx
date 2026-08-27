@@ -1,5 +1,5 @@
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
-import type { ModelApiKind, ModelProvider, OauthProviderInfo } from '@shared/types';
+import type { ModelProvider, OauthProviderInfo } from '@shared/types';
 import {
   BadgeCheck,
   HardDriveDownload,
@@ -18,17 +18,10 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { API_KIND_LABELS } from './constants';
 import { LocalImportDialog } from './LocalImportDialog';
 import { OauthProvidersDialog } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
-
-const API_LABELS: Record<ModelApiKind, string> = {
-  'openai-completions': 'OpenAI Completions',
-  'openai-responses': 'OpenAI Responses',
-  'anthropic-messages': 'Anthropic',
-  'google-generative-ai': 'Gemini',
-  ollama: 'Ollama',
-};
 
 export function ProvidersSettings() {
   const { t } = useI18n();
@@ -189,7 +182,7 @@ export function ProvidersSettings() {
                               )
                             ) : (
                               <Badge variant="outline" className="shrink-0 text-[11px]">
-                                {API_LABELS[provider.api] ?? provider.api}
+                                {API_KIND_LABELS[provider.api] ?? provider.api}
                               </Badge>
                             )}
                             {provider.importedFrom && (
