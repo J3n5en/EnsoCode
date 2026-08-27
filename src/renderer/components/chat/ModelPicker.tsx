@@ -22,6 +22,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useModelMeta } from '@/stores/modelMeta';
 import { formatTokens } from '@/stores/sessions/stats';
+import { interceptRootCascadeEscape, markSubmenuOpen } from './modelPickerCascadeEsc';
 
 /** 档位显示文案的 t() key（不是已翻译文本）；沿用既有英文短词，字典里已配好中文译文 */
 const LEVEL_LABEL_KEYS: Record<ThinkingLevel, string> = {
@@ -336,7 +337,9 @@ export function ModelPicker({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const openSubmenuIdsRef = useRef(new Set<string>());
+  const searchFocusedRef = useRef(false);
+  const [hoverLockedIds, setHoverLockedIds] = useState<ReadonlySet<string>>(new Set());
   const [oauthInfos, setOauthInfos] = useState<OauthProviderInfo[]>([]);
   const [metaByProvider, setMetaByProvider] = useState<Record<string, Record<string, ModelMeta>>>(
     {}
@@ -362,13 +365,14 @@ export function ModelPicker({
     };
   }, [open]);
 
-  // 每次打开都清空上次的搜索词，并把焦点交给搜索框（Menu 打开时会把焦点抢到菜单项/弹层本身，
-  // 手动把焦点拉回输入框，配合输入框上的 stopPropagation 让 Menu 的 typeahead 不再吞键盘事件）
+  // 打开时只清搜索词，不把焦点抢进搜索框。级联态焦点必须留在 Menu item 上，Esc 才能逐级退；
+  // 搜索模式（输入框有焦点 / 关键词非空）没有级联，Esc 一次关整棵。
   useEffect(() => {
     if (!open) return;
     setKeyword('');
-    const raf = requestAnimationFrame(() => searchInputRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
+    searchFocusedRef.current = false;
+    openSubmenuIdsRef.current.clear();
+    setHoverLockedIds(new Set());
   }, [open]);
 
   const oauthAccountsByKey = useMemo(() => {
@@ -409,6 +413,13 @@ export function ModelPicker({
   }, []);
 
   const searching = keyword.trim().length > 0;
+  const searchingRef = useRef(searching);
+  searchingRef.current = searching;
+
+  useEffect(() => {
+    if (!searching) return;
+    openSubmenuIdsRef.current.clear();
+  }, [searching]);
 
   const searchHits = useMemo<SearchHit[]>(() => {
     if (!searching) return [];
@@ -481,9 +492,36 @@ export function ModelPicker({
     onThinkingChange,
   ]);
 
+  const handleRootOpenChange = useCallback(
+    (
+      nextOpen: boolean,
+      details: { reason?: string; cancel: () => void; allowPropagation: () => void }
+    ) => {
+      if (
+        interceptRootCascadeEscape(nextOpen, details, {
+          openSubmenuCount: openSubmenuIdsRef.current.size,
+          searchFocused: searchFocusedRef.current || searchingRef.current,
+        })
+      ) {
+        setHoverLockedIds(new Set(openSubmenuIdsRef.current));
+        return;
+      }
+      if (!nextOpen) {
+        openSubmenuIdsRef.current.clear();
+        searchFocusedRef.current = false;
+        setHoverLockedIds(new Set());
+      }
+      setOpen(nextOpen);
+    },
+    []
+  );
+
   return (
-    <Menu open={open} onOpenChange={setOpen}>
-      <MenuTrigger className="flex h-7 max-w-64 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+    <Menu open={open} onOpenChange={handleRootOpenChange}>
+      <MenuTrigger
+        data-model-picker="trigger"
+        className="flex h-7 max-w-64 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
         <span className="truncate">{current?.label ?? modelId ?? t('Model')}</span>
         {reasoningEnabled && (
           <span className="flex shrink-0 items-center gap-0.5 text-primary">
@@ -493,16 +531,22 @@ export function ModelPicker({
         )}
         <ChevronDown className="h-3 w-3 shrink-0" />
       </MenuTrigger>
-      <MenuPopup side="top" align="start" className="w-96">
+      <MenuPopup data-model-picker="root" side="top" align="start" className="w-96">
         {providers.map((provider) => (
           <ModelMetaBridge key={provider.id} provider={provider} onData={handleMetaData} />
         ))}
 
         <div className="-mx-1 -mt-1 mb-1 border-b p-2">
           <input
-            ref={searchInputRef}
+            data-model-picker="search"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
+            onFocus={() => {
+              searchFocusedRef.current = true;
+            }}
+            onBlur={() => {
+              searchFocusedRef.current = false;
+            }}
             onKeyDown={stopTypeaheadOnly}
             placeholder={t('Search models')}
             className="h-8 w-full rounded-md border bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
@@ -543,8 +587,23 @@ export function ModelPicker({
                     const isSubscription =
                       info?.isSubscription ?? Boolean(provider.oauthAccountKey);
                     return (
-                      <MenuSub key={provider.id}>
-                        <MenuSubTrigger>
+                      <MenuSub
+                        key={provider.id}
+                        onOpenChange={(next) => {
+                          markSubmenuOpen(openSubmenuIdsRef.current, provider.id, next);
+                        }}
+                      >
+                        <MenuSubTrigger
+                          openOnHover={!hoverLockedIds.has(provider.id)}
+                          onPointerLeave={() => {
+                            setHoverLockedIds((prev) => {
+                              if (!prev.has(provider.id)) return prev;
+                              const next = new Set(prev);
+                              next.delete(provider.id);
+                              return next;
+                            });
+                          }}
+                        >
                           {isSubscription ? (
                             <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                           ) : (
@@ -570,7 +629,7 @@ export function ModelPicker({
                             </Badge>
                           )}
                         </MenuSubTrigger>
-                        <MenuSubPopup className="w-72">
+                        <MenuSubPopup data-model-picker="submenu" className="w-72">
                           <ProviderSubmenuList
                             provider={provider}
                             meta={metaByProvider[provider.id]}
