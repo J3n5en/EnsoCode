@@ -4,23 +4,25 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   EXTENSION_RUNNER_SPECIFIERS,
-  extractHookHandler,
   filterBeforeAgentStartResult,
   filterContextResult,
-  HASHED_OMP_TRELLIS_EXTENSION,
-  hasInlineConsentGateGuards,
-  hookHasInlineSubagentGuard,
   installExtensionRunnerGuard,
   isTrellisSubAgent,
-  OVERLAY_EXTENSION,
-  stripInlineConsentGateGuards,
-  TEMPLATE_HASHES_PATH,
+  RUNNER_GUARD_INSTALLED,
   TRELLIS_WORKFLOW_STATE_TYPE,
-} from './trellisSubagentGuard';
+} from '../../.omp/extensions/enso-subagent-guard/guard';
+
+const HASHED_OMP_TRELLIS_EXTENSION = '.omp/extensions/trellis/index.ts';
+const OVERLAY_DIR = '.omp/extensions/enso-subagent-guard';
+const OVERLAY_ENTRY = `${OVERLAY_DIR}/index.ts`;
+const OVERLAY_GUARD = `${OVERLAY_DIR}/guard.ts`;
+const TEMPLATE_HASHES_PATH = '.trellis/.template-hashes.json';
+const INLINE_GUARD_RE = /if\s*\(\s*isSubAgent\s*\)\s*return\s*;/;
 
 const repoRoot = path.resolve(import.meta.dirname, '../..');
 const hashedPath = path.join(repoRoot, HASHED_OMP_TRELLIS_EXTENSION);
-const overlayPath = path.join(repoRoot, OVERLAY_EXTENSION);
+const overlayPath = path.join(repoRoot, OVERLAY_ENTRY);
+const overlayGuardPath = path.join(repoRoot, OVERLAY_GUARD);
 const hashesPath = path.join(repoRoot, TEMPLATE_HASHES_PATH);
 
 const workflowState = {
@@ -39,6 +41,58 @@ function restoreHashedTemplate(): string {
     cwd: repoRoot,
     encoding: 'utf8',
   });
+}
+
+function extractHookHandler(source: string, hook: string): string | null {
+  const startRe = new RegExp(String.raw`pi\.on\(\s*["']${hook}["']`);
+  const startMatch = startRe.exec(source);
+  if (!startMatch) return null;
+  const brace = source.indexOf('{', startMatch.index);
+  if (brace < 0) return null;
+  let depth = 0;
+  for (let i = brace; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(brace + 1, i);
+    }
+  }
+  return null;
+}
+
+function hookHasInlineSubagentGuard(source: string, hook: string): boolean {
+  const body = extractHookHandler(source, hook);
+  return body !== null && INLINE_GUARD_RE.test(body);
+}
+
+function hasInlineConsentGateGuards(source: string): boolean {
+  return (
+    hookHasInlineSubagentGuard(source, 'before_agent_start') &&
+    hookHasInlineSubagentGuard(source, 'context')
+  );
+}
+
+/** Simulate `trellis update` restoring the hashed template (drops the two-line patch). */
+function stripInlineConsentGateGuards(source: string): string {
+  let next = source;
+  for (const hook of ['before_agent_start', 'context'] as const) {
+    const body = extractHookHandler(next, hook);
+    if (!body) continue;
+    const stripped = body
+      .replace(/\/\/[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if\s*\(\s*isSubAgent\s*\)\s*return\s*;\s*/g, '')
+      .replace(/if\s*\(\s*isSubAgent\s*\)\s*return\s*;\s*/g, '');
+    next = next.replace(body, stripped);
+  }
+  return next;
+}
+
+function isWorkflowStateLike(message: unknown): boolean {
+  return (
+    message !== null &&
+    typeof message === 'object' &&
+    (message as { customType?: string }).customType === TRELLIS_WORKFLOW_STATE_TYPE
+  );
 }
 
 class FakeRunner {
@@ -142,22 +196,29 @@ describe('installExtensionRunnerGuard', () => {
 describe('hashed template vs repo-owned overlay', () => {
   it('overlay 存在且未写入 template hashes（trellis update 不会覆盖）', () => {
     expect(existsSync(overlayPath)).toBe(true);
+    expect(existsSync(overlayGuardPath)).toBe(true);
     const hashes = JSON.parse(readFileSync(hashesPath, 'utf8')) as {
       hashes: Record<string, string>;
     };
     expect(hashes.hashes[HASHED_OMP_TRELLIS_EXTENSION]).toBeTypeOf('string');
-    expect(hashes.hashes[OVERLAY_EXTENSION]).toBeUndefined();
+    expect(hashes.hashes[OVERLAY_ENTRY]).toBeUndefined();
+    expect(hashes.hashes[OVERLAY_GUARD]).toBeUndefined();
     for (const key of Object.keys(hashes.hashes)) {
       expect(key.includes('enso-subagent-guard')).toBe(false);
     }
   });
 
-  it('overlay 安装 runner 守卫，且不订阅 session_start', () => {
-    const src = readFileSync(overlayPath, 'utf8');
-    expect(src).toContain('installExtensionRunnerGuard');
-    expect(src).toContain('EXTENSION_RUNNER_SPECIFIERS');
-    expect(src).not.toMatch(/pi\.on\(\s*["']session_start["']/);
+  it('overlay 自包含：不从 src/ 取实现，且不订阅 session_start', () => {
+    const entry = readFileSync(overlayPath, 'utf8');
+    const guard = readFileSync(overlayGuardPath, 'utf8');
+    expect(entry).toMatch(/from\s+["']\.\/guard["']/);
+    expect(entry).toContain('installHostExtensionRunnerGuard');
+    expect(entry).not.toMatch(/from\s+["'][^"']*src\//);
+    expect(guard).not.toMatch(/from\s+["'][^"']*src\//);
+    expect(entry).not.toMatch(/pi\.on\(\s*["']session_start["']/);
+    expect(guard).not.toMatch(/pi\.on\(\s*["']session_start["']/);
     expect(EXTENSION_RUNNER_SPECIFIERS).toContain('@oh-my-pi/pi-coding-agent');
+    expect(existsSync(path.join(repoRoot, 'src/tooling/trellisSubagentGuard.ts'))).toBe(false);
   });
 
   it('加载 overlay 后会给宿主 ExtensionRunner 打上守卫（删 overlay 即红）', async () => {
@@ -165,9 +226,7 @@ describe('hashed template vs repo-owned overlay', () => {
     const { ExtensionRunner } = await import('@earendil-works/pi-coding-agent');
     await overlay.default({});
     expect(
-      Object.getOwnPropertySymbols(ExtensionRunner.prototype).includes(
-        Symbol.for('enso.trellisSubagentConsentGate')
-      )
+      Object.getOwnPropertySymbols(ExtensionRunner.prototype).includes(RUNNER_GUARD_INSTALLED)
     ).toBe(true);
   });
 
@@ -209,8 +268,8 @@ describe('hashed template vs repo-owned overlay', () => {
 
   it('去掉 overlay 安装点会让契约测试失败', () => {
     const src = readFileSync(overlayPath, 'utf8');
-    expect(src.includes('installExtensionRunnerGuard')).toBe(true);
-    expect(existsSync(path.join(repoRoot, 'src/tooling/trellisSubagentGuard.ts'))).toBe(true);
+    expect(src.includes('installHostExtensionRunnerGuard')).toBe(true);
+    expect(existsSync(overlayGuardPath)).toBe(true);
   });
 });
 
@@ -268,15 +327,6 @@ describe('host ExtensionRunner after template restore', () => {
     const context = await runner.emitContext([{ role: 'user', content: 'go' }] as never);
     expect(context.some((m) => isWorkflowStateLike(m))).toBe(false);
 
-    // session_start 不在守卫范围：不调用 emitSessionStart 也不断言它被剥掉
     expect(extension.handlers.get('session_start')?.length).toBe(1);
   });
 });
-
-function isWorkflowStateLike(message: unknown): boolean {
-  return (
-    message !== null &&
-    typeof message === 'object' &&
-    (message as { customType?: string }).customType === TRELLIS_WORKFLOW_STATE_TYPE
-  );
-}
