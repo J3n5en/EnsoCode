@@ -138,10 +138,12 @@ export const useSettingsStore = create<SettingsState>()(
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
 
-      // 按 baseUrl+apiKey 指纹去重，返回实际新增数量
+      // 按 baseUrl+apiKey 指纹去重（OAuth 订阅条目按 oauthProviderId），返回实际新增数量
       addProviders: (providers) => {
-        const fingerprint = (p: { baseUrl: string; apiKey: string }) =>
-          `${p.baseUrl.trim().replace(/\/+$/, '')}::${p.apiKey.trim()}`;
+        const fingerprint = (p: { baseUrl: string; apiKey: string; oauthProviderId?: string }) =>
+          p.oauthProviderId
+            ? `oauth::${p.oauthProviderId}`
+            : `${p.baseUrl.trim().replace(/\/+$/, '')}::${p.apiKey.trim()}`;
         const known = new Set(get().providers.map(fingerprint));
         const fresh = providers.filter((provider) => {
           const key = fingerprint(provider);

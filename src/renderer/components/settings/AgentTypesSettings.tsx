@@ -1,4 +1,5 @@
 import type { AgentTypeEntry } from '@shared/types';
+import { hasProviderCredentials } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
 import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
@@ -231,7 +232,7 @@ export function AgentTypeEditDialog({
               >
                 <option value="">{t('Follow conversation')}</option>
                 {providers
-                  .filter((p) => p.enabled && p.apiKey)
+                  .filter((p) => p.enabled && hasProviderCredentials(p))
                   .map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}

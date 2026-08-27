@@ -32,3 +32,8 @@ export interface ModelProvider {
   /** pi 内置 OAuth provider id（如 'xai'）；存在即订阅条目，apiKey/baseUrl 为空 */
   oauthProviderId?: string;
 }
+
+/** provider 是否具备可用凭证（API key 或 OAuth 订阅） */
+export const hasProviderCredentials = (
+  provider: Pick<ModelProvider, 'apiKey' | 'oauthProviderId'>
+): boolean => Boolean(provider.apiKey || provider.oauthProviderId);

@@ -1,3 +1,4 @@
+import { hasProviderCredentials } from '@shared/types';
 import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
@@ -634,11 +635,12 @@ export const useSessionsStore = create<SessionsState>()(
           if (!project) return;
           // 导入的对话没有历史模型记录，退化到第一个可用 provider/model
           const fallbackProvider = settings.providers.find(
-            (p) => p.enabled && p.apiKey && p.models.some((m) => m.enabled !== false)
+            (p) =>
+              p.enabled && hasProviderCredentials(p) && p.models.some((m) => m.enabled !== false)
           );
           // 上次用的 provider 可能已被删除/禁用，校验有效性，失效则回退默认（不报错）
           const lastProvider = settings.providers.find(
-            (p) => p.id === conversation.lastProviderId && p.enabled && p.apiKey
+            (p) => p.id === conversation.lastProviderId && p.enabled && hasProviderCredentials(p)
           );
           const provider = lastProvider ?? fallbackProvider;
           const providerId = provider?.id;

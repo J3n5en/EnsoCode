@@ -50,6 +50,8 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const updateProvider = useSettingsStore((state) => state.updateProvider);
   const addProviders = useSettingsStore((state) => state.addProviders);
   const creating = provider === 'new';
+  /** OAuth 订阅条目：无 key/baseUrl 概念，仅编辑名称与模型开关 */
+  const isOauth = provider !== null && provider !== 'new' && Boolean(provider.oauthProviderId);
 
   const [name, setName] = React.useState('');
   const [api, setApi] = React.useState<ModelProvider['api']>('openai-completions');
@@ -160,6 +162,8 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
     };
     if (creating) {
       addProviders([{ ...data, id: crypto.randomUUID(), enabled: true }]);
+    } else if (isOauth) {
+      updateProvider(provider.id, { name: data.name, models });
     } else {
       updateProvider(provider.id, data);
     }
@@ -179,49 +183,53 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
 
-          <Field>
-            <FieldLabel>{t('API Type')}</FieldLabel>
-            <Select value={api} onValueChange={(v) => setApi(v as ModelProvider['api'])}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                {MODEL_API_KINDS.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {kind}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </Field>
+          {!isOauth && (
+            <>
+              <Field>
+                <FieldLabel>{t('API Type')}</FieldLabel>
+                <Select value={api} onValueChange={(v) => setApi(v as ModelProvider['api'])}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                    {MODEL_API_KINDS.map((kind) => (
+                      <SelectItem key={kind} value={kind}>
+                        {kind}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </Field>
 
-          <Field>
-            <FieldLabel>{t('Base URL')}</FieldLabel>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://..."
-            />
-          </Field>
+              <Field>
+                <FieldLabel>{t('Base URL')}</FieldLabel>
+                <Input
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+              </Field>
 
-          <Field>
-            <FieldLabel>{t('API Key')}</FieldLabel>
-            <div className="relative w-full">
-              <Input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="[&_input]:pr-10"
-              />
-              <button
-                type="button"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowKey(!showKey)}
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </Field>
+              <Field>
+                <FieldLabel>{t('API Key')}</FieldLabel>
+                <div className="relative w-full">
+                  <Input
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    className="[&_input]:pr-10"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowKey(!showKey)}
+                  >
+                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </Field>
+            </>
+          )}
 
           <Field>
             <div className="flex w-full items-center justify-between">
@@ -236,21 +244,23 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                   </span>
                 )}
               </FieldLabel>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 gap-1 px-2 text-xs"
-                disabled={busy !== null}
-                onClick={handleFetchModels}
-              >
-                {busy === 'fetch' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ListPlus className="h-3.5 w-3.5" />
-                )}
-                {busy === 'fetch' ? t('Fetching') : t('Fetch models')}
-              </Button>
+              {!isOauth && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs"
+                  disabled={busy !== null}
+                  onClick={handleFetchModels}
+                >
+                  {busy === 'fetch' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ListPlus className="h-3.5 w-3.5" />
+                  )}
+                  {busy === 'fetch' ? t('Fetching') : t('Fetch models')}
+                </Button>
+              )}
             </div>
 
             {models.length > 0 && (
@@ -355,21 +365,23 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
 
         <DialogFooter className="sm:justify-between">
           <div className="flex min-w-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy !== null}
-              onClick={handleTest}
-            >
-              {busy === 'test' ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Zap className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {busy === 'test' ? t('Testing') : t('Test connection')}
-            </Button>
-            {models.length > 0 && (
+            {!isOauth && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy !== null}
+                onClick={handleTest}
+              >
+                {busy === 'test' ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Zap className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {busy === 'test' ? t('Testing') : t('Test connection')}
+              </Button>
+            )}
+            {!isOauth && models.length > 0 && (
               <Select value={testModel} onValueChange={(v) => setTestModel(v ?? '')}>
                 <SelectTrigger className="h-8 w-36">
                   <SelectValue />

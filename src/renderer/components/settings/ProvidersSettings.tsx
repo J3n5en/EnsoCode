@@ -1,5 +1,5 @@
 import type { ModelApiKind, ModelProvider } from '@shared/types';
-import { HardDriveDownload, Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import { BadgeCheck, HardDriveDownload, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { LocalImportDialog } from './LocalImportDialog';
+import { OauthProvidersDialog } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 
 const API_LABELS: Record<ModelApiKind, string> = {
@@ -24,6 +25,7 @@ export function ProvidersSettings() {
   const updateProvider = useSettingsStore((state) => state.updateProvider);
   const removeProvider = useSettingsStore((state) => state.removeProvider);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [oauthOpen, setOauthOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
 
   return (
@@ -39,6 +41,10 @@ export function ProvidersSettings() {
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <HardDriveDownload className="h-4 w-4 mr-1.5" />
             {t('Import from local apps')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setOauthOpen(true)}>
+            <BadgeCheck className="h-4 w-4 mr-1.5" />
+            {t('Subscription login')}
           </Button>
           <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
             <Plus className="h-4 w-4 mr-1.5" />
@@ -72,7 +78,9 @@ export function ProvidersSettings() {
                   {provider.name}
                 </span>
                 <Badge variant="outline" className="shrink-0 text-[11px]">
-                  {API_LABELS[provider.api] ?? provider.api}
+                  {provider.oauthProviderId
+                    ? t('Subscription')
+                    : (API_LABELS[provider.api] ?? provider.api)}
                 </Badge>
                 {provider.importedFrom && (
                   <Badge variant="secondary" className="shrink-0 text-[11px]">
@@ -118,6 +126,7 @@ export function ProvidersSettings() {
       )}
 
       <LocalImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <OauthProvidersDialog open={oauthOpen} onOpenChange={setOauthOpen} />
       <ProviderEditDialog provider={editing} onClose={() => setEditing(null)} />
     </div>
   );

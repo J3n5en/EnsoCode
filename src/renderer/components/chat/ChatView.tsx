@@ -1,3 +1,4 @@
+import { hasProviderCredentials } from '@shared/types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -33,7 +34,7 @@ export function ChatView() {
   });
 
   const enabledProviders = useMemo(
-    () => providers.filter((provider) => provider.enabled && provider.apiKey),
+    () => providers.filter((provider) => provider.enabled && hasProviderCredentials(provider)),
     [providers]
   );
   // 模型选择读写会话记忆（lastProviderId/lastModelId,持久化）,重启/切会话不丢
