@@ -19,13 +19,17 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 
 interface InstructionEditDialogProps {
-  instruction: InstructionEntry | null;
+  /** 'new' 表示手动新建 */
+  instruction: InstructionEntry | 'new' | null;
   onClose: () => void;
 }
 
 export function InstructionEditDialog({ instruction, onClose }: InstructionEditDialogProps) {
   const { t } = useI18n();
+  const addInstructions = useSettingsStore((state) => state.addInstructions);
   const updateInstruction = useSettingsStore((state) => state.updateInstruction);
+  const creating = instruction === 'new';
+  const entry = creating || !instruction ? null : instruction;
 
   const [name, setName] = React.useState('');
   const [content, setContent] = React.useState('');
@@ -38,6 +42,15 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
 
   React.useEffect(() => {
     if (!instruction) return;
+    if (instruction === 'new') {
+      setName('');
+      setContent('');
+      setDirty(false);
+      setError(null);
+      setWriteToSource(false);
+      setLoading(false);
+      return;
+    }
     setName(instruction.name);
     setDirty(false);
     setError(null);
@@ -56,17 +69,50 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
       .finally(() => setLoading(false));
   }, [instruction, t]);
 
-  const linked = Boolean(instruction && !instruction.local && instruction.sourcePath);
+  const linked = Boolean(entry && !entry.local && entry.sourcePath);
 
   const handleSave = async () => {
     if (!instruction || !name.trim()) return;
     setSaving(true);
 
-    if (linked && writeToSource && instruction.sourcePath) {
+    if (creating) {
+      const id = crypto.randomUUID();
+      const result = await window.electronAPI.instructions.write(id, content);
+      if (!result.ok) {
+        setSaving(false);
+        setError(t('Failed to save'));
+        return;
+      }
+      const added = addInstructions([
+        {
+          id,
+          name: name.trim(),
+          source: 'Manual',
+          local: true,
+          bytes: result.bytes,
+          enabled: true,
+        },
+      ]);
+      setSaving(false);
+      if (added === 0) {
+        void window.electronAPI.instructions.delete(id);
+        setError(t('An instruction with this name already exists'));
+        return;
+      }
+      onClose();
+      return;
+    }
+
+    if (!entry) {
+      setSaving(false);
+      return;
+    }
+
+    if (linked && writeToSource && entry.sourcePath) {
       // 直接写回源应用的原文件，条目保持链接态
       const result = await window.electronAPI.instructions.writeSource(
-        instruction.id,
-        instruction.sourcePath,
+        entry.id,
+        entry.sourcePath,
         content
       );
       setSaving(false);
@@ -74,19 +120,19 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
         setError(result.error ?? t('Failed to save'));
         return;
       }
-      updateInstruction(instruction.id, { name: name.trim(), bytes: result.bytes });
+      updateInstruction(entry.id, { name: name.trim(), bytes: result.bytes });
       onClose();
       return;
     }
 
     // 复制为本地副本：首次保存即完成 copy-on-write
-    const result = await window.electronAPI.instructions.write(instruction.id, content);
+    const result = await window.electronAPI.instructions.write(entry.id, content);
     setSaving(false);
     if (!result.ok) {
       setError(t('Failed to save'));
       return;
     }
-    updateInstruction(instruction.id, {
+    updateInstruction(entry.id, {
       name: name.trim(),
       local: true,
       bytes: result.bytes,
@@ -98,11 +144,11 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
     <Dialog open={instruction !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t('Edit Instruction')}</DialogTitle>
+          <DialogTitle>{creating ? t('Add Instruction') : t('Edit Instruction')}</DialogTitle>
         </DialogHeader>
 
         <DialogPanel className="space-y-4">
-          {linked ? (
+          {creating ? null : linked ? (
             <div
               className={cn(
                 'w-full rounded-md border px-3 py-2.5 transition-colors',
@@ -125,12 +171,12 @@ export function InstructionEditDialog({ instruction, onClose }: InstructionEditD
               <p className="mt-1.5 pl-5.5 text-muted-foreground text-xs leading-relaxed">
                 {writeToSource
                   ? t('Saving overwrites {{path}} directly — {{source}} will pick up the change.', {
-                      path: instruction?.sourcePath ?? '',
-                      source: instruction?.source ?? '',
+                      path: entry?.sourcePath ?? '',
+                      source: entry?.source ?? '',
                     })
                   : t(
                       'Saving creates a local copy — {{path}} is left untouched, and this entry stops following its updates.',
-                      { path: instruction?.sourcePath ?? '' }
+                      { path: entry?.sourcePath ?? '' }
                     )}
               </p>
             </div>

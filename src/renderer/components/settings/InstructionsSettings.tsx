@@ -1,5 +1,5 @@
 import type { InstructionEntry } from '@shared/types';
-import { FileText, HardDriveDownload, Link2, Pencil, Trash2 } from 'lucide-react';
+import { FileText, HardDriveDownload, Link2, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,7 @@ export function InstructionsSettings() {
   const updateInstruction = useSettingsStore((state) => state.updateInstruction);
   const removeInstruction = useSettingsStore((state) => state.removeInstruction);
   const [importOpen, setImportOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<InstructionEntry | null>(null);
+  const [editing, setEditing] = React.useState<InstructionEntry | 'new' | null>(null);
 
   return (
     <div className="space-y-6">
@@ -33,10 +33,16 @@ export function InstructionsSettings() {
             {t('Only one file is active at a time; enabling one disables the others')}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-          <HardDriveDownload className="mr-1.5 h-4 w-4" />
-          {t('Import from local apps')}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <HardDriveDownload className="mr-1.5 h-4 w-4" />
+            {t('Import from local apps')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            {t('Add instruction')}
+          </Button>
+        </div>
       </div>
 
       {instructions.length === 0 ? (
@@ -44,7 +50,7 @@ export function InstructionsSettings() {
           <FileText className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 font-medium text-sm">{t('No instruction files yet')}</p>
           <p className="mt-1 text-muted-foreground text-xs">
-            {t('Import global instruction files configured in local AI tools')}
+            {t('Import instruction files from local apps or add one manually to get started')}
           </p>
         </div>
       ) : (
