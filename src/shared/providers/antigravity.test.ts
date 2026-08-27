@@ -1,3 +1,4 @@
+import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
 import { describe, expect, it } from 'vitest';
 import {
   ANTIGRAVITY_FALLBACK_MODELS,
@@ -325,6 +326,26 @@ describe('parseUsageWindows', () => {
     expect(windows).toEqual([
       { label: 'Google Daily', usedPercent: 100, resetsAt: Date.parse('2026-01-01T06:00:00Z') },
     ]);
+  });
+
+  it('厂商 windowLabel 超长时按共享上限截断', () => {
+    const windows = parseUsageWindows(
+      {
+        models: {
+          a: {
+            quotaInfo: {
+              remainingFraction: 0.5,
+              resetTime: '2026-01-01T06:00:00Z',
+              windowLabel: 'X'.repeat(200),
+            },
+          },
+        },
+      },
+      now
+    );
+    expect(windows).toHaveLength(1);
+    expect(windows[0]?.label).toHaveLength(OAUTH_LABEL_MAX_LENGTH);
+    expect(windows[0]?.label).toBe('X'.repeat(OAUTH_LABEL_MAX_LENGTH));
   });
 
   it.each([

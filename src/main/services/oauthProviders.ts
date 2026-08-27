@@ -22,7 +22,7 @@ import type {
   OauthProviderInfo,
   OauthUsageWindow,
 } from '@shared/types';
-import { IPC_CHANNELS, providerIdOfAccountKey } from '@shared/types';
+import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
 import { app, shell, type WebContents } from 'electron';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
@@ -201,12 +201,18 @@ function identityFromCredential(providerId: string, access: string): AccountIden
   if (typeof claims.email === 'string') identity.email = claims.email;
   if (providerId === 'openai-codex') {
     const planType = obj(claims['https://api.openai.com/auth']).chatgpt_plan_type;
-    if (typeof planType === 'string') identity.plan = planType;
+    if (typeof planType === 'string') assignPlan(identity, planType);
   } else if (providerId === 'xai') {
     const tier = claims.tier;
-    if (typeof tier === 'number' || typeof tier === 'string') identity.plan = `tier ${tier}`;
+    if (typeof tier === 'number' || typeof tier === 'string') assignPlan(identity, `tier ${tier}`);
   }
   return identity;
+}
+
+/** 空串视为没有档位，避免控制字符被洗掉后还留下一个空白 plan */
+function assignPlan(identity: AccountIdentity, raw: string): void {
+  const plan = sanitizeOauthLabel(raw);
+  if (plan) identity.plan = plan;
 }
 
 /** auth.json 里属于某基础 provider 的账号 key，按 key 排序 */
@@ -590,7 +596,7 @@ async function codexProbe(
       resetsAt: toEpochMs(window.reset_at),
     });
   }
-  if (typeof data.plan_type === 'string') probe.plan = data.plan_type;
+  if (typeof data.plan_type === 'string') assignPlan(probe, data.plan_type);
   return probe;
 }
 
@@ -809,7 +815,21 @@ async function probeAccount(runtime: ModelRuntimeType, accountKey: string): Prom
               ? await antigravityProbe(token)
               : { windows: [] as OauthUsageWindow[] };
   // 网络结果优先，缺的字段用 token 里读到的兜底
-  return { ...fromToken, ...probe };
+  return sanitizeAccountProbe({ ...fromToken, ...probe });
+}
+
+/** 所有探测出口过同一道限长，避免某个厂商忘了在赋值处调用 sanitizeOauthLabel */
+function sanitizeAccountProbe(probe: AccountProbe): AccountProbe {
+  const { plan: rawPlan, windows, ...rest } = probe;
+  const plan = rawPlan !== undefined ? sanitizeOauthLabel(rawPlan) : '';
+  return {
+    ...rest,
+    ...(plan ? { plan } : {}),
+    windows: windows.map((window) => ({
+      ...window,
+      label: sanitizeOauthLabel(window.label),
+    })),
+  };
 }
 
 /** 身份探测：登录成功后写 sidecar 用，额度部分丢弃 */
