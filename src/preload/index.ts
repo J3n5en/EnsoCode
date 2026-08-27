@@ -4,6 +4,7 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
+  OauthAccountInfo,
   OauthLoginEvent,
   OauthProviderInfo,
   ProviderApiConfig,
@@ -62,6 +63,8 @@ const electronAPI = {
     oauthLoginCancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_CANCEL),
     oauthLogout: (providerId: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGOUT, providerId),
+    oauthAccountInfo: (providerId: string): Promise<OauthAccountInfo> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, providerId),
     onOauthLoginEvent: (callback: (event: OauthLoginEvent) => void): (() => void) => {
       const listener = (_: unknown, event: OauthLoginEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);

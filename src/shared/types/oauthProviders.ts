@@ -9,6 +9,22 @@ export interface OauthProviderInfo {
   models: string[];
 }
 
+/** 订阅额度窗口（如 Claude 5h/7d、Codex primary/secondary） */
+export interface OauthUsageWindow {
+  label: string;
+  /** 已用百分比 0-100 */
+  usedPercent: number;
+  /** 重置时间 epoch ms */
+  resetsAt?: number;
+}
+
+/** 已登录账户信息（best-effort，取不到的字段缺省） */
+export interface OauthAccountInfo {
+  email?: string;
+  plan?: string;
+  windows: OauthUsageWindow[];
+}
+
 /** 登录流程中需要用户输入的 prompt（Main → Renderer，经 respond 回传） */
 export interface OauthLoginPrompt {
   requestId: string;

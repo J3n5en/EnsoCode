@@ -29,6 +29,7 @@ export const IPC_CHANNELS = {
   OAUTH_LOGIN_CANCEL: 'oauth-providers:login-cancel',
   OAUTH_LOGOUT: 'oauth-providers:logout',
   OAUTH_LOGIN_EVENT: 'oauth-providers:login-event',
+  OAUTH_ACCOUNT_INFO: 'oauth-providers:account-info',
 
   // Local skill / MCP scan/import
   ASSETS_SCAN_LOCAL: 'assets:scan-local',

@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
 import {
   cancelOauthLogin,
+  getOauthAccountInfo,
   listOauthProviders,
   oauthLogout,
   respondOauthPrompt,
@@ -67,5 +68,10 @@ export function registerProviderHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.OAUTH_LOGOUT, (_event, providerId: unknown) => {
     if (typeof providerId !== 'string') return;
     return oauthLogout(providerId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, (_event, providerId: unknown) => {
+    if (typeof providerId !== 'string') return { windows: [] };
+    return getOauthAccountInfo(providerId);
   });
 }
