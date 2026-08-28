@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "pnpm --filter @enso/phone build && wrangler dev",
+    "release": "pnpm --filter @enso/phone build && wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
