@@ -113,7 +113,21 @@ const ALWAYS_FORWARD = new Set([
 ]);
 
 /** 仅当前订阅会话才转发的事件（大帧：消息投影） */
-const SESSION_SCOPED = new Set(['message-upsert', 'snapshot-message']);
+const SESSION_SCOPED = new Set(['message-upsert']);
+
+/**
+ * snapshot 是批量事件（{ sessions: SessionSnapshot[] }，本身无 sessionId），
+ * 需裁成只含订阅会话，避免把全部会话正文推给手机。返回 null 表示不转发。
+ */
+export function narrowSnapshot(
+  event: { type: string; sessions?: { sessionId: string }[] },
+  subscribedId: string | null
+): { type: 'snapshot'; sessions: { sessionId: string }[] } | null {
+  if (!Array.isArray(event.sessions)) return null;
+  if (!subscribedId) return null;
+  const sessions = event.sessions.filter((s) => s.sessionId === subscribedId);
+  return sessions.length > 0 ? { type: 'snapshot', sessions } : null;
+}
 
 /**
  * 按订阅过滤下行，避免把全部会话的 message-upsert 都推给手机。
@@ -125,6 +139,8 @@ export function shouldForward(
   sinceIndex?: number
 ): boolean {
   if (ALWAYS_FORWARD.has(event.type)) return true;
+  // snapshot 由 narrowSnapshot 单独裁剪后转发，不走这里
+  if (event.type === 'snapshot') return false;
   if (SESSION_SCOPED.has(event.type)) {
     if (!subscribedId || event.sessionId !== subscribedId) return false;
     // 增量续传：手机已有的旧消息不重发

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { checkSpawn, parsePhoneCommand, type SpawnWhitelist, shouldForward } from './pairPolicy';
+import {
+  checkSpawn,
+  narrowSnapshot,
+  parsePhoneCommand,
+  type SpawnWhitelist,
+  shouldForward,
+} from './pairPolicy';
 
 describe('手机命令白名单', () => {
   it('放行 prompt/steer/abort/审批/ask/snapshot/subscribe', () => {
@@ -109,5 +115,29 @@ describe('下行过滤', () => {
     expect(shouldForward(ev(5), 'a', 3)).toBe(true);
     expect(shouldForward(ev(3), 'a', 3)).toBe(false);
     expect(shouldForward(ev(1), 'a', 3)).toBe(false);
+  });
+});
+
+describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
+  const event = {
+    type: 'snapshot',
+    sessions: [{ sessionId: 'a' }, { sessionId: 'b' }, { sessionId: 'c' }],
+  };
+
+  it('只保留订阅会话，不把全部会话正文推给手机', () => {
+    const out = narrowSnapshot(event, 'b');
+    expect(out?.sessions).toEqual([{ sessionId: 'b' }]);
+  });
+
+  it('未订阅任何会话时不转发', () => {
+    expect(narrowSnapshot(event, null)).toBeNull();
+  });
+
+  it('订阅会话不在快照里时不转发', () => {
+    expect(narrowSnapshot(event, 'zzz')).toBeNull();
+  });
+
+  it('snapshot 不走通用过滤（避免整包漏出）', () => {
+    expect(shouldForward({ type: 'snapshot' }, 'a')).toBe(false);
   });
 });
