@@ -7,8 +7,13 @@
  * still strips `trellis-workflow-state` for Trellis subagents.
  * Does not subscribe to `session_start`.
  */
+import type { HostPackageExports } from "./guard";
 import { installHostExtensionRunnerGuard } from "./guard";
 
-export default async function (_pi: unknown): Promise<void> {
-   await installHostExtensionRunnerGuard();
+type ExtensionApiLike = {
+   pi?: HostPackageExports;
+};
+
+export default function (pi: ExtensionApiLike): void {
+   installHostExtensionRunnerGuard(pi.pi);
 }
