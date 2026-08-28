@@ -23,6 +23,8 @@ export type TimelineItem =
       streaming: boolean;
       /** 思考耗时（结束后显示）；无打点为 null */
       durationMs: number | null;
+      /** 思考起点（流式计时用）；无打点则缺省 */
+      startedAt?: number;
     }
   | {
       kind: 'tool';
@@ -235,6 +237,7 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
               streaming,
               durationMs:
                 timing && end !== undefined ? Math.max(0, end - timing.stepStartMs) : null,
+              ...(timing ? { startedAt: timing.stepStartMs } : {}),
             });
           }
           return;
