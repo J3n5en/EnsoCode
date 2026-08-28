@@ -1,6 +1,6 @@
 import { claimPairing, type PairedDevice, parsePairUri } from '@enso/pair';
 import { Camera, Loader2, Smartphone } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createQrScanner } from './qr';
@@ -19,7 +19,6 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
     streamRef.current = null;
     setScanning(false);
   };
-
   const pair = async (raw: string) => {
     setBusy(true);
     setError(null);
@@ -45,39 +44,26 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
     }
   };
 
+  // 扫到码后的动作：effect 只依赖 scanning，经 ref 取最新实现，避免依赖抖动导致重挂
+  const onDetectedRef = useRef<(value: string) => void>(() => {});
+  onDetectedRef.current = (value: string) => {
+    stopScan();
+    void pair(value);
+  };
+
   const startScan = async () => {
     setError(null);
     try {
-      // 先要摄像头再建解码器：权限被拒时不必白白加载 jsQR
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // 只负责拿流；挂到 <video> 与解码循环交给下面的 effect——
+      // setScanning 是异步的，此刻 <video> 还没挂载，直接读 ref 必然为 null
+      streamRef.current = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
       });
-      streamRef.current = stream;
       setScanning(true);
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      // iOS 要求 playsInline + muted 才能内联播放（已在 JSX 上声明）
-      await video.play();
-      const scanner = await createQrScanner();
-      const tick = async () => {
-        if (!streamRef.current) return;
-        try {
-          const value = await scanner.scan(video);
-          if (value?.startsWith('enso://pair')) {
-            stopScan();
-            await pair(value);
-            return;
-          }
-        } catch {}
-        requestAnimationFrame(() => void tick());
-      };
-      void tick();
     } catch (e) {
       // 非 HTTPS / 非 localhost 时 getUserMedia 不可用，提示要具体
-      const insecure = !window.isSecureContext;
       setError(
-        insecure
+        !window.isSecureContext
           ? '扫码需要 HTTPS 环境，请改用粘贴配对码'
           : e instanceof DOMException && e.name === 'NotAllowedError'
             ? '摄像头权限被拒绝，请在浏览器设置中允许后重试'
@@ -86,6 +72,46 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
       setScanning(false);
     }
   };
+
+  // 进入扫码态后 <video> 才存在，此时才能挂流并起解码循环
+  useEffect(() => {
+    if (!scanning) return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+
+    let cancelled = false;
+    let raf = 0;
+    video.srcObject = stream;
+    // iOS 要求静音才允许内联自动播放；React 的 muted 属性有时不落到 DOM，显式再设一次
+    video.muted = true;
+
+    void (async () => {
+      try {
+        await video.play();
+        const scanner = await createQrScanner();
+        const tick = async () => {
+          if (cancelled || !streamRef.current) return;
+          try {
+            const value = await scanner.scan(video);
+            if (value?.startsWith('enso://pair')) {
+              onDetectedRef.current(value);
+              return;
+            }
+          } catch {}
+          raf = requestAnimationFrame(() => void tick());
+        };
+        await tick();
+      } catch {
+        if (!cancelled) setError('无法开始预览，请粘贴配对码');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [scanning]);
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-5 px-6 pt-safe pb-safe">
