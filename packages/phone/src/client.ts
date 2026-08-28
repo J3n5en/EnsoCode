@@ -50,6 +50,8 @@ export class PairClient {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  /** 中继已告知配对被解除：与 closed（本端主动关闭）区分，前者要提示用户重新配对 */
+  private revoked = false;
   private subscribedId: string | null = null;
   private sessions = new Map<string, SessionView>();
 
@@ -92,6 +94,10 @@ export class PairClient {
             if (this.subscribedId) this.subscribe(this.subscribedId);
           } else if (control.type === 'host-offline') {
             this.events.onState('host-offline');
+          } else if (control.type === 'revoked') {
+            // 桌面端解除了配对：立即停手，别再重连
+            this.revoked = true;
+            this.events.onState('unauthorized');
           }
         } catch {}
         return;
@@ -101,8 +107,9 @@ export class PairClient {
 
     ws.onclose = (event) => {
       this.ws = null;
-      // 1008/1006 + 401 场景：凭据已解绑
-      if (event.code === 1008) {
+      // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
+      if (event.code === 1008 || this.revoked) {
+        this.revoked = true;
         this.events.onState('unauthorized');
         return;
       }

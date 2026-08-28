@@ -58,3 +58,33 @@ export function saveDevices(devices: PairedDevice[]): void {
     console.warn('[pair] save devices failed', error);
   }
 }
+
+/*
+ * 中继地址：非机密，单独存明文 JSON，不塞进上面那个加密文件——
+ * 一来 safeStorage 不可用时它也该能读写，二来不必为它改动凭据的存储格式。
+ */
+function relayPath(): string {
+  return path.join(app.getPath('userData'), 'phone-relay.json');
+}
+
+export function loadRelayUrl(): string | null {
+  try {
+    const file = relayPath();
+    if (!existsSync(file)) return null;
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { relayUrl?: unknown };
+    return typeof parsed.relayUrl === 'string' && parsed.relayUrl ? parsed.relayUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveRelayUrl(relayUrl: string | null): void {
+  try {
+    const file = relayPath();
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ relayUrl }));
+    renameSync(tmp, file);
+  } catch (error) {
+    console.warn('[pair] save relay url failed', error);
+  }
+}

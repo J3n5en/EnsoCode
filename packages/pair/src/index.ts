@@ -13,6 +13,7 @@ export {
   sealFrame,
 } from './crypto';
 export {
+  buildPairLink,
   buildPairUri,
   fromBase64Url,
   type PairInvite,

@@ -26,11 +26,35 @@ export function buildPairUri(invite: PairInvite): string {
   return `enso://pair?relay=${encodeURIComponent(invite.relay)}&pk=${pk}`;
 }
 
+/**
+ * 配对链接（二维码用）。PWA 与中继同源部署，所以中继地址本身就是手机要打开的网址，
+ * 扫码即打开 PWA 并自动配对，不必先装应用再用页内扫码。
+ * 参数放在 # 片段里：片段不会随请求发给服务器，公钥不会落到中继的访问日志。
+ */
+export function buildPairLink(invite: PairInvite): string {
+  const pk = toBase64Url(invite.publicKey);
+  const base = invite.relay.replace(/\/+$/, '');
+  return `${base}/#relay=${encodeURIComponent(invite.relay)}&pk=${pk}`;
+}
+
+/** 解析配对码：兼容 enso:// 自定义 scheme 与 https 链接（片段或查询串） */
 export function parsePairUri(uri: string): PairInvite {
-  const match = /^enso:\/\/pair\?(.*)$/.exec(uri.trim());
-  if (!match) throw new Error('not an enso pair uri');
-  const params = new URLSearchParams(match[1]);
-  const relay = params.get('relay');
+  const text = uri.trim();
+  const custom = /^enso:\/\/pair\?(.*)$/.exec(text);
+  if (custom) return fromParams(new URLSearchParams(custom[1]));
+
+  if (/^https?:\/\//i.test(text)) {
+    const url = new URL(text);
+    // 片段优先（buildPairLink 写在这里），查询串兜底
+    const params = new URLSearchParams(url.hash.replace(/^#/, '') || url.search);
+    // https 链接的来源站点即中继，relay 缺省时可从中推出
+    return fromParams(params, url.origin);
+  }
+  throw new Error('not an enso pair uri');
+}
+
+function fromParams(params: URLSearchParams, fallbackRelay?: string): PairInvite {
+  const relay = params.get('relay') ?? fallbackRelay;
   const pk = params.get('pk');
   if (!relay || !pk) throw new Error('pair uri missing relay or pk');
   return { relay, publicKey: fromBase64Url(pk) };

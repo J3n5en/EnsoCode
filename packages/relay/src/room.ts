@@ -77,7 +77,23 @@ export class PairRoom extends DurableObject<Env> {
     const token = url.searchParams.get('token') ?? '';
     if (role !== 'host' && role !== 'guest') return new Response('bad role', { status: 400 });
     const state = await this.ctx.storage.get<PairState>('state');
-    if (!tokenValid(state, role, token)) return new Response('unauthorized', { status: 401 });
+    if (!tokenValid(state, role, token)) {
+      /*
+       * 凭据失效（多为对端已解绑）。这里不能只回 401：浏览器拿不到握手的状态码，
+       * onclose 只会收到 1006，与网络断开无法区分，客户端就会永远重连。
+       * 先接受连接再以 1008 关闭，两端都能确定地识别为「已解绑」。
+       */
+      if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+        const [rejectClient, rejectServer] = Object.values(new WebSocketPair()) as [
+          WebSocket,
+          WebSocket,
+        ];
+        rejectServer.accept();
+        rejectServer.close(1008, 'revoked');
+        return new Response(null, { status: 101, webSocket: rejectClient });
+      }
+      return new Response('unauthorized', { status: 401 });
+    }
 
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server, [role]);
@@ -105,10 +121,18 @@ export class PairRoom extends DurableObject<Env> {
     if (!tokenValid(state, 'host', token) && !tokenValid(state, 'guest', token)) {
       return json({ error: 'unauthorized' }, 401);
     }
-    this.broadcast('guest', { type: 'host-offline' });
+    /*
+     * 向双方广播明确的 revoked 帧再关连接。旧实现只发 guest 一条 host-offline，
+     * host 端收不到任何通知、且关闭码是 1000，两端都会把解绑误当成网络断开而无限重连。
+     */
     for (const ws of this.ctx.getWebSockets()) {
       try {
-        ws.close(1000, 'revoked');
+        ws.send(JSON.stringify({ type: 'revoked' }));
+      } catch {}
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1008, 'revoked');
       } catch {}
     }
     await this.ctx.storage.deleteAll();

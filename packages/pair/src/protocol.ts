@@ -18,7 +18,9 @@ export type PairControl =
   | { type: 'host-online' }
   | { type: 'host-offline' }
   | { type: 'peer-joined' }
-  | { type: 'peer-left' };
+  | { type: 'peer-left' }
+  /** 配对已被任一端解除：收到即清本地凭据、停止重连，不可与网络断开混淆 */
+  | { type: 'revoked' };
 
 // ── 上行：手机 → Electron（加密 payload，白名单）─────────────────────────
 export type PhoneToHost =

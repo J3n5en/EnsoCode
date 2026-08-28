@@ -1,6 +1,6 @@
 import {
   backoffDelay,
-  buildPairUri,
+  buildPairLink,
   type CatalogEntry,
   DEFAULT_RELAY_URL,
   fromBase64Url,
@@ -37,7 +37,13 @@ import {
   type SpawnWhitelist,
   shouldForward,
 } from './pairPolicy';
-import { isSecureStorageAvailable, loadDevices, saveDevices } from './pairStore';
+import {
+  isSecureStorageAvailable,
+  loadDevices,
+  loadRelayUrl,
+  saveDevices,
+  saveRelayUrl,
+} from './pairStore';
 
 /**
  * 手机第二屏 host：跑在 main，不依赖窗口焦点。
@@ -121,14 +127,17 @@ export function stopPairHost(): void {
 
 // ── 配对 ──────────────────────────────────────────────────────────────
 
+// undefined = 尚未从磁盘读过；null = 读过且没有自定义值，用默认
+let relayUrlOverride: string | null | undefined;
+
 export function getRelayUrl(): string {
+  if (relayUrlOverride === undefined) relayUrlOverride = loadRelayUrl();
   return relayUrlOverride ?? DEFAULT_RELAY_URL;
 }
 
-let relayUrlOverride: string | null = null;
-
 export function setRelayUrl(url: string): void {
   relayUrlOverride = url.trim() ? url.trim() : null;
+  saveRelayUrl(relayUrlOverride);
 }
 
 /** 配对码有效期，与中继侧 PAIR_TTL_MS 保持一致 */
@@ -140,7 +149,7 @@ export async function startPairing(): Promise<{ ok: boolean; inviteUri?: string;
   try {
     const relay = getRelayUrl();
     pairingSession = await startHostPairing(relay);
-    pairingInviteUri = buildPairUri({
+    pairingInviteUri = buildPairLink({
       relay,
       publicKey: fromBase64Url(pairingSession.publicKeyB64),
     });
@@ -202,18 +211,8 @@ function pollPairing(): void {
 }
 
 export async function revokeDevice(pairId: string): Promise<void> {
-  const conn = connections.get(pairId);
-  if (conn) {
-    conn.closed = true;
-    if (conn.timer) clearTimeout(conn.timer);
-    try {
-      conn.ws?.close();
-    } catch {}
-    connections.delete(pairId);
-  }
-  const devices = loadDevices();
-  const device = devices.find((d) => d.pairId === pairId);
-  saveDevices(devices.filter((d) => d.pairId !== pairId));
+  const device = loadDevices().find((d) => d.pairId === pairId);
+  forgetDevice(pairId);
   if (device) {
     try {
       await revokePairing(device.relayUrl, pairId, device.token);
@@ -300,6 +299,9 @@ function connect(conn: Connection): void {
         } else if (control.type === 'peer-left') {
           conn.phoneOnline = false;
           notifyStatus();
+        } else if (control.type === 'revoked') {
+          // 手机端解除了配对：连凭据一起清掉，否则设置页会一直挂着一个连不上的设备
+          dropRevoked(conn);
         }
       } catch {}
       return;
@@ -307,11 +309,16 @@ function connect(conn: Connection): void {
     void handleFrame(conn, new Uint8Array(event.data as ArrayBuffer));
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     conn.ws = null;
     conn.phoneOnline = false;
+    // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）。
+    // 不能只看「连不上」就放弃，那是正常的网络波动，仍需重连。
+    if (event.code === 1008) {
+      dropRevoked(conn);
+      return;
+    }
     notifyStatus();
-    // 401 = 凭据已被解绑：清本地，不再重连
     scheduleReconnect(conn);
   };
 
@@ -320,6 +327,27 @@ function connect(conn: Connection): void {
       ws.close();
     } catch {}
   };
+}
+
+/** 断开并忘记某台设备（本端解绑与对端解绑共用） */
+function forgetDevice(pairId: string): void {
+  const conn = connections.get(pairId);
+  if (conn) {
+    conn.closed = true;
+    if (conn.timer) clearTimeout(conn.timer);
+    try {
+      conn.ws?.close();
+    } catch {}
+    conn.ws = null;
+    connections.delete(pairId);
+  }
+  saveDevices(loadDevices().filter((d) => d.pairId !== pairId));
+}
+
+/** 配对已被对端解除：清干净并通知渲染层，不再重连 */
+function dropRevoked(conn: Connection): void {
+  forgetDevice(conn.device.pairId);
+  notifyStatus();
 }
 
 function scheduleReconnect(conn: Connection): void {

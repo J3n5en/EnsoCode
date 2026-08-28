@@ -1,5 +1,14 @@
 import type { PairStatus } from '@shared/types';
-import { Check, Copy, Loader2, Pencil, Smartphone, Trash2, TriangleAlert } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Loader2,
+  Pencil,
+  QrCode,
+  Smartphone,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react';
 import QRCode from 'qrcode';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
@@ -17,6 +26,8 @@ export function PhoneSettings() {
   const [relayDraft, setRelayDraft] = React.useState<string | null>(null);
   const [remaining, setRemaining] = React.useState<number | null>(null);
   const [copied, setCopied] = React.useState(false);
+  // 手机要访问的网址（PWA 与中继同源部署，就是中继地址）+ 它的二维码
+  const [siteQr, setSiteQr] = React.useState<string | null>(null);
 
   // 配对码倒计时：秒级刷新，到 0 停（main 侧同一时间戳到期会自动取消配对）
   const expiresAt = status?.pairingExpiresAt;
@@ -46,6 +57,21 @@ export function PhoneSettings() {
       if (next.pairing || next.devices.length > 0) setError(null);
     });
   }, []);
+
+  const phoneUrl = (status?.relayUrl ?? '').replace(/\/+$/, '');
+  const toggleSiteQr = () => {
+    if (siteQr) {
+      setSiteQr(null);
+      return;
+    }
+    if (!phoneUrl) return;
+    void QRCode.toDataURL(phoneUrl, { width: 320, margin: 1 })
+      .then(setSiteQr)
+      .catch(() => {});
+  };
+  // 改了中继地址后旧二维码就不对了，收起来
+  // biome-ignore lint/correctness/useExhaustiveDependencies: phoneUrl 是触发信号
+  React.useEffect(() => setSiteQr(null), [phoneUrl]);
 
   // 配对码变化时重画二维码；配对结束（inviteUri 消失）则清掉
   React.useEffect(() => {
@@ -127,7 +153,7 @@ export function PhoneSettings() {
             ) : (
               <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
             )}
-            <p className="mt-3 font-medium text-sm">{t('Scan with your phone')}</p>
+            <p className="mt-3 font-medium text-sm">{t('Scan with your phone camera')}</p>
             <p className="mt-1 text-muted-foreground text-xs">
               {remaining === null
                 ? t('The code expires in 60 seconds and can only be used once.')
@@ -159,6 +185,35 @@ export function PhoneSettings() {
           )}
         </div>
       )}
+
+      <div className="space-y-2">
+        <p className="font-medium text-sm">{t('Open on your phone')}</p>
+        <p className="text-muted-foreground text-xs">
+          {t('Open this address in your phone browser, then add it to the home screen.')}
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+            {phoneUrl || '—'}
+          </code>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={!phoneUrl}
+            onClick={toggleSiteQr}
+          >
+            <QrCode className="mr-1.5 h-3.5 w-3.5" />
+            {siteQr ? t('Hide QR') : t('Show QR')}
+          </Button>
+        </div>
+        {siteQr && (
+          <img
+            src={siteQr}
+            alt={t('QR code for the phone address')}
+            className="mx-auto h-44 w-44 rounded-md border p-2"
+          />
+        )}
+      </div>
 
       <div className="space-y-2">
         <p className="font-medium text-sm">{t('Paired devices')}</p>

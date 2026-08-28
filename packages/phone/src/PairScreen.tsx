@@ -1,12 +1,30 @@
 import { claimPairing, type PairedDevice, parsePairUri } from '@enso/pair';
+
 import { Camera, Loader2, Smartphone } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createQrScanner } from './qr';
 
+/** 扫到的内容是否是配对码（能解析出 relay + 公钥即可） */
+function isPairPayload(value: string): boolean {
+  try {
+    parsePairUri(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 配对页：扫码或粘贴配对码。BarcodeDetector 可用则用摄像头，否则手工粘贴。 */
-export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => void }) {
+export function PairScreen({
+  onPaired,
+  autoInvite,
+}: {
+  onPaired: (device: PairedDevice) => void;
+  /** 扫码直达时从地址栏取到的邀请链接，挂载后自动完成配对 */
+  autoInvite?: string | null;
+}) {
   const [uri, setUri] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +61,15 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
       setBusy(false);
     }
   };
+
+  // 扫码直达：地址栏带邀请时直接配对，用户无需再点任何按钮
+  const autoRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: autoInvite 是触发信号，只跑一次
+  useEffect(() => {
+    if (!autoInvite || autoRef.current) return;
+    autoRef.current = true;
+    void pair(autoInvite);
+  }, [autoInvite]);
 
   // 扫到码后的动作：effect 只依赖 scanning，经 ref 取最新实现，避免依赖抖动导致重挂
   const onDetectedRef = useRef<(value: string) => void>(() => {});
@@ -94,7 +121,8 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
           if (cancelled || !streamRef.current) return;
           try {
             const value = await scanner.scan(video);
-            if (value?.startsWith('enso://pair')) {
+            // 兼容两种码：桌面新版发 https 链接（系统相机也能直接打开），旧版是 enso:// scheme
+            if (value && isPairPayload(value)) {
               onDetectedRef.current(value);
               return;
             }

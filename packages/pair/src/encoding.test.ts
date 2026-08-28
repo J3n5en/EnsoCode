@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPairUri, fromBase64Url, parsePairUri, toBase64Url } from './encoding';
+import { buildPairLink, buildPairUri, fromBase64Url, parsePairUri, toBase64Url } from './encoding';
 
 describe('base64url', () => {
   it('随机字节往返', () => {
@@ -30,5 +30,40 @@ describe('配对 URI', () => {
   it('非法 URI 抛错', () => {
     expect(() => parsePairUri('https://example.com')).toThrow();
     expect(() => parsePairUri('enso://pair?relay=x')).toThrow();
+  });
+});
+
+describe('配对链接（二维码，https）', () => {
+  const publicKey = new Uint8Array(32).map((_, i) => (i * 7) & 0xff);
+
+  it('参数放在片段里，不会随请求发给服务器', () => {
+    const link = buildPairLink({ relay: 'https://relay.example.com', publicKey });
+    const url = new URL(link);
+    expect(url.search).toBe('');
+    expect(url.hash).toContain('pk=');
+  });
+
+  it('往返 relay + 公钥', () => {
+    const link = buildPairLink({ relay: 'https://relay.example.com', publicKey });
+    const parsed = parsePairUri(link);
+    expect(parsed.relay).toBe('https://relay.example.com');
+    expect(Buffer.from(parsed.publicKey).equals(Buffer.from(publicKey))).toBe(true);
+  });
+
+  it('relay 末尾斜杠不会导致重复', () => {
+    const link = buildPairLink({ relay: 'https://relay.example.com/', publicKey });
+    expect(link).not.toContain('.com//');
+  });
+
+  it('缺 relay 时回落到链接自身的来源站点', () => {
+    const pk = toBase64Url(publicKey);
+    const parsed = parsePairUri(`https://relay.example.com/#pk=${pk}`);
+    expect(parsed.relay).toBe('https://relay.example.com');
+  });
+
+  it('查询串形式也接受（兜底）', () => {
+    const pk = toBase64Url(publicKey);
+    const parsed = parsePairUri(`https://relay.example.com/?pk=${pk}`);
+    expect(Buffer.from(parsed.publicKey).equals(Buffer.from(publicKey))).toBe(true);
   });
 });

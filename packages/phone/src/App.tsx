@@ -14,6 +14,18 @@ import { PairScreen } from './PairScreen';
 import { SessionDrawer } from './SessionDrawer';
 import { clearPairing, loadPairing, savePairing } from './storage';
 
+/**
+ * 扫码直达：桌面二维码是 https 链接，系统相机可直接打开本页并带上 #relay=…&pk=…。
+ * 取出后立即抹掉 hash，避免公钥留在地址栏/历史里，也避免刷新时重复配对。
+ */
+function takeInviteFromUrl(): string | null {
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash.includes('pk=')) return null;
+  const link = window.location.href;
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  return link;
+}
+
 const STATE_LABEL: Record<ConnState, string> = {
   connecting: '连接中…',
   online: '已连接',
@@ -26,6 +38,8 @@ const LAST_SESSION_KEY = 'enso-phone-last-session';
 
 export function App() {
   const [device, setDevice] = useState(loadPairing);
+  // 只在首次挂载时取一次：内部会抹掉 hash，重复调用取不到
+  const [urlInvite] = useState(takeInviteFromUrl);
   const [state, setState] = useState<ConnState>('connecting');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -77,6 +91,7 @@ export function App() {
   if (!device) {
     return (
       <PairScreen
+        autoInvite={urlInvite}
         onPaired={(d) => {
           savePairing(d);
           setDevice(d);
