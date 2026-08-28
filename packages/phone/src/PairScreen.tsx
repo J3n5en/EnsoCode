@@ -3,6 +3,7 @@ import { Camera, Loader2, Smartphone } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { createQrScanner } from './qr';
 
 /** 配对页：扫码或粘贴配对码。BarcodeDetector 可用则用摄像头，否则手工粘贴。 */
 export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => void }) {
@@ -46,13 +47,8 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
 
   const startScan = async () => {
     setError(null);
-    const Detector = (window as unknown as { BarcodeDetector?: new (o: object) => object })
-      .BarcodeDetector;
-    if (!Detector) {
-      setError('此浏览器不支持扫码，请粘贴配对码');
-      return;
-    }
     try {
+      // 先要摄像头再建解码器：权限被拒时不必白白加载 jsQR
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
       });
@@ -61,26 +57,32 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
       const video = videoRef.current;
       if (!video) return;
       video.srcObject = stream;
+      // iOS 要求 playsInline + muted 才能内联播放（已在 JSX 上声明）
       await video.play();
-      const detector = new Detector({ formats: ['qr_code'] }) as {
-        detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
-      };
+      const scanner = await createQrScanner();
       const tick = async () => {
         if (!streamRef.current) return;
         try {
-          const codes = await detector.detect(video);
-          const hit = codes.find((c) => c.rawValue.startsWith('enso://pair'));
-          if (hit) {
+          const value = await scanner.scan(video);
+          if (value?.startsWith('enso://pair')) {
             stopScan();
-            await pair(hit.rawValue);
+            await pair(value);
             return;
           }
         } catch {}
         requestAnimationFrame(() => void tick());
       };
       void tick();
-    } catch {
-      setError('无法访问摄像头，请粘贴配对码');
+    } catch (e) {
+      // 非 HTTPS / 非 localhost 时 getUserMedia 不可用，提示要具体
+      const insecure = !window.isSecureContext;
+      setError(
+        insecure
+          ? '扫码需要 HTTPS 环境，请改用粘贴配对码'
+          : e instanceof DOMException && e.name === 'NotAllowedError'
+            ? '摄像头权限被拒绝，请在浏览器设置中允许后重试'
+            : '无法访问摄像头，请粘贴配对码'
+      );
       setScanning(false);
     }
   };
