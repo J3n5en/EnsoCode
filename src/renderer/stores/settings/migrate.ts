@@ -8,26 +8,32 @@
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 
 /**
  * v0 → v1：`ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`。
- * 值可以直接搬——多账号方案里第一个账号的 key 就是裸 providerId。
+ * v1 → v2：新增必填 `defaultModel`，旧设置明确迁为 null，不把数组第一项冒充用户选择。
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
-  if (!persisted || typeof persisted !== 'object') return persisted;
-  const state = persisted as Record<string, unknown>;
-  if (!Array.isArray(state.providers)) return state;
+  if (!persisted || typeof persisted !== 'object' || Array.isArray(persisted)) return persisted;
 
-  return {
-    ...state,
-    providers: state.providers.map((entry) => {
-      if (!entry || typeof entry !== 'object') return entry;
-      const provider = entry as Record<string, unknown>;
-      if (typeof provider.oauthProviderId !== 'string') return provider;
-      const { oauthProviderId, ...rest } = provider;
-      return { ...rest, oauthAccountKey: oauthProviderId };
-    }),
-  };
+  let state = { ...(persisted as Record<string, unknown>) };
+  if (version < 1 && Array.isArray(state.providers)) {
+    state = {
+      ...state,
+      providers: state.providers.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+        const provider = entry as Record<string, unknown>;
+        if (typeof provider.oauthProviderId !== 'string') return provider;
+        const { oauthProviderId, ...rest } = provider;
+        return { ...rest, oauthAccountKey: oauthProviderId };
+      }),
+    };
+  }
+
+  if (version < 2) {
+    state = { ...state, defaultModel: null };
+  }
+  return state;
 }

@@ -12,9 +12,15 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 }
 
-// 打包版 productName=EnsoCode 会把 userData 指到新目录，与 dev（enso-code）分家；
-// 统一到 enso-code，保证打包版接上既有会话与设置
-app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
+// 自动化可在开发环境显式隔离 userData；打包版永不接受环境覆盖。
+// 普通 dev/生产继续统一到 appData/enso-code，保证既有会话与设置不迁移。
+const developmentUserData = !app.isPackaged ? process.env.ENSO_USER_DATA_DIR?.trim() : undefined;
+app.setPath(
+  'userData',
+  developmentUserData
+    ? path.resolve(developmentUserData)
+    : path.join(app.getPath('appData'), 'enso-code')
+);
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -42,8 +48,9 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
-    startAgentWorker();
+    // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
+    setImmediate(() => startAgentWorker());
     void initAutoUpdater(mainWindow);
 
     app.on('activate', () => {

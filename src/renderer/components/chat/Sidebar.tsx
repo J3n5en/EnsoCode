@@ -63,8 +63,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
 
   const [addOpen, setAddOpen] = useState(false);
   const handleAddProject = (path: string) => {
-    const project = addProject(path);
-    newConversation(project.id);
+    void addProject(path).then((project) => {
+      if (project) void newConversation(project.id);
+    });
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
@@ -173,7 +174,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => newConversation(project.id)}
+                  onClick={() => void newConversation(project.id)}
                   className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   title={t('New conversation')}
                 >
@@ -317,7 +318,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           if (!pendingRemove) return;
           if (pendingRemove.kind === 'project') {
             for (const id of pendingRemove.conversationIds) removeConversation(id);
-            removeProject(pendingRemove.project.id);
+            void removeProject(pendingRemove.project.id);
           } else {
             removeConversation(pendingRemove.id);
           }

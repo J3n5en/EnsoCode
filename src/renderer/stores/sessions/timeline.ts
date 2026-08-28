@@ -1,4 +1,9 @@
-import type { ProjectedMessage, TodoItem, TurnPerf } from '@shared/types/agent';
+import type {
+  AgentSessionCustomEntry,
+  ProjectedMessage,
+  TodoItem,
+  TurnPerf,
+} from '@shared/types/agent';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
 export interface EditBlock {
@@ -54,7 +59,9 @@ export type TimelineItem =
     }
   | { kind: 'error'; key: string; text: string }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
-  | { kind: 'task-note'; key: string; summary: string; detail: string };
+  | { kind: 'task-note'; key: string; summary: string; detail: string }
+  /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
+  | { kind: 'session-custom'; key: string; entry: AgentSessionCustomEntry };
 
 export interface ToolGroupStats {
   commands: number;
@@ -151,7 +158,7 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
  * - assistant 的 text/thinking 各自成块，未完结（isLast 且会话 running）的块标 streaming
  * 纯函数，输入不被修改。
  */
-export function buildTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
+function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
   const results = new Map<
     string,
     {
@@ -264,6 +271,48 @@ export function buildTimeline(messages: ProjectedMessage[], running: boolean): T
     }
   });
   return items;
+}
+
+const customEntryTime = (entry: AgentSessionCustomEntry): number =>
+  entry.kind === 'capability-receipt' ? entry.receipt.occurredAt : entry.at;
+
+const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage[]): number => {
+  const separator = item.key.indexOf('-');
+  const index = Number.parseInt(separator === -1 ? item.key : item.key.slice(0, separator), 10);
+  return Number.isInteger(index)
+    ? (messages[index]?.timestamp ?? Number.NEGATIVE_INFINITY)
+    : Number.NEGATIVE_INFINITY;
+};
+
+/** Messages 与 custom entries 仅在展示层按时间合并；custom entries 从不进入 messages。 */
+export function buildTimeline(
+  messages: ProjectedMessage[],
+  running: boolean,
+  customEntries: readonly AgentSessionCustomEntry[] = []
+): TimelineItem[] {
+  const messageItems = buildMessageTimeline(messages, running);
+  if (customEntries.length === 0) return messageItems;
+  return [
+    ...messageItems.map((item, order) => ({
+      item,
+      at: messageItemTime(item, messages),
+      order,
+    })),
+    ...customEntries.map((entry, index) => ({
+      item: {
+        kind: 'session-custom' as const,
+        key:
+          entry.kind === 'capability-receipt'
+            ? `custom:receipt:${entry.receipt.receiptId}`
+            : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
+        entry,
+      },
+      at: customEntryTime(entry),
+      order: messageItems.length + index,
+    })),
+  ]
+    .sort((left, right) => left.at - right.at || left.order - right.order)
+    .map(({ item }) => item);
 }
 
 /** 折叠门槛：段内非 edit 工具数达到该值才收拢 */

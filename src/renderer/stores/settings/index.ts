@@ -1,3 +1,4 @@
+import { sanitizeDefaultModel } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
 import {
@@ -5,6 +6,7 @@ import {
   normalizeStatusLineSegments,
   type StatusLineSegmentId,
 } from '@shared/statusLine';
+import type { SourceAuthorityProjection } from '@shared/types/agent';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -12,9 +14,14 @@ import {
   clearTerminalThemeFromApp,
   isTerminalThemeDark,
 } from '@/lib/ghosttyTheme';
+import {
+  type OauthCredentialSnapshot,
+  oauthCredentialContext,
+  useOauthCredentialStore,
+} from '@/stores/oauthCredentials';
 import { migrateSettings, SETTINGS_VERSION } from './migrate';
 import { electronStorage } from './storage';
-import type { FontWeight, SettingsState, Theme } from './types';
+import type { DefaultModelRevalidation, FontWeight, SettingsState, Theme } from './types';
 
 export * from './types';
 
@@ -82,6 +89,7 @@ const initialState = {
   loadLocalSkills: true,
   autoUpdate: true,
   providers: [] as import('@shared/types').ModelProvider[],
+  defaultModel: null,
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
@@ -93,6 +101,18 @@ const initialState = {
   keybindings: {} as Record<string, string>,
   projects: [] as import('@shared/types').Project[],
 };
+interface DefaultModelRevalidationState {
+  latest: DefaultModelRevalidation | null;
+}
+
+/** 默认失效说明是每个 Renderer 窗口的瞬时状态，不进入 settings.json。 */
+export const useDefaultModelRevalidationStore = create<DefaultModelRevalidationState>(() => ({
+  latest: null,
+}));
+
+function publishDefaultModelRevalidation(result: DefaultModelRevalidation): void {
+  useDefaultModelRevalidationStore.setState({ latest: result });
+}
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -175,13 +195,67 @@ export const useSettingsStore = create<SettingsState>()(
         return fresh.length;
       },
 
-      updateProvider: (id, updates) =>
+      updateProvider: (id, updates) => {
         set((state) => ({
           providers: state.providers.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-        })),
+        }));
+        get().revalidateDefaultModel(useOauthCredentialStore.getState().snapshot);
+      },
 
-      removeProvider: (id) =>
-        set((state) => ({ providers: state.providers.filter((p) => p.id !== id) })),
+      removeProvider: (id) => {
+        set((state) => ({ providers: state.providers.filter((p) => p.id !== id) }));
+        get().revalidateDefaultModel(useOauthCredentialStore.getState().snapshot);
+      },
+
+      setDefaultModel: (defaultModel) => {
+        useDefaultModelRevalidationStore.setState({ latest: null });
+        set({ defaultModel });
+      },
+
+      revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {
+        const defaultModel = get().defaultModel;
+        if (snapshot.revision !== useOauthCredentialStore.getState().snapshot.revision) {
+          const stale: DefaultModelRevalidation = {
+            status: 'stale',
+            defaultModel,
+            writeback: false,
+            notice: null,
+          };
+          publishDefaultModelRevalidation(stale);
+          return stale;
+        }
+
+        const sanitized = sanitizeDefaultModel({
+          defaultModel,
+          providers: get().providers,
+          credentials: oauthCredentialContext(snapshot),
+        });
+        if (sanitized.status === 'unchanged') {
+          const unchanged: DefaultModelRevalidation = {
+            ...sanitized,
+            writeback: false,
+          };
+          publishDefaultModelRevalidation(unchanged);
+          return unchanged;
+        }
+        if (sanitized.status === 'deferred-oauth-unavailable') {
+          const deferred: DefaultModelRevalidation = {
+            ...sanitized,
+            status: 'deferred',
+            writeback: false,
+          };
+          publishDefaultModelRevalidation(deferred);
+          return deferred;
+        }
+
+        const result: DefaultModelRevalidation = {
+          ...sanitized,
+          writeback: true,
+        };
+        publishDefaultModelRevalidation(result);
+        set({ defaultModel: result.defaultModel });
+        return result;
+      },
 
       // 技能以名称为标识去重，同时拦住同路径的重复登记
       addSkills: (skills) => {
@@ -329,21 +403,49 @@ export const useSettingsStore = create<SettingsState>()(
           return { keybindings: rest };
         }),
 
-      // 按目录路径去重；已存在时返回已有项
-      addProject: (path) => {
-        const existing = get().projects.find((project) => project.path === path);
-        if (existing) return existing;
+      // Project execution authority is created/removed only through the dedicated Main registry.
+      addProject: async (path) => {
+        const projection = await window.electronAPI.sourceAuthority.read();
+        const existing = projection.projects.find(
+          (project) => project.state === 'active' && project.canonicalPath === path
+        );
+        const result = existing
+          ? { accepted: true as const, value: existing }
+          : await window.electronAPI.sourceAuthority.createProject({
+              requestId: crypto.randomUUID(),
+              path,
+            });
+        if (!result.accepted) return null;
         const project = {
-          id: crypto.randomUUID(),
-          name: path.split('/').filter(Boolean).pop() ?? path,
-          path,
+          id: result.value.projectId,
+          name:
+            result.value.canonicalPath.split('/').filter(Boolean).pop() ??
+            result.value.canonicalPath,
+          path: result.value.canonicalPath,
         };
-        set((state) => ({ projects: [...state.projects, project] }));
+        set((state) => ({
+          projects: [...state.projects.filter((candidate) => candidate.id !== project.id), project],
+        }));
         return project;
       },
 
-      removeProject: (id) => {
-        set((state) => ({ projects: state.projects.filter((project) => project.id !== id) }));
+      removeProject: async (id) => {
+        const projection = await window.electronAPI.sourceAuthority.read();
+        const project = projection.projects.find(
+          (candidate) => candidate.projectId === id && candidate.state === 'active'
+        );
+        if (!project) {
+          set((state) => ({ projects: state.projects.filter((candidate) => candidate.id !== id) }));
+          return true;
+        }
+        const result = await window.electronAPI.sourceAuthority.removeProject({
+          requestId: crypto.randomUUID(),
+          projectId: id,
+          version: project.version,
+        });
+        if (!result.accepted) return false;
+        set((state) => ({ projects: state.projects.filter((candidate) => candidate.id !== id) }));
+        return true;
       },
     }),
     {
@@ -372,10 +474,34 @@ export const useSettingsStore = create<SettingsState>()(
         ) {
           useSettingsStore.setState({ onboarded: true });
         }
+        // OAuth bootstrap 可能先于 persist 水合完成；水合后必须用当时最新快照再校验一次。
+        useSettingsStore
+          .getState()
+          .revalidateDefaultModel(useOauthCredentialStore.getState().snapshot);
+        void refreshProjectAuthorityProjection();
       },
     }
   )
 );
+
+function applyProjectAuthorityProjection(projection: SourceAuthorityProjection): void {
+  useSettingsStore.setState({
+    projects: projection.projects
+      .filter((project) => project.state === 'active')
+      .map((project) => ({
+        id: project.projectId,
+        name: project.canonicalPath.split('/').filter(Boolean).pop() ?? project.canonicalPath,
+        path: project.canonicalPath,
+      })),
+  });
+}
+
+async function refreshProjectAuthorityProjection(): Promise<void> {
+  applyProjectAuthorityProjection(await window.electronAPI.sourceAuthority.read());
+}
+
+window.electronAPI.sourceAuthority.onChanged(applyProjectAuthorityProjection);
+void refreshProjectAuthorityProjection();
 
 // 跟随系统明暗变化
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -385,7 +511,9 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   }
 });
 
-// 多窗口同步：其他窗口写入设置后重新 rehydrate 本窗口 store 并应用副作用
+// Generic settings is display persistence only; executable project identity is always re-projected by Main.
 window.electronAPI.settings.onChanged(() => {
-  void useSettingsStore.persist.rehydrate();
+  void Promise.resolve(useSettingsStore.persist.rehydrate()).then(
+    refreshProjectAuthorityProjection
+  );
 });

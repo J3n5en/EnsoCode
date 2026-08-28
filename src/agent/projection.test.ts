@@ -59,6 +59,31 @@ describe('projectMessage', () => {
     expect(args.path).toBe('a.txt');
   });
 
+  it('enso_app 投影剥离 raw params，只保留 capability 引用', () => {
+    const projected = projectMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'enso-call',
+          name: 'enso_app',
+          arguments: {
+            capability_id: 'settings.write',
+            params: { apiKey: 'raw-secret', target: '/private/path' },
+          },
+        },
+      ],
+    });
+    expect(projected?.content[0]).toEqual({
+      type: 'toolCall',
+      id: 'enso-call',
+      name: 'enso_app',
+      arguments: { capability_id: 'settings.write' },
+    });
+    expect(JSON.stringify(projected)).not.toContain('raw-secret');
+    expect(JSON.stringify(projected)).not.toContain('/private/path');
+  });
+
   it('未识别的 part 类型收敛为 unknown，不透传内容', () => {
     const projected = projectMessage({
       role: 'assistant',

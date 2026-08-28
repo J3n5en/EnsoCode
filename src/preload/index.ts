@@ -1,3 +1,14 @@
+import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
+import type {
+  CapabilityAskDecisionAck,
+  CapabilityAskRequest,
+  CapabilityAskResponse,
+  OauthFlowControlRequest,
+  OauthFlowEvent,
+  OauthFlowPromptResponse,
+  StartOauthResult,
+  StartOauthWizardRequest,
+} from '@shared/capabilities/types';
 import type {
   CollectedAsset,
   CollectedProvider,
@@ -7,7 +18,6 @@ import type {
   ModelMetaQuery,
   ModelMetaResult,
   OauthAccountUsage,
-  OauthLoginEvent,
   OauthProviderInfo,
   ProviderApiConfig,
   RecentProject,
@@ -20,9 +30,31 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   AttachedImage,
+  AuthorityMutationResult,
+  ConversationAuthorityProjection,
+  ConversationAuthorityRequest,
+  CreateConversationAuthorityRequest,
+  CreateProjectAuthorityRequest,
+  DispatchMainEvent,
+  ProjectAuthorityProjection,
+  RemoveProjectAuthorityRequest,
   RendererAgentEvent,
+  SelectProjectAuthorityRequest,
+  SourceAuthorityProjection,
   ThinkingLevel,
+  UpdateConversationSelectionRequest,
 } from '@shared/types/agent';
+import { parseDispatchMainEvent } from '@shared/types/agent';
+import type {
+  AgentComposerPrefillEvent,
+  AgentDispatchRequest,
+  AgentDispatchResult,
+  AgentSummonRequest,
+  MainModelSelectionBindingResult,
+  ParentModelSelectionRequest,
+  ParentSourceBindingRequest,
+  ParentSourceBindingResult,
+} from '@shared/types/mentions';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type { UpdateStatus } from '@shared/types/updater';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
@@ -61,21 +93,30 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_MODEL_META, query),
     listOauth: (): Promise<OauthProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
-    /** 总是给该 provider 新增一个账号（不覆盖已登录的） */
-    oauthLogin: (providerId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN, providerId),
-    oauthLoginRespond: (requestId: string, value: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, requestId, value),
-    oauthLoginCancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_CANCEL),
-    oauthLoginReopen: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_REOPEN),
+    listOauthCredentialKeys: (): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_CREDENTIAL_KEYS_LIST),
+    /** Wizard 只提交公开 provider id；Main 按 sender 生成 flow identity。 */
+    oauthLogin: (request: StartOauthWizardRequest): Promise<StartOauthResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN, request),
+    oauthLoginRespond: (request: OauthFlowPromptResponse): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, request),
+    oauthLoginCancel: (request: OauthFlowControlRequest): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_CANCEL, request),
+    oauthLoginReopen: (request: OauthFlowControlRequest): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGIN_REOPEN, request),
     oauthLogout: (accountKey: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_LOGOUT, accountKey),
     oauthAccountUsage: (accountKey: string): Promise<OauthAccountUsage> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, accountKey),
-    onOauthLoginEvent: (callback: (event: OauthLoginEvent) => void): (() => void) => {
-      const listener = (_: unknown, event: OauthLoginEvent) => callback(event);
+    onOauthLoginEvent: (callback: (event: OauthFlowEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: OauthFlowEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.OAUTH_LOGIN_EVENT, listener);
+    },
+    onOauthCredentialsChanged: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED, listener);
     },
   },
 
@@ -234,6 +275,82 @@ const electronAPI = {
     },
   },
 
+  agentRegistry: {
+    list: (): Promise<AgentTypeRegistrySnapshot> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_TYPES_REGISTRY_LIST),
+  },
+
+  agentDispatch: {
+    bindSource: (request: ParentSourceBindingRequest): Promise<ParentSourceBindingResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE, request),
+    registerModelSelection: (
+      request: ParentModelSelectionRequest
+    ): Promise<MainModelSelectionBindingResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_MODEL_SELECTION_REGISTER, request),
+    dispatch: (request: AgentDispatchRequest): Promise<AgentDispatchResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISPATCH, request),
+    onEvent: (callback: (event: DispatchMainEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: unknown) => {
+        const parsed = parseDispatchMainEvent(event);
+        if (parsed) callback(parsed);
+      };
+      ipcRenderer.on(IPC_CHANNELS.AGENT_DISPATCH_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_DISPATCH_EVENT, listener);
+    },
+  },
+
+  sourceAuthority: {
+    read: (): Promise<SourceAuthorityProjection> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_AUTHORITY_READ),
+    onChanged: (callback: (projection: SourceAuthorityProjection) => void): (() => void) => {
+      const listener = (_: unknown, projection: SourceAuthorityProjection) => callback(projection);
+      ipcRenderer.on(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED, listener);
+    },
+    createProject: (
+      request: CreateProjectAuthorityRequest
+    ): Promise<AuthorityMutationResult<ProjectAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_PROJECT_CREATE, request),
+    selectProject: (
+      request: SelectProjectAuthorityRequest
+    ): Promise<AuthorityMutationResult<ProjectAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_PROJECT_SELECT, request),
+    removeProject: (
+      request: RemoveProjectAuthorityRequest
+    ): Promise<AuthorityMutationResult<ProjectAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_PROJECT_REMOVE, request),
+    createConversation: (
+      request: CreateConversationAuthorityRequest
+    ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_CREATE, request),
+    selectConversation: (
+      request: ConversationAuthorityRequest
+    ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_SELECT, request),
+    endConversation: (
+      request: ConversationAuthorityRequest
+    ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_END, request),
+    removeConversation: (
+      request: ConversationAuthorityRequest
+    ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_REMOVE, request),
+    updateConversationSelection: (
+      request: UpdateConversationSelectionRequest
+    ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_UPDATE_SELECTION, request),
+  },
+
+  capabilities: {
+    onAsk: (callback: (request: CapabilityAskRequest) => void): (() => void) => {
+      const listener = (_event: unknown, request: CapabilityAskRequest) => callback(request);
+      ipcRenderer.on(IPC_CHANNELS.CAPABILITIES_ASK, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.CAPABILITIES_ASK, listener);
+    },
+    respond: (response: CapabilityAskResponse): Promise<CapabilityAskDecisionAck> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
+  },
+
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
@@ -256,6 +373,15 @@ const electronAPI = {
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
     openSettings: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS),
+    summonAgent: (request: AgentSummonRequest): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMON, request),
+    onAgentComposerPrefill: (
+      callback: (event: AgentComposerPrefillEvent) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, prefill: AgentComposerPrefillEvent) => callback(prefill);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
+    },
     onMaximizedChange: (callback: (maximized: boolean) => void): (() => void) => {
       const listener = (_: unknown, maximized: boolean) => callback(maximized);
       ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, listener);

@@ -1,5 +1,16 @@
-import { hasProviderCredentials } from '@shared/types';
-import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
+import type { AgentTypeKey } from '@shared/builtinAgents';
+import type { CapabilityAskRequest } from '@shared/capabilities/types';
+import { type DefaultModelRef, resolveChatModel } from '@shared/defaultModel';
+import type {
+  ApprovalMode,
+  AttachedImage,
+  ChildConversationMetadata,
+  ConversationAuthorityProjection,
+  DispatchMainEvent,
+  ProjectAuthorityProjection,
+  ThinkingLevel,
+} from '@shared/types/agent';
+import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -24,9 +35,15 @@ export interface QueuedMessage {
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { electronStorage } from '@/stores/settings/storage';
-import { applyAgentEvent, emptyProjection, type SessionProjection } from './reducer';
+import {
+  applyAgentEvent,
+  applyDispatchEvent,
+  emptyProjection,
+  type SessionProjection,
+} from './reducer';
 
 function startGoalPrompt(objective: string): string {
   return (
@@ -64,6 +81,14 @@ export interface Conversation extends SessionProjection {
   parentId?: string;
   coworkerName?: string;
   agentType?: string;
+  /** typed mention child 的 Main 权威 metadata；普通 coworker 无此字段。 */
+  child?: ChildConversationMetadata;
+  /** 当前 child TAB 的危险 capability ASK；不持久化。 */
+  pendingCapabilityAsks?: CapabilityAskRequest[];
+  /** allow ACK 后留在 child TAB 的 OAuth 宿主请求；不持久化。 */
+  activeOauthAsk?: CapabilityAskRequest;
+  /** Main summon 注入的一次性 typed recipient。 */
+  prefillAgentTypeKey?: AgentTypeKey;
   /** 父会话专有：在编 coworker id 列表（驱动 tab 条） */
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
@@ -87,10 +112,24 @@ interface SessionsState {
   /** 新的在前 */
   order: string[];
   activeId: string | null;
+  /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
+  pendingAgentPrefill?: AgentTypeKey;
 
-  newConversation(projectId: string): string;
+  newConversation(projectId: string): Promise<string | null>;
   selectConversation(id: string): void;
   removeConversation(id: string): void;
+  dispatchAgent(
+    typeKey: AgentTypeKey,
+    task: AgentDispatchTask,
+    selectedModel: DefaultModelRef | null
+  ): Promise<AgentDispatchResult>;
+  prefillAgent(typeKey: AgentTypeKey): void;
+  clearAgentPrefill(conversationId: string): void;
+  respondCapabilityAsk(
+    conversationId: string,
+    requestId: string,
+    decision: 'allow' | 'deny'
+  ): Promise<void>;
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
@@ -98,7 +137,7 @@ interface SessionsState {
   addImportedConversation(
     projectId: string,
     imported: { sessionFile: string; title: string }
-  ): string;
+  ): Promise<string | null>;
   /** 设置推理开关；已 spawn 的会话即时下发命令（worker 就地改 model，下条请求生效） */
   setReasoning(id: string, enabled: boolean): void;
   /** 设置推理档位；已 spawn 的会话即时生效 */
@@ -144,6 +183,41 @@ const patch = (
 export const useSessionsStore = create<SessionsState>()(
   persist(
     (set, get) => {
+      const pendingSelectionUpdates = new Map<string, Promise<void>>();
+      const pendingDispatchEvents = new Map<string, DispatchMainEvent[]>();
+
+      async function activateConversationAuthority(conversationId: string): Promise<{
+        project: ProjectAuthorityProjection;
+        conversation: ConversationAuthorityProjection;
+      } | null> {
+        const projection = await window.electronAPI.sourceAuthority.read();
+        const conversation = projection.conversations.find(
+          (candidate) =>
+            candidate.conversationId === conversationId &&
+            candidate.kind === 'root' &&
+            candidate.lifecycle !== 'ended'
+        );
+        if (!conversation) return null;
+        const project = projection.projects.find(
+          (candidate) =>
+            candidate.projectId === conversation.projectId && candidate.state === 'active'
+        );
+        if (!project) return null;
+        const projectResult = await window.electronAPI.sourceAuthority.selectProject({
+          requestId: crypto.randomUUID(),
+          projectId: project.projectId,
+          version: project.version,
+        });
+        if (!projectResult.accepted) return null;
+        const conversationResult = await window.electronAPI.sourceAuthority.selectConversation({
+          requestId: crypto.randomUUID(),
+          conversationId: conversation.conversationId,
+          version: conversation.version,
+        });
+        return conversationResult.accepted
+          ? { project: projectResult.value, conversation: conversationResult.value }
+          : null;
+      }
       window.electronAPI.agent.onFocusSession((sessionId) => {
         const conversation = get().conversations[sessionId];
         if (!conversation) return;
@@ -157,6 +231,40 @@ export const useSessionsStore = create<SessionsState>()(
           set({ activeId: sessionId });
         }
       });
+      window.electronAPI.capabilities.onAsk((request) => {
+        set((state) => {
+          const conversation = state.conversations[request.child.sessionId];
+          if (
+            !conversation ||
+            conversation.generation !== request.child.generation ||
+            (conversation.pendingCapabilityAsks ?? []).some(
+              (pending) => pending.requestId === request.requestId
+            )
+          ) {
+            return state;
+          }
+          return patch(state, conversation.id, {
+            pendingCapabilityAsks: [...(conversation.pendingCapabilityAsks ?? []), request],
+          });
+        });
+      });
+      window.electronAPI.agentDispatch.onEvent((event) => {
+        set((state) => {
+          const conversation = state.conversations[event.child.sessionId];
+          if (!conversation) {
+            pendingDispatchEvents.set(event.child.sessionId, [
+              ...(pendingDispatchEvents.get(event.child.sessionId) ?? []),
+              event,
+            ]);
+            return state;
+          }
+          const next = applyDispatchEvent(conversation, conversation.id, event);
+          return next === conversation
+            ? state
+            : patch(state, conversation.id, next as Conversation);
+        });
+      });
+
       window.electronAPI.agent.onEvent((event) => {
         if (event.type === 'worker-exited') {
           set((state) => {
@@ -170,176 +278,289 @@ export const useSessionsStore = create<SessionsState>()(
           });
           return;
         }
+
         if (event.type === 'snapshot') {
-          // 刷新后的补投影：worker 还活着的会话恢复消息与状态；
-          // 已 spawn 但 worker 不认识的（app 全量重启过）：有 jsonl 的转为可 resume，
-          // 没有的（老数据）标为已结束。
-          // partial=true 是 resume 的单会话回放，不能据此判定未涉及会话的死活。
           set((state) => {
-            const alive = new Map(event.sessions.map((s) => [s.sessionId, s]));
+            const alive = new Map(
+              event.sessions.map((snapshot) => [snapshot.identity.sessionId, snapshot])
+            );
             const partial = event.partial === true;
             const conversations = { ...state.conversations };
-            // persist 丢失时按 worker 快照重建 coworker 并挂回父(worker 是父子关系的权威)
-            for (const [sid, snapshot] of alive) {
-              const parentId = snapshot.parentSessionId;
-              if (conversations[sid] || !parentId || !conversations[parentId]) continue;
-              const parent = conversations[parentId];
-              conversations[sid] = {
+
+            // Persist 只保存 parent→child metadata；快照从各自 jsonl 恢复真实 history。
+            for (const [sessionId, snapshot] of alive) {
+              const metadata = snapshot.child;
+              if (conversations[sessionId] || !metadata) continue;
+              const parent = conversations[metadata.parentId];
+              if (!parent) continue;
+              conversations[sessionId] = {
                 ...emptyProjection,
-                id: sid,
+                generation: snapshot.identity.generation,
+                id: sessionId,
                 projectId: parent.projectId,
-                parentId,
-                coworkerName: snapshot.coworkerName,
-                title: snapshot.coworkerName ?? 'coworker',
+                parentId: metadata.parentId,
+                coworkerName: metadata.agentInstanceName,
+                agentType: metadata.agentTypeKey,
+                child: metadata,
+                title: metadata.agentInstanceName,
                 started: true,
                 spawning: false,
                 createdAt: Date.now(),
               };
-              conversations[parentId] = {
-                ...parent,
-                coworkerIds: [...(parent.coworkerIds ?? []), sid],
-              };
+              if (!(parent.coworkerIds ?? []).includes(sessionId)) {
+                conversations[metadata.parentId] = {
+                  ...parent,
+                  coworkerIds: [...(parent.coworkerIds ?? []), sessionId],
+                };
+              }
             }
+
             for (const id of Object.keys(conversations)) {
               const conversation = conversations[id];
               const snapshot = alive.get(id);
               if (snapshot) {
-                // worker 确认存活（含 resume 回放）：无条件采纳消息并标 started，避免与
-                // spawn 的 IPC 返回竞态时因 started 尚未置位而丢弃回放
                 conversations[id] = {
                   ...conversation,
+                  ...applyAgentEvent(conversation, id, event),
+                  ...(snapshot.child
+                    ? {
+                        parentId: snapshot.child.parentId,
+                        coworkerName: snapshot.child.agentInstanceName,
+                        agentType: snapshot.child.agentTypeKey,
+                        child: snapshot.child,
+                      }
+                    : {}),
                   started: true,
                   spawning: false,
-                  status: snapshot.status,
-                  messages: snapshot.messages,
-                  commands: snapshot.commands,
-                  pendingApprovals: snapshot.pendingApprovals ?? [],
-                  lastSeq: 0,
                   error: undefined,
+                  pendingCapabilityAsks: [],
+                  activeOauthAsk: undefined,
                 };
                 continue;
               }
-              // 增量快照不涉及的会话保持原样
               if (partial || !conversation.started) continue;
               conversations[id] = conversation.sessionFile
-                ? { ...conversation, started: false, status: 'idle', error: undefined }
+                ? {
+                    ...conversation,
+                    started: false,
+                    status: 'idle',
+                    error: undefined,
+                    pendingCapabilityAsks: [],
+                    activeOauthAsk: undefined,
+                  }
                 : {
                     ...conversation,
                     status: 'failed',
                     error: 'Session ended — history not restored',
+                    pendingCapabilityAsks: [],
+                    activeOauthAsk: undefined,
                   };
             }
             return { conversations };
           });
-          // resume 回放后会话已 idle:active goal 不会再等到 turn-completed,这里补一次续跑
           if (event.partial) {
-            for (const session of event.sessions) {
-              continueGoal(session.sessionId);
-            }
+            for (const session of event.sessions) continueGoal(session.identity.sessionId);
           }
           return;
         }
+
+        if (event.type === 'child-reserved') {
+          set((state) => {
+            const parentId = event.identity.parent.sessionId;
+            const parent = state.conversations[parentId];
+            if (!parent) return state;
+            const childId = event.identity.sessionId;
+            const existing = state.conversations[childId];
+            if (existing?.generation === event.identity.generation) return state;
+            let child: Conversation = {
+              ...emptyProjection,
+              generation: event.identity.generation,
+              lastSeq: event.seq,
+              id: childId,
+              projectId: parent.projectId,
+              parentId,
+              coworkerName: event.metadata.agentInstanceName,
+              agentType: event.metadata.agentTypeKey,
+              child: event.metadata,
+              title: event.metadata.agentInstanceName,
+              started: false,
+              spawning: true,
+              createdAt: Date.now(),
+            };
+            for (const dispatchEvent of [...(pendingDispatchEvents.get(childId) ?? [])].sort(
+              (left, right) => left.mainSeq - right.mainSeq
+            )) {
+              child = applyDispatchEvent(child, childId, dispatchEvent) as Conversation;
+            }
+            pendingDispatchEvents.delete(childId);
+            return {
+              activeId: parentId,
+              conversations: {
+                ...state.conversations,
+                [childId]: child,
+                [parentId]: {
+                  ...parent,
+                  generation: parent.generation ?? event.identity.parent.generation,
+                  coworkerIds: (parent.coworkerIds ?? []).includes(childId)
+                    ? parent.coworkerIds
+                    : [...(parent.coworkerIds ?? []), childId],
+                  activeTabId: childId,
+                  error: undefined,
+                },
+              },
+            };
+          });
+          return;
+        }
+
+        const identity = event.type === 'capability-invoke' ? event.child : event.identity;
+        const id = identity.sessionId;
+
+        if (event.type === 'coworker-update') {
+          set((state) => {
+            const parent = state.conversations[id];
+            if (!parent) return state;
+            const nextParent = applyAgentEvent(parent, id, event);
+            if (nextParent === parent) return state;
+            const coworker = event.coworker;
+            const conversations = { ...state.conversations, [id]: nextParent as Conversation };
+            if (coworker.status === 'dismissed') {
+              delete conversations[coworker.id];
+              conversations[id] = {
+                ...(nextParent as Conversation),
+                coworkerIds: (parent.coworkerIds ?? []).filter(
+                  (coworkerId) => coworkerId !== coworker.id
+                ),
+                activeTabId: parent.activeTabId === coworker.id ? undefined : parent.activeTabId,
+              };
+              return { conversations };
+            }
+            const existing = conversations[coworker.id];
+            const metadata = coworker.child;
+            const sameGeneration =
+              !metadata || !existing || existing.generation === metadata.childGeneration;
+            conversations[coworker.id] =
+              existing && sameGeneration
+                ? {
+                    ...existing,
+                    started: true,
+                    spawning: false,
+                    sessionFile: coworker.sessionFile ?? existing.sessionFile,
+                    coworkerName: coworker.name,
+                    ...(coworker.agentType ? { agentType: coworker.agentType } : {}),
+                    ...(metadata
+                      ? {
+                          generation: metadata.childGeneration,
+                          child: metadata,
+                          agentType: metadata.agentTypeKey,
+                        }
+                      : {}),
+                  }
+                : {
+                    ...emptyProjection,
+                    ...(metadata ? { generation: metadata.childGeneration, child: metadata } : {}),
+                    id: coworker.id,
+                    projectId: parent.projectId,
+                    parentId: id,
+                    coworkerName: coworker.name,
+                    agentType: metadata?.agentTypeKey ?? coworker.agentType,
+                    title: coworker.name,
+                    started: true,
+                    spawning: false,
+                    createdAt: coworker.createdAt,
+                    ...(coworker.sessionFile ? { sessionFile: coworker.sessionFile } : {}),
+                    ...(coworker.modelId ? { lastModelId: coworker.modelId } : {}),
+                  };
+            if (!(parent.coworkerIds ?? []).includes(coworker.id)) {
+              conversations[id] = {
+                ...(conversations[id] as Conversation),
+                coworkerIds: [...(parent.coworkerIds ?? []), coworker.id],
+              };
+            }
+            return { conversations };
+          });
+          return;
+        }
+
         if (event.type === 'goal-signal') {
           set((state) => {
-            const conversation = state.conversations[event.sessionId];
+            const conversation = state.conversations[id];
             if (!conversation?.goal) return state;
-            // 完成即收场:GoalBar 消失,痕迹留在时间线的 goal_complete 工具行里;
-            // blocked/waiting 保留条条(需要用户行动)
+            const next = applyAgentEvent(conversation, id, event);
+            if (next === conversation) return state;
             if (event.kind === 'complete') {
-              return patch(state, event.sessionId, { goal: undefined });
+              return patch(state, id, { ...next, goal: undefined });
             }
             const status = event.kind === 'blocked' ? ('blocked' as const) : ('waiting' as const);
-            return patch(state, event.sessionId, {
+            return patch(state, id, {
+              ...next,
               goal: { ...conversation.goal, status, note: event.note },
             });
           });
           return;
         }
-        if (event.type === 'coworker-update') {
+
+        if (event.type === 'rewind-done') {
           set((state) => {
-            const parent = state.conversations[event.sessionId];
-            if (!parent) return state;
-            const cw = event.coworker;
-            const conversations = { ...state.conversations };
-            if (cw.status === 'dismissed') {
-              delete conversations[cw.id];
-              conversations[event.sessionId] = {
-                ...parent,
-                coworkerIds: (parent.coworkerIds ?? []).filter((x) => x !== cw.id),
-                activeTabId: parent.activeTabId === cw.id ? undefined : parent.activeTabId,
-              };
-              return { conversations };
-            }
-            const existing = conversations[cw.id];
-            conversations[cw.id] = existing
-              ? {
-                  ...existing,
-                  started: true,
-                  spawning: false,
-                  sessionFile: cw.sessionFile ?? existing.sessionFile,
-                  ...(cw.agentType ? { agentType: cw.agentType } : {}),
-                }
-              : {
-                  ...emptyProjection,
-                  id: cw.id,
-                  projectId: parent.projectId,
-                  parentId: event.sessionId,
-                  coworkerName: cw.name,
-                  ...(cw.agentType ? { agentType: cw.agentType } : {}),
-                  title: cw.name,
-                  started: true,
-                  spawning: false,
-                  createdAt: cw.createdAt,
-                  ...(cw.sessionFile ? { sessionFile: cw.sessionFile } : {}),
-                  ...(cw.modelId ? { lastModelId: cw.modelId } : {}),
-                };
-            if (!(parent.coworkerIds ?? []).includes(cw.id)) {
-              conversations[event.sessionId] = {
-                ...parent,
-                coworkerIds: [...(parent.coworkerIds ?? []), cw.id],
-              };
-            }
-            return { conversations };
+            const conversation = state.conversations[id];
+            if (!conversation) return state;
+            const next = applyAgentEvent(conversation, id, event);
+            if (next === conversation) return state;
+            return patch(state, id, {
+              ...next,
+              ...(event.editorText ? { draftText: event.editorText } : {}),
+            });
           });
           return;
         }
-        if (event.type === 'rewind-done') {
-          // 截断已由随行的 message-upsert/messages-truncated 落定,这里只接编辑文本
-          if (event.editorText) {
-            set((state) =>
-              state.conversations[event.sessionId]
-                ? patch(state, event.sessionId, { draftText: event.editorText })
-                : state
-            );
-          }
-          return;
-        }
+
         if (event.type === 'session-meta') {
-          set((state) =>
-            state.conversations[event.sessionId]
-              ? patch(state, event.sessionId, {
-                  sessionFile: event.sessionFile,
-                  ...(event.contextWindow !== undefined
-                    ? { contextWindow: event.contextWindow }
-                    : {}),
-                })
-              : state
-          );
+          set((state) => {
+            const conversation = state.conversations[id];
+            if (!conversation) return state;
+            const next = applyAgentEvent(conversation, id, event);
+            if (next === conversation) return state;
+            return patch(state, id, {
+              ...next,
+              sessionFile: event.sessionFile,
+              ...(event.contextWindow !== undefined ? { contextWindow: event.contextWindow } : {}),
+            });
+          });
           return;
         }
-        if (!('sessionId' in event)) return;
-        const id = event.sessionId;
+
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
           const next = applyAgentEvent(conversation, id, event);
-          if (next === conversation && !conversation.spawning) return state;
-          // 该会话的首个 worker 事件即 spawn 完成信号，清掉 spawning（resume 的 loading 依赖它）
-          return patch(state, id, { ...next, spawning: false });
+          if (next === conversation) return state;
+          return patch(state, id, {
+            ...next,
+            spawning: false,
+            ...(event.type === 'parent-ready'
+              ? {
+                  started: true,
+                  sessionFile: event.sessionFile,
+                  lastProviderId: event.model.providerId,
+                  lastModelId: event.model.modelId,
+                }
+              : {}),
+            ...(event.type === 'child-ready'
+              ? {
+                  started: true,
+                  sessionFile: event.sessionFile,
+                }
+              : {}),
+            ...(event.type === 'session-custom-entry' &&
+            event.entry.kind === 'capability-receipt' &&
+            conversation.activeOauthAsk?.requestId === event.entry.receipt.requestId
+              ? { activeOauthAsk: undefined }
+              : {}),
+            ...(event.type === 'parent-ended' || event.type === 'child-ended'
+              ? { started: false, pendingCapabilityAsks: [], activeOauthAsk: undefined }
+              : {}),
+          });
         });
-        // 轮次收束后投递排队消息(审批/提问挂起时不投,等其解除后的下一次收束)。
-        // 只挂 turn-completed 单一触发点:worker 在它之前必先发 status idle,
-        // 两者都触发会在 running 事件回来前把下一条也投出去(双触发竞态)
         if (event.type === 'turn-completed') {
           flushQueue(id);
           continueGoal(id);
@@ -351,11 +572,12 @@ export const useSessionsStore = create<SessionsState>()(
         const conversation = get().conversations[id];
         const goal = conversation?.goal;
         if (!conversation?.started || conversation.status !== 'idle') return;
-        if (!goal || goal.status !== 'active') return;
+        if (goal?.status !== 'active') return;
         if ((conversation.queuedMessages ?? []).length > 0) return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0 ||
+          (conversation.pendingCapabilityAsks ?? []).length > 0
         ) {
           return;
         }
@@ -428,7 +650,8 @@ export const useSessionsStore = create<SessionsState>()(
         if (!next) return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0 ||
+          (conversation.pendingCapabilityAsks ?? []).length > 0
         ) {
           return;
         }
@@ -455,14 +678,24 @@ export const useSessionsStore = create<SessionsState>()(
         conversations: {},
         order: [],
         activeId: null,
+        pendingAgentPrefill: undefined,
 
-        newConversation(projectId) {
-          // 复用同项目下已存在的空白草稿，避免连点堆一排空行。
-          // 注意排除「待 resume 的旧对话」——app 重启后它们 started 也是 false，
-          // 但有 sessionFile/标题，不是草稿
+        async newConversation(projectId) {
+          const projection = await window.electronAPI.sourceAuthority.read();
+          const activeConversationIds = new Set(
+            projection.conversations
+              .filter(
+                (conversation) =>
+                  conversation.projectId === projectId &&
+                  conversation.kind === 'root' &&
+                  conversation.lifecycle !== 'ended'
+              )
+              .map((conversation) => conversation.conversationId)
+          );
           const existing = get().order.find((id) => {
             const conversation = get().conversations[id];
             return (
+              activeConversationIds.has(id) &&
               conversation.projectId === projectId &&
               !conversation.started &&
               !conversation.sessionFile &&
@@ -471,10 +704,32 @@ export const useSessionsStore = create<SessionsState>()(
             );
           });
           if (existing) {
-            set({ activeId: existing });
+            if (!(await activateConversationAuthority(existing))) return null;
+            const pendingAgentPrefill = get().pendingAgentPrefill;
+            set((state) => ({
+              activeId: existing,
+              pendingAgentPrefill: undefined,
+              conversations: pendingAgentPrefill
+                ? patch(state, existing, {
+                    activeTabId: undefined,
+                    prefillAgentTypeKey: pendingAgentPrefill,
+                  }).conversations
+                : state.conversations,
+            }));
             return existing;
           }
-          const id = crypto.randomUUID();
+          const project = projection.projects.find(
+            (candidate) => candidate.projectId === projectId && candidate.state === 'active'
+          );
+          if (!project) return null;
+          const created = await window.electronAPI.sourceAuthority.createConversation({
+            requestId: crypto.randomUUID(),
+            projectId,
+            projectVersion: project.version,
+          });
+          if (!created.accepted) return null;
+          const id = created.value.conversationId;
+          const pendingAgentPrefill = get().pendingAgentPrefill;
           const conversation: Conversation = {
             ...emptyProjection,
             id,
@@ -485,17 +740,39 @@ export const useSessionsStore = create<SessionsState>()(
             createdAt: Date.now(),
             reasoningEnabled: true,
             thinkingLevel: 'medium',
+            ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
           };
           set((state) => ({
             conversations: { ...state.conversations, [id]: conversation },
             order: [id, ...state.order],
             activeId: id,
+            pendingAgentPrefill: undefined,
           }));
+          await activateConversationAuthority(id);
           return id;
         },
 
         selectConversation(id) {
-          if (get().conversations[id]) set({ activeId: id });
+          if (!get().conversations[id]) return;
+          const pendingAgentPrefill = get().pendingAgentPrefill;
+          set((state) => ({
+            activeId: id,
+            pendingAgentPrefill: undefined,
+            conversations: pendingAgentPrefill
+              ? patch(state, id, {
+                  activeTabId: undefined,
+                  prefillAgentTypeKey: pendingAgentPrefill,
+                }).conversations
+              : state.conversations,
+          }));
+          void activateConversationAuthority(id).then((authority) => {
+            if (authority || !get().conversations[id]) return;
+            set((state) =>
+              patch(state, id, {
+                error: 'This conversation is history-only and cannot be dispatched.',
+              })
+            );
+          });
         },
 
         removeConversation(id) {
@@ -510,6 +787,25 @@ export const useSessionsStore = create<SessionsState>()(
           if (conversation.started && conversation.status === 'running') {
             void window.electronAPI.agent.abort(id);
           }
+          if (!conversation.parentId) {
+            void window.electronAPI.sourceAuthority.read().then(async (projection) => {
+              const authority = projection.conversations.find(
+                (candidate) => candidate.conversationId === id && candidate.lifecycle !== 'ended'
+              );
+              if (!authority) return;
+              const ended = await window.electronAPI.sourceAuthority.endConversation({
+                requestId: crypto.randomUUID(),
+                conversationId: id,
+                version: authority.version,
+              });
+              if (!ended.accepted) return;
+              await window.electronAPI.sourceAuthority.removeConversation({
+                requestId: crypto.randomUUID(),
+                conversationId: id,
+                version: ended.value.version,
+              });
+            });
+          }
           set((state) => {
             const conversations = { ...state.conversations };
             for (const coworkerId of conversation.coworkerIds ?? []) {
@@ -522,6 +818,156 @@ export const useSessionsStore = create<SessionsState>()(
               order,
               activeId: state.activeId === id ? (order[0] ?? null) : state.activeId,
             };
+          });
+        },
+        async dispatchAgent(typeKey, task, selectedModel) {
+          const requestId = crypto.randomUUID();
+          const parentId = get().activeId;
+          const parent = parentId ? get().conversations[parentId] : undefined;
+          if (!parentId || !parent || parent.parentId) {
+            return {
+              accepted: false,
+              requestId,
+              code: 'invalid-binding',
+              message: 'Open a parent conversation before dispatching an Agent.',
+            };
+          }
+          if (!selectedModel) {
+            const result: AgentDispatchResult = {
+              accepted: false,
+              requestId,
+              code: 'parent-model-unavailable',
+              message:
+                'Choose a usable model for the parent conversation before dispatching an Agent.',
+              action: 'select-model',
+            };
+            set((state) => patch(state, parentId, { error: result.message }));
+            return result;
+          }
+          try {
+            await pendingSelectionUpdates.get(parentId);
+            const authority = await activateConversationAuthority(parentId);
+            if (!authority) {
+              const result: AgentDispatchResult = {
+                accepted: false,
+                requestId,
+                code: 'invalid-binding',
+                message: 'This conversation is not an active Main-authorized source.',
+              };
+              set((state) => patch(state, parentId, { error: result.message }));
+              return result;
+            }
+            const sourceBinding = await window.electronAPI.agentDispatch.bindSource({
+              requestId: crypto.randomUUID(),
+            });
+            if (!sourceBinding.accepted) {
+              const result: AgentDispatchResult = {
+                accepted: false,
+                requestId,
+                code: 'invalid-binding',
+                message: sourceBinding.error,
+              };
+              set((state) => patch(state, parentId, { error: result.message }));
+              return result;
+            }
+            const selectionBinding = await window.electronAPI.agentDispatch.registerModelSelection({
+              parentBindingId: sourceBinding.parentBindingId,
+              selection: selectedModel,
+            });
+            if (!selectionBinding.accepted) {
+              const result: AgentDispatchResult = {
+                accepted: false,
+                requestId,
+                code: 'parent-model-unavailable',
+                message: selectionBinding.error,
+                action: 'select-model',
+              };
+              set((state) => patch(state, parentId, { error: result.message }));
+              return result;
+            }
+            const result = await window.electronAPI.agentDispatch.dispatch({
+              requestId,
+              selectionBindingId: selectionBinding.binding.selectionBindingId,
+              typeKey,
+              task,
+            });
+            set((state) =>
+              patch(state, parentId, {
+                error: result.accepted ? undefined : result.message,
+              })
+            );
+            return result;
+          } catch (error) {
+            const result: AgentDispatchResult = {
+              accepted: false,
+              requestId,
+              code: 'dispatch-failed',
+              message: error instanceof Error ? error.message : String(error),
+              action: 'retry',
+            };
+            set((state) => patch(state, parentId, { error: result.message }));
+            return result;
+          }
+        },
+
+        prefillAgent(typeKey) {
+          const parentId = get().activeId;
+          if (parentId && get().conversations[parentId]) {
+            set((state) => ({
+              pendingAgentPrefill: undefined,
+              conversations: patch(state, parentId, {
+                activeTabId: undefined,
+                prefillAgentTypeKey: typeKey,
+              }).conversations,
+            }));
+            return;
+          }
+          set({ pendingAgentPrefill: typeKey });
+          const project = useSettingsStore.getState().projects[0];
+          if (project) void get().newConversation(project.id);
+        },
+
+        clearAgentPrefill(conversationId) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation?.prefillAgentTypeKey) return;
+          set((state) => patch(state, conversationId, { prefillAgentTypeKey: undefined }));
+        },
+
+        async respondCapabilityAsk(conversationId, requestId, decision) {
+          const conversation = get().conversations[conversationId];
+          const request = conversation?.pendingCapabilityAsks?.find(
+            (candidate) => candidate.requestId === requestId
+          );
+          if (!conversation || !request) return;
+          const result = await window.electronAPI.capabilities.respond({
+            child: request.child,
+            turnId: request.turnId,
+            requestId: request.requestId,
+            decision,
+          });
+          if (!result.ok || !result.accepted) {
+            set((state) =>
+              patch(state, conversationId, {
+                error: !result.ok ? result.error : 'This approval is no longer active.',
+              })
+            );
+            return;
+          }
+          set((state) => {
+            const current = state.conversations[conversationId];
+            if (!current || current.generation !== request.child.generation) return state;
+            return patch(state, conversationId, {
+              pendingCapabilityAsks: (current.pendingCapabilityAsks ?? []).filter(
+                (candidate) => candidate.requestId !== requestId
+              ),
+              activeOauthAsk:
+                decision === 'allow' && request.host?.kind === 'oauth-login'
+                  ? request
+                  : current.activeOauthAsk?.requestId === requestId
+                    ? undefined
+                    : current.activeOauthAsk,
+              error: undefined,
+            });
           });
         },
 
@@ -640,24 +1086,25 @@ export const useSessionsStore = create<SessionsState>()(
           const settings = useSettingsStore.getState();
           const project = settings.projects.find((p) => p.id === conversation.projectId);
           if (!project) return;
-          // 导入的对话没有历史模型记录，退化到第一个可用 provider/model
-          const fallbackProvider = settings.providers.find(
-            (p) =>
-              p.enabled && hasProviderCredentials(p) && p.models.some((m) => m.enabled !== false)
+          const snapshot = useOauthCredentialStore.getState().snapshot;
+          const resolution = resolveChatModel({
+            defaultModel: settings.defaultModel,
+            lastProviderId: conversation.lastProviderId,
+            lastModelId: conversation.lastModelId,
+            providers: settings.providers,
+            credentials: oauthCredentialContext(snapshot),
+          });
+          // 有明确历史模型的旧会话只允许按原组合恢复；真实 logout/失效时不静默改模 spawn。
+          const hasRememberedModel = Boolean(
+            conversation.lastProviderId && conversation.lastModelId
           );
-          // 上次用的 provider 可能已被删除/禁用，校验有效性，失效则回退默认（不报错）
-          const lastProvider = settings.providers.find(
-            (p) => p.id === conversation.lastProviderId && p.enabled && hasProviderCredentials(p)
-          );
-          const provider = lastProvider ?? fallbackProvider;
-          const providerId = provider?.id;
-          const lastModelValid = lastProvider?.models.some(
-            (m) => m.id === conversation.lastModelId
-          );
-          const modelId = lastModelValid
-            ? conversation.lastModelId
-            : provider?.models.find((m) => m.enabled !== false)?.id;
-          if (!providerId || !modelId) return;
+          if (
+            resolution.source === 'none' ||
+            (hasRememberedModel && resolution.source !== 'session')
+          ) {
+            return;
+          }
+          const { providerId, modelId } = resolution;
           set((state) => patch(state, id, { spawning: true }));
           const result = await window.electronAPI.agent.spawn({
             sessionId: id,
@@ -710,25 +1157,15 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        addImportedConversation(projectId, imported) {
-          const id = crypto.randomUUID();
-          const conversation: Conversation = {
-            ...emptyProjection,
-            id,
-            projectId,
-            title: imported.title || '[imported]',
-            started: false,
-            spawning: false,
-            createdAt: Date.now(),
-            sessionFile: imported.sessionFile,
-            reasoningEnabled: true,
-            thinkingLevel: 'medium',
-          };
-          set((state) => ({
-            conversations: { ...state.conversations, [id]: conversation },
-            order: [id, ...state.order],
-            activeId: id,
-          }));
+        async addImportedConversation(projectId, imported) {
+          const id = await get().newConversation(projectId);
+          if (!id) return null;
+          set((state) =>
+            patch(state, id, {
+              title: imported.title || '[imported]',
+              sessionFile: imported.sessionFile,
+            })
+          );
           return id;
         },
 
@@ -760,7 +1197,37 @@ export const useSessionsStore = create<SessionsState>()(
           set((state) => patch(state, id, { presetId }));
         },
         setModel(id, providerId, modelId) {
-          set((state) => patch(state, id, { lastProviderId: providerId, lastModelId: modelId }));
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          const parentId = conversation.parentId ?? id;
+          set((state) =>
+            patch(state, parentId, { lastProviderId: providerId, lastModelId: modelId })
+          );
+          const update = window.electronAPI.sourceAuthority
+            .read()
+            .then((projection) => {
+              const authority = projection.conversations.find(
+                (candidate) =>
+                  candidate.conversationId === parentId && candidate.lifecycle !== 'ended'
+              );
+              if (!authority) return null;
+              return window.electronAPI.sourceAuthority.updateConversationSelection({
+                requestId: crypto.randomUUID(),
+                conversationId: parentId,
+                version: authority.version,
+                selection: { providerId, modelId },
+              });
+            })
+            .then((result) => {
+              if (!result || result.accepted || !get().conversations[parentId]) return;
+              set((state) => patch(state, parentId, { error: result.error }));
+            })
+            .finally(() => {
+              if (pendingSelectionUpdates.get(parentId) === update) {
+                pendingSelectionUpdates.delete(parentId);
+              }
+            });
+          pendingSelectionUpdates.set(parentId, update);
         },
 
         setApprovalMode(id, mode) {
@@ -975,6 +1442,9 @@ export const useSessionsStore = create<SessionsState>()(
             {
               ...conversation,
               messages: [],
+              customEntries: [],
+              dispatchMainEvents: {},
+              generation: undefined,
               lastSeq: 0,
               spawning: false,
               error: undefined,
@@ -982,10 +1452,13 @@ export const useSessionsStore = create<SessionsState>()(
               // 运行态字段不持久化：重启后由 worker snapshot 重建，避免 rehydrate 先摆出陈旧状态
               pendingApprovals: [],
               pendingAsks: [],
+              pendingCapabilityAsks: [],
+              activeOauthAsk: undefined,
               backgroundTasks: [],
               subagents: [],
               activeTabId: undefined,
               draftText: undefined,
+              prefillAgentTypeKey: undefined,
             },
           ])
         ),

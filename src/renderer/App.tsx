@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { TitleBar } from '@/components/app/TitleBar';
+import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { useSessionsStore } from '@/stores/sessions';
@@ -16,6 +17,7 @@ const MAX_WIDTH = 420;
 
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
+
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;
@@ -28,6 +30,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
+
+  useEffect(
+    () =>
+      window.electronAPI.window.onAgentComposerPrefill((prefill) => {
+        useSessionsStore.getState().prefillAgent(prefill.typeKey);
+      }),
+    []
+  );
 
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
@@ -62,7 +72,7 @@ export default function App() {
         const sessions = useSessionsStore.getState();
         const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
         const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-        if (projectId) sessions.newConversation(projectId);
+        if (projectId) void sessions.newConversation(projectId);
       } else if (pressed === bindings['next-tab']) {
         e.preventDefault();
         cycleTab(1);
@@ -77,7 +87,8 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <TitleBar title="EnsoCode" />
+      <OauthCredentialBootstrap />
+      <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar

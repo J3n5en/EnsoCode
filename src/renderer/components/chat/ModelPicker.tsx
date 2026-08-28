@@ -83,6 +83,8 @@ interface ModelPickerProps {
   modelId: string;
   reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
+  /** 设置页只复用 provider/account/model 级联，不展示会话级 reasoning/thinking。 */
+  showReasoningControls?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -330,6 +332,7 @@ export function ModelPicker({
   modelId,
   reasoningEnabled,
   thinkingLevel,
+  showReasoningControls = true,
   onSelect,
   onReasoningChange,
   onThinkingChange,
@@ -654,77 +657,79 @@ export function ModelPicker({
           )}
         </div>
 
-        <div className="-mx-1 -mb-1 mt-1 border-t p-3">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1 text-xs">
-              <Brain className="h-3.5 w-3.5 text-muted-foreground" />
-              {t('Reasoning')}
-            </span>
-            <Switch
-              tabIndex={-1}
-              checked={reasoningEnabled}
-              onCheckedChange={onReasoningChange}
-              disabled={reasoningUnsupported}
-            />
-          </div>
-          {reasoningUnsupported && (
-            <p className="mt-1 text-[10px] text-muted-foreground/70">
-              {t('{{model}} does not support reasoning', { model: current?.label ?? modelId })}
-            </p>
-          )}
-
-          {reasoningEnabled && !reasoningUnsupported && (
-            <div className="mt-3">
-              <Slider
+        {showReasoningControls && (
+          <div className="-mx-1 -mb-1 mt-1 border-t p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-xs">
+                <Brain className="h-3.5 w-3.5 text-muted-foreground" />
+                {t('Reasoning')}
+              </span>
+              <Switch
                 tabIndex={-1}
-                min={0}
-                max={THINKING_LEVELS.length - 1}
-                step={1}
-                value={levelIndex}
-                onValueChange={(value) => {
-                  const index = Array.isArray(value) ? value[0] : value;
-                  const target = THINKING_LEVELS[index] ?? 'medium';
-                  onThinkingChange(clampProjectThinkingLevel(target, supportedLevels));
-                }}
+                checked={reasoningEnabled}
+                onCheckedChange={onReasoningChange}
+                disabled={reasoningUnsupported}
               />
-              <div className="mt-1.5 flex justify-between">
-                {THINKING_LEVELS.map((entry, index) => {
-                  const disabled =
-                    supportedLevels !== undefined && !supportedLevels.includes(entry);
-                  return (
-                    <button
-                      key={entry}
-                      type="button"
-                      tabIndex={-1}
-                      disabled={disabled}
-                      onClick={disabled ? undefined : () => onThinkingChange(entry)}
-                      className={cn(
-                        'flex w-8 flex-col items-center gap-0.5',
-                        index === 0 && 'items-start',
-                        index === THINKING_LEVELS.length - 1 && 'items-end',
-                        disabled && 'cursor-not-allowed'
-                      )}
-                    >
-                      <span className="h-1.5 w-px bg-muted-foreground/40" />
-                      <span
+            </div>
+            {reasoningUnsupported && (
+              <p className="mt-1 text-[10px] text-muted-foreground/70">
+                {t('{{model}} does not support reasoning', { model: current?.label ?? modelId })}
+              </p>
+            )}
+
+            {reasoningEnabled && !reasoningUnsupported && (
+              <div className="mt-3">
+                <Slider
+                  tabIndex={-1}
+                  min={0}
+                  max={THINKING_LEVELS.length - 1}
+                  step={1}
+                  value={levelIndex}
+                  onValueChange={(value) => {
+                    const index = Array.isArray(value) ? value[0] : value;
+                    const target = THINKING_LEVELS[index] ?? 'medium';
+                    onThinkingChange(clampProjectThinkingLevel(target, supportedLevels));
+                  }}
+                />
+                <div className="mt-1.5 flex justify-between">
+                  {THINKING_LEVELS.map((entry, index) => {
+                    const disabled =
+                      supportedLevels !== undefined && !supportedLevels.includes(entry);
+                    return (
+                      <button
+                        key={entry}
+                        type="button"
+                        tabIndex={-1}
+                        disabled={disabled}
+                        onClick={disabled ? undefined : () => onThinkingChange(entry)}
                         className={cn(
-                          'text-[10px] transition-colors',
-                          entry === thinkingLevel
-                            ? 'font-medium text-primary'
-                            : disabled
-                              ? 'text-muted-foreground/30'
-                              : 'text-muted-foreground/70 hover:text-foreground'
+                          'flex w-8 flex-col items-center gap-0.5',
+                          index === 0 && 'items-start',
+                          index === THINKING_LEVELS.length - 1 && 'items-end',
+                          disabled && 'cursor-not-allowed'
                         )}
                       >
-                        {t(LEVEL_LABEL_KEYS[entry])}
-                      </span>
-                    </button>
-                  );
-                })}
+                        <span className="h-1.5 w-px bg-muted-foreground/40" />
+                        <span
+                          className={cn(
+                            'text-[10px] transition-colors',
+                            entry === thinkingLevel
+                              ? 'font-medium text-primary'
+                              : disabled
+                                ? 'text-muted-foreground/30'
+                                : 'text-muted-foreground/70 hover:text-foreground'
+                          )}
+                        >
+                          {t(LEVEL_LABEL_KEYS[entry])}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </MenuPopup>
     </Menu>
   );

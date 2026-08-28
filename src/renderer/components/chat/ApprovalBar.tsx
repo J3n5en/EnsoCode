@@ -14,6 +14,8 @@ const KIND_ICONS = {
 interface ApprovalBarProps {
   approvals: ApprovalRequestInfo[];
   onRespond: (requestId: string, decision: ApprovalDecision) => void;
+  /** Enso capability approvals are one-shot and must never expose allowSession. */
+  allowSession?: boolean;
 }
 
 /** 审批详情:command 走 shell 语法高亮,其余(文件路径/MCP 参数)素文本。
@@ -47,7 +49,7 @@ function SummaryView({ kind, summary }: { kind: ApprovalKind; summary: string })
   );
 }
 /** composer 上方的审批条（ref-chat-a 形态）：只渲染队首，>1 显示 1/N；summary 全文可滚动 */
-export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
+export function ApprovalBar({ approvals, onRespond, allowSession = true }: ApprovalBarProps) {
   const { t } = useI18n();
   const [responding, setResponding] = useState<string | null>(null);
   const active = approvals[0];
@@ -86,14 +88,16 @@ export function ApprovalBar({ approvals, onRespond }: ApprovalBarProps) {
         >
           {t('Deny')}
         </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => respond('allowSession')}
-          className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-        >
-          {t('Always allow this session')}
-        </button>
+        {allowSession && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => respond('allowSession')}
+            className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {t('Always allow this session')}
+          </button>
+        )}
         <button
           type="button"
           disabled={disabled}

@@ -152,7 +152,9 @@ export function MessageTimeline({
                     {runStartedAt !== undefined && <ElapsedTimer since={runStartedAt} />}
                   </div>
                 )}
-                {error && <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>}
+                {error && (
+                  <p className="text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
+                )}
               </div>
             ),
           }}

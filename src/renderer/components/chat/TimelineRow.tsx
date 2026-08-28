@@ -1,4 +1,4 @@
-import type { TodoItem, TurnPerf } from '@shared/types/agent';
+import type { AgentSessionCustomEntry, TodoItem, TurnPerf } from '@shared/types/agent';
 import {
   Bot,
   Brain,
@@ -16,7 +16,7 @@ import {
   TerminalSquare,
   Undo2,
 } from 'lucide-react';
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -101,6 +101,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'error' && a.text === b.text;
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
+    case 'session-custom':
+      return b.kind === 'session-custom' && a.entry === b.entry;
   }
 }
 
@@ -145,13 +147,7 @@ function SkillTag({ name, content }: { name: string; content: string }) {
   );
 }
 
-function ChipBubble({
-  chip,
-  extra,
-}: {
-  chip: ReactNode;
-  extra?: string;
-}) {
+function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   return (
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
       {chip}
@@ -165,10 +161,7 @@ function SkillInvocation({ text }: { text: string }) {
   if (!match) return null;
   const [, name, , content, userMessage] = match;
   return (
-    <ChipBubble
-      chip={<SkillTag name={name} content={content} />}
-      extra={userMessage?.trim()}
-    />
+    <ChipBubble chip={<SkillTag name={name} content={content} />} extra={userMessage?.trim()} />
   );
 }
 
@@ -266,8 +259,109 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       );
     case 'task-note':
       return <TaskNoteRow item={item} />;
+    case 'session-custom':
+      return <SessionCustomRow entry={item.entry} />;
   }
 }, itemEqual);
+
+const customValue = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value === undefined) return '—';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
+  const { t } = useI18n();
+  if (entry.kind === 'agent-dispatch') {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
+        <Bot className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span className="text-muted-foreground">{t('Dispatched to')}</span>
+        <span className="font-medium">{entry.child.instanceName}</span>
+      </div>
+    );
+  }
+  if (entry.kind === 'agent-completed') {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2 text-xs">
+        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+        <div className="min-w-0">
+          <p className="font-medium">
+            {entry.child.instanceName} · {t('Completed')}
+          </p>
+          {entry.receiptSummary && (
+            <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">
+              {entry.receiptSummary}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (entry.kind === 'agent-failed') {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-2.5 py-2 text-xs">
+        <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+        <div className="min-w-0">
+          <p className="font-medium">
+            {entry.child.instanceName} · {t('Failed')}
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{entry.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const receipt = entry.receipt;
+  const succeeded = receipt.outcome === 'succeeded';
+  return (
+    <div
+      className={cn(
+        'rounded-md border px-2.5 py-2 text-xs',
+        succeeded
+          ? 'border-emerald-500/20 bg-emerald-500/5'
+          : receipt.outcome === 'failed'
+            ? 'border-destructive/20 bg-destructive/5'
+            : 'border-amber-500/20 bg-amber-500/5'
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {succeeded ? (
+          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+        ) : (
+          <CircleAlert
+            className={cn(
+              'mt-0.5 h-3.5 w-3.5 shrink-0',
+              receipt.outcome === 'failed' ? 'text-destructive' : 'text-amber-500'
+            )}
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">
+            {receipt.subject.label} · {t(receipt.outcome)}
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{receipt.summary}</p>
+          {receipt.changes && receipt.changes.length > 0 && (
+            <dl className="mt-2 space-y-1 border-t border-border/50 pt-2">
+              {receipt.changes.map((change) => (
+                <div key={change.field} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <dt className="truncate text-muted-foreground">{change.field}</dt>
+                  <dd className="text-right font-mono">
+                    {customValue(change.previous)} → {customValue(change.value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** 当前展示的会话(主会话或激活的 coworker tab),与 ChatView 的选取逻辑一致 */
 function displayedConversation(state: ReturnType<typeof useSessionsStore.getState>) {

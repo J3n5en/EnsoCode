@@ -1,0 +1,12 @@
+{"file":".trellis/spec/main/ipc.md","reason":"核对 registry/dispatch/summon/capability 每条新通道三点式完整，Renderer 入参按 unknown strict parse，旧 BUILTIN_AGENTS_* 与 dead result channel 已删除。"}
+{"file":".trellis/spec/main/services.md","reason":"核对 Main source binding、worker 生命周期、apiKey 到 Main 为止、child factory 与敏感数据边界；Enso locked profile 不暴露 raw IPC/文件/命令/MCP。"}
+{"file":".trellis/spec/main/settings-persistence.md","reason":"核对 Gateway 写设置广播所有窗口、普通 Renderer 自写排除 sender，以及 defaultModel 持久化/迁移没有被 Agent 返工破坏。"}
+{"file":".trellis/spec/main/windows.md","reason":"核对右上/Settings/Onboarding 召唤只聚焦或创建 MainWindow 并预填，不创建独立 Enso window/drawer。"}
+{"file":".trellis/spec/shared/types.md","reason":"核对 AgentTypeKey、identity/generation、ready、custom entry、receipt、IPC 判别式与持久化 metadata 的 clean-cutover；无旧 shape alias。"}
+{"file":".trellis/spec/shared/conventions.md","reason":"核对命名、Biome 与精确文件门禁；F20 不通过 suppress/忽略规则规避。"}
+{"file":".trellis/spec/renderer/state.md","reason":"核对 child 复用 sessions/coworker projection 与 jsonl snapshot，generation+seq 单调；custom entry 不混入 LLM messages，不保留 agentInvocations sidecar persist。"}
+{"file":".trellis/spec/renderer/components.md","reason":"核对 MentionPicker、recipient chip、CoworkerTabs、child ASK/OAuth/receipt 与 parent custom timeline 使用现有 UI 封装。"}
+{"file":".trellis/spec/renderer/dialogs.md","reason":"核对 OAuth/危险 ASK 交互的 busy、逐笔确认与 child TAB 宿主；无独立 Ask Enso dialog。"}
+{"file":".trellis/spec/renderer/i18n.md","reason":"核对 Agents/Files/type badge/capacity/ready/receipt/summon 新文案均走 t()，旧 drawer/history 文案与孤儿 key 清除。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对 typed mention→Main binding→parent ready→child ready→task→TAB/custom notification 的每层 shape 与错误回传。"}
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"核对旧 jsonl/settings、多窗口、密钥、容量与失败清理边界；没有因根修扩大到无关模块。"}

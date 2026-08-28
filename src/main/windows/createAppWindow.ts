@@ -73,7 +73,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
     },
   });
 
@@ -124,7 +124,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${options.entry}.html`);
   } else {
-    win.loadFile(join(__dirname, `../renderer/${options.entry}.html`));
+    win.loadFile(join(import.meta.dirname, `../renderer/${options.entry}.html`));
   }
 
   return win;

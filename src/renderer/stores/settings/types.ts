@@ -1,3 +1,8 @@
+import type {
+  DefaultModelNotice,
+  DefaultModelRef,
+  OauthCredentialBlock,
+} from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import type { StatusLineSegmentId } from '@shared/statusLine';
 import type {
@@ -9,6 +14,33 @@ import type {
   Project,
   SkillEntry,
 } from '@shared/types';
+import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
+
+export type DefaultModelRevalidation =
+  | {
+      status: 'unchanged';
+      defaultModel: DefaultModelRef | null;
+      writeback: false;
+      notice: null;
+    }
+  | ({
+      status: 'deferred';
+      defaultModel: DefaultModelRef | null;
+      writeback: false;
+      notice: null;
+    } & OauthCredentialBlock)
+  | {
+      status: 'stale';
+      defaultModel: DefaultModelRef | null;
+      writeback: false;
+      notice: null;
+    }
+  | {
+      status: 'sanitized';
+      defaultModel: DefaultModelRef | null;
+      writeback: true;
+      notice: DefaultModelNotice;
+    };
 
 export type Theme = 'light' | 'dark' | 'system' | 'sync-terminal';
 
@@ -55,6 +87,8 @@ export interface SettingsState {
 
   // Model providers
   providers: ModelProvider[];
+  /** 尚未自选模型的新会话与 Enso 共用的全局默认；只保存 provider entry id + model id */
+  defaultModel: DefaultModelRef | null;
 
   // Skills / MCP servers（按引用登记，内容留在源应用目录）
   skills: SkillEntry[];
@@ -98,6 +132,10 @@ export interface SettingsState {
   updateProvider: (id: string, updates: Partial<Omit<ModelProvider, 'id'>>) => void;
   removeProvider: (id: string) => void;
 
+  /** 设置全局默认；只持久化 provider entry id + model id */
+  setDefaultModel: (defaultModel: DefaultModelRef | null) => void;
+  /** 用当前 OAuth 真凭证快照重校验；非 ready/stale 时绝不写回 */
+  revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => DefaultModelRevalidation;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;
@@ -136,7 +174,7 @@ export interface SettingsState {
   resetKeybinding: (action: string) => void;
 
   // Project actions
-  /** 按目录路径去重；已存在时返回已有项 */
-  addProject: (path: string) => Project;
-  removeProject: (id: string) => void;
+  /** Main authority创建project并返回canonical projection。 */
+  addProject: (path: string) => Promise<Project | null>;
+  removeProject: (id: string) => Promise<boolean>;
 }

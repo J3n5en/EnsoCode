@@ -1,17 +1,38 @@
-import { Minus, Square, X } from 'lucide-react';
+import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { Minus, Sparkles, Square, X } from 'lucide-react';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
 interface TitleBarProps {
   title?: string;
   className?: string;
+  /** Optional no-drag actions; omitted props preserve the existing title bar layout. */
+  actions?: React.ReactNode;
 }
 
+export function SummonEnsoButton({ label = true }: { label?: boolean }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => {
+        void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
+      }}
+      aria-label={t('Ask Enso')}
+      title={t('Ask Enso')}
+    >
+      <Sparkles className="h-3.5 w-3.5" />
+      {label && <span>{t('Ask Enso')}</span>}
+    </button>
+  );
+}
 /**
  * 无边框窗口标题栏：
  * - macOS: 仅作为拖拽区域（traffic lights 由系统渲染，左侧预留空间）
  * - Windows/Linux: 自绘最小化/最大化/关闭按钮
  */
-export function TitleBar({ title, className }: TitleBarProps) {
+export function TitleBar({ title, className, actions }: TitleBarProps) {
   const isMac = window.electronAPI.env.platform === 'darwin';
 
   return (
@@ -25,8 +46,10 @@ export function TitleBar({ title, className }: TitleBarProps) {
     >
       <span className="text-sm font-medium text-muted-foreground">{title}</span>
 
+      {actions && <div className="no-drag ml-auto flex items-center gap-1">{actions}</div>}
+
       {!isMac && (
-        <div className="no-drag ml-auto flex h-full items-center">
+        <div className={cn('no-drag flex h-full items-center', !actions && 'ml-auto')}>
           <button
             type="button"
             className="flex h-full w-12 items-center justify-center hover:bg-muted"

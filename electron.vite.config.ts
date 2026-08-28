@@ -1,34 +1,15 @@
-import { builtinModules } from 'node:module';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import pkg from './package.json';
 
-// main 段一旦自定义 rollupOptions.input，electron-vite 的默认 external 不再生效，
-// electron 与 dependencies 会被打进产物（见 spec/big-question/preload-externalization.md 同类坑），
-// 故显式复刻默认 external。
-const deps = Object.keys(pkg.dependencies);
-const nodeExternal = [
-  'electron',
-  /^electron\/.+/,
-  ...builtinModules.flatMap((m) => [m, `node:${m}`]),
-  ...deps,
-  new RegExp(`^(${deps.join('|')})/`),
-];
-
 export default defineConfig({
   main: {
     build: {
+      // Agent utilityProcess 走 `?modulePath` isolated build；Main 保持官方单入口，
+      // 避免手工 multi-input 把无 export 的启动入口 tree-shake 成 0B facade。
       externalizeDeps: true,
-      rollupOptions: {
-        input: {
-          index: path.resolve(__dirname, 'src/main/index.ts'),
-          // agent worker：utilityProcess 入口，与 main 同构建段以复用 external 配置
-          agent: path.resolve(__dirname, 'src/agent/index.ts'),
-        },
-        external: nodeExternal,
-      },
     },
     resolve: {
       alias: {

@@ -32,6 +32,8 @@ export const IPC_CHANNELS = {
   OAUTH_LOGOUT: 'oauth-providers:logout',
   OAUTH_LOGIN_EVENT: 'oauth-providers:login-event',
   OAUTH_ACCOUNT_INFO: 'oauth-providers:account-info',
+  OAUTH_CREDENTIAL_KEYS_LIST: 'oauth:credential-keys-list',
+  OAUTH_CREDENTIALS_CHANGED: 'oauth:credentials-changed',
 
   // Local skill / MCP scan/import
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
@@ -61,6 +63,31 @@ export const IPC_CHANNELS = {
   AGENT_SPAWN_COWORKER: 'agent:spawn-coworker',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',
+
+  // Agent type registry + sender-bound deterministic child dispatch
+  AGENT_TYPES_REGISTRY_LIST: 'agent-types:registry-list',
+  AGENT_MODEL_SELECTION_REGISTER: 'agent-dispatch:model-selection-register',
+  AGENT_DISPATCH_BIND_SOURCE: 'agent-dispatch:bind-source',
+  AGENT_DISPATCH: 'agent-dispatch:dispatch',
+  AGENT_DISPATCH_EVENT: 'agent-dispatch:event',
+  AGENT_SUMMON: 'agent-dispatch:summon',
+  AGENT_COMPOSER_PREFILL: 'agent-dispatch:composer-prefill',
+
+  // Main-owned project/conversation authority (generic settings are projection only)
+  SOURCE_AUTHORITY_READ: 'source-authority:read',
+  SOURCE_AUTHORITY_CHANGED: 'source-authority:changed',
+  SOURCE_PROJECT_CREATE: 'source-authority:project-create',
+  SOURCE_PROJECT_SELECT: 'source-authority:project-select',
+  SOURCE_PROJECT_REMOVE: 'source-authority:project-remove',
+  SOURCE_CONVERSATION_CREATE: 'source-authority:conversation-create',
+  SOURCE_CONVERSATION_SELECT: 'source-authority:conversation-select',
+  SOURCE_CONVERSATION_END: 'source-authority:conversation-end',
+  SOURCE_CONVERSATION_REMOVE: 'source-authority:conversation-remove',
+  SOURCE_CONVERSATION_UPDATE_SELECTION: 'source-authority:conversation-update-selection',
+
+  // Enso child capability approval (result returns Main → worker command)
+  CAPABILITIES_ASK: 'capabilities:ask',
+  CAPABILITIES_RESPOND: 'capabilities:respond',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

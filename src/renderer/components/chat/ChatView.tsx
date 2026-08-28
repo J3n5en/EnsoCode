@@ -1,7 +1,16 @@
-import { hasProviderCredentials } from '@shared/types';
+import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { resolveChatModel } from '@shared/defaultModel';
+import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import {
+  oauthCredentialContext,
+  usableProvidersForOauthSnapshot,
+  useOauthCredentialStore,
+} from '@/stores/oauthCredentials';
+
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
@@ -10,6 +19,7 @@ import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
 import { Composer } from './Composer';
 import { CoworkerTabs } from './CoworkerTabs';
+import { routeComposerPayload } from './composerRouting';
 import { GoalBar } from './GoalBar';
 import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
@@ -21,6 +31,7 @@ import { TaskBar } from './TaskBar';
 export function ChatView() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
+  const defaultModel = useSettingsStore((state) => state.defaultModel);
   const projects = useSettingsStore((state) => state.projects);
   const parent = useSessionsStore((state) =>
     state.activeId ? state.conversations[state.activeId] : null
@@ -32,20 +43,67 @@ export function ChatView() {
     return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
   });
 
+  const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
   const enabledProviders = useMemo(
-    () => providers.filter((provider) => provider.enabled && hasProviderCredentials(provider)),
-    [providers]
+    () => usableProvidersForOauthSnapshot(providers, oauthSnapshot),
+    [providers, oauthSnapshot]
   );
-  // 模型选择读写会话记忆（lastProviderId/lastModelId,持久化）,重启/切会话不丢
+  // 会话显式选择优先；没有 last* 的新草稿只使用全局默认，不再退化到 providers 第一项。
+  const modelResolution = useMemo(
+    () =>
+      resolveChatModel({
+        defaultModel,
+        lastProviderId: conversation?.lastProviderId,
+        lastModelId: conversation?.lastModelId,
+        providers,
+        credentials: oauthCredentialContext(oauthSnapshot),
+      }),
+    [
+      conversation?.lastModelId,
+      conversation?.lastProviderId,
+      defaultModel,
+      oauthSnapshot,
+      providers,
+    ]
+  );
+  const parentModelResolution = useMemo(
+    () =>
+      resolveChatModel({
+        defaultModel,
+        lastProviderId: parent?.lastProviderId,
+        lastModelId: parent?.lastModelId,
+        providers,
+        credentials: oauthCredentialContext(oauthSnapshot),
+      }),
+    [defaultModel, oauthSnapshot, parent?.lastModelId, parent?.lastProviderId, providers]
+  );
+  const parentSelectedModel =
+    parentModelResolution.source === 'none'
+      ? null
+      : {
+          providerId: parentModelResolution.providerId,
+          modelId: parentModelResolution.modelId,
+        };
   const provider =
-    enabledProviders.find((p) => p.id === conversation?.lastProviderId) ?? enabledProviders[0];
-  const enabledModels = useMemo(
-    () => (provider?.models ?? []).filter((model) => model.enabled !== false),
-    [provider]
-  );
-  const effectiveModelId = enabledModels.some((m) => m.id === conversation?.lastModelId)
-    ? (conversation?.lastModelId ?? '')
-    : (enabledModels[0]?.id ?? '');
+    modelResolution.source === 'none'
+      ? undefined
+      : enabledProviders.find((entry) => entry.id === modelResolution.providerId);
+  const effectiveModelId = modelResolution.source === 'none' ? '' : modelResolution.modelId;
+  const modelBlockMessage =
+    modelResolution.source !== 'none'
+      ? null
+      : modelResolution.reason === 'oauth-credentials-error'
+        ? t(
+            'Subscription credentials could not be loaded. Choose an API-key model or retry the credential refresh.'
+          )
+        : modelResolution.reason === 'oauth-credentials-loading' ||
+            modelResolution.reason === 'oauth-credentials-unloaded'
+          ? t('Subscription credentials are loading. Choose an API-key model or wait, then retry.')
+          : enabledProviders.length > 0
+            ? t('Choose a model for this conversation or set a global default before sending.')
+            : t(
+                'No usable model is available. Configure provider credentials and enable a model first.'
+              );
 
   const project = projects.find((p) => p.id === conversation?.projectId);
   const skills = useSettingsStore((state) => state.skills);
@@ -105,22 +163,36 @@ export function ChatView() {
   const running = conversation?.status === 'running';
   const busy = running || conversation?.spawning === true;
   const timeline = useMemo(
-    () => buildTimeline(conversation?.messages ?? [], running),
-    [conversation?.messages, running]
+    () => buildTimeline(conversation?.messages ?? [], running, conversation?.customEntries ?? []),
+    [conversation?.customEntries, conversation?.messages, running]
+  );
+  const capabilityApprovals = useMemo(
+    () =>
+      (conversation?.pendingCapabilityAsks ?? []).map((request) => ({
+        requestId: request.requestId,
+        tool: request.capabilityId,
+        kind: 'mcp' as const,
+        summary: request.summary,
+      })),
+    [conversation?.pendingCapabilityAsks]
   );
 
   // app 重启后选中可恢复的对话时自动 resume（历史消息由 worker 回放）
   useEffect(() => {
+    // modelResolution 变化代表默认/provider/OAuth 可用性已变化，需重试先前 fail-closed 的恢复。
+    void modelResolution;
     if (parent && !parent.started && parent.sessionFile) {
       void useSessionsStore.getState().resumeConversation(parent.id);
     }
-  }, [parent]);
+  }, [modelResolution, parent]);
 
   if (!conversation) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1 text-center">
         <p className="text-lg font-medium">EnsoCode</p>
-        <p className="text-sm text-muted-foreground">{t('Select or create a conversation')}</p>
+        <p className="text-sm text-muted-foreground">
+          {t('Create or select a project to start a conversation')}
+        </p>
       </div>
     );
   }
@@ -168,7 +240,19 @@ export function ChatView() {
             subagents={conversation.subagents ?? []}
           />
           <ApprovalBar
+            key={capabilityApprovals[0]?.requestId ?? 'no-capability-approval'}
+            approvals={capabilityApprovals}
+            allowSession={false}
+            onRespond={(requestId, decision) => {
+              if (decision === 'allowSession') return;
+              void useSessionsStore
+                .getState()
+                .respondCapabilityAsk(conversation.id, requestId, decision);
+            }}
+          />
+          <ApprovalBar
             approvals={conversation.pendingApprovals ?? []}
+            allowSession={conversation.child?.lockedProfileId === undefined}
             onRespond={(requestId, decision) =>
               void window.electronAPI.agent.respondApproval(conversation.id, requestId, decision)
             }
@@ -179,6 +263,13 @@ export function ChatView() {
               void window.electronAPI.agent.respondAsk(conversation.id, requestId, answer)
             }
           />
+          {conversation.activeOauthAsk && (
+            <AgentChildOauthHost
+              key={conversation.activeOauthAsk.requestId}
+              request={conversation.activeOauthAsk}
+              conversationId={conversation.id}
+            />
+          )}
           <MessageQueue
             conversationId={conversation.id}
             queued={conversation.queuedMessages ?? []}
@@ -186,15 +277,33 @@ export function ChatView() {
           {conversation.goal && (
             <GoalBar conversationId={conversation.id} goal={conversation.goal} />
           )}
+          {!conversation.parentId && modelBlockMessage && (
+            <div
+              role="status"
+              className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs"
+            >
+              {modelBlockMessage}
+            </div>
+          )}
           <Composer
             cwd={project?.path}
             commands={slashCommands}
             running={running}
             busy={busy}
-            locked={(conversation.pendingApprovals ?? []).length > 0}
+            locked={
+              (conversation.pendingApprovals ?? []).length > 0 || capabilityApprovals.length > 0
+            }
             focusKey={conversation.id}
             injectedDraft={conversation.draftText}
             onDraftConsumed={() => useSessionsStore.getState().clearDraft(conversation.id)}
+            initialRecipient={
+              conversation.prefillAgentTypeKey === ENSO_AGENT_TYPE_KEY
+                ? ENSO_PREFILL_CANDIDATE
+                : undefined
+            }
+            onInitialRecipientConsumed={() =>
+              useSessionsStore.getState().clearAgentPrefill(conversation.id)
+            }
             toolbar={
               <>
                 {!conversation.parentId && (
@@ -238,20 +347,37 @@ export function ChatView() {
                 )}
               </>
             }
-            onSend={(content, images) => {
-              if (!project) return;
-              if (!conversation.parentId && (!provider || !effectiveModelId)) return;
-              // 发送后强制回到跟随（ref-chat-b 的 post-submit scroll）
-              timelineRef.current?.scrollToBottom();
-              void useSessionsStore.getState().send(
-                content,
-                {
-                  providerId: provider?.id ?? '',
-                  modelId: effectiveModelId,
-                  cwd: project.path,
+            onSend={(payload) => {
+              if (!payload.recipient && !project) return false;
+              if (
+                !payload.recipient &&
+                !conversation.parentId &&
+                (!provider || !effectiveModelId)
+              ) {
+                return false;
+              }
+              routeComposerPayload(payload, {
+                dispatchAgent: (typeKey, task) => {
+                  void useSessionsStore
+                    .getState()
+                    .dispatchAgent(typeKey, task, parentSelectedModel);
                 },
-                images
-              );
+                sendCoding: (text, images) => {
+                  if (!project) return;
+                  // 发送后强制回到跟随（ref-chat-b 的 post-submit scroll）
+                  timelineRef.current?.scrollToBottom();
+                  void useSessionsStore.getState().send(
+                    text,
+                    {
+                      providerId: provider?.id ?? '',
+                      modelId: effectiveModelId,
+                      cwd: project.path,
+                    },
+                    images
+                  );
+                },
+              });
+              return true;
             }}
             onAbort={() => void useSessionsStore.getState().abort()}
           />
@@ -261,6 +387,18 @@ export function ChatView() {
     </div>
   );
 }
+const ENSO_PREFILL_CANDIDATE: AgentTypeMentionCandidate = {
+  kind: 'agent-type',
+  id: ENSO_AGENT_TYPE_KEY,
+  typeKey: ENSO_AGENT_TYPE_KEY,
+  label: 'Enso',
+  displayName: 'Enso',
+  description: 'EnsoCode system agent for product capabilities and team setup',
+  source: 'system',
+  locked: true,
+  canDisable: false,
+  canEdit: false,
+};
 
 function StatusDot({ status }: { status: string }) {
   return (

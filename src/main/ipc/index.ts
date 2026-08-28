@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { registerAgentHandlers } from './agent';
 import { registerAssetHandlers } from './assets';
+import { registerCapabilityHandlers } from './capabilities';
 import { registerProjectHandlers } from './projects';
 import { registerProviderHandlers } from './providers';
 import { registerSettingsHandlers } from './settings';
@@ -12,6 +13,7 @@ export function registerIpcHandlers(): void {
   registerWindowHandlers();
   registerProviderHandlers();
   registerAssetHandlers();
+  registerCapabilityHandlers();
   registerAgentHandlers();
   registerUpdaterHandlers();
   registerProjectHandlers();

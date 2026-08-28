@@ -83,7 +83,10 @@ function projectPart(part: unknown): ProjectedPart {
         name: typeof part.name === 'string' ? part.name : '',
       };
       if ('arguments' in part) {
-        projected.arguments = structuredCloneSafe(part.arguments);
+        projected.arguments =
+          projected.name === 'enso_app'
+            ? projectEnsoAppReference(part.arguments)
+            : structuredCloneSafe(part.arguments);
       }
       return projected;
     }
@@ -95,6 +98,12 @@ function projectPart(part: unknown): ProjectedPart {
     default:
       return { type: 'unknown' };
   }
+}
+
+/** enso_app raw params 只活在执行内存；jsonl/live 投影仅保留无秘密的 capability id。 */
+function projectEnsoAppReference(value: unknown): unknown {
+  if (!isRecord(value) || typeof value.capability_id !== 'string') return undefined;
+  return { capability_id: value.capability_id };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
