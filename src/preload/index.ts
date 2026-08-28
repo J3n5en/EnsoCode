@@ -113,6 +113,9 @@ const electronAPI = {
     /** 打开系统目录选择框，取消时返回 null */
     selectDirectory: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
+    /** 打开系统文件选择框（可按扩展名过滤），取消时返回 null */
+    selectFile: (extensions?: string[]): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILE, extensions),
   },
 
   projects: {
@@ -129,6 +132,9 @@ const electronAPI = {
     /** 读取文件内容（edit diff 还原上下文/行号用）；失败返回 null */
     read: (filePath: string): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, filePath),
+    /** 枚举目录下的媒体文件（背景图文件夹随机模式），返回绝对路径 */
+    listMedia: (dir: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_LIST_MEDIA, dir),
   },
 
   sessionImport: {

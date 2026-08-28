@@ -14,7 +14,13 @@ import {
 } from '@/lib/ghosttyTheme';
 import { migrateSettings, SETTINGS_VERSION } from './migrate';
 import { electronStorage } from './storage';
-import type { FontWeight, SettingsState, Theme } from './types';
+import type {
+  BackgroundSizeMode,
+  BackgroundSourceType,
+  FontWeight,
+  SettingsState,
+  Theme,
+} from './types';
 
 export * from './types';
 
@@ -69,6 +75,12 @@ function getDefaultLocale(): Locale {
   return normalizeLocale(navigator.language);
 }
 
+/** 数值设置项的防御：非法值落回缺省，越界值夹回范围 */
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 const initialState = {
   theme: 'system' as Theme,
   language: getDefaultLocale(),
@@ -81,6 +93,21 @@ const initialState = {
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   autoUpdate: true,
+  backgroundImageEnabled: false,
+  backgroundSourceType: 'file' as BackgroundSourceType,
+  backgroundImagePath: '',
+  backgroundFolderPath: '',
+  backgroundUrlPath: '',
+  backgroundRandomEnabled: false,
+  backgroundRandomInterval: 300,
+  backgroundOpacity: 0.85,
+  backgroundBlur: 0,
+  backgroundBrightness: 1,
+  backgroundSaturation: 1,
+  backgroundComposerOpacity: 0.6,
+  backgroundCodeOpacity: 0.65,
+  backgroundSizeMode: 'cover' as BackgroundSizeMode,
+  backgroundRefreshNonce: 0,
   providers: [] as import('@shared/types').ModelProvider[],
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
@@ -144,6 +171,29 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
+
+      setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
+      setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),
+      setBackgroundImagePath: (backgroundImagePath) => set({ backgroundImagePath }),
+      setBackgroundFolderPath: (backgroundFolderPath) => set({ backgroundFolderPath }),
+      setBackgroundUrlPath: (backgroundUrlPath) => set({ backgroundUrlPath }),
+      setBackgroundRandomEnabled: (backgroundRandomEnabled) => set({ backgroundRandomEnabled }),
+      setBackgroundRandomInterval: (seconds) =>
+        set({ backgroundRandomInterval: clampNumber(seconds, 5, 86400, 300) }),
+      setBackgroundOpacity: (opacity) =>
+        set({ backgroundOpacity: clampNumber(opacity, 0, 1, 0.85) }),
+      setBackgroundBlur: (blur) => set({ backgroundBlur: clampNumber(blur, 0, 20, 0) }),
+      setBackgroundBrightness: (brightness) =>
+        set({ backgroundBrightness: clampNumber(brightness, 0, 2, 1) }),
+      setBackgroundSaturation: (saturation) =>
+        set({ backgroundSaturation: clampNumber(saturation, 0, 2, 1) }),
+      setBackgroundComposerOpacity: (opacity) =>
+        set({ backgroundComposerOpacity: clampNumber(opacity, 0, 1, 0.6) }),
+      setBackgroundCodeOpacity: (opacity) =>
+        set({ backgroundCodeOpacity: clampNumber(opacity, 0, 1, 0.65) }),
+      setBackgroundSizeMode: (backgroundSizeMode) => set({ backgroundSizeMode }),
+      bumpBackgroundRefresh: () =>
+        set((state) => ({ backgroundRefreshNonce: (state.backgroundRefreshNonce ?? 0) + 1 })),
 
       setStatusLineSegments: (statusLineSegments) => set({ statusLineSegments }),
       toggleStatusLineSegment: (id, enabled) =>
