@@ -251,7 +251,13 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       return <TextRow item={item} />;
     case 'thinking':
       return (
-        <ThinkingRow text={item.text} streaming={item.streaming} durationMs={item.durationMs} />
+        <ThinkingRow
+          itemKey={item.key}
+          text={item.text}
+          streaming={item.streaming}
+          durationMs={item.durationMs}
+          startedAt={item.startedAt}
+        />
       );
     case 'tool':
       return <ToolRow item={item} />;
@@ -423,13 +429,17 @@ function formatPerf(perf: TurnPerf): string {
 
 /** deepseek-harness 的 Think 行：流式中自动展开跟看，结束自动收起；手动点击覆盖默认 */
 function ThinkingRow({
+  itemKey,
   text,
   streaming,
   durationMs,
+  startedAt,
 }: {
+  itemKey: string;
   text: string;
   streaming: boolean;
   durationMs: number | null;
+  startedAt?: number;
 }) {
   const { t } = useI18n();
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
@@ -444,7 +454,7 @@ function ThinkingRow({
         <Brain className={cn('h-3.5 w-3.5', streaming && 'animate-pulse')} />
         <span>{streaming ? t('Thinking…') : t('Thought process')}</span>
         {streaming ? (
-          <RunningElapsed />
+          <RunningElapsed itemKey={itemKey} since={startedAt} />
         ) : (
           durationMs !== null && (
             <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums">
@@ -588,7 +598,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           </>
         )}
         {item.state === 'running' ? (
-          <RunningElapsed />
+          <RunningElapsed itemKey={item.key} />
         ) : (
           (item.agentMeta || item.durationMs !== null) && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
@@ -720,9 +730,18 @@ function TodoRow({ todos }: { todos: TodoItem[] }) {
   );
 }
 
-/** running 工具行的实时计时：以挂载时刻为起点（≈执行起点；串行排队的会含排队时间） */
-function RunningElapsed() {
-  const startRef = useRef(Date.now());
+/** 切会话会卸载时间线，挂载时刻不能当起点。有 since 用打点；否则按会话+行 key 记住第一次出现的时刻。 */
+const elapsedStartByKey = new Map<string, number>();
+
+function RunningElapsed({ itemKey, since }: { itemKey: string; since?: number }) {
+  const sessionId = useSessionsStore((state) => displayedConversation(state)?.id ?? '');
+  const startRef = useRef<number | null>(null);
+  if (startRef.current === null) {
+    const cacheKey = `${sessionId}:${itemKey}`;
+    startRef.current = since ?? elapsedStartByKey.get(cacheKey) ?? Date.now();
+    if (since === undefined) elapsedStartByKey.set(cacheKey, startRef.current);
+  }
+  const origin = since ?? startRef.current;
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => tick((n) => n + 1), 1000);
@@ -730,7 +749,7 @@ function RunningElapsed() {
   }, []);
   return (
     <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
-      {formatDuration(Date.now() - startRef.current)}
+      {formatDuration(Date.now() - origin)}
     </span>
   );
 }
