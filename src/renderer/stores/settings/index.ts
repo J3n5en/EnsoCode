@@ -485,14 +485,32 @@ export const useSettingsStore = create<SettingsState>()(
 );
 
 function applyProjectAuthorityProjection(projection: SourceAuthorityProjection): void {
-  useSettingsStore.setState({
-    projects: projection.projects
-      .filter((project) => project.state === 'active')
-      .map((project) => ({
-        id: project.projectId,
-        name: project.canonicalPath.split('/').filter(Boolean).pop() ?? project.canonicalPath,
-        path: project.canonicalPath,
-      })),
+  const next = projection.projects
+    .filter((project) => project.state === 'active')
+    .map((project) => ({
+      id: project.projectId,
+      name: project.canonicalPath.split('/').filter(Boolean).pop() ?? project.canonicalPath,
+      path: project.canonicalPath,
+    }));
+  // 投影未变时必须不写 state：persist 的每次 setState 都会落盘并广播 SETTINGS_CHANGED，
+  // 而收到广播的窗口 rehydrate 后又会重投影。无条件写会让两个窗口互相广播成死循环
+  // （单窗口不复现，因为广播 exclude-sender）。
+  if (sameProjectProjection(useSettingsStore.getState().projects, next)) return;
+  useSettingsStore.setState({ projects: next });
+}
+
+function sameProjectProjection(
+  current: SettingsState['projects'],
+  next: SettingsState['projects']
+): boolean {
+  if (current.length !== next.length) return false;
+  return current.every((project, index) => {
+    const candidate = next[index];
+    return (
+      project.id === candidate.id &&
+      project.name === candidate.name &&
+      project.path === candidate.path
+    );
   });
 }
 
