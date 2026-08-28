@@ -97,6 +97,8 @@ export const IPC_CHANNELS = {
   PAIR_STATUS_CHANGED: 'pair:status-changed',
   /** main → renderer：手机订阅了某会话，请求恢复（历史会话在 worker 里没有投影） */
   PAIR_RESUME_SESSION: 'pair:resume-session',
+  /** main → renderer：手机新建了会话，请求登记（否则桌面列表里没有它，其事件也会被丢弃） */
+  PAIR_SESSION_CREATED: 'pair:session-created',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

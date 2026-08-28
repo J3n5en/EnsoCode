@@ -1,5 +1,6 @@
 import { hasProviderCredentials } from '@shared/types';
 import type { ApprovalMode, AttachedImage, ThinkingLevel } from '@shared/types/agent';
+import type { PairCreatedSession } from '@shared/types/pair';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -94,6 +95,8 @@ interface SessionsState {
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
+  /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
+  adoptPairSession(session: PairCreatedSession): void;
   /** 登记一条从外部应用导入的对话（选中后自动 resume 回放） */
   addImportedConversation(
     projectId: string,
@@ -131,6 +134,18 @@ interface SessionsState {
   pauseGoal(conversationId: string): void;
   resumeGoal(conversationId: string): void;
   clearGoal(conversationId: string): void;
+}
+
+/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
+function firstUserText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  if (!message) return '';
+  const text = message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+    .trim();
+  return (text || '[image]').slice(0, 40);
 }
 
 const patch = (
@@ -334,8 +349,11 @@ export const useSessionsStore = create<SessionsState>()(
           if (!conversation) return state;
           const next = applyAgentEvent(conversation, id, event);
           if (next === conversation && !conversation.spawning) return state;
+          // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上，
+          // 用它的首条用户消息补一个，否则侧边栏永远显示「新对话」
+          const title = conversation.title || firstUserText(next) || '';
           // 该会话的首个 worker 事件即 spawn 完成信号，清掉 spawning（resume 的 loading 依赖它）
-          return patch(state, id, { ...next, spawning: false });
+          return patch(state, id, { ...next, title, spawning: false });
         });
         // 轮次收束后投递排队消息(审批/提问挂起时不投,等其解除后的下一次收束)。
         // 只挂 turn-completed 单一触发点:worker 在它之前必先发 status idle,
@@ -492,6 +510,34 @@ export const useSessionsStore = create<SessionsState>()(
             activeId: id,
           }));
           return id;
+        },
+
+        adoptPairSession(session) {
+          // 幂等：手机重连可能重发，已登记就别覆盖本地状态
+          if (get().conversations[session.sessionId]) return;
+          const conversation: Conversation = {
+            ...emptyProjection,
+            id: session.sessionId,
+            projectId: session.projectId,
+            // 标题留空，首条用户消息到达时再补（手机建会话时还没有内容）
+            title: '',
+            // worker 侧已经起来了，这里直接标记为已启动，否则发消息会重复 spawn
+            started: true,
+            spawning: false,
+            createdAt: Date.now(),
+            reasoningEnabled: session.reasoningEnabled,
+            thinkingLevel: (session.thinkingLevel as Conversation['thinkingLevel']) ?? 'medium',
+            lastProviderId: session.providerId,
+            lastModelId: session.modelId,
+            ...(session.presetId ? { presetId: session.presetId } : {}),
+            ...(session.approvalMode
+              ? { approvalMode: session.approvalMode as Conversation['approvalMode'] }
+              : {}),
+          };
+          set((state) => ({
+            conversations: { ...state.conversations, [session.sessionId]: conversation },
+            order: [session.sessionId, ...state.order],
+          }));
         },
 
         selectConversation(id) {

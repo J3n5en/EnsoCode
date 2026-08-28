@@ -22,6 +22,21 @@ export interface PairStatus {
   secureStorage: boolean;
 }
 
+/**
+ * 手机端新建会话后，main 回传给 renderer 用于登记的最小信息。
+ * 会话已在 worker 侧 spawn，renderer 只补上自己的投影，不再重复 spawn。
+ */
+export interface PairCreatedSession {
+  sessionId: string;
+  projectId: string;
+  providerId: string;
+  modelId: string;
+  reasoningEnabled: boolean;
+  thinkingLevel?: string;
+  presetId?: string;
+  approvalMode?: string;
+}
+
 /** renderer 推给 main 的目录快照。providers 必须已剥掉 apiKey/baseUrl。 */
 export interface PairCatalogPayload {
   catalog: {

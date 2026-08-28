@@ -10,6 +10,7 @@ import type {
   OauthLoginEvent,
   OauthProviderInfo,
   PairCatalogPayload,
+  PairCreatedSession,
   PairStatus,
   ProviderApiConfig,
   RecentProject,
@@ -276,6 +277,12 @@ const electronAPI = {
       const listener = (_: unknown, sessionId: string) => callback(sessionId);
       ipcRenderer.on(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+    },
+    /** main 通知：手机新建了会话，请求登记到桌面列表 */
+    onSessionCreated: (callback: (session: PairCreatedSession) => void): (() => void) => {
+      const listener = (_: unknown, session: PairCreatedSession) => callback(session);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
     },
   },
 

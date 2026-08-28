@@ -12,6 +12,7 @@ import {
   getPairStatus,
   revokeDevice,
   setPairResumeListener,
+  setPairSessionCreatedListener,
   setPairStatusListener,
   setRelayUrl,
   startPairing,
@@ -31,6 +32,13 @@ export function registerPairHandlers(): void {
   setPairResumeListener((sessionId) => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_RESUME_SESSION, sessionId);
+    }
+  });
+
+  // 手机新建会话后请渲染层登记，否则桌面列表看不到它、其事件也会被丢弃
+  setPairSessionCreatedListener((session) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CREATED, session);
     }
   });
 

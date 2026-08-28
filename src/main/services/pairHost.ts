@@ -20,7 +20,7 @@ import {
   toWebSocketUrl,
 } from '@enso/pair';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import type { PairStatus } from '@shared/types/pair';
+import type { PairCreatedSession, PairStatus } from '@shared/types/pair';
 import {
   abortSession,
   promptSession,
@@ -80,6 +80,7 @@ let pairingExpiresAt: number | null = null;
 let onStatusChange: (() => void) | null = null;
 /** 请渲染层恢复某会话（手机订阅历史会话时用） */
 let onResumeRequest: ((sessionId: string) => void) | null = null;
+let onSessionCreated: ((session: PairCreatedSession) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
@@ -99,6 +100,12 @@ export function setPairStatusListener(listener: () => void): void {
 
 export function setPairResumeListener(listener: (sessionId: string) => void): void {
   onResumeRequest = listener;
+}
+
+export function setPairSessionCreatedListener(
+  listener: (session: PairCreatedSession) => void
+): void {
+  onSessionCreated = listener;
 }
 
 function notifyStatus(): void {
@@ -422,8 +429,25 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
         ...(command.reasoningEnabled ? { reasoningEnabled: true } : {}),
         ...(command.thinkingLevel ? { thinkingLevel: command.thinkingLevel } : {}),
       });
-      if (!result.ok) console.warn(`[pair] spawn failed: ${result.error}`);
-      else conn.subscribedId = command.sessionId;
+      if (!result.ok) {
+        console.warn(`[pair] spawn failed: ${result.error}`);
+        break;
+      }
+      conn.subscribedId = command.sessionId;
+      /*
+       * 会话已在 worker 侧起来，但 renderer 的 store 里没有它——桌面列表看不到，
+       * 且它的 agent 事件会因「未知会话」被直接丢弃。这里请 renderer 补登记。
+       */
+      onSessionCreated?.({
+        sessionId: command.sessionId,
+        projectId: command.projectId,
+        providerId: command.providerId,
+        modelId: command.modelId,
+        reasoningEnabled: command.reasoningEnabled ?? false,
+        ...(command.thinkingLevel ? { thinkingLevel: command.thinkingLevel } : {}),
+        ...(command.presetId ? { presetId: command.presetId } : {}),
+        ...(command.approvalMode ? { approvalMode: command.approvalMode } : {}),
+      });
       break;
     }
   }
