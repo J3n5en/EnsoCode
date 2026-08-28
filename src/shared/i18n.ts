@@ -207,12 +207,8 @@ export const zhTranslations: Record<string, string> = {
   'Pairing QR code': '配对二维码',
   'Expires in {{seconds}}s · single use': '{{seconds}} 秒后失效 · 仅可用一次',
   'Code expired': '配对码已失效',
-  'Open on your phone': '在手机上打开',
-  'Open this address in your phone browser, then add it to the home screen.':
-    '用手机浏览器打开这个网址，然后添加到主屏幕。',
-  'Show QR': '显示二维码',
-  'Hide QR': '隐藏二维码',
-  'QR code for the phone address': '手机访问地址的二维码',
+  'Scanning opens the app and pairs it. To keep it handy, add it to your home screen.':
+    '扫码即可打开并完成配对。想常用的话，打开后添加到主屏幕。',
   'Paired devices': '已配对设备',
   'No paired devices': '暂无已配对设备',
   'Pair a phone to view sessions and reply on the go.': '配对手机后即可随时查看会话并回复。',
