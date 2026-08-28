@@ -6,7 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
     />
-    <meta name="theme-color" content="#0b0b0c" />
+    <!-- 首屏兜底（scoped 在前、裸标签兜底在后：浏览器取第一个匹配的）；
+         JS 起来后由 theme.ts 清掉这些、按实际背景色重插一条 -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#252529" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />

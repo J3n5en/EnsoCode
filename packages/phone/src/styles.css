@@ -130,6 +130,8 @@
   html {
     font-size: var(--font-size-base);
     height: 100%;
+    /* Safari 的状态栏/工具栏会采样页面边缘颜色，html 也要有底色，否则露出系统灰 */
+    background: var(--background);
   }
 
   body {
