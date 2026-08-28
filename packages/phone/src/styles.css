@@ -138,12 +138,11 @@
     @apply bg-background text-foreground;
     margin: 0;
     /*
-     * 移动端不能用 100%：那是布局视口，比可见区域高，底部（输入框）会被
-     * 地址栏挡住。dvh 跟随浏览器 UI 收缩；键盘弹起时再由 main.tsx 用
-     * visualViewport 覆盖 --app-height。
+     * 移动端不能用 100%：那是布局视口，比可见区域高，底部会被浏览器工具栏挡住。
+     * dvh 跟随浏览器 UI 收缩；键盘避让交给 iOS 自己（会把聚焦的输入框滚进可视区），
+     * 不再用 JS 覆盖高度 —— 那套机制在 standalone 下反复误判。
      */
     height: 100dvh;
-    height: var(--app-height, 100dvh);
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
   }

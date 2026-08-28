@@ -12,39 +12,11 @@ installElectronApiShim();
 initTheme();
 
 /*
- * 键盘弹起时 dvh 不变，输入框会被键盘盖住。用 visualViewport 的实际可见高度
- * 覆盖 --app-height，让布局跟着收缩；键盘收起立即回落到 dvh。
- *
- * 判据是「有输入框聚焦」而不是高度比例：standalone（添加到主屏幕）下没有
- * 浏览器工具栏，innerHeight 与 visualViewport.height 的关系与浏览器里不同，
- * 按比例猜会误判成键盘弹起，把 --app-height 钉死成偏小的像素值 —— 表现为
- * 输入框下方一大片空白。
+ * 不用 JS 干预视口高度：布局直接吃 CSS 的 100dvh。
+ * 曾用 visualViewport 覆盖 --app-height 来避让键盘，但在 standalone 下反复
+ * 误判、把高度钉死成偏小的像素值，造成输入框下方大片空白；而 iOS 本来就会
+ * 在键盘弹起时把聚焦的输入框滚进可视区，这层机制得不偿失。
  */
-const viewport = window.visualViewport;
-if (viewport) {
-  const editableFocused = () => {
-    const el = document.activeElement;
-    return (
-      el instanceof HTMLTextAreaElement ||
-      el instanceof HTMLInputElement ||
-      (el instanceof HTMLElement && el.isContentEditable)
-    );
-  };
-  const syncHeight = () => {
-    // 只有输入中且可见区确实被压缩，才用像素高度；其余一律回到 dvh
-    const shrunk = viewport.height < window.innerHeight - 80;
-    document.documentElement.style.setProperty(
-      '--app-height',
-      editableFocused() && shrunk ? `${viewport.height}px` : '100dvh'
-    );
-  };
-  syncHeight();
-  viewport.addEventListener('resize', syncHeight);
-  viewport.addEventListener('scroll', syncHeight);
-  // 失焦后键盘收起，但 visualViewport 未必再触发 resize，显式回落
-  document.addEventListener('focusout', () => setTimeout(syncHeight, 100));
-  document.addEventListener('focusin', () => setTimeout(syncHeight, 100));
-}
 
 const root = document.getElementById('root');
 if (root)

@@ -27,6 +27,8 @@ const AT_BOTTOM_THRESHOLD = 40;
 export interface MessageTimelineHandle {
   /** 滚到底并恢复跟随（发送消息后调用） */
   scrollToBottom(): void;
+  /** 当前是否贴底（Virtuoso 的判定，比自己算 scrollHeight 可靠） */
+  isAtBottom(): boolean;
 }
 
 interface MessageTimelineProps {
@@ -58,6 +60,9 @@ export function MessageTimeline({
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // ref 镜像：imperative handle 里读，避免闭包拿到旧值
+  const atBottomRef = useRef(true);
+  const scrollerRef = useRef<HTMLElement | null>(null);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
   // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
@@ -95,11 +100,37 @@ export function MessageTimeline({
     return result;
   }, [items]);
 
+  /*
+   * 滚到底：写 scrollTop 是立刻生效的，难点在于 Virtuoso 动态测高会在滚动后
+   * 继续修正总高——窄屏上文本换行远多于估算，总高会一路上涨，固定兜几帧收不住
+   * （iOS 上实测点完仍差 500+px）。所以盯着 scrollHeight，直到它连续几帧不再变化
+   * 才停，并留一个时间上限兜底（流式输出时高度可能一直在长）。
+   */
   const scrollToBottom = () => {
-    virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
+    const scroller = scrollerRef.current;
+    const handle = virtuosoRef.current;
+    let lastHeight = -1;
+    let stable = 0;
+    const deadline = Date.now() + 1200;
+
+    const settle = () => {
+      if (scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+        stable = scroller.scrollHeight === lastHeight ? stable + 1 : 0;
+        lastHeight = scroller.scrollHeight;
+      }
+      handle?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
+      if (stable < 3 && Date.now() < deadline) requestAnimationFrame(settle);
+    };
+    settle();
+
     setAtBottom(true);
+    atBottomRef.current = true;
   };
-  useImperativeHandle(ref, () => ({ scrollToBottom }));
+  useImperativeHandle(ref, () => ({
+    scrollToBottom,
+    isAtBottom: () => atBottomRef.current,
+  }));
 
   const jumpTo = (key: string) => {
     const index = folded.findIndex((item) => item.key === key);
@@ -130,7 +161,10 @@ export function MessageTimeline({
           // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
           followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
           atBottomThreshold={AT_BOTTOM_THRESHOLD}
-          atBottomStateChange={setAtBottom}
+          atBottomStateChange={(value) => {
+            setAtBottom(value);
+            atBottomRef.current = value;
+          }}
           initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
           increaseViewportBy={{ top: 600, bottom: 600 }}
           // 可视范围起点附近的 user 轮次作为导航条高亮
@@ -140,6 +174,9 @@ export function MessageTimeline({
               if (folded[i]?.kind === 'user') current = folded[i].key;
             }
             setActiveNavKey(current);
+          }}
+          scrollerRef={(el) => {
+            scrollerRef.current = el instanceof HTMLElement ? el : null;
           }}
           className="h-full select-text"
           components={{

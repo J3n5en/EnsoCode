@@ -1,6 +1,6 @@
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
 import { PanelLeft, SquarePen } from 'lucide-react';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Composer } from '@/components/chat/Composer';
@@ -58,6 +58,17 @@ export function ChatScreen(props: Props) {
   );
 
   const timeline = useMemo(() => buildTimeline(messages, running), [messages, running]);
+
+  /*
+   * 兜底跟随：Virtuoso 的 followOutput 只在 data 长度变化时触发，而流式输出是
+   * 按同一 index 覆盖最后一条、长度不变，于是不会跟随。这里在时间线内容变化时
+   * 补一次：贴底判定用 Virtuoso 自己的（自己算 scrollHeight 会被
+   * increaseViewportBy 的预渲染空间干扰，距底永远归不了零）。
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: timeline 是触发信号，effect 内只用 ref
+  useEffect(() => {
+    if (timelineRef.current?.isAtBottom()) timelineRef.current.scrollToBottom();
+  }, [timeline]);
 
   const send = async (text: string, images: AttachedImage[]) => {
     // 手机拍照动辄数 MB，压到单帧上限内再发
