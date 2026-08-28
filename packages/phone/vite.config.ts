@@ -19,6 +19,7 @@ export default defineConfig({
       { find: /^@\/i18n$/, replacement: stub('i18n.tsx') },
       { find: /^@\/stores\/settings$/, replacement: stub('settings-store.ts') },
       { find: /^@\/stores\/sessions$/, replacement: stub('sessions-store.ts') },
+      { find: /^@\/lib\/ghosttyTheme$/, replacement: stub('ghostty-theme.ts') },
       { find: /^@\//, replacement: `${renderer}/` },
       { find: '@shared', replacement: path.resolve(import.meta.dirname, '../../src/shared') },
     ],

@@ -86,13 +86,52 @@ export interface ProviderEntry {
   models: { id: string; label?: string }[];
 }
 
-/** 桌面下发的外观偏好，手机作为默认值（可本地覆盖） */
-export type HostAppearance = 'light' | 'dark' | 'system';
+/**
+ * 桌面下发的外观偏好，手机作为默认值（可本地覆盖）。
+ * sync-terminal 表示整套 UI 配色由终端主题推导（与桌面同语义），
+ * 此时须配合 terminal 调色板使用。
+ */
+export type HostAppearance = 'light' | 'dark' | 'system' | 'sync-terminal';
+
+/**
+ * 终端配色（bash 工具输出用）。只下发桌面当前选中主题解析后的调色板，
+ * 手机不必打包整份 ghostty 主题库。字段与 renderer 的 XtermTheme 一致。
+ */
+export interface TerminalPalette {
+  background: string;
+  foreground: string;
+  cursor: string;
+  cursorAccent: string;
+  selectionBackground: string;
+  selectionForeground: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
+}
 
 /** 下行信封：pair 自有的目录类帧 + 透传的现有 RendererAgentEvent（此处不重定义，按 unknown 透传） */
 export type HostToPhone =
   | { type: 'catalog'; entries: CatalogEntry[] }
   | { type: 'projects'; projects: ProjectEntry[] }
   | { type: 'providers'; providers: ProviderEntry[] }
-  | { type: 'appearance'; theme: HostAppearance }
+  | {
+      type: 'appearance';
+      theme: HostAppearance;
+      /** 桌面选中的终端配色；缺省表示用手机默认 */
+      terminal?: TerminalPalette;
+      terminalFontFamily?: string;
+    }
   | { type: 'agent-event'; event: unknown };

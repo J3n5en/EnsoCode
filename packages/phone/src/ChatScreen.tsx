@@ -118,7 +118,7 @@ export function ChatScreen(props: Props) {
       )}
 
       {sessionId !== null && (
-        <div className="@container shrink-0 pt-1 pb-safe">
+        <div className="@container shrink-0 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className={CHAT_COL}>
             <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
             <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />

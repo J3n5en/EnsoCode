@@ -18,6 +18,7 @@ import type {
   SessionSnapshot,
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
+import { setTerminalAppearance } from './stubs/settings-store';
 import { setHostTheme } from './theme';
 
 /**
@@ -148,6 +149,8 @@ export class PairClient {
         this.events.onProviders(payload.providers);
         break;
       case 'appearance':
+        // 先写调色板再算主题：sync-terminal 要用它推导整套 UI 变量
+        setTerminalAppearance(payload.terminal, payload.terminalFontFamily);
         setHostTheme(payload.theme);
         break;
       case 'agent-event':

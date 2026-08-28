@@ -15,6 +15,7 @@ import {
   revokePairing,
   sealFrame,
   startHostPairing,
+  type TerminalPalette,
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
@@ -80,6 +81,9 @@ let projects: ProjectEntry[] = [];
 let providers: ProviderEntry[] = [];
 /** 桌面外观偏好，随目录下发给手机作为默认值 */
 let theme: HostAppearance = 'system';
+/** 桌面终端配色（bash 输出用），随外观一起下发 */
+let terminal: TerminalPalette | undefined;
+let terminalFontFamily: string | undefined;
 /** 剥密前的完整项目路径映射，用于 spawn 反查 cwd */
 let whitelist: SpawnWhitelist = { projects: [], providers: [] };
 
@@ -413,7 +417,12 @@ async function sendMeta(conn: Connection): Promise<void> {
   await send(conn, { type: 'catalog', entries: catalog });
   await send(conn, { type: 'projects', projects });
   await send(conn, { type: 'providers', providers });
-  await send(conn, { type: 'appearance', theme });
+  await send(conn, {
+    type: 'appearance',
+    theme,
+    ...(terminal ? { terminal } : {}),
+    ...(terminalFontFamily ? { terminalFontFamily } : {}),
+  });
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
@@ -442,11 +451,15 @@ export function updatePairCatalog(payload: {
   providers: ProviderEntry[];
   projectPaths: { id: string; path: string }[];
   theme: HostAppearance;
+  terminal?: TerminalPalette;
+  terminalFontFamily?: string;
 }): void {
   catalog = payload.catalog;
   projects = payload.projects;
   providers = payload.providers;
   theme = payload.theme;
+  terminal = payload.terminal;
+  terminalFontFamily = payload.terminalFontFamily;
   whitelist = {
     projects: payload.projectPaths,
     providers: payload.providers.map((p) => ({
