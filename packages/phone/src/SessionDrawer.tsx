@@ -1,6 +1,7 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
-import { ChevronRight, FolderGit2, MessageSquarePlus, X } from 'lucide-react';
+import { ChevronRight, FolderGit2, MessageSquarePlus, Unplug, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 
@@ -18,9 +19,15 @@ interface Props {
   catalog: CatalogEntry[];
   activeId: string | null;
   canCreate: boolean;
+  /** 已配对的桌面标识（配对时记录的设备名） */
+  deviceName: string;
+  connected: boolean;
+  connectionLabel: string;
   onClose(): void;
   onSelect(sessionId: string): void;
   onNewConversation(projectId: string): void;
+  /** 解绑并回到配对页 */
+  onUnpair(): void;
 }
 
 export function SessionDrawer({
@@ -29,12 +36,22 @@ export function SessionDrawer({
   catalog,
   activeId,
   canCreate,
+  deviceName,
+  connected,
+  connectionLabel,
   onClose,
   onSelect,
   onNewConversation,
+  onUnpair,
 }: Props) {
   const [foldedProjects, setFoldedProjects] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [confirmUnpair, setConfirmUnpair] = useState(false);
+
+  // 抽屉关闭时收起确认态，避免下次打开还停在确认框
+  useEffect(() => {
+    if (!open) setConfirmUnpair(false);
+  }, [open]);
 
   // 相对时间每分钟自刷（与桌面一致，避免「3 分钟前」僵住）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -76,7 +93,7 @@ export function SessionDrawer({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2 pb-safe">
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
           {projects.length === 0 && (
             <p className="rounded-lg border border-dashed px-3 py-6 text-center text-muted-foreground text-sm">
               桌面端还没有项目
@@ -121,6 +138,39 @@ export function SessionDrawer({
               }
               onSelect={onSelect}
             />
+          )}
+        </div>
+
+        <div className="shrink-0 border-t p-2 pb-safe">
+          {confirmUnpair ? (
+            <div className="space-y-2 rounded-lg border border-dashed p-3">
+              <p className="text-xs">取消配对后需重新扫码才能连接，确定吗？</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setConfirmUnpair(false)}>
+                  取消
+                </Button>
+                <Button variant="destructive" size="sm" onClick={onUnpair}>
+                  确定解绑
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmUnpair(true)}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-muted-foreground text-sm transition-colors hover:bg-accent/50 hover:text-foreground"
+            >
+              <Unplug className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{deviceName}</span>
+              <span
+                className={cn(
+                  'shrink-0 text-[10px]',
+                  connected ? 'text-muted-foreground' : 'text-destructive'
+                )}
+              >
+                {connectionLabel}
+              </span>
+            </button>
           )}
         </div>
       </aside>

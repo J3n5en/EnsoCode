@@ -136,6 +136,9 @@ export function App() {
         catalog={catalog}
         activeId={activeId}
         canCreate={state === 'online'}
+        deviceName={device.deviceName}
+        connected={state === 'online'}
+        connectionLabel={STATE_LABEL[state]}
         onClose={() => setDrawerOpen(false)}
         onSelect={(id) => {
           setActiveId(id);
@@ -144,6 +147,16 @@ export function App() {
         onNewConversation={() => {
           setDrawerOpen(false);
           setComposing(true);
+        }}
+        onUnpair={() => {
+          clearPairing();
+          localStorage.removeItem(LAST_SESSION_KEY);
+          setDrawerOpen(false);
+          setActiveId(null);
+          setCatalog([]);
+          setProjects([]);
+          setProviders([]);
+          setDevice(null);
         }}
       />
 
