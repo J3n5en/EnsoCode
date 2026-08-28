@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
   "observability": { "enabled": true },
+  // 自定义域：wrangler 自动建 DNS 记录并签证书
+  "routes": [{ "pattern": "enso-relay.j3.do", "custom_domain": true }],
+  // 必须显式保留：配了 routes 后 workers.dev 默认会被关掉，
+  // 而已配对设备各自存着当初的中继地址，关掉就等于把老设备踢下线
+  "workers_dev": true,
   "durable_objects": {
     "bindings": [{ "name": "PAIR_ROOM", "class_name": "PairRoom" }]
   },

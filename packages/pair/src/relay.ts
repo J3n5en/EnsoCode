@@ -1,6 +1,6 @@
 /** 中继默认地址与连接工具。域名可在设置里改，此处仅作缺省值。 */
 
-export const DEFAULT_RELAY_URL = 'https://enso-pair-relay.j3.workers.dev';
+export const DEFAULT_RELAY_URL = 'https://enso-relay.j3.do';
 
 /** http(s) → ws(s)，并去掉尾部斜杠 */
 export function toWebSocketUrl(relayUrl: string): string {
