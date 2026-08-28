@@ -216,7 +216,7 @@ export async function revokeDevice(pairId: string): Promise<void> {
   saveDevices(devices.filter((d) => d.pairId !== pairId));
   if (device) {
     try {
-      await revokePairing(device.relayUrl, pairId);
+      await revokePairing(device.relayUrl, pairId, device.token);
     } catch {}
   }
   notifyStatus();

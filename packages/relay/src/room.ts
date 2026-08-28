@@ -1,6 +1,13 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index';
-import { claim, MAX_FRAME_BYTES, type PairState, request, tokenValid } from './pairing';
+import {
+  canFetchCredentials,
+  claim,
+  MAX_FRAME_BYTES,
+  type PairState,
+  request,
+  tokenValid,
+} from './pairing';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,18 +26,24 @@ export class PairRoom extends DurableObject<Env> {
     if (path === '/request') return this.onRequest(req);
     if (path === '/claim') return this.onClaim(req);
     if (path === '/connect') return this.onConnect(req);
-    if (path === '/delete') return this.onDelete();
+    if (path === '/delete') return this.onDelete(req);
     return json({ error: 'not found' }, 404);
   }
 
-  /** host 发起 + 轮询：无 state/过期则建 requested；authorized 时回 hostToken + boxedKey */
+  /** host 发起 + 轮询：无 state/过期则建 requested；authorized 时在取回窗口内回凭据 */
   private async onRequest(req: Request): Promise<Response> {
     const pairId = req.headers.get('x-pair-id') ?? '';
     const { publicKey } = (await req.json()) as { publicKey: string };
+    const now = Date.now();
     const prev = await this.ctx.storage.get<PairState>('state');
-    const next = request(prev, Date.now(), publicKey);
+    const next = request(prev, now, publicKey);
     if (next !== prev) await this.ctx.storage.put('state', next);
     if (next.phase === 'authorized') {
+      // 窗口外不再吐凭据：publicKey 在 QR 里公开，长期可换 token 等于把
+      // host 身份长期暴露给任何看过二维码的人
+      if (!canFetchCredentials(next, now)) {
+        return json({ pairId, state: 'authorized' });
+      }
       return json({
         pairId,
         state: 'authorized',
@@ -84,8 +97,14 @@ export class PairRoom extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** 解绑：广播离线、关连接、清空 storage（含 token） */
-  private async onDelete(): Promise<Response> {
+  /** 解绑：需持 host 或 guest token（双方都可发起）；广播离线、关连接、清空 storage */
+  private async onDelete(req: Request): Promise<Response> {
+    const token = new URL(req.url).searchParams.get('token') ?? '';
+    const state = await this.ctx.storage.get<PairState>('state');
+    // 未鉴权的 DELETE 等于任何知道 pairId 的人都能强制解绑
+    if (!tokenValid(state, 'host', token) && !tokenValid(state, 'guest', token)) {
+      return json({ error: 'unauthorized' }, 401);
+    }
     this.broadcast('guest', { type: 'host-offline' });
     for (const ws of this.ctx.getWebSockets()) {
       try {
