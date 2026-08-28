@@ -118,7 +118,9 @@ export function ChatScreen(props: Props) {
       )}
 
       {sessionId !== null && (
-        <div className="@container shrink-0 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        // 浏览器里 safe-area 为 0，用 0.5rem 兜底不贴边；standalone 下取
+        // home indicator 的实际高度，不再叠加，避免下方留出多余空白
+        <div className="@container shrink-0 pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className={CHAT_COL}>
             <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
             <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
