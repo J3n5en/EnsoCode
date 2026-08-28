@@ -169,6 +169,29 @@ export const zhTranslations: Record<string, string> = {
   '{{count}} env vars': '{{count}} 个环境变量',
   'Imported {{count}} entries': '已导入 {{count}} 项',
   'Instruction Files': '指令文件',
+
+  // Phone second screen
+  Phone: '手机',
+  'Use your phone as a second screen. Keep this app running.':
+    '把手机当作第二块屏幕。需保持本应用运行。',
+  'Pair a phone': '配对手机',
+  'Cancel pairing': '取消配对',
+  'Failed to start pairing': '发起配对失败',
+  'Scan with your phone': '用手机扫码',
+  'The code expires in 60 seconds and can only be used once.':
+    '配对码 60 秒后失效，且只能使用一次。',
+  'Pairing QR code': '配对二维码',
+  'Paired devices': '已配对设备',
+  'No paired devices': '暂无已配对设备',
+  'Pair a phone to view sessions and reply on the go.': '配对手机后即可随时查看会话并回复。',
+  'Secure storage is unavailable on this system, so pairing keys are stored unencrypted.':
+    '当前系统不支持安全存储，配对密钥将以未加密方式保存。',
+  'Waiting for phone': '等待手机',
+  Online: '在线',
+  Offline: '离线',
+  'Relay server': '中继服务器',
+  'The relay only forwards encrypted frames and cannot read your messages.':
+    '中继只转发密文，无法读取你的消息内容。',
   'Global CLAUDE.md / AGENTS.md style files from local AI tools':
     '本机 AI 工具的全局 CLAUDE.md / AGENTS.md 类文件',
   'No instruction files yet': '暂无指令文件',
@@ -217,8 +240,7 @@ export const zhTranslations: Record<string, string> = {
   Projects: '项目',
   'Add project': '添加项目',
   'Add a project to start': '添加一个项目开始',
-  'Add a local directory as the conversation working folder.':
-    '把本地目录加为对话的工作目录。',
+  'Add a local directory as the conversation working folder.': '把本地目录加为对话的工作目录。',
   'Type a path or select from recent projects...': '输入路径或从最近项目中选择...',
   Browse: '浏览',
   'No matching projects found': '没有匹配的项目',
