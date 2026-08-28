@@ -29,6 +29,7 @@ import {
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
 import { maybeNotify } from '../services/notifications';
+import { forwardAgentEvent } from '../services/pairHost';
 import {
   importExternalSession,
   listExternalSessions,
@@ -61,6 +62,8 @@ export function registerAgentHandlers(): void {
       win.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
     }
     maybeNotify(event);
+    // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
+    forwardAgentEvent(event);
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SPAWN, (_event, request: unknown): AgentActionResult => {
