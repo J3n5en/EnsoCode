@@ -7,7 +7,6 @@ export const zhTranslations: Record<string, string> = {
   'Choose interface theme': '选择界面主题',
   'Color scheme': '配色方案',
   Dark: '深色',
-  'Electron multi-window scaffold': 'Electron 多窗口脚手架',
   Font: '字体',
   'Font size': '字号',
   'Font weight': '字重',
@@ -98,7 +97,6 @@ export const zhTranslations: Record<string, string> = {
   '{{count}} models': '{{count}} 个模型',
   '{{count}} selected': '已选 {{count}} 项',
   'Import selected': '导入所选',
-  'Imported {{count}} providers': '已导入 {{count}} 个模型服务',
   Done: '完成',
   'No providers yet': '暂无模型服务',
   'Import providers from local apps or add one manually to get started':
@@ -108,7 +106,6 @@ export const zhTranslations: Record<string, string> = {
   'Subscription login': '订阅登录',
   'Sign in with provider subscriptions (SuperGrok, Claude Pro, ChatGPT, etc.)':
     '使用订阅账号登录（SuperGrok、Claude Pro、ChatGPT 等）',
-  Subscription: '订阅',
   'Add account': '添加账号',
   '{{count}} accounts': '{{count}} 个账号',
   'Log out': '退出登录',
@@ -124,7 +121,6 @@ export const zhTranslations: Record<string, string> = {
   'API Type': 'API 类型',
   'Base URL': 'Base URL',
   'API Key': 'API Key',
-  'Models (one per line)': '模型(每行一个)',
   Models: '模型',
   'Add a model id': '添加模型 ID',
   'Filter models...': '筛选模型...',
@@ -203,11 +199,9 @@ export const zhTranslations: Record<string, string> = {
   'Save as local copy': '保存为本地副本',
   'Failed to read content': '读取内容失败',
   'Failed to save': '保存失败',
-  Provider: '模型服务',
   Model: '模型',
   'Working directory': '工作目录',
   'Ask the agent…': '想让 agent 做什么…',
-  'Steer the running agent…': '给运行中的 agent 补一句…',
   'Thinking…': '思考中…',
   'Thought process': '思考过程',
   'Loading Mermaid diagram...': '加载 Mermaid 图表...',
@@ -236,7 +230,6 @@ export const zhTranslations: Record<string, string> = {
   'Show {{n}} more': '展开其余 {{n}} 条',
   Collapse: '收起',
   'Expand sidebar': '展开侧边栏',
-  '{{count}} turns': '{{count}} 轮',
   'Approval required': '需要审批',
   'Type an answer…': '输入回答…',
   'Message will queue until this round finishes…': '消息将排队,本轮结束后发送…',
@@ -248,6 +241,23 @@ export const zhTranslations: Record<string, string> = {
   'Built-in tools': '内置工具',
   'Toggle the built-in tools available to agents. All enabled by default.':
     '开关 agent 可用的内置工具,默认全部启用。',
+  'One-shot subagent: delegate a self-contained task and return a final report (parallel or async)':
+    '一次性子代理:委派自包含子任务,返回最终报告(可并行、可异步)',
+  'Persistent subagent: hire for multi-turn dialogue; you can watch and intervene from a tab':
+    '持久子代理:雇佣后多轮对话,用户可在 tab 旁观介入',
+  'Task list: track progress on multi-step work': '任务清单:跟踪多步骤工作的进度',
+  'Ask the user a question and wait for an answer (options / timeout)':
+    '向用户提问并等待回答(带选项/超时)',
+  'Background shell task: run long commands in the background and notify on completion':
+    '后台 shell 任务:长命令挂后台跑,完成时通知',
+  '(log unavailable)': '(日志不可用)',
+  'Loading…': '加载中…',
+  '(no log available)': '(暂无日志)',
+  Note: '注意',
+  Tip: '提示',
+  Important: '重要',
+  Warning: '警告',
+  Caution: '小心',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',
@@ -267,8 +277,6 @@ export const zhTranslations: Record<string, string> = {
   Toolset: '工具集',
   'All tools (bash/edit/write)': '全部工具(bash/edit/write)',
   'Read-only (read/grep/find/ls)': '只读(read/grep/find/ls)',
-  'Background task {{id}} finished ({{outcome}} · {{duration}})':
-    '后台任务 {{id}} 已完成（{{outcome}} · {{duration}}）',
   'Stop task': '停止任务',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',
@@ -291,11 +299,7 @@ export const zhTranslations: Record<string, string> = {
   Hire: '雇佣',
   'Dismiss this coworker? Its session will be closed.': '解雇这个 coworker?其会话将被关闭。',
   Output: '输出',
-  Stop: '停止',
   '(no output yet)': '(暂无输出)',
-  'Turn completed': '回复完成',
-  'The agent finished and is waiting for you.': 'agent 已完成,等你查看。',
-  'Session failed': '会话失败',
   Deny: '拒绝',
   Allow: '允许',
   'Always allow this session': '本会话总是允许',
@@ -309,7 +313,6 @@ export const zhTranslations: Record<string, string> = {
   'No conversations yet': '暂无对话',
   'Preparing session…': '正在恢复会话…',
   Todos: '任务清单',
-  'Context {{used}} / {{window}} tok': '上下文 {{used}} / {{window}} tok',
   '{{count}} tool calls': '{{count}} 个工具调用',
   'ran {{count}} commands': '跑了 {{count}} 条命令',
   'read {{count}} files': '读了 {{count}} 个文件',
@@ -332,7 +335,6 @@ export const zhTranslations: Record<string, string> = {
   Untitled: '未命名',
   '{{count}} messages': '{{count}} 条消息',
   Import: '导入',
-  'Show {{count}} earlier': '显示更早的 {{count}} 条',
   'Scroll to bottom': '滚动到底部',
   Rewind: '回退',
   'Rewind to this message': '回退到这条消息（其后的消息移出当前分支,文本回填输入框）',
@@ -350,9 +352,7 @@ export const zhTranslations: Record<string, string> = {
   '"{{name}}" and its {{count}} conversations will be removed from the list.':
     '将从列表移除「{{name}}」及其 {{count}} 个对话。',
   'This conversation will be removed from the list.': '该对话将从列表移除。',
-  'Thinking level': '思考深度',
   Reasoning: '推理',
-  'Takes effect in a new conversation': '新对话生效',
   'Load local skills': '加载本机 skill',
   // Presets
   Presets: '预设',
@@ -369,6 +369,62 @@ export const zhTranslations: Record<string, string> = {
     '{{skills}} 个技能 · {{mcp}} 个 MCP · {{instruction}} 份指令',
   'Let the agent auto-discover skills under .agents/skills and .pi/skills':
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
+  // Model providers · 供应商分组与删除确认
+  Custom: '自定义',
+  'Remove provider?': '删除该配置？',
+  'Removing this also signs out {{name}}. Other accounts for the same vendor stay signed in.':
+    '删除会同时退登「{{name}}」。同一厂商下的其他账号仍保持登录。',
+  'This permanently deletes the "{{name}}" provider configuration.':
+    '将永久删除「{{name}}」这项配置。',
+  'Sign-out failed: {{message}}': '退登失败：{{message}}',
+  Retry: '重试',
+  'Delete anyway': '仍要删除',
+  // Provider model-row overrides（自定义 apiKey 条目展开编辑）
+  Overridden: '已覆盖',
+  Catalog: 'catalog',
+  Inherit: '跟随',
+  On: '开',
+  Off: '关',
+  'Thinking level': '思考档位',
+  Context: '上下文',
+  'Max tokens': '最大输出',
+  // Model picker · 上下文窗口与思考档支持性
+  'Context window': '上下文窗口',
+  'Estimated context window (catalog fallback)': '上下文窗口为估算值（取自模型目录回退）',
+  '{{model}} does not support reasoning': '{{model}} 不支持推理',
+  'Filter models in this entry': '在此配置内筛选模型',
+  'Showing {{shown}} of {{total}} models': '显示 {{shown}} / 共 {{total}} 个模型',
+  // Status line · 段位与预设
+  'Status line settings': '状态栏设置',
+  'No data yet': '暂无数据',
+  '{{count}} coworkers': '{{count}} 名队员',
+  'Drag to reorder': '拖动排序',
+  // 状态栏段名（设置弹层行标签 + 状态栏 hover title 前缀）
+  Turns: '轮次',
+  Duration: '耗时',
+  Speed: '速度',
+  Tokens: 'Token 用量',
+  'Cache hit rate': '缓存命中率',
+  'Session name': '会话名称',
+  'Approval mode': '审批档位',
+  Coworkers: '队员',
+  'Session time': '会话时长',
+  'Subscription usage': '订阅额度',
+  'resets in {{remaining}}': '{{remaining}} 后重置',
+  // 状态栏预设名（'Default' 已有译文「默认」，'Full access' 是审批档位、与 'Full' 不同 key）
+  Minimal: '简洁',
+  Full: '完整',
+  // 思考档位（模型段的档位后缀；'Med' 是状态栏用的缩写形式）
+  Low: '低',
+  Medium: '中',
+  Med: '中',
+  High: '高',
+  Max: '最高',
+  'Loading diff…': '加载 diff…',
+  // 补齐全 renderer 的中文覆盖（此前缺译文，中文界面下会静默显示英文）
+  Copy: '复制',
+  Description: '描述',
+  Source: '来源',
 };
 
 export function normalizeLocale(input?: string): Locale {

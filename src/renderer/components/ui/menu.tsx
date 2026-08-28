@@ -17,6 +17,10 @@ const Menu = MenuPrimitive.Root;
 
 const MenuPortal = MenuPrimitive.Portal;
 
+const MENU_POPUP_CLASS =
+  // 优化动画：150ms，使用模拟 Spring 的 cubic-bezier 曲线
+  "relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border bg-popover bg-clip-padding shadow-lg outline-none transition-[scale,opacity] duration-150 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus:outline-none has-data-starting-style:scale-95 has-data-starting-style:opacity-0 has-data-ending-style:scale-95 has-data-ending-style:opacity-0 dark:bg-clip-border dark:before:shadow-[0_-1px_--theme(--color-white/8%)]";
+
 function MenuTrigger(props: MenuPrimitive.Trigger.Props) {
   return <MenuPrimitive.Trigger data-slot="menu-trigger" {...props} />;
 }
@@ -47,11 +51,7 @@ function MenuPopup({
         sideOffset={sideOffset}
       >
         <MenuPrimitive.Popup
-          className={cn(
-            // 优化动画：150ms，使用模拟 Spring 的 cubic-bezier 曲线
-            "relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border bg-popover bg-clip-padding shadow-lg outline-none transition-[scale,opacity] duration-150 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus:outline-none has-data-starting-style:scale-95 has-data-starting-style:opacity-0 has-data-ending-style:scale-95 has-data-ending-style:opacity-0 dark:bg-clip-border dark:before:shadow-[0_-1px_--theme(--color-white/8%)]",
-            className
-          )}
+          className={cn(MENU_POPUP_CLASS, className)}
           data-slot="menu-popup"
           {...props}
         >
@@ -207,7 +207,14 @@ function MenuShortcut({ className, ...props }: React.ComponentProps<'span'>) {
 }
 
 function MenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
-  return <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />;
+  return (
+    <MenuPrimitive.SubmenuRoot
+      data-slot="menu-sub"
+      {...props}
+      // 级联 Esc 必须只关当前子层。默认已是 false，这里钉死，避免调用方误开 closeParentOnEsc。
+      closeParentOnEsc={false}
+    />
+  );
 }
 
 function MenuSubTrigger({
@@ -234,7 +241,14 @@ function MenuSubTrigger({
   );
 }
 
+/**
+ * 子菜单弹层：必须自己拼 Portal + Positioner + Popup，禁止复用 `MenuPopup`。
+ * `MenuPopup` 是根菜单专用（Portal + Backdrop + Positioner + Popup）。子层再包一层
+ * 会再挂一张全屏 Backdrop / 再叠一个 dismiss，Esc 一次关多层或关完留下幽灵层。
+ * 仍走同一套 base-ui Menu.Portal，不另起门户。
+ */
 function MenuSubPopup({
+  children,
   className,
   sideOffset = 0,
   alignOffset,
@@ -248,15 +262,24 @@ function MenuSubPopup({
   const defaultAlignOffset = align !== 'center' ? -5 : undefined;
 
   return (
-    <MenuPopup
-      align={align}
-      alignOffset={alignOffset ?? defaultAlignOffset}
-      className={className}
-      data-slot="menu-sub-content"
-      side="inline-end"
-      sideOffset={sideOffset}
-      {...props}
-    />
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner
+        align={align}
+        alignOffset={alignOffset ?? defaultAlignOffset}
+        className="z-50"
+        data-slot="menu-sub-positioner"
+        side="inline-end"
+        sideOffset={sideOffset}
+      >
+        <MenuPrimitive.Popup
+          className={cn(MENU_POPUP_CLASS, className)}
+          data-slot="menu-sub-content"
+          {...props}
+        >
+          <div className="max-h-(--available-height) w-full overflow-y-auto p-1">{children}</div>
+        </MenuPrimitive.Popup>
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
   );
 }
 

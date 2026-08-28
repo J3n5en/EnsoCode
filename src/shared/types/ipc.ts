@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   PROVIDERS_COLLECT_IMPORT: 'providers:collect-import',
   PROVIDERS_LIST_MODELS: 'providers:list-models',
   PROVIDERS_TEST: 'providers:test',
+  PROVIDERS_MODEL_META: 'providers:model-meta',
 
   // OAuth subscription providers (pi builtin)
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',

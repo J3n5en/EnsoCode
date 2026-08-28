@@ -18,7 +18,10 @@ export interface OauthAccount {
   providerId: string;
   /** 账号邮箱，从 JWT claims 或厂商 userinfo 端点 best-effort 取得 */
   email?: string;
-  /** 订阅档位（如 'max'、'pro'） */
+  /**
+   * 订阅档位（如 'max'、'pro'）。
+   * 厂商原文经 `sanitizeOauthLabel` 截到 `OAUTH_LABEL_MAX_LENGTH`。
+   */
   plan?: string;
 }
 
@@ -39,6 +42,9 @@ export interface OauthProviderInfo {
 
 /** 订阅额度窗口（如 Claude 5h/7d、Codex primary/secondary、Antigravity daily/weekly） */
 export interface OauthUsageWindow {
+  /**
+   * 窗口名。厂商原文经 `sanitizeOauthLabel` 截到 `OAUTH_LABEL_MAX_LENGTH`。
+   */
   label: string;
   /** 已用百分比 0-100 */
   usedPercent: number;
@@ -74,6 +80,30 @@ export type OauthLoginEvent =
   /** 登录成功；account 是这次新增（或覆盖）的那个账号 */
   | { type: 'done'; providerId: string; account: OauthAccount }
   | { type: 'error'; message: string };
+
+/**
+ * 厂商 `plan` / `OauthUsageWindow.label` 的上游长度上限。
+ *
+ * 渲染侧：ModelPicker 把 plan 截到 16，状态栏把窗口 label 截到 24。
+ * 这里取 32——略宽于两者，挡住无界厂商串写入 sidecar / IPC，
+ * 又不比界面展示更狠。控制字符一并剔除（与 ModelPicker 的 sanitizeAccountText 同意图）。
+ */
+export const OAUTH_LABEL_MAX_LENGTH = 32;
+
+/**
+ * 探测结果里给界面/sidecar 的短文案：去掉控制字符、trim，再硬截到
+ * `OAUTH_LABEL_MAX_LENGTH`。数据层不加省略号——展示截断仍由渲染侧负责。
+ */
+export function sanitizeOauthLabel(value: string): string {
+  let out = '';
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) continue;
+    out += ch;
+  }
+  out = out.trim();
+  return out.length > OAUTH_LABEL_MAX_LENGTH ? out.slice(0, OAUTH_LABEL_MAX_LENGTH) : out;
+}
 
 /** 首个账号沿用裸 providerId，后续为 `<providerId>#<n>` */
 export const accountKeyFor = (providerId: string, ordinal: number): string =>

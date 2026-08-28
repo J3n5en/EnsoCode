@@ -47,6 +47,10 @@
 <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
 ```
 
+弹窗（以及任何）`Select` 必须传 `items`（`Record<value, label>` 或 `{ value, label }[]`）。
+Base UI 的 `SelectValue` 关着 popup 时读不到 `SelectItem` 文案，缺 `items` 就会把原始 value 画在触发器上。
+对照 `GeneralSettings` / `AppearanceSettings` / `McpEditDialog` / `ProviderEditDialog`。
+
 因为 `SelectPopup` 默认用 `Z_INDEX.DROPDOWN`(40)，而 `MODAL_CONTENT` 是 51。
 症状是点开下拉看不见选项。嵌套弹窗里的下拉用 `DROPDOWN_IN_NESTED_MODAL`。
 

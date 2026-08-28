@@ -1,6 +1,7 @@
 import { parseDiffFromFile } from '@pierre/diffs';
 import { FileDiff } from '@pierre/diffs/react';
 import { useEffect, useMemo, useState } from 'react';
+import { useI18n } from '@/i18n';
 import type { EditBlock } from '@/stores/sessions/timeline';
 import { CODE_THEME, ensureHighlighter } from './codeHighlighter';
 
@@ -38,6 +39,7 @@ type Loaded =
 
 /** 用 @pierre/diffs 渲染 edit 工具的改动：优先读实际文件给出真实行号+上下文，否则回退片段 diff */
 export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }) {
+  const { t } = useI18n();
   const name = path.split('/').pop() || 'file';
   const [state, setState] = useState<Loaded>({ kind: 'loading' });
 
@@ -60,7 +62,7 @@ export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }
   if (state.kind === 'loading') {
     return (
       <div className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
-        加载 diff…
+        {t('Loading diff…')}
       </div>
     );
   }

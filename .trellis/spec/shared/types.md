@@ -99,3 +99,14 @@ export interface McpCandidate {
 ```
 
 新增扫描来源时保持这个切分，不要图省事把明文塞进候选类型。
+
+## 厂商短文案必须上游限长
+
+`OauthAccount.plan` 和 `OauthUsageWindow.label` 来自厂商 JWT / 额度接口，
+长度不受我们控制。渲染侧（ModelPicker 16、状态栏 24）已经截断展示，
+但探测结果还会写入 sidecar 并经 IPC 下发，所以**生产这些字段的探测路径
+必须走 `sanitizeOauthLabel`**（上限 `OAUTH_LABEL_MAX_LENGTH` = 32）。
+
+新探测不要把厂商原文直接赋给 `plan` / `label`。不要再写一份截断函数，
+也不要把展示截断上移成第二个事实源——渲染侧的 truncate 是布局兜底，
+上游限长是写盘 / IPC 兜底，两层都留着。

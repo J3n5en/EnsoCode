@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OauthLoginEvent } from '@shared/types';
+import { OAUTH_LABEL_MAX_LENGTH, type OauthLoginEvent } from '@shared/types';
 import type { WebContents } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -127,6 +127,28 @@ describe('listOauthProviders 的账号枚举', () => {
       { key: 'google-antigravity', providerId: 'google-antigravity', email: 'ag@example.com' },
     ]);
   });
+
+  it('JWT 里超长 plan 按共享上限截断', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 'huge@example.com',
+          'https://api.openai.com/auth': { chatgpt_plan_type: 'P'.repeat(200) },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts[0]?.plan).toBe('P'.repeat(OAUTH_LABEL_MAX_LENGTH));
+    } finally {
+      restore();
+    }
+  });
 });
 
 /** 收集 OAUTH_LOGIN_EVENT 的假 WebContents */
@@ -250,6 +272,34 @@ describe('Antigravity 额度探测', () => {
     fetchSpy.mockRestore();
   });
 
+  it('厂商 windowLabel 超长时按共享上限截断', async () => {
+    const { getOauthAccountUsage } = await import('./oauthProviders');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          models: {
+            'gemini-3-pro': {
+              quotaInfo: {
+                remainingFraction: 0.4,
+                resetTime: new Date(expires).toISOString(),
+                windowLabel: 'W'.repeat(200),
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    try {
+      const usage = await getOauthAccountUsage('google-antigravity');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toHaveLength(1);
+      expect(usage.windows[0]?.label).toBe('W'.repeat(OAUTH_LABEL_MAX_LENGTH));
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('凭证缺 projectId 时落到 error 而不是静默空窗口', async () => {
     const { getOauthAccountUsage } = await import('./oauthProviders');
     const broken = path.join(userData, 'agent', 'pi-agent', 'auth.json');
@@ -263,6 +313,191 @@ describe('Antigravity 额度探测', () => {
       expect(usage.error).toMatch(/projectId/);
     } finally {
       writeFileSync(broken, original);
+    }
+  });
+});
+
+const authFile = () => path.join(userData, 'agent', 'pi-agent', 'auth.json');
+
+function withAuthJson(mutate: (parsed: Record<string, unknown>) => void): () => void {
+  const original = readFileSync(authFile(), 'utf8');
+  const parsed = JSON.parse(original) as Record<string, unknown>;
+  mutate(parsed);
+  writeFileSync(authFile(), JSON.stringify(parsed));
+  return () => writeFileSync(authFile(), original);
+}
+
+function jsonOk(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+describe('xAI 额度探测', () => {
+  it('打 CLI billing 周池，带 xai-grok-cli 头，映射成 7d 窗口', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed.xai = {
+        type: 'oauth',
+        access: fakeJwt({ sub: 'xai-user-1' }),
+        refresh: 'rx',
+        expires,
+      };
+    });
+    const seen: Array<{ url: string; auth: string | null; tokenAuth: string | null }> = [];
+    const periodEnd = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      seen.push({
+        url,
+        auth: headers.get('authorization'),
+        tokenAuth: headers.get('x-xai-token-auth'),
+      });
+      if (url.includes('/oauth2/userinfo')) {
+        return jsonOk({ email: 'grok@example.com' });
+      }
+      if (url.includes('format=credits')) {
+        return jsonOk({
+          config: {
+            creditUsagePercent: 18,
+            currentPeriod: {
+              type: 'USAGE_PERIOD_TYPE_WEEKLY',
+              start: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+              end: periodEnd,
+            },
+          },
+        });
+      }
+      return jsonOk({});
+    });
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const usage = await getOauthAccountUsage('xai');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toEqual([
+        { label: '7d', usedPercent: 18, resetsAt: Date.parse(periodEnd) },
+      ]);
+      const billing = seen.find((call) => call.url.includes('format=credits'));
+      expect(billing?.tokenAuth).toBe('xai-grok-cli');
+      expect(billing?.auth).toMatch(/^Bearer /);
+      expect(seen.some((call) => call.url === 'https://cli-chat-proxy.grok.com/v1/billing')).toBe(
+        false
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it('unified 账号缺周百分比时改打月池', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed.xai = {
+        type: 'oauth',
+        access: fakeJwt({ sub: 'xai-user-2' }),
+        refresh: 'rx',
+        expires,
+      };
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/oauth2/userinfo')) return jsonOk({ email: 'grok@example.com' });
+      if (url.includes('format=credits')) {
+        return jsonOk({
+          config: {
+            isUnifiedBillingUser: true,
+            currentPeriod: {
+              type: 'USAGE_PERIOD_TYPE_WEEKLY',
+              start: new Date(Date.now() - 86_400_000).toISOString(),
+              end: new Date(Date.now() + 6 * 86_400_000).toISOString(),
+            },
+          },
+        });
+      }
+      if (url.endsWith('/v1/billing')) {
+        return jsonOk({
+          config: {
+            monthlyLimit: { val: 15000 },
+            used: { val: 4500 },
+            billingPeriodEnd: '2026-09-01T00:00:00Z',
+          },
+        });
+      }
+      return jsonOk({});
+    });
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const usage = await getOauthAccountUsage('xai');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toEqual([
+        { label: 'mo', usedPercent: 30, resetsAt: Date.parse('2026-09-01T00:00:00Z') },
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+});
+
+describe('Cursor 额度探测', () => {
+  it('JWT 账号走 usage-summary 的 auto/api 百分比', async () => {
+    const access = fakeJwt({ sub: 'auth0|user_cursor_1' });
+    const restore = withAuthJson((parsed) => {
+      parsed.cursor = { type: 'oauth', access, refresh: 'cr', expires };
+    });
+    const cycleEnd = Date.now() + 10 * 86_400_000;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/usage-summary')) {
+        return jsonOk({
+          billingCycleEnd: cycleEnd,
+          individualUsage: {
+            plan: { autoPercentUsed: 12, apiPercentUsed: 34, enabled: true },
+          },
+        });
+      }
+      if (url.includes('/api/auth/me')) return jsonOk({ email: 'cursor@example.com' });
+      return jsonOk({});
+    });
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const usage = await getOauthAccountUsage('cursor');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toEqual([
+        { label: 'auto', usedPercent: 12, resetsAt: cycleEnd },
+        { label: 'api', usedPercent: 34, resetsAt: cycleEnd },
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it('非 JWT token 退到 GetCurrentPeriodUsage', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes('GetCurrentPeriodUsage')) {
+        expect(init?.method).toBe('POST');
+        return jsonOk({
+          billingCycleEnd: '1771077734000',
+          planUsage: { autoPercentUsed: 8, apiPercentUsed: 21, enabled: true },
+        });
+      }
+      if (url.includes('cursor.com')) {
+        throw new Error('session endpoints must not be called without user id');
+      }
+      return jsonOk({});
+    });
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const usage = await getOauthAccountUsage('cursor');
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toEqual([
+        { label: 'auto', usedPercent: 8, resetsAt: 1_771_077_734_000 },
+        { label: 'api', usedPercent: 21, resetsAt: 1_771_077_734_000 },
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
     }
   });
 });

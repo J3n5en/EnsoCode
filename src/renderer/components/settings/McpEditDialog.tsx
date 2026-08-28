@@ -137,7 +137,11 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
 
           <Field>
             <FieldLabel>{t('Transport')}</FieldLabel>
-            <Select value={transport} onValueChange={(v) => setTransport(v as McpTransport)}>
+            <Select
+              items={MCP_TRANSPORTS.map((kind) => ({ value: kind, label: kind }))}
+              value={transport}
+              onValueChange={(v) => setTransport(v as McpTransport)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
