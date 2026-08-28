@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useSessionsStore } from '@/stores/sessions';
@@ -17,6 +19,7 @@ const MAX_WIDTH = 420;
 
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
+  useBackgroundImage();
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;
@@ -82,7 +85,8 @@ export default function App() {
   }, [keybindings]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="relative isolate flex h-screen flex-col">
+      <BackgroundLayer />
       <TitleBar title="EnsoCode" />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">

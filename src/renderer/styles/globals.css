@@ -215,3 +215,59 @@
   color: var(--shiki-dark) !important;
   background-color: var(--shiki-dark-bg) !important;
 }
+
+/**
+ * 背景图模式（useBackgroundImage 挂类 + 写 alpha 变量）：
+ * 用 CSS 相对颜色把面板类令牌重映射为半透明，保留原色相只改 alpha，
+ * 因此兼容 light / dark / sync-terminal（ghostty 主题写入的任意颜色）。
+ * 注意只改 --color-*（Tailwind 工具类引用层），不动 --background 等原始令牌，
+ * 避免循环引用，也让 body 能继续拿到实心底色。
+ */
+html.bg-image-enabled {
+  --color-background: oklch(from var(--background) l c h / var(--bg-panel-alpha, 0.15));
+  --color-card: oklch(from var(--card) l c h / var(--bg-panel-alpha, 0.15));
+  --color-secondary: oklch(from var(--secondary) l c h / var(--bg-panel-alpha, 0.15));
+  --color-muted: oklch(from var(--muted) l c h / var(--bg-panel-alpha, 0.15));
+  --color-accent: oklch(from var(--accent) l c h / var(--bg-panel-alpha, 0.15));
+  --color-border: oklch(from var(--border) l c h / var(--bg-border-alpha, 0.4));
+  --color-input: oklch(from var(--input) l c h / var(--bg-border-alpha, 0.4));
+  /* 弹出层保底不透明度，叠在内容上方时保住可读性 */
+  --color-popover: oklch(from var(--popover) l c h / var(--bg-popover-alpha, 0.92));
+}
+
+/* body 铺实心底色：contain/center 模式下图片盖不满的区域露主题色而不是白底 */
+html.bg-image-enabled body {
+  background-color: var(--background);
+}
+
+/**
+ * 代码块跟随透明：shiki 输出的 pre 自带主题实心底色（行内 style + 上方
+ * `.dark .shiki` 的 !important 规则），这里用更高优先级换成半透明面板色；
+ * token span 的底色直接去掉（保留文字颜色）。
+ * --bg-code-alpha 比普通面板更实一档，保代码可读性（useBackgroundImage 写入）。
+ */
+html.bg-image-enabled .shiki {
+  background-color: oklch(from var(--background) l c h / var(--bg-code-alpha, 0.45)) !important;
+}
+
+html.bg-image-enabled .shiki span {
+  background-color: transparent !important;
+}
+
+/**
+ * @pierre/diffs（edit diff / read 文件视图）：shadow 内 host/pre/gutter/content/行
+ * 多层元素都各自刷 --diffs-bg，若给它设半透明色会叠成近乎不透明。
+ * 因此：--diffs-bg 置全透（内部零叠色，红绿行由 color-mix 自带低 alpha），
+ * 半透明底色只由宿主元素刷一层。外部文档规则优先级高于 shadow 内 :host。
+ */
+html.bg-image-enabled diffs-container {
+  --diffs-light-bg: transparent;
+  --diffs-dark-bg: transparent;
+  --diffs-bg: transparent;
+  background-color: oklch(from var(--background) l c h / var(--bg-code-alpha, 0.45));
+}
+
+/* 底部输入框：独立可调的不透明度（useBackgroundImage 写入 --bg-composer-alpha） */
+html.bg-image-enabled [data-slot='composer'] {
+  background-color: oklch(from var(--background) l c h / var(--bg-composer-alpha, 0.6));
+}

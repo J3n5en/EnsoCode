@@ -1,4 +1,16 @@
-import { ChevronLeft, ChevronRight, Heart, Monitor, Moon, Sun, Terminal } from 'lucide-react';
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Heart,
+  ImageIcon,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Sun,
+  Terminal,
+} from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -17,6 +29,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
   defaultDarkTheme,
@@ -25,8 +39,303 @@ import {
   type XtermTheme,
 } from '@/lib/ghosttyTheme';
 import { cn } from '@/lib/utils';
-import { type FontWeight, type Theme, useSettingsStore } from '@/stores/settings';
+import {
+  type BackgroundSizeMode,
+  type BackgroundSourceType,
+  type FontWeight,
+  type Theme,
+  useSettingsStore,
+} from '@/stores/settings';
 import { fontWeightOptions } from './constants';
+
+/** 背景图设置区：百分比滑块行（拖动时本地预览，松手才写 store，避免拖动中频繁 IPC） */
+function PercentSliderRow({
+  label,
+  value,
+  onCommit,
+  min = 0,
+  max = 100,
+  unit = '%',
+}: {
+  label: string;
+  value: number;
+  onCommit: (value: number) => void;
+  min?: number;
+  max?: number;
+  unit?: string;
+}) {
+  const [local, setLocal] = React.useState(value);
+  React.useEffect(() => {
+    setLocal(value);
+  }, [value]);
+
+  return (
+    <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-3">
+        <Slider
+          min={min}
+          max={max}
+          value={local}
+          onValueChange={(v) => setLocal(Array.isArray(v) ? v[0] : v)}
+          onValueCommitted={(v) => onCommit(Array.isArray(v) ? v[0] : v)}
+        />
+        <span className="w-12 shrink-0 text-right text-sm text-muted-foreground">
+          {local}
+          {unit}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BackgroundImageSettings() {
+  const { t } = useI18n();
+  const enabled = useSettingsStore((s) => s.backgroundImageEnabled);
+  const setEnabled = useSettingsStore((s) => s.setBackgroundImageEnabled);
+  const sourceType = useSettingsStore((s) => s.backgroundSourceType);
+  const setSourceType = useSettingsStore((s) => s.setBackgroundSourceType);
+  const imagePath = useSettingsStore((s) => s.backgroundImagePath);
+  const setImagePath = useSettingsStore((s) => s.setBackgroundImagePath);
+  const folderPath = useSettingsStore((s) => s.backgroundFolderPath);
+  const setFolderPath = useSettingsStore((s) => s.setBackgroundFolderPath);
+  const urlPath = useSettingsStore((s) => s.backgroundUrlPath);
+  const setUrlPath = useSettingsStore((s) => s.setBackgroundUrlPath);
+  const randomEnabled = useSettingsStore((s) => s.backgroundRandomEnabled);
+  const setRandomEnabled = useSettingsStore((s) => s.setBackgroundRandomEnabled);
+  const randomInterval = useSettingsStore((s) => s.backgroundRandomInterval);
+  const setRandomInterval = useSettingsStore((s) => s.setBackgroundRandomInterval);
+  const opacity = useSettingsStore((s) => s.backgroundOpacity);
+  const setOpacity = useSettingsStore((s) => s.setBackgroundOpacity);
+  const blur = useSettingsStore((s) => s.backgroundBlur);
+  const setBlur = useSettingsStore((s) => s.setBackgroundBlur);
+  const brightness = useSettingsStore((s) => s.backgroundBrightness);
+  const setBrightness = useSettingsStore((s) => s.setBackgroundBrightness);
+  const saturation = useSettingsStore((s) => s.backgroundSaturation);
+  const setSaturation = useSettingsStore((s) => s.setBackgroundSaturation);
+  const composerOpacity = useSettingsStore((s) => s.backgroundComposerOpacity);
+  const setComposerOpacity = useSettingsStore((s) => s.setBackgroundComposerOpacity);
+  const codeOpacity = useSettingsStore((s) => s.backgroundCodeOpacity);
+  const setCodeOpacity = useSettingsStore((s) => s.setBackgroundCodeOpacity);
+  const sizeMode = useSettingsStore((s) => s.backgroundSizeMode);
+  const setSizeMode = useSettingsStore((s) => s.setBackgroundSizeMode);
+  const bumpRefresh = useSettingsStore((s) => s.bumpBackgroundRefresh);
+
+  // 路径类输入框：本地编辑，blur/Enter 时提交（与字体设置同一惯例）
+  const storedPath =
+    sourceType === 'file' ? imagePath : sourceType === 'folder' ? folderPath : urlPath;
+  const [localPath, setLocalPath] = React.useState(storedPath);
+  React.useEffect(() => {
+    setLocalPath(storedPath);
+  }, [storedPath]);
+
+  const commitPath = React.useCallback(() => {
+    const value = localPath.trim();
+    if (sourceType === 'file') setImagePath(value);
+    else if (sourceType === 'folder') setFolderPath(value);
+    else setUrlPath(value);
+  }, [localPath, sourceType, setImagePath, setFolderPath, setUrlPath]);
+
+  const [localInterval, setLocalInterval] = React.useState(randomInterval);
+  React.useEffect(() => {
+    setLocalInterval(randomInterval);
+  }, [randomInterval]);
+
+  const browse = async () => {
+    if (sourceType === 'folder') {
+      const dir = await window.electronAPI.dialog.selectDirectory();
+      if (dir) setFolderPath(dir);
+    } else {
+      const file = await window.electronAPI.dialog.selectFile([
+        ...IMAGE_EXTENSIONS,
+        ...VIDEO_EXTENSIONS,
+      ]);
+      if (file) setImagePath(file);
+    }
+  };
+
+  const sourceTypeOptions: { value: BackgroundSourceType; label: string }[] = [
+    { value: 'file', label: t('Single image') },
+    { value: 'folder', label: t('Folder (random)') },
+    { value: 'url', label: t('Remote URL') },
+  ];
+
+  const sizeModeOptions: { value: BackgroundSizeMode; label: string }[] = [
+    { value: 'cover', label: t('Cover') },
+    { value: 'contain', label: t('Contain') },
+    { value: 'repeat', label: t('Repeat') },
+    { value: 'center', label: t('Center') },
+  ];
+
+  const pathLabel =
+    sourceType === 'file'
+      ? t('Image path')
+      : sourceType === 'folder'
+        ? t('Folder path')
+        : t('Image URL');
+
+  return (
+    <>
+      <div className="flex items-center justify-between border-t pt-6">
+        <div>
+          <h3 className="text-lg font-medium">{t('Background image')}</h3>
+          <p className="text-sm text-muted-foreground">
+            {t('Show a custom image behind the interface')}
+          </p>
+        </div>
+        <Switch checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} />
+      </div>
+
+      {enabled && (
+        <>
+          {/* Source type */}
+          <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+            <span className="text-sm font-medium">{t('Source type')}</span>
+            <Select
+              items={sourceTypeOptions}
+              value={sourceType}
+              onValueChange={(v) => setSourceType(v as BackgroundSourceType)}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {sourceTypeOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+
+          {/* Source path */}
+          <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+            <span className="text-sm font-medium">{pathLabel}</span>
+            <div className="flex items-center gap-2">
+              <Input
+                value={localPath}
+                onChange={(e) => setLocalPath(e.target.value)}
+                onBlur={commitPath}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'Enter') {
+                    commitPath();
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder={sourceType === 'url' ? 'https://example.com/image.jpg' : ''}
+                className="flex-1"
+              />
+              {sourceType !== 'url' && (
+                <Button variant="outline" size="icon" onClick={browse} aria-label={t('Browse')}>
+                  {sourceType === 'folder' ? (
+                    <FolderOpen className="h-4 w-4" />
+                  ) : (
+                    <ImageIcon className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
+              {sourceType !== 'file' && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={bumpRefresh}
+                  aria-label={t('Refresh now')}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Auto switch interval（folder/url） */}
+          {sourceType !== 'file' && (
+            <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+              <span className="text-sm font-medium">{t('Auto switch')}</span>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={randomEnabled}
+                  onCheckedChange={(checked) => setRandomEnabled(checked === true)}
+                />
+                {randomEnabled && (
+                  <>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={86400}
+                      value={localInterval}
+                      onChange={(e) => setLocalInterval(Number(e.target.value))}
+                      onBlur={() => setRandomInterval(localInterval)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          setRandomInterval(localInterval);
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">{t('seconds')}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          <PercentSliderRow
+            label={t('Background visibility')}
+            value={Math.round(opacity * 100)}
+            onCommit={(v) => setOpacity(v / 100)}
+          />
+          <PercentSliderRow label={t('Blur')} value={blur} onCommit={setBlur} max={20} unit="px" />
+          <PercentSliderRow
+            label={t('Brightness')}
+            value={Math.round(brightness * 100)}
+            onCommit={(v) => setBrightness(v / 100)}
+            max={200}
+          />
+          <PercentSliderRow
+            label={t('Saturation')}
+            value={Math.round(saturation * 100)}
+            onCommit={(v) => setSaturation(v / 100)}
+            max={200}
+          />
+          <PercentSliderRow
+            label={t('Composer opacity')}
+            value={Math.round(composerOpacity * 100)}
+            onCommit={(v) => setComposerOpacity(v / 100)}
+          />
+          <PercentSliderRow
+            label={t('Code block opacity')}
+            value={Math.round(codeOpacity * 100)}
+            onCommit={(v) => setCodeOpacity(v / 100)}
+          />
+
+          {/* Size mode */}
+          <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+            <span className="text-sm font-medium">{t('Size mode')}</span>
+            <Select
+              items={sizeModeOptions}
+              value={sizeMode}
+              onValueChange={(v) => setSizeMode(v as BackgroundSizeMode)}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {sizeModeOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
 function TerminalPreview({
   theme,
@@ -557,6 +866,9 @@ export function AppearanceSettings() {
           </SelectPopup>
         </Select>
       </div>
+
+      {/* Background Image */}
+      <BackgroundImageSettings />
     </div>
   );
 }
