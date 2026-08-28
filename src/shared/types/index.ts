@@ -6,6 +6,7 @@ export * from './ipc';
 export * from './llm';
 export * from './modelMeta';
 export * from './oauthProviders';
+export * from './pair';
 export * from './project';
 export * from './providerApi';
 export * from './providerScan';

@@ -9,6 +9,8 @@ import type {
   OauthAccountUsage,
   OauthLoginEvent,
   OauthProviderInfo,
+  PairCatalogPayload,
+  PairStatus,
   ProviderApiConfig,
   RecentProject,
   TestProviderResult,
@@ -244,6 +246,24 @@ const electronAPI = {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATER_STATUS, listener);
+    },
+  },
+
+  pair: {
+    start: (): Promise<{ ok: boolean; inviteUri?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_START),
+    cancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_CANCEL),
+    revoke: (pairId: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_REVOKE, pairId),
+    status: (): Promise<PairStatus> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_STATUS),
+    setRelayUrl: (url: string): Promise<PairStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_SET_RELAY, url),
+    /** renderer → main 推会话目录 / 项目 / provider（provider 须已剥密） */
+    pushCatalog: (payload: PairCatalogPayload): void =>
+      ipcRenderer.send(IPC_CHANNELS.PAIR_CATALOG, payload),
+    onStatusChanged: (callback: (status: PairStatus) => void): (() => void) => {
+      const listener = (_: unknown, status: PairStatus) => callback(status);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
     },
   },
 
