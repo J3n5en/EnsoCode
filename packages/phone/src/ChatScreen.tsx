@@ -1,5 +1,5 @@
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
-import { ChevronLeft } from 'lucide-react';
+import { PanelLeft, SquarePen } from 'lucide-react';
 import { useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
@@ -9,20 +9,21 @@ import {
   MessageTimeline,
   type MessageTimelineHandle,
 } from '@/components/chat/MessageTimeline';
-import { cn } from '@/lib/utils';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import type { ConnState, SessionView } from './client';
 import { compressImage } from './image';
 import { setDisplayedConversation } from './stubs/sessions-store';
 
 interface Props {
-  sessionId: string;
+  sessionId: string | null;
   title: string;
   projectName: string;
   view: SessionView | null;
   connState: ConnState;
   stateLabel: string;
-  onBack(): void;
+  canCreate: boolean;
+  onOpenDrawer(): void;
+  onNewSession(): void;
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -31,7 +32,7 @@ interface Props {
 
 /** 会话页：复用桌面的时间线 / 审批条 / 输入框，保持与桌面一致的渲染 */
 export function ChatScreen(props: Props) {
-  const { view } = props;
+  const { view, sessionId } = props;
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const running = view?.status === 'running';
 
@@ -44,13 +45,17 @@ export function ChatScreen(props: Props) {
   );
 
   // 供复用组件内部读取（RunningElapsed 的计时 key；回退在手机端不可用）
-  setDisplayedConversation({
-    id: props.sessionId,
-    status: view?.status ?? 'idle',
-    started: false,
-    spawning: false,
-    messages,
-  });
+  setDisplayedConversation(
+    sessionId
+      ? {
+          id: sessionId,
+          status: view?.status ?? 'idle',
+          started: false,
+          spawning: false,
+          messages,
+        }
+      : null
+  );
 
   const timeline = useMemo(() => buildTimeline(messages, running), [messages, running]);
 
@@ -66,56 +71,69 @@ export function ChatScreen(props: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b px-2 py-2 pt-safe">
+      <header className="flex shrink-0 items-center gap-1 border-b px-2 py-2 pt-safe">
         <button
           type="button"
-          onClick={props.onBack}
-          className="flex h-8 shrink-0 items-center rounded-md pr-2 pl-1 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
+          onClick={props.onOpenDrawer}
+          aria-label="打开会话列表"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
-          返回
+          <PanelLeft className="h-4.5 w-4.5" />
         </button>
         <div className="min-w-0 flex-1 text-center">
           <p className="truncate font-medium text-sm">{props.title}</p>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {props.projectName}
+            {props.projectName || props.stateLabel}
           </p>
         </div>
-        <span
-          className={cn(
-            'shrink-0 px-1 text-[11px]',
-            props.connState === 'online' ? 'text-success' : 'text-destructive'
-          )}
+        <button
+          type="button"
+          onClick={props.onNewSession}
+          disabled={!props.canCreate}
+          aria-label="新建会话"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
         >
-          {props.stateLabel}
-        </span>
+          <SquarePen className="h-4.5 w-4.5" />
+        </button>
       </header>
 
-      <MessageTimeline
-        key={props.sessionId}
-        ref={timelineRef}
-        items={timeline}
-        busy={running}
-        running={running}
-        error={undefined}
-        emptyTitle={props.projectName || 'EnsoCode'}
-      />
-
-      <div className="@container shrink-0 pt-1 pb-safe">
-        <div className={CHAT_COL}>
-          <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
-          <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
-          <Composer
-            commands={[]}
-            running={running}
-            busy={running}
-            locked={(view?.approvals ?? []).length > 0}
-            focusKey={props.sessionId}
-            onSend={(text, images) => void send(text, images)}
-            onAbort={props.onAbort}
-          />
+      {sessionId === null ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
+          <p className="font-medium text-lg">EnsoCode</p>
+          <p className="text-muted-foreground text-sm">
+            {props.connState === 'online' ? '从左上角选择会话，或新建一个' : props.stateLabel}
+          </p>
         </div>
-      </div>
+      ) : (
+        <MessageTimeline
+          key={sessionId}
+          ref={timelineRef}
+          items={timeline}
+          // view 为 null = 快照尚未到达，交给时间线显示加载态而非空态
+          busy={running || view === null}
+          running={running}
+          error={undefined}
+          emptyTitle={props.projectName || 'EnsoCode'}
+        />
+      )}
+
+      {sessionId !== null && (
+        <div className="@container shrink-0 pt-1 pb-safe">
+          <div className={CHAT_COL}>
+            <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
+            <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
+            <Composer
+              commands={[]}
+              running={running}
+              busy={running}
+              locked={(view?.approvals ?? []).length > 0}
+              focusKey={sessionId}
+              onSend={(text, images) => void send(text, images)}
+              onAbort={props.onAbort}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

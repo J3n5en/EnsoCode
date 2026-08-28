@@ -265,6 +265,12 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
     },
+    /** main 请求恢复某会话（手机订阅了历史会话） */
+    onResumeSession: (callback: (sessionId: string) => void): (() => void) => {
+      const listener = (_: unknown, sessionId: string) => callback(sessionId);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+    },
   },
 
   window: {

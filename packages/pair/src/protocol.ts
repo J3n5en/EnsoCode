@@ -71,6 +71,8 @@ export interface CatalogEntry {
   projectId: string;
   status: string;
   parentId?: string;
+  /** 最后活动时间（末条消息或创建时间），手机端显示相对时间 */
+  updatedAt?: number;
 }
 export interface ProjectEntry {
   id: string;

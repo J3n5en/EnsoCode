@@ -70,6 +70,8 @@ let pairingTimer: NodeJS.Timeout | null = null;
 let pairingInviteUri: string | null = null;
 let pairingExpiresAt: number | null = null;
 let onStatusChange: (() => void) | null = null;
+/** 请渲染层恢复某会话（手机订阅历史会话时用） */
+let onResumeRequest: ((sessionId: string) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
@@ -80,6 +82,10 @@ let whitelist: SpawnWhitelist = { projects: [], providers: [] };
 
 export function setPairStatusListener(listener: () => void): void {
   onStatusChange = listener;
+}
+
+export function setPairResumeListener(listener: (sessionId: string) => void): void {
+  onResumeRequest = listener;
 }
 
 function notifyStatus(): void {
@@ -356,7 +362,9 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'subscribe':
       conn.subscribedId = command.sessionId;
       conn.sinceIndex = command.sinceIndex;
-      // 订阅后补发该会话的投影（worker 快照会经事件流回来）
+      // 历史会话在 worker 里没有投影，先请渲染层恢复（与桌面点开会话同路径），
+      // 再要快照；已启动的会话 resume 会自行忽略。
+      if (command.sessionId) onResumeRequest?.(command.sessionId);
       requestSnapshot();
       break;
     case 'snapshot':

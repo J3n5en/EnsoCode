@@ -26,6 +26,7 @@ function buildPayload(): PairCatalogPayload {
       projectName: projectName.get(c.projectId) ?? '',
       projectId: c.projectId,
       status: c.spawning ? 'running' : c.status,
+      updatedAt: c.messages.at(-1)?.timestamp ?? c.createdAt,
       ...(c.parentId ? { parentId: c.parentId } : {}),
     }));
 
@@ -68,5 +69,9 @@ export function bindPairCatalogSync(): void {
   });
   useSettingsStore.subscribe((state, prev) => {
     if (state.projects !== prev.projects || state.providers !== prev.providers) schedulePush();
+  });
+  // 手机订阅历史会话时恢复它，worker 才有投影可发（resume 对已启动会话自动忽略）
+  window.electronAPI.pair.onResumeSession((sessionId) => {
+    void useSessionsStore.getState().resumeConversation(sessionId);
   });
 }
