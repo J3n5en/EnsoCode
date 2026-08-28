@@ -50,30 +50,48 @@ function routeById(
   return stub.fetch(new Request(`https://do${internalPath}${url.search}`, request));
 }
 
+const CORS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+  'access-control-allow-headers': 'content-type',
+};
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  if (path === '/v1/pair/request' && request.method === 'POST') {
+    return routeByPublicKey(request, env, '/request');
+  }
+  if (path === '/v1/pair/claim' && request.method === 'POST') {
+    return routeByPublicKey(request, env, '/claim');
+  }
+
+  // /v1/pair/:id  (WSS 连接 或 DELETE 解绑)
+  const m = /^\/v1\/pair\/([^/]+)$/.exec(path);
+  if (m) {
+    const pairId = decodeURIComponent(m[1]);
+    if (request.headers.get('Upgrade') === 'websocket') {
+      return routeById(request, env, pairId, '/connect');
+    }
+    if (request.method === 'DELETE') {
+      return routeById(request, env, pairId, '/delete');
+    }
+  }
+
+  return json({ error: 'not found' }, 404);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
-
-    if (path === '/v1/pair/request' && request.method === 'POST') {
-      return routeByPublicKey(request, env, '/request');
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS });
     }
-    if (path === '/v1/pair/claim' && request.method === 'POST') {
-      return routeByPublicKey(request, env, '/claim');
-    }
-
-    // /v1/pair/:id  (WSS 连接 或 DELETE 解绑)
-    const m = /^\/v1\/pair\/([^/]+)$/.exec(path);
-    if (m) {
-      const pairId = decodeURIComponent(m[1]);
-      if (request.headers.get('Upgrade') === 'websocket') {
-        return routeById(request, env, pairId, '/connect');
-      }
-      if (request.method === 'DELETE') {
-        return routeById(request, env, pairId, '/delete');
-      }
-    }
-
-    return json({ error: 'not found' }, 404);
+    const res = await route(request, env);
+    // WSS upgrade（101 + webSocket）不可改写，直接返回
+    if (res.webSocket) return res;
+    const out = new Response(res.body, res);
+    for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
+    return out;
   },
 };

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Enso 手机第二屏 · 配对 Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; margin: 0; display: flex; height: 100vh; }
+  .pane { flex: 1; padding: 20px; overflow: auto; }
+  .host { background: #f5f5f7; color: #111; }
+  .phone { background: #0b0b0c; color: #eee; }
+  h2 { margin: 0 0 6px; font-size: 18px; }
+  .sub { font-size: 12px; opacity: 0.6; margin-bottom: 12px; }
+  button { padding: 9px 14px; margin: 4px 0; cursor: pointer; border-radius: 8px; border: 1px solid #888; background: #fff; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .phone button { background: #1c1c1e; color: #eee; border-color: #444; }
+  .status { font-weight: 700; margin: 8px 0; }
+  input { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid #888; }
+  .phone input { background: #1c1c1e; color: #eee; border-color: #444; }
+  .msgs { margin: 12px 0; min-height: 40px; }
+  .msg { padding: 7px 10px; border-radius: 10px; margin: 5px 0; background: #fff; font-size: 14px; }
+  .phone .msg { background: #1c1c1e; }
+  .cipher { color: #9a9a9a; font-size: 11px; word-break: break-all; margin-top: 3px; font-family: monospace; }
+  .invite { font-family: monospace; font-size: 11px; word-break: break-all; background: #fff; padding: 8px; border-radius: 8px; margin: 8px 0; }
+  .log { font-family: monospace; font-size: 11px; white-space: pre-wrap; margin-top: 12px; opacity: 0.75; }
+</style>
+</head>
+<body>
+  <div class="pane host">
+    <h2>🖥️ Host（模拟 Electron，持密钥）</h2>
+    <div class="sub">生成一次性 NaCl 公钥 → 配对码 → 等手机 box 回 contentKey</div>
+    <button type="button" id="h-start">① 生成配对码（出 QR）</button>
+    <div class="invite" id="h-invite" hidden></div>
+    <div class="status" id="h-status">未开始</div>
+    <div class="msgs" id="h-msgs"></div>
+    <input id="h-input" placeholder="Host 发消息…（回车）" disabled />
+    <div class="log" id="h-log"></div>
+  </div>
+  <div class="pane phone">
+    <h2>📱 Phone（模拟 PWA）</h2>
+    <div class="sub">扫码拿 relay+公钥 → 生成 contentKey → box 给公钥 → claim</div>
+    <button type="button" id="p-scan" disabled>② 扫码配对（读取左侧配对码）</button>
+    <div class="status" id="p-status">未开始</div>
+    <div class="msgs" id="p-msgs"></div>
+    <input id="p-input" placeholder="Phone 发消息…（回车）" disabled />
+    <div class="log" id="p-log"></div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
