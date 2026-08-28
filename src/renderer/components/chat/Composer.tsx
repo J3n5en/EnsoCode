@@ -20,6 +20,8 @@ interface ComposerProps {
   busy: boolean;
   /** 会话 id：变化（新建/切换会话）时自动 focus 输入框 */
   focusKey?: string;
+  /** 挂载/切会话时是否自动聚焦。移动端置 false，否则一进会话就弹出键盘挡住内容 */
+  autoFocus?: boolean;
   /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
   /** 有待处理审批时锁定输入（ref-chat-a 语义：先处理审批再继续） */
@@ -63,6 +65,7 @@ export function Composer({
   running,
   busy,
   focusKey,
+  autoFocus = true,
   toolbar,
   locked = false,
   injectedDraft,
@@ -102,7 +105,7 @@ export function Composer({
       setSlashQuery(null);
       setActiveIndex(0);
     }
-    textareaRef.current?.focus();
+    if (autoFocus) textareaRef.current?.focus();
     if (previous !== focusKey) {
       const restored = nextText;
       setTimeout(() => detect(restored), 0);

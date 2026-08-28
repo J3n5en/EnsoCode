@@ -128,6 +128,8 @@ export function ChatScreen(props: Props) {
               busy={running}
               locked={(view?.approvals ?? []).length > 0}
               focusKey={sessionId}
+              // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
+              autoFocus={false}
               onSend={(text, images) => void send(text, images)}
               onAbort={props.onAbort}
             />

@@ -13,6 +13,11 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- iOS 只认 apple-touch-icon，manifest 里的 icons 它不读；缺了会拿页面截图当图标 -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- 桌面图标下的名字，缺省会退回 <title> -->
+    <meta name="apple-mobile-web-app-title" content="EnsoCode" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>EnsoCode</title>
   </head>
