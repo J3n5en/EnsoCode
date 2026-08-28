@@ -9,7 +9,6 @@ import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
 import { Composer } from './Composer';
-import { ContextMeter } from './ContextMeter';
 import { CoworkerTabs } from './CoworkerTabs';
 import { GoalBar } from './GoalBar';
 import { MessageQueue } from './MessageQueue';
@@ -237,10 +236,6 @@ export function ChatView() {
                     {conversation.lastModelId ? ` · ${conversation.lastModelId}` : ''}
                   </span>
                 )}
-                <ContextMeter
-                  messages={conversation.messages}
-                  contextWindow={conversation.contextWindow}
-                />
               </>
             }
             onSend={(content, images) => {
@@ -260,7 +255,7 @@ export function ChatView() {
             }}
             onAbort={() => void useSessionsStore.getState().abort()}
           />
-          <StatsLine messages={conversation.messages} />
+          <StatsLine messages={conversation.messages} conversation={conversation} />
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ export interface BuiltinToolInfo {
   /** 稳定 id,用于开关持久化与下发过滤 */
   id: string;
   name: string;
+  /** i18n key（英文原文）；模块级不能调 hook，设置页消费侧 t() */
   description: string;
 }
 
@@ -10,18 +11,25 @@ export const BUILTIN_TOOLS: BuiltinToolInfo[] = [
   {
     id: 'subagent',
     name: 'Subagent',
-    description: '一次性子代理:委派自包含子任务,返回最终报告(可并行、可异步)',
+    description:
+      'One-shot subagent: delegate a self-contained task and return a final report (parallel or async)',
   },
   {
     id: 'coworker',
     name: 'Coworker',
-    description: '持久子代理:雇佣后多轮对话,用户可在 tab 旁观介入',
+    description:
+      'Persistent subagent: hire for multi-turn dialogue; you can watch and intervene from a tab',
   },
-  { id: 'todo', name: 'Todo', description: '任务清单:跟踪多步骤工作的进度' },
-  { id: 'ask_user', name: 'Ask user', description: '向用户提问并等待回答(带选项/超时)' },
+  { id: 'todo', name: 'Todo', description: 'Task list: track progress on multi-step work' },
+  {
+    id: 'ask_user',
+    name: 'Ask user',
+    description: 'Ask the user a question and wait for an answer (options / timeout)',
+  },
   {
     id: 'background_tasks',
     name: 'Background tasks',
-    description: '后台 shell 任务:长命令挂后台跑,完成时通知',
+    description:
+      'Background shell task: run long commands in the background and notify on completion',
   },
 ];

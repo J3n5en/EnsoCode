@@ -22,7 +22,7 @@ import type {
   OauthProviderInfo,
   OauthUsageWindow,
 } from '@shared/types';
-import { IPC_CHANNELS, providerIdOfAccountKey } from '@shared/types';
+import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
 import { app, shell, type WebContents } from 'electron';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
@@ -39,8 +39,11 @@ const authPath = (): string => path.join(app.getPath('userData'), 'agent', 'pi-a
 // 与 agent worker 共用同一 auth.json（pi CredentialStore 文件锁保证跨进程互斥），
 // 登录/退出在 Main 完成后，worker 侧请求时经 getAuth 直接读到新凭证
 let runtimePromise: Promise<ModelRuntimeType> | null = null;
+const onlineCatalogProviderIds = new Set<string>([ANTIGRAVITY_PROVIDER_ID]);
+const onlineCatalogRefreshes = new Map<string, Promise<boolean>>();
 
-function getRuntime(): Promise<ModelRuntimeType> {
+/** 订阅设置与模型元数据查询共用同一份 Main 侧 runtime（catalog + auth.json） */
+export function getRuntime(): Promise<ModelRuntimeType> {
   runtimePromise ??= (async () => {
     const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
     process.env.PI_CODING_AGENT_DIR ??= agentDir;
@@ -53,13 +56,17 @@ function getRuntime(): Promise<ModelRuntimeType> {
     // Antigravity / Cursor 都不在 pi 内置 catalog 里，先注册基础 provider 再对齐账号克隆；
     // Cursor 的合成账号会由 syncAccountProviders 按单账号能力显式排除
     runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
-    const { loadCursorProvider } = await import('../../agent/cursor/loadProvider');
+    const { CURSOR_PROVIDER_ID, loadCursorProvider } = await import(
+      '../../agent/cursor/loadProvider'
+    );
+    onlineCatalogProviderIds.add(CURSOR_PROVIDER_ID);
     await loadCursorProvider(runtime);
     await syncAccountProviders(runtime);
     // registerProvider 内部只会跑一次 allowNetwork:false 的 refresh（拿到的是兜底清单）。
-    // 已登录的账号在这里补一次联网拉取，让老用户不必重新登录就能拿到真实模型清单。
-    // 不 await：拉取要走网络，不能把设置页的首次打开阻塞在上面；失败自动留用兜底清单。
-    void refreshProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+    // 两个扩展 provider 分开预热；单路发现服务失败不会影响另一条，也不阻塞设置页首开。
+    // 元数据查询会 await 同一份 promise，避免首次查询抢在预热前把 unknown 永久写进缓存。
+    void ensureProviderModelsRefreshed(runtime, ANTIGRAVITY_PROVIDER_ID);
+    void ensureProviderModelsRefreshed(runtime, CURSOR_PROVIDER_ID);
     return runtime;
   })();
   return runtimePromise;
@@ -75,12 +82,45 @@ function getRuntime(): Promise<ModelRuntimeType> {
  *
  * 拉取失败不抛：清单退化成兜底表仍可用，不该因此让登录或启动失败。
  */
-async function refreshProviderModels(runtime: ModelRuntimeType, providerId: string): Promise<void> {
+async function refreshProviderModels(
+  runtime: ModelRuntimeType,
+  providerId: string
+): Promise<boolean> {
   try {
-    await runtime.refresh({ providers: [providerId], allowNetwork: true });
+    const result = await runtime.refresh({ providers: [providerId], allowNetwork: true });
+    return !result.aborted && result.errors.size === 0;
   } catch {
-    // 保持兜底清单
+    // 保持兜底清单；调用方可在下一次元数据查询时重试
+    return false;
   }
+}
+
+/**
+ * 等待扩展 provider 本进程第一次联网 catalog 刷新；内置 provider 无需额外刷新。
+ *
+ * promise 按基础 provider id 常驻复用：冷启动预热与元数据查询不会重复发请求。登录成功
+ * 仍会直接调用 refreshProviderModels，因为新凭证必须强制刷新，不能复用登录前的尝试。
+ */
+export async function ensureProviderModelsRefreshed(
+  runtime: ModelRuntimeType,
+  accountKey: string
+): Promise<void> {
+  const providerId = providerIdOfAccountKey(accountKey);
+  if (!onlineCatalogProviderIds.has(providerId)) return;
+  let refresh = onlineCatalogRefreshes.get(providerId);
+  if (!refresh) {
+    refresh = refreshProviderModels(runtime, providerId);
+    onlineCatalogRefreshes.set(providerId, refresh);
+    void refresh.then((succeeded) => {
+      // 成功结果常驻；失败只去重本轮并发，后续查询可重试。这里不另加定时退避：
+      // renderer 没有轮询；同波请求已由 promise 去重；provider 自己维护 freshness/backoff，
+      // 且这里没有传 force；应用层再延迟会在网络恢复后继续人为留用兜底清单。
+      if (!succeeded && onlineCatalogRefreshes.get(providerId) === refresh) {
+        onlineCatalogRefreshes.delete(providerId);
+      }
+    });
+  }
+  await refresh;
 }
 
 // ---- 账号身份缓存 ----
@@ -161,12 +201,18 @@ function identityFromCredential(providerId: string, access: string): AccountIden
   if (typeof claims.email === 'string') identity.email = claims.email;
   if (providerId === 'openai-codex') {
     const planType = obj(claims['https://api.openai.com/auth']).chatgpt_plan_type;
-    if (typeof planType === 'string') identity.plan = planType;
+    if (typeof planType === 'string') assignPlan(identity, planType);
   } else if (providerId === 'xai') {
     const tier = claims.tier;
-    if (typeof tier === 'number' || typeof tier === 'string') identity.plan = `tier ${tier}`;
+    if (typeof tier === 'number' || typeof tier === 'string') assignPlan(identity, `tier ${tier}`);
   }
   return identity;
+}
+
+/** 空串视为没有档位，避免控制字符被洗掉后还留下一个空白 plan */
+function assignPlan(identity: AccountIdentity, raw: string): void {
+  const plan = sanitizeOauthLabel(raw);
+  if (plan) identity.plan = plan;
 }
 
 /** auth.json 里属于某基础 provider 的账号 key，按 key 排序 */
@@ -192,7 +238,10 @@ async function accountKeysOf(runtime: ModelRuntimeType): Promise<Map<string, str
  * Renderer 传来的 accountKey 会被直接当 auth.json 的键用（logout / getAuth），
  * 不收窄就等于把「任意键」的读写能力交给渲染层。
  */
-async function hasStoredAccount(runtime: ModelRuntimeType, accountKey: string): Promise<boolean> {
+export async function hasStoredAccount(
+  runtime: ModelRuntimeType,
+  accountKey: string
+): Promise<boolean> {
   const credentials = await runtime.listCredentials();
   return credentials.some((info) => info.type === 'oauth' && info.providerId === accountKey);
 }
@@ -434,12 +483,13 @@ const CLAUDE_CLI_VERSION = '2.1.75';
 
 async function fetchJson(
   url: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  init?: Pick<RequestInit, 'method' | 'body'>
 ): Promise<Record<string, unknown> | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ACCOUNT_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { headers, signal: controller.signal });
+    const response = await fetch(url, { headers, signal: controller.signal, ...init });
     if (!response.ok) return null;
     const data = (await response.json()) as unknown;
     return data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
@@ -457,13 +507,22 @@ const toEpochMs = (value: unknown): number | undefined => {
   }
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? undefined : parsed;
+    if (!Number.isNaN(parsed)) return parsed;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric;
   }
   return undefined;
 };
 
 const clampPercent = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+
+/** xAI billing 把金额包成 `{ val }`；裸 number 也收 */
+const unwrapAmount = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const inner = obj(value).val;
+  return typeof inner === 'number' && Number.isFinite(inner) ? inner : undefined;
+};
 
 /** 单个账号的探测结果：身份 + 额度窗口 */
 interface AccountProbe extends AccountIdentity {
@@ -537,17 +596,176 @@ async function codexProbe(
       resetsAt: toEpochMs(window.reset_at),
     });
   }
-  if (typeof data.plan_type === 'string') probe.plan = data.plan_type;
+  if (typeof data.plan_type === 'string') assignPlan(probe, data.plan_type);
   return probe;
 }
 
-/** xai：access token 无 email claim，走标准 OIDC userinfo */
+/**
+ * xai：email 走 OIDC userinfo；额度走 Grok CLI billing（oh-my-pi xai-oauth）。
+ * 先 `?format=credits` 拿周池；unified 账号缺周百分比时再打默认月池。
+ */
 async function xaiProbe(token: string): Promise<AccountProbe> {
   const probe: AccountProbe = { windows: [] };
-  const userinfo = await fetchJson('https://auth.x.ai/oauth2/userinfo', {
+  const billingHeaders = {
     Authorization: `Bearer ${token}`,
-  });
+    Accept: 'application/json',
+    'X-XAI-Token-Auth': 'xai-grok-cli',
+  };
+  const [userinfo, credits] = await Promise.all([
+    fetchJson('https://auth.x.ai/oauth2/userinfo', { Authorization: `Bearer ${token}` }),
+    fetchJson('https://cli-chat-proxy.grok.com/v1/billing?format=credits', billingHeaders),
+  ]);
   if (typeof userinfo?.email === 'string') probe.email = userinfo.email;
+
+  const creditsConfig = obj(credits?.config);
+  const weekly = parseXaiWeekly(creditsConfig);
+  const unified = creditsConfig.isUnifiedBillingUser === true;
+  let monthly: OauthUsageWindow | null = null;
+  if (!weekly || unified) {
+    const monthlyData = await fetchJson(
+      'https://cli-chat-proxy.grok.com/v1/billing',
+      billingHeaders
+    );
+    monthly = parseXaiMonthly(obj(monthlyData?.config));
+  }
+  // unified 且周百分比是缺省推断的 0%：月池才是真实额度，丢掉推断周窗
+  if (weekly && !(weekly.inferred && monthly)) {
+    probe.windows.push({
+      label: '7d',
+      usedPercent: weekly.usedPercent,
+      resetsAt: weekly.resetsAt,
+    });
+  }
+  if (monthly) probe.windows.push(monthly);
+  return probe;
+}
+
+function parseXaiWeekly(
+  config: Record<string, unknown>
+): { usedPercent: number; resetsAt?: number; inferred: boolean } | null {
+  const period = obj(config.currentPeriod);
+  const type = typeof period.type === 'string' ? period.type : '';
+  const start = toEpochMs(period.start);
+  const end = toEpochMs(period.end);
+  if (
+    start === undefined ||
+    end === undefined ||
+    end <= start ||
+    !type.toUpperCase().includes('WEEK')
+  ) {
+    return null;
+  }
+  const inferred = config.creditUsagePercent === undefined || config.creditUsagePercent === null;
+  const usedPercent = inferred
+    ? end > Date.now()
+      ? 0
+      : null
+    : clampPercent(config.creditUsagePercent);
+  if (usedPercent === null) return null;
+  return { usedPercent, resetsAt: end, inferred };
+}
+
+function parseXaiMonthly(config: Record<string, unknown>): OauthUsageWindow | null {
+  const limit = unwrapAmount(config.monthlyLimit);
+  const used = unwrapAmount(config.used);
+  if (limit === undefined || limit <= 0 || used === undefined) return null;
+  return {
+    label: 'mo',
+    usedPercent: Math.min(100, Math.max(0, (used / limit) * 100)),
+    resetsAt: toEpochMs(config.billingPeriodEnd),
+  };
+}
+
+function cursorUserId(token: string): string | undefined {
+  const sub = decodeJwtPayload(token)?.sub;
+  if (typeof sub !== 'string' || !sub) return undefined;
+  const pipe = sub.indexOf('|');
+  const userId = (pipe === -1 ? sub : sub.slice(pipe + 1)).trim();
+  return userId || undefined;
+}
+
+function cursorSessionHeaders(userId: string, token: string): Record<string, string> {
+  return {
+    Accept: 'application/json',
+    Cookie: `WorkosCursorSessionToken=${encodeURIComponent(`${userId}::${token}`)}`,
+  };
+}
+
+function cursorResetsAt(payload: Record<string, unknown>): number | undefined {
+  for (const key of ['billingCycleEnd', 'endOfMonth', 'resetsAt', 'nextReset'] as const) {
+    const parsed = toEpochMs(payload[key]);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+/** Cursor Pro+ 仪表盘：Cursor Models ← autoPercentUsed，Other Models ← apiPercentUsed */
+function cursorPlanWindows(bucket: Record<string, unknown>, resetsAt?: number): OauthUsageWindow[] {
+  if (bucket.enabled === false) return [];
+  const autoPct = clampPercent(bucket.autoPercentUsed);
+  const apiPct = clampPercent(bucket.apiPercentUsed);
+  const totalPct = clampPercent(bucket.totalPercentUsed);
+  const windows: OauthUsageWindow[] = [];
+  if (autoPct !== null) windows.push({ label: 'auto', usedPercent: autoPct, resetsAt });
+  if (apiPct !== null) windows.push({ label: 'api', usedPercent: apiPct, resetsAt });
+  if (windows.length === 0 && totalPct !== null) {
+    windows.push({ label: 'plan', usedPercent: totalPct, resetsAt });
+  }
+  return windows;
+}
+
+function parseCursorSummary(payload: Record<string, unknown> | null): OauthUsageWindow[] {
+  const individual = obj(payload?.individualUsage);
+  if (!payload || Object.keys(individual).length === 0) return [];
+  const resetsAt = cursorResetsAt(payload);
+  const plan = obj(individual.plan);
+  const overall = obj(individual.overall);
+  const fromPlan = cursorPlanWindows(plan, resetsAt);
+  if (fromPlan.length > 0) return fromPlan;
+  const limit = unwrapAmount(overall.limit);
+  const used = unwrapAmount(overall.used);
+  if (limit !== undefined && limit > 0 && used !== undefined) {
+    return [
+      {
+        label: 'plan',
+        usedPercent: Math.min(100, Math.max(0, (used / limit) * 100)),
+        resetsAt,
+      },
+    ];
+  }
+  return [];
+}
+
+function parseCursorPeriodUsage(payload: Record<string, unknown> | null): OauthUsageWindow[] {
+  if (!payload) return [];
+  return cursorPlanWindows(obj(payload.planUsage), cursorResetsAt(payload));
+}
+
+/**
+ * cursor：oh-my-pi 的 usage-summary（session cookie）优先；
+ * Bearer 打 DashboardService/GetCurrentPeriodUsage 作无 JWT 时的退路。
+ */
+async function cursorProbe(token: string): Promise<AccountProbe> {
+  const probe: AccountProbe = { windows: [] };
+  const userId = cursorUserId(token);
+  const session = userId ? cursorSessionHeaders(userId, token) : null;
+  const [summary, period, me] = await Promise.all([
+    session ? fetchJson('https://cursor.com/api/usage-summary', session) : Promise.resolve(null),
+    fetchJson(
+      'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage',
+      {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Connect-Protocol-Version': '1',
+      },
+      { method: 'POST', body: '{}' }
+    ),
+    session ? fetchJson('https://cursor.com/api/auth/me', session) : Promise.resolve(null),
+  ]);
+  if (typeof me?.email === 'string') probe.email = me.email;
+  probe.windows = parseCursorSummary(summary);
+  if (probe.windows.length === 0) probe.windows = parseCursorPeriodUsage(period);
   return probe;
 }
 
@@ -569,12 +787,19 @@ async function antigravityProbe(apiKeyRaw: string): Promise<AccountProbe> {
 /** 按基础 provider 分派探测；未接入额度端点的 provider 返回空窗口而不是报错 */
 async function probeAccount(runtime: ModelRuntimeType, accountKey: string): Promise<AccountProbe> {
   ensureAccountProvider(runtime, accountKey);
-  // getAuth 在 store 锁内自动 refresh，拿到的即该账号的有效 access token
+  // getAuth 在 store 锁内自动 refresh；多数 provider 的 apiKey 就是 access token。
+  // Cursor 的 getApiKey 返回占位符 `cursor-native`（真 token 由 pi-cursor 另取），
+  // 所以 refresh 之后改读 auth.json 里的 oauth.access。
   const auth = await runtime.getAuth(accountKey);
-  const token = auth?.auth.apiKey;
-  if (!token) throw new Error(`no credential for account: ${accountKey}`);
-
   const providerId = providerIdOfAccountKey(accountKey);
+  const apiKey = auth?.auth.apiKey;
+  let token = apiKey;
+  if (providerId === 'cursor') {
+    const { readStoredCredential } = await import('@earendil-works/pi-coding-agent');
+    const credential = readStoredCredential(accountKey, authPath());
+    token = credential?.type === 'oauth' ? credential.access : apiKey;
+  }
+  if (!token) throw new Error(`no credential for account: ${accountKey}`);
   const claims = decodeJwtPayload(token);
   const fromToken = identityFromCredential(providerId, token);
   const probe =
@@ -584,11 +809,27 @@ async function probeAccount(runtime: ModelRuntimeType, accountKey: string): Prom
         ? await codexProbe(token, claims)
         : providerId === 'xai'
           ? await xaiProbe(token)
-          : providerId === ANTIGRAVITY_PROVIDER_ID
-            ? await antigravityProbe(token)
-            : { windows: [] as OauthUsageWindow[] };
+          : providerId === 'cursor'
+            ? await cursorProbe(token)
+            : providerId === ANTIGRAVITY_PROVIDER_ID
+              ? await antigravityProbe(token)
+              : { windows: [] as OauthUsageWindow[] };
   // 网络结果优先，缺的字段用 token 里读到的兜底
-  return { ...fromToken, ...probe };
+  return sanitizeAccountProbe({ ...fromToken, ...probe });
+}
+
+/** 所有探测出口过同一道限长，避免某个厂商忘了在赋值处调用 sanitizeOauthLabel */
+function sanitizeAccountProbe(probe: AccountProbe): AccountProbe {
+  const { plan: rawPlan, windows, ...rest } = probe;
+  const plan = rawPlan !== undefined ? sanitizeOauthLabel(rawPlan) : '';
+  return {
+    ...rest,
+    ...(plan ? { plan } : {}),
+    windows: windows.map((window) => ({
+      ...window,
+      label: sanitizeOauthLabel(window.label),
+    })),
+  };
 }
 
 /** 身份探测：登录成功后写 sidecar 用，额度部分丢弃 */

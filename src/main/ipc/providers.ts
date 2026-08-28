@@ -1,6 +1,7 @@
-import type { ProviderApiConfig } from '@shared/types';
+import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
+import { queryModelMeta } from '../services/modelMeta';
 import {
   cancelOauthLogin,
   getOauthAccountUsage,
@@ -20,6 +21,38 @@ function toApiConfig(input: unknown): ProviderApiConfig | null {
     return null;
   }
   return { api: api as ProviderApiConfig['api'], apiKey, baseUrl };
+}
+
+// 当前最大订阅 catalog 为 155 项；256 项留出增长余量，同时把单次 IPC 的字符串载荷
+// 限在 32 KiB。单个 wire id 超过 256 字符也没有现实用途，应在构造 Set/返回体前拒绝。
+const MAX_MODEL_IDS = 256;
+const MAX_MODEL_ID_LENGTH = 256;
+const MAX_MODEL_IDS_CHARACTERS = 32_768;
+
+function toModelMetaQuery(input: unknown): ModelMetaQuery | null {
+  if (!input || typeof input !== 'object') return null;
+  const { oauthAccountKey, modelIds } = input as Record<string, unknown>;
+  if (!Array.isArray(modelIds) || modelIds.length > MAX_MODEL_IDS) return null;
+  let totalCharacters = 0;
+  for (const id of modelIds) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > MAX_MODEL_ID_LENGTH) return null;
+    totalCharacters += id.length;
+    if (totalCharacters > MAX_MODEL_IDS_CHARACTERS) return null;
+  }
+  const parsedModelIds = modelIds as string[];
+  if (oauthAccountKey !== undefined) {
+    if (
+      typeof oauthAccountKey !== 'string' ||
+      oauthAccountKey.length === 0 ||
+      oauthAccountKey.length > MAX_MODEL_ID_LENGTH
+    ) {
+      return null;
+    }
+    return { oauthAccountKey, modelIds: parsedModelIds };
+  }
+  // 空数组会返回整个 catalog，只允许 service 层已授权的订阅账号使用。
+  if (parsedModelIds.length === 0) return null;
+  return { modelIds: parsedModelIds };
 }
 
 export function registerProviderHandlers(): void {
@@ -48,6 +81,12 @@ export function registerProviderHandlers(): void {
     const parsed = toApiConfig(config);
     if (!parsed) return { ok: false, latencyMs: 0, message: 'Invalid config' };
     return testProvider(parsed, typeof modelId === 'string' ? modelId : undefined);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROVIDERS_MODEL_META, (_event, query: unknown) => {
+    const parsed = toModelMetaQuery(query);
+    if (!parsed) return { ok: false, models: [], error: 'Invalid query' };
+    return queryModelMeta(parsed);
   });
 
   ipcMain.handle(IPC_CHANNELS.OAUTH_PROVIDERS_LIST, () => listOauthProviders());

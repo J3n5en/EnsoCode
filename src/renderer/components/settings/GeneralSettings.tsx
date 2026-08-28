@@ -36,7 +36,11 @@ export function GeneralSettings() {
 
       <div className="grid grid-cols-[140px_1fr] items-center gap-4">
         <span className="text-sm font-medium">{t('Language')}</span>
-        <Select value={language} onValueChange={(v) => setLanguage(v as 'en' | 'zh')}>
+        <Select
+          items={{ en: 'English', zh: '简体中文' }}
+          value={language}
+          onValueChange={(v) => setLanguage(v as 'en' | 'zh')}
+        >
           <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>

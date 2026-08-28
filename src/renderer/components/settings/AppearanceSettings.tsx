@@ -520,6 +520,7 @@ export function AppearanceSettings() {
       <div className="grid grid-cols-[100px_1fr] items-center gap-4">
         <span className="text-sm font-medium">{t('Font weight')}</span>
         <Select
+          items={fontWeightOptions}
           value={terminalFontWeight}
           onValueChange={(v) => setTerminalFontWeight(v as FontWeight)}
         >
@@ -540,6 +541,7 @@ export function AppearanceSettings() {
       <div className="grid grid-cols-[100px_1fr] items-center gap-4">
         <span className="text-sm font-medium">{t('Bold font weight')}</span>
         <Select
+          items={fontWeightOptions}
           value={terminalFontWeightBold}
           onValueChange={(v) => setTerminalFontWeightBold(v as FontWeight)}
         >

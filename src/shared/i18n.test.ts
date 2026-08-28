@@ -1,5 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { getTranslation, normalizeLocale, translate } from './i18n';
+import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
+import { BUILTIN_TOOLS } from './types/builtinTools';
+
+/** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
+const MAPPED_I18N_KEYS = [
+  // ModelPicker.LEVEL_LABEL_KEYS + StatsLine.THINKING_LEVEL_SHORT_KEYS
+  'Low',
+  'Med',
+  'High',
+  'Max',
+  // StatsLine.THINKING_LEVEL_FULL_KEYS（medium 档用 'Medium'，不是 'Med'）
+  'Medium',
+  // StatsLine.SEGMENT_LABEL_KEYS
+  'Model',
+  'Approval mode',
+  'Working directory',
+  'Session name',
+  'Coworkers',
+  'Tokens',
+  'Cache hit rate',
+  'Context window',
+  'Turns',
+  'Speed',
+  'Duration',
+  'Session time',
+  'Subscription usage',
+  // StatsLine.APPROVAL_LABEL_KEYS + ApprovalModePicker.MODE_META.labelKey
+  'Supervised',
+  'Auto-accept edits',
+  'Full access',
+  // ApprovalModePicker.MODE_META.descKey
+  'Approve every command and file change',
+  'Edits run freely; commands and MCP still ask',
+  'Run everything without asking',
+  // StatusLineSettings.PRESET_LABEL_KEYS
+  'Minimal',
+  'Default',
+  'Full',
+  // ProviderModelRow.BADGE_LABEL_KEYS + tri-state / number inherit labels
+  'Overridden',
+  'Catalog',
+  'Inherit',
+  'On',
+  'Off',
+  'Thinking level',
+  'Context',
+  'Max tokens',
+  // GeneralSettings.ACTION_LABEL_KEYS
+  'Toggle sidebar',
+  'Open settings',
+  'New conversation',
+  'Next coworker tab',
+  'Previous coworker tab',
+] as const;
 
 describe('normalizeLocale', () => {
   it('zh 开头的一律归为中文', () => {
@@ -13,6 +66,15 @@ describe('normalizeLocale', () => {
     expect(normalizeLocale('ja')).toBe('en');
     expect(normalizeLocale(undefined)).toBe('en');
     expect(normalizeLocale('')).toBe('en');
+  });
+});
+
+describe('mapped i18n keys', () => {
+  it('间接映射表用到的词条都在字典里，且中文不是原文回退', () => {
+    for (const key of MAPPED_I18N_KEYS) {
+      expect(zhTranslations[key], `missing mapped key: ${key}`).toBeTypeOf('string');
+      expect(getTranslation('zh', key)).not.toBe(key);
+    }
   });
 });
 
@@ -55,5 +117,27 @@ describe('translate', () => {
 
   it('数字参数正确转成字符串', () => {
     expect(translate('zh', 'Connected ({{ms}}ms)', { ms: 128 })).toBe('连接成功(128ms)');
+  });
+});
+
+describe('模块级常量的 i18n key（#5）', () => {
+  const alertLabels = ['Note', 'Tip', 'Important', 'Warning', 'Caution'] as const;
+  const taskNoteKeys = ['(log unavailable)', 'Loading…', '(no log available)'] as const;
+
+  it('内置工具说明存英文 key，中文表有对应译文', () => {
+    for (const tool of BUILTIN_TOOLS) {
+      expect(tool.description).not.toMatch(/[\u4e00-\u9fff]/);
+      expect(zhTranslations[tool.description]).toBeDefined();
+      expect(translate('en', tool.description)).toBe(tool.description);
+      expect(translate('zh', tool.description)).not.toBe(tool.description);
+    }
+  });
+
+  it('GitHub alert 标题与 task-note 占位文案两边 locale 都能解析', () => {
+    for (const key of [...alertLabels, ...taskNoteKeys]) {
+      expect(translate('en', key)).toBe(key);
+      expect(zhTranslations[key]).toBeDefined();
+      expect(translate('zh', key)).toBe(zhTranslations[key]);
+    }
   });
 });

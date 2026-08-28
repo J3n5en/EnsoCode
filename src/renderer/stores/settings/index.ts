@@ -1,5 +1,10 @@
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
+import {
+  DEFAULT_STATUS_LINE_SEGMENTS,
+  normalizeStatusLineSegments,
+  type StatusLineSegmentId,
+} from '@shared/statusLine';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -73,6 +78,7 @@ const initialState = {
   terminalFontWeight: 'normal' as FontWeight,
   terminalFontWeightBold: '500' as FontWeight,
   favoriteTerminalThemes: [] as string[],
+  statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   autoUpdate: true,
   providers: [] as import('@shared/types').ModelProvider[],
@@ -138,6 +144,16 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
+
+      setStatusLineSegments: (statusLineSegments) => set({ statusLineSegments }),
+      toggleStatusLineSegment: (id, enabled) =>
+        set((state) => ({
+          statusLineSegments: enabled
+            ? state.statusLineSegments.includes(id)
+              ? state.statusLineSegments
+              : [...state.statusLineSegments, id]
+            : state.statusLineSegments.filter((segment) => segment !== id),
+        })),
 
       // 按 baseUrl+apiKey 指纹去重；订阅条目按 oauthAccountKey——同一厂商的多个账号
       // key 各异，用基础 providerId 会把第二个账号当重复项吞掉
@@ -338,6 +354,14 @@ export const useSettingsStore = create<SettingsState>()(
       onRehydrateStorage: () => (state) => {
         const s = state ?? useSettingsStore.getState();
         applySettings(s);
+        // 持久化数据可能被外部污染；非法值会让设置弹层渲染 undefined 图标而白屏
+        const segments = normalizeStatusLineSegments(s.statusLineSegments);
+        if (
+          segments.length !== s.statusLineSegments?.length ||
+          segments.some((id, i) => s.statusLineSegments[i] !== id)
+        ) {
+          useSettingsStore.setState({ statusLineSegments: segments });
+        }
         // 老用户（升级前已有配置）视为已完成引导，避免被打扰
         if (
           !s.onboarded &&

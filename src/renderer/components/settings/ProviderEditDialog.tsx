@@ -1,4 +1,4 @@
-import type { ModelEntry, ModelProvider } from '@shared/types';
+import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import {
   CircleCheck,
@@ -9,7 +9,6 @@ import {
   Loader2,
   Plus,
   Search,
-  Trash2,
   Zap,
 } from 'lucide-react';
 import * as React from 'react';
@@ -31,11 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
+import { API_KIND_LABELS } from './constants';
+import { ProviderModelRow } from './ProviderModelRow';
 
 interface ProviderEditDialogProps {
   /** 'new' 表示手动新建 */
@@ -64,6 +64,9 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const [showKey, setShowKey] = React.useState(false);
   const [busy, setBusy] = React.useState<'fetch' | 'test' | null>(null);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  /** model id → queryModelMeta 结果，交给 `resolveCustomModelView` 分层徽章。 */
+  const [catalogMeta, setCatalogMeta] = React.useState<Record<string, ModelMeta>>({});
 
   React.useEffect(() => {
     if (!provider) return;
@@ -78,7 +81,32 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
     setTestModel(base ? (base.models.find(isEnabled)?.id ?? base.models[0]?.id ?? '') : '');
     setShowKey(false);
     setStatus(null);
+    setExpandedId(null);
+    setCatalogMeta({});
   }, [provider]);
+
+  const modelIdKey = models.map((model) => model.id).join('\0');
+  React.useEffect(() => {
+    if (isOauth || !modelIdKey) return;
+    const queryMeta = window.electronAPI.providers.modelMeta;
+    // catalog 未接线或旧 preload 没有 modelMeta：徽章走 resolveCustomModelView(undefined) → default
+    if (typeof queryMeta !== 'function') return;
+    const modelIds = modelIdKey.split('\0');
+    let cancelled = false;
+    void queryMeta({ modelIds })
+      .then((result) => {
+        if (cancelled || !result.ok) return;
+        const next: Record<string, ModelMeta> = {};
+        for (const meta of result.models) next[meta.modelId] = meta;
+        setCatalogMeta(next);
+      })
+      .catch(() => {
+        /* 查询失败不挡覆盖编辑 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOauth, modelIdKey]);
 
   const apiConfig = () => ({ api, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() });
 
@@ -107,6 +135,11 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
   const removeModel = (id: string) => {
     setModels((prev) => prev.filter((model) => model.id !== id));
     setTestModel((prev) => (prev === id ? '' : prev));
+    setExpandedId((prev) => (prev === id ? null : prev));
+  };
+
+  const replaceModel = (id: string, next: ModelEntry) => {
+    setModels((prev) => prev.map((model) => (model.id === id ? next : model)));
   };
 
   const addModel = (id: string) => {
@@ -187,14 +220,18 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
             <>
               <Field>
                 <FieldLabel>{t('API Type')}</FieldLabel>
-                <Select value={api} onValueChange={(v) => setApi(v as ModelProvider['api'])}>
+                <Select
+                  items={API_KIND_LABELS}
+                  value={api}
+                  onValueChange={(v) => setApi(v as ModelProvider['api'])}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                     {MODEL_API_KINDS.map((kind) => (
                       <SelectItem key={kind} value={kind}>
-                        {kind}
+                        {API_KIND_LABELS[kind]}
                       </SelectItem>
                     ))}
                   </SelectPopup>
@@ -297,34 +334,21 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                   </Button>
                 </div>
 
-                <div className="max-h-48 w-full space-y-0.5 overflow-y-auto rounded-md border p-1">
+                <div className="max-h-72 w-full space-y-0.5 overflow-y-auto rounded-md border p-1">
                   {visibleModels.map((model) => (
-                    <div
+                    <ProviderModelRow
                       key={model.id}
-                      className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
-                    >
-                      <Switch
-                        checked={isEnabled(model)}
-                        onCheckedChange={() => toggleModel(model.id)}
-                      />
-                      <span
-                        className={cn(
-                          'min-w-0 flex-1 truncate font-mono text-xs',
-                          !isEnabled(model) && 'text-muted-foreground line-through'
-                        )}
-                      >
-                        {model.id}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                        onClick={() => removeModel(model.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      model={model}
+                      expanded={expandedId === model.id}
+                      canOverride={!isOauth}
+                      catalogMeta={catalogMeta[model.id]}
+                      onToggleExpand={() =>
+                        setExpandedId((prev) => (prev === model.id ? null : model.id))
+                      }
+                      onToggleEnabled={() => toggleModel(model.id)}
+                      onRemove={() => removeModel(model.id)}
+                      onChange={(next) => replaceModel(model.id, next)}
+                    />
                   ))}
                   {visibleModels.length === 0 && (
                     <p className="py-4 text-center text-muted-foreground text-xs">
@@ -382,14 +406,21 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
               </Button>
             )}
             {!isOauth && models.length > 0 && (
-              <Select value={testModel} onValueChange={(v) => setTestModel(v ?? '')}>
+              <Select
+                items={models.map((model) => ({
+                  value: model.id,
+                  label: model.label ?? model.id,
+                }))}
+                value={testModel}
+                onValueChange={(v) => setTestModel(v ?? '')}
+              >
                 <SelectTrigger className="h-8 w-36">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                   {models.map((model) => (
                     <SelectItem key={model.id} value={model.id}>
-                      {model.id}
+                      {model.label ?? model.id}
                     </SelectItem>
                   ))}
                 </SelectPopup>
