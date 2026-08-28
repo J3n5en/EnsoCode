@@ -1,4 +1,9 @@
-import type { CatalogEntry, ProjectEntry, ProviderEntry } from '@enso/pair';
+import {
+  type CatalogEntry,
+  type ProjectEntry,
+  type ProviderEntry,
+  revokePairing,
+} from '@enso/pair';
 import { Smartphone } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -149,6 +154,8 @@ export function App() {
           setComposing(true);
         }}
         onUnpair={() => {
+          // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）
+          void revokePairing(device.relayUrl, device.pairId, device.token).catch(() => {});
           clearPairing();
           localStorage.removeItem(LAST_SESSION_KEY);
           setDrawerOpen(false);

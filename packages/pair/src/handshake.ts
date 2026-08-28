@@ -120,9 +120,12 @@ export async function claimPairing(
   };
 }
 
-/** 解绑：清中继房间（含 DO storage token），两端重连即被拒 */
-export async function revokePairing(relayUrl: string, pairId: string): Promise<void> {
-  await fetch(`${normalizeRelayUrl(relayUrl)}/v1/pair/${encodeURIComponent(pairId)}`, {
-    method: 'DELETE',
-  });
+/** 解绑：清中继房间（含 DO storage token），两端重连即被拒。需持本端 token 鉴权。 */
+export async function revokePairing(
+  relayUrl: string,
+  pairId: string,
+  token: string
+): Promise<void> {
+  const url = `${normalizeRelayUrl(relayUrl)}/v1/pair/${encodeURIComponent(pairId)}?token=${encodeURIComponent(token)}`;
+  await fetch(url, { method: 'DELETE' });
 }

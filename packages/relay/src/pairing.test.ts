@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { claim, PAIR_TTL_MS, pairIdFromPublicKey, request, tokenValid } from './pairing';
+import {
+  CREDENTIAL_WINDOW_MS,
+  canFetchCredentials,
+  claim,
+  PAIR_TTL_MS,
+  pairIdFromPublicKey,
+  request,
+  tokenValid,
+} from './pairing';
 
 describe('pairId 派生', () => {
   it('由公钥确定性派生，两端各算一致', async () => {
@@ -72,5 +80,37 @@ describe('token 校验', () => {
 
   it('requested 阶段任何 token 都拒绝', () => {
     expect(tokenValid(request(undefined, 1000, 'pk'), 'host', 'x')).toBe(false);
+  });
+});
+
+describe('凭据取回窗口（publicKey 在 QR 里公开，不能长期换 token）', () => {
+  const authorized = () => {
+    const res = claim(request(undefined, 1000, 'pk'), 1000, 'boxed', 'phone');
+    if (!res.ok) throw new Error('claim failed');
+    return res.next;
+  };
+
+  it('窗口内可取回（含轮询重试的余量）', () => {
+    const st = authorized();
+    expect(canFetchCredentials(st, 1000)).toBe(true);
+    expect(canFetchCredentials(st, 1000 + CREDENTIAL_WINDOW_MS)).toBe(true);
+  });
+
+  it('窗口外拒绝：看过二维码的人事后换不到 hostToken', () => {
+    const st = authorized();
+    expect(canFetchCredentials(st, 1000 + CREDENTIAL_WINDOW_MS + 1)).toBe(false);
+    // 长期之后依然拒绝
+    expect(canFetchCredentials(st, 1000 + 86_400_000)).toBe(false);
+  });
+
+  it('未认领状态本就没有凭据可取', () => {
+    expect(canFetchCredentials(request(undefined, 1000, 'pk'), 1000)).toBe(false);
+  });
+
+  it('窗口关闭不影响用已有 token 重连', () => {
+    const st = authorized();
+    expect(canFetchCredentials(st, 1000 + 86_400_000)).toBe(false);
+    expect(tokenValid(st, 'host', st.hostToken as string)).toBe(true);
+    expect(tokenValid(st, 'guest', st.deviceToken as string)).toBe(true);
   });
 });

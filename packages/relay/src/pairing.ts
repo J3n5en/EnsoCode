@@ -4,6 +4,12 @@
  */
 
 export const PAIR_TTL_MS = 60_000; // 配对码（QR/claim）有效期
+/**
+ * 配对成功后，host 还能凭 publicKey 取回凭据的窗口。
+ * publicKey 在 QR 里公开，若长期可换 hostToken，任何看过 QR 的人（拍照/录屏/
+ * 肩窥）事后都能以 host 身份进房。窗口足够 host 轮询到手（含重试），随即关闭。
+ */
+export const CREDENTIAL_WINDOW_MS = 120_000;
 export const MAX_FRAME_BYTES = 1_048_576; // 单业务帧上限 1MB
 
 export type PairPhase = 'requested' | 'authorized';
@@ -16,6 +22,8 @@ export interface PairState {
   deviceName?: string;
   hostToken?: string; // 配对成功后长期有效，用于重连进房
   deviceToken?: string;
+  /** 进入 authorized 的时刻，用于计算凭据取回窗口 */
+  authorizedAt?: number;
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -71,12 +79,22 @@ export function claim(
     next: {
       ...prev,
       phase: 'authorized',
+      authorizedAt: now,
       boxedKey,
       deviceName,
       hostToken: randomToken(),
       deviceToken: randomToken(),
     },
   };
+}
+
+/**
+ * host 是否还能凭 publicKey 取回 hostToken / boxedKey。
+ * 窗口关闭后，publicKey 泄漏也换不到进房凭据（host 早已持 token 重连）。
+ */
+export function canFetchCredentials(state: PairState, now: number): boolean {
+  if (state.phase !== 'authorized') return false;
+  return now - (state.authorizedAt ?? state.createdAt) <= CREDENTIAL_WINDOW_MS;
 }
 
 export function tokenValid(
