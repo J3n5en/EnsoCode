@@ -1,5 +1,8 @@
 import { claimPairing, type PairedDevice, parsePairUri } from '@enso/pair';
+import { Camera, Loader2, Smartphone } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 /** 配对页：扫码或粘贴配对码。BarcodeDetector 可用则用摄像头，否则手工粘贴。 */
 export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => void }) {
@@ -83,43 +86,55 @@ export function PairScreen({ onPaired }: { onPaired: (device: PairedDevice) => v
   };
 
   return (
-    <div className="screen pair-screen">
-      <h1>连接到 EnsoCode</h1>
-      <p className="hint">在桌面端「设置 → 手机」生成配对码，用手机扫码或粘贴。</p>
+    <div className="flex h-full flex-col items-center justify-center gap-5 px-6 pt-safe pb-safe">
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        <Smartphone className="h-8 w-8 text-muted-foreground" />
+        <h1 className="font-medium text-lg">连接到 EnsoCode</h1>
+        <p className="text-muted-foreground text-sm">
+          在桌面端「设置 → 手机」生成配对码，扫码或粘贴。
+        </p>
+      </div>
 
       {scanning ? (
-        <div className="scanner">
-          <video ref={videoRef} playsInline muted />
-          <button type="button" className="btn ghost" onClick={stopScan}>
+        <div className="w-full max-w-sm space-y-2">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            className="aspect-square w-full rounded-lg bg-black object-cover"
+          />
+          <Button variant="outline" className="w-full" onClick={stopScan}>
             取消扫码
-          </button>
+          </Button>
         </div>
       ) : (
-        <button type="button" className="btn primary" onClick={() => void startScan()}>
+        <Button className="w-full max-w-sm" onClick={() => void startScan()}>
+          <Camera className="mr-1.5 h-4 w-4" />
           扫描二维码
-        </button>
+        </Button>
       )}
 
-      <div className="manual">
-        <input
+      <div className="flex w-full max-w-sm items-center gap-2">
+        <Input
           value={uri}
           onChange={(e) => setUri(e.target.value)}
           placeholder="enso://pair?relay=…"
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
+          className="font-mono text-xs"
         />
-        <button
-          type="button"
-          className="btn"
+        <Button
+          variant="outline"
+          className="shrink-0"
           disabled={busy || !uri.trim()}
           onClick={() => void pair(uri.trim())}
         >
-          {busy ? '连接中…' : '配对'}
-        </button>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : '配对'}
+        </Button>
       </div>
 
-      {error && <p className="error">{error}</p>}
+      {error && <p className="max-w-sm text-center text-destructive text-xs">{error}</p>}
     </div>
   );
 }

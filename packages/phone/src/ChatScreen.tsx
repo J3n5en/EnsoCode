@@ -1,9 +1,22 @@
-import type { AttachedImage } from '@enso/pair';
-import { useMemo, useRef, useState } from 'react';
+import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
+import { ChevronLeft } from 'lucide-react';
+import { useMemo, useRef } from 'react';
+import { ApprovalBar } from '@/components/chat/ApprovalBar';
+import { AskBar } from '@/components/chat/AskBar';
+import { Composer } from '@/components/chat/Composer';
+import {
+  CHAT_COL,
+  MessageTimeline,
+  type MessageTimelineHandle,
+} from '@/components/chat/MessageTimeline';
+import { cn } from '@/lib/utils';
+import { buildTimeline } from '@/stores/sessions/timeline';
 import type { ConnState, SessionView } from './client';
 import { compressImage } from './image';
+import { setDisplayedConversation } from './stubs/sessions-store';
 
 interface Props {
+  sessionId: string;
   title: string;
   projectName: string;
   view: SessionView | null;
@@ -16,209 +29,100 @@ interface Props {
   onAsk(requestId: string, answer: string): void;
 }
 
-/** 会话页：时间线 + 审批条 + composer（running 时发送即 steer） */
+/** 会话页：复用桌面的时间线 / 审批条 / 输入框，保持与桌面一致的渲染 */
 export function ChatScreen(props: Props) {
   const { view } = props;
-  const [text, setText] = useState('');
-  const [images, setImages] = useState<{ id: string; image: AttachedImage }[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<MessageTimelineHandle>(null);
   const running = view?.status === 'running';
 
-  const messages = useMemo(
-    () => (view ? [...view.messages.values()].sort((a, b) => a.index - b.index) : []),
+  const messages = useMemo<ProjectedMessage[]>(
+    () =>
+      view
+        ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message)
+        : [],
     [view]
   );
 
-  // 新消息到达才滚到底（避免每次 render 都抢滚动位置）
-  const lastCount = useRef(0);
-  if (messages.length !== lastCount.current) {
-    lastCount.current = messages.length;
-    queueMicrotask(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
-  }
+  // 供复用组件内部读取（RunningElapsed 的计时 key；回退在手机端不可用）
+  setDisplayedConversation({
+    id: props.sessionId,
+    status: view?.status ?? 'idle',
+    started: false,
+    spawning: false,
+    messages,
+  });
 
-  const pickImages = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setError(null);
-    for (const file of Array.from(files).slice(0, 4)) {
-      try {
-        const image = await compressImage(file);
-        setImages((prev) => [...prev, { id: crypto.randomUUID(), image }]);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '图片处理失败');
-      }
+  const timeline = useMemo(() => buildTimeline(messages, running), [messages, running]);
+
+  const send = async (text: string, images: AttachedImage[]) => {
+    // 手机拍照动辄数 MB，压到单帧上限内再发
+    const compressed: AttachedImage[] = [];
+    for (const image of images) {
+      compressed.push(await compressImageIfNeeded(image));
     }
-  };
-
-  const submit = () => {
-    if (!text.trim() && images.length === 0) return;
-    props.onSend(
-      text.trim(),
-      images.map((i) => i.image)
-    );
-    setText('');
-    setImages([]);
+    props.onSend(text, compressed);
+    timelineRef.current?.scrollToBottom();
   };
 
   return (
-    <div className="screen chat-screen">
-      <header className="topbar">
-        <button type="button" className="btn ghost sm" onClick={props.onBack}>
-          ‹ 返回
-        </button>
-        <div className="chat-title">
-          <span className="title">{props.title}</span>
-          <span className="project">{props.projectName}</span>
-        </div>
-        <span className={`state ${props.connState}`}>{props.stateLabel}</span>
-      </header>
-
-      <div className="timeline">
-        {messages.length === 0 && <p className="empty">还没有消息</p>}
-        {messages.map((m) => (
-          <div key={m.index} className={`bubble ${String(m.role)}`}>
-            <span className="role">{String(m.role)}</span>
-            <div className="content">{renderContent(m)}</div>
-          </div>
-        ))}
-        {running && <div className="running">agent 正在运行…</div>}
-        <div ref={bottomRef} />
-      </div>
-
-      {view?.approvals.map((a) => (
-        <div key={a.requestId} className="approval">
-          <span>{String(a.title ?? a.toolName ?? '需要审批')}</span>
-          <div className="actions">
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => props.onApproval(a.requestId, 'deny')}
-            >
-              拒绝
-            </button>
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => props.onApproval(a.requestId, 'allowSession')}
-            >
-              本会话允许
-            </button>
-            <button
-              type="button"
-              className="btn primary sm"
-              onClick={() => props.onApproval(a.requestId, 'allow')}
-            >
-              允许
-            </button>
-          </div>
-        </div>
-      ))}
-
-      {view?.asks.map((a) => (
-        <AskBar key={a.requestId} ask={a} onAnswer={props.onAsk} />
-      ))}
-
-      {error && <p className="error">{error}</p>}
-
-      <div className="composer">
-        {images.length > 0 && (
-          <div className="thumbs">
-            {images.map(({ id, image }) => (
-              <div key={id} className="thumb">
-                <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
-                <button
-                  type="button"
-                  onClick={() => setImages((prev) => prev.filter((item) => item.id !== id))}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="input-row">
-          <label className="attach">
-            +
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => void pickImages(e.target.files)}
-            />
-          </label>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={running ? '插话（steer）…' : '发消息…'}
-            rows={1}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          {running ? (
-            <button type="button" className="btn stop" onClick={props.onAbort}>
-              停
-            </button>
-          ) : (
-            <button type="button" className="btn primary" onClick={submit}>
-              发送
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AskBar({
-  ask,
-  onAnswer,
-}: {
-  ask: { requestId: string; [key: string]: unknown };
-  onAnswer(requestId: string, answer: string): void;
-}) {
-  const [value, setValue] = useState('');
-  return (
-    <div className="approval">
-      <span>{String(ask.question ?? '需要回答')}</span>
-      <div className="actions">
-        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="回答…" />
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 items-center gap-2 border-b px-2 py-2 pt-safe">
         <button
           type="button"
-          className="btn primary sm"
-          onClick={() => {
-            onAnswer(ask.requestId, value);
-            setValue('');
-          }}
+          onClick={props.onBack}
+          className="flex h-8 shrink-0 items-center rounded-md pr-2 pl-1 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
         >
-          回答
+          <ChevronLeft className="h-4 w-4" />
+          返回
         </button>
+        <div className="min-w-0 flex-1 text-center">
+          <p className="truncate font-medium text-sm">{props.title}</p>
+          <p className="truncate font-mono text-[11px] text-muted-foreground">
+            {props.projectName}
+          </p>
+        </div>
+        <span
+          className={cn(
+            'shrink-0 px-1 text-[11px]',
+            props.connState === 'online' ? 'text-success' : 'text-destructive'
+          )}
+        >
+          {props.stateLabel}
+        </span>
+      </header>
+
+      <MessageTimeline
+        key={props.sessionId}
+        ref={timelineRef}
+        items={timeline}
+        busy={running}
+        running={running}
+        error={undefined}
+        emptyTitle={props.projectName || 'EnsoCode'}
+      />
+
+      <div className="@container shrink-0 pt-1 pb-safe">
+        <div className={CHAT_COL}>
+          <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
+          <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
+          <Composer
+            commands={[]}
+            running={running}
+            busy={running}
+            locked={(view?.approvals ?? []).length > 0}
+            focusKey={props.sessionId}
+            onSend={(text, images) => void send(text, images)}
+            onAbort={props.onAbort}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-/** 消息投影结构与桌面一致，这里只做纯文本降级渲染 */
-function renderContent(message: Record<string, unknown>): string {
-  const content = message.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        const p = part as Record<string, unknown>;
-        if (typeof p.text === 'string') return p.text;
-        if (p.type === 'image') return '[图片]';
-        if (typeof p.toolName === 'string') return `[工具 ${p.toolName}]`;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (typeof message.text === 'string') return message.text;
-  return '';
+/** Composer 已把图片读成 base64，这里只在超限时再压一轮 */
+async function compressImageIfNeeded(image: AttachedImage): Promise<AttachedImage> {
+  if (image.data.length * 0.75 <= 700_000) return image;
+  const blob = await (await fetch(`data:${image.mimeType};base64,${image.data}`)).blob();
+  return compressImage(new File([blob], 'image', { type: image.mimeType }));
 }
