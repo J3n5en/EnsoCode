@@ -18,6 +18,7 @@ import type {
   SessionSnapshot,
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
+import { setHostTheme } from './theme';
 
 /**
  * 与中继的长连接：自动重连（指数退避 + 抖动）、加解密、
@@ -145,6 +146,9 @@ export class PairClient {
         break;
       case 'providers':
         this.events.onProviders(payload.providers);
+        break;
+      case 'appearance':
+        setHostTheme(payload.theme);
         break;
       case 'agent-event':
         this.applyAgentEvent(payload.event as Record<string, unknown>);

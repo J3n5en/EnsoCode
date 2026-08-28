@@ -1,9 +1,15 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
-import { ChevronRight, FolderGit2, MessageSquarePlus, Unplug, X } from 'lucide-react';
+import { ChevronRight, FolderGit2, MessageSquarePlus, Palette, Unplug, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import {
+  getThemePreference,
+  setThemePreference,
+  subscribeTheme,
+  type ThemePreference,
+} from './theme';
 
 /**
  * 手机侧边栏：复刻桌面 Sidebar 的项目分组结构（chevron / 仓库图标 / 状态点 /
@@ -12,6 +18,13 @@ import { cn } from '@/lib/utils';
  */
 
 const COLLAPSED_SESSION_LIMIT = 5;
+
+/** auto = 跟随桌面下发；其余为本地覆盖 */
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'auto', label: '跟随桌面' },
+  { value: 'light', label: '浅' },
+  { value: 'dark', label: '深' },
+];
 
 interface Props {
   open: boolean;
@@ -47,6 +60,10 @@ export function SessionDrawer({
   const [foldedProjects, setFoldedProjects] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [confirmUnpair, setConfirmUnpair] = useState(false);
+  const [themePref, setThemePref] = useState<ThemePreference>(getThemePreference);
+
+  // 主题可能由桌面下发触发变化，订阅后同步按钮高亮
+  useEffect(() => subscribeTheme(() => setThemePref(getThemePreference())), []);
 
   // 抽屉关闭时收起确认态，避免下次打开还停在确认框
   useEffect(() => {
@@ -141,7 +158,31 @@ export function SessionDrawer({
           )}
         </div>
 
-        <div className="shrink-0 border-t p-2 pb-safe">
+        <div className="shrink-0 space-y-1 border-t p-2 pb-safe">
+          {!confirmUnpair && (
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <Palette className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 text-muted-foreground text-sm">主题</span>
+              <div className="flex shrink-0 gap-0.5 rounded-md border p-0.5">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setThemePreference(option.value)}
+                    className={cn(
+                      'rounded px-2 py-1 text-[11px] transition-colors',
+                      themePref === option.value
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-accent'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {confirmUnpair ? (
             <div className="space-y-2 rounded-lg border border-dashed p-3">
               <p className="text-xs">取消配对后需重新扫码才能连接，确定吗？</p>

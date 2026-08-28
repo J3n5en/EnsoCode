@@ -4,6 +4,7 @@ import {
   type CatalogEntry,
   DEFAULT_RELAY_URL,
   fromBase64Url,
+  type HostAppearance,
   type HostPairSession,
   type HostToPhone,
   openFrame,
@@ -77,6 +78,8 @@ let onResumeRequest: ((sessionId: string) => void) | null = null;
 let catalog: CatalogEntry[] = [];
 let projects: ProjectEntry[] = [];
 let providers: ProviderEntry[] = [];
+/** 桌面外观偏好，随目录下发给手机作为默认值 */
+let theme: HostAppearance = 'system';
 /** 剥密前的完整项目路径映射，用于 spawn 反查 cwd */
 let whitelist: SpawnWhitelist = { projects: [], providers: [] };
 
@@ -410,6 +413,7 @@ async function sendMeta(conn: Connection): Promise<void> {
   await send(conn, { type: 'catalog', entries: catalog });
   await send(conn, { type: 'projects', projects });
   await send(conn, { type: 'providers', providers });
+  await send(conn, { type: 'appearance', theme });
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
@@ -437,10 +441,12 @@ export function updatePairCatalog(payload: {
   projects: ProjectEntry[];
   providers: ProviderEntry[];
   projectPaths: { id: string; path: string }[];
+  theme: HostAppearance;
 }): void {
   catalog = payload.catalog;
   projects = payload.projects;
   providers = payload.providers;
+  theme = payload.theme;
   whitelist = {
     projects: payload.projectPaths,
     providers: payload.providers.map((p) => ({

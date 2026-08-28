@@ -48,6 +48,12 @@ function buildPayload(): PairCatalogPayload {
     providers,
     // 仅 main 侧用于 spawn 反查 cwd，不下发手机
     projectPaths: settings.projects.map((p) => ({ id: p.id, path: p.path })),
+    // sync-terminal 与 system 都归一为 system：让手机跟随自己的系统深浅色，
+    // 而不是照搬桌面此刻的解析结果
+    theme:
+      settings.theme === 'light' || settings.theme === 'dark'
+        ? settings.theme
+        : ('system' as const),
   };
 }
 
@@ -68,7 +74,13 @@ export function bindPairCatalogSync(): void {
     if (state.conversations !== prev.conversations || state.order !== prev.order) schedulePush();
   });
   useSettingsStore.subscribe((state, prev) => {
-    if (state.projects !== prev.projects || state.providers !== prev.providers) schedulePush();
+    if (
+      state.projects !== prev.projects ||
+      state.providers !== prev.providers ||
+      state.theme !== prev.theme
+    ) {
+      schedulePush();
+    }
   });
   // 手机订阅历史会话时恢复它，worker 才有投影可发（resume 对已启动会话自动忽略）
   window.electronAPI.pair.onResumeSession((sessionId) => {

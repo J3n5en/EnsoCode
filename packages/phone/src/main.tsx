@@ -2,16 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { installElectronApiShim } from './stubs/electron-api';
+import { initTheme } from './theme';
 import './styles.css';
 
 // 复用的桌面组件里有少量 electronAPI 调用，先装降级实现（必须早于组件加载）
 installElectronApiShim();
 
-// 跟随系统深浅色（主题变量由 .dark class 切换，与桌面同源）
-const applyTheme = (dark: boolean) => document.documentElement.classList.toggle('dark', dark);
-const media = window.matchMedia('(prefers-color-scheme: dark)');
-applyTheme(media.matches);
-media.addEventListener('change', (e) => applyTheme(e.matches));
+// 主题：本地覆盖 > 桌面下发 > 跟随系统（桌面偏好经 client 的 appearance 帧到达）
+initTheme();
 
 /*
  * 键盘弹起时 dvh 不变，输入框会被键盘盖住。用 visualViewport 的实际可见高度

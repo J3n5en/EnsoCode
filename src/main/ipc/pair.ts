@@ -1,4 +1,4 @@
-import type { CatalogEntry, ProjectEntry, ProviderEntry } from '@enso/pair';
+import type { CatalogEntry, HostAppearance, ProjectEntry, ProviderEntry } from '@enso/pair';
 import { IPC_CHANNELS } from '@shared/types';
 import { BrowserWindow, ipcMain } from 'electron';
 import {
@@ -49,6 +49,7 @@ export function registerPairHandlers(): void {
       projects?: ProjectEntry[];
       providers?: ProviderEntry[];
       projectPaths?: { id: string; path: string }[];
+      theme?: HostAppearance;
     };
     if (!p || typeof p !== 'object') return;
     updatePairCatalog({
@@ -56,6 +57,7 @@ export function registerPairHandlers(): void {
       projects: Array.isArray(p.projects) ? p.projects : [],
       providers: Array.isArray(p.providers) ? p.providers : [],
       projectPaths: Array.isArray(p.projectPaths) ? p.projectPaths : [],
+      theme: p.theme === 'light' || p.theme === 'dark' ? p.theme : 'system',
     });
   });
 }
