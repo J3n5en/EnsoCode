@@ -17,6 +17,10 @@ const nodeExternal = [
   new RegExp(`^(${deps.join('|')})/`),
 ];
 
+// @enso/pair 是 workspace 内的 TS 源码包，需被打进产物（不可 external），
+// 三段统一用 alias 指到源码入口。
+const pairAlias = path.resolve(__dirname, 'packages/pair/src/index.ts');
+
 export default defineConfig({
   main: {
     build: {
@@ -33,6 +37,7 @@ export default defineConfig({
     resolve: {
       alias: {
         '@shared': path.resolve(__dirname, 'src/shared'),
+        '@enso/pair': pairAlias,
       },
     },
   },
@@ -55,6 +60,7 @@ export default defineConfig({
       alias: {
         '@': path.resolve(__dirname, 'src/renderer'),
         '@shared': path.resolve(__dirname, 'src/shared'),
+        '@enso/pair': pairAlias,
       },
     },
     build: {

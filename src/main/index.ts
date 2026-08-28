@@ -9,6 +9,7 @@ import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
 } from './services/localImageProtocol';
+import { startPairHost, stopPairHost } from './services/pairHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
@@ -51,6 +52,8 @@ if (!gotTheLock) {
     registerIpcHandlers();
     registerLocalImageProtocolHandler();
     startAgentWorker();
+    // 手机第二屏：恢复已配对设备的中继连接（与 agent worker 并列，不依赖窗口）
+    startPairHost();
     const mainWindow = createMainWindow();
     void initAutoUpdater(mainWindow);
 
@@ -65,6 +68,11 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') {
       app.quit();
     }
+  });
+
+  // Electron 退出即断开中继，手机侧收到 host-offline
+  app.on('before-quit', () => {
+    stopPairHost();
   });
 }
 

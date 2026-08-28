@@ -9,6 +9,8 @@ import type {
   OauthAccountUsage,
   OauthLoginEvent,
   OauthProviderInfo,
+  PairCatalogPayload,
+  PairStatus,
   ProviderApiConfig,
   RecentProject,
   TestProviderResult,
@@ -250,6 +252,30 @@ const electronAPI = {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATER_STATUS, listener);
+    },
+  },
+
+  pair: {
+    start: (): Promise<{ ok: boolean; inviteUri?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_START),
+    cancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_CANCEL),
+    revoke: (pairId: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_REVOKE, pairId),
+    status: (): Promise<PairStatus> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_STATUS),
+    setRelayUrl: (url: string): Promise<PairStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_SET_RELAY, url),
+    /** renderer → main 推会话目录 / 项目 / provider（provider 须已剥密） */
+    pushCatalog: (payload: PairCatalogPayload): void =>
+      ipcRenderer.send(IPC_CHANNELS.PAIR_CATALOG, payload),
+    onStatusChanged: (callback: (status: PairStatus) => void): (() => void) => {
+      const listener = (_: unknown, status: PairStatus) => callback(status);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
+    },
+    /** main 请求恢复某会话（手机订阅了历史会话） */
+    onResumeSession: (callback: (sessionId: string) => void): (() => void) => {
+      const listener = (_: unknown, sessionId: string) => callback(sessionId);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
     },
   },
 

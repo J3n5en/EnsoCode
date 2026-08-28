@@ -86,6 +86,17 @@ export const IPC_CHANNELS = {
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
   UPDATER_STATUS: 'updater:status',
+
+  // Phone second screen (pairing + relay)
+  PAIR_START: 'pair:start',
+  PAIR_CANCEL: 'pair:cancel',
+  PAIR_REVOKE: 'pair:revoke',
+  PAIR_STATUS: 'pair:status',
+  PAIR_SET_RELAY: 'pair:set-relay',
+  PAIR_CATALOG: 'pair:catalog',
+  PAIR_STATUS_CHANGED: 'pair:status-changed',
+  /** main → renderer：手机订阅了某会话，请求恢复（历史会话在 worker 里没有投影） */
+  PAIR_RESUME_SESSION: 'pair:resume-session',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

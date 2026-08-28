@@ -8,6 +8,7 @@ import { Sidebar } from '@/components/chat/Sidebar';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -31,6 +32,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
+
+  // 手机第二屏：会话目录/项目/provider 只在 renderer，绑定后 debounce 同步给 main
+  useEffect(() => {
+    bindPairCatalogSync();
+  }, []);
 
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
