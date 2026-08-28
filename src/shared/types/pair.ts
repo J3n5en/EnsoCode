@@ -38,4 +38,9 @@ export interface PairCatalogPayload {
   providers: { id: string; name: string; models: { id: string; label?: string }[] }[];
   /** 仅供 main 侧 spawn 反查 cwd，不下发手机 */
   projectPaths: { id: string; path: string }[];
+  /**
+   * 桌面外观偏好，手机作为默认值。桌面的 system / sync-terminal 都归一为
+   * 'system'——让手机跟随自己的系统，而不是照搬桌面的解析结果。
+   */
+  theme: 'light' | 'dark' | 'system';
 }

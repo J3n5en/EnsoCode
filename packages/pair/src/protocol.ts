@@ -86,9 +86,13 @@ export interface ProviderEntry {
   models: { id: string; label?: string }[];
 }
 
+/** 桌面下发的外观偏好，手机作为默认值（可本地覆盖） */
+export type HostAppearance = 'light' | 'dark' | 'system';
+
 /** 下行信封：pair 自有的目录类帧 + 透传的现有 RendererAgentEvent（此处不重定义，按 unknown 透传） */
 export type HostToPhone =
   | { type: 'catalog'; entries: CatalogEntry[] }
   | { type: 'projects'; projects: ProjectEntry[] }
   | { type: 'providers'; providers: ProviderEntry[] }
+  | { type: 'appearance'; theme: HostAppearance }
   | { type: 'agent-event'; event: unknown };
