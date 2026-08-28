@@ -906,32 +906,32 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation || !item) return;
+          const running = conversation.status === 'running';
+          // 出队并乐观回显。与 sendMessage / flushQueue 同一套：worker 会为这条
+          // user 消息发同 index 的 message-upsert 覆盖对齐。running 分支此前只出队
+          // 不上屏（指望 reconcile 补），一旦没回流用户就看到消息凭空消失。
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
                 (message) => message.id !== messageId
               ),
+              messages: [
+                ...state.conversations[conversationId].messages,
+                {
+                  role: 'user',
+                  content: [
+                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+                  ],
+                  timestamp: Date.now(),
+                },
+              ],
             })
           );
-          if (conversation.status === 'running') {
-            // steer 插入当前轮;消息回显由 worker 的 reconcile 补齐
+          if (running) {
+            // steer 插入当前轮
             void window.electronAPI.agent.steer(conversationId, item.text, item.images);
           } else {
-            set((state) =>
-              patch(state, conversationId, {
-                messages: [
-                  ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [
-                      ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                      ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                    ],
-                    timestamp: Date.now(),
-                  },
-                ],
-              })
-            );
             void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
           }
         },
