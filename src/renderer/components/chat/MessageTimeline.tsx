@@ -25,8 +25,10 @@ export const CHAT_COL =
 const AT_BOTTOM_THRESHOLD = 40;
 
 export interface MessageTimelineHandle {
-  /** 滚到底并恢复跟随（发送消息后调用） */
+  /** 滚到底并恢复跟随（发送消息 / 点回到底部按钮） */
   scrollToBottom(): void;
+  /** 单次贴底，不起循环（流式输出跟随，每次内容更新调一次） */
+  pinToBottom(): void;
   /** 当前是否贴底（Virtuoso 的判定，比自己算 scrollHeight 可靠） */
   isAtBottom(): boolean;
 }
@@ -63,6 +65,7 @@ export function MessageTimeline({
   // ref 镜像：imperative handle 里读，避免闭包拿到旧值
   const atBottomRef = useRef(true);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const settleRef = useRef(0);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
   // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
@@ -100,35 +103,50 @@ export function MessageTimeline({
     return result;
   }, [items]);
 
+  /** 单次贴底：只在确实没贴底时写，贴住后不再碰 scrollTop（反复写会与 Virtuoso 自身的滚动纠正打架） */
+  const pinToBottom = () => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  };
+
   /*
-   * 滚到底：写 scrollTop 是立刻生效的，难点在于 Virtuoso 动态测高会在滚动后
-   * 继续修正总高——窄屏上文本换行远多于估算，总高会一路上涨，固定兜几帧收不住
-   * （iOS 上实测点完仍差 500+px）。所以盯着 scrollHeight，直到它连续几帧不再变化
-   * 才停，并留一个时间上限兜底（流式输出时高度可能一直在长）。
+   * 滚到底：Virtuoso 动态测高会在滚动后继续修正总高（窄屏换行远多于估算、iOS 测量更慢），
+   * 一次写不到位，得持续纠正到高度稳定。三个约束缺一不可，否则表现为屏幕闪烁：
+   * 单飞——不取消旧循环的话，流式输出期间每次更新都起一个，叠在一起抢同一个 scrollTop；
+   * 只在没贴底时写——贴住后循环空转也不会再动画面；
+   * 不混用 scrollToIndex——它算出的落点与直接写 scrollTop 不一致，同帧调用会来回拉扯。
    */
   const scrollToBottom = () => {
+    cancelAnimationFrame(settleRef.current);
     const scroller = scrollerRef.current;
-    const handle = virtuosoRef.current;
-    let lastHeight = -1;
-    let stable = 0;
     const deadline = Date.now() + 1200;
+    // 用户一碰屏幕就交还控制权：真机上 iOS 的惯性滚动与我们的纠正会互相打架，
+    // 表现为持续闪烁；有这道闸，最坏情况下一次触摸即可终止。
+    const abort = () => {
+      cancelAnimationFrame(settleRef.current);
+      scroller?.removeEventListener('touchstart', abort);
+      scroller?.removeEventListener('wheel', abort);
+    };
+    scroller?.addEventListener('touchstart', abort, { passive: true, once: true });
+    scroller?.addEventListener('wheel', abort, { passive: true, once: true });
 
     const settle = () => {
-      if (scroller) {
-        scroller.scrollTop = scroller.scrollHeight;
-        stable = scroller.scrollHeight === lastHeight ? stable + 1 : 0;
-        lastHeight = scroller.scrollHeight;
-      }
-      handle?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
-      if (stable < 3 && Date.now() < deadline) requestAnimationFrame(settle);
+      pinToBottom();
+      if (Date.now() < deadline) settleRef.current = requestAnimationFrame(settle);
+      else abort();
     };
     settle();
 
     setAtBottom(true);
     atBottomRef.current = true;
   };
+  useEffect(() => () => cancelAnimationFrame(settleRef.current), []);
   useImperativeHandle(ref, () => ({
     scrollToBottom,
+    pinToBottom,
     isAtBottom: () => atBottomRef.current,
   }));
 
