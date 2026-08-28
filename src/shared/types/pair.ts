@@ -39,8 +39,38 @@ export interface PairCatalogPayload {
   /** 仅供 main 侧 spawn 反查 cwd，不下发手机 */
   projectPaths: { id: string; path: string }[];
   /**
-   * 桌面外观偏好，手机作为默认值。桌面的 system / sync-terminal 都归一为
-   * 'system'——让手机跟随自己的系统，而不是照搬桌面的解析结果。
+   * 桌面外观偏好，手机作为默认值。原样下发（含 sync-terminal，手机同样
+   * 按终端配色推导整套 UI）；system 由手机跟随自己的系统深浅色。
    */
-  theme: 'light' | 'dark' | 'system';
+  theme: 'light' | 'dark' | 'system' | 'sync-terminal';
+  /**
+   * 桌面选中的终端配色解析结果（bash 输出用）；未选则为 undefined。
+   * 字段与 renderer 的 XtermTheme / @enso/pair 的 TerminalPalette 一致，
+   * 这里用结构类型避免 shared 反向依赖 renderer。
+   */
+  terminal?: {
+    background: string;
+    foreground: string;
+    cursor: string;
+    cursorAccent: string;
+    selectionBackground: string;
+    selectionForeground: string;
+    black: string;
+    red: string;
+    green: string;
+    yellow: string;
+    blue: string;
+    magenta: string;
+    cyan: string;
+    white: string;
+    brightBlack: string;
+    brightRed: string;
+    brightGreen: string;
+    brightYellow: string;
+    brightBlue: string;
+    brightMagenta: string;
+    brightCyan: string;
+    brightWhite: string;
+  };
+  terminalFontFamily?: string;
 }

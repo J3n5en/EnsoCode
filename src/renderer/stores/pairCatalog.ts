@@ -1,4 +1,5 @@
 import type { PairCatalogPayload } from '@shared/types';
+import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -48,12 +49,12 @@ function buildPayload(): PairCatalogPayload {
     providers,
     // 仅 main 侧用于 spawn 反查 cwd，不下发手机
     projectPaths: settings.projects.map((p) => ({ id: p.id, path: p.path })),
-    // sync-terminal 与 system 都归一为 system：让手机跟随自己的系统深浅色，
-    // 而不是照搬桌面此刻的解析结果
-    theme:
-      settings.theme === 'light' || settings.theme === 'dark'
-        ? settings.theme
-        : ('system' as const),
+    // 原样下发（含 sync-terminal：手机也按终端配色推导整套 UI，与桌面一致）；
+    // system 交由手机跟随自己的系统深浅色，而非照搬桌面此刻的解析结果
+    theme: settings.theme,
+    // 只下发选中主题解析后的调色板（约几百字节），手机不必打包整份主题库
+    terminal: getXtermTheme(settings.terminalTheme),
+    terminalFontFamily: settings.terminalFontFamily,
   };
 }
 
@@ -77,7 +78,9 @@ export function bindPairCatalogSync(): void {
     if (
       state.projects !== prev.projects ||
       state.providers !== prev.providers ||
-      state.theme !== prev.theme
+      state.theme !== prev.theme ||
+      state.terminalTheme !== prev.terminalTheme ||
+      state.terminalFontFamily !== prev.terminalFontFamily
     ) {
       schedulePush();
     }

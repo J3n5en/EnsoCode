@@ -43,6 +43,7 @@ export {
   type PhoneToHost,
   type ProjectEntry,
   type ProviderEntry,
+  type TerminalPalette,
   type ThinkingLevel,
 } from './protocol';
 export {

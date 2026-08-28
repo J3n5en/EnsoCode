@@ -180,12 +180,12 @@
   }
 }
 
-/* 安全区（刘海屏 / 底部 home 条） */
+/* 安全区（刘海屏 / 底部 home 条）；底部留一点最小间距，不贴死屏幕边缘 */
 @utility pt-safe {
   padding-top: env(safe-area-inset-top);
 }
 @utility pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
 /* shiki dual-theme 代码块：深色模式切到 --shiki-dark 变量（与桌面一致） */
