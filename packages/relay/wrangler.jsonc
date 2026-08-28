@@ -7,5 +7,13 @@
   "durable_objects": {
     "bindings": [{ "name": "PAIR_ROOM", "class_name": "PairRoom" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PairRoom"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PairRoom"] }],
+  // 手机 PWA 与中继同域部署：/v1/* 走 Worker（配对 + WSS），其余交给静态资源。
+  // 同域后 PWA 无需跨域，手机打开根地址即用。
+  "assets": {
+    "directory": "../phone/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*"]
+  }
 }

@@ -5,6 +5,8 @@ export { PairRoom };
 
 export interface Env {
   PAIR_ROOM: DurableObjectNamespace<PairRoom>;
+  /** 静态资源（手机 PWA）：非 /v1 路径回落到这里 */
+  ASSETS: Fetcher;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -79,7 +81,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
   }
 
-  return json({ error: 'not found' }, 404);
+  // 非 /v1 路径交给静态资源（手机 PWA 与中继同域部署）
+  return env.ASSETS.fetch(request);
 }
 
 export default {
