@@ -11,6 +11,12 @@ import {
   sealFrame,
   toWebSocketUrl,
 } from '@enso/pair';
+import type {
+  ApprovalRequestInfo,
+  AskRequestInfo,
+  ProjectedMessage,
+  SessionSnapshot,
+} from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
 
 /**
@@ -20,18 +26,12 @@ import { loadCursors, saveCursor } from './storage';
 
 export type ConnState = 'connecting' | 'online' | 'host-offline' | 'unauthorized' | 'offline';
 
-export interface Message {
-  index: number;
-  role: string;
-  text: string;
-  [key: string]: unknown;
-}
-
 export interface SessionView {
-  messages: Map<number, Message>;
+  /** key = 消息 index，与桌面同为按 index 幂等写入 */
+  messages: Map<number, ProjectedMessage>;
   status: string;
-  approvals: { requestId: string; [key: string]: unknown }[];
-  asks: { requestId: string; [key: string]: unknown }[];
+  approvals: ApprovalRequestInfo[];
+  asks: AskRequestInfo[];
 }
 
 export interface ClientEvents {
@@ -166,19 +166,19 @@ export class PairClient {
     }
     // 全量快照：批事件，直接铺开会话投影（进会话时补历史消息）
     if (type === 'snapshot') {
-      for (const snap of (event.sessions ?? []) as Record<string, unknown>[]) {
-        const id = snap.sessionId as string;
+      for (const snap of (event.sessions ?? []) as SessionSnapshot[]) {
+        const id = snap.sessionId;
         if (!id) continue;
-        const messages = new Map<number, Message>();
-        for (const [index, message] of ((snap.messages ?? []) as object[]).entries()) {
-          messages.set(index, { index, ...message } as Message);
+        const messages = new Map<number, ProjectedMessage>();
+        for (const [index, message] of (snap.messages ?? []).entries()) {
+          messages.set(index, message);
           saveCursor(id, index);
         }
         const view: SessionView = {
           messages,
-          status: (snap.status as string) ?? 'idle',
-          approvals: (snap.pendingApprovals ?? []) as { requestId: string }[],
-          asks: (snap.pendingAsks ?? []) as { requestId: string }[],
+          status: snap.status ?? 'idle',
+          approvals: snap.pendingApprovals ?? [],
+          asks: snap.pendingAsks ?? [],
         };
         this.sessions.set(id, view);
         this.events.onSession(id, { ...view, messages: new Map(messages) });
@@ -187,7 +187,7 @@ export class PairClient {
     }
     if (!sessionId) return;
     const view = this.sessions.get(sessionId) ?? {
-      messages: new Map<number, Message>(),
+      messages: new Map<number, ProjectedMessage>(),
       status: 'idle',
       approvals: [],
       asks: [],
@@ -196,7 +196,7 @@ export class PairClient {
     switch (type) {
       case 'message-upsert': {
         const index = event.index as number;
-        view.messages.set(index, { index, ...(event.message as object) } as Message);
+        view.messages.set(index, event.message as ProjectedMessage);
         saveCursor(sessionId, index);
         break;
       }
@@ -210,13 +210,13 @@ export class PairClient {
         view.status = 'failed';
         break;
       case 'approval-request':
-        view.approvals = [...view.approvals, event as { requestId: string }];
+        view.approvals = [...view.approvals, event as unknown as ApprovalRequestInfo];
         break;
       case 'approval-resolved':
         view.approvals = view.approvals.filter((a) => a.requestId !== event.requestId);
         break;
       case 'ask-request':
-        view.asks = [...view.asks, event as { requestId: string }];
+        view.asks = [...view.asks, event as unknown as AskRequestInfo];
         break;
       case 'ask-resolved':
         view.asks = view.asks.filter((a) => a.requestId !== event.requestId);

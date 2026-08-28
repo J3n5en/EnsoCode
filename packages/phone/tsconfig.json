@@ -12,7 +12,12 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "paths": {
-      "@enso/pair": ["../pair/src/index.ts"]
+      "@enso/pair": ["../pair/src/index.ts"],
+      "@/i18n": ["./src/stubs/i18n.tsx"],
+      "@/stores/settings": ["./src/stubs/settings-store.ts"],
+      "@/stores/sessions": ["./src/stubs/sessions-store.ts"],
+      "@/*": ["../../src/renderer/*"],
+      "@shared/*": ["../../src/shared/*"]
     }
   },
   "include": ["src/**/*"]
