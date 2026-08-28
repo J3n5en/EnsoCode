@@ -71,6 +71,11 @@ export class PairRoom extends DurableObject<Env> {
 
     if (role === 'host') {
       this.broadcast('guest', { type: 'host-online' });
+      // 手机可能先于 host 进房（如 Electron 重启），必须告知 host 对端已在，
+      // 否则 host 认为手机离线而不下发目录
+      if (this.ctx.getWebSockets('guest').length > 0) {
+        server.send(JSON.stringify({ type: 'peer-joined' }));
+      }
     } else {
       this.broadcast('host', { type: 'peer-joined' });
       const hostOnline = this.ctx.getWebSockets('host').length > 0;

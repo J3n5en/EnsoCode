@@ -164,6 +164,27 @@ export class PairClient {
       }
       return;
     }
+    // 全量快照：批事件，直接铺开会话投影（进会话时补历史消息）
+    if (type === 'snapshot') {
+      for (const snap of (event.sessions ?? []) as Record<string, unknown>[]) {
+        const id = snap.sessionId as string;
+        if (!id) continue;
+        const messages = new Map<number, Message>();
+        for (const [index, message] of ((snap.messages ?? []) as object[]).entries()) {
+          messages.set(index, { index, ...message } as Message);
+          saveCursor(id, index);
+        }
+        const view: SessionView = {
+          messages,
+          status: (snap.status as string) ?? 'idle',
+          approvals: (snap.pendingApprovals ?? []) as { requestId: string }[],
+          asks: (snap.pendingAsks ?? []) as { requestId: string }[],
+        };
+        this.sessions.set(id, view);
+        this.events.onSession(id, { ...view, messages: new Map(messages) });
+      }
+      return;
+    }
     if (!sessionId) return;
     const view = this.sessions.get(sessionId) ?? {
       messages: new Map<number, Message>(),
@@ -199,9 +220,6 @@ export class PairClient {
         break;
       case 'ask-resolved':
         view.asks = view.asks.filter((a) => a.requestId !== event.requestId);
-        break;
-      case 'snapshot':
-        // 全量快照：worker 回放，messages 逐条经 message-upsert 到达
         break;
     }
     this.sessions.set(sessionId, view);

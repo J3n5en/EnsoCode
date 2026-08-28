@@ -28,7 +28,13 @@ import {
   spawnSession,
   steerSession,
 } from './agentHost';
-import { checkSpawn, parsePhoneCommand, type SpawnWhitelist, shouldForward } from './pairPolicy';
+import {
+  checkSpawn,
+  narrowSnapshot,
+  parsePhoneCommand,
+  type SpawnWhitelist,
+  shouldForward,
+} from './pairPolicy';
 import { isSecureStorageAvailable, loadDevices, saveDevices } from './pairStore';
 
 /**
@@ -275,6 +281,8 @@ function connect(conn: Connection): void {
         if (control.type === 'peer-joined') {
           conn.phoneOnline = true;
           conn.subscribedId = null;
+          // 手机进房即推目录（它也会发 snapshot，但 main 侧缓存可能更早就绪）
+          void sendMeta(conn);
           notifyStatus();
         } else if (control.type === 'peer-left') {
           conn.phoneOnline = false;
@@ -311,6 +319,11 @@ function scheduleReconnect(conn: Connection): void {
 // ── 收：解密 + 白名单 + 打进 agentHost ─────────────────────────────────
 
 async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
+  // 收到手机的加密帧即证明它在房间里（控制帧可能因时序丢失）
+  if (!conn.phoneOnline) {
+    conn.phoneOnline = true;
+    notifyStatus();
+  }
   let payload: unknown;
   try {
     payload = await openFrame(conn.contentKey, frame);
@@ -396,6 +409,15 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
   const e = event as { type: string; sessionId?: string; index?: number };
   for (const conn of connections.values()) {
     if (!conn.phoneOnline) continue;
+    // snapshot 是全量批事件，裁成只含订阅会话再发
+    if (e.type === 'snapshot') {
+      const narrowed = narrowSnapshot(
+        event as { type: string; sessions?: { sessionId: string }[] },
+        conn.subscribedId
+      );
+      if (narrowed) void send(conn, { type: 'agent-event', event: narrowed });
+      continue;
+    }
     if (!shouldForward(e, conn.subscribedId, conn.sinceIndex)) continue;
     void send(conn, { type: 'agent-event', event });
   }
@@ -419,6 +441,7 @@ export function updatePairCatalog(payload: {
     })),
   };
   for (const conn of connections.values()) {
-    if (conn.phoneOnline) void sendMeta(conn);
+    // 连接已建立就发：phoneOnline 依赖控制帧，时序上可能晚于目录更新
+    if (conn.ws?.readyState === 1) void sendMeta(conn);
   }
 }
