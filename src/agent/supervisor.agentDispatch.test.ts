@@ -89,6 +89,7 @@ const model = {
   baseUrl: 'https://example.test/v1',
   apiKey: 'secret',
   modelId: 'model',
+  settingsProviderId: 'settings-provider',
 };
 
 function session(options: Record<string, unknown>) {
@@ -150,7 +151,11 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     });
     await settle();
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'parent-ready', identity: parent })
+      expect.objectContaining({
+        type: 'parent-ready',
+        identity: parent,
+        model: { providerId: 'settings-provider', modelId: 'model' },
+      })
     );
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
     expect(parentSession.prompt).not.toHaveBeenCalled();
@@ -182,6 +187,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         identity: child,
         proof: expect.objectContaining({
           spawnSpecId: 'spawn-enso',
+          model: { providerId: 'settings-provider', modelId: 'model' },
           toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
         }),
       })

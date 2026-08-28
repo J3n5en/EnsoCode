@@ -151,7 +151,7 @@ export function resolveModelSelection(
     ok: true,
     selection: {
       ref: { providerId, modelId },
-      runtimeRef: modelRefForSpawnConfig(config),
+      runtimeRef: { providerId: config.oauthAccountKey ?? config.api, modelId: config.modelId },
       config,
     },
   };
@@ -184,7 +184,7 @@ export function resolveAgentTypeSpawnConfig(
         systemPromptHash: createHash('sha256').update(ENSO_SYSTEM_PROMPT).digest('hex'),
         lockedProfileId: ENSO_LOCKED_PROFILE.profileId,
       },
-      expectedModel: parentModel.runtimeRef,
+      expectedModel: parentModel.ref,
       expectedToolIds: ENSO_LOCKED_PROFILE.toolIds,
     };
   }
@@ -236,7 +236,7 @@ export function resolveAgentTypeSpawnConfig(
       mcpBindingIds: resources.mcpServers.map(() => randomUUID()),
       systemPromptHash: createHash('sha256').update(definition.systemPrompt).digest('hex'),
     },
-    expectedModel: selectedModel.runtimeRef,
+    expectedModel: selectedModel.ref,
     expectedToolIds:
       definition.tools === 'readonly'
         ? ['read', 'grep', 'find', 'ls', 'message_main_agent']
@@ -566,19 +566,27 @@ function providersFromSettings(): ModelProvider[] {
 }
 
 export function modelRefForSpawnConfig(config: SpawnModelConfig): ModelRef {
-  return {
-    providerId: config.oauthAccountKey ?? config.api,
-    modelId: config.modelId,
-  };
+  if (
+    'settingsProviderId' in config &&
+    typeof config.settingsProviderId === 'string' &&
+    config.settingsProviderId
+  ) {
+    return { providerId: config.settingsProviderId, modelId: config.modelId };
+  }
+  throw new Error('Spawn model is missing its settings provider identity.');
 }
 
-function spawnModelConfig(provider: ModelProvider, modelId: string): SpawnModelConfig {
+function spawnModelConfig(
+  provider: ModelProvider,
+  modelId: string
+): SpawnModelConfig & { settingsProviderId: string } {
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
   return {
     api: provider.api,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId,
+    settingsProviderId: provider.id,
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
     ...(!provider.oauthAccountKey ? pickModelCapabilityOverrides(entry) : {}),
   };

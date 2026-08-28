@@ -37,6 +37,7 @@ import type {
   CoworkerInfo,
   McpServerSpawnConfig,
   MessageTiming,
+  ModelRef,
   NodeStatus,
   ProjectedMessage,
   ResolvedAgentTypeSpawnConfig,
@@ -197,6 +198,17 @@ function createEnsoResourceLoader(cwd: string, agentDir: string): DefaultResourc
 function requiredSessionFile(session: AgentSession): string {
   if (!session.sessionFile) throw new Error('SessionManager did not provide a session file.');
   return session.sessionFile;
+}
+
+function settingsModelRef(model: SpawnModelConfig): ModelRef {
+  if (
+    'settingsProviderId' in model &&
+    typeof model.settingsProviderId === 'string' &&
+    model.settingsProviderId
+  ) {
+    return { providerId: model.settingsProviderId, modelId: model.modelId };
+  }
+  throw new Error('Spawn model is missing its settings provider identity.');
 }
 
 function isSameGeneration(left: SessionIdentity, right: SessionIdentity): boolean {
@@ -579,10 +591,7 @@ export class SessionSupervisor {
         identity,
         seq: ++existing.seq,
         sessionFile: requiredSessionFile(existing.session),
-        model: {
-          providerId: existing.session.model?.provider ?? model.oauthAccountKey ?? model.api,
-          modelId: existing.modelId,
-        },
+        model: settingsModelRef(model),
       });
       return;
     }
@@ -807,7 +816,7 @@ export class SessionSupervisor {
           session,
           modelId: selectedModel.modelId,
           ...(safeJournal ? { safeJournal } : {}),
-          modelRef: { providerId: subModel.provider, modelId: selectedModel.modelId },
+          modelRef: settingsModelRef(selectedModel),
           toolIds: subTools.map((tool) => tool.name),
           proofToolIds: subTools
             .filter((tool) => !typeMcpTools.includes(tool))
@@ -918,7 +927,7 @@ export class SessionSupervisor {
       identity,
       seq: ++managedRef.seq,
       sessionFile: requiredSessionFile(session),
-      model: { providerId: piModel.provider, modelId: model.modelId },
+      model: settingsModelRef(model),
     });
     checkpoints?.cleanupOldSessions();
   }
@@ -1086,11 +1095,7 @@ export class SessionSupervisor {
         proof: {
           spawnSpecId: config.spawnSpecId,
           typeKey: config.typeKey,
-          model: {
-            providerId:
-              existing.session.model?.provider ?? config.model.oauthAccountKey ?? config.model.api,
-            modelId: existing.modelId,
-          },
+          model: settingsModelRef(config.model),
           toolIds: existing.proofToolIds,
           loadedSkillBindingIds: config.skillBindingIds,
           loadedMcpBindingIds: config.mcpBindingIds,

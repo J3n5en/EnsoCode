@@ -110,4 +110,63 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.isReady(parent)).toBe(false);
     expect(sessions.currentIdentity(parent.sessionId)).toEqual(replacement);
   });
+
+  it('rejects duplicate or decreasing seq and does not let snapshots overwrite sequenced state', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    expect(
+      sessions.observe({
+        type: 'parent-ready',
+        identity: parent,
+        seq: 5,
+        sessionFile: '/tmp/current.jsonl',
+        model: { providerId: 'settings-provider', modelId: 'model' },
+      })
+    ).toBe(true);
+    expect(
+      sessions.observe({
+        type: 'status',
+        identity: parent,
+        seq: 4,
+        status: 'failed',
+      })
+    ).toBe(false);
+    expect(sessions.isReady(parent)).toBe(true);
+    expect(
+      sessions.observe({
+        type: 'snapshot',
+        sessions: [{ identity: parent, status: 'failed', messages: [], commands: [] }],
+      })
+    ).toBe(false);
+    expect(sessions.isReady(parent)).toBe(true);
+  });
+
+  it('resets seq authority when prepareParent installs a new generation', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    expect(
+      sessions.observe({
+        type: 'parent-ready',
+        identity: parent,
+        seq: 9,
+        sessionFile: '/tmp/old.jsonl',
+        model: { providerId: 'settings-provider', modelId: 'model' },
+      })
+    ).toBe(true);
+    const replacement = {
+      sessionId: parent.sessionId,
+      generation: '33333333-3333-4333-8333-333333333333',
+    };
+    sessions.prepareParent(replacement);
+    expect(
+      sessions.observe({
+        type: 'parent-ready',
+        identity: replacement,
+        seq: 1,
+        sessionFile: '/tmp/new.jsonl',
+        model: { providerId: 'settings-provider', modelId: 'model' },
+      })
+    ).toBe(true);
+    expect(sessions.isReady(replacement)).toBe(true);
+  });
 });

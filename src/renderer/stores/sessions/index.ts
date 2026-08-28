@@ -541,7 +541,6 @@ export const useSessionsStore = create<SessionsState>()(
               ? {
                   started: true,
                   sessionFile: event.sessionFile,
-                  lastProviderId: event.model.providerId,
                   lastModelId: event.model.modelId,
                 }
               : {}),

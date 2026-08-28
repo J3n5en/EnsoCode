@@ -23,6 +23,7 @@ interface IndexedSession {
   ready: boolean;
   alive: boolean;
   status: NodeStatus;
+  lastSeq: number;
   model?: ModelRef;
   sessionFile?: string;
   coworkers: Map<string, CoworkerInfo>;
@@ -131,6 +132,7 @@ export class AgentSessionIndex {
       ready: false,
       alive: true,
       status: 'idle',
+      lastSeq: -1,
       coworkers: current?.coworkers ?? new Map(),
     });
   }
@@ -237,12 +239,20 @@ export class AgentSessionIndex {
     }
     if (event.type === 'snapshot') {
       if (!event.partial) {
-        for (const session of this.sessions.values()) session.alive = false;
+        for (const session of this.sessions.values()) {
+          if (session.lastSeq < 0) session.alive = false;
+        }
       }
       let accepted = false;
       for (const snapshot of event.sessions) {
         const current = this.sessions.get(snapshot.identity.sessionId);
-        if (!current || !isSameGeneration(current.identity, snapshot.identity)) continue;
+        if (
+          !current ||
+          !isSameGeneration(current.identity, snapshot.identity) ||
+          current.lastSeq >= 0
+        ) {
+          continue;
+        }
         current.alive = snapshot.status !== 'failed';
         current.status = snapshot.status;
         accepted = true;
@@ -253,9 +263,14 @@ export class AgentSessionIndex {
     const identity = identityOf(event);
     const current = this.sessions.get(identity.sessionId);
     if (current && !isSameGeneration(current.identity, identity)) return false;
+    if (current) {
+      if (event.seq <= current.lastSeq) return false;
+      current.lastSeq = event.seq;
+    }
 
     if (event.type === 'parent-ready') {
       const parent = current ?? this.createIndexed(event.identity);
+      parent.lastSeq = event.seq;
       parent.started = true;
       parent.ready = true;
       parent.alive = true;
@@ -293,6 +308,7 @@ export class AgentSessionIndex {
         ready: true,
         alive: true,
         status: 'idle',
+        lastSeq: event.seq,
         model: event.proof.model,
         sessionFile: event.sessionFile,
         coworkers: new Map(),
@@ -415,6 +431,7 @@ export class AgentSessionIndex {
       ready: false,
       alive: true,
       status: 'idle',
+      lastSeq: -1,
       coworkers: new Map(),
     };
     this.sessions.set(identity.sessionId, created);

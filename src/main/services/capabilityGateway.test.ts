@@ -290,6 +290,57 @@ describe('CapabilityGateway child/generation安全合同', () => {
     });
     expect(logout).not.toHaveBeenCalled();
   });
+
+  it('provider remove在oauthLogout返回后再次复验，abort期间不删除settings', async () => {
+    const logout = Promise.withResolvers<void>();
+    const current = fixture({
+      providers: [provider({ oauthAccountKey: 'anthropic' })],
+    });
+    current.services.oauthLogout = vi.fn(() => logout.promise);
+    const pending = current.gateway.invoke(
+      request('provider-remove-barrier', 'providers.remove', { id: 'provider-1' })
+    );
+    await waitForAsk(current.asks, 1);
+    current.gateway.respond(7, {
+      child,
+      turnId: 'turn-1',
+      requestId: 'provider-remove-barrier',
+      decision: 'allow',
+    });
+    await vi.waitFor(() => expect(current.services.oauthLogout).toHaveBeenCalledOnce());
+    current.gateway.terminateGeneration(child);
+    logout.resolve();
+    await expect(pending).resolves.toMatchObject({
+      modelResult: { ok: false, code: 'cancelled' },
+      receipt: { outcome: 'cancelled' },
+    });
+    expect(current.patchSettings).not.toHaveBeenCalled();
+  });
+
+  it('oauth logout在底层返回后再次复验，abort期间不伪报success', async () => {
+    const logout = Promise.withResolvers<void>();
+    const current = fixture();
+    current.services.oauthLogout = vi.fn(() => logout.promise);
+    const pending = current.gateway.invoke(
+      request('oauth-logout-second-barrier', 'providers.oauth.logout', {
+        accountKey: 'anthropic',
+      })
+    );
+    await waitForAsk(current.asks, 1);
+    current.gateway.respond(7, {
+      child,
+      turnId: 'turn-1',
+      requestId: 'oauth-logout-second-barrier',
+      decision: 'allow',
+    });
+    await vi.waitFor(() => expect(current.services.oauthLogout).toHaveBeenCalledOnce());
+    current.gateway.terminateGeneration(child);
+    logout.resolve();
+    await expect(pending).resolves.toMatchObject({
+      modelResult: { ok: false, code: 'cancelled' },
+      receipt: { outcome: 'cancelled' },
+    });
+  });
 });
 
 describe('CapabilityGateway OAuth/default/secret/receipt', () => {

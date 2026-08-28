@@ -64,12 +64,15 @@ async function setup(
     description: 'Built in',
     spawnSpecId: crypto.randomUUID(),
     systemPrompt: 'safe',
-    model: {
-      api: 'openai-completions',
-      baseUrl: 'https://example.com',
-      apiKey: 'key',
-      modelId: 'model',
-    },
+    model: Object.assign(
+      {
+        api: 'openai-completions' as const,
+        baseUrl: 'https://example.com',
+        apiKey: 'key',
+        modelId: 'model',
+      },
+      { settingsProviderId: 'provider' }
+    ),
     tools: 'enso-locked',
     skillPaths: [],
     skillBindingIds: [],
@@ -115,7 +118,7 @@ async function setup(
       resolveAgentType: () => ({
         ok: true,
         config,
-        expectedModel: { providerId: 'runtime', modelId: 'model' },
+        expectedModel: { providerId: 'provider', modelId: 'model' },
         expectedToolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
       }),
       spawnParent: (identity) => {
@@ -125,7 +128,7 @@ async function setup(
             identity,
             seq: 1,
             sessionFile: path.join(root, 'parent.jsonl'),
-            model: { providerId: 'runtime', modelId: 'model' },
+            model: { providerId: 'provider', modelId: 'model' },
           })
         );
         return { ok: true };
@@ -141,7 +144,7 @@ async function setup(
             proof: {
               spawnSpecId: altered.spawnSpecId ?? config.spawnSpecId,
               typeKey: config.typeKey,
-              model: { providerId: 'runtime', modelId: 'model' },
+              model: { providerId: 'provider', modelId: 'model' },
               toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
               loadedSkillBindingIds: config.skillBindingIds,
               loadedMcpBindingIds: config.mcpBindingIds,
@@ -164,12 +167,13 @@ async function setup(
     selectionBindingId: selection.binding.selectionBindingId,
     mainEvents,
     customEntries,
+    bindings,
   };
 }
 
 describe('AgentDispatchService delta coordination', () => {
   it('settles receipt + turn exactly once with strictly increasing Main seq', async () => {
-    const { service, selectionBindingId, mainEvents, customEntries } = await setup();
+    const { service, selectionBindingId, mainEvents, customEntries, bindings } = await setup();
     const result = await service.dispatch(
       {
         requestId: 'turn-1',
@@ -232,6 +236,30 @@ describe('AgentDispatchService delta coordination', () => {
       mainEvents.map((_event, index) => index + 1)
     );
     expect(customEntries.filter((entry) => entry.kind === 'agent-completed')).toHaveLength(1);
+    const reboundParent = bindings.bindSource(1, { requestId: 'bind-again' });
+    expect(reboundParent.accepted).toBe(true);
+    if (!reboundParent.accepted) return;
+    const reboundSelection = bindings.registerModelSelection(
+      1,
+      {
+        parentBindingId: reboundParent.parentBindingId,
+        selection: { providerId: 'provider', modelId: 'model' },
+      },
+      true
+    );
+    expect(reboundSelection.accepted).toBe(true);
+    if (!reboundSelection.accepted) return;
+    await expect(
+      service.dispatch(
+        {
+          requestId: 'turn-2',
+          selectionBindingId: reboundSelection.binding.selectionBindingId,
+          typeKey: 'agent:enso',
+          task: { text: 'again', images: [], fileMentions: [] },
+        },
+        1
+      )
+    ).resolves.toMatchObject({ accepted: true });
   });
 
   it('rejects ordinary/locked child when exact spawn proof drifts', async () => {

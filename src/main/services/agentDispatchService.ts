@@ -95,6 +95,11 @@ interface DispatchHost {
   ): { ok: boolean; error?: string };
 }
 
+export interface TeamExecutionGuard {
+  signal: AbortSignal;
+  assertExecutionCurrent(): boolean;
+}
+
 export interface AgentDispatchServiceOptions {
   sourceRegistry: ActiveConversationRegistry;
   sessionIndex: AgentSessionIndex;
@@ -143,6 +148,7 @@ export class AgentDispatchService {
   private readonly inFlight = new Map<string, Promise<AgentDispatchResult>>();
   private readonly parentReady = new Map<string, Promise<void>>();
   private readonly prompted = new Set<string>();
+  private readonly teamGuards = new Map<string, TeamExecutionGuard>();
   private readonly randomUuid: () => string;
   private readonly now: () => number;
   private readonly readyTimeoutMs: number;
@@ -162,7 +168,6 @@ export class AgentDispatchService {
     if (completed) return completed;
     const running = this.inFlight.get(dispatchKey);
     if (running) return running;
-
     const operation = this.executeDispatch(request, ownerWebContentsId).then((result) => {
       this.inFlight.delete(dispatchKey);
       this.remember(dispatchKey, result);
@@ -175,8 +180,10 @@ export class AgentDispatchService {
   async hireCoworker(
     parentConversationId: string,
     name: string,
-    agentType?: string
+    agentType?: string,
+    guard?: TeamExecutionGuard
   ): Promise<TeamOperationResult> {
+    if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
     const target = this.options.sessionIndex.resolveTeamTarget(parentConversationId);
     if (!target.ok) return target;
     const source = this.options.sourceRegistry.resolveParentSource(parentConversationId);
@@ -243,6 +250,7 @@ export class AgentDispatchService {
         suggestedAction: 'Choose an available Agent type and model.',
       };
     }
+    if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
     const reserved = this.options.sessionIndex.reserveChild(
       target.identity,
       candidate.typeKey,
@@ -262,6 +270,10 @@ export class AgentDispatchService {
       };
     }
     const child = reserved.reservation.child;
+    if (!this.guardCurrent(guard)) {
+      this.options.sessionIndex.releaseChild(child);
+      return this.cancelledTeamOperation();
+    }
     this.options.emitRendererEvent({
       type: 'child-reserved',
       identity: child,
@@ -270,13 +282,14 @@ export class AgentDispatchService {
       metadata: reserved.reservation.metadata,
     });
     try {
+      if (guard) this.teamGuards.set(child.generation, guard);
       const spawned = this.options.host.spawnChild(
         child,
         source.parentProjectPath,
         resolved.config
       );
       if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to spawn coworker.');
-      const ready = await this.waitForChild(child);
+      const ready = await this.waitForChild(child, guard?.signal);
       this.verifyChildReady(
         reserved.reservation,
         ready,
@@ -297,13 +310,17 @@ export class AgentDispatchService {
         error: error instanceof Error ? error.message : String(error),
         suggestedAction: 'Retry from the current coding conversation.',
       };
+    } finally {
+      this.teamGuards.delete(child.generation);
     }
   }
 
   async dismissCoworker(
     parentConversationId: string,
-    coworkerId: string
+    coworkerId: string,
+    guard?: TeamExecutionGuard
   ): Promise<TeamOperationResult> {
+    if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
     const target = this.options.sessionIndex.resolveTeamTarget(parentConversationId);
     if (!target.ok) return target;
     const existing = target.coworkers.get(coworkerId);
@@ -321,6 +338,7 @@ export class AgentDispatchService {
         suggestedAction: 'List coworkers and choose an active id.',
       };
     }
+    if (!this.guardCurrent(guard)) return this.cancelledTeamOperation();
     const sent = this.options.host.dismissChild(target.identity, child, false);
     if (!sent.ok) {
       return {
@@ -354,7 +372,11 @@ export class AgentDispatchService {
   }
 
   observe(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
-    this.options.sessionIndex.observe(event);
+    const readyGuard =
+      event.type === 'child-ready' ? this.teamGuards.get(event.identity.generation) : undefined;
+    if (!readyGuard || this.guardCurrent(readyGuard)) {
+      this.options.sessionIndex.observe(event);
+    }
     for (const waiter of [...this.waiters]) {
       if (waiter.accept(event)) {
         clearTimeout(waiter.timer);
@@ -697,8 +719,8 @@ export class AgentDispatchService {
       if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to spawn parent container.');
       const ready = await this.waitForParent(parent);
       if (
-        ready.model.providerId !== model.runtimeRef.providerId ||
-        ready.model.modelId !== model.runtimeRef.modelId
+        ready.model.providerId !== model.ref.providerId ||
+        ready.model.modelId !== model.ref.modelId
       ) {
         throw new Error('Parent ready model did not match the bound model.');
       }
@@ -720,45 +742,86 @@ export class AgentDispatchService {
   }
 
   private waitForChild(
-    identity: ChildSessionIdentity
+    identity: ChildSessionIdentity,
+    signal?: AbortSignal
   ): Promise<Extract<ChildLifecycleEvent, { type: 'child-ready' }>> {
     return this.waitFor(
       (event): event is Extract<ChildLifecycleEvent, { type: 'child-ready' }> =>
         event.type === 'child-ready' && isSameChildSessionIdentity(identity, event.identity),
       (event) =>
         (event.type === 'child-rejected' || event.type === 'child-ended') &&
-        isSameChildSessionIdentity(identity, event.identity)
+        isSameChildSessionIdentity(identity, event.identity),
+      signal
     );
   }
 
   private waitFor<T extends AgentWorkerEvent>(
     success: (event: AgentWorkerEvent) => event is T,
-    failure: (event: AgentWorkerEvent) => boolean
+    failure: (event: AgentWorkerEvent) => boolean,
+    signal?: AbortSignal
   ): Promise<T> {
     const { promise, resolve, reject } = Promise.withResolvers<T>();
+    let abortListener: (() => void) | undefined;
+    const cleanup = (waiter: EventWaiter) => {
+      clearTimeout(waiter.timer);
+      this.waiters.delete(waiter);
+      if (abortListener && signal) signal.removeEventListener('abort', abortListener);
+    };
     const waiter: EventWaiter = {
       accept: (event) => {
         if (event.type === 'worker-exited') {
+          cleanup(waiter);
           reject(new Error('Agent worker exited before ready.'));
           return true;
         }
         if (success(event)) {
+          cleanup(waiter);
           resolve(event);
           return true;
         }
         if (failure(event)) {
+          cleanup(waiter);
           reject(new Error('Agent session was rejected before ready.'));
           return true;
         }
         return false;
       },
       timer: setTimeout(() => {
-        this.waiters.delete(waiter);
+        cleanup(waiter);
         reject(new Error('Agent session ready handshake timed out.'));
       }, this.readyTimeoutMs),
     };
-    this.waiters.add(waiter);
+    abortListener = () => {
+      cleanup(waiter);
+      reject(new Error('Team operation cancelled before child ready.'));
+    };
+    if (signal?.aborted) abortListener();
+    else {
+      if (signal) signal.addEventListener('abort', abortListener, { once: true });
+      this.waiters.add(waiter);
+    }
     return promise;
+  }
+
+  private guardCurrent(guard?: TeamExecutionGuard): boolean {
+    if (!guard || guard.signal.aborted === false) {
+      if (!guard) return true;
+      try {
+        return guard.assertExecutionCurrent();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private cancelledTeamOperation(): TeamOperationResult {
+    return {
+      ok: false,
+      code: 'unavailable',
+      error: 'Team operation cancelled before commit.',
+      suggestedAction: 'Retry from the current Agent generation.',
+    };
   }
 
   private verifyChildReady(

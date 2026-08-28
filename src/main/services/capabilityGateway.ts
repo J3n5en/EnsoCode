@@ -607,6 +607,8 @@ export function createCapabilityHandlers(
       try {
         if (provider.oauthAccountKey) {
           await services.oauthLogout(provider.oauthAccountKey, context.ownerWebContentsId);
+          const staleAfterLogout = context.assertExecutionCurrent();
+          if (staleAfterLogout) return staleAfterLogout;
         }
       } catch (error) {
         return failed(safeError(error));
@@ -748,6 +750,8 @@ export function createCapabilityHandlers(
       if (stale) return stale;
       try {
         await services.oauthLogout(accountKey, context.ownerWebContentsId);
+        const staleAfterLogout = context.assertExecutionCurrent();
+        if (staleAfterLogout) return staleAfterLogout;
         return success({ accountKey, status: 'signed-out' });
       } catch (error) {
         return failed(safeError(error));

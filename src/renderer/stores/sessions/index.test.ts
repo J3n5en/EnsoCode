@@ -346,6 +346,59 @@ describe('typed Agent child projection', () => {
     expect(agentPrompt).not.toHaveBeenCalled();
   });
 
+  it('keeps the settings provider id after parent-ready exposes a different runtime provider', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          lastProviderId: 'settings-provider-entry',
+          lastModelId: 'logical-model',
+        },
+      },
+    }));
+    onAgentEvent?.({
+      type: 'parent-ready',
+      identity: {
+        sessionId: 'parent',
+        generation: '33333333-3333-4333-8333-333333333333',
+      },
+      seq: 1,
+      sessionFile: '/tmp/parent.jsonl',
+      model: { providerId: 'anthropic#oauth-account', modelId: 'logical-model' },
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
+      lastProviderId: 'settings-provider-entry',
+      lastModelId: 'logical-model',
+    });
+
+    dispatch.mockResolvedValue({
+      accepted: true,
+      requestId: '123e4567-e89b-42d3-a456-426614174070',
+      dispatchId: '123e4567-e89b-42d3-a456-426614174071',
+      child: childIdentity(1),
+    });
+    const task = { text: 'use the selected settings entry', images: [], fileMentions: [] };
+    const result = await sessionsModule.useSessionsStore
+      .getState()
+      .dispatchAgent('builtin:scout', task, {
+        providerId: 'settings-provider-entry',
+        modelId: 'logical-model',
+      });
+
+    expect(result.accepted).toBe(true);
+    expect(registerModelSelection).toHaveBeenLastCalledWith({
+      parentBindingId: 'parent-binding-1',
+      selection: { providerId: 'settings-provider-entry', modelId: 'logical-model' },
+    });
+    expect(dispatch).toHaveBeenLastCalledWith({
+      requestId: expect.any(String),
+      selectionBindingId: 'selection-binding-1',
+      typeKey: 'builtin:scout',
+      task,
+    });
+  });
+
   it('rejects a forged persisted conversation that Main source authority does not project', async () => {
     sourceProjection = { ...sourceProjection, conversations: [] };
     bindSource.mockClear();
