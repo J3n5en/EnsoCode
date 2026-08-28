@@ -82,6 +82,9 @@ importers:
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
       unist-util-visit:
         specifier: ^5.1.0
         version: 5.1.0
