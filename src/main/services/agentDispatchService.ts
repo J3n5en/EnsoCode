@@ -416,9 +416,11 @@ export class AgentDispatchService {
 
   observeReceipt(event: ReceiptLifecycleEvent): void {
     const dispatch = this.active.get(event.child.generation);
+    // 关联键只能是 child 身份 + turnId：event.requestId 是每笔能力调用自己的 uuid
+    // （见 agent/tools/ensoApp.ts），与派发请求 id 不同命名空间；拿它与 dispatch.requestId
+    // 相比永远不相等，会把全部 receipt 丢掉，导致父会话完成通知拿不到安全 summary。
     if (
       !dispatch ||
-      dispatch.requestId !== event.requestId ||
       dispatch.turnId !== event.turnId ||
       !isSameChildSessionIdentity(dispatch.child, event.child) ||
       dispatch.terminal

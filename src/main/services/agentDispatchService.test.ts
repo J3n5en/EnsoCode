@@ -172,6 +172,60 @@ async function setup(
 }
 
 describe('AgentDispatchService delta coordination', () => {
+  it('receipt 的每笔调用 requestId 与派发 requestId 不同时，完成通知仍带安全 summary', async () => {
+    const { service, selectionBindingId, customEntries } = await setup();
+    const result = await service.dispatch(
+      {
+        requestId: 'turn-1',
+        selectionBindingId,
+        typeKey: 'agent:enso',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    expect(result.accepted).toBe(true);
+    if (!result.accepted) return;
+    const child = result.child;
+    // 生产形状：ensoApp 每笔 capability 调用自己 randomUUID()，与派发 requestId 无关。
+    const callRequestId = 'capability-call-uuid';
+    service.observeReceipt({
+      type: 'receipt-started',
+      child,
+      turnId: 'turn-1',
+      requestId: callRequestId,
+      receiptId: 'r1',
+      receiptSeq: 1,
+      executionState: 'executing',
+    });
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    service.observeReceipt({
+      type: 'receipt-settled',
+      child,
+      turnId: 'turn-1',
+      requestId: callRequestId,
+      receiptId: 'r1',
+      receiptSeq: 1,
+      executionState: 'settled',
+      receipt: {
+        receiptId: 'r1',
+        operationId: 'op',
+        child,
+        turnId: 'turn-1',
+        requestId: callRequestId,
+        capabilityId: 'appearance.theme',
+        risk: 'reversible',
+        subject: { kind: 'setting', id: 'theme', label: 'Application theme' },
+        outcome: 'succeeded',
+        summary: 'theme: system → dark',
+        occurredAt: 1,
+        sequence: 1,
+      },
+    });
+    const completed = customEntries.filter((entry) => entry.kind === 'agent-completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ receiptSummary: 'theme: system → dark' });
+  });
+
   it('settles receipt + turn exactly once with strictly increasing Main seq', async () => {
     const { service, selectionBindingId, mainEvents, customEntries, bindings } = await setup();
     const result = await service.dispatch(
