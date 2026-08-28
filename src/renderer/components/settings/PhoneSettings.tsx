@@ -1,5 +1,5 @@
 import type { PairStatus } from '@shared/types';
-import { Check, Loader2, Pencil, Smartphone, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, Copy, Loader2, Pencil, Smartphone, Trash2, TriangleAlert } from 'lucide-react';
 import QRCode from 'qrcode';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
@@ -15,10 +15,36 @@ export function PhoneSettings() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [relayDraft, setRelayDraft] = React.useState<string | null>(null);
+  const [remaining, setRemaining] = React.useState<number | null>(null);
+  const [copied, setCopied] = React.useState(false);
+
+  // 配对码倒计时：秒级刷新，到 0 停（main 侧同一时间戳到期会自动取消配对）
+  const expiresAt = status?.pairingExpiresAt;
+  React.useEffect(() => {
+    if (!expiresAt) {
+      setRemaining(null);
+      return;
+    }
+    const update = () => setRemaining(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
+  const copyInvite = (uri: string) => {
+    void navigator.clipboard.writeText(uri).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
 
   React.useEffect(() => {
     void window.electronAPI.pair.status().then(setStatus);
-    return window.electronAPI.pair.onStatusChanged(setStatus);
+    return window.electronAPI.pair.onStatusChanged((next) => {
+      setStatus(next);
+      // 配对已重新跑起来 / 有设备连上，清掉上一次的失败提示
+      if (next.pairing || next.devices.length > 0) setError(null);
+    });
   }, []);
 
   // 配对码变化时重画二维码；配对结束（inviteUri 消失）则清掉
@@ -94,16 +120,43 @@ export function PhoneSettings() {
       {error && <p className="text-destructive text-xs">{error}</p>}
 
       {status?.pairing && (
-        <div className="rounded-md border border-dashed px-3 py-6 text-center">
-          {qrDataUrl ? (
-            <img src={qrDataUrl} alt={t('Pairing QR code')} className="mx-auto h-52 w-52" />
-          ) : (
-            <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="space-y-3 rounded-md border border-dashed px-3 py-6">
+          <div className="text-center">
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt={t('Pairing QR code')} className="mx-auto h-52 w-52" />
+            ) : (
+              <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+            )}
+            <p className="mt-3 font-medium text-sm">{t('Scan with your phone')}</p>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {remaining === null
+                ? t('The code expires in 60 seconds and can only be used once.')
+                : remaining > 0
+                  ? t('Expires in {{seconds}}s · single use', { seconds: remaining })
+                  : t('Code expired')}
+            </p>
+          </div>
+
+          {status.inviteUri && (
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+                {status.inviteUri}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => copyInvite(status.inviteUri as string)}
+              >
+                {copied ? (
+                  <Check className="mr-1.5 h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {copied ? t('Copied') : t('Copy')}
+              </Button>
+            </div>
           )}
-          <p className="mt-3 font-medium text-sm">{t('Scan with your phone')}</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            {t('The code expires in 60 seconds and can only be used once.')}
-          </p>
         </div>
       )}
 

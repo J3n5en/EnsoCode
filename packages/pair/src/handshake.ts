@@ -26,14 +26,27 @@ export function decodeBoxedKey(s: string): BoxedContentKey {
 }
 
 async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) ?? `relay ${res.status}`);
-  return json;
+  // 网络抖动重试一次；10s 超时避免卡住配对流程
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // 4xx 是业务拒绝（如已被认领），不重试
+      if (!res.ok) throw new Error((json.error as string) ?? `relay ${res.status}`);
+      return json;
+    } catch (error) {
+      lastError = error;
+      const isNetwork = error instanceof TypeError || (error as Error)?.name === 'TimeoutError';
+      if (!isNetwork) throw error;
+    }
+  }
+  throw lastError;
 }
 
 // ── host 侧（Electron）────────────────────────────────────────────────

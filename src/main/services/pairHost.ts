@@ -62,6 +62,7 @@ const connections = new Map<string, Connection>();
 let pairingSession: HostPairSession | null = null;
 let pairingTimer: NodeJS.Timeout | null = null;
 let pairingInviteUri: string | null = null;
+let pairingExpiresAt: number | null = null;
 let onStatusChange: (() => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
@@ -111,6 +112,9 @@ export function setRelayUrl(url: string): void {
   relayUrlOverride = url.trim() ? url.trim() : null;
 }
 
+/** 配对码有效期，与中继侧 PAIR_TTL_MS 保持一致 */
+const PAIRING_TTL_MS = 60_000;
+
 /** 生成一次性密钥对 + 中继登记，返回 QR 内容；随后轮询等待手机认领 */
 export async function startPairing(): Promise<{ ok: boolean; inviteUri?: string; error?: string }> {
   cancelPairing();
@@ -121,12 +125,14 @@ export async function startPairing(): Promise<{ ok: boolean; inviteUri?: string;
       relay,
       publicKey: fromBase64Url(pairingSession.publicKeyB64),
     });
+    pairingExpiresAt = Date.now() + PAIRING_TTL_MS;
     pollPairing();
     notifyStatus();
     return { ok: true, inviteUri: pairingInviteUri };
   } catch (error) {
     pairingSession = null;
     pairingInviteUri = null;
+    pairingExpiresAt = null;
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -136,16 +142,16 @@ export function cancelPairing(): void {
   pairingTimer = null;
   pairingSession = null;
   pairingInviteUri = null;
+  pairingExpiresAt = null;
   notifyStatus();
 }
 
-/** 轮询中继直到手机 claim；配对码 TTL 60s，超时自动停 */
+/** 轮询中继直到手机 claim；到期自动停（与 UI 倒计时同一时间戳） */
 function pollPairing(): void {
-  const startedAt = Date.now();
   const tick = async (): Promise<void> => {
     const session = pairingSession;
     if (!session) return;
-    if (Date.now() - startedAt > 60_000) {
+    if (pairingExpiresAt !== null && Date.now() > pairingExpiresAt) {
       cancelPairing();
       return;
     }
@@ -163,6 +169,7 @@ function pollPairing(): void {
         saveDevices([...loadDevices().filter((d) => d.pairId !== device.pairId), device]);
         pairingSession = null;
         pairingInviteUri = null;
+        pairingExpiresAt = null;
         openConnection(device);
         notifyStatus();
         return;
@@ -201,6 +208,7 @@ export function getPairStatus(): PairStatus {
     relayUrl: getRelayUrl(),
     pairing: pairingSession !== null,
     ...(pairingInviteUri ? { inviteUri: pairingInviteUri } : {}),
+    ...(pairingExpiresAt ? { pairingExpiresAt } : {}),
     secureStorage: isSecureStorageAvailable(),
     devices: loadDevices().map((d) => {
       const conn = connections.get(d.pairId);

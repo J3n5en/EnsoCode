@@ -15,6 +15,8 @@ export interface PairStatus {
   pairing: boolean;
   /** 配对中的 QR 内容（enso://pair?...） */
   inviteUri?: string;
+  /** 配对码过期时间戳（ms），用于 UI 倒计时 */
+  pairingExpiresAt?: number;
   devices: PairStatusDevice[];
   /** safeStorage 是否可用；false 时 UI 必须提示密钥无法加密存储 */
   secureStorage: boolean;
