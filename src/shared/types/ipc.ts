@@ -92,6 +92,8 @@ export const IPC_CHANNELS = {
   PAIR_SET_RELAY: 'pair:set-relay',
   PAIR_CATALOG: 'pair:catalog',
   PAIR_STATUS_CHANGED: 'pair:status-changed',
+  /** main → renderer：手机订阅了某会话，请求恢复（历史会话在 worker 里没有投影） */
+  PAIR_RESUME_SESSION: 'pair:resume-session',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -31,6 +31,8 @@ export interface PairCatalogPayload {
     projectId: string;
     status: string;
     parentId?: string;
+    /** 最后活动时间（末条消息或创建时间） */
+    updatedAt?: number;
   }[];
   projects: { id: string; name: string; path: string }[];
   providers: { id: string; name: string; models: { id: string; label?: string }[] }[];

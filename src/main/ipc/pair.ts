@@ -5,6 +5,7 @@ import {
   cancelPairing,
   getPairStatus,
   revokeDevice,
+  setPairResumeListener,
   setPairStatusListener,
   setRelayUrl,
   startPairing,
@@ -17,6 +18,13 @@ export function registerPairHandlers(): void {
     const status = getPairStatus();
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_STATUS_CHANGED, status);
+    }
+  });
+
+  // 手机订阅历史会话时，请渲染层按桌面同路径恢复（worker 里才有投影可发）
+  setPairResumeListener((sessionId) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_RESUME_SESSION, sessionId);
     }
   });
 
