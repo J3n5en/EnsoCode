@@ -181,6 +181,8 @@ export const zhTranslations: Record<string, string> = {
   'The code expires in 60 seconds and can only be used once.':
     '配对码 60 秒后失效，且只能使用一次。',
   'Pairing QR code': '配对二维码',
+  'Expires in {{seconds}}s · single use': '{{seconds}} 秒后失效 · 仅可用一次',
+  'Code expired': '配对码已失效',
   'Paired devices': '已配对设备',
   'No paired devices': '暂无已配对设备',
   'Pair a phone to view sessions and reply on the go.': '配对手机后即可随时查看会话并回复。',
