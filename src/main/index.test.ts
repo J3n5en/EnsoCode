@@ -96,6 +96,16 @@ describe('Main userData isolation', () => {
     );
   });
 
+  it('defaults development userData to the isolated enso-code-dev profile', async () => {
+    await import('./index');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(mocks.setPath).toHaveBeenCalledWith(
+      'userData',
+      path.join('/system-app-data', 'enso-code-dev')
+    );
+  });
+
   it('ignores ENSO_USER_DATA_DIR in packaged builds', async () => {
     mocks.isPackaged = true;
     process.env.ENSO_USER_DATA_DIR = '/tmp/must-not-be-used';
