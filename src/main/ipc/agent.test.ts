@@ -95,6 +95,25 @@ describe('agent IPC Main identity boundary', () => {
     registerAgentHandlers();
   });
 
+  it('exposes the Main agent type registry snapshot on the three-point list channel', () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_TYPES_REGISTRY_LIST);
+    expect(handler).toBeDefined();
+    expect(handler!(event)).toEqual({
+      revision: 1,
+      candidates: [
+        {
+          typeKey: 'agent:enso',
+          displayName: 'Enso',
+          description: 'System Agent',
+          source: 'system',
+          locked: true,
+          canDisable: false,
+          canEdit: false,
+        },
+      ],
+    });
+  });
+
   it('rejects plain spawn attempts for the removed global/reserved Enso identity', async () => {
     const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SPAWN);
     expect(handler).toBeDefined();

@@ -294,6 +294,8 @@ export function registerAgentHandlers(): void {
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.AGENT_TYPES_REGISTRY_LIST, () => agentTypeRegistrySnapshot());
+
   ipcMain.handle(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE, (event, request: unknown) => {
     const parsed = parseParentSourceBindingRequest(request);
     if (!parsed) return { accepted: false, requestId: '', error: 'invalid source binding request' };
