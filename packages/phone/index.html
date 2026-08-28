@@ -12,7 +12,11 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!--
+      不用 black-translucent：那会把 webview 原点放到 y=0（内容钻到状态栏下），
+      但 iOS 给的高度仍是「屏幕高 - 状态栏」，于是底部空出一条与状态栏等高的
+      死区。默认样式下 webview 被摆在状态栏下方并铺满，没有这个问题。
+    -->
     <!-- iOS 只认 apple-touch-icon，manifest 里的 icons 它不读；缺了会拿页面截图当图标 -->
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <!-- 桌面图标下的名字，缺省会退回 <title> -->

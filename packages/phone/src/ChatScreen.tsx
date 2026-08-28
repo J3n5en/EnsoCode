@@ -126,6 +126,8 @@ export function ChatScreen(props: Props) {
           running={running}
           error={undefined}
           emptyTitle={props.projectName || 'EnsoCode'}
+          // 手机端不虚拟化：见 MessageTimeline 里 virtualize 的说明
+          virtualize={false}
         />
       )}
 

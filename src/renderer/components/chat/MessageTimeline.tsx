@@ -44,6 +44,13 @@ interface MessageTimelineProps {
   error?: string;
   /** 空态标题（项目名） */
   emptyTitle: string;
+  /**
+   * 是否虚拟化。移动端置 false：真机实测 Virtuoso 在 WebKit 上跳转到底时，
+   * 渲染范围切换的中间态列表变短会被浏览器钳位滚动位置，之后模型再也涨不回去，
+   * 末条消息永远差一截露不出来（表现为点「回到底部」滚不到底、画面来回跳）。
+   * 手机一次只看一个会话、条数有限，直接全量渲染更可靠。
+   */
+  virtualize?: boolean;
 }
 
 /**
@@ -58,6 +65,7 @@ export function MessageTimeline({
   runStartedAt,
   error,
   emptyTitle,
+  virtualize = true,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -66,6 +74,7 @@ export function MessageTimeline({
   const atBottomRef = useRef(true);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const settleRef = useRef(0);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
   // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
@@ -104,13 +113,13 @@ export function MessageTimeline({
   }, [items]);
 
   /** 单次贴底：只在确实没贴底时写，贴住后不再碰 scrollTop（反复写会与 Virtuoso 自身的滚动纠正打架） */
-  const pinToBottom = () => {
+  const pinToBottom = useCallback(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
       scroller.scrollTop = scroller.scrollHeight;
     }
-  };
+  }, []);
 
   /*
    * 滚到底：Virtuoso 动态测高会在滚动后继续修正总高（窄屏换行远多于估算、iOS 测量更慢），
@@ -144,13 +153,65 @@ export function MessageTimeline({
     atBottomRef.current = true;
   };
   useEffect(() => () => cancelAnimationFrame(settleRef.current), []);
+
+  /*
+   * 全量渲染下的跟随：内容常在提交之后才继续长高（markdown 渲染、代码高亮、图片），
+   * 只在数据变化时贴一次会漏掉这部分，一旦漏出超过贴底阈值就判定为“用户已上滚”，
+   * 跟随就此中断。盯住内容高度，长高即补贴底。
+   * 用回调 ref 而非 effect：挂载时快照往往还没到（列表是加载态、节点不存在），
+   * effect 只跑一次会永远绑不上。
+   */
+  const attachContent = useCallback(
+    (el: HTMLDivElement | null) => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      if (!el) return;
+      const observer = new ResizeObserver(() => {
+        if (atBottomRef.current) pinToBottom();
+      });
+      observer.observe(el);
+      observerRef.current = observer;
+    },
+    [pinToBottom]
+  );
+  useEffect(() => () => observerRef.current?.disconnect(), []);
   useImperativeHandle(ref, () => ({
     scrollToBottom,
     pinToBottom,
     isAtBottom: () => atBottomRef.current,
   }));
 
+  // 两条渲染路径（虚拟化 / 全量）共用，保证外观完全一致
+  const renderRow = (item: TimelineItem) => (
+    <div
+      key={item.key}
+      className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
+      {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
+    >
+      <RowErrorBoundary itemKey={item.key}>
+        <TimelineRow item={item} onToggleGroup={toggleGroup} />
+      </RowErrorBoundary>
+    </div>
+  );
+  const renderFooter = () => (
+    <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
+      {busy && (
+        <div className="flex items-center gap-2.5">
+          <LoadingDots />
+          {runStartedAt !== undefined && <ElapsedTimer since={runStartedAt} />}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>}
+    </div>
+  );
+
   const jumpTo = (key: string) => {
+    if (!virtualize) {
+      scrollerRef.current
+        ?.querySelector(`[data-nav-key="${CSS.escape(key)}"]`)
+        ?.scrollIntoView({ block: 'start' });
+      return;
+    }
     const index = folded.findIndex((item) => item.key === key);
     if (index >= 0) {
       virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
@@ -171,6 +232,27 @@ export function MessageTimeline({
           <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
         </div>
+      ) : !virtualize ? (
+        <div
+          ref={(el) => {
+            scrollerRef.current = el;
+          }}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
+            if (value !== atBottomRef.current) {
+              atBottomRef.current = value;
+              setAtBottom(value);
+            }
+          }}
+          className="h-full select-text overflow-y-auto"
+        >
+          <div ref={attachContent}>
+            <div className="h-6" />
+            {folded.map(renderRow)}
+            {renderFooter()}
+          </div>
+        </div>
       ) : (
         <Virtuoso
           ref={virtuosoRef}
@@ -183,8 +265,8 @@ export function MessageTimeline({
             setAtBottom(value);
             atBottomRef.current = value;
           }}
-          initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
           increaseViewportBy={{ top: 600, bottom: 600 }}
+          initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
           // 可视范围起点附近的 user 轮次作为导航条高亮
           rangeChanged={({ startIndex }) => {
             let current: string | null = null;
@@ -199,28 +281,9 @@ export function MessageTimeline({
           className="h-full select-text"
           components={{
             Header: () => <div className="h-6" />,
-            Footer: () => (
-              <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
-                {busy && (
-                  <div className="flex items-center gap-2.5">
-                    <LoadingDots />
-                    {runStartedAt !== undefined && <ElapsedTimer since={runStartedAt} />}
-                  </div>
-                )}
-                {error && <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>}
-              </div>
-            ),
+            Footer: renderFooter,
           }}
-          itemContent={(_, item) => (
-            <div
-              className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
-              {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
-            >
-              <RowErrorBoundary itemKey={item.key}>
-                <TimelineRow item={item} onToggleGroup={toggleGroup} />
-              </RowErrorBoundary>
-            </div>
-          )}
+          itemContent={(_, item) => renderRow(item)}
         />
       )}
       {!atBottom && items.length > 0 && (
