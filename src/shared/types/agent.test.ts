@@ -43,6 +43,7 @@ const model = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'k',
   modelId: 'gpt',
+  settingsProviderId: 'provider-entry-1',
 };
 const task = { text: 'Configure theme', images: [], fileMentions: [] };
 const proof = {
@@ -158,6 +159,28 @@ describe('parent/child commands', () => {
     ).toBeNull();
     expect(
       parseAgentCommand({ type: 'spawn', sessionId: parent.sessionId, cwd: '/repo', model })
+    ).toBeNull();
+  });
+
+  it('spawn model 缺 settingsProviderId 必须拒绝：worker 回报 ready 模型身份要用它', () => {
+    // 生产端 spawnModelConfig() 恒发该字段，worker 的 settingsModelRef() 缺了就抛错。
+    // 解析器若放行，命令会在 worker 入口被静默丢弃 → Main 只能等 ready 握手超时。
+    const { settingsProviderId: _omitted, ...withoutSettingsProvider } = model;
+    expect(
+      parseAgentCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/repo',
+        model: withoutSettingsProvider,
+      })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/repo',
+        model: { ...model, settingsProviderId: '' },
+      })
     ).toBeNull();
   });
 

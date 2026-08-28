@@ -41,6 +41,7 @@ const apiKeySpawn = {
   baseUrl: 'https://relay.example/v1',
   apiKey: 'sk-relay',
   modelId: 'claude-sonnet-4',
+  settingsProviderId: 'settings-provider',
 };
 
 describe('resolveBaseModel apiKey', () => {
@@ -67,6 +68,7 @@ describe('resolveBaseModel apiKey', () => {
     const model = resolveBaseModel(runtime, {
       ...apiKeySpawn,
       modelId: 'my-private-gateway-model',
+      settingsProviderId: 'settings-provider',
     });
     expect(model.reasoning).toBe(true);
     expect(model.thinkingLevelMap).toEqual({ max: 'max' });
@@ -115,6 +117,7 @@ describe('resolveBaseModel apiKey', () => {
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-test',
       modelId: 'gpt-4.1',
+      settingsProviderId: 'settings-provider',
     });
     expect(model.reasoning).toBe(false);
     expect(model.thinkingLevelMap).toBeUndefined();
@@ -146,6 +149,7 @@ describe('resolveBaseModel oauth', () => {
       baseUrl: '',
       apiKey: '',
       modelId: 'claude-sonnet-4-5',
+      settingsProviderId: 'settings-provider',
       oauthAccountKey: 'anthropic',
       reasoning: 'off',
       thinkingLevel: 'low',

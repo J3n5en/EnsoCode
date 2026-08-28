@@ -36,6 +36,12 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
   apiKey: string;
   modelId: string;
   /**
+   * settings 里的 provider 条目 id。parent-ready / child-ready 必须用它回报模型身份
+   * （见 supervisor.settingsModelRef 与 agentHost.modelRefForSpawnConfig，缺失即抛错），
+   * 因此它是 spawn 命令的必填字段，解析器同样强制要求。
+   */
+  settingsProviderId: string;
+  /**
    * 订阅账号 key（= 合成 provider id，见 shared/types/oauthProviders.ts）。
    * 存在时 worker 直取该 key 对应的 provider 与模型，凭证由 pi runtime 从 auth.json 解析。
    */
@@ -703,6 +709,7 @@ function parseSpawnModelConfig(value: unknown): SpawnModelConfig | null {
       'baseUrl',
       'apiKey',
       'modelId',
+      'settingsProviderId',
       'oauthAccountKey',
       'reasoning',
       'thinkingLevel',
@@ -713,6 +720,7 @@ function parseSpawnModelConfig(value: unknown): SpawnModelConfig | null {
     typeof value.baseUrl !== 'string' ||
     typeof value.apiKey !== 'string' ||
     !isNonEmptyString(value.modelId) ||
+    !isNonEmptyString(value.settingsProviderId) ||
     (value.oauthAccountKey !== undefined && !isNonEmptyString(value.oauthAccountKey))
   ) {
     return null;
