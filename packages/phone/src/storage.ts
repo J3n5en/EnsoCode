@@ -3,6 +3,8 @@ import type { PairedDevice } from '@enso/pair';
 /** 配对凭据持久化。含 contentKey，故存 localStorage（浏览器沙箱内），解绑后远程失效。 */
 
 const KEY = 'enso-phone-pairing';
+/** 每会话的消息游标，用于重连增量续传 */
+const CURSOR_KEY = 'enso-phone-cursors';
 
 export function loadPairing(): PairedDevice | null {
   try {
@@ -19,10 +21,11 @@ export function savePairing(device: PairedDevice): void {
 
 export function clearPairing(): void {
   localStorage.removeItem(KEY);
+  // 游标属于旧配对：不清会让重新配对后的增量续传按旧 index 起算而漏消息
+  localStorage.removeItem(CURSOR_KEY);
 }
 
 /** 每会话的消息游标，用于重连增量续传 */
-const CURSOR_KEY = 'enso-phone-cursors';
 
 export function loadCursors(): Record<string, number> {
   try {

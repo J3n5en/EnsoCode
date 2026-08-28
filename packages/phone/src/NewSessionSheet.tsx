@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Z_INDEX } from '@/lib/z-index';
 
 export interface NewSessionRequest {
   projectId: string;
@@ -33,12 +34,20 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
 
 /** 新建会话：只能选桌面已添加的项目（cwd 由 main 反查）与已启用的模型 */
 export function NewSessionSheet({ projects, providers, open, onClose, onCreate }: Props) {
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
-  const [providerId, setProviderId] = useState(providers[0]?.id ?? '');
-  const [modelId, setModelId] = useState(providers[0]?.models[0]?.id ?? '');
+  // 组件常驻挂载，目录是异步到达的：选中值存"用户是否显式选过"，
+  // 实际取值再对当前列表做校验回落，避免初值算在空列表上而永远选不中。
+  const [pickedProject, setPickedProject] = useState<string | null>(null);
+  const [pickedProvider, setPickedProvider] = useState<string | null>(null);
+  const [pickedModel, setPickedModel] = useState<string | null>(null);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('full');
 
-  const provider = providers.find((p) => p.id === providerId);
+  const projectId = projects.find((p) => p.id === pickedProject)?.id ?? projects[0]?.id ?? '';
+  const provider = providers.find((p) => p.id === pickedProvider) ??
+    providers[0] ?? { id: '', models: [] };
+  const providerId = provider.id;
+  const modelId =
+    provider.models.find((m) => m.id === pickedModel)?.id ?? provider.models[0]?.id ?? '';
+
   const canCreate = Boolean(projectId && providerId && modelId);
 
   return (
@@ -47,17 +56,17 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
         <SheetHeader>
           <SheetTitle>新建会话</SheetTitle>
         </SheetHeader>
-        <div className="space-y-4 p-4">
+        <div className="space-y-4 p-4 pt-0">
           <Field label="项目">
             <Select
               items={projects.map((p) => ({ value: p.id, label: p.name }))}
               value={projectId}
-              onValueChange={(v) => setProjectId(v as string)}
+              onValueChange={(v) => setPickedProject(v as string)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
+              <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
@@ -72,14 +81,14 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
               items={providers.map((p) => ({ value: p.id, label: p.name }))}
               value={providerId}
               onValueChange={(v) => {
-                setProviderId(v as string);
-                setModelId(providers.find((p) => p.id === v)?.models[0]?.id ?? '');
+                setPickedProvider(v as string);
+                setPickedModel(null);
               }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
+              <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                 {providers.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
@@ -91,15 +100,15 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
 
           <Field label="模型">
             <Select
-              items={(provider?.models ?? []).map((m) => ({ value: m.id, label: m.label ?? m.id }))}
+              items={provider.models.map((m) => ({ value: m.id, label: m.label ?? m.id }))}
               value={modelId}
-              onValueChange={(v) => setModelId(v as string)}
+              onValueChange={(v) => setPickedModel(v as string)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
-                {(provider?.models ?? []).map((m) => (
+              <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                {provider.models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label ?? m.id}
                   </SelectItem>
@@ -120,7 +129,7 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
+              <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                 {(Object.keys(APPROVAL_LABELS) as ApprovalMode[]).map((mode) => (
                   <SelectItem key={mode} value={mode}>
                     {APPROVAL_LABELS[mode]}
@@ -132,6 +141,9 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
 
           {projects.length === 0 && (
             <p className="text-destructive text-xs">桌面端还没有项目，请先在桌面添加。</p>
+          )}
+          {projects.length > 0 && providers.length === 0 && (
+            <p className="text-destructive text-xs">桌面端没有可用的模型服务。</p>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
