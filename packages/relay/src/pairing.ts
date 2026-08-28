@@ -84,6 +84,6 @@ export function tokenValid(
   role: 'host' | 'guest',
   token: string
 ): boolean {
-  if (!state || state.phase !== 'authorized' || !token) return false;
+  if (state?.phase !== 'authorized' || !token) return false;
   return role === 'host' ? token === state.hostToken : token === state.deviceToken;
 }

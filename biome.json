@@ -52,6 +52,8 @@
       "!**/node_modules",
       "!**/out",
       "!**/dist",
+      "!**/.wrangler",
+      "!**/.vite",
       "!**/*.min.js",
       "!**/*.css",
       "!.trellis",
