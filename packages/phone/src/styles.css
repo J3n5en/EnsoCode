@@ -135,7 +135,13 @@
   body {
     @apply bg-background text-foreground;
     margin: 0;
-    height: 100%;
+    /*
+     * 移动端不能用 100%：那是布局视口，比可见区域高，底部（输入框）会被
+     * 地址栏挡住。dvh 跟随浏览器 UI 收缩；键盘弹起时再由 main.tsx 用
+     * visualViewport 覆盖 --app-height。
+     */
+    height: 100dvh;
+    height: var(--app-height, 100dvh);
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
   }
