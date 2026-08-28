@@ -64,6 +64,7 @@ export const IPC_CHANNELS = {
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
+  DIALOG_SELECT_FILE: 'dialog:select-file',
 
   // Recent projects from local apps
   PROJECTS_GET_RECENT: 'projects:get-recent',
@@ -71,6 +72,8 @@ export const IPC_CHANNELS = {
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
   FILES_READ: 'files:read',
+  // 目录媒体文件枚举（背景图文件夹随机模式）
+  FILES_LIST_MEDIA: 'files:list-media',
 
   // External session import
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',

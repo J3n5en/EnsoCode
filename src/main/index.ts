@@ -5,6 +5,10 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
+import {
+  registerLocalImageProtocolHandler,
+  registerLocalImageSchemePrivileges,
+} from './services/localImageProtocol';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
@@ -16,6 +20,9 @@ if (!app.isPackaged) {
 // 打包版 productName=EnsoCode 会把 userData 指到新目录，与 dev（enso-code）分家；
 // 统一到 enso-code，保证打包版接上既有会话与设置
 app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
+
+// 背景图媒体协议：特权 scheme 必须在 app ready 前登记
+registerLocalImageSchemePrivileges();
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -43,6 +50,7 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
+    registerLocalImageProtocolHandler();
     startAgentWorker();
     // 手机第二屏：恢复已配对设备的中继连接（与 agent worker 并列，不依赖窗口）
     startPairHost();

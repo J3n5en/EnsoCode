@@ -368,6 +368,7 @@ export function Composer({
       )}
 
       <div
+        data-slot="composer"
         className={cn(
           'rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring',
           dragging && 'border-ring bg-muted/30'
@@ -405,10 +406,7 @@ export function Composer({
           </div>
         )}
         <div
-          className={cn(
-            'flex items-start gap-1.5 px-3.5',
-            images.length > 0 ? 'pt-1.5' : 'pt-3'
-          )}
+          className={cn('flex items-start gap-1.5 px-3.5', images.length > 0 ? 'pt-1.5' : 'pt-3')}
         >
           {slash && (
             <SlashChip

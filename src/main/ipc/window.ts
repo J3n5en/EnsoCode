@@ -17,6 +17,23 @@ export function registerWindowHandlers(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
+  // 选单个文件；可选扩展名过滤（不带点，如 ['png','jpg']）
+  ipcMain.handle(
+    IPC_CHANNELS.DIALOG_SELECT_FILE,
+    async (event, extensions: unknown): Promise<string | null> => {
+      const win = senderWindow(event);
+      if (!win) return null;
+      const exts = Array.isArray(extensions)
+        ? extensions.filter((ext): ext is string => typeof ext === 'string' && ext.length > 0)
+        : [];
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openFile'],
+        filters: exts.length > 0 ? [{ name: 'Media', extensions: exts }] : undefined,
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, (event) => {
     senderWindow(event)?.minimize();
   });
