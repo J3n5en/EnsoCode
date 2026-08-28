@@ -16,7 +16,7 @@ import {
   TerminalSquare,
   Undo2,
 } from 'lucide-react';
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -145,13 +145,7 @@ function SkillTag({ name, content }: { name: string; content: string }) {
   );
 }
 
-function ChipBubble({
-  chip,
-  extra,
-}: {
-  chip: ReactNode;
-  extra?: string;
-}) {
+function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   return (
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
       {chip}
@@ -165,10 +159,7 @@ function SkillInvocation({ text }: { text: string }) {
   if (!match) return null;
   const [, name, , content, userMessage] = match;
   return (
-    <ChipBubble
-      chip={<SkillTag name={name} content={content} />}
-      extra={userMessage?.trim()}
-    />
+    <ChipBubble chip={<SkillTag name={name} content={content} />} extra={userMessage?.trim()} />
   );
 }
 
@@ -485,9 +476,13 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
 
   useEffect(() => {
     if (!expanded || !logPath || log !== undefined) return;
-    void window.electronAPI.files.read(logPath).then((content) => {
-      setLog(content);
-    });
+    void window.electronAPI.files
+      .read(logPath)
+      .then((content) => {
+        setLog(typeof content === 'string' ? content : null);
+      })
+      // 同 EditDiff：读失败也要落地成明确状态，否则一直是「加载中」
+      .catch(() => setLog(null));
   }, [expanded, logPath, log]);
 
   return (

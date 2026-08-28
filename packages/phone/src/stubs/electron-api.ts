@@ -10,7 +10,10 @@ export function installElectronApiShim(): void {
   Object.defineProperty(window, 'electronAPI', {
     value: {
       files: {
-        read: async () => ({ ok: false as const, content: '' }),
+        // 必须返回 null：桌面端契约是 Promise<string | null>，失败即 null。
+        // 早先返回 { ok, content } 这种对象，调用方的 `content != null` 判断会通过，
+        // 拿着对象去做字符串操作直接抛错，Promise 链断掉、界面永远停在加载态。
+        read: async (): Promise<string | null> => null,
         search: async () => [],
         pathForFile: () => null,
       },
