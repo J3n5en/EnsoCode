@@ -25,6 +25,12 @@ export type FontWeight =
   | '800'
   | '900';
 
+/** 背景图来源：单张图片 / 本地文件夹随机 / 远程 URL */
+export type BackgroundSourceType = 'file' | 'folder' | 'url';
+
+/** 背景图填充方式（映射到 background-size/repeat/position） */
+export type BackgroundSizeMode = 'cover' | 'contain' | 'repeat' | 'center';
+
 export interface SettingsState {
   // UI
   theme: Theme;
@@ -52,6 +58,39 @@ export interface SettingsState {
 
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
+
+  // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
+  /** 背景图总开关；缺省 false */
+  backgroundImageEnabled: boolean;
+  backgroundSourceType: BackgroundSourceType;
+  /** file 模式：本地图片/视频绝对路径 */
+  backgroundImagePath: string;
+  /** folder 模式：随机取图的本地目录 */
+  backgroundFolderPath: string;
+  /** url 模式：http(s) 图片地址（经主进程代理加载） */
+  backgroundUrlPath: string;
+  /** folder/url 模式下定时自动换图 */
+  backgroundRandomEnabled: boolean;
+  /** 自动换图间隔（秒），setter 内 clamp 5–86400 */
+  backgroundRandomInterval: number;
+  /** 背景可见度 0–1；前景面板 alpha = 1 - opacity（背景图本身不变透明） */
+  backgroundOpacity: number;
+  /** 模糊半径 0–20 px */
+  backgroundBlur: number;
+  /** 亮度 0–2（1 为原图） */
+  backgroundBrightness: number;
+  /** 饱和度 0–2（1 为原图） */
+  backgroundSaturation: number;
+  /** 底部输入框（Composer）的不透明度 0–1，独立于面板 alpha 单独可调 */
+  backgroundComposerOpacity: number;
+  /** 代码块 / diff 视图的不透明度 0–1，独立可调（保可读性同时透出背景） */
+  backgroundCodeOpacity: number;
+  backgroundSizeMode: BackgroundSizeMode;
+  /**
+   * 手动刷新计数器。设置窗口点「立即刷新」时 +1，借设置持久化的多窗口同步
+   * 广播传到主窗口，驱动 BackgroundLayer 重新随机选图 / 绕开远程缓存。
+   */
+  backgroundRefreshNonce: number;
 
   // Model providers
   providers: ModelProvider[];
@@ -89,6 +128,24 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
+
+  // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
+  setBackgroundImageEnabled: (value: boolean) => void;
+  setBackgroundSourceType: (type: BackgroundSourceType) => void;
+  setBackgroundImagePath: (path: string) => void;
+  setBackgroundFolderPath: (path: string) => void;
+  setBackgroundUrlPath: (url: string) => void;
+  setBackgroundRandomEnabled: (value: boolean) => void;
+  setBackgroundRandomInterval: (seconds: number) => void;
+  setBackgroundOpacity: (opacity: number) => void;
+  setBackgroundBlur: (blur: number) => void;
+  setBackgroundBrightness: (brightness: number) => void;
+  setBackgroundSaturation: (saturation: number) => void;
+  setBackgroundComposerOpacity: (opacity: number) => void;
+  setBackgroundCodeOpacity: (opacity: number) => void;
+  setBackgroundSizeMode: (mode: BackgroundSizeMode) => void;
+  /** 手动刷新：nonce +1，经多窗口同步触发主窗口重新取图 */
+  bumpBackgroundRefresh: () => void;
   setStatusLineSegments: (segments: StatusLineSegmentId[]) => void;
   toggleStatusLineSegment: (id: StatusLineSegmentId, enabled: boolean) => void;
 

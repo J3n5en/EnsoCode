@@ -5,6 +5,10 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
+import {
+  registerLocalImageProtocolHandler,
+  registerLocalImageSchemePrivileges,
+} from './services/localImageProtocol';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
@@ -15,6 +19,9 @@ if (!app.isPackaged) {
 // 打包版 productName=EnsoCode 会把 userData 指到新目录，与 dev（enso-code）分家；
 // 统一到 enso-code，保证打包版接上既有会话与设置
 app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
+
+// 背景图媒体协议：特权 scheme 必须在 app ready 前登记
+registerLocalImageSchemePrivileges();
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -42,6 +49,7 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
+    registerLocalImageProtocolHandler();
     startAgentWorker();
     const mainWindow = createMainWindow();
     void initAutoUpdater(mainWindow);
