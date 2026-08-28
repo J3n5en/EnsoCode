@@ -10,7 +10,8 @@ export type SettingsCategory =
   | 'instructions'
   | 'presets'
   | 'agents'
-  | 'tools';
+  | 'tools'
+  | 'phone';
 
 /** API 协议取值 → 设置页展示名；列表徽章与编辑弹窗共用。 */
 export const API_KIND_LABELS: Record<ModelApiKind, string> = {

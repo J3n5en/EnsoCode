@@ -6,6 +6,7 @@ import {
   Plug,
   Server,
   Settings,
+  Smartphone,
   Sparkles,
   Wrench,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import type { SettingsCategory } from './constants';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { McpSettings } from './McpSettings';
+import { PhoneSettings } from './PhoneSettings';
 import { PresetsSettings } from './PresetsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { SkillsSettings } from './SkillsSettings';
@@ -37,6 +39,7 @@ export function SettingsContent() {
     { id: 'skills', icon: Sparkles, label: t('Skills') },
     { id: 'mcp', icon: Plug, label: t('MCP Servers') },
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
+    { id: 'phone', icon: Smartphone, label: t('Phone') },
   ];
 
   return (
@@ -72,6 +75,7 @@ export function SettingsContent() {
         {activeCategory === 'presets' && <PresetsSettings />}
         {activeCategory === 'agents' && <AgentTypesSettings />}
         {activeCategory === 'tools' && <BuiltinToolsSettings />}
+        {activeCategory === 'phone' && <PhoneSettings />}
       </div>
     </div>
   );
