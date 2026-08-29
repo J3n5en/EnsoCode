@@ -67,7 +67,8 @@ interface ChatCandidateSource {
 
 const MAX_CHAT_CANDIDATES = 20;
 
-/** 同项目 root 会话且有 jsonl 可读才成候选；排除当前会话，createdAt 倒序取前 20。 */
+/** root 会话且有 jsonl 可读才成候选（跨项目收录）；排除当前会话，
+ * 同项目优先排前、组内 createdAt 倒序，取前 20。 */
 export function toChatMentionCandidates(
   conversations: readonly ChatCandidateSource[],
   projectId: string,
@@ -76,12 +77,14 @@ export function toChatMentionCandidates(
   return conversations
     .filter(
       (conversation) =>
-        conversation.projectId === projectId &&
-        conversation.id !== currentId &&
-        !conversation.parentId &&
-        !!conversation.sessionFile
+        conversation.id !== currentId && !conversation.parentId && !!conversation.sessionFile
     )
-    .sort((left, right) => right.createdAt - left.createdAt)
+    .sort((left, right) => {
+      const sameLeft = left.projectId === projectId ? 0 : 1;
+      const sameRight = right.projectId === projectId ? 0 : 1;
+      if (sameLeft !== sameRight) return sameLeft - sameRight;
+      return right.createdAt - left.createdAt;
+    })
     .slice(0, MAX_CHAT_CANDIDATES)
     .map((conversation) => ({
       kind: 'chat' as const,

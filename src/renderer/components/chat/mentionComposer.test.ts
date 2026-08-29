@@ -109,9 +109,9 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
-  it('turns same-project root conversations with session files into chat candidates', () => {
+  it('turns root conversations with session files into chat candidates across projects', () => {
     const conversations = [
-      // 命中：同项目 root 会话且有 sessionFile
+      // 同项目：优先排前
       { id: 'c1', title: 'fix login', projectId: 'p1', sessionFile: '/s/c1.jsonl', createdAt: 3 },
       { id: 'c2', title: '', projectId: 'p1', sessionFile: '/s/c2.jsonl', createdAt: 5 },
       // 排除：当前会话
@@ -127,13 +127,14 @@ describe('typed multi-entity mentions', () => {
       },
       // 排除：无 sessionFile（无从回放）
       { id: 'c4', title: 'draft', projectId: 'p1', createdAt: 7 },
-      // 排除：其它项目
-      { id: 'c5', title: 'other', projectId: 'p2', sessionFile: '/s/c5.jsonl', createdAt: 6 },
+      // 跨项目：也收录，排在同项目之后
+      { id: 'c5', title: 'other proj', projectId: 'p2', sessionFile: '/s/c5.jsonl', createdAt: 6 },
     ];
     expect(toChatMentionCandidates(conversations, 'p1', 'self')).toEqual([
-      // createdAt 倒序；空标题回落
+      // 同项目 createdAt 倒序在前；空标题回落；跨项目垫后
       { kind: 'chat', id: 'c2', label: 'Untitled chat', sessionFile: '/s/c2.jsonl' },
       { kind: 'chat', id: 'c1', label: 'fix login', sessionFile: '/s/c1.jsonl' },
+      { kind: 'chat', id: 'c5', label: 'other proj', sessionFile: '/s/c5.jsonl' },
     ]);
     const many = Array.from({ length: 30 }, (_, i) => ({
       id: `m${i}`,
