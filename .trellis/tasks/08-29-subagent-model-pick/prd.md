@@ -7,10 +7,12 @@
 主 agent 无法按任务挑模型（如简单子任务用便宜模型）。模型凭证只在 main 进程解析
 （agentHost.resolveModelSelection → SpawnModelConfig 含 apiKey），worker 没有模型目录。
 
-## 用户决策
+## 用户决策（v2，覆盖逐模型勾选方案）
 
-- 可选模型范围由用户在「模型中心」逐模型勾选（新增开关），而非自动暴露全部模型。
+- 集中配置：设置页默认模型下方「允许子代理指定模型」开关，打开后维护
+  「模型 + 选型描述」列表（SubagentModelEntry）；描述注入工具 model 参数说明。
 - 工具调用显式指定的 model 优先于 agent_type 绑定模型。
+- 旧方案（ModelEntry.subagent 逐模型勾选）已 revert。
 
 ## 方案
 
