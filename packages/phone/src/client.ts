@@ -57,6 +57,8 @@ export class PairClient {
   private revoked = false;
   private subscribedId: string | null = null;
   private sessions = new Map<string, SessionView>();
+  /** 分页请求在途标记（每会话一次一发，响应或换订阅时清） */
+  private historyPending = new Set<string>();
 
   constructor(
     private device: PairedDevice,
@@ -195,6 +197,20 @@ export class PairClient {
       case 'agent-event':
         this.applyAgentEvent(payload.event as Record<string, unknown>);
         break;
+      case 'history': {
+        // 上滑分页应答：只并入消息，不动 status/审批（那些以尾窗快照为准）
+        this.historyPending.delete(payload.sessionId);
+        const view = this.sessions.get(payload.sessionId);
+        if (!view || payload.messages.length === 0) break;
+        const messages = new Map(view.messages);
+        for (const [i, message] of payload.messages.entries()) {
+          messages.set(payload.baseIndex + i, message as ProjectedMessage);
+        }
+        const next = { ...view, messages };
+        this.sessions.set(payload.sessionId, next);
+        this.events.onSession(payload.sessionId, { ...next, messages: new Map(messages) });
+        break;
+      }
     }
   }
 
@@ -221,9 +237,7 @@ export class PairClient {
         const prevMax = existing?.size ? Math.max(...existing.keys()) : -1;
         // 离线太久、尾窗与已有内容接不上：丢弃旧段保持时间线连续，上滑可重新拉回
         const messages =
-          existing && base <= prevMax + 1
-            ? new Map(existing)
-            : new Map<number, ProjectedMessage>();
+          existing && base <= prevMax + 1 ? new Map(existing) : new Map<number, ProjectedMessage>();
         for (const [i, message] of (snap.messages ?? []).entries()) {
           messages.set(base + i, message);
           saveCursor(id, base + i);
@@ -294,6 +308,7 @@ export class PairClient {
   /** 订阅会话：带上本地游标，只补断线期间的增量 */
   subscribe(sessionId: string | null): void {
     this.subscribedId = sessionId;
+    this.historyPending.clear();
     if (!sessionId) {
       this.send({ type: 'subscribe', sessionId: null });
       return;
@@ -304,5 +319,21 @@ export class PairClient {
       sessionId,
       ...(typeof sinceIndex === 'number' ? { sinceIndex } : {}),
     });
+  }
+
+  /** 是否还有更早的历史可拉（已加载区间起点 > 0） */
+  hasOlder(sessionId: string): boolean {
+    const view = this.sessions.get(sessionId);
+    if (!view || view.messages.size === 0) return false;
+    return Math.min(...view.messages.keys()) > 0;
+  }
+
+  /** 上滑加载上一页；无更早内容或已在途时静默忽略 */
+  requestHistory(sessionId: string): void {
+    if (this.historyPending.has(sessionId) || !this.hasOlder(sessionId)) return;
+    const view = this.sessions.get(sessionId);
+    if (!view) return;
+    this.historyPending.add(sessionId);
+    this.send({ type: 'history', sessionId, beforeIndex: Math.min(...view.messages.keys()) });
   }
 }

@@ -152,6 +152,10 @@ export function App() {
         canCreate={state === 'online' && projects.length > 0}
         modelLabel={state === 'online' ? modelLabel : undefined}
         onOpenConfig={() => setConfigOpen(true)}
+        hasOlder={Boolean(
+          activeId && view && view.messages.size > 0 && Math.min(...view.messages.keys()) > 0
+        )}
+        onLoadOlder={() => activeId && clientRef.current?.requestHistory(activeId)}
         onSend={(text, images) => {
           if (!activeId) return;
           send({

@@ -31,6 +31,8 @@ export interface MessageTimelineHandle {
   pinToBottom(): void;
   /** 当前是否贴底（Virtuoso 的判定，比自己算 scrollHeight 可靠） */
   isAtBottom(): boolean;
+  /** 非虚拟化模式的滚动容器（手机端分页需要读写 scrollTop 补偿锚点）；虚拟化下为 null */
+  getScroller(): HTMLElement | null;
 }
 
 interface MessageTimelineProps {
@@ -51,6 +53,11 @@ interface MessageTimelineProps {
    * 手机一次只看一个会话、条数有限，直接全量渲染更可靠。
    */
   virtualize?: boolean;
+  /**
+   * 滚动接近顶部时回调（仅非虚拟化模式；带锁存，离开顶部区域后才会再次触发）。
+   * 手机端用于上滑加载更早的历史分页。
+   */
+  onStartReached?: () => void;
 }
 
 /**
@@ -66,6 +73,7 @@ export function MessageTimeline({
   error,
   emptyTitle,
   virtualize = true,
+  onStartReached,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -179,7 +187,11 @@ export function MessageTimeline({
     scrollToBottom,
     pinToBottom,
     isAtBottom: () => atBottomRef.current,
+    getScroller: () => (virtualize ? null : scrollerRef.current),
   }));
+
+  // 顶部触发锁存：进入顶部区域只触发一次，滚离后解锁（避免加载期间连环触发）
+  const startReachedLatch = useRef(false);
 
   // 两条渲染路径（虚拟化 / 全量）共用，保证外观完全一致
   const renderRow = (item: TimelineItem) => (
@@ -243,6 +255,14 @@ export function MessageTimeline({
             if (value !== atBottomRef.current) {
               atBottomRef.current = value;
               setAtBottom(value);
+            }
+            if (onStartReached) {
+              if (el.scrollTop < 80 && !startReachedLatch.current) {
+                startReachedLatch.current = true;
+                onStartReached();
+              } else if (el.scrollTop > 240) {
+                startReachedLatch.current = false;
+              }
             }
           }}
           className="h-full select-text overflow-y-auto"

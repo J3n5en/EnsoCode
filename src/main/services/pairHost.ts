@@ -40,6 +40,7 @@ import {
   parsePhoneCommand,
   type SpawnWhitelist,
   shouldForward,
+  sliceHistory,
 } from './pairPolicy';
 import {
   isSecureStorageAvailable,
@@ -71,6 +72,8 @@ interface Connection {
   /** 手机当前订阅的会话（null = 列表页，不收正文） */
   subscribedId: string | null;
   sinceIndex?: number;
+  /** 待应答的 history 分页请求（beforeIndex）；下一个 snapshot 事件到达时切片发回 */
+  pendingHistory?: number;
   phoneOnline: boolean;
   attempt: number;
   timer: NodeJS.Timeout | null;
@@ -472,6 +475,8 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'subscribe':
       conn.subscribedId = command.sessionId;
       conn.sinceIndex = command.sinceIndex;
+      // 换了订阅，旧会话的分页请求作废
+      conn.pendingHistory = undefined;
       // 历史会话在 worker 里没有投影，先请渲染层恢复（与桌面点开会话同路径），
       // 再要快照；已启动的会话 resume 会自行忽略。
       if (command.sessionId) onResumeRequest?.(command.sessionId);
@@ -494,6 +499,12 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'set-thinking':
       // 结构已校验；store 的 setReasoning/setThinking 自带「已启动会话即时下发」逻辑
       onSessionConfig?.(command);
+      break;
+    case 'history':
+      // 只服务当前订阅会话：其它会话的正文本就不该下发
+      if (command.sessionId !== conn.subscribedId) return;
+      conn.pendingHistory = command.beforeIndex;
+      requestSnapshot();
       break;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
@@ -571,6 +582,25 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
     if (!conn.phoneOnline) continue;
     // snapshot 是全量批事件，裁成只含订阅会话再发
     if (e.type === 'snapshot') {
+      const full = event as {
+        type: string;
+        sessions?: { sessionId: string; messages?: unknown[] }[];
+      };
+      // 有挂起的分页请求：切 beforeIndex 之前的一页发回，不重复发尾窗
+      if (conn.pendingHistory !== undefined && conn.subscribedId) {
+        const session = full.sessions?.find((s) => s.sessionId === conn.subscribedId);
+        if (session && Array.isArray(session.messages)) {
+          const page = sliceHistory(session.messages, conn.pendingHistory);
+          void send(conn, {
+            type: 'history',
+            sessionId: conn.subscribedId,
+            baseIndex: page.baseIndex,
+            messages: page.messages,
+          });
+        }
+        conn.pendingHistory = undefined;
+        continue;
+      }
       const narrowed = narrowSnapshot(
         event as { type: string; sessions?: { sessionId: string }[] },
         conn.subscribedId

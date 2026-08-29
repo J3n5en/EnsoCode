@@ -91,6 +91,12 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
         return { ok: false, error: 'invalid level' };
       }
       return { ok: true, command: value as PhoneToHost };
+    case 'history':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (typeof v.beforeIndex !== 'number' || v.beforeIndex < 0) {
+        return { ok: false, error: 'invalid beforeIndex' };
+      }
+      return { ok: true, command: value as PhoneToHost };
     default:
       return { ok: false, error: `command not allowed: ${String(v.type)}` };
   }
@@ -161,7 +167,10 @@ interface SnapshotSession {
 }
 
 /** 从尾部往前取，直到条数或字节预算耗尽；至少保 1 条（单条超预算也发，交给中继裁决） */
-function takeTail(messages: unknown[], endIndex: number): { messages: unknown[]; baseIndex: number } {
+function takeTail(
+  messages: unknown[],
+  endIndex: number
+): { messages: unknown[]; baseIndex: number } {
   let bytes = 0;
   let start = endIndex;
   while (start > 0 && endIndex - start < SNAPSHOT_TAIL_MESSAGES) {

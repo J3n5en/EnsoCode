@@ -4,10 +4,10 @@ import {
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
-  shouldForward,
-  sliceHistory,
   SNAPSHOT_TAIL_MESSAGES,
   type SpawnWhitelist,
+  shouldForward,
+  sliceHistory,
 } from './pairPolicy';
 
 describe('手机命令白名单', () => {
@@ -78,6 +78,13 @@ describe('手机命令白名单', () => {
       false
     );
     expect(parsePhoneCommand({ type: 'set-model', providerId: 'pr', modelId: 'm' }).ok).toBe(false);
+  });
+
+  it('history 结构校验：beforeIndex 必须是非负数字', () => {
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's', beforeIndex: 40 }).ok).toBe(true);
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's', beforeIndex: -1 }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's' }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'history', beforeIndex: 40 }).ok).toBe(false);
   });
 
   it('set-reasoning / set-thinking 结构校验', () => {
