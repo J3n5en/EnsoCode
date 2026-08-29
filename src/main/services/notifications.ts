@@ -8,12 +8,14 @@ import { readSettings } from '../ipc/settings';
 // （index.js 被打成 0 字节空产物），故不走共享 i18n
 const TEXTS = {
   zh: {
+    ask: '等你回答',
     approval: '需要审批',
     turnDone: '回复完成',
     turnDoneBody: 'agent 已完成,等你查看。',
     failed: '会话失败',
   },
   en: {
+    ask: 'Question for you',
     approval: 'Approval required',
     turnDone: 'Turn completed',
     turnDoneBody: 'The agent finished and is waiting for you.',
@@ -63,6 +65,10 @@ export function maybeNotify(event: RendererAgentEvent): void {
   if (mainWindowFocused()) return;
   const t = texts();
   switch (event.type) {
+    case 'ask-request':
+      // agent 在等答复才能继续,不提醒会静默卡住整个会话
+      notify(event.identity.sessionId, t.ask, event.ask.question.slice(0, 100));
+      return;
     case 'approval-request':
       notify(
         event.identity.sessionId,
