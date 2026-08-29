@@ -228,6 +228,13 @@ const electronAPI = {
       notify?: boolean
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_DISMISS_COWORKER, parentSessionId, coworkerId, notify),
+    /** 手动雇佣：走 Main dispatch（typed child），tab 由 child-reserved/ready 回流建立 */
+    hireCoworker: (
+      parentConversationId: string,
+      name: string,
+      agentType?: string
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_HIRE_COWORKER, parentConversationId, name, agentType),
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
     requestSnapshot: (): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),

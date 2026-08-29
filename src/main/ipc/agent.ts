@@ -503,6 +503,31 @@ export function registerAgentHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.AGENT_HIRE_COWORKER,
+    async (
+      event,
+      parentConversationId: unknown,
+      name: unknown,
+      agentType: unknown
+    ): Promise<AgentActionResult> => {
+      // 手动雇佣走 Main dispatch（与 Enso team.hire 同款守卫：reservation/容量/
+      // name 去重/exact 握手）；渲染层只交 conversationId + 名字 + 类型。
+      if (
+        !isMainWebContents(event.sender.id) ||
+        !isNonEmptyString(parentConversationId) ||
+        !isNonEmptyString(name) ||
+        (agentType !== undefined && !isNonEmptyString(agentType))
+      ) {
+        return { ok: false, error: 'invalid hire request' };
+      }
+      const service = getAgentDispatchService();
+      if (!service) return { ok: false, error: 'Agent dispatcher is unavailable.' };
+      const result = await service.hireCoworker(parentConversationId, name, agentType);
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.AGENT_DISMISS_COWORKER,
     (_event, parentSessionId: unknown, coworkerId: unknown, notify: unknown): AgentActionResult => {
       const parent = exactIdentity(parentSessionId);

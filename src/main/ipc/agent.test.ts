@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   persistedConversation: vi.fn(),
   currentIdentity: vi.fn(),
   coworkerOf: vi.fn(),
+  resolveTeamTarget: vi.fn(),
+  isMainWebContents: vi.fn(() => true),
   dismissChildSession: vi.fn(() => ({ ok: true })),
   dismissCoworkerSession: vi.fn(() => ({ ok: true })),
   promptSession: vi.fn(),
@@ -29,7 +31,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-vi.mock('../windows/MainWindow', () => ({ isMainWebContents: vi.fn(() => true) }));
+vi.mock('../windows/MainWindow', () => ({ isMainWebContents: mocks.isMainWebContents }));
 vi.mock('../services/oauthProviders', () => ({
   readStoredOauthCredentialKeys: vi.fn(async () => new Set<string>()),
 }));
@@ -83,7 +85,7 @@ vi.mock('./capabilities', () => ({
     observe: vi.fn(),
     reserveChild: vi.fn(),
     releaseChild: vi.fn(),
-    resolveTeamTarget: vi.fn(),
+    resolveTeamTarget: mocks.resolveTeamTarget,
     persistedConversation: mocks.persistedConversation,
     coworkerOf: mocks.coworkerOf,
   },
@@ -166,6 +168,32 @@ describe('agent IPC Main identity boundary', () => {
       })
     ).resolves.toEqual({ ok: false, error: 'invalid spawn request' });
     expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
+  describe('手动雇佣走 Main dispatch', () => {
+    it('非主窗口 / 非法参数拒绝；合法请求委托 dispatchService.hireCoworker', async () => {
+      const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_HIRE_COWORKER);
+      expect(handler).toBeDefined();
+      await expect(handler!(event, 'conv-1', '', undefined)).resolves.toMatchObject({
+        ok: false,
+      });
+      mocks.isMainWebContents.mockReturnValueOnce(false);
+      await expect(handler!(event, 'conv-1', 'bob', undefined)).resolves.toMatchObject({
+        ok: false,
+      });
+      // 合法请求到达 dispatchService：hireCoworker 首先查 resolveTeamTarget，
+      // 这里用哨兵错误证明委托链路真实走通。
+      mocks.resolveTeamTarget.mockReturnValue({
+        ok: false,
+        code: 'unavailable',
+        error: 'sentinel: team target',
+      });
+      await expect(handler!(event, 'conv-1', 'bob', 'scout')).resolves.toMatchObject({
+        ok: false,
+        error: 'sentinel: team target',
+      });
+      expect(mocks.resolveTeamTarget).toHaveBeenCalledWith('conv-1');
+    });
   });
 
   describe('dismiss 降级链：typed child → legacy coworker → not-found', () => {

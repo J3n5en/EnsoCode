@@ -65,6 +65,7 @@ export const IPC_CHANNELS = {
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
+  AGENT_HIRE_COWORKER: 'agent:hire-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',
 
   // Agent type registry + sender-bound deterministic child dispatch

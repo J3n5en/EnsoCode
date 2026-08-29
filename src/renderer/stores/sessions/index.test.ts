@@ -91,6 +91,7 @@ const dismissCoworker = vi.fn(
     ok: true,
   })
 );
+const hireCoworker = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -127,6 +128,7 @@ vi.stubGlobal('window', {
       prompt: agentPrompt,
       spawn: vi.fn(async () => ({ ok: true })),
       dismissCoworker,
+      hireCoworker,
       abort: vi.fn(async () => ({ ok: true })),
     },
     agentDispatch: {
@@ -844,6 +846,42 @@ describe('typed Agent child projection', () => {
         sessionsModule.useSessionsStore.getState().conversations['parent::cw-dead'];
       expect(conversation.started).toBe(true);
       expect(conversation.ended).toBeUndefined();
+    });
+  });
+
+  describe('手动雇佣委托 Main dispatch', () => {
+    it('已启动父会话：委托 IPC，错误透传；未启动：不发 IPC', async () => {
+      hireCoworker.mockClear();
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, started: true },
+        },
+      }));
+      const ok = await sessionsModule.useSessionsStore
+        .getState()
+        .hireCoworker('parent', ' bob ', 'Scout');
+      expect(ok).toBeNull();
+      expect(hireCoworker).toHaveBeenCalledWith('parent', 'bob', 'Scout');
+
+      hireCoworker.mockResolvedValueOnce({ ok: false, error: 'capacity reached' });
+      const failed = await sessionsModule.useSessionsStore
+        .getState()
+        .hireCoworker('parent', 'bob2');
+      expect(failed).toBe('capacity reached');
+
+      hireCoworker.mockClear();
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, started: false },
+        },
+      }));
+      const notStarted = await sessionsModule.useSessionsStore
+        .getState()
+        .hireCoworker('parent', 'bob');
+      expect(notStarted).toBe('conversation not started');
+      expect(hireCoworker).not.toHaveBeenCalled();
     });
   });
 

@@ -1545,12 +1545,15 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        async hireCoworker(parentId, name, _agentType) {
+        async hireCoworker(parentId, name, agentType) {
           const parent = get().conversations[parentId];
           if (!parent?.started) return 'conversation not started';
-          if (!name.trim()) return 'invalid name';
-          // 旧直雇通道已被 Main 权威派发架构封死；新 IPC 接 dispatchService 后恢复可用。
-          return 'hire is temporarily unavailable — use @Agent mention to dispatch';
+          const trimmed = name.trim();
+          if (!trimmed) return 'invalid name';
+          // 走 Main dispatch（与 Enso team.hire 同款守卫）；tab 建立与选中由
+          // child-reserved 事件回流驱动，本地不预先造会话对象。
+          const result = await window.electronAPI.agent.hireCoworker(parentId, trimmed, agentType);
+          return result.ok ? null : (result.error ?? 'hire failed');
         },
       };
     },
