@@ -165,6 +165,43 @@ async function waitForAsk(asks: unknown[], count: number) {
 }
 
 describe('CapabilityGateway child/generation安全合同', () => {
+  it('危险 team hire/dismiss 必须拿到真实取消 guard，终止 generation 后 guard 立即失效', async () => {
+    // 用户批准后才进入 reserve/spawn/ready；关窗、结束 parent、终止 generation 都发生在那之后。
+    // 入口处检一次不够，必须把 guard 交给 dispatch service 在每个不可逆边界前重验。
+    const { gateway, services, asks } = fixture();
+    // team.* 的 availability 要求源会话已启动；不满足时会在 ASK 之前就判不可用。
+    services.sessionIndex.listCoworkers = (() => ({ ok: true, data: [] })) as never;
+    const hiring = gateway.invoke(request('hire-1', 'team.hire-coworker', { name: 'scout-1' }));
+    await waitForAsk(asks, 1);
+    gateway.respond(7, { child, turnId: 'turn-1', requestId: 'hire-1', decision: 'allow' });
+    await hiring;
+
+    const guard = vi.mocked(services.hireCoworker).mock.calls.at(-1)?.[3];
+    expect(guard).toBeDefined();
+    expect(guard?.signal).toBeInstanceOf(AbortSignal);
+    expect(guard?.assertExecutionCurrent()).toBe(true);
+
+    // generation 被终止后，同一个 guard 必须立即报不再 current，
+    // 否则 service 会在旧 generation 上继续提交不可逆动作。
+    gateway.terminateGeneration(child, 'window closed');
+    expect(guard?.assertExecutionCurrent()).toBe(false);
+  });
+
+  it('dismiss 同样传 guard，不能只在入口检一次', async () => {
+    const { gateway, services, asks } = fixture();
+    services.sessionIndex.listCoworkers = (() => ({ ok: true, data: [] })) as never;
+    const dismissing = gateway.invoke(
+      request('dismiss-1', 'team.dismiss-coworker', { coworkerId: 'cw-1' })
+    );
+    await waitForAsk(asks, 1);
+    gateway.respond(7, { child, turnId: 'turn-1', requestId: 'dismiss-1', decision: 'allow' });
+    await dismissing;
+
+    const guard = vi.mocked(services.dismissCoworker).mock.calls.at(-1)?.[2];
+    expect(guard).toBeDefined();
+    expect(guard?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('custom agent type 的 edit/delete 接受 list 开出的 custom: typeKey', async () => {
     // list 只给 typeKey，不给内部条目 id；写入端若只认裸 id，模型根本无从获得合法参数。
     const { gateway, state, asks } = fixture();

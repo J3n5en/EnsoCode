@@ -39,6 +39,7 @@ import type {
 } from '@shared/types/oauthProviders';
 import type { RecentProject } from '@shared/types/project';
 import type { ListModelsResult, TestProviderResult } from '@shared/types/providerApi';
+import type { TeamExecutionGuard } from './agentDispatchService';
 import type { AgentSessionIndex } from './agentSessionIndex';
 import { createSecretSet, type SecretSet } from './secretRedactor';
 
@@ -107,9 +108,28 @@ export interface CapabilityDomainServices {
   hireCoworker(
     parentConversationId: string,
     name: string,
-    agentType?: string
+    agentType?: string,
+    guard?: TeamExecutionGuard
   ): Promise<CapabilityResult>;
-  dismissCoworker(parentConversationId: string, coworkerId: string): Promise<CapabilityResult>;
+  dismissCoworker(
+    parentConversationId: string,
+    coworkerId: string,
+    guard?: TeamExecutionGuard
+  ): Promise<CapabilityResult>;
+}
+
+/**
+ * 把 handler 的取消上下文折成 dispatch service 认的 guard。
+ *
+ * hire/dismiss 是有外溢的不可逆动作，且跨 reserve/spawn/ready/handshake 多个异步边界。
+ * 只在入口处检一次 assertExecutionCurrent 不够——用户批准后关窗/结束 parent/终止
+ * generation 都发生在那之后，而外部动作可能已经跑了。
+ */
+function teamGuardOf(context: CapabilityHandlerContext): TeamExecutionGuard {
+  return {
+    signal: context.signal,
+    assertExecutionCurrent: () => context.assertExecutionCurrent() === null,
+  };
 }
 
 interface CapabilityHandlerContext extends CapabilityInvocationContext {
@@ -1089,10 +1109,13 @@ export function createCapabilityHandlers(
       }
       const stale = context.assertExecutionCurrent();
       if (stale) return stale;
+      // 入口处检一次不够：hire 要跨 reserve → spawn → ready 好几个异步边界。
+      // 把 guard 一并交给 dispatch service，让它在每个不可逆边界前重验。
       return services.hireCoworker(
         context.parentBinding.parentConversationId,
         name,
-        typeof params.agentType === 'string' ? params.agentType : undefined
+        typeof params.agentType === 'string' ? params.agentType : undefined,
+        teamGuardOf(context)
       );
     },
     'team.dismiss-coworker': async (context, params) => {
@@ -1100,7 +1123,11 @@ export function createCapabilityHandlers(
       if (!coworkerId) return invalid('coworkerId is required');
       const stale = context.assertExecutionCurrent();
       if (stale) return stale;
-      return services.dismissCoworker(context.parentBinding.parentConversationId, coworkerId);
+      return services.dismissCoworker(
+        context.parentBinding.parentConversationId,
+        coworkerId,
+        teamGuardOf(context)
+      );
     },
     'updates.check': async () => {
       await services.checkForUpdates();
