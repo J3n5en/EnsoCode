@@ -22,6 +22,15 @@ export type PairControl =
   /** 配对已被任一端解除：收到即清本地凭据、停止重连，不可与网络断开混淆 */
   | { type: 'revoked' };
 
+/**
+ * Web Push 订阅（PushSubscription.toJSON() 的结构子集）。
+ * 手机经加密信道交给桌面，桌面 main 用 web-push 直发，中继不参与。
+ */
+export interface PushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
 // ── 上行：手机 → Electron（加密 payload，白名单）─────────────────────────
 export type PhoneToHost =
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
@@ -47,7 +56,10 @@ export type PhoneToHost =
   | { type: 'set-reasoning'; sessionId: string; enabled: boolean }
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
   /** 上滑分页：拉取 beforeIndex 之前的一页历史消息 */
-  | { type: 'history'; sessionId: string; beforeIndex: number };
+  | { type: 'history'; sessionId: string; beforeIndex: number }
+  /** 登记/解除 Web Push 订阅：手机离线时桌面用它发系统推送 */
+  | { type: 'push-subscribe'; subscription: PushSubscriptionJson }
+  | { type: 'push-unsubscribe' };
 
 /** 手机命令白名单：main 只接受这些 type，其余（set-approval-mode、设置写入等）拒绝 */
 export const PHONE_COMMAND_TYPES = [
@@ -63,6 +75,8 @@ export const PHONE_COMMAND_TYPES = [
   'set-reasoning',
   'set-thinking',
   'history',
+  'push-subscribe',
+  'push-unsubscribe',
 ] as const satisfies readonly PhoneToHost['type'][];
 
 export function isPhoneCommand(value: unknown): value is PhoneToHost {
@@ -152,5 +166,7 @@ export type HostToPhone =
       terminalFontFamily?: string;
     }
   | { type: 'agent-event'; event: unknown }
+  /** Web Push 能力下发：手机拿 VAPID 公钥才能 pushManager.subscribe */
+  | { type: 'push-config'; vapidPublicKey: string }
   /** history 命令的应答：baseIndex 之前拼接的一页消息，手机按绝对 index 合并 */
   | { type: 'history'; sessionId: string; baseIndex: number; messages: unknown[] };

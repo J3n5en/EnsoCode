@@ -18,9 +18,24 @@ export const BrowserWindow = {
   getAllWindows: () => [],
 };
 
+export const safeStorage = {
+  isEncryptionAvailable: () => false,
+  encryptString: (s: string) => Buffer.from(s, 'utf-8'),
+  decryptString: (b: Buffer) => b.toString('utf-8'),
+};
+
 export const shell = { openExternal: () => {} };
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
 export const powerMonitor = { on: () => {} };
 export const powerSaveBlocker = { start: () => 0, stop: () => {} };
 
-export default { app, ipcMain, BrowserWindow, shell, Menu, powerMonitor, powerSaveBlocker };
+export default {
+  app,
+  ipcMain,
+  BrowserWindow,
+  safeStorage,
+  shell,
+  Menu,
+  powerMonitor,
+  powerSaveBlocker,
+};

@@ -104,6 +104,23 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
         return { ok: false, error: 'invalid level' };
       }
       return { ok: true, command: value as PhoneToHost };
+    case 'push-subscribe': {
+      const sub = v.subscription as Record<string, unknown> | undefined;
+      if (typeof sub !== 'object' || sub === null) {
+        return { ok: false, error: 'missing subscription' };
+      }
+      // 推送端点只能是 https：main 会向它发请求，不接受手机指向任意协议/内网
+      if (!isStr(sub.endpoint) || !sub.endpoint.startsWith('https://')) {
+        return { ok: false, error: 'invalid endpoint' };
+      }
+      const keys = sub.keys as Record<string, unknown> | undefined;
+      if (typeof keys !== 'object' || keys === null || !isStr(keys.p256dh) || !isStr(keys.auth)) {
+        return { ok: false, error: 'invalid keys' };
+      }
+      return { ok: true, command: value as PhoneToHost };
+    }
+    case 'push-unsubscribe':
+      return { ok: true, command: value as PhoneToHost };
     case 'history':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
       if (typeof v.beforeIndex !== 'number' || v.beforeIndex < 0) {

@@ -45,6 +45,7 @@ export {
   type PhoneToHost,
   type ProjectEntry,
   type ProviderEntry,
+  type PushSubscriptionJson,
   type TerminalPalette,
   type ThinkingLevel,
 } from './protocol';

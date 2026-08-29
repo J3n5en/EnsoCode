@@ -47,6 +47,14 @@ import {
   saveDevices,
   saveRelayUrl,
 } from './pairStore';
+import {
+  buildPushPayload,
+  clearPushSubscription,
+  getVapidPublicKey,
+  hasPushSubscription,
+  sendPush,
+  setPushSubscription,
+} from './pushNotifier';
 
 /**
  * 手机第二屏 host：跑在 main，不依赖窗口焦点。
@@ -437,6 +445,8 @@ function forgetDevice(pairId: string): void {
     conn.ws = null;
     connections.delete(pairId);
   }
+  // 设备忘掉，推送订阅也一并清：避免继续向已解绑的手机发通知
+  clearPushSubscription(pairId);
   saveDevices(loadDevices().filter((d) => d.pairId !== pairId));
 }
 
@@ -524,6 +534,12 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       conn.pendingHistory = command.beforeIndex;
       requestSnapshot();
       break;
+    case 'push-subscribe':
+      setPushSubscription(conn.device.pairId, command.subscription);
+      break;
+    case 'push-unsubscribe':
+      clearPushSubscription(conn.device.pairId);
+      break;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
       if (!check.ok) {
@@ -591,6 +607,8 @@ async function sendMeta(conn: Connection): Promise<void> {
     ...(terminal ? { terminal } : {}),
     ...(terminalFontFamily ? { terminalFontFamily } : {}),
   });
+  // Web Push 能力下发：手机拿公钥才能 pushManager.subscribe
+  await send(conn, { type: 'push-config', vapidPublicKey: getVapidPublicKey() });
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
@@ -605,7 +623,17 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
   //（线上 PWA 不随桌面版同步发布），下发前归一化补上
   const flatSessionId = e.identity?.sessionId ?? e.sessionId;
   for (const conn of connections.values()) {
-    if (!conn.phoneOnline) continue;
+    if (!conn.phoneOnline) {
+      // 手机离线但登记过推送订阅：关键事件转为系统推送（只发通用文案）
+      if (hasPushSubscription(conn.device.pairId)) {
+        const payload = buildPushPayload(
+          e,
+          catalog.find((entry) => entry.id === flatSessionId)?.title
+        );
+        if (payload) void sendPush(conn.device.pairId, payload);
+      }
+      continue;
+    }
     // snapshot 是全量批事件，裁成只含订阅会话再发
     if (e.type === 'snapshot') {
       const full = event as {

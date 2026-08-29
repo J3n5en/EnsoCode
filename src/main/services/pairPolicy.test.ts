@@ -81,6 +81,23 @@ describe('手机命令白名单', () => {
     );
   });
 
+  it('push-subscribe 结构校验：endpoint 必须 https，keys 必填', () => {
+    const sub = (over: Record<string, unknown> = {}) => ({
+      type: 'push-subscribe',
+      subscription: {
+        endpoint: 'https://push.example.com/x',
+        keys: { p256dh: 'k1', auth: 'k2' },
+        ...over,
+      },
+    });
+    expect(parsePhoneCommand(sub()).ok).toBe(true);
+    expect(parsePhoneCommand(sub({ endpoint: 'http://evil/x' })).ok).toBe(false);
+    expect(parsePhoneCommand(sub({ keys: { p256dh: 'k1' } })).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'push-subscribe' }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'push-subscribe', subscription: 'x' }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'push-unsubscribe' }).ok).toBe(true);
+  });
+
   it('set-model 结构校验：三个 id 必填', () => {
     expect(
       parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr', modelId: 'm' }).ok
