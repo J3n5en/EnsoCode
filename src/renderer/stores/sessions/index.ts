@@ -1580,7 +1580,16 @@ export const useSessionsStore = create<SessionsState>()(
         order: state.order,
         activeId: state.activeId,
       }),
-      onRehydrateStorage: () => () => {
+      onRehydrateStorage: () => (state) => {
+        // partialize 只管写。旧版本已把 started:true 落盘的用户，升级后第一次
+        // 启动仍会读回陈旧的 true 而门死自动恢复，故读时再兜一次。
+        // worker 与 app 同生命周期，rehydrate 这一刻不可能有会话还活着；
+        // 真活着的（刷新场景）由随后的 snapshot 重新置回 true。
+        if (state) {
+          for (const conversation of Object.values(state.conversations)) {
+            conversation.started = false;
+          }
+        }
         // 刷新时 worker 仍活着：要一份全量投影把消息接回来
         void window.electronAPI.agent.requestSnapshot();
       },
