@@ -285,6 +285,29 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...command, resumeFile: '/tmp/x.jsonl' })).toBeNull();
   });
 
+  it('resume-coworker 绑 exact parent，resumeFile 必填，coworkerId 归属校验', () => {
+    // 双形状过渡命令：Main 从自己读的持久化取 name/agentType/resumeFile，
+    // 渲染层永远不参与——但解析器仍要把关：缺 resumeFile 的、跨会话的都拒。
+    const command = {
+      type: 'resume-coworker',
+      parent,
+      coworkerId: 'conversation-1::cw-bob',
+      name: 'bob',
+      agentType: 'scout',
+      resumeFile: '/tmp/sessions/bob.jsonl',
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, agentType: undefined })).toEqual({
+      ...command,
+      agentType: undefined,
+    });
+    expect(parseAgentCommand({ ...command, resumeFile: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, resumeFile: undefined })).toBeNull();
+    expect(parseAgentCommand({ ...command, name: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, coworkerId: 'conversation-2::cw-bob' })).toBeNull();
+    expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
+  });
+
   it('capability-result 绑定 child/turn/request 并只接受 envelope', () => {
     const command = {
       type: 'capability-result',

@@ -69,6 +69,61 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     ).toMatchObject({ ok: true });
   });
 
+  it('reserveChildResume 保留原 instanceId/name/typeKey，只换新 generation', () => {
+    // §7.3：resume 的身份连续性——sessionFile/instanceId/name 不变，每次恢复新 generation。
+    const sessions = index();
+    sessions.prepareParent(parent);
+    const metadata = {
+      parentId: parent.sessionId,
+      childGeneration: 'old-generation',
+      agentTypeKey: 'builtin:scout' as const,
+      agentInstanceId: '99999999-9999-4999-8999-999999999999',
+      agentInstanceName: 'Scout · 9999',
+      dispatchOrigin: 'typed-mention' as const,
+    };
+    const resumed = sessions.reserveChildResume(parent, metadata, 'resume-1');
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+    const child = resumed.reservation.child;
+    expect(child.sessionId).toBe(`${parent.sessionId}::cw-${metadata.agentInstanceId}`);
+    expect(child.instanceId).toBe(metadata.agentInstanceId);
+    expect(child.instanceName).toBe(metadata.agentInstanceName);
+    expect(child.typeKey).toBe('builtin:scout');
+    expect(child.generation).not.toBe('old-generation');
+    expect(resumed.reservation.metadata.childGeneration).toBe(child.generation);
+    // 恢复预约同样占容量名额，与新雇共用 occupied 计数
+    for (let position = 1; position < MAX_ORIGIN_COWORKERS; position += 1) {
+      expect(sessions.reserveChild(parent, 'builtin:worker', 'Worker', `fill-${position}`).ok).toBe(
+        true
+      );
+    }
+    expect(sessions.reserveChild(parent, 'builtin:worker', 'Worker', 'overflow')).toMatchObject({
+      ok: false,
+      code: 'capacity-reached',
+    });
+  });
+
+  it('reserveChildResume 拒绝名字已被占用与旧代父身份', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    const metadata = {
+      parentId: parent.sessionId,
+      childGeneration: 'old-generation',
+      agentTypeKey: 'builtin:scout' as const,
+      agentInstanceId: '99999999-9999-4999-8999-999999999999',
+      agentInstanceName: 'Scout · 9999',
+      dispatchOrigin: 'typed-mention' as const,
+    };
+    expect(sessions.reserveChildResume(parent, metadata, 'resume-1').ok).toBe(true);
+    // 同名重复恢复（并发/重入）→ 拒绝，不得换名降级
+    expect(sessions.reserveChildResume(parent, metadata, 'resume-2').ok).toBe(false);
+    const stale: SessionIdentity = { sessionId: parent.sessionId, generation: 'stale' };
+    expect(sessions.reserveChildResume(stale, metadata, 'resume-3')).toMatchObject({
+      ok: false,
+      code: 'stale-parent',
+    });
+  });
+
   it('rejects stale generations and cannot activate an unreserved child identity', () => {
     const sessions = index();
     sessions.prepareParent(parent);

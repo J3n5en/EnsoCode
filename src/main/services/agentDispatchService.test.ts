@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { CapabilityReceipt } from '@shared/capabilities/types';
 import type {
   AgentSessionCustomEntry,
@@ -17,8 +18,16 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+interface SetupOptions {
+  /** 注入持久化会话状态（settings.json 的 enso-conversations.state） */
+  persistedState?: (conversationId: string) => Record<string, unknown>;
+  /** 覆盖 resolveAgentType（模拟类型已删） */
+  resolveAgentTypeError?: string;
+}
+
 async function setup(
-  proofOverride?: (proof: ResolvedAgentTypeSpawnConfig) => Partial<ResolvedAgentTypeSpawnConfig>
+  proofOverride?: (proof: ResolvedAgentTypeSpawnConfig) => Partial<ResolvedAgentTypeSpawnConfig>,
+  options: SetupOptions = {}
 ) {
   const root = path.join(process.cwd(), 'temp', `dispatch-${crypto.randomUUID()}`);
   const projectPath = path.join(root, 'project');
@@ -40,7 +49,18 @@ async function setup(
     selection: { providerId: 'provider', modelId: 'model' },
   });
   if (!selected.accepted) throw new Error(selected.error);
-  const index = new AgentSessionIndex({ readSettings: () => null });
+  let persistedConversationId = '';
+  const index = new AgentSessionIndex({
+    readSettings: () =>
+      options.persistedState && persistedConversationId
+        ? {
+            'enso-conversations': {
+              state: options.persistedState(persistedConversationId),
+            },
+          }
+        : null,
+  });
+  persistedConversationId = conversation.value.conversationId;
   const bindings = new ActiveConversationRegistry({
     authority,
     sessionIndex: index,
@@ -83,6 +103,18 @@ async function setup(
   };
   const mainEvents: DispatchMainEvent[] = [];
   const customEntries: AgentSessionCustomEntry[] = [];
+  const spawnChildCalls: Array<{
+    identity: ChildSessionIdentity;
+    cwd: string;
+    resumeFile?: string;
+  }> = [];
+  const resumeCoworkerCalls: Array<{
+    parent: { sessionId: string; generation: string };
+    coworkerId: string;
+    name: string;
+    agentType?: string;
+    resumeFile: string;
+  }> = [];
   let service!: AgentDispatchService;
   service = new AgentDispatchService({
     sourceRegistry: bindings,
@@ -115,12 +147,15 @@ async function setup(
           config: config.model,
         },
       }),
-      resolveAgentType: () => ({
-        ok: true,
-        config,
-        expectedModel: { providerId: 'provider', modelId: 'model' },
-        expectedToolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
-      }),
+      resolveAgentType: () =>
+        options.resolveAgentTypeError
+          ? { ok: false, error: options.resolveAgentTypeError }
+          : {
+              ok: true,
+              config,
+              expectedModel: { providerId: 'provider', modelId: 'model' },
+              expectedToolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
+            },
       spawnParent: (identity) => {
         queueMicrotask(() =>
           service.observe({
@@ -133,7 +168,8 @@ async function setup(
         );
         return { ok: true };
       },
-      spawnChild: (identity) => {
+      spawnChild: (identity, cwd, _config, resumeFile) => {
+        spawnChildCalls.push({ identity, cwd, ...(resumeFile ? { resumeFile } : {}) });
         const altered = proofOverride?.(config) ?? {};
         queueMicrotask(() =>
           service.observe({
@@ -160,14 +196,29 @@ async function setup(
         return { ok: true };
       },
       dismissChild: () => ({ ok: true }),
+      resumeCoworker: (parent, coworkerId, name, agentType, resumeFile) => {
+        resumeCoworkerCalls.push({
+          parent,
+          coworkerId,
+          name,
+          ...(agentType ? { agentType } : {}),
+          resumeFile,
+        });
+        return { ok: true };
+      },
     },
   });
   return {
     service,
+    conversationId: conversation.value.conversationId,
     selectionBindingId: selection.binding.selectionBindingId,
     mainEvents,
     customEntries,
     bindings,
+    index,
+    spawnChildCalls,
+    resumeCoworkerCalls,
+    root,
   };
 }
 
@@ -328,5 +379,114 @@ describe('AgentDispatchService delta coordination', () => {
       1
     );
     expect(result).toMatchObject({ accepted: false, code: 'dispatch-failed' });
+  });
+});
+
+describe('parent-ready 级联恢复 child（§7.3）', () => {
+  const INSTANCE_ID = '99999999-9999-4999-8999-999999999999';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** 持久化形状：typed child（带 metadata）+ 工具直雇 legacy + 已 ended + 缺 sessionFile */
+  function persistedState(conversationId: string): Record<string, unknown> {
+    const typedId = `${conversationId}::cw-${INSTANCE_ID}`;
+    const legacyId = `${conversationId}::cw-bob`;
+    const endedId = `${conversationId}::cw-ended`;
+    const noFileId = `${conversationId}::cw-nofile`;
+    return {
+      conversations: {
+        [conversationId]: { coworkerIds: [typedId, legacyId, endedId, noFileId] },
+        [typedId]: {
+          sessionFile: '/tmp/typed.jsonl',
+          child: {
+            parentId: conversationId,
+            childGeneration: '77777777-7777-4777-8777-777777777777',
+            agentTypeKey: 'agent:enso',
+            agentInstanceId: INSTANCE_ID,
+            agentInstanceName: 'Enso · 9999',
+            dispatchOrigin: 'typed-mention',
+            lockedProfileId: 'enso-locked-v1',
+          },
+        },
+        [legacyId]: {
+          sessionFile: '/tmp/bob.jsonl',
+          coworkerName: 'bob',
+          agentType: 'scout',
+        },
+        [endedId]: {
+          ended: true,
+          sessionFile: '/tmp/ended.jsonl',
+          coworkerName: 'gone',
+        },
+        [noFileId]: { coworkerName: 'nofile' },
+      },
+    };
+  }
+
+  async function ready(fixture: Awaited<ReturnType<typeof setup>>, generation: string) {
+    const identity = { sessionId: fixture.conversationId, generation };
+    fixture.index.prepareParent(identity);
+    fixture.service.observe({
+      type: 'parent-ready',
+      identity,
+      seq: 1,
+      sessionFile: path.join(fixture.root, 'parent.jsonl'),
+      model: { providerId: 'provider', modelId: 'model' },
+    });
+    await settle();
+    return identity;
+  }
+
+  it('typed child 走 resume 预约 + spawnChild(resumeFile)；legacy 走 resumeCoworker；ended/缺文件跳过', async () => {
+    const fixture = await setup(undefined, { persistedState });
+    const identity = await ready(fixture, '11111111-1111-4111-8111-111111111111');
+
+    expect(fixture.spawnChildCalls).toHaveLength(1);
+    const typed = fixture.spawnChildCalls[0];
+    expect(typed.identity.instanceId).toBe(INSTANCE_ID);
+    expect(typed.identity.instanceName).toBe('Enso · 9999');
+    expect(typed.identity.generation).not.toBe('77777777-7777-4777-8777-777777777777');
+    expect(typed.identity.parent).toEqual(identity);
+    expect(typed.resumeFile).toBe('/tmp/typed.jsonl');
+
+    expect(fixture.resumeCoworkerCalls).toHaveLength(1);
+    expect(fixture.resumeCoworkerCalls[0]).toMatchObject({
+      parent: identity,
+      coworkerId: `${fixture.conversationId}::cw-bob`,
+      name: 'bob',
+      agentType: 'scout',
+      resumeFile: '/tmp/bob.jsonl',
+    });
+  });
+
+  it('同一 parent generation 只级联一次（派发触发的 parent-ready 重放不重复 spawn）', async () => {
+    const fixture = await setup(undefined, { persistedState });
+    const identity = await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    fixture.service.observe({
+      type: 'parent-ready',
+      identity,
+      seq: 2,
+      sessionFile: path.join(fixture.root, 'parent.jsonl'),
+      model: { providerId: 'provider', modelId: 'model' },
+    });
+    await settle();
+    expect(fixture.spawnChildCalls).toHaveLength(1);
+    expect(fixture.resumeCoworkerCalls).toHaveLength(1);
+  });
+
+  it('类型解析失败（已删/禁用）时该 child 跳过，不静默降级、不影响其他 child', async () => {
+    const fixture = await setup(undefined, {
+      persistedState,
+      resolveAgentTypeError: 'Agent type is unavailable.',
+    });
+    await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    expect(fixture.spawnChildCalls).toHaveLength(0);
+    expect(fixture.resumeCoworkerCalls).toHaveLength(1);
+  });
+
+  it('无持久化 coworkerIds 时零动作', async () => {
+    const fixture = await setup();
+    await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    expect(fixture.spawnChildCalls).toHaveLength(0);
+    expect(fixture.resumeCoworkerCalls).toHaveLength(0);
   });
 });

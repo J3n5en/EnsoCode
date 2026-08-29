@@ -14,19 +14,20 @@ import type {
   CapabilityReceipt,
   ReceiptLifecycleEvent,
 } from '@shared/capabilities/types';
-import type {
-  AgentSessionCustomEntry,
-  AgentSpawnRequest,
-  AgentWorkerEvent,
-  ChildLifecycleEvent,
-  DispatchMainEvent,
-  DispatchProgressPhase,
-  DispatchTerminal,
-  ModelRef,
-  ParentLifecycleEvent,
-  RendererAgentEvent,
-  ResolvedAgentTypeSpawnConfig,
-  SpawnModelConfig,
+import {
+  type AgentSessionCustomEntry,
+  type AgentSpawnRequest,
+  type AgentWorkerEvent,
+  type ChildLifecycleEvent,
+  type DispatchMainEvent,
+  type DispatchProgressPhase,
+  type DispatchTerminal,
+  type ModelRef,
+  type ParentLifecycleEvent,
+  parseChildConversationMetadata,
+  type RendererAgentEvent,
+  type ResolvedAgentTypeSpawnConfig,
+  type SpawnModelConfig,
 } from '@shared/types/agent';
 import type {
   AgentDispatchRequest,
@@ -93,6 +94,14 @@ interface DispatchHost {
     child: ChildSessionIdentity,
     notify?: boolean
   ): { ok: boolean; error?: string };
+  /** 重启后恢复 worker 直雇 coworker（双形状过渡；参数全部来自 Main 自读的持久化） */
+  resumeCoworker(
+    parent: SessionIdentity,
+    coworkerId: string,
+    name: string,
+    agentType: string | undefined,
+    resumeFile: string
+  ): { ok: boolean; error?: string };
 }
 
 export interface TeamExecutionGuard {
@@ -149,6 +158,8 @@ export class AgentDispatchService {
   private readonly parentReady = new Map<string, Promise<void>>();
   private readonly prompted = new Set<string>();
   private readonly teamGuards = new Map<string, TeamExecutionGuard>();
+  /** 已级联恢复过的父代（sessionId\0generation）：parent-ready 重放不重复 spawn */
+  private readonly restoredParents = new Set<string>();
   private readonly randomUuid: () => string;
   private readonly now: () => number;
   private readonly readyTimeoutMs: number;
@@ -376,6 +387,12 @@ export class AgentDispatchService {
       event.type === 'child-ready' ? this.teamGuards.get(event.identity.generation) : undefined;
     if (!readyGuard || this.guardCurrent(readyGuard)) {
       this.options.sessionIndex.observe(event);
+    }
+    // 级联恢复在 sessionIndex.observe 之后：resolveParentSource 要读 ready 后的 parent 模型
+    if (event.type === 'parent-ready') {
+      void this.restoreChildren(event.identity).catch(() => {
+        // 恢复是尽力而为：单个失败不影响父会话可用性，残局 tab 可关、历史可回放
+      });
     }
     for (const waiter of [...this.waiters]) {
       if (waiter.accept(event)) {
@@ -675,6 +692,78 @@ export class AgentDispatchService {
         reason,
       });
       return this.rejected(request, 'dispatch-failed', reason, 'retry');
+    }
+  }
+
+  /**
+   * 父会话 ready 后按 Main 自读的持久化级联恢复 child（08-28 design §7.3）。
+   * 尽力而为：单个 child 失败只跳过（渲染层落只读回放/可关闭的残局 tab）；
+   * 幂等键是 parent generation，派发链路重放的 parent-ready 不重复 spawn。
+   * 渲染层全程不参与：sessionFile/类型/名字都从 settings 持久化取。
+   */
+  private async restoreChildren(parent: SessionIdentity): Promise<void> {
+    const key = `${parent.sessionId}\u0000${parent.generation}`;
+    if (this.restoredParents.has(key)) return;
+    this.restoredParents.add(key);
+    const persisted = this.options.sessionIndex.persistedConversation(parent.sessionId);
+    const coworkerIds = Array.isArray(persisted?.coworkerIds)
+      ? persisted.coworkerIds.filter((id): id is string => typeof id === 'string')
+      : [];
+    if (coworkerIds.length === 0) return;
+    const source = this.options.sourceRegistry.resolveParentSource(parent.sessionId);
+    if (!source) return;
+    const credentialKeys = await this.options.readStoredOauthCredentialKeys();
+    for (const coworkerId of coworkerIds) {
+      const child = this.options.sessionIndex.persistedConversation(coworkerId);
+      if (!child || child.ended === true) continue;
+      const resumeFile = typeof child.sessionFile === 'string' ? child.sessionFile : undefined;
+      if (!resumeFile) continue;
+      // 已活着的跳过（刷新/重建窗口时 worker 侧会话仍在）
+      const existing = this.options.sessionIndex.currentIdentity(coworkerId);
+      if (existing && this.options.sessionIndex.isReady(existing)) continue;
+      const metadata = parseChildConversationMetadata(child.child);
+      if (metadata) {
+        // typed child：registry 重新解析，类型已删/禁用 → 不恢复不降级（只读回放兑底）；
+        // 模型继承恢复后的 parent 模型（resolveParentSource 读 sessionIndex.model）
+        const model = this.options.host.resolveModel(
+          source.selectedModel.providerId,
+          source.selectedModel.modelId,
+          credentialKeys
+        );
+        if (!model.ok || !model.selection) continue;
+        const resolved = this.options.host.resolveAgentType(
+          metadata.agentTypeKey,
+          model.selection,
+          credentialKeys
+        );
+        if (!resolved.ok || !resolved.config) continue;
+        const reservation = this.options.sessionIndex.reserveChildResume(
+          parent,
+          metadata,
+          this.randomUuid()
+        );
+        if (!reservation.ok) continue;
+        const spawned = this.options.host.spawnChild(
+          reservation.reservation.child,
+          source.parentProjectPath,
+          resolved.config,
+          resumeFile
+        );
+        if (!spawned.ok) this.options.sessionIndex.releaseChild(reservation.reservation.child);
+        continue;
+      }
+      // 工具直雇 coworker（无 typed metadata）：双形状过渡命令，worker 侧自带容量豁免
+      const name =
+        typeof child.coworkerName === 'string' && child.coworkerName
+          ? child.coworkerName
+          : (coworkerId.split('::cw-').at(-1) ?? coworkerId);
+      this.options.host.resumeCoworker(
+        parent,
+        coworkerId,
+        name,
+        typeof child.agentType === 'string' ? child.agentType : undefined,
+        resumeFile
+      );
     }
   }
 

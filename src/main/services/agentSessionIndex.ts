@@ -216,6 +216,53 @@ export class AgentSessionIndex {
     return { ok: true, reservation };
   }
 
+  /**
+   * 重启后恢复 typed child 的预约变体（§7.3）：原 instanceId/instanceName/typeKey/
+   * lockedProfileId 不变，只换新 generation；名字已被占用拒绝，不得换名降级。
+   * 容量与 reserveChild 共用 occupied 计数。
+   */
+  reserveChildResume(
+    parent: SessionIdentity,
+    metadata: ChildConversationMetadata,
+    requestId: string
+  ): ChildReservationResult {
+    const session = this.sessions.get(parent.sessionId);
+    if (!session || !isSameGeneration(session.identity, parent)) {
+      return { ok: false, code: 'stale-parent', error: 'Parent generation is no longer current.' };
+    }
+    const occupied = session.coworkers.size + this.parentReservations(parent).length;
+    if (occupied >= MAX_ORIGIN_COWORKERS) {
+      return {
+        ok: false,
+        code: 'capacity-reached',
+        error: `Coworker limit reached (${MAX_ORIGIN_COWORKERS} active or reserved).`,
+      };
+    }
+    if (this.usedNames(parent.sessionId).has(metadata.agentInstanceName)) {
+      return {
+        ok: false,
+        code: 'capacity-reached',
+        error: `Coworker name is already in use: ${metadata.agentInstanceName}`,
+      };
+    }
+    const child: ChildSessionIdentity = {
+      sessionId: `${parent.sessionId}::cw-${metadata.agentInstanceId}`,
+      generation: this.randomUuid(),
+      parent,
+      instanceId: metadata.agentInstanceId,
+      instanceName: metadata.agentInstanceName,
+      typeKey: metadata.agentTypeKey,
+      ...(metadata.lockedProfileId ? { profileId: metadata.lockedProfileId } : {}),
+    };
+    const reservation: ChildReservation = {
+      requestId,
+      child,
+      metadata: { ...metadata, childGeneration: child.generation },
+    };
+    this.reservations.set(child.sessionId, reservation);
+    return { ok: true, reservation };
+  }
+
   reservation(child: ChildSessionIdentity): ChildReservation | undefined {
     const current = this.reservations.get(child.sessionId);
     return current && isSameChildSessionIdentity(current.child, child) ? current : undefined;

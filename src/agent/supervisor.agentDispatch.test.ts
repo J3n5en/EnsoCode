@@ -368,6 +368,99 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     );
   });
 
+  it('resume-coworker 恢复工具直雇 coworker；容量对 resume 豁免，新雇仍卡上限', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await settle();
+
+    // 用 resume 灌满 5 个（上限）：若容量对 resume 不豁免，第 6 个就进不来
+    for (const name of ['a', 'b', 'c', 'd', 'e']) {
+      supervisor.handleCommand({
+        type: 'resume-coworker',
+        parent,
+        coworkerId: `parent::cw-${name}`,
+        name,
+        resumeFile: `/tmp/coworker-${name}.jsonl`,
+      });
+    }
+    await settle();
+    const resumed = events.filter(
+      (event) =>
+        event.type === 'coworker-update' &&
+        (event as { coworker: { status: string } }).coworker.status !== 'dismissed'
+    );
+    expect(resumed).toHaveLength(5);
+    expect(resumed[0]).toMatchObject({ coworker: { id: 'parent::cw-a', name: 'a' } });
+
+    // typed child 带 resumeFile：容量已满仍允许恢复（恢复量受关机前存量约束，不是疯雇）
+    const typedChild = {
+      sessionId: 'parent::cw-typed',
+      generation: '88888888-8888-4888-8888-888888888888',
+      parent,
+      instanceId: '99999999-9999-4999-8999-999999999999',
+      instanceName: 'Scout-99999999',
+      typeKey: 'builtin:scout' as const,
+    };
+    const scoutConfig = {
+      typeKey: 'builtin:scout' as const,
+      displayName: 'Scout',
+      description: 'Read-only scout',
+      spawnSpecId: 'spawn-scout-resume',
+      systemPrompt: 'scout role',
+      model,
+      tools: 'readonly' as const,
+      skillPaths: [],
+      skillBindingIds: [],
+      mcpServers: [],
+      mcpBindingIds: [],
+      systemPromptHash: 'scout-hash',
+    };
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: typedChild,
+      cwd: '/workspace',
+      config: scoutConfig,
+      resumeFile: '/tmp/typed.jsonl',
+    });
+    await settle();
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'child-ready', identity: typedChild })
+    );
+
+    // 新雇（无 resumeFile）在满员时仍被拒：豁免只给 resume
+    const overflow = {
+      ...typedChild,
+      sessionId: 'parent::cw-overflow',
+      generation: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      instanceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      instanceName: 'Scout-bbbbbbbb',
+    };
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: overflow,
+      cwd: '/workspace',
+      config: { ...scoutConfig, spawnSpecId: 'spawn-scout-overflow' },
+    });
+    await settle();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'child-rejected',
+        identity: overflow,
+        reason: expect.stringContaining('coworker limit'),
+      })
+    );
+  });
+
   it('rejects an ordinary exact profile when a configured MCP fails to establish', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

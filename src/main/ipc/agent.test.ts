@@ -52,6 +52,7 @@ vi.mock('../services/agentHost', () => ({
   appendSessionCustomEntry: vi.fn(),
   dismissChildSession: mocks.dismissChildSession,
   dismissCoworkerSession: mocks.dismissCoworkerSession,
+  resumeCoworkerSession: vi.fn(() => ({ ok: true })),
   promptChildSession: vi.fn(),
   promptSession: mocks.promptSession,
   requestSnapshot: vi.fn(),

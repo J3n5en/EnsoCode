@@ -360,6 +360,27 @@ export function dismissChildSession(
   });
 }
 
+/** 重启后恢复 worker 直雇 coworker：name/agentType/resumeFile 由 Main 从自读持久化取 */
+export function resumeCoworkerSession(
+  parent: SessionIdentity,
+  coworkerId: string,
+  name: string,
+  agentType: string | undefined,
+  resumeFile: string
+): { ok: boolean; error?: string } {
+  if (!existsSync(resumeFile)) {
+    return { ok: false, error: 'coworker 会话文件已丢失，无法恢复' };
+  }
+  return sendAgentCommand({
+    type: 'resume-coworker',
+    parent,
+    coworkerId,
+    name,
+    ...(agentType ? { agentType } : {}),
+    resumeFile,
+  });
+}
+
 /** 解雇 worker 直雇 coworker（双形状过渡：无 ChildSessionIdentity，按裸 id + exact 父代下发） */
 export function dismissCoworkerSession(
   parent: SessionIdentity,

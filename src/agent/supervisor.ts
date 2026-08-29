@@ -357,7 +357,9 @@ export class SessionSupervisor {
     const identity =
       command.type === 'capability-result'
         ? command.child
-        : command.type === 'dismiss-child' || command.type === 'dismiss-coworker'
+        : command.type === 'dismiss-child' ||
+            command.type === 'dismiss-coworker' ||
+            command.type === 'resume-coworker'
           ? command.parent
           : command.identity;
     void this.gate
@@ -434,6 +436,20 @@ export class SessionSupervisor {
             { urgent: true }
           );
         }
+        return;
+      }
+      case 'resume-coworker': {
+        // 重启后恢复工具直雇 coworker：name/agentType/resumeFile 全部来自 Main
+        // 自己读的持久化；spawnCoworker 的 resumeFile 分支自带容量豁免与类型降级容错。
+        this.must(command.parent);
+        await this.spawnCoworker(
+          command.parent.sessionId,
+          command.coworkerId,
+          command.name,
+          command.agentType,
+          undefined,
+          command.resumeFile
+        );
         return;
       }
       case 'dismiss-coworker': {
@@ -1179,7 +1195,9 @@ export class SessionSupervisor {
       });
       return;
     }
-    if (parent.coworkers.size >= MAX_ACTIVE_COWORKERS) {
+    // 容量对 resume 豁免（与 coworker 路径同语义）：恢复量受关机前存量约束，
+    // 不是疯雇；上限的目的是防主 agent 循环雇人。
+    if (!resumeFile && parent.coworkers.size >= MAX_ACTIVE_COWORKERS) {
       throw new Error(`coworker limit reached (${MAX_ACTIVE_COWORKERS} active)`);
     }
 

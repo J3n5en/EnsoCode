@@ -398,6 +398,16 @@ export type AgentCommand =
       coworkerId: string;
       notify?: boolean;
     }
+  | {
+      /** 重启后恢复 worker 直雇 coworker：name/agentType/resumeFile 全部由 Main
+       * 从自己读的持久化取，渲染层不参与；双形状过渡命令 */
+      type: 'resume-coworker';
+      parent: SessionIdentity;
+      coworkerId: string;
+      name: string;
+      agentType?: string;
+      resumeFile: string;
+    }
   | { type: 'prompt'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
@@ -1333,6 +1343,25 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         // 归属校验：coworker id 恒为 `父id::cw-…`，防跨会话误解雇
         value.coworkerId.startsWith(`${parent.sessionId}::cw-`) &&
         (value.notify === undefined || typeof value.notify === 'boolean')
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
+    case 'resume-coworker': {
+      const parent = parseSessionIdentity(value.parent);
+      return hasOnlyKeys(value, [
+        'type',
+        'parent',
+        'coworkerId',
+        'name',
+        'agentType',
+        'resumeFile',
+      ]) &&
+        parent &&
+        isNonEmptyString(value.coworkerId) &&
+        value.coworkerId.startsWith(`${parent.sessionId}::cw-`) &&
+        isNonEmptyString(value.name) &&
+        (value.agentType === undefined || isNonEmptyString(value.agentType)) &&
+        isNonEmptyString(value.resumeFile)
         ? (value as unknown as AgentCommand)
         : null;
     }
