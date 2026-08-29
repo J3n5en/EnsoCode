@@ -456,8 +456,6 @@ export const zhTranslations: Record<string, string> = {
   Important: '重要',
   Warning: '警告',
   Caution: '小心',
-  'Allow subagents to use this model':
-    '允许子代理使用该模型（主 agent 可在 subagent/coworker 工具里指定）',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',
