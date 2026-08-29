@@ -1136,7 +1136,12 @@ export class CapabilityGateway {
     ) {
       return false;
     }
-    const key = this.invocationKey(context.child, context.turnId);
+    // 授权以 child generation 为单位：一次派发 = 一个 locked Enso child，注册只发生一次。
+    // 不能用 turnId 做键：child 内部的 agent turn 是模型循环产物（agent_end 会清空
+    // currentTurnId，下一轮重新生成随机 uuid），而这里没有任何“每轮重新授权”的路径，
+    // 以 turnId 为键会让能力调用在第二轮起静默失效。真正的门是 exact generation
+    // 比对（sameChild）与 terminateGeneration 的级联撤销。
+    const key = this.generationKey(context.child);
     if (this.invocations.has(key)) return false;
     const immutable: CapabilityInvocationContext = {
       child: {
@@ -1165,7 +1170,7 @@ export class CapabilityGateway {
 
   async invoke(request: CapabilityInvokeRequest): Promise<CapabilityExecutionEnvelope> {
     const spec = CAPABILITY_CATALOG[request.capabilityId] as CapabilitySpec;
-    const context = this.invocations.get(this.invocationKey(request.child, request.turnId));
+    const context = this.invocations.get(this.generationKey(request.child));
     if (!context || !this.sameChild(context.child, request.child)) {
       return this.unprojectedEnvelope(
         request,
@@ -1225,8 +1230,7 @@ export class CapabilityGateway {
       requestId: request.requestId,
       signal: controller.signal,
       assertExecutionCurrent: () =>
-        controller.signal.aborted ||
-        !this.invocations.has(this.invocationKey(context.child, context.turnId))
+        controller.signal.aborted || !this.invocations.has(this.generationKey(context.child))
           ? cancelled('Capability generation was terminated before commit.')
           : null,
       setOauthFlow: (locator) => this.oauthFlows.set(flowKey, locator),
@@ -1453,7 +1457,9 @@ export class CapabilityGateway {
     this.transport.observeReceipt({
       type: 'receipt-settled',
       child: context.child,
-      turnId: request.turnId,
+      // 用绑定上下文的 turnId（= 派发轮次），不用 child 内部的每轮 uuid，
+      // 否则跨 agent turn 的 receipt 在协调器侧关联不上，完成通知会丢 summary。
+      turnId: context.turnId,
       requestId: request.requestId,
       receiptId: reservation.receiptId,
       receiptSeq: reservation.receiptSeq,
@@ -1481,7 +1487,7 @@ export class CapabilityGateway {
     this.transport.observeReceipt({
       type: 'receipt-started',
       child: context.child,
-      turnId: request.turnId,
+      turnId: context.turnId,
       requestId: request.requestId,
       receiptId: reservation.receiptId,
       receiptSeq: reservation.receiptSeq,
@@ -1754,10 +1760,6 @@ export class CapabilityGateway {
       const oldest = this.settledRequestOrder.shift();
       if (oldest) this.settledRequestIds.delete(oldest);
     }
-  }
-
-  private invocationKey(child: CapabilityInvokeRequest['child'], turnId: string): string {
-    return `${this.generationKey(child)}:${turnId}`;
   }
 
   private generationKey(child: CapabilityInvokeRequest['child']): string {

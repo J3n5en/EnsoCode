@@ -165,6 +165,24 @@ async function waitForAsk(asks: unknown[], count: number) {
 }
 
 describe('CapabilityGateway child/generation安全合同', () => {
+  it('授权按 child generation：跨内部 agent turn 仍可调用，旧 generation 仍被拒', async () => {
+    const { gateway } = fixture();
+    // child 内部的 agent turn 会重新生成 turnId（supervisor 在 agent_end 清空
+    // currentTurnId，下一轮 agent_start 取新 uuid）。授权不得因此失效。
+    const laterTurn = await gateway.invoke({
+      ...request('cross-turn-1', 'providers.list', {}),
+      turnId: 'model-loop-turn-2',
+    });
+    expect(laterTurn.modelResult).toMatchObject({ ok: true });
+
+    // 但身份门不能松：旧/伪造 generation 无论用哪个 turnId 都必须被拒。
+    const staleGeneration = await gateway.invoke({
+      ...request('cross-turn-2', 'providers.list', {}),
+      child: { ...child, generation: '99999999-9999-4999-8999-999999999999' },
+    });
+    expect(staleGeneration.modelResult).toMatchObject({ ok: false, code: 'invalid' });
+  });
+
   it('handler registry完整且非locked child不能注册/调用enso_app', async () => {
     const { gateway, services } = fixture();
     expect(Object.keys(createCapabilityHandlers(services)).sort()).toHaveLength(
