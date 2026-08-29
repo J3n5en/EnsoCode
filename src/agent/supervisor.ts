@@ -195,6 +195,29 @@ function createEnsoResourceLoader(cwd: string, agentDir: string): DefaultResourc
     appendSystemPromptOverride: () => [],
   });
 }
+/**
+ * pi 的 SessionManager._persist 在会话出现第一条 assistant 消息之前一个字节不写（避免留下空会话
+ * 文件）。而纯派发的父容器按设计永远不跑主 coding 回合，永远不会有 assistant 消息，
+ * 于是它的 custom entry（已派发/完成通知）只存在内存里，且 parent-ready 上报的 sessionFile
+ * 指向一个不存在的文件——重启后 resume 直接失败，连带 child 的历史也打不开。
+ *
+ * 因此在会话还没有 assistant 消息时，由我们强制落盘；一旦 pi 自己接管了持久化就不再介入。
+ * 依赖的 `_rewriteFile` 是 pi 的私有方法：升级 pi 时需复检，回归测试断言的是“文件落盘”
+ * 这个可观测结果，不是调用了该方法，所以上游改语义时测试会直接飘红。
+ */
+export function materializeSessionFile(session: AgentSession): void {
+  const hasAssistant = (session.messages as { role?: string }[] | undefined)?.some(
+    (message) => message?.role === 'assistant'
+  );
+  if (hasAssistant) return;
+  const manager = session.sessionManager as unknown as { _rewriteFile?: () => void };
+  try {
+    manager._rewriteFile?.();
+  } catch {
+    // 落盘失败不能弄挂派发；内存中的通知仍然可用。
+  }
+}
+
 function requiredSessionFile(session: AgentSession): string {
   if (!session.sessionFile) throw new Error('SessionManager did not provide a session file.');
   return session.sessionFile;
@@ -489,6 +512,7 @@ export class SessionSupervisor {
       case 'append-session-custom-entry': {
         const managed = this.must(command.identity);
         managed.session.sessionManager.appendCustomEntry('enso-agent-session', command.entry);
+        materializeSessionFile(managed.session);
         managed.customEntries.push(command.entry);
         this.options.emit({
           type: 'session-custom-entry',
