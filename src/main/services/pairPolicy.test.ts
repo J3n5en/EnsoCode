@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkSetModel,
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
@@ -65,6 +66,52 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ ...base, cwd: '/etc' }).ok).toBe(false);
     expect(parsePhoneCommand({ ...base, apiKey: 'sk-x' }).ok).toBe(false);
     expect(parsePhoneCommand({ ...base, baseUrl: 'http://evil' }).ok).toBe(false);
+  });
+
+  it('set-model 结构校验：三个 id 必填', () => {
+    expect(
+      parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr', modelId: 'm' }).ok
+    ).toBe(true);
+    expect(parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-model', providerId: 'pr', modelId: 'm' }).ok).toBe(
+      false
+    );
+  });
+
+  it('set-reasoning / set-thinking 结构校验', () => {
+    expect(parsePhoneCommand({ type: 'set-reasoning', sessionId: 's', enabled: true }).ok).toBe(
+      true
+    );
+    expect(parsePhoneCommand({ type: 'set-reasoning', sessionId: 's', enabled: 'yes' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-reasoning', enabled: true }).ok).toBe(false);
+    for (const level of ['low', 'medium', 'high', 'max']) {
+      expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level }).ok).toBe(true);
+    }
+    expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level: 'ultra' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's' }).ok).toBe(false);
+  });
+});
+
+describe('set-model 白名单校验', () => {
+  const whitelist: SpawnWhitelist = {
+    projects: [],
+    providers: [{ id: 'pr1', models: [{ id: 'm1' }] }],
+  };
+  const cmd = { type: 'set-model' as const, sessionId: 's', providerId: 'pr1', modelId: 'm1' };
+
+  it('provider/model 在下发集合内才放行', () => {
+    expect(checkSetModel(cmd, whitelist).ok).toBe(true);
+  });
+
+  it('伪造 providerId / 未启用 model 被拒', () => {
+    expect(checkSetModel({ ...cmd, providerId: 'evil' }, whitelist).ok).toBe(false);
+    expect(checkSetModel({ ...cmd, modelId: 'not-enabled' }, whitelist).ok).toBe(false);
   });
 });
 

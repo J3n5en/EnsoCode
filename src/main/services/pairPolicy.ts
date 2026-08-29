@@ -76,6 +76,21 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
         return { ok: false, error: 'cwd/apiKey/baseUrl not accepted from phone' };
       }
       return { ok: true, command: value as PhoneToHost };
+    case 'set-model':
+      if (!isStr(v.sessionId) || !isStr(v.providerId) || !isStr(v.modelId)) {
+        return { ok: false, error: 'missing set-model fields' };
+      }
+      return { ok: true, command: value as PhoneToHost };
+    case 'set-reasoning':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (typeof v.enabled !== 'boolean') return { ok: false, error: 'invalid enabled' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'set-thinking':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (v.level !== 'low' && v.level !== 'medium' && v.level !== 'high' && v.level !== 'max') {
+        return { ok: false, error: 'invalid level' };
+      }
+      return { ok: true, command: value as PhoneToHost };
     default:
       return { ok: false, error: `command not allowed: ${String(v.type)}` };
   }
@@ -98,6 +113,19 @@ export function checkSpawn(
     return { ok: false, error: `model not enabled: ${command.modelId}` };
   }
   return { ok: true, resolved: { cwd: project.path } };
+}
+
+/** set-model 业务校验：与 spawn 同一白名单，provider/model 不在下发集合内直接拒绝 */
+export function checkSetModel(
+  command: Extract<PhoneToHost, { type: 'set-model' }>,
+  whitelist: SpawnWhitelist
+): { ok: true } | { ok: false; error: string } {
+  const provider = whitelist.providers.find((p) => p.id === command.providerId);
+  if (!provider) return { ok: false, error: `unknown providerId: ${command.providerId}` };
+  if (!provider.models.some((m) => m.id === command.modelId)) {
+    return { ok: false, error: `model not enabled: ${command.modelId}` };
+  }
+  return { ok: true };
 }
 
 // ── 下行过滤 ──────────────────────────────────────────────────────────
