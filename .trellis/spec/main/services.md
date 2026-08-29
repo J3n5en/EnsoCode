@@ -44,6 +44,20 @@ worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared �
 receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派发轮次），
 不是 child 内部每轮的 uuid，否则跨 turn 的 receipt 在协调器侧关联不上。
 
+## child 恢复由 Main 级联，双形状过渡命令有到期日
+
+重启后 coworker/child 的恢复入口在 `agentDispatchService.restoreChildren`（parent-ready
+触发，幂等键是 parent generation），渲染层零参与：sessionFile/类型/名字全部由
+`persistedConversation()` 自读。两条铁律：
+
+- **resume 类操作的防撞检查必须排除自身的持久化条目**。`usedNames` 扫盘防跨
+  重启撞名，而被恢复者自己的名字必然在盘上——直接复用会自撞，恢复永远失败。
+  写这类单测时夹具的 `readSettings` 必须带上被恢复者自己的持久化条目（真机
+  形状），否则抓不到这类 bug（见 0e8fc11）。
+- **`resume-coworker` / `dismiss-coworker` 是双形状过渡命令**：工具直雇 coworker
+  （普通 SessionIdentity，不进 Main sessions 索引）的遥控通路。coworker 工具统一
+  到 Main dispatch（typed child）后这两条命令应随之删除，不要在其上叠新功能。
+
 ## 对 pi 私有 API 的依赖要登记
 
 目前有一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
