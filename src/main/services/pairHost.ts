@@ -81,6 +81,8 @@ interface Connection {
   /** 待应答的 history 分页请求（beforeIndex）；下一个 snapshot 事件到达时切片发回 */
   pendingHistory?: number;
   phoneOnline: boolean;
+  /** 手机页面可见性（presence 帧上报）：锁屏/切后台时 socket 半开不会 close，推送据此门控 */
+  phoneVisible: boolean;
   attempt: number;
   timer: NodeJS.Timeout | null;
   closed: boolean;
@@ -346,6 +348,7 @@ function openConnection(device: PairedDevice): void {
     heartbeat: null,
     subscribedId: null,
     phoneOnline: false,
+    phoneVisible: true,
     attempt: 0,
     timer: null,
     closed: false,
@@ -405,6 +408,7 @@ function connect(conn: Connection): void {
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'peer-joined') {
           conn.phoneOnline = true;
+          conn.phoneVisible = true;
           conn.subscribedId = null;
           // 手机进房即推目录（它也会发 snapshot，但 main 侧缓存可能更早就绪）
           void sendMeta(conn);
@@ -540,6 +544,9 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'push-unsubscribe':
       clearPushSubscription(conn.device.pairId);
       break;
+    case 'presence':
+      conn.phoneVisible = command.visible;
+      break;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
       if (!check.ok) {
@@ -623,8 +630,8 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
   //（线上 PWA 不随桌面版同步发布），下发前归一化补上
   const flatSessionId = e.identity?.sessionId ?? e.sessionId;
   for (const conn of connections.values()) {
-    if (!conn.phoneOnline) {
-      // 手机离线但登记过推送订阅：关键事件转为系统推送（只发通用文案）
+    // 离线或锁屏/切后台（socket 半开不算离线）都转系统推送，只发通用文案
+    if (!conn.phoneOnline || !conn.phoneVisible) {
       if (hasPushSubscription(conn.device.pairId)) {
         const payload = buildPushPayload(
           e,
@@ -632,7 +639,7 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
         );
         if (payload) void sendPush(conn.device.pairId, payload);
       }
-      continue;
+      if (!conn.phoneOnline) continue;
     }
     // snapshot 是全量批事件，裁成只含订阅会话再发
     if (e.type === 'snapshot') {

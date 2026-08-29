@@ -126,9 +126,16 @@ export function App() {
     });
     clientRef.current = client;
     client.connect();
-    // 切后台时系统会掐死或冻结 socket 且不触发 close：回前台/网络恢复立即探活
+    // 切后台时系统会掐死或冻结 socket 且不触发 close：回前台/网络恢复立即探活。
+    // 退后台瞬间赶在冻结前上报不可见：桌面据此把关键事件转系统推送
+    //（半开 socket 不会 close，光靠 peer-left 桌面要很久才知道手机不在看）
     const nudge = () => {
-      if (document.visibilityState === 'visible') client.nudge();
+      if (document.visibilityState === 'visible') {
+        client.nudge();
+        client.send({ type: 'presence', visible: true });
+      } else {
+        client.send({ type: 'presence', visible: false });
+      }
     };
     document.addEventListener('visibilitychange', nudge);
     window.addEventListener('online', nudge);

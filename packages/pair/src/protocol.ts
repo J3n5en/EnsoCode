@@ -59,7 +59,12 @@ export type PhoneToHost =
   | { type: 'history'; sessionId: string; beforeIndex: number }
   /** 登记/解除 Web Push 订阅：手机离线时桌面用它发系统推送 */
   | { type: 'push-subscribe'; subscription: PushSubscriptionJson }
-  | { type: 'push-unsubscribe' };
+  | { type: 'push-unsubscribe' }
+  /**
+   * 可见性上报：iOS 锁屏/切后台时 socket 只是半开不会 close，桌面无法靠
+   * peer-left 判断手机是否还在看。退后台瞬间主动发一帧，推送据此门控。
+   */
+  | { type: 'presence'; visible: boolean };
 
 /** 手机命令白名单：main 只接受这些 type，其余（set-approval-mode、设置写入等）拒绝 */
 export const PHONE_COMMAND_TYPES = [
@@ -77,6 +82,7 @@ export const PHONE_COMMAND_TYPES = [
   'history',
   'push-subscribe',
   'push-unsubscribe',
+  'presence',
 ] as const satisfies readonly PhoneToHost['type'][];
 
 export function isPhoneCommand(value: unknown): value is PhoneToHost {

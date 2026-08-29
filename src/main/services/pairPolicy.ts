@@ -121,6 +121,9 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
     }
     case 'push-unsubscribe':
       return { ok: true, command: value as PhoneToHost };
+    case 'presence':
+      if (typeof v.visible !== 'boolean') return { ok: false, error: 'invalid visible' };
+      return { ok: true, command: value as PhoneToHost };
     case 'history':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
       if (typeof v.beforeIndex !== 'number' || v.beforeIndex < 0) {

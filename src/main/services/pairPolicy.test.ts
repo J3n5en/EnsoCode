@@ -98,6 +98,13 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ type: 'push-unsubscribe' }).ok).toBe(true);
   });
 
+  it('presence 结构校验：visible 必须是 boolean', () => {
+    expect(parsePhoneCommand({ type: 'presence', visible: false }).ok).toBe(true);
+    expect(parsePhoneCommand({ type: 'presence', visible: true }).ok).toBe(true);
+    expect(parsePhoneCommand({ type: 'presence' }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'presence', visible: 'no' }).ok).toBe(false);
+  });
+
   it('set-model 结构校验：三个 id 必填', () => {
     expect(
       parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr', modelId: 'm' }).ok

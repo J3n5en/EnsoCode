@@ -132,6 +132,7 @@ export async function sendPush(pairId: string, payload: PushPayload): Promise<vo
       // 审批类通知过期没意义，1 小时足够
       TTL: 3600,
     });
+    console.log(`[push] sent "${payload.title}" to ${pairId}`);
   } catch (error) {
     const statusCode = (error as { statusCode?: number }).statusCode;
     if (statusCode === 404 || statusCode === 410) {
