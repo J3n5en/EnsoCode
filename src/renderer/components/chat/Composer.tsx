@@ -3,7 +3,7 @@ import type { AgentTypeMentionCandidate, MentionCandidate } from '@shared/types/
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { flattenMentionGroups, useMentionSearch } from '@/hooks/useMentionSearch';
+import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { MentionChip } from './MentionChip';
@@ -97,9 +97,14 @@ export function Composer({
   const composingRef = useRef(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionGroups = useMentionSearch(cwd, mentionQuery);
-  const mentionItems = useMemo(() => flattenMentionGroups(mentionGroups), [mentionGroups]);
+  const mentionItems = useMemo(
+    () => flattenMentionRoot(mentionGroups, mentionQuery ?? ''),
+    [mentionGroups, mentionQuery]
+  );
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [folderIndex, setFolderIndex] = useState(0);
   const slashListRef = useRef<HTMLDivElement>(null);
 
   const detect = useCallback((value: string) => {
@@ -112,6 +117,8 @@ export function Composer({
       const slashStart = mention === null ? findSlashStart(value, cursor) : null;
       setSlashQuery(slashStart === null ? null : value.slice(slashStart + 1, cursor));
       setActiveIndex(0);
+      setFolderOpen(false);
+      setFolderIndex(0);
     }, 0);
   }, []);
 
@@ -132,6 +139,8 @@ export function Composer({
       setMentionQuery(null);
       setSlashQuery(null);
       setActiveIndex(0);
+      setFolderOpen(false);
+      setFolderIndex(0);
     }
     if (autoFocus) textareaRef.current?.focus();
     if (previous !== focusKey) {
@@ -235,15 +244,30 @@ export function Composer({
 
   const pickActive = useCallback(() => {
     if (popupKind === 'mention') {
+      if (folderOpen) {
+        const agent = mentionGroups.agents[folderIndex];
+        if (agent) pickMention(agent);
+        return;
+      }
       const item = mentionItems[activeIndex];
-      if (item) pickMention(item.candidate);
+      if (item?.type === 'item') pickMention(item.candidate);
     } else if (popupKind === 'slash') {
       const item = slashResults[activeIndex];
       if (!item) return;
       replaceToken('/', '');
       setSlash(item.name);
     }
-  }, [activeIndex, mentionItems, pickMention, popupKind, replaceToken, slashResults]);
+  }, [
+    activeIndex,
+    folderIndex,
+    folderOpen,
+    mentionGroups.agents,
+    mentionItems,
+    pickMention,
+    popupKind,
+    replaceToken,
+    slashResults,
+  ]);
 
   const unresolvedToken = unresolvedMentionToken(text, mentions);
   const content = text.trim();
@@ -314,16 +338,38 @@ export function Composer({
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing = event.nativeEvent.isComposing || composingRef.current;
     if (popupKind) {
+      const activeItem = popupKind === 'mention' ? mentionItems[activeIndex] : undefined;
       const action = resolvePopupKeyAction({
         key: event.key,
         shiftKey: event.shiftKey,
         isComposing,
         activeIndex,
         itemCount: popupLength,
+        folderOpen: popupKind === 'mention' && folderOpen,
+        activeIsFolder: popupKind === 'mention' && activeItem?.type === 'folder',
+        folderIndex,
+        folderItemCount: mentionGroups.agents.length,
       });
       if (action.type === 'move') {
         event.preventDefault();
         setActiveIndex(action.index);
+        setFolderOpen(false);
+        return;
+      }
+      if (action.type === 'move-folder') {
+        event.preventDefault();
+        setFolderIndex(action.index);
+        return;
+      }
+      if (action.type === 'open-folder') {
+        event.preventDefault();
+        setFolderOpen(true);
+        setFolderIndex(0);
+        return;
+      }
+      if (action.type === 'close-folder') {
+        event.preventDefault();
+        setFolderOpen(false);
         return;
       }
       if (action.type === 'pick') {
@@ -335,6 +381,7 @@ export function Composer({
         event.preventDefault();
         setMentionQuery(null);
         setSlashQuery(null);
+        setFolderOpen(false);
         return;
       }
     }
@@ -356,8 +403,13 @@ export function Composer({
         <MentionPicker
           id={mentionPickerId}
           groups={mentionGroups}
+          query={mentionQuery ?? ''}
           activeIndex={activeIndex}
           onActiveIndexChange={setActiveIndex}
+          folderOpen={folderOpen}
+          folderIndex={folderIndex}
+          onFolderOpenChange={setFolderOpen}
+          onFolderIndexChange={setFolderIndex}
           onSelect={pickMention}
         />
       )}
@@ -506,7 +558,11 @@ export function Composer({
             aria-expanded={popupKind !== null}
             aria-controls={popupKind === 'mention' ? mentionPickerId : undefined}
             aria-activedescendant={
-              popupKind === 'mention' ? `${mentionPickerId}-option-${activeIndex}` : undefined
+              popupKind === 'mention'
+                ? folderOpen
+                  ? `${mentionPickerId}-agent-${folderIndex}`
+                  : `${mentionPickerId}-option-${activeIndex}`
+                : undefined
             }
             placeholder={
               slash

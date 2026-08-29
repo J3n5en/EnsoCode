@@ -16,11 +16,34 @@ export interface MentionPickerItem {
   group: 'agents' | 'files';
 }
 
+export type MentionRootItem =
+  | { type: 'folder'; id: 'agents' }
+  | { type: 'item'; candidate: MentionCandidate; group: 'agents' | 'files' };
+
 export function flattenMentionGroups(groups: MentionSearchGroups): MentionPickerItem[] {
   return [
     ...groups.agents.map((candidate) => ({ candidate, group: 'agents' as const })),
     ...groups.files.map((candidate) => ({ candidate, group: 'files' as const })),
   ];
+}
+
+/** 空查询把 Agents 收成一级文件夹；有关键词时摊平，保证 @enso 仍能直接命中。 */
+export function flattenMentionRoot(groups: MentionSearchGroups, query: string): MentionRootItem[] {
+  if (!query.trim() && groups.agents.length > 0) {
+    return [
+      { type: 'folder', id: 'agents' },
+      ...groups.files.map((candidate) => ({
+        type: 'item' as const,
+        candidate,
+        group: 'files' as const,
+      })),
+    ];
+  }
+  return flattenMentionGroups(groups).map((item) => ({
+    type: 'item' as const,
+    candidate: item.candidate,
+    group: item.group,
+  }));
 }
 
 interface FileHit {

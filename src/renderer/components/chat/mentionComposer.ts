@@ -53,6 +53,9 @@ export function unresolvedMentionToken(
 export type PopupKeyAction =
   | { type: 'none' }
   | { type: 'move'; index: number }
+  | { type: 'move-folder'; index: number }
+  | { type: 'open-folder' }
+  | { type: 'close-folder' }
   | { type: 'pick' }
   | { type: 'close' };
 
@@ -62,8 +65,30 @@ export function resolvePopupKeyAction(input: {
   isComposing: boolean;
   activeIndex: number;
   itemCount: number;
+  folderOpen?: boolean;
+  activeIsFolder?: boolean;
+  folderIndex?: number;
+  folderItemCount?: number;
 }): PopupKeyAction {
   if (input.isComposing || input.itemCount === 0) return { type: 'none' };
+  const pickKey = (input.key === 'Enter' && !input.shiftKey) || input.key === 'Tab';
+  if (input.folderOpen) {
+    // 退出判断必须在空列表判断之前：候选异步变空时 Escape 仍要能退出 folder，
+    // 否则根级 close 永远走不到（folderOpen 还是 true），弹窗死锁。
+    if (input.key === 'Escape' || input.key === 'ArrowLeft') return { type: 'close-folder' };
+    const count = input.folderItemCount ?? 0;
+    if (count === 0) return { type: 'none' };
+    const index = input.folderIndex ?? 0;
+    if (input.key === 'ArrowDown') return { type: 'move-folder', index: (index + 1) % count };
+    if (input.key === 'ArrowUp') {
+      return { type: 'move-folder', index: (index - 1 + count) % count };
+    }
+    if (pickKey) return { type: 'pick' };
+    return { type: 'none' };
+  }
+  if (input.activeIsFolder && (input.key === 'ArrowRight' || pickKey)) {
+    return { type: 'open-folder' };
+  }
   if (input.key === 'ArrowDown') {
     return { type: 'move', index: (input.activeIndex + 1) % input.itemCount };
   }
@@ -73,7 +98,7 @@ export function resolvePopupKeyAction(input: {
       index: (input.activeIndex - 1 + input.itemCount) % input.itemCount,
     };
   }
-  if ((input.key === 'Enter' && !input.shiftKey) || input.key === 'Tab') return { type: 'pick' };
+  if (pickKey) return { type: 'pick' };
   if (input.key === 'Escape') return { type: 'close' };
   return { type: 'none' };
 }

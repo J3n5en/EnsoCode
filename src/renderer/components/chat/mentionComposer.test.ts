@@ -2,6 +2,7 @@ import type { AgentTypeCandidate } from '@shared/builtinAgents';
 import { describe, expect, it } from 'vitest';
 import {
   flattenMentionGroups,
+  flattenMentionRoot,
   groupMentionCandidates,
   toAgentMentionCandidates,
   toFileMentionCandidates,
@@ -83,6 +84,30 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
+  it('nests Agents as a folder on empty query and flattens agents when searching', () => {
+    const groups = groupMentionCandidates('', agents, duplicateNames);
+    expect(flattenMentionRoot(groups, '')).toEqual([
+      { type: 'folder', id: 'agents' },
+      {
+        type: 'item',
+        group: 'files',
+        candidate: duplicateNames[0],
+      },
+      {
+        type: 'item',
+        group: 'files',
+        candidate: duplicateNames[1],
+      },
+    ]);
+    expect(flattenMentionRoot(groups, '  ')).toEqual(flattenMentionRoot(groups, ''));
+    const filesOnly = groupMentionCandidates('', [], duplicateNames);
+    expect(flattenMentionRoot(filesOnly, '').every((item) => item.type === 'item')).toBe(true);
+    const searched = groupMentionCandidates('scout', agents, duplicateNames);
+    expect(flattenMentionRoot(searched, 'scout')).toEqual([
+      { type: 'item', group: 'agents', candidate: agents[1] },
+    ]);
+  });
+
   it('keeps duplicate file names distinguishable by relative path', () => {
     expect(duplicateNames).toEqual([
       {
@@ -150,6 +175,102 @@ describe('typed multi-entity mentions', () => {
         itemCount: 3,
       })
     ).toEqual({ type: 'none' });
+  });
+
+  it('opens, navigates, and closes the Agents folder without picking the parent row', () => {
+    expect(
+      resolvePopupKeyAction({
+        key: 'Enter',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        activeIsFolder: true,
+      })
+    ).toEqual({ type: 'open-folder' });
+    expect(
+      resolvePopupKeyAction({
+        key: 'ArrowRight',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        activeIsFolder: true,
+      })
+    ).toEqual({ type: 'open-folder' });
+    expect(
+      resolvePopupKeyAction({
+        key: 'ArrowDown',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 0,
+        folderItemCount: 4,
+      })
+    ).toEqual({ type: 'move-folder', index: 1 });
+    expect(
+      resolvePopupKeyAction({
+        key: 'ArrowUp',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 0,
+        folderItemCount: 4,
+      })
+    ).toEqual({ type: 'move-folder', index: 3 });
+    expect(
+      resolvePopupKeyAction({
+        key: 'Enter',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 2,
+        folderItemCount: 4,
+      })
+    ).toEqual({ type: 'pick' });
+    expect(
+      resolvePopupKeyAction({
+        key: 'Escape',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 1,
+        folderItemCount: 4,
+      })
+    ).toEqual({ type: 'close-folder' });
+    expect(
+      resolvePopupKeyAction({
+        key: 'ArrowLeft',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 1,
+        folderItemCount: 4,
+      })
+    ).toEqual({ type: 'close-folder' });
+    // 候选异步变空时 Escape 仍要能退出 folder，否则根级 close 永远走不到，弹窗死锁
+    expect(
+      resolvePopupKeyAction({
+        key: 'Escape',
+        shiftKey: false,
+        isComposing: false,
+        activeIndex: 0,
+        itemCount: 3,
+        folderOpen: true,
+        folderIndex: 0,
+        folderItemCount: 0,
+      })
+    ).toEqual({ type: 'close-folder' });
   });
 
   it('builds a typed recipient payload with explicit file context', () => {
