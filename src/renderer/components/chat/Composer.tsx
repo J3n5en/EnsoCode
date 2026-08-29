@@ -25,6 +25,11 @@ interface ComposerProps {
   focusKey?: string;
   /** 挂载/切会话时是否自动聚焦。移动端置 false，否则一进会话就弹出键盘挡住内容 */
   autoFocus?: boolean;
+  /**
+   * Enter 是否发送（默认 true，桌面习惯）。移动端置 false：软键盘的「换行」
+   * 也是 Enter keydown，默认行为会把换行变成误发送；此时只能点发送按钮。
+   */
+  enterToSend?: boolean;
   /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
   locked?: boolean;
@@ -65,6 +70,7 @@ export function Composer({
   busy,
   focusKey,
   autoFocus = true,
+  enterToSend = true,
   toolbar,
   locked = false,
   injectedDraft,
@@ -338,7 +344,7 @@ export function Composer({
       setSlash(null);
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && enterToSend) {
       event.preventDefault();
       handleSend();
     }

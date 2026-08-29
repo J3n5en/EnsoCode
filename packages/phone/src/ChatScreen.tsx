@@ -175,6 +175,8 @@ export function ChatScreen(props: Props) {
               focusKey={sessionId}
               // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
               autoFocus={false}
+              // 软键盘的「换行」就是 Enter：Enter 只换行，发送必须点按钮
+              enterToSend={false}
               toolbar={
                 props.modelLabel && props.onOpenConfig ? (
                   <button
