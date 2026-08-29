@@ -103,6 +103,42 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     });
   });
 
+  it('reserveChildResume 不被自己的持久化名字挡住（真机回归：恢复必然自撞）', () => {
+    // usedNames 扫持久化防跨重启撞名；但 resume 的 child 自己的名字必然在盘上——
+    // 把它算冲突会让所有 typed child 永远恢复失败。只有「其他会话」同名才是冲突。
+    const metadata = {
+      parentId: parent.sessionId,
+      childGeneration: 'old-generation',
+      agentTypeKey: 'builtin:scout' as const,
+      agentInstanceId: '99999999-9999-4999-8999-999999999999',
+      agentInstanceName: 'Scout · 9999',
+      dispatchOrigin: 'typed-mention' as const,
+    };
+    const selfId = `${parent.sessionId}::cw-${metadata.agentInstanceId}`;
+    const withPersisted = (conversations: Record<string, unknown>) =>
+      new AgentSessionIndex({
+        readSettings: () => ({ 'enso-conversations': { state: { conversations } } }),
+        randomUuid: uuids(),
+      });
+
+    // 自己的持久化名字 → 必须成功
+    const sessions = withPersisted({
+      [selfId]: { parentId: parent.sessionId, coworkerName: metadata.agentInstanceName },
+    });
+    sessions.prepareParent(parent);
+    expect(sessions.reserveChildResume(parent, metadata, 'resume-1').ok).toBe(true);
+
+    // 另一个会话同名 → 拒绝
+    const conflicted = withPersisted({
+      [`${parent.sessionId}::cw-other`]: {
+        parentId: parent.sessionId,
+        coworkerName: metadata.agentInstanceName,
+      },
+    });
+    conflicted.prepareParent(parent);
+    expect(conflicted.reserveChildResume(parent, metadata, 'resume-2').ok).toBe(false);
+  });
+
   it('reserveChildResume 拒绝名字已被占用与旧代父身份', () => {
     const sessions = index();
     sessions.prepareParent(parent);

@@ -238,7 +238,18 @@ export class AgentSessionIndex {
         error: `Coworker limit reached (${MAX_ORIGIN_COWORKERS} active or reserved).`,
       };
     }
-    if (this.usedNames(parent.sessionId).has(metadata.agentInstanceName)) {
+    // 撞名检查要排除自身：usedNames 扫持久化防跨重启撞名，而 resume 的 child
+    // 自己的名字必然在盘上，算冲突会让所有 typed child 永远恢复失败。
+    const sessionId = `${parent.sessionId}::cw-${metadata.agentInstanceId}`;
+    // 同一 child 已在恢复中（并发/重入）→ 拒绝，防 reservation 被静默覆盖
+    if (this.reservations.has(sessionId)) {
+      return {
+        ok: false,
+        code: 'capacity-reached',
+        error: `Coworker resume is already in flight: ${metadata.agentInstanceName}`,
+      };
+    }
+    if (this.nameTakenByOther(parent.sessionId, metadata.agentInstanceName, sessionId)) {
       return {
         ok: false,
         code: 'capacity-reached',
@@ -246,7 +257,7 @@ export class AgentSessionIndex {
       };
     }
     const child: ChildSessionIdentity = {
-      sessionId: `${parent.sessionId}::cw-${metadata.agentInstanceId}`,
+      sessionId,
       generation: this.randomUuid(),
       parent,
       instanceId: metadata.agentInstanceId,
@@ -509,6 +520,34 @@ export class AgentSessionIndex {
     for (const [childId, reservation] of this.reservations) {
       if (reservation.child.parent.sessionId === parentSessionId) this.reservations.delete(childId);
     }
+  }
+
+  /** resume 专用撞名检查：排除被恢复 child 自身的内存/持久化条目 */
+  private nameTakenByOther(parentSessionId: string, name: string, selfSessionId: string): boolean {
+    const parent = this.sessions.get(parentSessionId);
+    for (const coworker of parent?.coworkers.values() ?? []) {
+      if (coworker.name === name && coworker.id !== selfSessionId) return true;
+    }
+    for (const reservation of this.reservations.values()) {
+      if (
+        reservation.child.parent.sessionId === parentSessionId &&
+        reservation.child.instanceName === name &&
+        reservation.child.sessionId !== selfSessionId
+      ) {
+        return true;
+      }
+    }
+    const conversations = record(conversationState(this.options.readSettings()).conversations);
+    if (conversations) {
+      for (const [conversationId, value] of Object.entries(conversations)) {
+        if (conversationId === selfSessionId) continue;
+        const conversation = record(value);
+        if (conversation?.parentId !== parentSessionId) continue;
+        const persistedName = conversation.agentInstanceName ?? conversation.coworkerName;
+        if (persistedName === name) return true;
+      }
+    }
+    return false;
   }
 
   private usedNames(parentSessionId: string): Set<string> {
