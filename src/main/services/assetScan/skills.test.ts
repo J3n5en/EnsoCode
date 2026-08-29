@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readPluginSkills, readSkillsRoot } from './skills';
+import { listProjectSkills, readPluginSkills, readSkillsRoot } from './skills';
 
 let tmp: string;
 
@@ -106,5 +106,32 @@ describe('readPluginSkills', () => {
       JSON.stringify({ plugins: { 'a@b': [{ installPath: '/definitely/not/here' }] } })
     );
     expect(readPluginSkills(manifest)).toEqual([]);
+  });
+});
+
+describe('listProjectSkills', () => {
+  it('spawn 前菜单覆盖 pi 运行时的全部自动发现根:项目 + 用户全局', () => {
+    // pi 会自动发现 ~/.pi/agent/skills 与 ~/.agents/skills(docs/skills.md),
+    // spawn 前的斜杠菜单漏掉全局根会导致"新会话没有 /skill"
+    const cwd = path.join(tmp, 'proj');
+    const home = path.join(tmp, 'home');
+    writeSkill(path.join(cwd, '.agents', 'skills'), 'proj-a', 'name: proj-a\ndescription: p');
+    writeSkill(path.join(home, '.agents', 'skills'), 'global-a', 'name: global-a\ndescription: g');
+    writeSkill(path.join(home, '.pi', 'agent', 'skills'), 'global-b', 'name: global-b\ndescription: g2');
+    const names = listProjectSkills(cwd, home).map((skill) => skill.name);
+    expect(names).toContain('proj-a');
+    expect(names).toContain('global-a');
+    expect(names).toContain('global-b');
+  });
+
+  it('同名 skill 项目优先,全局根不重复上报', () => {
+    const cwd = path.join(tmp, 'proj');
+    const home = path.join(tmp, 'home');
+    writeSkill(path.join(cwd, '.agents', 'skills'), 'dup', 'name: dup\ndescription: project');
+    writeSkill(path.join(home, '.agents', 'skills'), 'dup', 'name: dup\ndescription: global');
+    const skills = listProjectSkills(cwd, home);
+    expect(skills.filter((skill) => skill.name === 'dup')).toEqual([
+      { name: 'dup', description: 'project' },
+    ]);
   });
 });

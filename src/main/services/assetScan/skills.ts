@@ -59,11 +59,21 @@ export function readSkillsRoot(root: string, groupName: string): DiscoveredSkill
   return skills;
 }
 
-/** 项目 cwd 下 agent 会自动发现的 skill（spawn 前斜杠菜单用） */
-export function listProjectSkills(cwd: string): { name: string; description: string }[] {
+/** spawn 前斜杠菜单用：覆盖 pi 运行时会自动发现的全部根（项目 + 用户全局，
+ * 见 pi docs/skills.md），否则未 spawn 的新会话看不到 /skill；项目同名优先 */
+export function listProjectSkills(
+  cwd: string,
+  home: string = HOME
+): { name: string; description: string }[] {
   const seen = new Set<string>();
   const skills: { name: string; description: string }[] = [];
-  for (const root of [path.join(cwd, '.agents', 'skills'), path.join(cwd, '.pi', 'skills')]) {
+  const roots = [
+    path.join(cwd, '.agents', 'skills'),
+    path.join(cwd, '.pi', 'skills'),
+    path.join(home, '.agents', 'skills'),
+    path.join(home, '.pi', 'agent', 'skills'),
+  ];
+  for (const root of roots) {
     let found: DiscoveredSkill[];
     try {
       found = readSkillsRoot(root, '');
