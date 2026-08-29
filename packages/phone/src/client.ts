@@ -50,6 +50,8 @@ export interface ClientEvents {
   onProjects(projects: ProjectEntry[]): void;
   onProviders(providers: ProviderEntry[]): void;
   onSession(sessionId: string, view: SessionView): void;
+  /** 桌面下发 VAPID 公钥：有它才能 pushManager.subscribe */
+  onPushConfig?(vapidPublicKey: string): void;
 }
 
 export class PairClient {
@@ -202,6 +204,9 @@ export class PairClient {
         break;
       case 'agent-event':
         this.applyAgentEvent(payload.event as Record<string, unknown>);
+        break;
+      case 'push-config':
+        this.events.onPushConfig?.(payload.vapidPublicKey);
         break;
       case 'history': {
         // 上滑分页应答：只并入消息，不动 status/审批（那些以尾窗快照为准）

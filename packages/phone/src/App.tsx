@@ -11,6 +11,13 @@ import { ChatScreen } from './ChatScreen';
 import { type ConnState, PairClient, type SessionView } from './client';
 import { NewSessionSheet } from './NewSessionSheet';
 import { PairScreen } from './PairScreen';
+import {
+  isPushSupported,
+  isStandalone,
+  registerServiceWorker,
+  subscribePush,
+  unsubscribePush,
+} from './push';
 import { SessionConfigSheet } from './SessionConfigSheet';
 import { SessionDrawer } from './SessionDrawer';
 import { clearPairing, loadPairing, savePairing } from './storage';
@@ -36,6 +43,25 @@ const STATE_LABEL: Record<ConnState, string> = {
 };
 
 const LAST_SESSION_KEY = 'enso-phone-last-session';
+const PUSH_ENABLED_KEY = 'enso-phone-push';
+
+/** 通知点击冷启动时带的 ?session=：取出即抹掉，优先于上次会话 */
+function takeSessionFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get('session');
+  if (!sessionId) return null;
+  params.delete('session');
+  const query = params.toString();
+  history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+  return sessionId;
+}
+
+/** 推送可用性：iOS 必须先添加到主屏幕才有 pushManager */
+function pushAvailability(): 'ok' | 'needs-install' | 'unsupported' {
+  if (isPushSupported()) return 'ok';
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return isIos && !isStandalone() ? 'needs-install' : 'unsupported';
+}
 
 export function App() {
   const [device, setDevice] = useState(loadPairing);
@@ -45,15 +71,32 @@ export function App() {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(() =>
-    localStorage.getItem(LAST_SESSION_KEY)
+  const [activeId, setActiveId] = useState<string | null>(
+    () => takeSessionFromUrl() ?? localStorage.getItem(LAST_SESSION_KEY)
   );
   const [view, setView] = useState<SessionView | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(
+    () => localStorage.getItem(PUSH_ENABLED_KEY) === 'on'
+  );
   const clientRef = useRef<PairClient | null>(null);
   const activeIdRef = useRef<string | null>(null);
+  /** VAPID 公钥（桌面下发）；用 ref 避免重建连接 effect */
+  const vapidKeyRef = useRef<string | null>(null);
+
+  // SW 常驻注册（通知点击路由依赖它）+ 监听点击通知的切会话消息
+  useEffect(() => {
+    void registerServiceWorker();
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; sessionId?: string };
+      if (data?.type === 'open-session' && data.sessionId) setActiveId(data.sessionId);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, []);
 
   useEffect(() => {
     if (!device) return;
@@ -64,6 +107,15 @@ export function App() {
       onProviders: setProviders,
       onSession: (id, next) => {
         setView((prev) => (id === activeIdRef.current ? next : prev));
+      },
+      onPushConfig: (key) => {
+        vapidKeyRef.current = key;
+        // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
+        if (localStorage.getItem(PUSH_ENABLED_KEY) === 'on') {
+          void subscribePush(key).then((subscription) => {
+            if (subscription) client.send({ type: 'push-subscribe', subscription });
+          });
+        }
       },
     });
     clientRef.current = client;
@@ -138,6 +190,23 @@ export function App() {
 
   const send = (command: Parameters<PairClient['send']>[0]) => clientRef.current?.send(command);
 
+  const togglePush = async (next: boolean) => {
+    if (!next) {
+      localStorage.setItem(PUSH_ENABLED_KEY, 'off');
+      setPushEnabled(false);
+      send({ type: 'push-unsubscribe' });
+      void unsubscribePush();
+      return;
+    }
+    const key = vapidKeyRef.current;
+    if (!key) return; // 还没收到 push-config（未连上桌面），开关保持关闭
+    const subscription = await subscribePush(key);
+    if (!subscription) return; // 权限被拒或环境不支持
+    send({ type: 'push-subscribe', subscription });
+    localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+    setPushEnabled(true);
+  };
+
   return (
     <>
       <ChatScreen
@@ -192,6 +261,9 @@ export function App() {
           setDrawerOpen(false);
           setComposing(true);
         }}
+        pushEnabled={pushEnabled}
+        pushAvailability={pushAvailability()}
+        onTogglePush={(next) => void togglePush(next)}
         onUnpair={() => {
           // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）
           void revokePairing(device.relayUrl, device.pairId, device.token).catch(() => {});

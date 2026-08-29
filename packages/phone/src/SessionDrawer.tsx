@@ -1,7 +1,17 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
-import { Bot, ChevronRight, FolderGit2, MessageSquarePlus, Palette, Unplug, X } from 'lucide-react';
+import {
+  Bell,
+  Bot,
+  ChevronRight,
+  FolderGit2,
+  MessageSquarePlus,
+  Palette,
+  Unplug,
+  X,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import {
@@ -36,6 +46,9 @@ interface Props {
   deviceName: string;
   connected: boolean;
   connectionLabel: string;
+  pushEnabled: boolean;
+  pushAvailability: 'ok' | 'needs-install' | 'unsupported';
+  onTogglePush(next: boolean): void;
   onClose(): void;
   onSelect(sessionId: string): void;
   onNewConversation(projectId: string): void;
@@ -52,6 +65,9 @@ export function SessionDrawer({
   deviceName,
   connected,
   connectionLabel,
+  pushEnabled,
+  pushAvailability,
+  onTogglePush,
   onClose,
   onSelect,
   onNewConversation,
@@ -191,6 +207,30 @@ export function SessionDrawer({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {!confirmUnpair && (
+            <div className="px-2 py-1.5">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 text-muted-foreground text-sm">推送通知</span>
+                <Switch
+                  checked={pushEnabled}
+                  disabled={pushAvailability !== 'ok' || !connected}
+                  onCheckedChange={onTogglePush}
+                />
+              </div>
+              {pushAvailability === 'needs-install' && (
+                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+                  iOS 需先用分享菜单「添加到主屏幕」，从主屏幕打开后才能开启。
+                </p>
+              )}
+              {pushAvailability === 'unsupported' && (
+                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+                  当前浏览器不支持推送。
+                </p>
+              )}
             </div>
           )}
 
