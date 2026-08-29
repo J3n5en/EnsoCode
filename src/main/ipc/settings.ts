@@ -16,6 +16,41 @@ let isDirty = false;
 const DEBOUNCE_MS = 500;
 const MAX_WAIT_MS = 5000;
 
+export const SETTINGS_STATE_FIELDS = [
+  'theme',
+  'language',
+  'terminalTheme',
+  'terminalFontSize',
+  'terminalFontFamily',
+  'terminalFontWeight',
+  'terminalFontWeightBold',
+  'favoriteTerminalThemes',
+  'statusLineSegments',
+  'loadLocalSkills',
+  'autoUpdate',
+  'providers',
+  'defaultModel',
+  'skills',
+  'mcpServers',
+  'instructions',
+  'presets',
+  'agentTypes',
+  'disabledBuiltinAgentTypes',
+  'disabledBuiltinTools',
+  'onboarded',
+  'keybindings',
+  'projects',
+] as const;
+
+export type SettingsStateField = (typeof SETTINGS_STATE_FIELDS)[number];
+
+export interface SettingsPatchResult {
+  ok: boolean;
+  previous?: unknown;
+  value?: unknown;
+  error?: string;
+}
+
 export function readSettings(): Record<string, unknown> | null {
   if (cachedSettings !== null) {
     return cachedSettings;
@@ -62,15 +97,24 @@ export function flushSettings(): boolean {
   return true;
 }
 
-/** 更新缓存、广播其他窗口、debounce 落盘（SETTINGS_WRITE / WRITE_KEY 共用） */
-function scheduleWrite(data: Record<string, unknown>, sender: Electron.WebContents): boolean {
+export type SettingsBroadcast = 'exclude-sender' | 'all-renderers';
+
+/** 更新缓存、广播窗口、debounce 落盘（SETTINGS_WRITE / WRITE_KEY / Gateway 共用） */
+function scheduleWrite(
+  data: Record<string, unknown>,
+  sender?: Electron.WebContents,
+  broadcast: SettingsBroadcast = 'exclude-sender'
+): boolean {
   try {
     cachedSettings = data;
     isDirty = true;
 
-    // 多窗口同步：广播给除发起窗口外的所有窗口
+    // 普通 store 写排除 sender；Gateway 写显式选择 all-renderers。
     for (const win of BrowserWindow.getAllWindows()) {
-      if (win.webContents !== sender && !win.isDestroyed()) {
+      if (
+        (broadcast === 'all-renderers' || !sender || win.webContents !== sender) &&
+        !win.isDestroyed()
+      ) {
         win.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED);
       }
     }
@@ -106,6 +150,117 @@ function scheduleWrite(data: Record<string, unknown>, sender: Electron.WebConten
   } catch {
     return false;
   }
+}
+
+/**
+ * Gateway 的唯一设置写入口：只允许登记字段，保留 zustand 容器与其它字段，
+ * 并复用现有缓存、原子写和多窗口广播。
+ */
+export function patchSettingsState(
+  field: string,
+  value: unknown,
+  sender?: Electron.WebContents,
+  broadcast: SettingsBroadcast = 'all-renderers'
+): SettingsPatchResult {
+  if (!SETTINGS_STATE_FIELDS.includes(field as SettingsStateField)) {
+    return { ok: false, error: `Unregistered settings field: ${field}` };
+  }
+  const current = readSettings() ?? {};
+  const persisted =
+    current['enso-settings'] && typeof current['enso-settings'] === 'object'
+      ? (current['enso-settings'] as Record<string, unknown>)
+      : {};
+  const state =
+    persisted.state && typeof persisted.state === 'object'
+      ? (persisted.state as Record<string, unknown>)
+      : {};
+  const previous = state[field];
+  const nextState = { ...state, [field]: value };
+  const next = {
+    ...current,
+    'enso-settings': {
+      ...persisted,
+      state: nextState,
+    },
+  };
+  return scheduleWrite(next, sender, broadcast)
+    ? { ok: true, previous, value }
+    : { ok: false, error: `Failed to write settings field: ${field}` };
+}
+
+/** 删除项目及其会话元数据；两个 zustand store 在同一次顶层按键合并中原子更新。 */
+export function removeProjectAndConversations(
+  projectId: string,
+  sender?: Electron.WebContents,
+  broadcast: SettingsBroadcast = 'all-renderers'
+): SettingsPatchResult {
+  const current = readSettings() ?? {};
+  const settingsStore =
+    current['enso-settings'] && typeof current['enso-settings'] === 'object'
+      ? (current['enso-settings'] as Record<string, unknown>)
+      : {};
+  const settingsState =
+    settingsStore.state && typeof settingsStore.state === 'object'
+      ? (settingsStore.state as Record<string, unknown>)
+      : {};
+  const projects = Array.isArray(settingsState.projects) ? settingsState.projects : [];
+  const project = projects.find(
+    (entry) =>
+      entry && typeof entry === 'object' && (entry as Record<string, unknown>).id === projectId
+  );
+  if (!project) return { ok: false, error: `Project not found: ${projectId}` };
+
+  const conversationStore =
+    current['enso-conversations'] && typeof current['enso-conversations'] === 'object'
+      ? (current['enso-conversations'] as Record<string, unknown>)
+      : {};
+  const conversationState =
+    conversationStore.state && typeof conversationStore.state === 'object'
+      ? (conversationStore.state as Record<string, unknown>)
+      : {};
+  const conversations =
+    conversationState.conversations && typeof conversationState.conversations === 'object'
+      ? (conversationState.conversations as Record<string, unknown>)
+      : {};
+  const removedIds = Object.entries(conversations)
+    .filter(([, entry]) => {
+      const conversation =
+        entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
+      return conversation?.projectId === projectId;
+    })
+    .map(([id]) => id);
+  const removedSet = new Set(removedIds);
+  const nextConversations = Object.fromEntries(
+    Object.entries(conversations).filter(([id]) => !removedSet.has(id))
+  );
+  const nextOrder = Array.isArray(conversationState.order)
+    ? conversationState.order.filter((id) => typeof id !== 'string' || !removedSet.has(id))
+    : conversationState.order;
+  const next = {
+    ...current,
+    'enso-settings': {
+      ...settingsStore,
+      state: {
+        ...settingsState,
+        projects: projects.filter((entry) => entry !== project),
+      },
+    },
+    'enso-conversations': {
+      ...conversationStore,
+      state: {
+        ...conversationState,
+        conversations: nextConversations,
+        ...(nextOrder === undefined ? {} : { order: nextOrder }),
+        ...(typeof conversationState.activeId === 'string' &&
+        removedSet.has(conversationState.activeId)
+          ? { activeId: undefined }
+          : {}),
+      },
+    },
+  };
+  return scheduleWrite(next, sender, broadcast)
+    ? { ok: true, previous: { project, conversationIds: removedIds }, value: null }
+    : { ok: false, error: `Failed to remove project: ${projectId}` };
 }
 
 export function registerSettingsHandlers(): void {

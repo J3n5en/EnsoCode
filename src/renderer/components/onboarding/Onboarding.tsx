@@ -1,3 +1,4 @@
+import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { Bot, Check, Layers, Plug, Server, Sparkles, Wand2, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
@@ -7,8 +8,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { AgentTypeList } from '../settings/AgentTypesSettings';
 import { LocalAssetImportDialog } from '../settings/LocalAssetImportDialog';
 import { LocalImportDialog } from '../settings/LocalImportDialog';
-import { OauthProvidersDialog } from '../settings/OauthProvidersDialog';
 import { PresetEditDialog } from '../settings/PresetsSettings';
+import { ProviderSetupWizard } from '../settings/ProviderSetupWizard';
 
 type StepId =
   | 'welcome'
@@ -43,11 +44,15 @@ export function Onboarding() {
   const [stepIndex, setStepIndex] = React.useState(0);
   const [importKind, setImportKind] = React.useState<'skill' | 'mcp' | 'instruction' | null>(null);
   const [providerOpen, setProviderOpen] = React.useState(false);
-  const [oauthOpen, setOauthOpen] = React.useState(false);
+  const [setupOpen, setSetupOpen] = React.useState(false);
   const [presetOpen, setPresetOpen] = React.useState(false);
   const step = STEPS[stepIndex];
 
   const finish = () => setOnboarded(true);
+  const summonEnso = () => {
+    finish();
+    void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
+  };
   const next = () => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1));
   const prev = () => setStepIndex((i) => Math.max(0, i - 1));
 
@@ -67,11 +72,10 @@ export function Onboarding() {
     provider: {
       icon: Server,
       title: t('Model Providers'),
-      desc: t('Sign in with a provider subscription, or import API providers from local AI apps'),
+      desc: t('Add a provider subscription or API Key, or import providers from local AI apps'),
       count: providers.length,
-      // 订阅已是主要接入方式，占主按钮；本地导入退到次按钮
-      onImport: () => setOauthOpen(true),
-      importLabel: t('Subscription login'),
+      onImport: () => setSetupOpen(true),
+      importLabel: t('Add model or provider'),
       secondary: { label: t('Import from local apps'), onClick: () => setProviderOpen(true) },
     },
     skill: {
@@ -187,6 +191,16 @@ export function Onboarding() {
           </div>
         )}
 
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            {t('Need help choosing a setup? Ask Enso.')}
+          </p>
+          <Button variant="ghost" size="sm" onClick={summonEnso}>
+            <Sparkles className="h-3.5 w-3.5" />
+            {t('Ask Enso')}
+          </Button>
+        </div>
+
         {/* 导航 */}
         <div className="mt-6 flex items-center justify-between">
           <Button variant="ghost" size="sm" onClick={prev} disabled={stepIndex === 0}>
@@ -213,7 +227,7 @@ export function Onboarding() {
 
       {/* 复用现有导入弹窗（受控） */}
       <LocalImportDialog open={providerOpen} onOpenChange={setProviderOpen} />
-      <OauthProvidersDialog open={oauthOpen} onOpenChange={setOauthOpen} />
+      <ProviderSetupWizard open={setupOpen} onOpenChange={setSetupOpen} />
       {importKind && (
         <LocalAssetImportDialog
           kind={importKind}

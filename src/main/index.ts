@@ -17,9 +17,16 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 }
 
-// 打包版 productName=EnsoCode 会把 userData 指到新目录，与 dev（enso-code）分家；
-// 统一到 enso-code，保证打包版接上既有会话与设置
-app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
+// 自动化可在开发环境显式指定 userData；打包版永不接受环境覆盖。
+// dev 缺省隔离到 appData/enso-code-dev：与打包版彻底分离，避免单实例锁 /
+// Chromium profile 锁冲突（对齐 EnsoAI 的 dev profile 方案）。
+const developmentUserData = !app.isPackaged ? process.env.ENSO_USER_DATA_DIR?.trim() : undefined;
+app.setPath(
+  'userData',
+  developmentUserData
+    ? path.resolve(developmentUserData)
+    : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
+);
 
 // 背景图媒体协议：特权 scheme 必须在 app ready 前登记
 registerLocalImageSchemePrivileges();
@@ -50,11 +57,16 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
+    // 协议处理器要赶在窗口加载内容之前注册（local-image:// 资源依赖它）。
     registerLocalImageProtocolHandler();
-    startAgentWorker();
-    // 手机第二屏：恢复已配对设备的中继连接（与 agent worker 并列，不依赖窗口）
-    startPairHost();
+    // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
+    // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
+    setImmediate(() => {
+      startAgentWorker();
+      // 手机第二屏：恢复已配对设备的中继连接
+      startPairHost();
+    });
     void initAutoUpdater(mainWindow);
 
     app.on('activate', () => {

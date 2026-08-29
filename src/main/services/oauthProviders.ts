@@ -1,6 +1,13 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ModelRuntime as ModelRuntimeType } from '@earendil-works/pi-coding-agent';
+import { isSameChildSessionIdentity } from '@shared/builtinAgents';
+import type {
+  OauthFlowEvent,
+  OauthFlowLocator,
+  StartOauthResult,
+} from '@shared/capabilities/types';
 import {
   ensureAccountProvider,
   nextAccountKey,
@@ -23,7 +30,7 @@ import type {
   OauthUsageWindow,
 } from '@shared/types';
 import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
-import { app, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, shell, type WebContents } from 'electron';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
 type AuthInteraction = Parameters<ModelRuntimeType['login']>[2];
@@ -234,6 +241,66 @@ async function accountKeysOf(runtime: ModelRuntimeType): Promise<Map<string, str
 }
 
 /**
+ * 直接读取 auth.json 中实际存在的全部 OAuth account key。
+ * 不初始化 ModelRuntime，不触发 provider 注册、getAuth、token refresh 或网络请求。
+ * 文件不存在表示尚无账号；损坏、权限与其它 I/O 错误原样上抛供调用方 fail-closed。
+ */
+export async function readStoredOauthCredentialKeys(): Promise<ReadonlySet<string>> {
+  let raw: string;
+  try {
+    raw = await readFile(authPath(), 'utf8');
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (code === 'ENOENT') return new Set();
+    throw error;
+  }
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid OAuth credential store');
+  }
+  const keys = new Set<string>();
+  for (const [key, credential] of Object.entries(parsed)) {
+    if (
+      credential &&
+      typeof credential === 'object' &&
+      !Array.isArray(credential) &&
+      'type' in credential &&
+      credential.type === 'oauth'
+    ) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+
+/** Gateway 值感知脱敏使用；只读 auth.json，不触发 token refresh 或网络。 */
+export async function readStoredOauthSecretValues(): Promise<readonly string[]> {
+  let raw: string;
+  try {
+    raw = await readFile(authPath(), 'utf8');
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (code === 'ENOENT') return [];
+    throw error;
+  }
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid OAuth credential store');
+  }
+  const values: string[] = [];
+  for (const credential of Object.values(parsed)) {
+    if (!credential || typeof credential !== 'object' || Array.isArray(credential)) continue;
+    const record = credential as Record<string, unknown>;
+    if (record.type !== 'oauth') continue;
+    for (const key of ['access', 'refresh', 'accessToken', 'refreshToken', 'apiKey'] as const) {
+      const value = record[key];
+      if (typeof value === 'string' && value.length > 0) values.push(value);
+    }
+  }
+  return values;
+}
+
+/**
  * 该 key 在 auth.json 里确有一条 oauth 凭证吗。
  * Renderer 传来的 accountKey 会被直接当 auth.json 的键用（logout / getAuth），
  * 不收窄就等于把「任意键」的读写能力交给渲染层。
@@ -287,14 +354,24 @@ export async function listOauthProviders(): Promise<OauthProviderInfo[]> {
 // ---- 登录 / 登出 ----
 
 interface ActiveLogin {
+  locator: OauthFlowLocator;
   abort: AbortController;
   pendingPrompts: Map<string, { resolve: (value: string) => void; reject: (err: Error) => void }>;
+  resolveCompletion: (event: OauthLoginEvent) => void;
+  settled: boolean;
   /** 完整 URL 只留在 Main 内存里，Renderer 需要重开时经专用 IPC 请求 */
   authUrl?: string;
 }
 
 // 同一时刻只允许一个进行中的登录流程
 let activeLogin: ActiveLogin | null = null;
+/** 通知除发起窗口外的 renderer：auth.json 账号集合已变化，需要重拉真值快照。 */
+export function broadcastOauthCredentialsChanged(source?: WebContents): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents === source || win.webContents.isDestroyed()) continue;
+    win.webContents.send(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
+  }
+}
 
 /** Renderer 只需要展示来源，不得拿到 OAuth 查询参数里的 state 等敏感值 */
 function authUrlForRenderer(url: string): string {
@@ -306,36 +383,95 @@ function authUrlForRenderer(url: string): string {
   }
 }
 
-/**
- * 登录一个账号；支持多账号的 provider 会新增且不覆盖已登录凭证，单账号 provider 已登录时拒绝。
- *
- * 实现要点：pi 把凭证写在传给 `login()` 的那个 id 上（pi-ai `models.js` 里
- * `credentials.modify(providerId, …)`），而合成 id 只要先 `registerNativeProvider`
- * 就是 login 认得的合法 provider（实测 `temp/multiaccount-probe/probe3.mjs`，
- * 5 个内置 oauth provider 全部通过）。所以直接登到目标 key 即可——
- * 全程不碰已有账号那一格，失败时也没有「原凭证被顶掉」的窗口，
- * 唯一需要回滚的是白注册的克隆 provider，交给 finally 里的 syncAccountProviders 清掉。
- */
-export async function startOauthLogin(providerId: string, sender: WebContents): Promise<void> {
-  const emit = (event: OauthLoginEvent) => {
-    if (!sender.isDestroyed()) sender.send(IPC_CHANNELS.OAUTH_LOGIN_EVENT, event);
-  };
-  if (activeLogin) {
-    emit({ type: 'error', message: 'login already in progress' });
-    return;
+export interface OauthLoginHandle {
+  start: StartOauthResult;
+  completion?: Promise<OauthLoginEvent>;
+}
+
+function sameFlow(left: OauthFlowLocator, right: OauthFlowLocator): boolean {
+  if (
+    left.flowId !== right.flowId ||
+    left.host !== right.host ||
+    left.ownerWebContentsId !== right.ownerWebContentsId
+  ) {
+    return false;
   }
+  return left.host === 'provider-wizard'
+    ? right.host === 'provider-wizard'
+    : right.host === 'agent-child-tab' &&
+        left.turnId === right.turnId &&
+        left.requestId === right.requestId &&
+        isSameChildSessionIdentity(left.child, right.child);
+}
+function emitOauthEvent(login: ActiveLogin, sender: WebContents, event: OauthLoginEvent): void {
+  if (!sender.isDestroyed()) {
+    const flowEvent: OauthFlowEvent = { locator: login.locator, event };
+    sender.send(IPC_CHANNELS.OAUTH_LOGIN_EVENT, flowEvent);
+  }
+  if (!login.settled && (event.type === 'done' || event.type === 'error')) {
+    login.settled = true;
+    login.resolveCompletion(event);
+  }
+}
 
+/** 同一入口服务 wizard 与 Enso child；locator 完整绑定 owner/host/generation/request。 */
+export function beginOauthLogin(
+  providerId: string,
+  sender: WebContents,
+  locator: OauthFlowLocator,
+  signal?: AbortSignal
+): OauthLoginHandle {
+  if (sender.isDestroyed() || sender.id !== locator.ownerWebContentsId) {
+    return {
+      start: { status: 'failed', code: 'invalid-owner', message: 'OAuth owner is unavailable' },
+    };
+  }
+  if (activeLogin) return { start: { status: 'busy', activeHost: activeLogin.locator.host } };
+  if (signal?.aborted) {
+    return {
+      start: { status: 'failed', code: 'cancelled', message: 'OAuth login was cancelled' },
+    };
+  }
   const abort = new AbortController();
-  const pendingPrompts: ActiveLogin['pendingPrompts'] = new Map();
-  const login: ActiveLogin = { abort, pendingPrompts };
+  const { promise: completion, resolve: resolveCompletion } =
+    Promise.withResolvers<OauthLoginEvent>();
+  const login: ActiveLogin = {
+    locator,
+    abort,
+    pendingPrompts: new Map(),
+    resolveCompletion,
+    settled: false,
+  };
   activeLogin = login;
-  let runtime: ModelRuntimeType | null = null;
+  setImmediate(() => {
+    void runOauthLogin(providerId, sender, login, signal);
+  });
+  return { start: { status: 'started', locator }, completion };
+}
 
+/** Provider wizard 入口；Main 生成 exact locator，完成仅经 OauthFlowEvent 收敛。 */
+export function startOauthLogin(providerId: string, sender: WebContents): StartOauthResult {
+  const locator: OauthFlowLocator = {
+    flowId: crypto.randomUUID(),
+    ownerWebContentsId: sender.id,
+    host: 'provider-wizard',
+  };
+  return beginOauthLogin(providerId, sender, locator).start;
+}
+
+async function runOauthLogin(
+  providerId: string,
+  sender: WebContents,
+  login: ActiveLogin,
+  ownerSignal?: AbortSignal
+): Promise<void> {
+  const abortFromOwner = () => login.abort.abort();
+  ownerSignal?.addEventListener('abort', abortFromOwner, { once: true });
+  let runtime: ModelRuntimeType | null = null;
+  const emit = (event: OauthLoginEvent) => emitOauthEvent(login, sender, event);
+  emit({ type: 'progress', message: 'Starting login...' });
   try {
     runtime = await getRuntime();
-    // providerId 来自 Renderer，必须收窄成 listOauthProviders 暴露的那种「裸基础 id」：
-    // 放合成 id（anthropic#2）进来会让 nextAccountKey 原样返回它，
-    // 随后 login 直接覆盖那个已登录账号的凭证
     const base = providerId.includes('#') ? undefined : runtime.getProvider(providerId);
     if (!base?.auth.oauth) {
       emit({ type: 'error', message: `unknown oauth provider: ${providerId}` });
@@ -346,7 +482,6 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
       providerId,
       credentials.map((info) => info.providerId)
     );
-    // Renderer 只负责隐藏入口；Main 必须独立阻止伪造调用把单账号 provider 登到合成 key。
     if (accountKey !== providerId && !supportsMultipleAccounts(providerId)) {
       emit({ type: 'error', message: `${providerId} does not support multiple accounts` });
       return;
@@ -354,7 +489,7 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
     ensureAccountProvider(runtime, accountKey);
 
     await runtime.login(accountKey, 'oauth', {
-      signal: abort.signal,
+      signal: login.abort.signal,
       notify: (event) => {
         switch (event.type) {
           case 'info':
@@ -385,75 +520,85 @@ export async function startOauthLogin(providerId: string, sender: WebContents): 
       },
       prompt: (prompt: AuthPrompt) => {
         const requestId = crypto.randomUUID();
-        return new Promise<string>((resolve, reject) => {
-          pendingPrompts.set(requestId, { resolve, reject });
-          // 流程侧可能在带外事件（如回调服务器命中）后取消这个 prompt
-          prompt.signal?.addEventListener('abort', () => {
-            if (pendingPrompts.delete(requestId)) {
-              emit({ type: 'prompt-cancel', requestId });
-              reject(new Error('prompt aborted'));
-            }
-          });
-          emit({
-            type: 'prompt',
-            prompt: {
-              requestId,
-              type: prompt.type,
-              message: prompt.message,
-              placeholder: 'placeholder' in prompt ? prompt.placeholder : undefined,
-              options:
-                prompt.type === 'select'
-                  ? prompt.options.map((option) => ({ ...option }))
-                  : undefined,
-            },
-          });
+        const { promise, resolve, reject } = Promise.withResolvers<string>();
+        login.pendingPrompts.set(requestId, { resolve, reject });
+        prompt.signal?.addEventListener('abort', () => {
+          if (login.pendingPrompts.delete(requestId)) {
+            emit({ type: 'prompt-cancel', requestId });
+            reject(new Error('prompt aborted'));
+          }
         });
+        emit({
+          type: 'prompt',
+          prompt: {
+            requestId,
+            type: prompt.type,
+            message: prompt.message,
+            placeholder: 'placeholder' in prompt ? prompt.placeholder : undefined,
+            options:
+              prompt.type === 'select'
+                ? prompt.options.map((option) => ({ ...option }))
+                : undefined,
+          },
+        });
+        return promise;
       },
     });
 
-    // 刚登进来时网络是通的，顺手探一次身份存进 sidecar；
-    // 否则同一厂商的两个账号在列表里只能靠 key 区分
-    const identity = await probeIdentity(runtime, accountKey);
-    if (identity.email || identity.plan) {
+    const accountIdentity = await probeIdentity(runtime, accountKey);
+    if (accountIdentity.email || accountIdentity.plan) {
       await writeAccountMeta((meta) => {
-        meta[accountKey] = identity;
+        meta[accountKey] = accountIdentity;
       });
     }
-
-    // pi 在 registerProvider 之后只跑过一次 allowNetwork:false 的 refresh，那一轮拿到的
-    // 是兜底清单。登录成功后必须再拉一次真实清单：Antigravity 后端的模型 id 一律带档位
-    // 后缀（gemini-3.1-pro-high / claude-opus-4-6-thinking / gpt-oss-120b-medium），
-    // 用错 id 推理时后端回 404 Requested entity was not found。
     await refreshProviderModels(runtime, providerId);
-    emit({ type: 'done', providerId, account: { key: accountKey, providerId, ...identity } });
+    emit({
+      type: 'done',
+      providerId,
+      account: { key: accountKey, providerId, ...accountIdentity },
+    });
+    broadcastOauthCredentialsChanged(sender);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    emit({ type: 'error', message: sanitizeUpstreamBody(message).slice(0, 300) });
+    const raw = error instanceof Error ? error.message : String(error);
+    emit({ type: 'error', message: sanitizeUpstreamBody(raw).slice(0, 300) });
   } finally {
-    for (const pending of pendingPrompts.values()) pending.reject(new Error('login finished'));
-    pendingPrompts.clear();
-    activeLogin = null;
-    // 登录失败/取消时把没拿到凭证的克隆 provider 注销掉，保持注册表与 auth.json 一致
+    ownerSignal?.removeEventListener('abort', abortFromOwner);
+    for (const pending of login.pendingPrompts.values()) {
+      pending.reject(new Error('login finished'));
+    }
+    login.pendingPrompts.clear();
+    if (!login.settled) emit({ type: 'error', message: 'OAuth login ended unexpectedly' });
+    if (activeLogin === login) activeLogin = null;
     if (runtime) await syncAccountProviders(runtime);
   }
 }
 
-export function respondOauthPrompt(requestId: string, value: string): void {
-  const pending = activeLogin?.pendingPrompts.get(requestId);
-  if (!pending) return;
-  activeLogin?.pendingPrompts.delete(requestId);
+export function respondOauthPrompt(
+  locator: OauthFlowLocator,
+  requestId: string,
+  value: string
+): boolean {
+  if (!activeLogin || !sameFlow(activeLogin.locator, locator)) return false;
+  const pending = activeLogin.pendingPrompts.get(requestId);
+  if (!pending) return false;
+  activeLogin.pendingPrompts.delete(requestId);
   pending.resolve(value);
+  return true;
 }
 
-export function cancelOauthLogin(): void {
-  activeLogin?.abort.abort();
+export function cancelOauthLogin(locator: OauthFlowLocator): boolean {
+  if (!activeLogin || !sameFlow(activeLogin.locator, locator)) return false;
+  activeLogin.abort.abort();
+  return true;
 }
 
-/** 重新打开当前登录流的完整授权地址；没有活动登录或系统打开失败时安全 no-op */
-export function reopenOauthLogin(): void {
-  const url = activeLogin?.authUrl;
-  if (!url) return;
-  void shell.openExternal(url).catch(() => {});
+/** 重新打开完整授权地址；任何 locator 字段不匹配均拒绝。 */
+export function reopenOauthLogin(locator: OauthFlowLocator): boolean {
+  if (!activeLogin || !sameFlow(activeLogin.locator, locator) || !activeLogin.authUrl) {
+    return false;
+  }
+  void shell.openExternal(activeLogin.authUrl).catch(() => {});
+  return true;
 }
 
 /**
@@ -463,7 +608,7 @@ export function reopenOauthLogin(): void {
  * 它与凭证无关，auth.json 全空时依然存在（实测 probe3）。而新账号的 key 由
  * `nextAccountKey` 递增分配、不回收空位，所以裸 key 空着也不会撞号。
  */
-export async function oauthLogout(accountKey: string): Promise<void> {
+export async function oauthLogout(accountKey: string, sender?: WebContents): Promise<void> {
   const runtime = await getRuntime();
   // accountKey 来自 Renderer，只接受 auth.json 里真实存在的键：
   // 任意字符串都能当键传进 pi 的 logout/getAuth，先按已存凭证收窄
@@ -473,6 +618,7 @@ export async function oauthLogout(accountKey: string): Promise<void> {
   await writeAccountMeta((meta) => {
     delete meta[accountKey];
   });
+  broadcastOauthCredentialsChanged(sender);
 }
 
 // ---- 额度（端点参照 @mtrojnar/pi-usage，MIT）----

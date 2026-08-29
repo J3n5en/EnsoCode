@@ -70,6 +70,22 @@ removeInstruction: (id) => {
 
 新增「有外部落地物」的实体时照此处理，别让文件残留。
 
+## 拒绝要赶在乐观回显之前
+
+`sessions.send()` 会先把用户消息乐观上屏再发给 worker。任何“这条压根不会发出去”
+的判断（会话已结束、只读历史、无可用模型……）必须放在乐观回显**之前**，
+否则会往时间线里插一条幽灵消息 —— 只读历史被污染后重启还会消失，更难查。
+
+写测试时，**只断言错误文案会放过这类 bug**（文案是对的，消息也进去了）。
+必须同时断言消息数不变：
+
+```ts
+const before = store.getState().conversations.ended.messages.length;
+const error = await store.getState().send('...', target);
+expect(error).toContain('read-only');
+expect(store.getState().conversations.ended.messages).toHaveLength(before);
+```
+
 ## 持久化边界
 
 store 里的一切都会被写进 `settings.json`。因此：

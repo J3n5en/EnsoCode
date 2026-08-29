@@ -48,11 +48,9 @@ function notify(sessionId: string, title: string, body: string): void {
   // （无点击跳转，但至少可见；打包签名后走原生路径）
   notification.on('failed', () => {
     if (process.platform !== 'darwin') return;
-    const escape = (text: string) => text.replace(/[\\"]/g, ' ');
-    execFile('osascript', [
-      '-e',
-      `display notification "${escape(body)}" with title "${escape(title)}"`,
-    ]);
+    const safeBody = body.replace(/[\\"]/g, ' ');
+    const safeTitle = title.replace(/[\\"]/g, ' ');
+    execFile('osascript', ['-e', `display notification "${safeBody}" with title "${safeTitle}"`]);
   });
   notification.show();
 }
@@ -67,19 +65,19 @@ export function maybeNotify(event: RendererAgentEvent): void {
   switch (event.type) {
     case 'approval-request':
       notify(
-        event.sessionId,
+        event.identity.sessionId,
         t.approval,
         `${event.request.tool} · ${event.request.summary.slice(0, 80)}`
       );
       return;
     case 'turn-completed':
       // coworker 每轮完成不弹系统通知(主 agent/用户在 tab 内自会看到)
-      if (event.sessionId.includes('::cw-')) return;
-      notify(event.sessionId, t.turnDone, t.turnDoneBody);
+      if (event.identity.sessionId.includes('::cw-')) return;
+      notify(event.identity.sessionId, t.turnDone, t.turnDoneBody);
       return;
     case 'status':
       if (event.status === 'failed' && event.error) {
-        notify(event.sessionId, t.failed, event.error.slice(0, 100));
+        notify(event.identity.sessionId, t.failed, event.error.slice(0, 100));
       }
       return;
     default:

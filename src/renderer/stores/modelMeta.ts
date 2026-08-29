@@ -47,7 +47,7 @@ function ensureCacheInvalidation(): void {
     if (state.providers !== prev.providers) useModelMetaStore.getState().invalidate();
   });
   window.electronAPI.providers.onOauthLoginEvent((event) => {
-    if (event.type === 'done') useModelMetaStore.getState().invalidate();
+    if (event.event.type === 'done') useModelMetaStore.getState().invalidate();
   });
 }
 

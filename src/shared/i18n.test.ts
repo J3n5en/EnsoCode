@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CAPABILITY_CATALOG } from './capabilities/catalog';
 import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
 import { BUILTIN_TOOLS } from './types/builtinTools';
 
@@ -54,6 +55,72 @@ const MAPPED_I18N_KEYS = [
   'Previous coworker tab',
 ] as const;
 
+const MODEL_CENTER_ENSO_I18N_KEYS = [
+  // Unified provider setup and OAuth hosts
+  'Add model or provider',
+  'Choose a provider first. You will select subscription or API Key next.',
+  'Choose how to connect',
+  'Provider subscription',
+  'Authorization failed',
+  'Authorizing {{provider}}',
+  'Enter this code in your browser',
+  'Open authorization page again',
+  'Cancel authorization',
+  'Subscription authorization',
+  'No subscription account connected',
+  'Connect subscription',
+  'Add another account',
+  'Resets {{time}}',
+  'Could not load subscription providers',
+  'Target',
+  'Provider',
+  'Account',
+  'Name',
+  'Coworker',
+  // Default model
+  'Default model',
+  'Used for new conversations.',
+  'No default model',
+  'No usable models',
+  'Default model changed: {{previous}} → {{next}}',
+  'Subscription credentials could not be loaded: {{error}}',
+  // Typed Agent recipient, child TAB, and parent notifications
+  'Ask Enso',
+  'Type @ to choose a file or Agent',
+  'Create or select a project to start a conversation',
+  'Agents',
+  'Files',
+  'System',
+  'Built-in',
+  'Custom',
+  'Locked',
+  'Recipient',
+  'Remove Agent recipient',
+  'Message the selected Agent…',
+  'This message and selected files go only to the selected Agent',
+  'Send only to the selected Agent',
+  'Inherits the conversation model and provides product capabilities',
+  'This Agent name is reserved',
+  'Dispatched to',
+  'Completed',
+  'Failed',
+  // Receipt outcomes
+  'succeeded',
+  'denied',
+  'failed',
+  'unavailable',
+  'cancelled',
+  // Capacity and exact ready handshake failures surfaced in the current TAB
+  'Coworker limit reached (5 active or reserved).',
+  'Agent worker exited before ready.',
+  'Agent session was rejected before ready.',
+  'Agent session ready handshake timed out.',
+  'Parent ready model did not match the bound model.',
+  'Child ready identity mismatch.',
+  'Child ready profile or model mismatch.',
+  'Locked Enso tool profile mismatch.',
+] as const;
+
 describe('normalizeLocale', () => {
   it('zh 开头的一律归为中文', () => {
     expect(normalizeLocale('zh')).toBe('zh');
@@ -74,6 +141,35 @@ describe('mapped i18n keys', () => {
     for (const key of MAPPED_I18N_KEYS) {
       expect(zhTranslations[key], `missing mapped key: ${key}`).toBeTypeOf('string');
       expect(getTranslation('zh', key)).not.toBe(key);
+    }
+  });
+});
+
+describe('model center and Enso i18n keys', () => {
+  it('关键向导、Enso 与 ASK key 唯一且都有中文映射', () => {
+    MODEL_CENTER_ENSO_I18N_KEYS.forEach((key, index) => {
+      expect(MODEL_CENTER_ENSO_I18N_KEYS.indexOf(key), `duplicate feature key: ${key}`).toBe(index);
+    });
+    for (const key of MODEL_CENTER_ENSO_I18N_KEYS) {
+      expect(zhTranslations, `missing feature key: ${key}`).toHaveProperty(key);
+      expect(zhTranslations[key], `empty feature translation: ${key}`).not.toBe('');
+      expect(getTranslation('zh', key), `untranslated feature key: ${key}`).not.toBe(key);
+    }
+  });
+});
+
+describe('dangerous capability i18n keys', () => {
+  it('从 catalog 自动收集的全部危险能力说明都有中文映射', () => {
+    const descriptions = Object.values(CAPABILITY_CATALOG)
+      .filter((spec) => spec.risk === 'dangerous')
+      .map((spec) => spec.description);
+    expect(descriptions.length).toBeGreaterThan(0);
+    for (const description of descriptions) {
+      expect(
+        zhTranslations[description],
+        `missing dangerous capability: ${description}`
+      ).toBeDefined();
+      expect(getTranslation('zh', description)).not.toBe(description);
     }
   });
 });

@@ -26,6 +26,44 @@ worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared �
 [../shared/index.md](../shared/index.md)。
 
 
+## 能力授权以 child generation 为单位
+
+`capabilityGateway` 的 invocation 上下文按 `generationKey(child)` 建键，
+**不得把 `turnId` 叠进授权键**。理由：
+
+- `registerCapabilityInvocation` 一次派发只调一次，代码里**没有任何“每轮重新授权”的路径**；
+- worker 在 `agent_end` 会清空 `currentTurnId`，下一轮 `agent_start` 取新的随机 uuid；
+- 于是 child 的活儿一旦跨了内部 agent turn，能力调用就被判 not bound，
+  表现为**同一条指令时成时败**。
+
+内部 agent turn 是模型循环产物，没有产品语义，不能当权限边界。真正的门是：
+
+- `sameChild` 的 exact generation 比对（旧 / 伪造 generation 一律拒）
+- `terminateGeneration` 的级联撤销
+
+receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派发轮次），
+不是 child 内部每轮的 uuid，否则跨 turn 的 receipt 在协调器侧关联不上。
+
+## 对 pi 私有 API 的依赖要登记
+
+目前有一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
+`SessionManager._rewriteFile()`。
+
+**为什么需要**：pi 的 `_persist` 在会话出现第一条 assistant 消息前一个字节不写
+（避免留空会话文件），而纯派发的父容器按设计永远不跑主 coding 回合、永远没有
+assistant 消息。不干预的后果是父会话文件从未创建，重启后 `resumeConversation`
+报「会话文件已丢失」，**连带该会话下所有 child 的历史都打不开**。
+
+**升级 pi 时必须复检这一处**。回归测试（`src/agent/sessionPersistence.test.ts`）故意包含
+一条**上游行为基线断言**——“pi 当前在没有 assistant 消息时不落盘”；上游改了这个
+启发式，该断言会先飘红提醒复检适配层是否还需要。
+
+新增此类依赖前先找公开 API；确实没有时，三件事缺一不可：
+
+1. 封成带注释的适配函数（说清为什么需要、上游行为是什么）
+2. 回归测试断言**可观测结果**（文件落盘）而不是“调用了某私有方法”
+3. 在本节登记
+
 ## 扫描器的三件套结构
 
 `providerScan/` 和 `assetScan/` 都是同一套形状，新增扫描来源时照此扩展：

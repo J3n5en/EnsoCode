@@ -1,6 +1,9 @@
 import { IPC_CHANNELS } from '@shared/types';
+import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import { TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
+import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 
 /** 窗口控制：所有 handler 作用于发起 IPC 的窗口，天然支持多窗口 */
@@ -73,6 +76,20 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, () => {
     openSettingsWindow();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_SUMMON, (_event, request: unknown) => {
+    const snapshot = agentTypeRegistrySnapshot();
+    const parsed = parseAgentSummonRequest(
+      request,
+      new Set(snapshot.candidates.map((candidate) => candidate.typeKey))
+    );
+    if (!parsed) return { ok: false, error: 'invalid Agent summon request' };
+    const window = focusMainWindow();
+    window.webContents.send(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
+      typeKey: parsed.typeKey,
+    });
+    return { ok: true };
   });
 }
 

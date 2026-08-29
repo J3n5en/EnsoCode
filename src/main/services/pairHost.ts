@@ -21,18 +21,16 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
-import type { RendererAgentEvent } from '@shared/types/agent';
+import type {
+  AgentSpawnRequest,
+  ApprovalDecision,
+  AttachedImage,
+  RendererAgentEvent,
+} from '@shared/types/agent';
 import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/types/pair';
 import { powerMonitor, powerSaveBlocker } from 'electron';
-import {
-  abortSession,
-  promptSession,
-  requestSnapshot,
-  respondApproval,
-  respondAsk,
-  spawnSession,
-  steerSession,
-} from './agentHost';
+// 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
+import { requestSnapshot } from './agentHost';
 import {
   checkSetModel,
   checkSpawn,
@@ -110,6 +108,26 @@ export function setPairStatusListener(listener: () => void): void {
 
 export function setPairResumeListener(listener: (sessionId: string) => void): void {
   onResumeRequest = listener;
+}
+
+/**
+ * 手机侧只持有裸 sessionId，而 agentHost 的会话命令已收紧为 exact identity（带 generation）。
+ * 身份解析与 spawn 准入属于策略，留在 ipc/agent.ts；pairHost 只做传输，通过此桥调用。
+ * 未注入或解析不出身份时一律 fail-closed，不降级成按 sessionId 盲发。
+ */
+export interface PairAgentBridge {
+  prompt(sessionId: string, text: string, images?: AttachedImage[]): void;
+  steer(sessionId: string, text: string, images?: AttachedImage[]): void;
+  abort(sessionId: string): void;
+  respondApproval(sessionId: string, requestId: string, decision: ApprovalDecision): void;
+  respondAsk(sessionId: string, requestId: string, answer: string): void;
+  spawn(request: AgentSpawnRequest): Promise<{ ok: boolean; error?: string }>;
+}
+
+let agentBridge: PairAgentBridge | null = null;
+
+export function setPairAgentBridge(bridge: PairAgentBridge): void {
+  agentBridge = bridge;
 }
 
 export function setPairSessionCreatedListener(
@@ -458,19 +476,19 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   const command = parsed.command;
   switch (command.type) {
     case 'prompt':
-      promptSession(command.sessionId, command.text, command.images);
+      agentBridge?.prompt(command.sessionId, command.text, command.images);
       break;
     case 'steer':
-      steerSession(command.sessionId, command.text, command.images);
+      agentBridge?.steer(command.sessionId, command.text, command.images);
       break;
     case 'abort':
-      abortSession(command.sessionId);
+      agentBridge?.abort(command.sessionId);
       break;
     case 'approval-respond':
-      respondApproval(command.sessionId, command.requestId, command.decision);
+      agentBridge?.respondApproval(command.sessionId, command.requestId, command.decision);
       break;
     case 'ask-respond':
-      respondAsk(command.sessionId, command.requestId, command.answer);
+      agentBridge?.respondAsk(command.sessionId, command.requestId, command.answer);
       break;
     case 'subscribe':
       conn.subscribedId = command.sessionId;
@@ -512,7 +530,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
         console.warn(`[pair] spawn rejected: ${check.error}`);
         return;
       }
-      const result = spawnSession({
+      const result = (await agentBridge?.spawn({
         sessionId: command.sessionId,
         providerId: command.providerId,
         modelId: command.modelId,
@@ -521,7 +539,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
         ...(command.approvalMode ? { approvalMode: command.approvalMode } : {}),
         ...(command.reasoningEnabled ? { reasoningEnabled: true } : {}),
         ...(command.thinkingLevel ? { thinkingLevel: command.thinkingLevel } : {}),
-      });
+      })) ?? { ok: false, error: 'pair agent bridge is not wired' };
       if (!result.ok) {
         console.warn(`[pair] spawn failed: ${result.error}`);
         break;

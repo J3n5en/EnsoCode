@@ -4,6 +4,7 @@ export * from './assets';
 export * from './builtinTools';
 export * from './ipc';
 export * from './llm';
+export * from './mentions';
 export * from './modelMeta';
 export * from './oauthProviders';
 // 纯类型：用 type-only 再导出，避免 rollup 生成 __exportAll 运行时 helper

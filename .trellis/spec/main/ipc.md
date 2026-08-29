@@ -31,6 +31,28 @@ listModels: (config: ProviderApiConfig): Promise<ListModelsResult> =>
 漏掉注册的表现是 `No handler registered for '...'`。两者都是运行时才炸，
 类型检查发现不了 —— 所以改完自己对一遍这三处。
 
+## 文件路径不收渲染层的，只收标识符
+
+需要读写磁盘的通道，请求里**只允许带 id**，路径由 Main 从自己读的权威数据推导：
+
+```ts
+// Wrong：等于开放任意文件读取
+ipcMain.handle(CH, (_event, sessionFile: string) => read(sessionFile));
+
+// Correct
+ipcMain.handle(CH, (_event, request) => {
+  const file = agentSessionIndex.persistedConversation(request.conversationId)?.sessionFile;
+  // …再叠目录与文件名校验
+});
+```
+
+`src/main/ipc/agent.ts` 的 `readChildHistory` 是范例，两道校验缺一不可：
+`path.resolve` 后必须落在预期目录内（防 `../` 穿越），且 basename 必须符合预期前缀
+（这里是 `enso-`，避免读到未脱敏的 pi session 文件）。
+
+测试要直接验“恶意输入不读盘”：不存在的 id、持久化记录里的路径逃出目录、
+文件名不合预期、以及请求额外带了 `sessionFile` 时不被采信。
+
 ## 入参一律当 unknown
 
 渲染层传来的任何东西都不可信，handler 第一件事是收窄类型：

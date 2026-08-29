@@ -63,6 +63,38 @@ window.electronAPI.settings.onChanged(() => {
 **新增带副作用的设置项时，副作用必须同时写进 `applySettings()`**，
 否则只有改动的那个窗口生效，另一个窗口要重启才对。
 
+### Don't：rehydrate 路径上无条件 setState
+
+**现象**：打开设置窗后改任何一项设置，两个渲染进程 CPU 各自跑到 100%+，
+界面卡死、设置改不动。单窗口不复现。
+
+**成因**：persist 的每次 `setState` 都会落盘并广播 `SETTINGS_CHANGED`，而广播是
+`exclude-sender` 的 —— 只要 rehydrate 后的回调无条件写一次 state，两个窗口就会
+互相广播成死循环：
+
+```
+窗口A 写 → 落盘 → 广播(排除A) → 窗口B rehydrate → 无条件 setState
+  → 落盘 → 广播(排除B) → 窗口A rehydrate → … ∞
+```
+
+实例：source-authority 投影回调每次都构造新数组 `setState({ projects })`，
+内容完全相同但引用不同，zustand 判定为变更。
+
+**规则**：`onRehydrateStorage` 及其触发的任何异步回调里，写 state 前必须先比对值：
+
+```ts
+// Wrong：内容相同也会触发落盘 + 广播
+useSettingsStore.setState({ projects: next });
+
+// Correct
+if (sameProjectProjection(useSettingsStore.getState().projects, next)) return;
+useSettingsStore.setState({ projects: next });
+```
+
+**回归测试断言点**：同一份投影重复到达时，`settings.writeKey` 不得被再次调用
+（见 `src/renderer/stores/settings/projectProjection.test.ts`）。
+只断言“值正确”是不够的 —— 死循环里值一直是对的。
+
 ## 不适合放这里的数据
 
 - 窗口几何信息 → 独立状态文件，见 [windows.md](windows.md)

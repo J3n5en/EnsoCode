@@ -63,7 +63,7 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
         project.path
       );
       if (result) {
-        useSessionsStore.getState().addImportedConversation(project.id, result);
+        void useSessionsStore.getState().addImportedConversation(project.id, result);
         onClose();
       }
     } finally {
