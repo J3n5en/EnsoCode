@@ -4,8 +4,10 @@ import {
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
-  type SpawnWhitelist,
   shouldForward,
+  sliceHistory,
+  SNAPSHOT_TAIL_MESSAGES,
+  type SpawnWhitelist,
 } from './pairPolicy';
 
 describe('手机命令白名单', () => {
@@ -171,7 +173,7 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
 
   it('只保留订阅会话，不把全部会话正文推给手机', () => {
     const out = narrowSnapshot(event, 'b');
-    expect(out?.sessions).toEqual([{ sessionId: 'b' }]);
+    expect(out?.sessions.map((s) => s.sessionId)).toEqual(['b']);
   });
 
   it('未订阅任何会话时不转发', () => {
@@ -184,5 +186,49 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
 
   it('snapshot 不走通用过滤（避免整包漏出）', () => {
     expect(shouldForward({ type: 'snapshot' }, 'a')).toBe(false);
+  });
+
+  it('长对话只发尾窗并标 baseIndex，避免超中继单帧上限被丢', () => {
+    const messages = Array.from({ length: 200 }, (_, i) => ({ role: 'user', text: `m${i}` }));
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    expect(session.messages.length).toBeLessThanOrEqual(SNAPSHOT_TAIL_MESSAGES);
+    expect(session.baseIndex).toBe(200 - session.messages.length);
+    // 尾窗必须是最新的消息
+    expect(session.messages.at(-1)).toEqual({ role: 'user', text: 'm199' });
+  });
+
+  it('短对话不裁剪，baseIndex 为 0', () => {
+    const messages = [{ text: 'a' }, { text: 'b' }];
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    expect(session.messages).toHaveLength(2);
+    expect(session.baseIndex).toBe(0);
+  });
+
+  it('单条超大消息也受字节预算约束（宁可少发不可超帧）', () => {
+    const big = 'x'.repeat(300_000);
+    const messages = Array.from({ length: 10 }, () => ({ text: big }));
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    // 600KB 预算下 300KB 的消息最多装 2 条
+    expect(session.messages.length).toBeLessThanOrEqual(2);
+    expect(session.baseIndex).toBe(10 - session.messages.length);
+  });
+});
+
+describe('history 分页切片', () => {
+  const messages = Array.from({ length: 100 }, (_, i) => ({ text: `m${i}` }));
+
+  it('取 beforeIndex 之前的一页，附 baseIndex', () => {
+    const page = sliceHistory(messages, 80);
+    expect(page.messages.at(-1)).toEqual({ text: 'm79' });
+    expect(page.baseIndex).toBe(80 - page.messages.length);
+    expect(page.messages.length).toBeLessThanOrEqual(SNAPSHOT_TAIL_MESSAGES);
+  });
+
+  it('beforeIndex 越界或到头时返回空页', () => {
+    expect(sliceHistory(messages, 0).messages).toHaveLength(0);
+    expect(sliceHistory([], 10).messages).toHaveLength(0);
   });
 });

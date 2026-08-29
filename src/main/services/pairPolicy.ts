@@ -146,15 +146,58 @@ const SESSION_SCOPED = new Set(['message-upsert']);
 /**
  * snapshot 是批量事件（{ sessions: SessionSnapshot[] }，本身无 sessionId），
  * 需裁成只含订阅会话，避免把全部会话正文推给手机。返回 null 表示不转发。
+ *
+ * 消息只发尾窗（条数 + 字节双预算）：中继对超过 MAX_FRAME_BYTES(1MB) 的帧
+ * 直接丢弃且不通知发送方，长对话的全量快照会静默消失——手机端表现为
+ * 「历史加载不出、新消息却正常」。更早的消息由 history 命令分页拉取。
  */
+export const SNAPSHOT_TAIL_MESSAGES = 60;
+/** 加密封帧还会膨胀（base64 图片已在消息体内），预算须显著低于中继 1MB 上限 */
+const SNAPSHOT_BYTE_BUDGET = 600_000;
+
+interface SnapshotSession {
+  sessionId: string;
+  messages?: unknown[];
+}
+
+/** 从尾部往前取，直到条数或字节预算耗尽；至少保 1 条（单条超预算也发，交给中继裁决） */
+function takeTail(messages: unknown[], endIndex: number): { messages: unknown[]; baseIndex: number } {
+  let bytes = 0;
+  let start = endIndex;
+  while (start > 0 && endIndex - start < SNAPSHOT_TAIL_MESSAGES) {
+    const size = JSON.stringify(messages[start - 1]).length;
+    if (bytes + size > SNAPSHOT_BYTE_BUDGET && start < endIndex) break;
+    bytes += size;
+    start--;
+    if (bytes > SNAPSHOT_BYTE_BUDGET) break;
+  }
+  return { messages: messages.slice(start, endIndex), baseIndex: start };
+}
+
 export function narrowSnapshot(
-  event: { type: string; sessions?: { sessionId: string }[] },
+  event: { type: string; sessions?: SnapshotSession[] },
   subscribedId: string | null
-): { type: 'snapshot'; sessions: { sessionId: string }[] } | null {
+): { type: 'snapshot'; sessions: SnapshotSession[] } | null {
   if (!Array.isArray(event.sessions)) return null;
   if (!subscribedId) return null;
-  const sessions = event.sessions.filter((s) => s.sessionId === subscribedId);
+  const sessions = event.sessions
+    .filter((s) => s.sessionId === subscribedId)
+    .map((s) => {
+      if (!Array.isArray(s.messages)) return { ...s, baseIndex: 0 };
+      const tail = takeTail(s.messages, s.messages.length);
+      return { ...s, messages: tail.messages, baseIndex: tail.baseIndex };
+    });
   return sessions.length > 0 ? { type: 'snapshot', sessions } : null;
+}
+
+/** history 分页：取 beforeIndex 之前的一页（同尾窗双预算），baseIndex 标注绝对起点 */
+export function sliceHistory(
+  messages: unknown[],
+  beforeIndex: number
+): { messages: unknown[]; baseIndex: number } {
+  const end = Math.max(0, Math.min(beforeIndex, messages.length));
+  if (end === 0) return { messages: [], baseIndex: 0 };
+  return takeTail(messages, end);
 }
 
 /**

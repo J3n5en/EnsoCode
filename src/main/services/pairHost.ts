@@ -541,6 +541,11 @@ async function send(conn: Connection, message: HostToPhone): Promise<void> {
   if (conn.ws?.readyState !== 1) return;
   try {
     const frame = await sealFrame(conn.contentKey, message);
+    // 中继对超过 1MB 的帧直接丢弃且不通知发送方：本地拦下并留痕，别白发
+    if (frame.byteLength > 1_000_000) {
+      console.warn(`[pair] frame ${frame.byteLength}B over relay limit, dropped locally`);
+      return;
+    }
     conn.ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
   } catch (error) {
     console.warn('[pair] send failed', error);

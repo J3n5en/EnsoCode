@@ -210,15 +210,23 @@ export class PairClient {
       }
       return;
     }
-    // 全量快照：批事件，直接铺开会话投影（进会话时补历史消息）
+    // 尾窗快照：批事件，按 baseIndex 偏移合并进已有投影。
+    // 不能整张 Map 替换——用户可能已上滑加载了更早的分页，替换会把它们抹掉。
     if (type === 'snapshot') {
       for (const snap of (event.sessions ?? []) as SessionSnapshot[]) {
         const id = snap.sessionId;
         if (!id) continue;
-        const messages = new Map<number, ProjectedMessage>();
-        for (const [index, message] of (snap.messages ?? []).entries()) {
-          messages.set(index, message);
-          saveCursor(id, index);
+        const base = snap.baseIndex ?? 0;
+        const existing = this.sessions.get(id)?.messages;
+        const prevMax = existing?.size ? Math.max(...existing.keys()) : -1;
+        // 离线太久、尾窗与已有内容接不上：丢弃旧段保持时间线连续，上滑可重新拉回
+        const messages =
+          existing && base <= prevMax + 1
+            ? new Map(existing)
+            : new Map<number, ProjectedMessage>();
+        for (const [i, message] of (snap.messages ?? []).entries()) {
+          messages.set(base + i, message);
+          saveCursor(id, base + i);
         }
         const view: SessionView = {
           messages,
