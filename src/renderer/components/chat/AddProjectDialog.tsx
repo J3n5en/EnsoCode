@@ -44,7 +44,10 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
       .catch(() => setRecent([]));
   }, [open]);
 
-  const existing = React.useMemo(() => new Set(projects.map((project) => project.path)), [projects]);
+  const existing = React.useMemo(
+    () => new Set(projects.map((project) => project.path)),
+    [projects]
+  );
   const items = React.useMemo(
     () => recent.filter((project) => !existing.has(project.path)),
     [recent, existing]

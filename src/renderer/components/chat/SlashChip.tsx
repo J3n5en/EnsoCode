@@ -1,4 +1,4 @@
-import { SlashSquare, Sparkles, Target, type LucideIcon } from 'lucide-react';
+import { type LucideIcon, SlashSquare, Sparkles, Target } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 

@@ -204,7 +204,10 @@ export function MermaidRenderer({
   );
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
-  const handleFullscreenContentClick = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
+  const handleFullscreenContentClick = useCallback(
+    (e: React.MouseEvent) => e.stopPropagation(),
+    []
+  );
   const handleFullscreenOverlayClick = useCallback(() => {
     if (!hasDraggedRef.current) handleExitFullscreen();
   }, [handleExitFullscreen]);
@@ -329,7 +332,10 @@ export function MermaidRenderer({
     >
       <div
         ref={containerRef}
-        className={cn('overflow-hidden', isFullscreen && (isDragging ? 'cursor-grabbing' : 'cursor-grab'))}
+        className={cn(
+          'overflow-hidden',
+          isFullscreen && (isDragging ? 'cursor-grabbing' : 'cursor-grab')
+        )}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -361,7 +367,9 @@ export function MermaidRenderer({
             className="flex shrink-0 items-center justify-between border-b border-border bg-muted/30 px-4 py-2"
             onClick={(e) => e.stopPropagation()}
           >
-            <span className="text-sm font-medium text-muted-foreground">{t('Mermaid preview')}</span>
+            <span className="text-sm font-medium text-muted-foreground">
+              {t('Mermaid preview')}
+            </span>
             <button
               type="button"
               onClick={handleExitFullscreen}
