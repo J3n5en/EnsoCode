@@ -238,6 +238,33 @@ describe('typed Agent child projection', () => {
     await seedParent();
   });
 
+  it('parent-rejected clears started and lands failed so retry can spawn again', () => {
+    // spawn IPC ack 后 store 乐观置 started:true；若 rejected 到达时不清回 false，
+    // 重发会走 prompt 分支打到 worker 里不存在的会话，重试彻底无声。
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          generation: 'pg1',
+        },
+      },
+    }));
+    onAgentEvent?.({
+      type: 'parent-rejected',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 0,
+      reason: 'no api key',
+    });
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conversation.started).toBe(false);
+    expect(conversation.status).toBe('failed');
+    expect(conversation.error).toBe('no api key');
+    expect(conversation.generation).toBeUndefined();
+  });
+
   it('creates and selects a fresh placeholder for every reservation without adding the task to parent messages', () => {
     onAgentEvent?.(reserve(1));
     onAgentEvent?.(reserve(2));

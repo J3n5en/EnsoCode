@@ -34,6 +34,84 @@ describe('applyAgentEvent', () => {
     ).toBe(advanced);
   });
 
+  it('parent-rejected at seq 0 lands failed with reason even when lastSeq is 0', () => {
+    // 回归锈定：拒绝事件恒以 seq:0 发出（worker 侧被拒时尚未建会话），
+    // 若被 event.seq <= lastSeq 单调门吞掉，spawn 失败在 UI 上完全无声。
+    const next = applyAgentEvent(base, 's1', {
+      type: 'parent-rejected',
+      identity: identity(),
+      seq: 0,
+      reason: 'no api key',
+    });
+    expect(next.status).toBe('failed');
+    expect(next.error).toBe('no api key');
+    // generation 重置为 undefined：重试 spawn 的新代事件才能被干净领养，
+    // 否则钉在被拒代上会把重试的全部合法事件永久吞掉。
+    expect(next.generation).toBeUndefined();
+  });
+
+  it('child-rejected at seq 0 lands failed with reason', () => {
+    const next = applyAgentEvent(base, 's1', {
+      type: 'child-rejected',
+      identity: {
+        sessionId: 's1',
+        generation: 'g1',
+        parent: { sessionId: 'p1', generation: 'pg1' },
+        instanceId: 'i1',
+        instanceName: 'Scout · a1',
+        typeKey: 'builtin:scout',
+      },
+      seq: 0,
+      reason: 'spawn denied',
+    });
+    expect(next.status).toBe('failed');
+    expect(next.error).toBe('spawn denied');
+    expect(next.generation).toBeUndefined();
+  });
+
+  it('retry after rejection: new-generation parent-ready still applies', () => {
+    const rejected = applyAgentEvent(base, 's1', {
+      type: 'parent-rejected',
+      identity: identity('g1'),
+      seq: 0,
+      reason: 'no api key',
+    });
+    const retried = applyAgentEvent(rejected, 's1', {
+      type: 'parent-ready',
+      identity: identity('g2'),
+      seq: 1,
+      sessionFile: '/tmp/s1.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    expect(retried.status).toBe('idle');
+    expect(retried.error).toBeUndefined();
+    expect(retried.generation).toBe('g2');
+  });
+
+  it('stale old-generation rejection does not clobber a live newer generation', () => {
+    const live = applyAgentEvent(base, 's1', status(3, 'running', 'g2'));
+    const next = applyAgentEvent(live, 's1', {
+      type: 'parent-rejected',
+      identity: identity('g1'),
+      seq: 0,
+      reason: 'late rejection',
+    });
+    expect(next).toBe(live);
+  });
+
+  it('same-generation rejection after events applies (second spawn failure)', () => {
+    const live = applyAgentEvent(base, 's1', status(3, 'running', 'g1'));
+    const next = applyAgentEvent(live, 's1', {
+      type: 'parent-rejected',
+      identity: identity('g1'),
+      seq: 0,
+      reason: 'worker refused',
+    });
+    expect(next.status).toBe('failed');
+    expect(next.error).toBe('worker refused');
+    expect(next.generation).toBeUndefined();
+  });
+
   it('message-upsert writes by index without duplicating the message', () => {
     const first = applyAgentEvent(base, 's1', {
       type: 'message-upsert',

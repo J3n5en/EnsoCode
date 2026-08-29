@@ -139,14 +139,17 @@ export function applyAgentEvent(
   // spawn 拒绝恒以 seq:0 发出（worker 侧此时尚未建会话，没有 seq 计数器），
   // 过不了下面的 (generation, seq) 单调守卫。一并丢弃的后果是 spawn 失败在
   // UI 上完全无声：spawning 被别处清掉、status 停在 idle、error 为空，用户
-  // 只看到会话点开一片空白。故只校验 sessionId，并把 generation 推进到被拒的这代。
+  // 只看到会话点开一片空白。故单独处理：仅当代未领养或同代时生效（旧代
+  // 迟到的拒绝不得回退活着的新代），并把 generation 重置为 undefined，
+  // 重试 spawn 的新代事件才能被干净领养而不是被钉死在被拒的这代上。
   if (
     (event.type === 'parent-rejected' || event.type === 'child-rejected') &&
     identity?.sessionId === sessionId
   ) {
+    if (state.generation !== undefined && state.generation !== identity.generation) return state;
     return {
       ...settleTiming(state, now),
-      generation: identity.generation,
+      generation: undefined,
       status: 'failed',
       error: event.reason,
       pendingApprovals: [],

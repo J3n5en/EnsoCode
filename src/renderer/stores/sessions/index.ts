@@ -613,6 +613,11 @@ export const useSessionsStore = create<SessionsState>()(
             ...(event.type === 'parent-ended' || event.type === 'child-ended'
               ? { started: false, pendingCapabilityAsks: [], activeOauthAsk: undefined }
               : {}),
+            // spawn IPC ack 时已乐观置 started:true；拒绝到达不清回 false 的话，
+            // 重发会绕过 spawn 分支直接 prompt 到 worker 里不存在的会话，重试无声失败。
+            ...(event.type === 'parent-rejected' || event.type === 'child-rejected'
+              ? { started: false }
+              : {}),
           });
         });
         if (event.type === 'turn-completed') {
