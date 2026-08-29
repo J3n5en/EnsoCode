@@ -162,7 +162,10 @@ export function registerCapabilityHandlers(): void {
   });
 
   app.on('browser-window-created', (_event, window) => {
-    window.once('closed', () => capabilityGateway.releaseWindow(window.webContents.id));
+    // closed 触发时窗口已销毁，届时再读 webContents 会抛 Object has been
+    // destroyed：id 必须在创建时捕获，回调里只用值
+    const webContentsId = window.webContents.id;
+    window.once('closed', () => capabilityGateway.releaseWindow(webContentsId));
   });
   app.on('before-quit', () => capabilityGateway.denyAll('Application is exiting.'));
 }
