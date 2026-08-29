@@ -190,7 +190,10 @@ function firstUserText(projection: SessionProjection): string {
     .map((part) => part.text)
     .join(' ')
     .trim();
-  return (text || '[image]').slice(0, 40);
+  // 只取首行：发送时追加的提及引用块（\n\n 分隔）不得污染标题，
+  // 否则带换行的标题会反过来破坏 chat 引用行的单行格式
+  const firstLine = text.split('\n')[0].trim();
+  return (firstLine || '[image]').slice(0, 40);
 }
 
 const patch = (
@@ -1140,7 +1143,10 @@ export const useSessionsStore = create<SessionsState>()(
             set((state) =>
               patch(state, id, {
                 spawning: true,
-                title: conversation.title || spawnTitle || (text || '[image]').slice(0, 40),
+                title:
+                  conversation.title ||
+                  spawnTitle ||
+                  (text.split('\n')[0].trim() || '[image]').slice(0, 40),
               })
             );
             const result = await window.electronAPI.agent.spawn({
