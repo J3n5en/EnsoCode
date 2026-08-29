@@ -190,7 +190,8 @@ function InlineMentionCard({
     <span
       className={cn(
         mentionChipClass(kind),
-        'mx-0.5 max-w-52 translate-y-0.5 rounded-md px-1.5 align-baseline leading-5'
+        // align-middle + leading-4：与 CJK 正文光学居中（baseline+translate 会偏高）
+        'mx-0.5 max-w-52 rounded-md px-1.5 align-middle leading-4'
       )}
       title={title}
     >

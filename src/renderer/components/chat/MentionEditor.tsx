@@ -69,7 +69,8 @@ function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpan
     chip.dataset.sessionFile = segment.sessionFile;
   }
   chip.className = cn(
-    'mx-0.5 inline-flex max-w-52 translate-y-0.5 items-center gap-1 rounded-md px-1.5 align-baseline text-xs font-medium leading-5 select-none',
+    // align-middle + leading-4：与正文（含 CJK）光学居中，与气泡侧 InlineMentionCard 同参数
+    'mx-0.5 inline-flex max-w-52 items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-xs font-medium leading-4 select-none',
     CHIP_CLASS[segment.type]
   );
   const icon = document.createElement('span');
