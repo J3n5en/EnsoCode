@@ -10,6 +10,7 @@ import {
   registerLocalImageSchemePrivileges,
 } from './services/localImageProtocol';
 import { startPairHost, stopPairHost } from './services/pairHost';
+import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
@@ -23,6 +24,12 @@ app.setPath('userData', path.join(app.getPath('appData'), 'enso-code'));
 
 // 背景图媒体协议：特权 scheme 必须在 app ready 前登记
 registerLocalImageSchemePrivileges();
+
+// GUI 启动（Dock/Finder）继承 launchd 极简 PATH，pi 的 bash / MCP 子进程会
+// 找不到 node/git。打包版立即前插保底目录；dev 从终端启动，环境本就完整。
+if (app.isPackaged && process.platform !== 'win32') {
+  seedProcessPath();
+}
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -51,7 +58,13 @@ if (!gotTheLock) {
 
     registerIpcHandlers();
     registerLocalImageProtocolHandler();
-    startAgentWorker();
+    // worker 的 env 是 fork 时的快照：先等登录 shell 探测出真实 PATH（内置
+    // 10s 超时，典型远快于此；失败静默用 seed），再起 worker。窗口不等它。
+    if (app.isPackaged && process.platform !== 'win32') {
+      void hydrateShellPath().finally(() => startAgentWorker());
+    } else {
+      startAgentWorker();
+    }
     // 手机第二屏：恢复已配对设备的中继连接（与 agent worker 并列，不依赖窗口）
     startPairHost();
     const mainWindow = createMainWindow();
