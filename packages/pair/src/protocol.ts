@@ -105,6 +105,9 @@ export interface CatalogEntry {
   parentId?: string;
   /** 最后活动时间（末条消息或创建时间），手机端显示相对时间 */
   updatedAt?: number;
+  /** 置顶/归档（与桌面侧栏同语义：归档与置顶互斥，归档只进单独栏目） */
+  pinned?: boolean;
+  archived?: boolean;
   /** 会话当前选用的 provider/model 与推理档位，手机模型切换器回显用 */
   providerId?: string;
   modelId?: string;

@@ -1,10 +1,12 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
 import {
+  Archive,
   Bell,
   ChevronRight,
   FolderGit2,
   MessageSquarePlus,
   Palette,
+  Pin,
   Unplug,
   X,
 } from 'lucide-react';
@@ -77,6 +79,8 @@ export function SessionDrawer({
 }: Props) {
   const [foldedProjects, setFoldedProjects] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  // 底部「已归档」栏目的折叠态（与桌面一致：缺省收起）
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [themePref, setThemePref] = useState<ThemePreference>(getThemePreference);
 
@@ -96,9 +100,15 @@ export function SessionDrawer({
     return () => clearInterval(timer);
   }, [open]);
 
+  // 与桌面侧栏同语义：归档不进项目组，只进底部栏目；置顶另起一栏且组内靠前
+  const topLevel = catalog.filter((c) => !c.parentId);
+  const pinnedSessions = topLevel.filter((c) => c.pinned && !c.archived);
+  const archivedSessions = topLevel.filter((c) => c.archived);
+  const active = topLevel.filter((c) => !c.archived);
+
   // 没有项目归属的会话（项目已删等）单独归到「其他」
   const known = new Set(projects.map((p) => p.id));
-  const orphans = catalog.filter((c) => !c.parentId && !known.has(c.projectId));
+  const orphans = active.filter((c) => !known.has(c.projectId));
 
   return (
     <>
@@ -135,11 +145,31 @@ export function SessionDrawer({
             </p>
           )}
 
+          {pinnedSessions.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1.5 px-2 py-2">
+                <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="font-medium text-sm">置顶</span>
+              </div>
+              <div className="flex flex-col gap-y-0.5">
+                {pinnedSessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    active={activeId === session.id}
+                    nowTick={nowTick}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {projects.map((project) => (
             <ProjectGroup
               key={project.id}
               name={project.name}
-              sessions={catalog.filter((c) => !c.parentId && c.projectId === project.id)}
+              sessions={sortPinnedFirst(active.filter((c) => c.projectId === project.id))}
               folded={foldedProjects[project.id] === true}
               expanded={expandedProjects[project.id] === true}
               activeId={activeId}
@@ -173,6 +203,40 @@ export function SessionDrawer({
               }
               onSelect={onSelect}
             />
+          )}
+          {archivedSessions.length > 0 && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen((prev) => !prev)}
+                className="flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
+              >
+                <ChevronRight
+                  className={cn(
+                    'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                    archivedOpen && 'rotate-90'
+                  )}
+                />
+                <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-medium text-sm">已归档</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {archivedSessions.length}
+                </span>
+              </button>
+              {archivedOpen && (
+                <div className="mt-0.5 flex flex-col gap-y-0.5">
+                  {archivedSessions.map((session) => (
+                    <SessionRow
+                      key={session.id}
+                      session={session}
+                      active={activeId === session.id}
+                      nowTick={nowTick}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -266,6 +330,43 @@ export function SessionDrawer({
   );
 }
 
+/** 组内置顶靠前，其余保持 catalog 相对顺序（与桌面 projectConversationIds 同语义） */
+function sortPinnedFirst(sessions: CatalogEntry[]): CatalogEntry[] {
+  return [...sessions.filter((s) => s.pinned), ...sessions.filter((s) => !s.pinned)];
+}
+
+/** 置顶/归档/项目组共用的会话行 */
+function SessionRow({
+  session,
+  active,
+  nowTick,
+  onSelect,
+}: {
+  session: CatalogEntry;
+  active: boolean;
+  nowTick: number;
+  onSelect(id: string): void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(session.id)}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-lg py-2 pr-2 pl-4 text-left text-sm transition-colors',
+        active ? 'bg-muted' : 'hover:bg-muted/50'
+      )}
+    >
+      <StatusDot status={session.status} />
+      <span className="min-w-0 flex-1 truncate">{session.title || '新对话'}</span>
+      {session.updatedAt && (
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {formatRelativeTime(session.updatedAt, 'zh', nowTick)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function ProjectGroup({
   name,
   sessions,
@@ -326,23 +427,13 @@ function ProjectGroup({
       {!folded && (
         <div className="mt-0.5 flex flex-col gap-y-0.5">
           {shown.map((session) => (
-            <button
+            <SessionRow
               key={session.id}
-              type="button"
-              onClick={() => onSelect(session.id)}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-lg py-2 pr-2 pl-4 text-left text-sm transition-colors',
-                activeId === session.id ? 'bg-muted' : 'hover:bg-muted/50'
-              )}
-            >
-              <StatusDot status={session.status} />
-              <span className="min-w-0 flex-1 truncate">{session.title || '新对话'}</span>
-              {session.updatedAt && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {formatRelativeTime(session.updatedAt, 'zh', nowTick)}
-                </span>
-              )}
-            </button>
+              session={session}
+              active={activeId === session.id}
+              nowTick={nowTick}
+              onSelect={onSelect}
+            />
           ))}
           {sessions.length > COLLAPSED_SESSION_LIMIT && (
             <button
