@@ -1,9 +1,11 @@
 import {
+  attachHeartbeat,
   backoffDelay,
   buildPairLink,
   type CatalogEntry,
   DEFAULT_RELAY_URL,
   fromBase64Url,
+  type Heartbeat,
   type HostAppearance,
   type HostPairSession,
   type HostToPhone,
@@ -63,6 +65,7 @@ interface Connection {
   device: PairedDevice;
   contentKey: Uint8Array;
   ws: WebSocket | null;
+  heartbeat: Heartbeat | null;
   /** 手机当前订阅的会话（null = 列表页，不收正文） */
   subscribedId: string | null;
   sinceIndex?: number;
@@ -125,6 +128,8 @@ export function stopPairHost(): void {
   for (const conn of connections.values()) {
     conn.closed = true;
     if (conn.timer) clearTimeout(conn.timer);
+    conn.heartbeat?.stop();
+    conn.heartbeat = null;
     try {
       conn.ws?.close();
     } catch {}
@@ -255,6 +260,8 @@ function openConnection(device: PairedDevice): void {
   if (existing) {
     existing.closed = true;
     if (existing.timer) clearTimeout(existing.timer);
+    existing.heartbeat?.stop();
+    existing.heartbeat = null;
     try {
       existing.ws?.close();
     } catch {}
@@ -263,6 +270,7 @@ function openConnection(device: PairedDevice): void {
     device,
     contentKey: fromBase64Url(device.contentKey),
     ws: null,
+    heartbeat: null,
     subscribedId: null,
     phoneOnline: false,
     attempt: 0,
@@ -286,6 +294,31 @@ function connect(conn: Connection): void {
   }
   ws.binaryType = 'arraybuffer';
   conn.ws = ws;
+
+  // 半开死链的 close 事件可能永不到达：心跳判死后直接走关闭路径，幂等防双跑
+  let settled = false;
+  const closed = (code: number | null): void => {
+    if (settled) return;
+    settled = true;
+    conn.heartbeat?.stop();
+    conn.heartbeat = null;
+    conn.ws = null;
+    conn.phoneOnline = false;
+    // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）。
+    // 不能只看「连不上」就放弃，那是正常的网络波动，仍需重连。
+    if (code === 1008) {
+      dropRevoked(conn);
+      return;
+    }
+    notifyStatus();
+    scheduleReconnect(conn);
+  };
+  conn.heartbeat = attachHeartbeat(ws, () => {
+    try {
+      ws.close();
+    } catch {}
+    closed(null);
+  });
 
   ws.onopen = () => {
     conn.attempt = 0;
@@ -316,18 +349,7 @@ function connect(conn: Connection): void {
     void handleFrame(conn, new Uint8Array(event.data as ArrayBuffer));
   };
 
-  ws.onclose = (event) => {
-    conn.ws = null;
-    conn.phoneOnline = false;
-    // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）。
-    // 不能只看「连不上」就放弃，那是正常的网络波动，仍需重连。
-    if (event.code === 1008) {
-      dropRevoked(conn);
-      return;
-    }
-    notifyStatus();
-    scheduleReconnect(conn);
-  };
+  ws.onclose = (event) => closed(event.code);
 
   ws.onerror = () => {
     try {
@@ -342,6 +364,8 @@ function forgetDevice(pairId: string): void {
   if (conn) {
     conn.closed = true;
     if (conn.timer) clearTimeout(conn.timer);
+    conn.heartbeat?.stop();
+    conn.heartbeat = null;
     try {
       conn.ws?.close();
     } catch {}

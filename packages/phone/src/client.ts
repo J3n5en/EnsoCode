@@ -1,7 +1,9 @@
 import {
+  attachHeartbeat,
   backoffDelay,
   type CatalogEntry,
   fromBase64Url,
+  type Heartbeat,
   type HostToPhone,
   openFrame,
   type PairedDevice,
@@ -46,6 +48,7 @@ export interface ClientEvents {
 
 export class PairClient {
   private ws: WebSocket | null = null;
+  private heartbeat: Heartbeat | null = null;
   private contentKey: Uint8Array;
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -77,6 +80,30 @@ export class PairClient {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
+    // 半开死链的 close 事件可能永不到达：心跳判死后直接走关闭路径，幂等防双跑
+    let settled = false;
+    const closed = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      this.heartbeat?.stop();
+      this.heartbeat = null;
+      this.ws = null;
+      // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
+      if (code === 1008 || this.revoked) {
+        this.revoked = true;
+        this.events.onState('unauthorized');
+        return;
+      }
+      this.events.onState('offline');
+      this.scheduleReconnect();
+    };
+    this.heartbeat = attachHeartbeat(ws, () => {
+      try {
+        ws.close();
+      } catch {}
+      closed(null);
+    });
+
     ws.onopen = () => {
       this.attempt = 0;
       // 进房后立即要目录；有订阅则带游标续传
@@ -105,17 +132,7 @@ export class PairClient {
       void this.handleFrame(new Uint8Array(event.data as ArrayBuffer));
     };
 
-    ws.onclose = (event) => {
-      this.ws = null;
-      // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
-      if (event.code === 1008 || this.revoked) {
-        this.revoked = true;
-        this.events.onState('unauthorized');
-        return;
-      }
-      this.events.onState('offline');
-      this.scheduleReconnect();
-    };
+    ws.onclose = (event) => closed(event.code);
 
     ws.onerror = () => {
       try {
@@ -127,6 +144,8 @@ export class PairClient {
   close(): void {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
+    this.heartbeat?.stop();
+    this.heartbeat = null;
     try {
       this.ws?.close();
     } catch {}

@@ -21,6 +21,13 @@ function json(body: unknown, status = 200): Response {
  * 两个 WebSocket 用 hibernation API 持有（tag = host/guest）。只转发密文，不解密、不写聊天。
  */
 export class PairRoom extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // 心跳应答由 runtime 直接回，不唤醒（不计费）休眠中的 DO。
+    // 客户端定期发 "ping" 探测半开死链（见 @enso/pair attachHeartbeat）
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
+
   async fetch(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
     if (path === '/request') return this.onRequest(req);
