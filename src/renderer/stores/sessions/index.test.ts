@@ -86,6 +86,11 @@ const readChildHistory = vi.fn(async (_conversationId: string) => ({
   code: 'not-found' as const,
   error: 'none',
 }));
+const dismissCoworker = vi.fn(
+  async (): Promise<{ ok: boolean; error?: string }> => ({
+    ok: true,
+  })
+);
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -121,7 +126,7 @@ vi.stubGlobal('window', {
       readChildHistory,
       prompt: agentPrompt,
       spawn: vi.fn(async () => ({ ok: true })),
-      dismissCoworker: vi.fn(async () => ({ ok: true })),
+      dismissCoworker,
       abort: vi.fn(async () => ({ ok: true })),
     },
     agentDispatch: {
@@ -743,6 +748,102 @@ describe('typed Agent child projection', () => {
       sessionsModule.useSessionsStore.getState().selectTab('parent', 'live');
       await Promise.resolve();
       expect(readChildHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('coworker dismiss 兑底与 ended 标记', () => {
+    /** 在父会话下挂一个 coworker 会话（模拟重启后的持久化形状） */
+    function seedCoworker(overrides: Record<string, unknown> = {}) {
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: {
+            ...state.conversations.parent,
+            coworkerIds: ['parent::cw-dead'],
+            activeTabId: 'parent::cw-dead',
+          },
+          'parent::cw-dead': {
+            ...state.conversations.parent,
+            id: 'parent::cw-dead',
+            parentId: 'parent',
+            coworkerName: 'bob',
+            coworkerIds: undefined,
+            activeTabId: undefined,
+            started: false,
+            spawning: false,
+            ...overrides,
+          },
+        },
+      }));
+    }
+
+    it('死 tab（未 started）dismiss 失败时本地移除：删会话、收缩 coworkerIds、tab 回落', async () => {
+      // 重启后 worker/Main 侧无实体，IPC 必然拒绝；不兑底就是永远关不掉的僵尸 tab。
+      seedCoworker();
+      dismissCoworker.mockResolvedValueOnce({ ok: false, error: 'not-found' });
+      await sessionsModule.useSessionsStore
+        .getState()
+        .dismissCoworkerFromUI('parent', 'parent::cw-dead');
+      const state = sessionsModule.useSessionsStore.getState();
+      expect(state.conversations['parent::cw-dead']).toBeUndefined();
+      expect(state.conversations.parent.coworkerIds).toEqual([]);
+      expect(state.conversations.parent.activeTabId).toBeUndefined();
+    });
+
+    it('活 coworker（started）dismiss 失败时状态不动（不能静默吞掉活会话的 tab）', async () => {
+      seedCoworker({ started: true });
+      dismissCoworker.mockResolvedValueOnce({ ok: false, error: 'transient' });
+      await sessionsModule.useSessionsStore
+        .getState()
+        .dismissCoworkerFromUI('parent', 'parent::cw-dead');
+      const state = sessionsModule.useSessionsStore.getState();
+      expect(state.conversations['parent::cw-dead']).toBeDefined();
+      expect(state.conversations.parent.coworkerIds).toEqual(['parent::cw-dead']);
+    });
+
+    it('dismiss 成功时本地不动，tab 删除由 coworker-update 回流驱动（单一数据流）', async () => {
+      seedCoworker({ started: true });
+      dismissCoworker.mockResolvedValueOnce({ ok: true });
+      await sessionsModule.useSessionsStore
+        .getState()
+        .dismissCoworkerFromUI('parent', 'parent::cw-dead');
+      const state = sessionsModule.useSessionsStore.getState();
+      expect(state.conversations['parent::cw-dead']).toBeDefined();
+      expect(state.conversations.parent.coworkerIds).toEqual(['parent::cw-dead']);
+    });
+
+    it('coworker-update 复活清除 ended 标记，且 ended 随 partialize 落盘', () => {
+      seedCoworker({ ended: true, generation: undefined });
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, generation: 'pg1' },
+        },
+      }));
+      // 落盘验证：ended 必须进 partialize，否则重启后级联恢复无从筛选
+      const partialize = sessionsModule.useSessionsStore.persist.getOptions().partialize;
+      const persisted = partialize?.(sessionsModule.useSessionsStore.getState()) as {
+        conversations: Record<string, { ended?: boolean }>;
+      };
+      expect(persisted.conversations['parent::cw-dead'].ended).toBe(true);
+
+      onAgentEvent?.({
+        type: 'coworker-update',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 1,
+        coworker: {
+          id: 'parent::cw-dead',
+          name: 'bob',
+          status: 'idle',
+          modelId: 'm',
+          sessionFile: '/tmp/coworker.jsonl',
+          createdAt: 1,
+        },
+      });
+      const conversation =
+        sessionsModule.useSessionsStore.getState().conversations['parent::cw-dead'];
+      expect(conversation.started).toBe(true);
+      expect(conversation.ended).toBeUndefined();
     });
   });
 

@@ -69,6 +69,71 @@ describe('applyAgentEvent', () => {
     expect(next.generation).toBeUndefined();
   });
 
+  it('child-ended marks the persisted ended flag so restart-side restore skips it', () => {
+    // R6：「已结束」必须落盘，否则重启后 Main 级联恢复无法区分
+    // 「跑完的一次性派发 child」与「关机时还活着的 coworker」。
+    const next = applyAgentEvent(base, 's1', {
+      type: 'child-ended',
+      identity: {
+        sessionId: 's1',
+        generation: 'g1',
+        parent: { sessionId: 'p1', generation: 'pg1' },
+        instanceId: 'i1',
+        instanceName: 'Scout · a1',
+        typeKey: 'builtin:scout',
+      },
+      seq: 1,
+      reason: 'turn terminal',
+    });
+    expect(next.ended).toBe(true);
+    expect(next.status).toBe('idle');
+  });
+
+  it('child-rejected also marks ended (terminal for that generation)', () => {
+    const next = applyAgentEvent(base, 's1', {
+      type: 'child-rejected',
+      identity: {
+        sessionId: 's1',
+        generation: 'g1',
+        parent: { sessionId: 'p1', generation: 'pg1' },
+        instanceId: 'i1',
+        instanceName: 'Scout · a1',
+        typeKey: 'builtin:scout',
+      },
+      seq: 0,
+      reason: 'spawn denied',
+    });
+    expect(next.ended).toBe(true);
+  });
+
+  it('parent-ended does not mark ended (flag is child-only)', () => {
+    const next = applyAgentEvent(base, 's1', {
+      type: 'parent-ended',
+      identity: identity(),
+      seq: 1,
+      reason: 'closed',
+    });
+    expect(next.ended).toBeUndefined();
+  });
+
+  it('child-ready on a new generation clears ended (successful resume revives)', () => {
+    const endedState: SessionProjection = { ...emptyProjection, ended: true };
+    const next = applyAgentEvent(endedState, 's1', {
+      type: 'child-ready',
+      identity: {
+        sessionId: 's1',
+        generation: 'g2',
+        parent: { sessionId: 'p1', generation: 'pg2' },
+        instanceId: 'i1',
+        instanceName: 'Scout · a1',
+        typeKey: 'builtin:scout',
+      },
+      seq: 1,
+      sessionFile: '/tmp/child.jsonl',
+    });
+    expect(next.ended).toBeUndefined();
+  });
+
   it('retry after rejection: new-generation parent-ready still applies', () => {
     const rejected = applyAgentEvent(base, 's1', {
       type: 'parent-rejected',

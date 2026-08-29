@@ -94,7 +94,7 @@ export function CoworkerTabs({
                 className="absolute top-1/2 right-1.5 hidden -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-destructive group-hover/tab:block"
                 onClick={() => {
                   if (window.confirm(t('Dismiss this coworker? Its session will be closed.'))) {
-                    useSessionsStore.getState().dismissCoworkerFromUI(parent.id, coworker.id);
+                    void useSessionsStore.getState().dismissCoworkerFromUI(parent.id, coworker.id);
                   }
                 }}
               >

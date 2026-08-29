@@ -46,6 +46,8 @@ export interface SessionProjection {
   backgroundTasks: BackgroundTaskInfo[];
   /** 子代理（状态行数据） */
   subagents: SubagentInfo[];
+  /** child 会话终态：已结束，跨重启不复活（随 partialize 持久化，重启后 Main 级联恢复据此跳过） */
+  ended?: boolean;
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
   /** 最近一次权威 message-upsert 落地时间：运行中计时显示「距上次返回」，随 running 结束清空 */
@@ -156,6 +158,8 @@ export function applyAgentEvent(
       error: event.reason,
       pendingApprovals: [],
       pendingAsks: [],
+      // 拒绝对该代是终态：child 标 ended，重启后不再重试恢复（历史仍可读）
+      ...(event.type === 'child-rejected' ? { ended: true } : {}),
     };
   }
 
@@ -176,6 +180,8 @@ export function applyAgentEvent(
         ...current,
         status: 'idle',
         error: undefined,
+        // 新代 ready = 成功复活，清掉上一代的终态标记
+        ended: undefined,
         lastSeq: event.seq,
       };
     case 'parent-ended':
@@ -185,6 +191,8 @@ export function applyAgentEvent(
         status: 'idle',
         pendingApprovals: [],
         pendingAsks: [],
+        // 只有 child 有「跨重启不复活」语义；父会话 ended 由 source authority 管
+        ...(event.type === 'child-ended' ? { ended: true } : {}),
         lastSeq: event.seq,
       };
     case 'status': {

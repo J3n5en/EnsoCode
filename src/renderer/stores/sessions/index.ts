@@ -170,8 +170,9 @@ interface SessionsState {
   abort(): Promise<void>;
   /** 切换聊天区 tab（undefined = 主会话） */
   selectTab(parentId: string, tabId?: string): void;
-  /** 解雇 coworker（删除靠 coworker-update 回流,单一数据流） */
-  dismissCoworkerFromUI(parentId: string, coworkerId: string): void;
+  /** 解雇 coworker：活会话删除靠 coworker-update 回流（单一数据流）；
+   * 重启后 worker/Main 侧无实体的死 tab（IPC 拒绝且未 started）本地移除兑底 */
+  dismissCoworkerFromUI(parentId: string, coworkerId: string): Promise<void>;
   /** 手动雇佣 coworker（会话建立靠 coworker-update 回流;主 agent 经 worker 通知感知） */
   hireCoworker(parentId: string, name: string, agentType?: string): Promise<string | null>;
   removeQueuedMessage(conversationId: string, messageId: string): void;
@@ -509,6 +510,8 @@ export const useSessionsStore = create<SessionsState>()(
                     ...existing,
                     started: true,
                     spawning: false,
+                    // worker 侧有实体 = 复活，清掉上一代的终态标记
+                    ended: undefined,
                     sessionFile: coworker.sessionFile ?? existing.sessionFile,
                     coworkerName: coworker.name,
                     ...(coworker.agentType ? { agentType: coworker.agentType } : {}),
@@ -1479,8 +1482,25 @@ export const useSessionsStore = create<SessionsState>()(
           if (tabId && tabId !== parentId) void loadChildHistory(tabId);
         },
 
-        dismissCoworkerFromUI(parentId, coworkerId) {
-          void window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
+        async dismissCoworkerFromUI(parentId, coworkerId) {
+          const result = await window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
+          if (result.ok) return;
+          const coworker = get().conversations[coworkerId];
+          // 只兑底「worker/Main 侧本就没有实体」的死 tab（重启后未恢复）；
+          // 活会话的 dismiss 失败不能静默吞 tab，否则 worker 侧会泄漏孤儿会话。
+          if (!coworker || coworker.started || coworker.spawning) return;
+          set((state) => {
+            const parent = state.conversations[parentId];
+            if (!parent) return state;
+            const conversations = { ...state.conversations };
+            delete conversations[coworkerId];
+            conversations[parentId] = {
+              ...parent,
+              coworkerIds: (parent.coworkerIds ?? []).filter((id) => id !== coworkerId),
+              activeTabId: parent.activeTabId === coworkerId ? undefined : parent.activeTabId,
+            };
+            return { conversations };
+          });
         },
 
         removeQueuedMessage(conversationId, messageId) {
