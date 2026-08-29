@@ -127,8 +127,8 @@ function HireCoworkerDialog({ parentId, onClose }: { parentId: string; onClose: 
   const [name, setName] = React.useState('');
   const [agentType, setAgentType] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
-  // 与 main 下发口径一致：内置(过滤已关闭)+ 自定义(同名覆盖内置)
-  const customNames = new Set(agentTypes.map((entry) => entry.name));
+  // 与 main 下发口径一致：内置(过滤已关闭)+ 自定义(同名覆盖内置，trim+小写同口径)
+  const customNames = new Set(agentTypes.map((entry) => entry.name.trim().toLowerCase()));
   const typeNames = [
     ...BUILTIN_AGENT_TYPES.filter(
       (type) => !disabledBuiltins.includes(type.name) && !customNames.has(type.name)

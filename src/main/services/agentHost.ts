@@ -468,7 +468,8 @@ function configuredAgentTypes(
       : []
   );
   const custom = Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [];
-  const customNames = new Set(custom.map((entry) => entry.name));
+  // 与 registry 同口径（trim + 小写）：同名 custom 覆盖 builtin
+  const customNames = new Set(custom.map((entry) => entry.name.trim().toLowerCase()));
   const builtins = BUILTIN_AGENT_TYPES.filter(
     (type) => !disabled.has(type.name) && !customNames.has(type.name)
   ).map((type) => ({

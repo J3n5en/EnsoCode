@@ -382,7 +382,8 @@ export function Composer({
               onMouseEnter={() => setActiveIndex(index)}
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
-                index === activeIndex && 'bg-muted'
+                // 同 MentionPicker：浅色主题下 bg-muted 在纯白 popover 上不可见
+                index === activeIndex && 'bg-foreground/10'
               )}
             >
               <SlashSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
