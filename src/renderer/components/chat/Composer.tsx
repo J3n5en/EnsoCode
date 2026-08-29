@@ -379,7 +379,7 @@ export function Composer({
                 replaceToken('/', '');
                 setSlash(item.name);
               }}
-              onMouseEnter={() => setActiveIndex(index)}
+              onMouseMove={() => setActiveIndex(index)}
               className={cn(
                 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
                 // 同 MentionPicker：浅色主题下 bg-muted 在纯白 popover 上不可见
