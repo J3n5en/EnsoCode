@@ -396,6 +396,30 @@ export function Composer({
       setSlash(null);
       return;
     }
+    // 光标在行首且无选区时，Backspace 按可视顺序从后往前删 chip（会话 → 文件 → Agent），
+    // 对齐常见 pill 输入框交互；chip 不占文本 token，不这样做就只能鼠标点 X。
+    if (
+      event.key === 'Backspace' &&
+      textareaRef.current?.selectionStart === 0 &&
+      textareaRef.current?.selectionEnd === 0
+    ) {
+      const chats = mentions.filter((mention) => mention.kind === 'chat');
+      const files = mentions.filter((mention) => mention.kind === 'file');
+      const victim = chats.at(-1) ?? files.at(-1);
+      if (victim) {
+        event.preventDefault();
+        setMentions((current) =>
+          current.filter((item) => !(item.kind === victim.kind && item.id === victim.id))
+        );
+        return;
+      }
+      if (recipient) {
+        event.preventDefault();
+        setRecipient(undefined);
+        setMentions((current) => current.filter((mention) => mention.kind !== 'agent-type'));
+        return;
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && enterToSend) {
       event.preventDefault();
       handleSend();
@@ -500,46 +524,58 @@ export function Composer({
             ))}
           </div>
         )}
+        {(recipient || hasChipMentions) && (
+          <div
+            className={cn(
+              'flex flex-wrap items-center gap-1.5 px-3.5',
+              images.length > 0 ? 'pt-1.5' : 'pt-3'
+            )}
+          >
+            {recipient && (
+              <MentionChip
+                recipient={recipient}
+                onRemove={() => {
+                  setRecipient(undefined);
+                  setMentions((current) =>
+                    current.filter((mention) => mention.kind !== 'agent-type')
+                  );
+                }}
+              />
+            )}
+            {mentions
+              .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
+              .map((mention) => (
+                <FileMentionChip
+                  key={mention.id}
+                  file={mention}
+                  onRemove={() =>
+                    setMentions((current) =>
+                      current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
+                    )
+                  }
+                />
+              ))}
+            {mentions
+              .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
+              .map((mention) => (
+                <ChatMentionChip
+                  key={mention.id}
+                  chat={mention}
+                  onRemove={() =>
+                    setMentions((current) =>
+                      current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
+                    )
+                  }
+                />
+              ))}
+          </div>
+        )}
         <div
-          className={cn('flex items-start gap-1.5 px-3.5', images.length > 0 ? 'pt-1.5' : 'pt-3')}
-        >
-          {recipient && (
-            <MentionChip
-              recipient={recipient}
-              onRemove={() => {
-                setRecipient(undefined);
-                setMentions((current) =>
-                  current.filter((mention) => mention.kind !== 'agent-type')
-                );
-              }}
-            />
+          className={cn(
+            'flex items-start gap-1.5 px-3.5',
+            images.length > 0 || recipient || hasChipMentions ? 'pt-1.5' : 'pt-3'
           )}
-          {mentions
-            .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
-            .map((mention) => (
-              <FileMentionChip
-                key={mention.id}
-                file={mention}
-                onRemove={() =>
-                  setMentions((current) =>
-                    current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
-                  )
-                }
-              />
-            ))}
-          {mentions
-            .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
-            .map((mention) => (
-              <ChatMentionChip
-                key={mention.id}
-                chat={mention}
-                onRemove={() =>
-                  setMentions((current) =>
-                    current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
-                  )
-                }
-              />
-            ))}
+        >
           {slash && (
             <SlashChip
               name={slash}

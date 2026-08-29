@@ -15,7 +15,8 @@ export type MentionKind = 'agent-type' | 'file' | 'chat';
  * 浅底用实色字，避免 *-foreground 近白叠在 /15 底上看不清（同 SlashChip）。
  */
 const COLORS: Record<MentionKind, string> = {
-  'agent-type': 'bg-primary/15 text-primary',
+  // primary 是近黑灰，做色块 tag 会变灰块；agent 用 purple（Markdown.tsx 已有直接用调色板的先例）
+  'agent-type': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
   file: 'bg-success/15 text-success',
   chat: 'bg-warning/25 text-warning-foreground dark:bg-warning/15 dark:text-warning',
 };
@@ -48,7 +49,7 @@ interface MentionChipProps {
 export function MentionChip({ recipient, onRemove }: MentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('agent-type'), 'mt-0.5 shrink-0')}>
+    <span className={cn(mentionChipClass('agent-type'), 'shrink-0')}>
       <Bot className="h-3 w-3 shrink-0" />
       <span className="truncate">{recipient.label}</span>
       <RemoveButton label={t('Remove Agent recipient')} onRemove={onRemove} />
@@ -66,7 +67,7 @@ interface FileMentionChipProps {
 export function FileMentionChip({ file, onRemove }: FileMentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('file'), 'mt-0.5 shrink-0')} title={file.relativePath}>
+    <span className={cn(mentionChipClass('file'), 'shrink-0')} title={file.relativePath}>
       <FileText className="h-3 w-3 shrink-0" />
       <span className="truncate">{file.label}</span>
       <RemoveButton label={t('Remove file reference')} onRemove={onRemove} />
@@ -83,7 +84,7 @@ interface ChatMentionChipProps {
 export function ChatMentionChip({ chat, onRemove }: ChatMentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('chat'), 'mt-0.5 shrink-0')}>
+    <span className={cn(mentionChipClass('chat'), 'shrink-0')}>
       <History className="h-3 w-3 shrink-0" />
       <span className="truncate">{chat.label}</span>
       <RemoveButton label={t('Remove chat reference')} onRemove={onRemove} />
