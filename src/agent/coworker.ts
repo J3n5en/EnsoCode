@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { AgentTypeSpawnConfig, CoworkerInfo } from '@shared/types/agent';
+import type { AgentTypeSpawnConfig, CoworkerInfo, SubagentModelOption } from '@shared/types/agent';
 
 /** 回传主 agent 的结果上限,全文永远在 coworker tab 里 */
 const RESULT_LIMIT = 4000;
@@ -14,8 +14,10 @@ export interface CoworkerSendOptions {
 
 export interface CoworkerToolDeps {
   agentTypes: AgentTypeSpawnConfig[];
-  /** 雇佣:创建持久子会话并登记(不发首条消息) */
-  spawn(name: string, agentTypeName?: string): Promise<CoworkerInfo>;
+  /** 模型中心勾选的子代理可选模型（空 = 不暴露 model 参数） */
+  models: SubagentModelOption[];
+  /** 雇佣:创建持久子会话并登记(不发首条消息)。modelName 仅 spawn 时生效 */
+  spawn(name: string, agentTypeName?: string, modelName?: string): Promise<CoworkerInfo>;
   /** 发消息。wait=false 时立即返回投递回执,轮次完成后自动通知主 agent */
   send(name: string, message: string, opts?: CoworkerSendOptions): Promise<string>;
   list(): CoworkerInfo[];
@@ -33,6 +35,18 @@ const truncate = (text: string): string =>
  */
 export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
   const typeList = deps.agentTypes.map((type) => type.name).join(', ');
+  const modelNames = deps.models.map((option) => option.name);
+  const modelParam =
+    deps.models.length > 0
+      ? {
+          model: {
+            type: 'string',
+            description:
+              `Model override for spawn: ${modelNames.join(', ')}. ` +
+              'Prefer a cheaper model for simple roles; omit to inherit the default.',
+          },
+        }
+      : {};
   return {
     name: 'coworker',
     label: 'Coworker',
@@ -72,6 +86,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           type: 'string',
           description: `Agent type for spawn${typeList ? ` (${typeList})` : ''}; omit for general`,
         },
+        ...modelParam,
         task: { type: 'string', description: 'Initial task for spawn, self-contained' },
         message: { type: 'string', description: 'Message for send' },
         wait: {
@@ -94,6 +109,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         operation,
         name = '',
         agent_type: agentTypeName,
+        model: modelName,
         task = '',
         message = '',
         wait = false,
@@ -102,6 +118,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         operation?: string;
         name?: string;
         agent_type?: string;
+        model?: string;
         task?: string;
         message?: string;
         wait?: boolean;
@@ -125,7 +142,12 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
               `unknown agent_type "${agentTypeName}". Available: [${typeList}] or omit for general.`
             );
           }
-          const info = await deps.spawn(name.trim(), agentTypeName);
+          if (modelName && !deps.models.some((option) => option.name === modelName)) {
+            throw new Error(
+              `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+            );
+          }
+          const info = await deps.spawn(name.trim(), agentTypeName, modelName);
           // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
           const result = await deps.send(info.name, task, sendOptions);
           return text(

@@ -1,16 +1,26 @@
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { AgentTypeSpawnConfig, SubagentInfo } from '@shared/types/agent';
+import type {
+  AgentTypeSpawnConfig,
+  SpawnModelConfig,
+  SubagentInfo,
+  SubagentModelOption,
+} from '@shared/types/agent';
 
 /** 进度事件节流 */
 const UPDATE_INTERVAL_MS = 500;
 
 export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
-  createSubSession(agentType?: AgentTypeSpawnConfig): Promise<AgentSession>;
+  createSubSession(
+    agentType?: AgentTypeSpawnConfig,
+    modelOverride?: SpawnModelConfig
+  ): Promise<AgentSession>;
   /** 父会话模型 id（general 类型展示用） */
   modelId: string;
   /** 自定义 agent 类型表（空 = 仅 general） */
   agentTypes: AgentTypeSpawnConfig[];
+  /** 模型中心勾选的子代理可选模型（空 = 不暴露 model 参数） */
+  models: SubagentModelOption[];
   /** 进度/状态上报（覆盖式,按 id 幂等） */
   emitUpdate(agent: SubagentInfo): void;
   /** gate 验收:在会话 cwd 跑命令,返回 PASSED/FAILED 文本 */
@@ -59,6 +69,18 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         `${type.model ? ` (model: ${type.model.modelId})` : ''}${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
     )
     .join('; ');
+  const modelNames = deps.models.map((option) => option.name);
+  const modelParam =
+    deps.models.length > 0
+      ? {
+          model: {
+            type: 'string',
+            description:
+              `Model override for this subagent: ${modelNames.join(', ')}. ` +
+              'Prefer a cheaper model for simple subtasks; omit to inherit the default.',
+          },
+        }
+      : {};
   const typeParam =
     deps.agentTypes.length > 0
       ? {
@@ -93,6 +115,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       type: 'object',
       properties: {
         ...typeParam,
+        ...modelParam,
         description: {
           type: 'string',
           description: 'Short (3-8 words) label of the subtask, shown in the UI',
@@ -121,12 +144,14 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         description = '',
         prompt = '',
         agent_type: agentTypeName,
+        model: modelName,
         gate,
         wait = true,
       } = params as {
         description?: string;
         prompt?: string;
         agent_type?: string;
+        model?: string;
         gate?: string;
         wait?: boolean;
       };
@@ -139,6 +164,14 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           `unknown agent_type "${agentTypeName}". Available: [${deps.agentTypes.map((t) => t.name).join(', ')}] or omit for general.`
         );
       }
+      const modelOption = modelName
+        ? deps.models.find((option) => option.name === modelName)
+        : undefined;
+      if (modelName && !modelOption) {
+        throw new Error(
+          `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+        );
+      }
       const id = `agent-${++counter}-${Date.now().toString(36)}`;
       const info: SubagentInfo = {
         id,
@@ -147,13 +180,13 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         steps: 0,
         currentActivity: 'starting…',
         activityLog: [],
-        modelId: agentType?.model?.modelId ?? deps.modelId,
+        modelId: modelOption?.config.modelId ?? agentType?.model?.modelId ?? deps.modelId,
         ...(agentType ? { agentType: agentType.name } : {}),
         startedAt: Date.now(),
       };
       deps.emitUpdate({ ...info });
 
-      const session = await deps.createSubSession(agentType);
+      const session = await deps.createSubSession(agentType, modelOption?.config);
       let dirty = false;
       const timer = setInterval(() => {
         if (!dirty) return;

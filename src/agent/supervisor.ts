@@ -45,6 +45,7 @@ import type {
   SlashCommand,
   SpawnModelConfig,
   SubagentInfo,
+  SubagentModelOption,
   ThinkingLevel,
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry } from '@shared/types/agent';
@@ -90,10 +91,13 @@ interface ChildSessionResult {
 interface SessionFactory {
   cwd: string;
   agentTypes: AgentTypeSpawnConfig[];
+  subagentModels: SubagentModelOption[];
   modelId: string;
   createChildSession(opts: {
     agentType?: AgentTypeSpawnConfig;
     resolved?: ResolvedAgentTypeSpawnConfig;
+    /** 主 agent 显式指定的模型,优先于 resolved/agentType 绑定模型 */
+    modelOverride?: SpawnModelConfig;
     identity?: ChildSessionIdentity;
     gate: ApprovalGate;
     askManager?: AskManager;
@@ -401,7 +405,8 @@ export class SessionSupervisor {
           command.approvalMode,
           command.agentTypes,
           command.disabledTools,
-          command.instruction
+          command.instruction,
+          command.subagentModels
         );
         return;
       case 'spawn-child':
@@ -622,7 +627,8 @@ export class SessionSupervisor {
     approvalMode: ApprovalMode = 'full',
     agentTypes: AgentTypeSpawnConfig[] = [],
     disabledTools: string[] = [],
-    instruction?: { path: string; content: string }
+    instruction?: { path: string; content: string },
+    subagentModels: SubagentModelOption[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -741,17 +747,19 @@ export class SessionSupervisor {
     const factory: SessionFactory = {
       cwd,
       agentTypes,
+      subagentModels,
       modelId: model.modelId,
       createChildSession: async ({
         agentType,
         resolved,
+        modelOverride,
         identity: childIdentity,
         gate: childGate,
         askManager,
         resumeFile: childResume,
         extraTools = [],
       }) => {
-        const selectedModel = resolved?.model ?? agentType?.model ?? model;
+        const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
         const base = resolveBaseModel(runtime, selectedModel);
         const subModel = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
@@ -874,8 +882,9 @@ export class SessionSupervisor {
     const taskTool = createSubagentTool({
       modelId: model.modelId,
       agentTypes,
-      createSubSession: async (agentType) =>
-        (await factory.createChildSession({ agentType, gate })).session,
+      models: subagentModels,
+      createSubSession: async (agentType, modelOverride) =>
+        (await factory.createChildSession({ agentType, modelOverride, gate })).session,
       runGate: (gateCommand) => runGateCommand(cwd, gateCommand),
       notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
       emitUpdate: (agent) => {
@@ -892,8 +901,15 @@ export class SessionSupervisor {
     });
     const coworkerTool = createCoworkerTool({
       agentTypes,
-      spawn: (name, agentTypeName) =>
-        this.spawnCoworker(sessionId, `${sessionId}::cw-${slugify(name)}`, name, agentTypeName),
+      models: subagentModels,
+      spawn: (name, agentTypeName, modelName) =>
+        this.spawnCoworker(
+          sessionId,
+          `${sessionId}::cw-${slugify(name)}`,
+          name,
+          agentTypeName,
+          modelName
+        ),
       send: (name, message, opts) => {
         const parent = this.must(identity);
         const info = parent.coworkers.get(name);
@@ -1255,6 +1271,7 @@ export class SessionSupervisor {
     coworkerId: string,
     name: string,
     agentTypeName?: string,
+    modelName?: string,
     resumeFile?: string
   ): Promise<CoworkerInfo> {
     const parent = this.mustCurrent(parentId);
@@ -1270,6 +1287,10 @@ export class SessionSupervisor {
     // 类型找不到降级 general(resume 时配置漂移不毁恢复;工具路径在 coworker.ts 已前置校验)
     const agentType = agentTypeName
       ? factory.agentTypes.find((type) => type.name === agentTypeName)
+      : undefined;
+    // 模型同样降级容错:resume/配置漂移时找不到就回 agentType/父模型(工具入口已前置校验)
+    const modelOverride = modelName
+      ? factory.subagentModels.find((option) => option.name === modelName)?.config
       : undefined;
     const identity: SessionIdentity = { sessionId: coworkerId, generation: randomUUID() };
     const gate = new ApprovalGate(
@@ -1300,6 +1321,7 @@ export class SessionSupervisor {
     const askManager = this.createAskManager(identity);
     const { session, modelId, toolIds } = await factory.createChildSession({
       agentType,
+      modelOverride,
       gate,
       resumeFile,
       extraTools: [

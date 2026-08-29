@@ -27,6 +27,7 @@ import type {
   ModelRef,
   ResolvedAgentTypeSpawnConfig,
   SpawnModelConfig,
+  SubagentModelOption,
   ThinkingLevel,
 } from '@shared/types/agent';
 import { parseAgentWorkerEvent } from '@shared/types/agent';
@@ -45,6 +46,7 @@ import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import agentWorkerPath from '../../agent/index?modulePath';
 import { readSettings } from '../ipc/settings';
 import { resolveGlobalInstruction } from './instructionStore';
+import { pickSubagentModelRefs } from './subagentModels';
 
 export interface ResolvedModelSelection {
   ref: ModelRef;
@@ -279,6 +281,7 @@ export function spawnSession(
   const skillPaths = enabledSkillPaths(preset);
   const mcpServers = enabledMcpServers(preset);
   const agentTypes = configuredAgentTypes(authenticatedAccountKeys);
+  const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
   const state = readSettingsState();
   const disabledTools = Array.isArray(state?.disabledBuiltinTools)
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
@@ -296,6 +299,7 @@ export function spawnSession(
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
+    ...(subagentModels.length > 0 ? { subagentModels } : {}),
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
     ...(instruction ? { instruction } : {}),
   });
@@ -521,6 +525,18 @@ function configuredAgentTypes(
     };
   });
   return [...builtins, ...customs];
+}
+
+/** 模型中心勾选的子代理可选模型 → 解析凭证后随 spawn-parent 下发（不可用的静默跳过） */
+function configuredSubagentModels(
+  authenticatedAccountKeys: ReadonlySet<string>
+): SubagentModelOption[] {
+  const options: SubagentModelOption[] = [];
+  for (const ref of pickSubagentModelRefs(providersFromSettings())) {
+    const resolved = resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
+    if (resolved.ok) options.push({ name: ref.name, config: resolved.selection.config });
+  }
+  return options;
 }
 
 function resolveAgentTypeResources(

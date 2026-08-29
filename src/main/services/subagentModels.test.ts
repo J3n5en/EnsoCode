@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { ModelProvider } from '@shared/types';
+import { describe, expect, it } from 'vitest';
 import { pickSubagentModelRefs } from './subagentModels';
 
 const provider = (overrides: Partial<ModelProvider>): ModelProvider => ({
