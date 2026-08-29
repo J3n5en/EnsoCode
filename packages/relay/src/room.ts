@@ -96,6 +96,13 @@ export class PairRoom extends DurableObject<Env> {
     }
 
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
+    // 同角色旧连接（网络切换/睡眠唤醒后的半开残留）先关掉：否则它迟到的 close
+    // 会在新连接建立后向对端广播离线，把真实在线状态覆盖成假离线
+    for (const stale of this.ctx.getWebSockets(role)) {
+      try {
+        stale.close(1000, 'replaced');
+      } catch {}
+    }
     this.ctx.acceptWebSocket(server, [role]);
 
     if (role === 'host') {
@@ -156,6 +163,10 @@ export class PairRoom extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket): Promise<void> {
     const isHost = this.ctx.getTags(ws).includes('host');
+    // 该角色还有存活连接（对端已重连成功）就不广播离线：
+    // 被顶替/半开的旧连接迟到关闭，不代表对端真的离线
+    const alive = this.ctx.getWebSockets(isHost ? 'host' : 'guest').filter((w) => w !== ws);
+    if (alive.length > 0) return;
     this.broadcast(isHost ? 'guest' : 'host', { type: isHost ? 'host-offline' : 'peer-left' });
   }
 
