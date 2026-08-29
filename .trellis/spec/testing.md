@@ -74,8 +74,32 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
   `// 真实场景：同一个服务器在 Claude 里叫 cunzhi，在 Cursor 里叫寸止`
 - 一个 `it` 验一件事，避免一个用例里堆十个断言。
 
+## 参与模型的功能，真机验证至少跨两个厂商
+
+凡是靠 LLM 调工具的链路（Enso 能力、subagent 派发等），**只用一个模型验证会漏掉整类 bug**。
+
+实例：`enso_app` 的 `params` 没声明 `type`，Grok 传对象（恰好能用）、Claude 传
+字符串化 JSON（被 inputSchema 判 `$ must be an object`，建类型三次全败）。
+只测 Grok 时这个 bug 完全隐形。同一轮还暴露了第二个：`agent-types.list` 只给
+`typeKey`、`delete` 只认裸 id，模型根本拿不到合法参数。
+
+因此：
+
+- 真机验收这类功能时，至少跑两个不同厂商的模型（如 xAI + Anthropic）
+- 工具参数 schema **必须写 `type`**，不能只给 description 让模型自己猜
+- 形态归一放 `prepareArguments`（schema 校验**之前**），放 `execute` 里就晚了
+- 面向模型的 list 类能力开出什么标识，写入类能力就要能收什么标识
+
 ## 修 bug 时
 
 先写一个能复现的失败用例，再改代码。
 `extractModelIds` 在响应含 `null` 条目时抛异常就是这么发现的 ——
 写"脏输入不崩"用例时暴露的。
+
+来不及先写用例时（比如真机排查完才定位），**补完测试必须反向验一次**：
+临时把修复改回去，确认新用例真的 fail，再恢复。
+否则很容易写出“怎么改都绿”的假用例 —— 这类用例在真出问题时恰恰不报。
+
+同样的道理：**断言可观测行为，不断言实现细节**。
+验“文件落盘了”而不是“调用了 `_rewriteFile`”；
+验“同一投影重复到达不再落盘”而不是“值是对的”（死循环里值一直是对的）。
