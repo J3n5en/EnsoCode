@@ -102,6 +102,9 @@ export function App() {
 
   useEffect(() => {
     if (!device) return;
+    // 换绑另一台桌面时清掉上一台的 VAPID 公钥，等新桌面重新下发
+    vapidKeyRef.current = null;
+    setPushConfigReady(false);
     const client = new PairClient(device, {
       onState: setState,
       onCatalog: setCatalog,
