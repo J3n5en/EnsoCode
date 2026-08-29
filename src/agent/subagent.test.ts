@@ -86,4 +86,11 @@ describe('subagent tool model 参数', () => {
     const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;
     expect('model' in properties).toBe(false);
   });
+
+  it('promptSnippet 仅在有可选模型时提及 model 参数(开关关闭不泄露)', () => {
+    expect(createSubagentTool(makeDeps()).promptSnippet).toMatch(/model parameter/);
+    expect(createSubagentTool(makeDeps({ models: [] })).promptSnippet).not.toMatch(
+      /model parameter/
+    );
+  });
 });

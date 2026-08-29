@@ -72,7 +72,10 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       'spawn/send are async by default — you get notified on completion, so never block waiting; ' +
       'pass wait:true only when the result is needed immediately. ' +
       'Verify delegated work with gate:"<command>" (exit code speaks, not the coworker). ' +
-      'Coworkers cost resources while alive — dismiss them when done; prefer few with clear roles',
+      'Coworkers cost resources while alive — dismiss them when done; prefer few with clear roles' +
+      (deps.models.length > 0
+        ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — see the tool schema for options'
+        : ''),
     parameters: {
       type: 'object',
       properties: {

@@ -113,6 +113,9 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         ? `; agent_type options: ${deps.agentTypes
             .map((type) => `${type.name} (${type.description || 'custom'})`)
             .join(', ')} — pick the cheapest type that fits the subtask`
+        : '') +
+      (deps.models.length > 0
+        ? '; a model parameter lets you pick a cheaper/stronger model per subtask — see the tool schema for options'
         : ''),
     parameters: {
       type: 'object',
