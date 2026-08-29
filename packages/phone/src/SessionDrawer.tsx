@@ -204,41 +204,46 @@ export function SessionDrawer({
               onSelect={onSelect}
             />
           )}
-          {archivedSessions.length > 0 && (
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setArchivedOpen((prev) => !prev)}
-                className="flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
-              >
+        </div>
+
+        {/* 与桌面一致：归档栏固定底部（滚动区外），列表在折叠头上方向上展开 */
+        {archivedSessions.length > 0 && (
+          <div className="shrink-0 border-t p-2">
+            {archivedOpen && (
+              <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
+                {archivedSessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    active={activeId === session.id}
+                    nowTick={nowTick}
+                    subtitle={projects.find((p) => p.id === session.projectId)?.name}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setArchivedOpen((prev) => !prev)}
+              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                 <ChevronRight
                   className={cn(
                     'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                    archivedOpen && 'rotate-90'
+                    archivedOpen ? '-rotate-90' : 'rotate-0'
                   )}
                 />
-                <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate font-medium text-sm">已归档</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {archivedSessions.length}
-                </span>
-              </button>
-              {archivedOpen && (
-                <div className="mt-0.5 flex flex-col gap-y-0.5">
-                  {archivedSessions.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      session={session}
-                      active={activeId === session.id}
-                      nowTick={nowTick}
-                      onSelect={onSelect}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+              </span>
+              <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground text-sm">已归档</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {archivedSessions.length}
+              </span>
+            </button>
+          </div>
+        )}
 
         <div className="shrink-0 space-y-1 border-t p-2 pb-safe">
           {!confirmUnpair && (
@@ -335,16 +340,18 @@ function sortPinnedFirst(sessions: CatalogEntry[]): CatalogEntry[] {
   return [...sessions.filter((s) => s.pinned), ...sessions.filter((s) => !s.pinned)];
 }
 
-/** 置顶/归档/项目组共用的会话行 */
+/** 置顶/归档/项目组共用的会话行（subtitle = 归档栏内联的项目名，与桌面一致） */
 function SessionRow({
   session,
   active,
   nowTick,
+  subtitle,
   onSelect,
 }: {
   session: CatalogEntry;
   active: boolean;
   nowTick: number;
+  subtitle?: string;
   onSelect(id: string): void;
 }) {
   return (
@@ -357,7 +364,10 @@ function SessionRow({
       )}
     >
       <StatusDot status={session.status} />
-      <span className="min-w-0 flex-1 truncate">{session.title || '新对话'}</span>
+      <span className="min-w-0 flex-1 truncate">
+        {session.title || '新对话'}
+        {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
+      </span>
       {session.updatedAt && (
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {formatRelativeTime(session.updatedAt, 'zh', nowTick)}
