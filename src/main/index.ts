@@ -5,6 +5,11 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
+import {
+  registerLocalImageProtocolHandler,
+  registerLocalImageSchemePrivileges,
+} from './services/localImageProtocol';
+import { startPairHost, stopPairHost } from './services/pairHost';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
@@ -22,6 +27,9 @@ app.setPath(
     ? path.resolve(developmentUserData)
     : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
 );
+
+// 背景图媒体协议：特权 scheme 必须在 app ready 前登记
+registerLocalImageSchemePrivileges();
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -49,9 +57,16 @@ if (!gotTheLock) {
     });
 
     registerIpcHandlers();
+    // 协议处理器要赶在窗口加载内容之前注册（local-image:// 资源依赖它）。
+    registerLocalImageProtocolHandler();
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
-    setImmediate(() => startAgentWorker());
+    // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
+    setImmediate(() => {
+      startAgentWorker();
+      // 手机第二屏：恢复已配对设备的中继连接
+      startPairHost();
+    });
     void initAutoUpdater(mainWindow);
 
     app.on('activate', () => {
@@ -65,6 +80,11 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') {
       app.quit();
     }
+  });
+
+  // Electron 退出即断开中继，手机侧收到 host-offline
+  app.on('before-quit', () => {
+    stopPairHost();
   });
 }
 

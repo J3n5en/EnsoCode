@@ -45,15 +45,21 @@ export function EditDiff({ path, blocks }: { path: string; blocks: EditBlock[] }
 
   useEffect(() => {
     let alive = true;
-    Promise.all([ensureHighlighter(), window.electronAPI.files.read(path)]).then(([, current]) => {
-      if (!alive) return;
-      const old = current != null ? reconstructOld(current, blocks) : null;
-      setState(
-        old != null && current != null
-          ? { kind: 'full', oldText: old, newText: current }
-          : { kind: 'blocks' }
-      );
-    });
+    Promise.all([ensureHighlighter(), window.electronAPI.files.read(path)])
+      .then(([, current]) => {
+        if (!alive) return;
+        // 读不到（手机端无本机文件系统）或还原失败时退成片段 diff
+        const old = typeof current === 'string' ? reconstructOld(current, blocks) : null;
+        setState(
+          old != null && typeof current === 'string'
+            ? { kind: 'full', oldText: old, newText: current }
+            : { kind: 'blocks' }
+        );
+      })
+      // 没有这个兜底，任何一步抛错都会让链断掉、永远停在「加载 diff…」
+      .catch(() => {
+        if (alive) setState({ kind: 'blocks' });
+      });
     return () => {
       alive = false;
     };

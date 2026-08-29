@@ -11,6 +11,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
+import type { PairCreatedSession } from '@shared/types/pair';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -138,6 +139,8 @@ interface SessionsState {
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
+  /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
+  adoptPairSession(session: PairCreatedSession): void;
   /** 登记一条从外部应用导入的对话（选中后自动 resume 回放） */
   addImportedConversation(
     projectId: string,
@@ -175,6 +178,18 @@ interface SessionsState {
   pauseGoal(conversationId: string): void;
   resumeGoal(conversationId: string): void;
   clearGoal(conversationId: string): void;
+}
+
+/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
+function firstUserText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  if (!message) return '';
+  const text = message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+    .trim();
+  return (text || '[image]').slice(0, 40);
 }
 
 const patch = (
@@ -568,9 +583,14 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = state.conversations[id];
           if (!conversation) return state;
           const next = applyAgentEvent(conversation, id, event);
-          if (next === conversation) return state;
+          // dev：首个 worker 事件即 spawn 完成信号，即使投影未变也要清 spawning（resume loading 依赖它）
+          if (next === conversation && !conversation.spawning) return state;
+          // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上，
+          // 用它的首条用户消息补一个，否则侧边栏永远显示「新对话」
+          const title = conversation.title || firstUserText(next) || '';
           return patch(state, id, {
             ...next,
+            title,
             spawning: false,
             ...(event.type === 'parent-ready'
               ? {
@@ -784,6 +804,34 @@ export const useSessionsStore = create<SessionsState>()(
           }));
           await activateConversationAuthority(id);
           return id;
+        },
+
+        adoptPairSession(session) {
+          // 幂等：手机重连可能重发，已登记就别覆盖本地状态
+          if (get().conversations[session.sessionId]) return;
+          const conversation: Conversation = {
+            ...emptyProjection,
+            id: session.sessionId,
+            projectId: session.projectId,
+            // 标题留空，首条用户消息到达时再补（手机建会话时还没有内容）
+            title: '',
+            // worker 侧已经起来了，这里直接标记为已启动，否则发消息会重复 spawn
+            started: true,
+            spawning: false,
+            createdAt: Date.now(),
+            reasoningEnabled: session.reasoningEnabled,
+            thinkingLevel: (session.thinkingLevel as Conversation['thinkingLevel']) ?? 'medium',
+            lastProviderId: session.providerId,
+            lastModelId: session.modelId,
+            ...(session.presetId ? { presetId: session.presetId } : {}),
+            ...(session.approvalMode
+              ? { approvalMode: session.approvalMode as Conversation['approvalMode'] }
+              : {}),
+          };
+          set((state) => ({
+            conversations: { ...state.conversations, [session.sessionId]: conversation },
+            order: [session.sessionId, ...state.order],
+          }));
         },
 
         selectConversation(id) {
@@ -1413,32 +1461,32 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation || !item) return;
+          const running = conversation.status === 'running';
+          // 出队并乐观回显。与 sendMessage / flushQueue 同一套：worker 会为这条
+          // user 消息发同 index 的 message-upsert 覆盖对齐。running 分支此前只出队
+          // 不上屏（指望 reconcile 补），一旦没回流用户就看到消息凭空消失。
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
                 (message) => message.id !== messageId
               ),
+              messages: [
+                ...state.conversations[conversationId].messages,
+                {
+                  role: 'user',
+                  content: [
+                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+                  ],
+                  timestamp: Date.now(),
+                },
+              ],
             })
           );
-          if (conversation.status === 'running') {
-            // steer 插入当前轮;消息回显由 worker 的 reconcile 补齐
+          if (running) {
+            // steer 插入当前轮
             void window.electronAPI.agent.steer(conversationId, item.text, item.images);
           } else {
-            set((state) =>
-              patch(state, conversationId, {
-                messages: [
-                  ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [
-                      ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                      ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                    ],
-                    timestamp: Date.now(),
-                  },
-                ],
-              })
-            );
             void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
           }
         },

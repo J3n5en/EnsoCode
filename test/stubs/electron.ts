@@ -20,5 +20,7 @@ export const BrowserWindow = {
 
 export const shell = { openExternal: () => {} };
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
+export const powerMonitor = { on: () => {} };
+export const powerSaveBlocker = { start: () => 0, stop: () => {} };
 
-export default { app, ipcMain, BrowserWindow, shell, Menu };
+export default { app, ipcMain, BrowserWindow, shell, Menu, powerMonitor, powerSaveBlocker };

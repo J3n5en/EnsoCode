@@ -4,6 +4,14 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import pkg from './package.json';
 
+// 合并说明：dev 曾为手工 multi-input 显式复刻默认 external（nodeExternal）。
+// 本分支已改用 `?modulePath` 独立构建 agent worker、main 保持官方单入口，
+// 默认 external 自然生效，nodeExternal 随之成为死代码，故一并移除。
+
+// @enso/pair 是 workspace 内的 TS 源码包，需被打进产物（不可 external），
+// 三段统一用 alias 指到源码入口。
+const pairAlias = path.resolve(__dirname, 'packages/pair/src/index.ts');
+
 export default defineConfig({
   main: {
     build: {
@@ -14,6 +22,7 @@ export default defineConfig({
     resolve: {
       alias: {
         '@shared': path.resolve(__dirname, 'src/shared'),
+        '@enso/pair': pairAlias,
       },
     },
   },
@@ -36,6 +45,7 @@ export default defineConfig({
       alias: {
         '@': path.resolve(__dirname, 'src/renderer'),
         '@shared': path.resolve(__dirname, 'src/shared'),
+        '@enso/pair': pairAlias,
       },
     },
     build: {

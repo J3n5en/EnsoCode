@@ -51,7 +51,9 @@ import {
   stopBackgroundTask,
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
+import { maybeNotify } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
+import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
 import {
   importExternalSession,
   listExternalSessions,
@@ -100,6 +102,9 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
       window.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
     }
   }
+  maybeNotify(event);
+  // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
+  forwardAgentEvent(event);
 }
 
 function exactIdentity(sessionId: unknown): SessionIdentity | ChildSessionIdentity | undefined {
@@ -191,7 +196,56 @@ function readChildHistory(conversationId: string): ChildHistoryResult {
   return { ok: true, projection: EnsoSafeJournal.restore(resolved) };
 }
 
+/**
+ * 手机第二屏只持有裸 sessionId，而会话命令已收紧为 exact identity。身份解析与 spawn
+ * 准入是策略，留在本文件（与渲染层走同一套 exactIdentity / persistedRootSpawn 守卫）；
+ * pairHost 只做传输。解析不出身份就丢弃命令，不降级成按 sessionId 盲发。
+ */
+function wirePairAgentBridge(): void {
+  const identityOf = (sessionId: unknown) => {
+    const identity = exactIdentity(sessionId);
+    return identity && !('parent' in identity) ? identity : undefined;
+  };
+  setPairAgentBridge({
+    prompt: (sessionId, text, images) => {
+      const identity = identityOf(sessionId);
+      if (identity) promptSession(identity, text, images);
+    },
+    steer: (sessionId, text, images) => {
+      const identity = identityOf(sessionId);
+      if (identity) steerSession(identity, text, images);
+    },
+    abort: (sessionId) => {
+      const identity = identityOf(sessionId);
+      if (identity) abortSession(identity);
+    },
+    respondApproval: (sessionId, requestId, decision) => {
+      const identity = identityOf(sessionId);
+      if (identity) respondApproval(identity, requestId, decision);
+    },
+    respondAsk: (sessionId, requestId, answer) => {
+      const identity = identityOf(sessionId);
+      if (identity) respondAsk(identity, requestId, answer);
+    },
+    spawn: async (request) => {
+      const identity = identityOf(request.sessionId) ?? {
+        sessionId: request.sessionId,
+        generation: randomUUID(),
+      };
+      agentSessionIndex.prepareParent(identity);
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      return spawnSession(identity, request, credentialKeys);
+    },
+  });
+}
+
 export function registerAgentHandlers(): void {
+  wirePairAgentBridge();
   const agentDataDir = path.join(app.getPath('userData'), 'agent');
   sourceAuthority = new SourceAuthorityRegistry({
     registryFile: path.join(agentDataDir, 'source-registry.json'),

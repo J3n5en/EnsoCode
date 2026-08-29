@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <!-- 首屏兜底（scoped 在前、裸标签兜底在后：浏览器取第一个匹配的）；
+         JS 起来后由 theme.ts 清掉这些、按实际背景色重插一条 -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#252529" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!--
+      不用 black-translucent：那会把 webview 原点放到 y=0（内容钻到状态栏下），
+      但 iOS 给的高度仍是「屏幕高 - 状态栏」，于是底部空出一条与状态栏等高的
+      死区。默认样式下 webview 被摆在状态栏下方并铺满，没有这个问题。
+    -->
+    <!-- iOS 只认 apple-touch-icon，manifest 里的 icons 它不读；缺了会拿页面截图当图标 -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- 桌面图标下的名字，缺省会退回 <title> -->
+    <meta name="apple-mobile-web-app-title" content="EnsoCode" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>EnsoCode</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -14,8 +14,9 @@
     "types": ["node"],
     "paths": {
       "@/*": ["./src/renderer/*"],
-      "@shared/*": ["./src/shared/*"]
+      "@shared/*": ["./src/shared/*"],
+      "@enso/pair": ["./packages/pair/src/index.ts"]
     }
   },
-  "include": ["src/**/*", "electron.vite.config.ts"]
+  "include": ["src/**/*", "packages/pair/src/**/*", "electron.vite.config.ts"]
 }

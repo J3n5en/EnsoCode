@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "enso-pair-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": { "enabled": true },
+  // 自定义域：wrangler 自动建 DNS 记录并签证书
+  "routes": [{ "pattern": "enso-relay.j3.do", "custom_domain": true }],
+  // 必须显式保留：配了 routes 后 workers.dev 默认会被关掉，
+  // 而已配对设备各自存着当初的中继地址，关掉就等于把老设备踢下线
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "PAIR_ROOM", "class_name": "PairRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PairRoom"] }],
+  // 手机 PWA 与中继同域部署：/v1/* 走 Worker（配对 + WSS），其余交给静态资源。
+  // 同域后 PWA 无需跨域，手机打开根地址即用。
+  "assets": {
+    "directory": "../phone/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*"]
+  }
+}

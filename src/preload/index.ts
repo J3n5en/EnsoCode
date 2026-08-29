@@ -19,6 +19,9 @@ import type {
   ModelMetaResult,
   OauthAccountUsage,
   OauthProviderInfo,
+  PairCatalogPayload,
+  PairCreatedSession,
+  PairStatus,
   ProviderApiConfig,
   RecentProject,
   TestProviderResult,
@@ -155,6 +158,9 @@ const electronAPI = {
     /** 打开系统目录选择框，取消时返回 null */
     selectDirectory: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
+    /** 打开系统文件选择框（可按扩展名过滤），取消时返回 null */
+    selectFile: (extensions?: string[]): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILE, extensions),
   },
 
   projects: {
@@ -171,6 +177,9 @@ const electronAPI = {
     /** 读取文件内容（edit diff 还原上下文/行号用）；失败返回 null */
     read: (filePath: string): Promise<string | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, filePath),
+    /** 枚举目录下的媒体文件（背景图文件夹随机模式），返回绝对路径 */
+    listMedia: (dir: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_LIST_MEDIA, dir),
   },
 
   sessionImport: {
@@ -365,6 +374,36 @@ const electronAPI = {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATER_STATUS, listener);
+    },
+  },
+
+  pair: {
+    start: (): Promise<{ ok: boolean; inviteUri?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_START),
+    cancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_CANCEL),
+    revoke: (pairId: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_REVOKE, pairId),
+    status: (): Promise<PairStatus> => ipcRenderer.invoke(IPC_CHANNELS.PAIR_STATUS),
+    setRelayUrl: (url: string): Promise<PairStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PAIR_SET_RELAY, url),
+    /** renderer → main 推会话目录 / 项目 / provider（provider 须已剥密） */
+    pushCatalog: (payload: PairCatalogPayload): void =>
+      ipcRenderer.send(IPC_CHANNELS.PAIR_CATALOG, payload),
+    onStatusChanged: (callback: (status: PairStatus) => void): (() => void) => {
+      const listener = (_: unknown, status: PairStatus) => callback(status);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_STATUS_CHANGED, listener);
+    },
+    /** main 请求恢复某会话（手机订阅了历史会话） */
+    onResumeSession: (callback: (sessionId: string) => void): (() => void) => {
+      const listener = (_: unknown, sessionId: string) => callback(sessionId);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_RESUME_SESSION, listener);
+    },
+    /** main 通知：手机新建了会话，请求登记到桌面列表 */
+    onSessionCreated: (callback: (session: PairCreatedSession) => void): (() => void) => {
+      const listener = (_: unknown, session: PairCreatedSession) => callback(session);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
     },
   },
 

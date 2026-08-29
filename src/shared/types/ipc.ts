@@ -93,6 +93,7 @@ export const IPC_CHANNELS = {
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
+  DIALOG_SELECT_FILE: 'dialog:select-file',
 
   // Recent projects from local apps
   PROJECTS_GET_RECENT: 'projects:get-recent',
@@ -100,6 +101,8 @@ export const IPC_CHANNELS = {
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
   FILES_READ: 'files:read',
+  // 目录媒体文件枚举（背景图文件夹随机模式）
+  FILES_LIST_MEDIA: 'files:list-media',
 
   // External session import
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',
@@ -112,6 +115,19 @@ export const IPC_CHANNELS = {
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
   UPDATER_STATUS: 'updater:status',
+
+  // Phone second screen (pairing + relay)
+  PAIR_START: 'pair:start',
+  PAIR_CANCEL: 'pair:cancel',
+  PAIR_REVOKE: 'pair:revoke',
+  PAIR_STATUS: 'pair:status',
+  PAIR_SET_RELAY: 'pair:set-relay',
+  PAIR_CATALOG: 'pair:catalog',
+  PAIR_STATUS_CHANGED: 'pair:status-changed',
+  /** main → renderer：手机订阅了某会话，请求恢复（历史会话在 worker 里没有投影） */
+  PAIR_RESUME_SESSION: 'pair:resume-session',
+  /** main → renderer：手机新建了会话，请求登记（否则桌面列表里没有它，其事件也会被丢弃） */
+  PAIR_SESSION_CREATED: 'pair:session-created',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

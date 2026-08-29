@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCheckpoint,
   loadAllCheckpoints,
@@ -13,6 +13,10 @@ import { CheckpointManager } from './manager';
 
 const runGit = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+
+// 每个用例都要建临时 git 仓库，一次 checkpoint 又要 spawn 十几个 git 进程，
+// 单例常跑到数秒，5s 默认超时不够。只放宽本文件，避免掩盖别处真正的卡死。
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 
 let root: string;
 

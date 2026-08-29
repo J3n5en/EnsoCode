@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
@@ -6,7 +7,9 @@ import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -17,7 +20,7 @@ const MAX_WIDTH = 420;
 
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
-
+  useBackgroundImage();
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;
@@ -38,6 +41,11 @@ export default function App() {
       }),
     []
   );
+
+  // 手机第二屏：会话目录/项目/provider 只在 renderer，绑定后 debounce 同步给 main
+  useEffect(() => {
+    bindPairCatalogSync();
+  }, []);
 
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
@@ -86,7 +94,8 @@ export default function App() {
   }, [keybindings]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="relative isolate flex h-screen flex-col">
+      <BackgroundLayer />
       <OauthCredentialBootstrap />
       <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />
       <UpdateBanner />

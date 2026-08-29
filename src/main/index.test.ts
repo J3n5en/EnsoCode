@@ -41,6 +41,14 @@ vi.mock('./ipc', () => ({
   registerIpcHandlers: vi.fn(() => mocks.order.push('ipc')),
 }));
 vi.mock('./ipc/settings', () => ({ readSettings: vi.fn(() => null) }));
+vi.mock('./services/localImageProtocol', () => ({
+  registerLocalImageProtocolHandler: vi.fn(),
+  registerLocalImageSchemePrivileges: vi.fn(),
+}));
+vi.mock('./services/pairHost', () => ({
+  startPairHost: vi.fn(() => mocks.order.push('pair')),
+  stopPairHost: vi.fn(),
+}));
 vi.mock('./services/agentHost', () => ({ startAgentWorker: mocks.startAgentWorker }));
 vi.mock('./services/updater/AutoUpdater', () => ({
   autoUpdaterService: { init: mocks.autoUpdaterInit },
@@ -78,7 +86,8 @@ describe('Main startup order', () => {
     expect(mocks.startAgentWorker).not.toHaveBeenCalled();
 
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(mocks.order).toEqual(['ipc', 'window', 'worker']);
+    // worker 与 pair host 都不依赖窗口，同样延后到首帧之后，不得插到 window 之前。
+    expect(mocks.order).toEqual(['ipc', 'window', 'worker', 'pair']);
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.startAgentWorker).toHaveBeenCalledOnce();
   });

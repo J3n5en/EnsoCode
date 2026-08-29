@@ -46,6 +46,22 @@ export const SETTINGS_DATA_COVERAGE = {
   onboarded: surfaces('onboarding.complete'),
   keybindings: surfaces('general.keybindings.list'),
   projects: surfaces('projects.list'),
+  // 背景图属纯外观装饰，目前未开放为面向 Enso 的产品能力（需要时再建 catalog 条目）。
+  backgroundImageEnabled: excluded('Appearance-only background decoration.'),
+  backgroundSourceType: excluded('Appearance-only background decoration.'),
+  backgroundImagePath: excluded('Appearance-only background decoration.'),
+  backgroundFolderPath: excluded('Appearance-only background decoration.'),
+  backgroundUrlPath: excluded('Appearance-only background decoration.'),
+  backgroundRandomEnabled: excluded('Appearance-only background decoration.'),
+  backgroundRandomInterval: excluded('Appearance-only background decoration.'),
+  backgroundOpacity: excluded('Appearance-only background decoration.'),
+  backgroundBlur: excluded('Appearance-only background decoration.'),
+  backgroundBrightness: excluded('Appearance-only background decoration.'),
+  backgroundSaturation: excluded('Appearance-only background decoration.'),
+  backgroundComposerOpacity: excluded('Appearance-only background decoration.'),
+  backgroundCodeOpacity: excluded('Appearance-only background decoration.'),
+  backgroundSizeMode: excluded('Appearance-only background decoration.'),
+  backgroundRefreshNonce: excluded('Internal repaint nonce; not user-facing state.'),
 } satisfies Record<SettingsDataKey, CoverageDisposition>;
 
 /** SettingsState 新增 action 时，此 Record 会在编译期要求登记或明确排除。 */
@@ -93,6 +109,21 @@ export const SETTINGS_ACTION_COVERAGE = {
   resetKeybinding: surfaces('general.keybindings.reset'),
   addProject: surfaces('projects.add'),
   removeProject: surfaces('projects.remove'),
+  setBackgroundImageEnabled: excluded('Appearance-only background decoration.'),
+  setBackgroundSourceType: excluded('Appearance-only background decoration.'),
+  setBackgroundImagePath: excluded('Appearance-only background decoration.'),
+  setBackgroundFolderPath: excluded('Appearance-only background decoration.'),
+  setBackgroundUrlPath: excluded('Appearance-only background decoration.'),
+  setBackgroundRandomEnabled: excluded('Appearance-only background decoration.'),
+  setBackgroundRandomInterval: excluded('Appearance-only background decoration.'),
+  setBackgroundOpacity: excluded('Appearance-only background decoration.'),
+  setBackgroundBlur: excluded('Appearance-only background decoration.'),
+  setBackgroundBrightness: excluded('Appearance-only background decoration.'),
+  setBackgroundSaturation: excluded('Appearance-only background decoration.'),
+  setBackgroundComposerOpacity: excluded('Appearance-only background decoration.'),
+  setBackgroundCodeOpacity: excluded('Appearance-only background decoration.'),
+  setBackgroundSizeMode: excluded('Appearance-only background decoration.'),
+  bumpBackgroundRefresh: excluded('Internal repaint nonce; not user-facing state.'),
 } satisfies Record<SettingsActionKey, CoverageDisposition>;
 
 export const BUILTIN_TOOL_COVERAGE: Readonly<Record<string, CoverageDisposition>> = {
@@ -210,6 +241,17 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_QUIT_AND_INSTALL: surfaces('updates.install'),
   UPDATER_SET_AUTO_UPDATE_ENABLED: surfaces('general.automatic-updates'),
   UPDATER_STATUS: surfaces('updates.status'),
+  DIALOG_SELECT_FILE: excluded('Native file picker; user-driven OS dialog.'),
+  FILES_LIST_MEDIA: excluded('Renderer media listing for background picker.'),
+  PAIR_CANCEL: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_CATALOG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_RESUME_SESSION: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_REVOKE: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_SESSION_CREATED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_SET_RELAY: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_START: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_STATUS: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

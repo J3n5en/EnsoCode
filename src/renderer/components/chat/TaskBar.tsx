@@ -18,13 +18,26 @@ const STATUS_DOT = {
   failed: 'bg-destructive',
 } as const;
 
+/** 按会话记住已收起的条目。TaskBar 用 conversation.id 当 key，切会话/coworker 会卸载重挂，组件 state 会丢。 */
+const dismissedBySession = new Map<string, Set<string>>();
+
+const readDismissed = (sessionId: string): Set<string> => {
+  const cached = dismissedBySession.get(sessionId);
+  return cached ? new Set(cached) : new Set();
+};
+
+const writeDismissed = (sessionId: string, next: Set<string>): Set<string> => {
+  dismissedBySession.set(sessionId, next);
+  return next;
+};
+
 /**
  * 后台任务状态行（grok-build 风）：输入框上方每任务一行；
  * 点「查看」在行下内嵌展开输出;done 5s 自动移除,failed 手动关闭。
  */
 export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
   const { t } = useI18n();
-  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(sessionId));
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   // 结束的条目(done/failed)5s 后自动收起（展开中的不收）
@@ -38,18 +51,18 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
       setDismissed((prev) => {
         const next = new Set(prev);
         for (const id of finished) next.add(id);
-        return next;
+        return writeDismissed(sessionId, next);
       });
     }, 5000);
     return () => clearTimeout(timer);
-  }, [tasks, subagents, dismissed, openTaskId]);
+  }, [sessionId, tasks, subagents, dismissed, openTaskId]);
 
   const visible = tasks.filter((task) => !dismissed.has(task.taskId));
   const visibleAgents = subagents.filter((agent) => !dismissed.has(agent.id));
   if (visible.length === 0 && visibleAgents.length === 0) return null;
 
   const dismiss = (taskId: string) => {
-    setDismissed((prev) => new Set(prev).add(taskId));
+    setDismissed((prev) => writeDismissed(sessionId, new Set(prev).add(taskId)));
     if (openTaskId === taskId) setOpenTaskId(null);
   };
 

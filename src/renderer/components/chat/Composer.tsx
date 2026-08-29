@@ -23,6 +23,9 @@ interface ComposerProps {
   running: boolean;
   busy: boolean;
   focusKey?: string;
+  /** 挂载/切会话时是否自动聚焦。移动端置 false，否则一进会话就弹出键盘挡住内容 */
+  autoFocus?: boolean;
+  /** 底部工具行左侧插槽（模型选择器等） */
   toolbar?: React.ReactNode;
   locked?: boolean;
   injectedDraft?: string;
@@ -61,6 +64,7 @@ export function Composer({
   running,
   busy,
   focusKey,
+  autoFocus = true,
   toolbar,
   locked = false,
   injectedDraft,
@@ -123,8 +127,11 @@ export function Composer({
       setSlashQuery(null);
       setActiveIndex(0);
     }
-    textareaRef.current?.focus();
-    if (previous !== focusKey) window.setTimeout(() => detect(nextText), 0);
+    if (autoFocus) textareaRef.current?.focus();
+    if (previous !== focusKey) {
+      const restored = nextText;
+      setTimeout(() => detect(restored), 0);
+    }
   }, [focusKey]);
 
   useEffect(() => {
@@ -383,6 +390,7 @@ export function Composer({
       )}
 
       <div
+        data-slot="composer"
         className={cn(
           'rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring',
           dragging && 'border-ring bg-muted/30',

@@ -189,6 +189,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 非 tag 触发时 electron-builder 不发布，产物只留在 runner 上；
+      # 传上来才能直接下载试装，不必为了拿个安装包去发版
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*.exe
+            dist/latest.yml
+          retention-days: 7
+
   build-linux:
     needs: build-app
     runs-on: ubuntu-latest
