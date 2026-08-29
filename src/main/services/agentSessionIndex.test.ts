@@ -111,6 +111,41 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.currentIdentity(parent.sessionId)).toEqual(replacement);
   });
 
+  it('model-changed 更新已启动模型；旧 generation 的上报不生效', () => {
+    // 不更新的后果见 issue #30：改过模型的会话，后续 @Agent 派发会因
+    // selection 与已启动模型对不上而被永久拒绝。
+    const sessions = index();
+    sessions.prepareParent(parent);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'pv-A', modelId: 'model-1' },
+    });
+    expect(sessions.model(parent)).toEqual({ providerId: 'pv-A', modelId: 'model-1' });
+
+    expect(
+      sessions.observe({
+        type: 'model-changed',
+        identity: parent,
+        seq: 2,
+        model: { providerId: 'pv-B', modelId: 'model-1' },
+      })
+    ).toBe(true);
+    expect(sessions.model(parent)).toEqual({ providerId: 'pv-B', modelId: 'model-1' });
+
+    expect(
+      sessions.observe({
+        type: 'model-changed',
+        identity: { sessionId: parent.sessionId, generation: 'stale-generation' },
+        seq: 3,
+        model: { providerId: 'pv-C', modelId: 'model-1' },
+      })
+    ).toBe(false);
+    expect(sessions.model(parent)).toEqual({ providerId: 'pv-B', modelId: 'model-1' });
+  });
+
   it('rejects duplicate or decreasing seq and does not let snapshots overwrite sequenced state', () => {
     const sessions = index();
     sessions.prepareParent(parent);

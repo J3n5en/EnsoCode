@@ -278,6 +278,13 @@ export class AgentSessionIndex {
       parent.model = event.model;
       return true;
     }
+    // 就地换模型：不更新这里，activeConversationRegistry 的 selection 校验会永远拿旧模型比对。
+    if (event.type === 'model-changed') {
+      if (!current || !isSameGeneration(current.identity, event.identity)) return false;
+      current.model = event.model;
+      current.lastSeq = event.seq;
+      return true;
+    }
     if (event.type === 'parent-rejected' || event.type === 'parent-ended') {
       if (!current) return false;
       current.ready = false;

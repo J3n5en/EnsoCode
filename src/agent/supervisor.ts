@@ -477,6 +477,27 @@ export class SessionSupervisor {
       case 'set-thinking':
         this.must(command.identity).session.setThinkingLevel(command.level);
         return;
+      case 'set-model': {
+        const managed = this.must(command.identity);
+        const runtime = await this.getRuntime();
+        const base = resolveBaseModel(runtime, command.model);
+        const next = applyReasoningToModel(
+          { ...base, compat: base.compat ? { ...base.compat } : undefined },
+          managed.session.model ? Boolean(managed.session.model.reasoning) : false,
+          command.model.modelId
+        );
+        await managed.session.setModel(next);
+        managed.modelId = command.model.modelId;
+        // 必须回报：Main 的 agentSessionIndex 只认 parent-ready 与本事件，
+        // 不回报就会让后续派发的 selection 校验永远对不上（issue #30）。
+        this.options.emit({
+          type: 'model-changed',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          model: settingsModelRef(command.model),
+        });
+        return;
+      }
       case 'set-reasoning': {
         const managed = this.must(command.identity);
         if (managed.session.model) {

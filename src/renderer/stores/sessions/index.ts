@@ -1290,6 +1290,15 @@ export const useSessionsStore = create<SessionsState>()(
           set((state) =>
             patch(state, parentId, { lastProviderId: providerId, lastModelId: modelId })
           );
+          // 已启动的会话必须真正换掉 worker 里的模型：只改记忆会让选择器显示新模型
+          // 而请求仍走旧 provider，且后续 @Agent 派发因 selection 对不上而被拒（issue #30）。
+          if (get().conversations[parentId]?.started) {
+            void window.electronAPI.agent.setModel(parentId, providerId, modelId).then((result) => {
+              if (!result.ok && get().conversations[parentId]) {
+                set((state) => patch(state, parentId, { error: result.error }));
+              }
+            });
+          }
           const update = window.electronAPI.sourceAuthority
             .read()
             .then((projection) => {

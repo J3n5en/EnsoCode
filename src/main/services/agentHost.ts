@@ -287,6 +287,21 @@ export function spawnSession(
   });
 }
 
+/**
+ * 已启动会话就地换模型。不做这件事的后果见 issue #30：选择器显示新模型、
+ * 请求却仍打旧 provider，且该会话后续所有 @Agent 派发被永久拒绝。
+ */
+export function setSessionModel(
+  identity: SessionIdentity,
+  providerId: string,
+  modelId: string,
+  authenticatedAccountKeys: ReadonlySet<string>
+): { ok: boolean; error?: string } {
+  const resolved = resolveModelSelection(providerId, modelId, authenticatedAccountKeys);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  return sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+}
+
 export function spawnChildSession(
   identity: ChildSessionIdentity,
   cwd: string,

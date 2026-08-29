@@ -55,6 +55,8 @@ export const IPC_CHANNELS = {
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */
   AGENT_CHILD_HISTORY_READ: 'agent:child-history-read',
+  /** 已启动会话就地换模型；worker 换完回报，Main 据此更新已启动模型记录 */
+  AGENT_SET_MODEL: 'agent:set-model',
   AGENT_SET_THINKING: 'agent:set-thinking',
   AGENT_SET_REASONING: 'agent:set-reasoning',
   AGENT_APPROVAL_RESPOND: 'agent:approval-respond',

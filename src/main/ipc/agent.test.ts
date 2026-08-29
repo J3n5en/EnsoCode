@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   steerSession: vi.fn(),
   abortSession: vi.fn(),
   setPairAgentBridge: vi.fn(),
+  setSessionModel: vi.fn(() => ({ ok: true })),
 }));
 
 vi.mock('electron', () => ({
@@ -57,6 +58,7 @@ vi.mock('../services/agentHost', () => ({
   rewindSession: vi.fn(),
   setAgentEventListener: mocks.setAgentEventListener,
   setSessionApprovalMode: vi.fn(),
+  setSessionModel: mocks.setSessionModel,
   setSessionReasoning: vi.fn(),
   setSessionThinking: vi.fn(),
   spawnChildSession: vi.fn(),
@@ -120,6 +122,7 @@ describe('agent IPC Main identity boundary', () => {
     mocks.steerSession.mockClear();
     mocks.abortSession.mockClear();
     mocks.setPairAgentBridge.mockClear();
+    mocks.setSessionModel.mockClear();
     registerAgentHandlers();
   });
 
@@ -156,12 +159,48 @@ describe('agent IPC Main identity boundary', () => {
     expect(mocks.spawnSession).not.toHaveBeenCalled();
   });
 
+  it('已启动会话换模型走 exact identity，旧 generation 与 child 身份被拒', async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SET_MODEL);
+    expect(handler).toBeDefined();
+
+    mocks.currentIdentity.mockReturnValue({ sessionId: 'conv-1', generation: 'gen-1' });
+    await expect(handler?.(event, 'conv-1', 'pv-B', 'model-1')).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(mocks.setSessionModel).toHaveBeenCalledWith(
+      { sessionId: 'conv-1', generation: 'gen-1' },
+      'pv-B',
+      'model-1',
+      expect.anything()
+    );
+
+    // child 不能走父会话的换模型路径
+    mocks.setSessionModel.mockClear();
+    mocks.currentIdentity.mockReturnValue({
+      sessionId: 'conv-1::cw-1',
+      generation: 'g',
+      parent: { sessionId: 'conv-1', generation: 'gen-1' },
+      instanceId: 'i',
+      instanceName: 'Enso-1',
+      typeKey: 'agent:enso',
+    });
+    await expect(handler?.(event, 'conv-1::cw-1', 'pv-B', 'model-1')).resolves.toMatchObject({
+      ok: false,
+    });
+
+    // 解析不出身份（会话已结束 / generation 已轮替）同样拒绝
+    mocks.currentIdentity.mockReturnValue(undefined);
+    await expect(handler?.(event, 'gone', 'pv-B', 'model-1')).resolves.toMatchObject({ ok: false });
+    expect(mocks.setSessionModel).not.toHaveBeenCalled();
+  });
+
   describe('手机第二屏的会话命令桥', () => {
     const parent = { sessionId: 'conv-1', generation: 'gen-1' };
-    const bridge = () => mocks.setPairAgentBridge.mock.calls.at(-1)?.[0] as {
-      prompt(sessionId: string, text: string): void;
-      abort(sessionId: string): void;
-    };
+    const bridge = () =>
+      mocks.setPairAgentBridge.mock.calls.at(-1)?.[0] as {
+        prompt(sessionId: string, text: string): void;
+        abort(sessionId: string): void;
+      };
 
     it('裸 sessionId 被解析成 exact identity 后才下发', () => {
       mocks.currentIdentity.mockReturnValue(parent);

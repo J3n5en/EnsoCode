@@ -43,6 +43,7 @@ import {
   rewindSession,
   setAgentEventListener,
   setSessionApprovalMode,
+  setSessionModel,
   setSessionReasoning,
   setSessionThinking,
   spawnChildSession,
@@ -515,6 +516,26 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid dismiss-child or stale generation' };
       }
       return dismissChildSession(parent, child, notify === true);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SET_MODEL,
+    async (_event, sessionId: unknown, providerId: unknown, modelId: unknown) => {
+      const identity = exactIdentity(sessionId);
+      if (!identity || 'parent' in identity) {
+        return { ok: false, error: 'invalid session or stale generation' };
+      }
+      if (!isNonEmptyString(providerId) || !isNonEmptyString(modelId)) {
+        return { ok: false, error: 'providerId and modelId are required' };
+      }
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      return setSessionModel(identity, providerId, modelId, credentialKeys);
     }
   );
 

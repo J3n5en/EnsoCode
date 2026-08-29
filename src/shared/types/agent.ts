@@ -380,6 +380,7 @@ export type AgentCommand =
     }
   | { type: 'prompt'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
+  | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
   | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
   | {
       type: 'set-reasoning';
@@ -536,6 +537,16 @@ export type ParentLifecycleEvent =
       identity: SessionIdentity;
       seq: number;
       sessionFile: string;
+      model: ModelRef;
+    }
+  | {
+      /**
+       * 已启动会话就地换模型成功。Main 必须据此更新 agentSessionIndex 的
+       * 已启动模型，否则后续派发的 selection 校验会永远对不上（见 issue #30）。
+       */
+      type: 'model-changed';
+      identity: SessionIdentity;
+      seq: number;
       model: ModelRef;
     }
   | {
@@ -1283,6 +1294,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     }
+    case 'set-model':
+      return hasExactKeys(value, ['type', 'identity', 'model']) &&
+        parseAnySessionIdentity(value.identity) &&
+        parseSpawnModelConfig(value.model)
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'set-thinking':
       return hasExactKeys(value, ['type', 'identity', 'level']) &&
         parseAnySessionIdentity(value.identity) &&
@@ -1374,6 +1391,8 @@ function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent |
       return isNonEmptyString(value.sessionFile) && parseModelRef(value.model)
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'model-changed':
+      return parseModelRef(value.model) ? (value as unknown as AgentWorkerEvent) : null;
     case 'parent-rejected':
     case 'parent-ended':
     case 'child-rejected':
@@ -1406,6 +1425,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   if (!isRecord(value) || !isNonEmptyString(value.type)) return null;
   if (
     value.type === 'parent-ready' ||
+    value.type === 'model-changed' ||
     value.type === 'parent-rejected' ||
     value.type === 'parent-ended' ||
     value.type === 'child-reserved' ||

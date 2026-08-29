@@ -249,6 +249,13 @@ const electronAPI = {
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
+    /** 已启动会话就地换模型（未启动的会话只需记忆，下次 spawn 生效） */
+    setModel: (
+      sessionId: string,
+      providerId: string,
+      modelId: string
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_MODEL, sessionId, providerId, modelId),
     setThinking: (sessionId: string, level: ThinkingLevel): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_THINKING, sessionId, level),
     setReasoning: (
