@@ -37,6 +37,12 @@ export interface PairCreatedSession {
   approvalMode?: string;
 }
 
+/** 手机端会话配置变更（已过白名单校验），renderer 应用到会话 store（与桌面选择器同一路径） */
+export type PairSessionConfig =
+  | { type: 'set-model'; sessionId: string; providerId: string; modelId: string }
+  | { type: 'set-reasoning'; sessionId: string; enabled: boolean }
+  | { type: 'set-thinking'; sessionId: string; level: 'low' | 'medium' | 'high' | 'max' };
+
 /** renderer 推给 main 的目录快照。providers 必须已剥掉 apiKey/baseUrl。 */
 export interface PairCatalogPayload {
   catalog: {
@@ -48,6 +54,11 @@ export interface PairCatalogPayload {
     parentId?: string;
     /** 最后活动时间（末条消息或创建时间） */
     updatedAt?: number;
+    /** 会话当前选用的 provider/model 与推理档位，手机切换器回显用 */
+    providerId?: string;
+    modelId?: string;
+    reasoningEnabled?: boolean;
+    thinkingLevel?: string;
   }[];
   projects: { id: string; name: string; path: string }[];
   providers: { id: string; name: string; models: { id: string; label?: string }[] }[];

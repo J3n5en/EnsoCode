@@ -29,6 +29,11 @@ function buildPayload(): PairCatalogPayload {
       status: c.spawning ? 'running' : c.status,
       updatedAt: c.messages.at(-1)?.timestamp ?? c.createdAt,
       ...(c.parentId ? { parentId: c.parentId } : {}),
+      // 当前模型与推理档位：手机切换器回显；缺省字段不占帧体积
+      ...(c.lastProviderId ? { providerId: c.lastProviderId } : {}),
+      ...(c.lastModelId ? { modelId: c.lastModelId } : {}),
+      ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
+      ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
     }));
 
   // 只下发可用 provider（启用 + 有 key），且剥掉密钥与 baseUrl
@@ -92,5 +97,17 @@ export function bindPairCatalogSync(): void {
   // 手机新建的会话登记进桌面列表；不登记的话它的 agent 事件会因「未知会话」被丢弃
   window.electronAPI.pair.onSessionCreated((session) => {
     useSessionsStore.getState().adoptPairSession(session);
+  });
+  // 手机改会话模型/推理档位：走桌面选择器同一 store 方法
+  // （setModel 只记忆待用模型；reasoning/thinking 对已启动会话即时下发）
+  window.electronAPI.pair.onSessionConfig((config) => {
+    const store = useSessionsStore.getState();
+    if (config.type === 'set-model') {
+      store.setModel(config.sessionId, config.providerId, config.modelId);
+    } else if (config.type === 'set-reasoning') {
+      store.setReasoning(config.sessionId, config.enabled);
+    } else {
+      store.setThinking(config.sessionId, config.level);
+    }
   });
 }

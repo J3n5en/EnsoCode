@@ -11,6 +11,7 @@ import type {
   OauthProviderInfo,
   PairCatalogPayload,
   PairCreatedSession,
+  PairSessionConfig,
   PairStatus,
   ProviderApiConfig,
   RecentProject,
@@ -283,6 +284,12 @@ const electronAPI = {
       const listener = (_: unknown, session: PairCreatedSession) => callback(session);
       ipcRenderer.on(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_SESSION_CREATED, listener);
+    },
+    /** main 通知：手机改了会话模型/推理档位，应用到会话 store */
+    onSessionConfig: (callback: (config: PairSessionConfig) => void): (() => void) => {
+      const listener = (_: unknown, config: PairSessionConfig) => callback(config);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_SESSION_CONFIG, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_SESSION_CONFIG, listener);
     },
   },
 

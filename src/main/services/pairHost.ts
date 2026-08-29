@@ -23,7 +23,7 @@ import {
 } from '@enso/pair';
 import { powerMonitor, powerSaveBlocker } from 'electron';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import type { PairCreatedSession, PairStatus } from '@shared/types/pair';
+import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/types/pair';
 import {
   abortSession,
   promptSession,
@@ -34,6 +34,7 @@ import {
   steerSession,
 } from './agentHost';
 import {
+  checkSetModel,
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
@@ -85,6 +86,8 @@ let onStatusChange: (() => void) | null = null;
 /** 请渲染层恢复某会话（手机订阅历史会话时用） */
 let onResumeRequest: ((sessionId: string) => void) | null = null;
 let onSessionCreated: ((session: PairCreatedSession) => void) | null = null;
+/** 手机改会话模型/推理档位：renderer 应用到会话 store（与桌面选择器同一路径） */
+let onSessionConfig: ((config: PairSessionConfig) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
@@ -110,6 +113,12 @@ export function setPairSessionCreatedListener(
   listener: (session: PairCreatedSession) => void
 ): void {
   onSessionCreated = listener;
+}
+
+export function setPairSessionConfigListener(
+  listener: (config: PairSessionConfig) => void
+): void {
+  onSessionConfig = listener;
 }
 
 let powerBlockerId: number | null = null;
@@ -473,6 +482,20 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'snapshot':
       void sendMeta(conn);
       requestSnapshot();
+      break;
+    case 'set-model': {
+      const check = checkSetModel(command, whitelist);
+      if (!check.ok) {
+        console.warn(`[pair] set-model rejected: ${check.error}`);
+        return;
+      }
+      onSessionConfig?.(command);
+      break;
+    }
+    case 'set-reasoning':
+    case 'set-thinking':
+      // 结构已校验；store 的 setReasoning/setThinking 自带「已启动会话即时下发」逻辑
+      onSessionConfig?.(command);
       break;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
