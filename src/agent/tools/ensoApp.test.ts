@@ -5,7 +5,7 @@ import type {
   CapabilityResult,
 } from '@shared/capabilities/types';
 import { describe, expect, it, vi } from 'vitest';
-import { EnsoAppInvoker } from './ensoApp';
+import { createEnsoAppTool, EnsoAppInvoker } from './ensoApp';
 
 const child: ChildSessionIdentity = {
   sessionId: 'parent::enso',
@@ -101,6 +101,47 @@ describe('EnsoAppInvoker', () => {
     await expect(first).rejects.toThrow('Enso worker shutdown');
     await expect(second).rejects.toThrow('Enso worker shutdown');
     expect(invoker.pendingCount).toBe(0);
+  });
+
+  it('模型把 params 传成 JSON 字符串时归一成对象，非法输入仍原样透传给 Main 校验', async () => {
+    const seen: unknown[] = [];
+    const tool = createEnsoAppTool({
+      invoke: (_capabilityId: string, params: unknown) => {
+        seen.push(params);
+        return Promise.resolve({ ok: true, data: null } as never);
+      },
+    } as unknown as EnsoAppInvoker);
+
+    // 实测：Claude 传字符串化 JSON，Grok 传对象；只声明 description 时模型会各猜各的。
+    const run = (args: Record<string, unknown>) =>
+      (tool.execute as unknown as (id: string, p: unknown) => Promise<unknown>)('call', args);
+    const prepare = tool.prepareArguments as unknown as (a: unknown) => Record<string, unknown>;
+
+    // prepareArguments 在 schema 校验前把字符串化 JSON 还原成对象
+    expect(prepare({ capability_id: 'general.language', params: '{"value":"zh-CN"}' })).toEqual({
+      capability_id: 'general.language',
+      params: { value: 'zh-CN' },
+    });
+    expect(prepare({ capability_id: 'general.language', params: 'not-json' })).toEqual({
+      capability_id: 'general.language',
+      params: 'not-json',
+    });
+
+    await run({ capability_id: 'general.language', params: '{"value":"zh-CN"}' });
+    await run({ capability_id: 'general.language', params: { value: 'zh-CN' } });
+    await run({ capability_id: 'general.language', params: 'not-json' });
+
+    expect(seen[0]).toEqual({ value: 'zh-CN' });
+    expect(seen[1]).toEqual({ value: 'zh-CN' });
+    expect(seen[2]).toBe('not-json');
+  });
+
+  it('params 在工具 schema 里必须声明为 object', () => {
+    const tool = createEnsoAppTool({} as unknown as EnsoAppInvoker);
+    const schema = tool.parameters as unknown as {
+      properties: { params?: { type?: string } };
+    };
+    expect(schema.properties.params?.type).toBe('object');
   });
 
   it('缺turn、未知或known-unavailable capability不发请求', async () => {

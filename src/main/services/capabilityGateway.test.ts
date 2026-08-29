@@ -165,6 +165,22 @@ async function waitForAsk(asks: unknown[], count: number) {
 }
 
 describe('CapabilityGateway child/generation安全合同', () => {
+  it('custom agent type 的 edit/delete 接受 list 开出的 custom: typeKey', async () => {
+    // list 只给 typeKey，不给内部条目 id；写入端若只认裸 id，模型根本无从获得合法参数。
+    const { gateway, state, asks } = fixture();
+    state.agentTypes = [{ id: 'type-uuid', name: 'probe', description: 'd', tools: 'readonly' }];
+
+    // delete 是危险能力：先出 ASK，同意后才执行。
+    const deleting = gateway.invoke(
+      request('del-1', 'agent-types.delete', { id: 'custom:type-uuid' })
+    );
+    await waitForAsk(asks, 1);
+    gateway.respond(7, { child, turnId: 'turn-1', requestId: 'del-1', decision: 'allow' });
+    const deleted = await deleting;
+    expect(deleted.modelResult).toMatchObject({ ok: true });
+    expect(state.agentTypes).toEqual([]);
+  });
+
   it('授权按 child generation：跨内部 agent turn 仍可调用，旧 generation 仍被拒', async () => {
     const { gateway } = fixture();
     // child 内部的 agent turn 会重新生成 turnId（supervisor 在 agent_end 清空

@@ -228,6 +228,16 @@ function requiredString(params: Record<string, unknown>, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/**
+ * agent-types.list 对模型只暴露 typeKey（custom:<id>），不暴露内部条目 id，而 custom 类型的
+ * inputSchema 只写 `id: string` 也给不出提示——模型因此无从获得合法 id，edit/delete 等于不可用。
+ * （builtin 类型不受影响：其 schema 带 enum，已向模型声明合法取值。）
+ * 两种形式都收：前缀形式还原成内部 id，裸 id 原样透传。
+ */
+function customAgentTypeId(value: string): string {
+  return value.startsWith('custom:') ? value.slice('custom:'.length) : value;
+}
+
 function safeError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.replace(/(bearer\s+|sk-[a-z0-9_-]*|token[=:]\s*)[^\s,;]+/gi, '$1[redacted]');
@@ -952,8 +962,9 @@ export function createCapabilityHandlers(
       );
     },
     'agent-types.edit': (context, params) => {
-      const id = requiredString(params, 'id');
-      if (!id) return invalid('id is required');
+      const rawId = requiredString(params, 'id');
+      if (!rawId) return invalid('id is required');
+      const id = customAgentTypeId(rawId);
       const current = settingsState(services.readSettings()).agentTypes;
       const existing = Array.isArray(current)
         ? current.map(asRecord).find((entry) => entry?.id === id)
@@ -993,8 +1004,9 @@ export function createCapabilityHandlers(
       );
     },
     'agent-types.delete': (context, params) => {
-      const id = requiredString(params, 'id');
-      if (!id) return invalid('id is required');
+      const rawId = requiredString(params, 'id');
+      if (!rawId) return invalid('id is required');
+      const id = customAgentTypeId(rawId);
       const stale = context.assertExecutionCurrent();
       return (
         stale ?? updateArrayById(services, 'agentTypes', id, () => null, context.ownerWebContentsId)
