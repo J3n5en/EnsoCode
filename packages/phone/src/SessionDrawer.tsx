@@ -1,5 +1,5 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
-import { ChevronRight, FolderGit2, MessageSquarePlus, Palette, Unplug, X } from 'lucide-react';
+import { Bot, ChevronRight, FolderGit2, MessageSquarePlus, Palette, Unplug, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/time';
@@ -82,6 +82,15 @@ export function SessionDrawer({
   const known = new Set(projects.map((p) => p.id));
   const orphans = catalog.filter((c) => !c.parentId && !known.has(c.projectId));
 
+  // coworker 等子会话按父 id 归组，嵌套展示在父会话下（可点进查看完整输出）
+  const childrenByParent = new Map<string, CatalogEntry[]>();
+  for (const entry of catalog) {
+    if (!entry.parentId) continue;
+    const list = childrenByParent.get(entry.parentId) ?? [];
+    list.push(entry);
+    childrenByParent.set(entry.parentId, list);
+  }
+
   return (
     <>
       <button
@@ -122,6 +131,7 @@ export function SessionDrawer({
               key={project.id}
               name={project.name}
               sessions={catalog.filter((c) => !c.parentId && c.projectId === project.id)}
+              childrenByParent={childrenByParent}
               folded={foldedProjects[project.id] === true}
               expanded={expandedProjects[project.id] === true}
               activeId={activeId}
@@ -142,6 +152,7 @@ export function SessionDrawer({
             <ProjectGroup
               name="其他"
               sessions={orphans}
+              childrenByParent={childrenByParent}
               folded={foldedProjects.__orphan === true}
               expanded={expandedProjects.__orphan === true}
               activeId={activeId}
@@ -222,6 +233,7 @@ export function SessionDrawer({
 function ProjectGroup({
   name,
   sessions,
+  childrenByParent,
   folded,
   expanded,
   activeId,
@@ -234,6 +246,7 @@ function ProjectGroup({
 }: {
   name: string;
   sessions: CatalogEntry[];
+  childrenByParent: Map<string, CatalogEntry[]>;
   folded: boolean;
   expanded: boolean;
   activeId: string | null;
@@ -279,23 +292,41 @@ function ProjectGroup({
       {!folded && (
         <div className="mt-0.5 flex flex-col gap-y-0.5">
           {shown.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              onClick={() => onSelect(session.id)}
-              className={cn(
-                'flex items-center gap-2 rounded-lg py-2 pr-2 pl-4 text-left text-sm transition-colors',
-                activeId === session.id ? 'bg-muted' : 'hover:bg-muted/50'
-              )}
-            >
-              <StatusDot status={session.status} />
-              <span className="min-w-0 flex-1 truncate">{session.title || '新对话'}</span>
-              {session.updatedAt && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {formatRelativeTime(session.updatedAt, 'zh', nowTick)}
-                </span>
-              )}
-            </button>
+            <div key={session.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(session.id)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg py-2 pr-2 pl-4 text-left text-sm transition-colors',
+                  activeId === session.id ? 'bg-muted' : 'hover:bg-muted/50'
+                )}
+              >
+                <StatusDot status={session.status} />
+                <span className="min-w-0 flex-1 truncate">{session.title || '新对话'}</span>
+                {session.updatedAt && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {formatRelativeTime(session.updatedAt, 'zh', nowTick)}
+                  </span>
+                )}
+              </button>
+              {(childrenByParent.get(session.id) ?? []).map((child) => (
+                <button
+                  key={child.id}
+                  type="button"
+                  onClick={() => onSelect(child.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 pl-8 text-left text-xs transition-colors',
+                    activeId === child.id ? 'bg-muted' : 'hover:bg-muted/50'
+                  )}
+                >
+                  <StatusDot status={child.status} />
+                  <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {child.title || 'coworker'}
+                  </span>
+                </button>
+              ))}
+            </div>
           ))}
           {sessions.length > COLLAPSED_SESSION_LIMIT && (
             <button

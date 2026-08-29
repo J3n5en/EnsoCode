@@ -16,11 +16,14 @@ import {
 import type {
   ApprovalRequestInfo,
   AskRequestInfo,
+  BackgroundTaskInfo,
   ProjectedMessage,
   SessionSnapshot,
+  SubagentInfo,
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
 import { setTerminalAppearance } from './stubs/settings-store';
+import { applyTaskEvent } from './taskProjection';
 import { setHostTheme } from './theme';
 
 /**
@@ -36,6 +39,9 @@ export interface SessionView {
   status: string;
   approvals: ApprovalRequestInfo[];
   asks: AskRequestInfo[];
+  /** 后台任务 / subagent 状态（TaskBar 胶囊用，与桌面同源事件投影） */
+  tasks: BackgroundTaskInfo[];
+  subagents: SubagentInfo[];
 }
 
 export interface ClientEvents {
@@ -251,6 +257,8 @@ export class PairClient {
           status: snap.status ?? 'idle',
           approvals: snap.pendingApprovals ?? [],
           asks: snap.pendingAsks ?? [],
+          tasks: snap.backgroundTasks ?? [],
+          subagents: snap.subagents ?? [],
         };
         this.sessions.set(id, view);
         this.events.onSession(id, { ...view, messages: new Map(messages) });
@@ -263,7 +271,18 @@ export class PairClient {
       status: 'idle',
       approvals: [],
       asks: [],
+      tasks: [],
+      subagents: [],
     };
+
+    // 后台任务 / subagent 事件：纯函数投影，命中则直接推视图
+    const taskNext = applyTaskEvent({ tasks: view.tasks, subagents: view.subagents }, event);
+    if (taskNext) {
+      const next = { ...view, ...taskNext };
+      this.sessions.set(sessionId, next);
+      this.events.onSession(sessionId, { ...next, messages: new Map(next.messages) });
+      return;
+    }
 
     switch (type) {
       case 'message-upsert': {

@@ -9,6 +9,7 @@ import {
   MessageTimeline,
   type MessageTimelineHandle,
 } from '@/components/chat/MessageTimeline';
+import { TaskBar } from '@/components/chat/TaskBar';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import type { ConnState, SessionView } from './client';
 import { compressImage } from './image';
@@ -165,6 +166,12 @@ export function ChatScreen(props: Props) {
         // home indicator 的实际高度，不再叠加，避免下方留出多余空白
         <div className="@container shrink-0 pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className={CHAT_COL}>
+            {/* 后台任务 / subagent 胶囊：复用桌面组件，停止按钮经 stub 降级为无操作 */}
+            <TaskBar
+              sessionId={sessionId}
+              tasks={view?.tasks ?? []}
+              subagents={view?.subagents ?? []}
+            />
             <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
             <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
             <Composer
