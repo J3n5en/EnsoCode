@@ -53,6 +53,66 @@ describe('applyAgentEvent', () => {
     expect(updated.messages[0].content).toEqual([{ type: 'text', text: 'hi!' }]);
   });
 
+  it('乐观尾巴不被同 index 的 assistant upsert 覆盖，同文本 user upsert 将其消费', () => {
+    // 复现：running 中“立即发送”乐观回显在本地尾部，当前轮的 assistant
+    // upsert 撞同 index 把它覆盖 → 用户看到消息凭空消失，轮次结束后又出现。
+    const withHistory = applyAgentEvent(base, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: 'first' }] },
+    });
+    const withEcho = {
+      ...withHistory,
+      messages: [
+        ...withHistory.messages,
+        {
+          role: 'user',
+          content: [{ type: 'text' as const, text: 'steer me' }],
+          optimistic: true as const,
+        },
+      ],
+    };
+
+    // 当前轮的 assistant 消息撞上乐观回显的 index：回显必须浮到它之后而非被覆盖
+    const collided = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 2,
+      index: 1,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'working...' }] },
+    });
+    expect(collided.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
+    expect(collided.messages[2].content).toEqual([{ type: 'text', text: 'steer me' }]);
+
+    // steer 真正送达：同文本的 user upsert 消费掉乐观回显，不产生重复
+    const delivered = applyAgentEvent(collided, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 3,
+      index: 2,
+      message: { role: 'user', content: [{ type: 'text', text: 'steer me' }] },
+    });
+    expect(delivered.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(delivered.messages[2]).not.toHaveProperty('optimistic', true);
+
+    // 历史区（index < 权威长度）的 upsert 仍是就地覆盖
+    const rewrite = applyAgentEvent(delivered, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 4,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: 'first!' }] },
+    });
+    expect(rewrite.messages).toHaveLength(3);
+    expect(rewrite.messages[0].content).toEqual([{ type: 'text', text: 'first!' }]);
+  });
+
   it('restored generation replaces the projection and rejects stale generation events', () => {
     const g1 = applyAgentEvent(base, 's1', status(5, 'running', 'g1'));
     const snapshot: SessionSnapshot = {

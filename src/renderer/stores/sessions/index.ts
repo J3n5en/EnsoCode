@@ -689,13 +689,17 @@ export const useSessionsStore = create<SessionsState>()(
           patch(state, id, {
             messages: [
               ...state.conversations[id].messages,
-              { role: 'user', content: [{ type: 'text' as const, text }], timestamp: Date.now() },
+              {
+                role: 'user',
+                content: [{ type: 'text' as const, text }],
+                timestamp: Date.now(),
+                optimistic: true,
+              },
             ],
           })
         );
         void window.electronAPI.agent.prompt(id, text, undefined);
       }
-
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
         const conversation = get().conversations[id];
@@ -721,6 +725,7 @@ export const useSessionsStore = create<SessionsState>()(
                   ...(next.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
                 ],
                 timestamp: Date.now(),
+                optimistic: true,
               },
             ],
           })
@@ -1102,8 +1107,8 @@ export const useSessionsStore = create<SessionsState>()(
             );
             return null;
           }
-          // 乐观回显：立即上屏，不等 spawn/prompt 往返。worker 会为这条 user 消息
-          // 发同 index 的 message-upsert（其 messages.length 与本地一致），自然覆盖对齐；
+          // 乐观回显：立即上屏，不等 spawn/prompt 往返。optimistic 标记使其作为
+          // 未确认尾巴浮在权威消息之后，同文本 user upsert 到达时被消费；
           // 万一错位由 agent_end 的全量 reconcile 兜底。
           set((state) =>
             patch(state, id, {
@@ -1116,6 +1121,7 @@ export const useSessionsStore = create<SessionsState>()(
                     ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
                   ],
                   timestamp: Date.now(),
+                  optimistic: true,
                 },
               ],
             })
@@ -1368,6 +1374,7 @@ export const useSessionsStore = create<SessionsState>()(
                     role: 'user',
                     content: [{ type: 'text' as const, text: kickoff }],
                     timestamp: Date.now(),
+                    optimistic: true,
                   },
                 ],
               })
@@ -1471,9 +1478,9 @@ export const useSessionsStore = create<SessionsState>()(
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation || !item) return;
           const running = conversation.status === 'running';
-          // 出队并乐观回显。与 sendMessage / flushQueue 同一套：worker 会为这条
-          // user 消息发同 index 的 message-upsert 覆盖对齐。running 分支此前只出队
-          // 不上屏（指望 reconcile 补），一旦没回流用户就看到消息凭空消失。
+          // 出队并乐观回显。optimistic 标记使其浮在权威消息之后：running 时 steer
+          // 要到下一个循环边界才送达，期间当前轮的 assistant upsert 若按裸 index
+          // 覆盖会把回显顶掉（消息凭空消失，轮次结束后又出现）。
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
@@ -1488,6 +1495,7 @@ export const useSessionsStore = create<SessionsState>()(
                     ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
                   ],
                   timestamp: Date.now(),
+                  optimistic: true,
                 },
               ],
             })

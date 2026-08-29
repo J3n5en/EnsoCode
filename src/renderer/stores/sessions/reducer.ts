@@ -13,11 +13,24 @@ import {
   shouldApplyDispatchMainEvent,
 } from '@shared/types/agent';
 
+/**
+ * 时间线消息：乐观回显（本地先上屏、worker 尚未确认）带 optimistic 标记，
+ * 只允许出现在数组尾部（权威消息之后）。
+ */
+export type TimelineMessage = ProjectedMessage & { optimistic?: boolean };
+
+function textOf(message: ProjectedMessage): string {
+  return message.content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('\n')
+    .trim();
+}
+
 export interface SessionProjection {
   generation?: string;
   status: NodeStatus;
   error?: string;
-  messages: ProjectedMessage[];
+  messages: TimelineMessage[];
   customEntries: AgentSessionCustomEntry[];
   commands: SlashCommand[];
   lastSeq: number;
@@ -174,9 +187,25 @@ export function applyAgentEvent(
       };
     }
     case 'message-upsert': {
-      const messages = current.messages.slice();
-      messages[event.index] = event.message;
-      return { ...current, messages, lastSeq: event.seq };
+      // 乐观回显是未确认的本地尾巴：权威 upsert 只写权威区，尾巴永远浮在后面。
+      // running 中 steer 的回显若按裸 index 覆盖，会被当前轮的 assistant 消息
+      // 顶掉（用户看到消息凭空消失，轮次结束后又出现）。
+      const firstOptimistic = current.messages.findIndex((message) => message.optimistic);
+      const authoritative =
+        firstOptimistic === -1
+          ? current.messages.slice()
+          : current.messages.slice(0, firstOptimistic);
+      let tail = firstOptimistic === -1 ? [] : current.messages.slice(firstOptimistic);
+      authoritative[event.index] = event.message;
+      // 同文本的 user upsert 到达 = 回显对应的真消息落地，消费掉避免重复
+      if (event.message.role === 'user' && tail.length > 0) {
+        const deliveredText = textOf(event.message);
+        const matched = tail.findIndex(
+          (message) => message.role === 'user' && textOf(message) === deliveredText
+        );
+        if (matched !== -1) tail = tail.toSpliced(matched, 1);
+      }
+      return { ...current, messages: [...authoritative, ...tail], lastSeq: event.seq };
     }
     case 'approval-request':
       return {
