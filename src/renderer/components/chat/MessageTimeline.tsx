@@ -41,8 +41,10 @@ interface MessageTimelineProps {
   busy: boolean;
   /** 会话 running：进行中的最后一轮工具行不折叠 */
   running: boolean;
-  /** 本次 running 的起点，驱动运行中计时器 */
+  /** 本次 running 的起点，无任何返回时作计时兜底起点 */
   runStartedAt?: number;
+  /** 最近一次返回落地时间：运行中计时显示「距上次返回」 */
+  lastOutputAt?: number;
   error?: string;
   /** 空态标题（项目名） */
   emptyTitle: string;
@@ -70,6 +72,7 @@ export function MessageTimeline({
   busy,
   running,
   runStartedAt,
+  lastOutputAt,
   error,
   emptyTitle,
   virtualize = true,
@@ -210,7 +213,9 @@ export function MessageTimeline({
       {busy && (
         <div className="flex items-center gap-2.5">
           <LoadingDots />
-          {runStartedAt !== undefined && <ElapsedTimer since={runStartedAt} />}
+          {(lastOutputAt ?? runStartedAt) !== undefined && (
+            <ElapsedTimer since={(lastOutputAt ?? runStartedAt) as number} />
+          )}
         </div>
       )}
       {error && <p className="text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>}

@@ -48,6 +48,8 @@ export interface SessionProjection {
   subagents: SubagentInfo[];
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
+  /** 最近一次权威 message-upsert 落地时间：运行中计时显示「距上次返回」，随 running 结束清空 */
+  lastOutputAt?: number;
 }
 
 export const emptyProjection: SessionProjection = {
@@ -216,7 +218,12 @@ export function applyAgentEvent(
         );
         if (matched !== -1) tail = tail.toSpliced(matched, 1);
       }
-      return { ...current, messages: [...authoritative, ...tail], lastSeq: event.seq };
+      return {
+        ...current,
+        messages: [...authoritative, ...tail],
+        lastOutputAt: now,
+        lastSeq: event.seq,
+      };
     }
     case 'approval-request':
       return {
@@ -353,5 +360,6 @@ function settleTiming(state: SessionProjection, now: number): SessionProjection 
     ...state,
     activeMs: state.activeMs + Math.max(0, now - state.runStartedAt),
     runStartedAt: undefined,
+    lastOutputAt: undefined,
   };
 }
