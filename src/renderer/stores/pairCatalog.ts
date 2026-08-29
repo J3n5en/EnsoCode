@@ -18,23 +18,33 @@ function buildPayload(): PairCatalogPayload {
   const sessions = useSessionsStore.getState();
   const projectName = new Map(settings.projects.map((p) => [p.id, p.name]));
 
-  const catalog = sessions.order
+  type Conversation = NonNullable<(typeof sessions.conversations)[string]>;
+  const toEntry = (c: Conversation) => ({
+    id: c.id,
+    title: c.parentId ? c.coworkerName || c.title : c.title,
+    projectName: projectName.get(c.projectId) ?? '',
+    projectId: c.projectId,
+    status: c.spawning ? 'running' : c.status,
+    updatedAt: c.messages.at(-1)?.timestamp ?? c.createdAt,
+    ...(c.parentId ? { parentId: c.parentId } : {}),
+    // 当前模型与推理档位：手机切换器回显；缺省字段不占帧体积
+    ...(c.lastProviderId ? { providerId: c.lastProviderId } : {}),
+    ...(c.lastModelId ? { modelId: c.lastModelId } : {}),
+    ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
+    ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
+  });
+
+  const topLevel = sessions.order
     .map((id) => sessions.conversations[id])
-    .filter((c): c is NonNullable<typeof c> => Boolean(c))
-    .map((c) => ({
-      id: c.id,
-      title: c.title,
-      projectName: projectName.get(c.projectId) ?? '',
-      projectId: c.projectId,
-      status: c.spawning ? 'running' : c.status,
-      updatedAt: c.messages.at(-1)?.timestamp ?? c.createdAt,
-      ...(c.parentId ? { parentId: c.parentId } : {}),
-      // 当前模型与推理档位：手机切换器回显；缺省字段不占帧体积
-      ...(c.lastProviderId ? { providerId: c.lastProviderId } : {}),
-      ...(c.lastModelId ? { modelId: c.lastModelId } : {}),
-      ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
-      ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
-    }));
+    .filter((c): c is Conversation => Boolean(c));
+  // coworker 子会话不进 order（桌面用 tab 展示），但手机抽屉需要它们嵌套在父会话下；
+  // 只补父会话仍在列表里的（dismissed 的已从 conversations 删除，自然不会出现）
+  const inOrder = new Set(sessions.order);
+  const children = Object.values(sessions.conversations).filter((c): c is Conversation =>
+    Boolean(c?.parentId && inOrder.has(c.parentId))
+  );
+
+  const catalog = [...topLevel, ...children].map(toEntry);
 
   // 只下发可用 provider（启用 + 有 key），且剥掉密钥与 baseUrl
   const providers = settings.providers
