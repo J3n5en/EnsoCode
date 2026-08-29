@@ -67,6 +67,8 @@ export type AgentTypeResolution =
 
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
+/** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
+let workerReady = false;
 let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
 /** worker 就绪前到达的快照请求，spawn 后补发一次。 */
 let snapshotPending = false;
@@ -90,6 +92,7 @@ export function startAgentWorker(): void {
   worker = child;
 
   child.once('spawn', () => {
+    workerReady = true;
     const servers = enabledMcpServers();
     if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
     if (snapshotPending) {
@@ -102,7 +105,10 @@ export function startAgentWorker(): void {
     if (event) onEvent?.(event);
   });
   child.on('exit', () => {
-    if (worker === child) worker = null;
+    if (worker === child) {
+      worker = null;
+      workerReady = false;
+    }
     onEvent?.({ type: 'worker-exited' });
   });
 }
@@ -110,6 +116,8 @@ export function startAgentWorker(): void {
 export function stopAgentWorker(): void {
   worker?.kill();
   worker = null;
+  workerReady = false;
+  snapshotPending = false;
 }
 
 export function isAgentWorkerRunning(): boolean {
@@ -461,10 +469,11 @@ export function setSessionApprovalMode(
 }
 
 export function requestSnapshot(): { ok: boolean; error?: string } {
-  // renderer rehydrate 时就会要快照，而打包版 worker 要等 hydrateShellPath 才 fork。
-  // 直接拒绝会让这次请求彻底丢失（调用方 void 掉返回值，无重试），会话消息接不回来。
-  // 挂起，等 worker spawn 后补发。
-  if (!worker) {
+  // renderer rehydrate 时就会要快照，而打包版 worker 要等 hydrateShellPath 才 fork；
+  // 已 fork 未 spawn 的窗口里 postMessage 也不保证送达。直接拒绝或直发都会让
+  // 请求丢失（调用方 void 掉返回值，无重试），会话消息接不回来。
+  // 挂起等 spawn 后补发。注意：此处 ok:true 语义是「已入队」而非「已送达」。
+  if (!worker || !workerReady) {
     snapshotPending = true;
     return { ok: true };
   }
