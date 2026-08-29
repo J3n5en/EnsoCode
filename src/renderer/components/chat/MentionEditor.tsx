@@ -336,7 +336,8 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           emitState();
         }}
         className={cn(
-          'max-h-40 min-w-0 flex-1 overflow-y-auto pt-0.5 text-sm break-words whitespace-pre-wrap outline-none',
+          // min-h-10 对齐旧 textarea rows={2}（text-sm 行高 20px × 2）
+          'max-h-40 min-h-10 min-w-0 flex-1 overflow-y-auto pt-0.5 text-sm break-words whitespace-pre-wrap outline-none',
           'empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
           disabled && 'opacity-60',
           className
