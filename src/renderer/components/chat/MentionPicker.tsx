@@ -56,7 +56,7 @@ export function MentionPicker({
                 id={`${id}-option-${index}`}
                 candidate={candidate}
                 active={index === activeIndex}
-                onMouseEnter={() => onActiveIndexChange(index)}
+                onHover={() => onActiveIndexChange(index)}
                 onSelect={() => onSelect(candidate)}
               />
             );
@@ -80,7 +80,7 @@ export function MentionPicker({
                 id={`${id}-option-${index}`}
                 candidate={candidate}
                 active={index === activeIndex}
-                onMouseEnter={() => onActiveIndexChange(index)}
+                onHover={() => onActiveIndexChange(index)}
                 onSelect={() => onSelect(candidate)}
               />
             );
@@ -96,14 +96,14 @@ function MentionOption({
   id,
   candidate,
   active,
-  onMouseEnter,
+  onHover,
   onSelect,
 }: {
   id: string;
   ref: React.Ref<HTMLButtonElement>;
   candidate: MentionCandidate;
   active: boolean;
-  onMouseEnter: () => void;
+  onHover: () => void;
   onSelect: () => void;
 }) {
   const { t } = useI18n();
@@ -116,7 +116,10 @@ function MentionOption({
       role="option"
       aria-selected={active}
       onClick={onSelect}
-      onMouseEnter={onMouseEnter}
+      // onMouseMove 而非 onMouseEnter：键盘导航的 scrollIntoView 会让项目从静止的
+      // 物理光标下滑过，Chrome 重算 hover 触发 mouseenter 会把高亮拽回光标处；
+      // mousemove 只在物理移动时触发，不和键盘打架。
+      onMouseMove={onHover}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
         // 浅色主题下 popover(纯白)与 muted 亮度差仅 0.035，高亮几乎不可见；
