@@ -91,6 +91,46 @@ export interface SentMentionRefs {
   chats: { label: string; sessionFile: string }[];
 }
 
+export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; path: string };
+
+/** 内联文件 token：末段带扩展名才算（@src/main.ts），避免误伤 @types/node 这类 npm scope */
+const INLINE_FILE_TOKEN = /^[\w./-]*\.[A-Za-z0-9]{1,8}$/;
+
+/**
+ * 把文本拆成普通段与内联 @文件 段，供发出的气泡原位渲染成 tag（Cursor 式）。
+ * 启发式识别（气泡只有文本没有结构化元数据）：@ 前是空白/行首，
+ * token 剥掉句尾标点后末段带扩展名。邮箱（@ 前非空白）、npm scope 不误伤。
+ */
+export function splitInlineFileTokens(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = [];
+  let plain = '';
+  let index = 0;
+  while (index < text.length) {
+    const at = text.indexOf('@', index);
+    if (at === -1) {
+      plain += text.slice(index);
+      break;
+    }
+    const previous = at > 0 ? text[at - 1] : ' ';
+    const raw = /^\S*/.exec(text.slice(at + 1))?.[0] ?? '';
+    const token = raw.replace(/[),.;!?]+$/, '');
+    if ((previous === ' ' || previous === '\n') && token && INLINE_FILE_TOKEN.test(token)) {
+      plain += text.slice(index, at);
+      if (plain) {
+        segments.push({ type: 'text', text: plain });
+        plain = '';
+      }
+      segments.push({ type: 'file', path: token });
+      index = at + 1 + token.length;
+    } else {
+      plain += text.slice(index, at + 1);
+      index = at + 1;
+    }
+  }
+  if (plain) segments.push({ type: 'text', text: plain });
+  return segments.length > 0 ? segments : [{ type: 'text', text }];
+}
+
 /**
  * 从发出的消息里剥出尾部引用块，供气泡把它们渲染回 chip。
  * 只当尾部连续行全部是引用行、且前面有空行分隔时才剥，

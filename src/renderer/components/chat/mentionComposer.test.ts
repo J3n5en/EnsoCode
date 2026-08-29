@@ -12,6 +12,7 @@ import {
   createComposerPayload,
   extractMentionQuery,
   resolvePopupKeyAction,
+  splitInlineFileTokens,
   splitMentionRefs,
 } from './mentionComposer';
 
@@ -406,6 +407,29 @@ describe('typed multi-entity mentions', () => {
       files: ['src/main/index.ts', 'src/renderer/index.ts'],
       chats: [],
     });
+  });
+
+  it('splits inline @file tokens for in-place tag rendering without touching plain @ text', () => {
+    // 发出的气泡里，内联 @path 原位渲染成 tag（Cursor 式）：保持顺序与上下文
+    expect(splitInlineFileTokens('compare @src/main.ts and @README.md please')).toEqual([
+      { type: 'text', text: 'compare ' },
+      { type: 'file', path: 'src/main.ts' },
+      { type: 'text', text: ' and ' },
+      { type: 'file', path: 'README.md' },
+      { type: 'text', text: ' please' },
+    ]);
+    // 句尾标点不吃进 token
+    expect(splitInlineFileTokens('see @docs/a.md.')).toEqual([
+      { type: 'text', text: 'see ' },
+      { type: 'file', path: 'docs/a.md' },
+      { type: 'text', text: '.' },
+    ]);
+    // 不误伤：无扩展名的 npm scope、邮箱（@ 前非空白）、裸 @
+    expect(splitInlineFileTokens('upgrade @types/node mail user@a.com @ ok')).toEqual([
+      { type: 'text', text: 'upgrade @types/node mail user@a.com @ ok' },
+    ]);
+    // 纯文本原样
+    expect(splitInlineFileTokens('hello')).toEqual([{ type: 'text', text: 'hello' }]);
   });
 
   it('builds a typed recipient payload with explicit file context', () => {

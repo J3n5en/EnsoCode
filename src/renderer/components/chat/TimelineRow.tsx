@@ -36,7 +36,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { mentionChipClass } from './MentionChip';
-import { splitMentionRefs } from './mentionComposer';
+import { splitInlineFileTokens, splitMentionRefs } from './mentionComposer';
 import { ReadFileView } from './ReadFileView';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
@@ -175,6 +175,34 @@ function SlashInvocation({ text }: { text: string }) {
 }
 
 /** 发出消息尾部的提及引用块渲染回 chip（与输入框 chip 同底座），不再裸文本曝露 */
+/** 内联 @文件 tag（Cursor 式）：保持在句子里的原位与顺序，不是纯文字 */
+function InlineFileTag({ path }: { path: string }) {
+  return (
+    <span className={cn(mentionChipClass('file'), 'mx-0.5')} title={path}>
+      <FileText className="h-3 w-3 shrink-0" />
+      {path.split('/').at(-1) || path}
+    </span>
+  );
+}
+
+/** 正文里的 @path 原位渲染成 tag，其余文本原样 */
+function InlineMentionText({ text }: { text: string }) {
+  const segments = splitInlineFileTokens(text);
+  return (
+    <span className="whitespace-pre-wrap">
+      {segments.map((segment, index) =>
+        segment.type === 'file' ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
+          <InlineFileTag key={index} path={segment.path} />
+        ) : (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+          <span key={index}>{segment.text}</span>
+        )
+      )}
+    </span>
+  );
+}
+
 function MentionRefChips({
   files,
   chats,
@@ -213,11 +241,13 @@ function UserText({ text }: { text: string }) {
           <>
             <SlashChip name={parsed.slash} />
             {parsed.rest.trim() ? (
-              <span className="ml-1.5 align-middle whitespace-pre-wrap">{parsed.rest.trim()}</span>
+              <span className="ml-1.5 align-middle">
+                <InlineMentionText text={parsed.rest.trim()} />
+              </span>
             ) : null}
           </>
         ) : (
-          <span className="whitespace-pre-wrap">{refs.body}</span>
+          <InlineMentionText text={refs.body} />
         )}
         <MentionRefChips files={refs.files} chats={refs.chats} />
       </div>
@@ -263,7 +293,7 @@ function UserText({ text }: { text: string }) {
           <span className="font-semibold">{t('Role')}</span> · {role[1]}
         </div>
       )}
-      {fromMain ? <Markdown text={body} /> : body}
+      {fromMain ? <Markdown text={body} /> : <InlineMentionText text={body} />}
     </div>
   );
 }
