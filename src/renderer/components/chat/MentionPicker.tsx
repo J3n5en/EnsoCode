@@ -119,7 +119,9 @@ function MentionOption({
       onMouseEnter={onMouseEnter}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
-        active && 'bg-muted'
+        // 浅色主题下 popover(纯白)与 muted 亮度差仅 0.035，高亮几乎不可见；
+        // 用前景色衍生的透明度保证两种主题都有对比度。
+        active && 'bg-foreground/10'
       )}
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
