@@ -206,7 +206,7 @@ export function SessionDrawer({
           )}
         </div>
 
-        {/* 与桌面一致：归档栏固定底部（滚动区外），列表在折叠头上方向上展开 */
+        {/* 与桌面一致：归档栏固定底部（滚动区外），列表在折叠头上方向上展开 */}
         {archivedSessions.length > 0 && (
           <div className="shrink-0 border-t p-2">
             {archivedOpen && (
