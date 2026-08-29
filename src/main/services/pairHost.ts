@@ -21,7 +21,7 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
-import { powerMonitor } from 'electron';
+import { powerMonitor, powerSaveBlocker } from 'electron';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type { PairCreatedSession, PairStatus } from '@shared/types/pair';
 import {
@@ -112,7 +112,22 @@ export function setPairSessionCreatedListener(
   onSessionCreated = listener;
 }
 
+let powerBlockerId: number | null = null;
+
+/** 有手机在线时阻止系统 idle 休眠（屏幕仍可熄）：休眠会掐死中继连接，手机端直接失联 */
+function syncPowerBlocker(): void {
+  const anyOnline = [...connections.values()].some((c) => c.phoneOnline);
+  if (anyOnline && powerBlockerId === null) {
+    powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  } else if (!anyOnline && powerBlockerId !== null) {
+    powerSaveBlocker.stop(powerBlockerId);
+    powerBlockerId = null;
+  }
+}
+
 function notifyStatus(): void {
+  // phoneOnline 的每次变化都会走到这里，顺带同步休眠锁
+  syncPowerBlocker();
   onStatusChange?.();
 }
 
@@ -156,6 +171,7 @@ export function stopPairHost(): void {
     } catch {}
   }
   connections.clear();
+  syncPowerBlocker();
 }
 
 // ── 配对 ──────────────────────────────────────────────────────────────
