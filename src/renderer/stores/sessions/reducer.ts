@@ -136,6 +136,24 @@ export function applyAgentEvent(
   }
 
   const identity = eventIdentity(event);
+  // spawn 拒绝恒以 seq:0 发出（worker 侧此时尚未建会话，没有 seq 计数器），
+  // 过不了下面的 (generation, seq) 单调守卫。一并丢弃的后果是 spawn 失败在
+  // UI 上完全无声：spawning 被别处清掉、status 停在 idle、error 为空，用户
+  // 只看到会话点开一片空白。故只校验 sessionId，并把 generation 推进到被拒的这代。
+  if (
+    (event.type === 'parent-rejected' || event.type === 'child-rejected') &&
+    identity?.sessionId === sessionId
+  ) {
+    return {
+      ...settleTiming(state, now),
+      generation: identity.generation,
+      status: 'failed',
+      error: event.reason,
+      pendingApprovals: [],
+      pendingAsks: [],
+    };
+  }
+
   if (
     !identity ||
     identity.sessionId !== sessionId ||
@@ -153,16 +171,6 @@ export function applyAgentEvent(
         ...current,
         status: 'idle',
         error: undefined,
-        lastSeq: event.seq,
-      };
-    case 'parent-rejected':
-    case 'child-rejected':
-      return {
-        ...settleTiming(current, now),
-        status: 'failed',
-        error: event.reason,
-        pendingApprovals: [],
-        pendingAsks: [],
         lastSeq: event.seq,
       };
     case 'parent-ended':
