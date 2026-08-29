@@ -12,6 +12,7 @@ import {
   getPairStatus,
   revokeDevice,
   setPairResumeListener,
+  setPairSessionConfigListener,
   setPairSessionCreatedListener,
   setPairStatusListener,
   setRelayUrl,
@@ -39,6 +40,13 @@ export function registerPairHandlers(): void {
   setPairSessionCreatedListener((session) => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CREATED, session);
+    }
+  });
+
+  // 手机改会话模型/推理档位：交给渲染层的 store 方法，与桌面选择器同一路径
+  setPairSessionConfigListener((config) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CONFIG, config);
     }
   });
 

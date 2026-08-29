@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkSetModel,
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
+  SNAPSHOT_TAIL_MESSAGES,
   type SpawnWhitelist,
   shouldForward,
+  sliceHistory,
 } from './pairPolicy';
 
 describe('手机命令白名单', () => {
@@ -66,6 +69,57 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ ...base, apiKey: 'sk-x' }).ok).toBe(false);
     expect(parsePhoneCommand({ ...base, baseUrl: 'http://evil' }).ok).toBe(false);
   });
+
+  it('set-model 结构校验：三个 id 必填', () => {
+    expect(
+      parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr', modelId: 'm' }).ok
+    ).toBe(true);
+    expect(parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-model', providerId: 'pr', modelId: 'm' }).ok).toBe(false);
+  });
+
+  it('history 结构校验：beforeIndex 必须是非负数字', () => {
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's', beforeIndex: 40 }).ok).toBe(true);
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's', beforeIndex: -1 }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'history', sessionId: 's' }).ok).toBe(false);
+    expect(parsePhoneCommand({ type: 'history', beforeIndex: 40 }).ok).toBe(false);
+  });
+
+  it('set-reasoning / set-thinking 结构校验', () => {
+    expect(parsePhoneCommand({ type: 'set-reasoning', sessionId: 's', enabled: true }).ok).toBe(
+      true
+    );
+    expect(parsePhoneCommand({ type: 'set-reasoning', sessionId: 's', enabled: 'yes' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-reasoning', enabled: true }).ok).toBe(false);
+    for (const level of ['low', 'medium', 'high', 'max']) {
+      expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level }).ok).toBe(true);
+    }
+    expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level: 'ultra' }).ok).toBe(
+      false
+    );
+    expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's' }).ok).toBe(false);
+  });
+});
+
+describe('set-model 白名单校验', () => {
+  const whitelist: SpawnWhitelist = {
+    projects: [],
+    providers: [{ id: 'pr1', models: [{ id: 'm1' }] }],
+  };
+  const cmd = { type: 'set-model' as const, sessionId: 's', providerId: 'pr1', modelId: 'm1' };
+
+  it('provider/model 在下发集合内才放行', () => {
+    expect(checkSetModel(cmd, whitelist).ok).toBe(true);
+  });
+
+  it('伪造 providerId / 未启用 model 被拒', () => {
+    expect(checkSetModel({ ...cmd, providerId: 'evil' }, whitelist).ok).toBe(false);
+    expect(checkSetModel({ ...cmd, modelId: 'not-enabled' }, whitelist).ok).toBe(false);
+  });
 });
 
 describe('spawn 白名单校验（cwd 由 main 反查）', () => {
@@ -126,7 +180,7 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
 
   it('只保留订阅会话，不把全部会话正文推给手机', () => {
     const out = narrowSnapshot(event, 'b');
-    expect(out?.sessions).toEqual([{ sessionId: 'b' }]);
+    expect(out?.sessions.map((s) => s.sessionId)).toEqual(['b']);
   });
 
   it('未订阅任何会话时不转发', () => {
@@ -139,5 +193,49 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
 
   it('snapshot 不走通用过滤（避免整包漏出）', () => {
     expect(shouldForward({ type: 'snapshot' }, 'a')).toBe(false);
+  });
+
+  it('长对话只发尾窗并标 baseIndex，避免超中继单帧上限被丢', () => {
+    const messages = Array.from({ length: 200 }, (_, i) => ({ role: 'user', text: `m${i}` }));
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    expect(session.messages.length).toBeLessThanOrEqual(SNAPSHOT_TAIL_MESSAGES);
+    expect(session.baseIndex).toBe(200 - session.messages.length);
+    // 尾窗必须是最新的消息
+    expect(session.messages.at(-1)).toEqual({ role: 'user', text: 'm199' });
+  });
+
+  it('短对话不裁剪，baseIndex 为 0', () => {
+    const messages = [{ text: 'a' }, { text: 'b' }];
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    expect(session.messages).toHaveLength(2);
+    expect(session.baseIndex).toBe(0);
+  });
+
+  it('单条超大消息也受字节预算约束（宁可少发不可超帧）', () => {
+    const big = 'x'.repeat(300_000);
+    const messages = Array.from({ length: 10 }, () => ({ text: big }));
+    const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    // 600KB 预算下 300KB 的消息最多装 2 条
+    expect(session.messages.length).toBeLessThanOrEqual(2);
+    expect(session.baseIndex).toBe(10 - session.messages.length);
+  });
+});
+
+describe('history 分页切片', () => {
+  const messages = Array.from({ length: 100 }, (_, i) => ({ text: `m${i}` }));
+
+  it('取 beforeIndex 之前的一页，附 baseIndex', () => {
+    const page = sliceHistory(messages, 80);
+    expect(page.messages.at(-1)).toEqual({ text: 'm79' });
+    expect(page.baseIndex).toBe(80 - page.messages.length);
+    expect(page.messages.length).toBeLessThanOrEqual(SNAPSHOT_TAIL_MESSAGES);
+  });
+
+  it('beforeIndex 越界或到头时返回空页', () => {
+    expect(sliceHistory(messages, 0).messages).toHaveLength(0);
+    expect(sliceHistory([], 10).messages).toHaveLength(0);
   });
 });

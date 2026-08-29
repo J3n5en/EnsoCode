@@ -253,6 +253,7 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_START: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_STATUS: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  PAIR_SESSION_CONFIG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

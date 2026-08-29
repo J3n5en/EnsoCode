@@ -130,6 +130,8 @@ export const IPC_CHANNELS = {
   PAIR_RESUME_SESSION: 'pair:resume-session',
   /** main → renderer：手机新建了会话，请求登记（否则桌面列表里没有它，其事件也会被丢弃） */
   PAIR_SESSION_CREATED: 'pair:session-created',
+  /** main → renderer：手机改了会话模型/推理档位，请求应用到会话 store（与桌面同一路径） */
+  PAIR_SESSION_CONFIG: 'pair:session-config',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

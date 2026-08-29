@@ -1,6 +1,6 @@
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
-import { PanelLeft, SquarePen } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { ChevronDown, PanelLeft, SquarePen } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Composer } from '@/components/chat/Composer';
@@ -24,6 +24,12 @@ interface Props {
   canCreate: boolean;
   onOpenDrawer(): void;
   onNewSession(): void;
+  /** 当前模型标签；undefined = 子会话或目录未含模型信息，不显示切换入口 */
+  modelLabel?: string;
+  onOpenConfig?(): void;
+  /** 还有更早的历史可上滑加载 */
+  hasOlder?: boolean;
+  onLoadOlder?(): void;
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -58,6 +64,28 @@ export function ChatScreen(props: Props) {
   );
 
   const timeline = useMemo(() => buildTimeline(messages, running), [messages, running]);
+
+  /*
+   * 上滑分页的滚动锚定：iOS Safari 不支持 overflow-anchor，旧页插到顶部后
+   * scrollTop 不动、内容整体下压，画面会跳到更早的消息。请求前记下
+   * scrollHeight，旧页渲染完（最早 index 变小）用差值补偿 scrollTop。
+   */
+  const minIndex = view?.messages.size ? Math.min(...view.messages.keys()) : null;
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+  const loadOlder = () => {
+    if (!props.hasOlder || !props.onLoadOlder) return;
+    const el = timelineRef.current?.getScroller();
+    anchorRef.current = el ? { height: el.scrollHeight, top: el.scrollTop } : null;
+    props.onLoadOlder();
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: minIndex 变小 = 旧页已渲染，此时才补偿
+  useLayoutEffect(() => {
+    const el = timelineRef.current?.getScroller();
+    const anchor = anchorRef.current;
+    if (!el || !anchor) return;
+    anchorRef.current = null;
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+  }, [minIndex]);
 
   /*
    * 兜底跟随：Virtuoso 的 followOutput 只在 data 长度变化时触发，而流式输出是
@@ -128,6 +156,7 @@ export function ChatScreen(props: Props) {
           emptyTitle={props.projectName || 'EnsoCode'}
           // 手机端不虚拟化：见 MessageTimeline 里 virtualize 的说明
           virtualize={false}
+          onStartReached={props.hasOlder ? loadOlder : undefined}
         />
       )}
 
@@ -146,6 +175,18 @@ export function ChatScreen(props: Props) {
               focusKey={sessionId}
               // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
               autoFocus={false}
+              toolbar={
+                props.modelLabel && props.onOpenConfig ? (
+                  <button
+                    type="button"
+                    onClick={props.onOpenConfig}
+                    className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <span className="truncate">{props.modelLabel}</span>
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  </button>
+                ) : undefined
+              }
               onSend={(text, images) => void send(text, images)}
               onAbort={props.onAbort}
             />

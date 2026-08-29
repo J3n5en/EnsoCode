@@ -41,9 +41,15 @@ export type PhoneToHost =
       approvalMode?: ApprovalMode;
       reasoningEnabled?: boolean;
       thinkingLevel?: ThinkingLevel;
-    };
+    }
+  /** 与桌面 setModel 同语义：记忆会话选用模型，运行中的会话下次 spawn 生效 */
+  | { type: 'set-model'; sessionId: string; providerId: string; modelId: string }
+  | { type: 'set-reasoning'; sessionId: string; enabled: boolean }
+  | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
+  /** 上滑分页：拉取 beforeIndex 之前的一页历史消息 */
+  | { type: 'history'; sessionId: string; beforeIndex: number };
 
-/** 手机命令白名单：main 只接受这些 type，其余（spawn 之外的 set-approval-mode、设置写入等）拒绝 */
+/** 手机命令白名单：main 只接受这些 type，其余（set-approval-mode、设置写入等）拒绝 */
 export const PHONE_COMMAND_TYPES = [
   'prompt',
   'steer',
@@ -53,6 +59,10 @@ export const PHONE_COMMAND_TYPES = [
   'snapshot',
   'subscribe',
   'spawn',
+  'set-model',
+  'set-reasoning',
+  'set-thinking',
+  'history',
 ] as const satisfies readonly PhoneToHost['type'][];
 
 export function isPhoneCommand(value: unknown): value is PhoneToHost {
@@ -75,6 +85,11 @@ export interface CatalogEntry {
   parentId?: string;
   /** 最后活动时间（末条消息或创建时间），手机端显示相对时间 */
   updatedAt?: number;
+  /** 会话当前选用的 provider/model 与推理档位，手机模型切换器回显用 */
+  providerId?: string;
+  modelId?: string;
+  reasoningEnabled?: boolean;
+  thinkingLevel?: ThinkingLevel;
 }
 export interface ProjectEntry {
   id: string;
@@ -136,4 +151,6 @@ export type HostToPhone =
       terminal?: TerminalPalette;
       terminalFontFamily?: string;
     }
-  | { type: 'agent-event'; event: unknown };
+  | { type: 'agent-event'; event: unknown }
+  /** history 命令的应答：baseIndex 之前拼接的一页消息，手机按绝对 index 合并 */
+  | { type: 'history'; sessionId: string; baseIndex: number; messages: unknown[] };

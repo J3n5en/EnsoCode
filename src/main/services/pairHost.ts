@@ -27,15 +27,18 @@ import type {
   AttachedImage,
   RendererAgentEvent,
 } from '@shared/types/agent';
-import type { PairCreatedSession, PairStatus } from '@shared/types/pair';
+import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/types/pair';
 import { powerMonitor, powerSaveBlocker } from 'electron';
+// 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot } from './agentHost';
 import {
+  checkSetModel,
   checkSpawn,
   narrowSnapshot,
   parsePhoneCommand,
   type SpawnWhitelist,
   shouldForward,
+  sliceHistory,
 } from './pairPolicy';
 import {
   isSecureStorageAvailable,
@@ -67,6 +70,8 @@ interface Connection {
   /** 手机当前订阅的会话（null = 列表页，不收正文） */
   subscribedId: string | null;
   sinceIndex?: number;
+  /** 待应答的 history 分页请求（beforeIndex）；下一个 snapshot 事件到达时切片发回 */
+  pendingHistory?: number;
   phoneOnline: boolean;
   attempt: number;
   timer: NodeJS.Timeout | null;
@@ -82,6 +87,8 @@ let onStatusChange: (() => void) | null = null;
 /** 请渲染层恢复某会话（手机订阅历史会话时用） */
 let onResumeRequest: ((sessionId: string) => void) | null = null;
 let onSessionCreated: ((session: PairCreatedSession) => void) | null = null;
+/** 手机改会话模型/推理档位：renderer 应用到会话 store（与桌面选择器同一路径） */
+let onSessionConfig: ((config: PairSessionConfig) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
@@ -127,6 +134,10 @@ export function setPairSessionCreatedListener(
   listener: (session: PairCreatedSession) => void
 ): void {
   onSessionCreated = listener;
+}
+
+export function setPairSessionConfigListener(listener: (config: PairSessionConfig) => void): void {
+  onSessionConfig = listener;
 }
 
 let powerBlockerId: number | null = null;
@@ -482,6 +493,8 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'subscribe':
       conn.subscribedId = command.sessionId;
       conn.sinceIndex = command.sinceIndex;
+      // 换了订阅，旧会话的分页请求作废
+      conn.pendingHistory = undefined;
       // 历史会话在 worker 里没有投影，先请渲染层恢复（与桌面点开会话同路径），
       // 再要快照；已启动的会话 resume 会自行忽略。
       if (command.sessionId) onResumeRequest?.(command.sessionId);
@@ -489,6 +502,26 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       break;
     case 'snapshot':
       void sendMeta(conn);
+      requestSnapshot();
+      break;
+    case 'set-model': {
+      const check = checkSetModel(command, whitelist);
+      if (!check.ok) {
+        console.warn(`[pair] set-model rejected: ${check.error}`);
+        return;
+      }
+      onSessionConfig?.(command);
+      break;
+    }
+    case 'set-reasoning':
+    case 'set-thinking':
+      // 结构已校验；store 的 setReasoning/setThinking 自带「已启动会话即时下发」逻辑
+      onSessionConfig?.(command);
+      break;
+    case 'history':
+      // 只服务当前订阅会话：其它会话的正文本就不该下发
+      if (command.sessionId !== conn.subscribedId) return;
+      conn.pendingHistory = command.beforeIndex;
       requestSnapshot();
       break;
     case 'spawn': {
@@ -537,6 +570,11 @@ async function send(conn: Connection, message: HostToPhone): Promise<void> {
   if (conn.ws?.readyState !== 1) return;
   try {
     const frame = await sealFrame(conn.contentKey, message);
+    // 中继对超过 1MB 的帧直接丢弃且不通知发送方：本地拦下并留痕，别白发
+    if (frame.byteLength > 1_000_000) {
+      console.warn(`[pair] frame ${frame.byteLength}B over relay limit, dropped locally`);
+      return;
+    }
     conn.ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
   } catch (error) {
     console.warn('[pair] send failed', error);
@@ -562,6 +600,25 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
     if (!conn.phoneOnline) continue;
     // snapshot 是全量批事件，裁成只含订阅会话再发
     if (e.type === 'snapshot') {
+      const full = event as {
+        type: string;
+        sessions?: { sessionId: string; messages?: unknown[] }[];
+      };
+      // 有挂起的分页请求：切 beforeIndex 之前的一页发回，不重复发尾窗
+      if (conn.pendingHistory !== undefined && conn.subscribedId) {
+        const session = full.sessions?.find((s) => s.sessionId === conn.subscribedId);
+        if (session && Array.isArray(session.messages)) {
+          const page = sliceHistory(session.messages, conn.pendingHistory);
+          void send(conn, {
+            type: 'history',
+            sessionId: conn.subscribedId,
+            baseIndex: page.baseIndex,
+            messages: page.messages,
+          });
+        }
+        conn.pendingHistory = undefined;
+        continue;
+      }
       const narrowed = narrowSnapshot(
         event as { type: string; sessions?: { sessionId: string }[] },
         conn.subscribedId

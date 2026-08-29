@@ -495,6 +495,11 @@ export interface SessionSnapshot {
   identity: SessionIdentity;
   status: NodeStatus;
   messages: ProjectedMessage[];
+  /**
+   * messages 的绝对起始 index。仅手机链路（pairPolicy 裁尾窗）会设置：
+   * 长对话只发最近一段，手机按 baseIndex+i 幂等写入。worker 全量快照恒缺省（=0）。
+   */
+  baseIndex?: number;
   commands: SlashCommand[];
   pendingApprovals?: ApprovalRequestInfo[];
   pendingAsks?: AskRequestInfo[];
