@@ -633,6 +633,11 @@ export function ModelPicker({
                               {info.plan}
                             </Badge>
                           )}
+                          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                            {provider.id === providerId && (
+                              <Check className="h-3.5 w-3.5 text-primary" />
+                            )}
+                          </span>
                         </MenuSubTrigger>
                         <MenuSubPopup data-model-picker="submenu" className="w-72">
                           <ProviderSubmenuList
