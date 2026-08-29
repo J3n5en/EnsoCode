@@ -49,6 +49,12 @@ export function AgentTypeList() {
   const [editing, setEditing] = React.useState<
     AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
   >(null);
+  // 同名自定义覆盖内置：被覆盖的内置行隐藏（与 registry / 编码工具路径同口径），
+  // 否则设置页会出现两个同名行，且内置行的开关看似有效实则已被顶替。
+  const overriddenNames = React.useMemo(
+    () => new Set(agentTypes.map((entry) => entry.name.trim().toLowerCase())),
+    [agentTypes]
+  );
 
   return (
     <div className="space-y-2">
@@ -79,7 +85,7 @@ export function AgentTypeList() {
         </div>
       </div>
 
-      {BUILTIN_AGENT_TYPES.map((type) => (
+      {BUILTIN_AGENT_TYPES.filter((type) => !overriddenNames.has(type.name)).map((type) => (
         <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -108,6 +114,9 @@ export function AgentTypeList() {
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2 truncate text-sm font-medium">
                 {entry.name}
+                {BUILTIN_AGENT_TYPES.some(
+                  (type) => type.name === entry.name.trim().toLowerCase()
+                ) && <Badge variant="secondary">{t('Overrides built-in')}</Badge>}
                 {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
               </p>
               <p className="truncate text-muted-foreground text-xs">
@@ -165,7 +174,7 @@ export function AgentTypeEditDialog({
   onClose,
 }: {
   entry: AgentTypeEntry | null;
-  /** 编辑内置时的预填内容（保存生成独立 custom type；registry 以 typeKey 区分同名项） */
+  /** 编辑内置时的预填内容（保存生成同名 custom 覆盖，内置行随之隐藏；删除 custom 后内置恢复） */
   defaults?: Omit<AgentTypeEntry, 'id'>;
   onClose: () => void;
 }) {

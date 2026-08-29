@@ -234,6 +234,14 @@ export function buildAgentTypeRegistrySnapshot(input: {
   customAgentTypes: readonly AgentTypeEntry[];
 }): AgentTypeRegistrySnapshot {
   const disabled = new Set(input.disabledBuiltinAgentTypes);
+  // 同名合法 custom 覆盖 builtin（仅 Enso 受 reserved 名保护）：名字在
+  // 编码会话的 subagent/coworker 工具里就是类型的唯一键，同名并存在那条
+  // 路径上无法干净表达；这里同步过滤，保证 @ 候选与工具可用集一致。
+  const overriddenNames = new Set(
+    input.customAgentTypes
+      .filter((entry) => isUuid(entry.id) && !isReservedAgentTypeName(entry.name))
+      .map((entry) => entry.name.trim().toLowerCase())
+  );
   const candidates: AgentTypeCandidate[] = [
     {
       typeKey: ENSO_AGENT_TYPE_KEY,
@@ -246,7 +254,12 @@ export function buildAgentTypeRegistrySnapshot(input: {
     },
   ];
   for (const builtin of BUILTIN_AGENT_TYPES) {
-    if (builtin.name === 'general' || builtin.name === 'enso' || disabled.has(builtin.name)) {
+    if (
+      builtin.name === 'general' ||
+      builtin.name === 'enso' ||
+      disabled.has(builtin.name) ||
+      overriddenNames.has(builtin.name)
+    ) {
       continue;
     }
     candidates.push({

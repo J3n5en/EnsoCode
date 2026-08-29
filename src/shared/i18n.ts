@@ -463,6 +463,7 @@ export const zhTranslations: Record<string, string> = {
   'Follows the conversation model, full toolset': '跟随会话模型,全部工具',
   'Follows the conversation model': '跟随会话模型',
   'Read-only': '只读',
+  'Overrides built-in': '覆盖内置',
   'Edit agent type': '编辑类型',
   'Name (slug)': '名称(slug)',
   'Description (helps the agent pick this type)': '描述(帮助主 agent 选型)',

@@ -48,7 +48,7 @@ describe('AgentType registry and locked Enso profile', () => {
     expect(isReservedAgentTypeName('reviewer')).toBe(false);
   });
 
-  it('registry 过滤 disabled builtin/非法 custom，但允许 builtin/custom 同名', () => {
+  it('registry 过滤 disabled builtin/非法 custom；同名合法 custom 覆盖 builtin', () => {
     const snapshot = buildAgentTypeRegistrySnapshot({
       revision: 3,
       disabledBuiltinAgentTypes: ['worker'],
@@ -71,11 +71,44 @@ describe('AgentType registry and locked Enso profile', () => {
     });
     expect(snapshot.candidates.map((candidate) => candidate.typeKey)).toEqual([
       'agent:enso',
-      'builtin:scout',
       'builtin:reviewer',
       `custom:${CUSTOM_ID}`,
     ]);
     expect(parseAgentTypeRegistrySnapshot(snapshot)).toEqual(snapshot);
+
+    // 非法 custom（非 UUID id）不产生覆盖：builtin 保留
+    const withIllegal = buildAgentTypeRegistrySnapshot({
+      revision: 4,
+      disabledBuiltinAgentTypes: [],
+      customAgentTypes: [
+        {
+          id: 'not-a-uuid',
+          name: 'scout',
+          description: 'x',
+          systemPrompt: 'x',
+          tools: 'readonly',
+        },
+      ],
+    });
+    expect(withIllegal.candidates.map((candidate) => candidate.typeKey)).toContain('builtin:scout');
+
+    // 覆盖名称对比徽 trim + 大小写不敏感（与 reserved 名校验同口径）
+    const caseInsensitive = buildAgentTypeRegistrySnapshot({
+      revision: 5,
+      disabledBuiltinAgentTypes: [],
+      customAgentTypes: [
+        {
+          id: CUSTOM_ID,
+          name: ' Scout ',
+          description: 'x',
+          systemPrompt: 'x',
+          tools: 'readonly',
+        },
+      ],
+    });
+    expect(caseInsensitive.candidates.map((candidate) => candidate.typeKey)).not.toContain(
+      'builtin:scout'
+    );
   });
 
   it('type key 严格拒绝未知形态与 reserved custom', () => {
