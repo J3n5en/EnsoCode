@@ -11,7 +11,33 @@ description: >
 
 Dev (`!app.isPackaged`) already opens **9222** in `src/main/index.ts`. Do not inject `TEMP-DEBUG`. Packaged builds stay closed.
 
-## Connect
+## Scripts first
+
+免依赖脚本在 `scripts/`（相对本 skill 目录），优先用它们，不要重写 connect 样板：
+
+```bash
+node scripts/cdp.mjs pages                          # 列出 page 目标
+node scripts/cdp.mjs eval '(async()=>{...})()'      # 主窗口执行 JS（支持 await）
+node scripts/cdp.mjs eval '...' --page settings.html # 设置窗口
+node scripts/cdp.mjs shot /tmp/x.png                # 截图
+node scripts/cdp.mjs keys ArrowDown Enter           # 受信任按键（真实输入管线）
+node scripts/cdp.mjs type '@rev'                    # 受信任文本输入
+```
+
+合成事件（eval 里 dispatchEvent）`isTrusted=false` 且不过 IME/焦点管线；排查“真实键盘行为”用 `keys`/`type`。
+
+隔离验证环境（不碰真实 userData）：
+
+```bash
+node scripts/mk-env.mjs /tmp/enso-x 2      # 2 个 fake provider（凭证尾号可区分）
+node <repo>/scripts/fake-provider-issue-27.mjs &   # 8899；支持 [[tool:name {json}]] 指令
+ENSO_USER_DATA_DIR=/tmp/enso-x pnpm dev
+curl -s http://127.0.0.1:8899/__requests   # 每个请求实际带的凭证尾号
+```
+
+常用 store 入口（eval 里）：`window.__stores.sessions.getState()` / `window.__stores.settings.getState()`；`window.electronAPI.*` 是 preload API。
+
+## Connect（手写时才看）
 
 1. `pnpm dev` is running.
 2. `curl -s http://127.0.0.1:9222/json/version` — if this fails, restart dev (port is not HMR).
