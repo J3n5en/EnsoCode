@@ -111,6 +111,11 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Set global default model',
   },
+  'providers.subagent-models': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Models the agent may pick for subagents',
+  },
   'providers.oauth.list': {
     domain: 'providers',
     kind: 'action',

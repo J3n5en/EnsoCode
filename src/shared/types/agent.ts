@@ -105,12 +105,14 @@ export interface AgentTypeSpawnConfig {
 }
 
 /**
- * 下发 worker 的子代理可选模型（模型中心逐模型勾选，main 已解析凭证）。
- * name 是给 LLM 看的唯一键（`{provider.name}/{modelId}`，冲突时追加 #n）。
+ * 下发 worker 的子代理可选模型（设置页集中配置，main 已解析凭证）。
+ * name 是给 LLM 看的唯一键（`{provider.name}/{modelId}`，冲突时追加 #n）；
+ * description 是用户写的选型依据，注入工具参数说明。
  */
 export interface SubagentModelOption {
   name: string;
   config: SpawnModelConfig;
+  description?: string;
 }
 
 /** 子代理状态（渲染层状态行与 snapshot 共用） */
@@ -762,9 +764,10 @@ function parseSpawnModelConfig(value: unknown): SpawnModelConfig | null {
 function parseSubagentModelOption(value: unknown): SubagentModelOption | null {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['name', 'config']) ||
+    !hasOnlyKeys(value, ['name', 'config', 'description']) ||
     !isNonEmptyString(value.name) ||
-    !parseSpawnModelConfig(value.config)
+    !parseSpawnModelConfig(value.config) ||
+    (value.description !== undefined && typeof value.description !== 'string')
   ) {
     return null;
   }

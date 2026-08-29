@@ -123,6 +123,8 @@ const initialState = {
   instructions: [] as import('@shared/types').InstructionEntry[],
   presets: [] as import('@shared/types').Preset[],
   agentTypes: [] as import('@shared/types').AgentTypeEntry[],
+  subagentModelsEnabled: false,
+  subagentModels: [] as import('@shared/types').SubagentModelEntry[],
   disabledBuiltinAgentTypes: [] as string[],
   disabledBuiltinTools: [] as string[],
   onboarded: false,
@@ -415,6 +417,26 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       removePreset: (id) => set((state) => ({ presets: state.presets.filter((p) => p.id !== id) })),
+
+      setSubagentModelsEnabled: (subagentModelsEnabled) => set({ subagentModelsEnabled }),
+
+      addSubagentModel: (entry) => {
+        const created = { ...entry, id: crypto.randomUUID() };
+        set((state) => ({ subagentModels: [...state.subagentModels, created] }));
+        return created;
+      },
+
+      updateSubagentModel: (id, updates) =>
+        set((state) => ({
+          subagentModels: state.subagentModels.map((entry) =>
+            entry.id === id ? { ...entry, ...updates } : entry
+          ),
+        })),
+
+      removeSubagentModel: (id) =>
+        set((state) => ({
+          subagentModels: state.subagentModels.filter((entry) => entry.id !== id),
+        })),
 
       addAgentType: (entry) => {
         const created = { ...entry, id: crypto.randomUUID() };

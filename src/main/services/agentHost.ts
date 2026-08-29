@@ -31,6 +31,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { parseAgentWorkerEvent } from '@shared/types/agent';
+import type { SubagentModelEntry } from '@shared/types/assets';
 import {
   type AgentTypeEntry,
   BUILTIN_AGENT_TYPES,
@@ -527,16 +528,38 @@ function configuredAgentTypes(
   return [...builtins, ...customs];
 }
 
-/** 模型中心勾选的子代理可选模型 → 解析凭证后随 spawn-parent 下发（不可用的静默跳过） */
+/** 设置页「允许子代理指定模型」列表 → 解析凭证后随 spawn-parent 下发（开关关闭/不可用静默跳过） */
 function configuredSubagentModels(
   authenticatedAccountKeys: ReadonlySet<string>
 ): SubagentModelOption[] {
+  const state = readSettingsState();
+  if (state?.subagentModelsEnabled !== true) return [];
+  const entries = Array.isArray(state.subagentModels)
+    ? state.subagentModels.filter(isSubagentModelEntry)
+    : [];
   const options: SubagentModelOption[] = [];
-  for (const ref of pickSubagentModelRefs(providersFromSettings())) {
+  for (const ref of pickSubagentModelRefs(entries, providersFromSettings())) {
     const resolved = resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
-    if (resolved.ok) options.push({ name: ref.name, config: resolved.selection.config });
+    if (resolved.ok) {
+      options.push({
+        name: ref.name,
+        config: resolved.selection.config,
+        ...(ref.description ? { description: ref.description } : {}),
+      });
+    }
   }
   return options;
+}
+
+function isSubagentModelEntry(value: unknown): value is SubagentModelEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Partial<SubagentModelEntry>;
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.providerId === 'string' &&
+    typeof entry.modelId === 'string' &&
+    typeof entry.description === 'string'
+  );
 }
 
 function resolveAgentTypeResources(

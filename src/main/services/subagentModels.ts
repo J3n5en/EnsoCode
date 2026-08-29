@@ -1,4 +1,4 @@
-import type { ModelProvider } from '@shared/types';
+import type { ModelProvider, SubagentModelEntry } from '@shared/types';
 import { hasProviderCredentials } from '@shared/types';
 
 export interface SubagentModelRef {
@@ -6,32 +6,45 @@ export interface SubagentModelRef {
   name: string;
   providerId: string;
   modelId: string;
+  /** 用户写的选型依据(空串不透传) */
+  description?: string;
 }
 
 /**
- * 从 settings providers 里挑出「模型中心勾选了子代理可用」的模型引用。
- * 过滤规则:provider 需启用且有凭证(API key 或订阅账号);模型行需
- * `enabled !== false && subagent === true`。凭证解析仍走 resolveModelSelection,
- * 这里只做纯过滤与命名,便于单测。
+ * 把设置页「允许子代理指定模型」列表解析成命名引用。
+ * 过滤规则:provider 需存在、启用且有凭证(API key 或订阅账号);
+ * 模型行需存在且 `enabled !== false`;同一 provider+model 的重复条目去重。
+ * 凭证解析仍走 resolveModelSelection,这里只做纯过滤与命名,便于单测。
  */
-export function pickSubagentModelRefs(providers: ModelProvider[]): SubagentModelRef[] {
+export function pickSubagentModelRefs(
+  entries: readonly SubagentModelEntry[],
+  providers: readonly ModelProvider[]
+): SubagentModelRef[] {
   const refs: SubagentModelRef[] = [];
-  const used = new Map<string, number>();
-  for (const provider of providers) {
-    if (provider.enabled === false || !hasProviderCredentials(provider)) continue;
-    if (!Array.isArray(provider.models)) continue;
-    for (const model of provider.models) {
-      if (!model || typeof model.id !== 'string' || !model.id) continue;
-      if (model.enabled === false || model.subagent !== true) continue;
-      const base = `${provider.name}/${model.id}`;
-      const count = (used.get(base) ?? 0) + 1;
-      used.set(base, count);
-      refs.push({
-        name: count === 1 ? base : `${base}#${count}`,
-        providerId: provider.id,
-        modelId: model.id,
-      });
+  const named = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry.providerId !== 'string' || typeof entry.modelId !== 'string') {
+      continue;
     }
+    const key = `${entry.providerId}\u0000${entry.modelId}`;
+    if (seen.has(key)) continue;
+    const provider = providers.find((candidate) => candidate.id === entry.providerId);
+    if (!provider || provider.enabled === false || !hasProviderCredentials(provider)) continue;
+    if (!Array.isArray(provider.models)) continue;
+    const model = provider.models.find((candidate) => candidate?.id === entry.modelId);
+    if (!model || model.enabled === false) continue;
+    seen.add(key);
+    const base = `${provider.name}/${model.id}`;
+    const count = (named.get(base) ?? 0) + 1;
+    named.set(base, count);
+    const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+    refs.push({
+      name: count === 1 ? base : `${base}#${count}`,
+      providerId: provider.id,
+      modelId: model.id,
+      ...(description ? { description } : {}),
+    });
   }
   return refs;
 }

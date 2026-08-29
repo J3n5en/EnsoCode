@@ -456,6 +456,12 @@ export const zhTranslations: Record<string, string> = {
   Important: '重要',
   Warning: '警告',
   Caution: '小心',
+  'Let the agent pick subagent models': '允许子代理指定模型',
+  'The main agent can pick one of these models when dispatching subagents or coworkers. The description tells it when to use each model.':
+    '主 agent 派发 subagent/coworker 时可从这些模型里挑选；描述用于告诉它每个模型适合什么任务。',
+  'When to use it, e.g. cheap and fast for simple subtasks':
+    '什么时候用它，例如：便宜快，适合简单子任务',
+  'Add model': '添加模型',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',

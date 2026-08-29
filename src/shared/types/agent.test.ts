@@ -163,7 +163,7 @@ describe('parent/child commands', () => {
   });
 
   it('spawn-parent 携 subagentModels:合法通过,坏条目整条拒绝', () => {
-    const option = { name: 'openai/gpt', config: model };
+    const option = { name: 'openai/gpt', config: model, description: '便宜快,适合简单任务' };
     const command = {
       type: 'spawn-parent',
       identity: parent,
@@ -176,6 +176,15 @@ describe('parent/child commands', () => {
       parseAgentCommand({ ...command, subagentModels: [{ name: '', config: model }] })
     ).toBeNull();
     expect(parseAgentCommand({ ...command, subagentModels: [{ name: 'x' }] })).toBeNull();
+    expect(
+      parseAgentCommand({
+        ...command,
+        subagentModels: [{ name: 'x', config: model, description: 42 }],
+      })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ ...command, subagentModels: [{ name: 'x', config: model }] })
+    ).toEqual({ ...command, subagentModels: [{ name: 'x', config: model }] });
     expect(
       parseAgentCommand({
         ...command,

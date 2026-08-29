@@ -463,6 +463,11 @@ export const CAPABILITY_CATALOG = {
     ...reversibleGlobal('Set or clear the global default model.', MODEL_REF_INPUT_SCHEMA),
     availability: [{ kind: 'configured-provider' }],
   }),
+  'providers.subagent-models': unavailable('providers.subagent-models', {
+    ...reversibleGlobal('Maintain the list of models the agent may pick for subagents.'),
+    reason: 'The list pairs model refs with free-form guidance text and needs the review UI.',
+    suggestedAction: 'Open Model Providers and configure "Let the agent pick subagent models".',
+  }),
   'providers.oauth.list': executable(
     'providers.oauth.list',
     readGlobal('List subscription providers and signed-in account metadata without tokens.')

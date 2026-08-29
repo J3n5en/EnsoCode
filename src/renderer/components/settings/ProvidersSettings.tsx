@@ -25,6 +25,7 @@ import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
+import { SubagentModelsSettings } from './SubagentModelsSettings';
 
 export function ProvidersSettings() {
   const { t } = useI18n();
@@ -121,6 +122,7 @@ export function ProvidersSettings() {
         </div>
       </div>
       <DefaultModelPicker />
+      <SubagentModelsSettings />
 
       {providers.length === 0 ? (
         <div className="rounded-md border border-dashed px-3 py-8 text-center">

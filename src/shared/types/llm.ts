@@ -33,8 +33,6 @@ export interface ModelEntry extends ModelCapabilityOverrides {
   label?: string;
   /** 是否启用（缺省视为启用） */
   enabled?: boolean;
-  /** 允许主 agent 给 subagent/coworker 指定该模型（缺省 false = 不暴露） */
-  subagent?: boolean;
 }
 
 export interface ModelProvider {

@@ -47,12 +47,11 @@ export function applyModelOverrides(
     else (next as ModelCapabilityOverrides)[key] = value as never;
   }
   const cleaned = pickModelCapabilityOverrides(next);
-  const { id, label, enabled, subagent } = next;
+  const { id, label, enabled } = next;
   return {
     id,
     ...(label !== undefined ? { label } : {}),
     ...(enabled !== undefined ? { enabled } : {}),
-    ...(subagent !== undefined ? { subagent } : {}),
     ...cleaned,
   };
 }

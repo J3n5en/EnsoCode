@@ -90,6 +90,18 @@ export interface AgentTypeEntry {
   mcpServerIds?: string[];
 }
 
+/**
+ * 子代理可选模型条目（设置页「允许子代理指定模型」列表）。
+ * 只存 provider entry id + model id，凭证由 main 在 spawn 时解析；
+ * description 是选型依据，注入 subagent/coworker 工具的 model 参数说明。
+ */
+export interface SubagentModelEntry {
+  id: string;
+  providerId: string;
+  modelId: string;
+  description: string;
+}
+
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等
  *  默认指向源应用的原文件（跟随其更新）；一旦在应用内编辑，
  *  先复制为本地副本再改，不回写源文件 */

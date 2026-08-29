@@ -70,14 +70,17 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     )
     .join('; ');
   const modelNames = deps.models.map((option) => option.name);
+  const modelList = deps.models
+    .map((option) => option.name + (option.description ? ` (${option.description})` : ''))
+    .join('; ');
   const modelParam =
     deps.models.length > 0
       ? {
           model: {
             type: 'string',
             description:
-              `Model override for this subagent: ${modelNames.join(', ')}. ` +
-              'Prefer a cheaper model for simple subtasks; omit to inherit the default.',
+              `Model override for this subagent: ${modelList}. ` +
+              'Pick the cheapest model that fits the subtask; omit to inherit the default.',
           },
         }
       : {};

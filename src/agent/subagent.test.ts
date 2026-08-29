@@ -26,7 +26,7 @@ function makeDeps(overrides: Partial<SubagentDeps> = {}): SubagentDeps {
     createSubSession: vi.fn(async () => fakeSession('done')),
     modelId: 'parent-model',
     agentTypes: [],
-    models: [{ name: 'OpenAI/gpt-cheap', config: cheapConfig }],
+    models: [{ name: 'OpenAI/gpt-cheap', config: cheapConfig, description: '便宜快' }],
     emitUpdate: vi.fn(),
     runGate: vi.fn(async () => 'PASSED'),
     notify: vi.fn(),
@@ -71,6 +71,14 @@ describe('subagent tool model 参数', () => {
     const tool = createSubagentTool(deps);
     await tool.execute('t1', { description: 'x', prompt: 'do' }, undefined, undefined, {} as never);
     expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined);
+  });
+
+  it('model 参数说明携带用户写的选型描述', () => {
+    const tool = createSubagentTool(makeDeps());
+    const properties = (tool.parameters as { properties: Record<string, { description?: string }> })
+      .properties;
+    expect(properties.model?.description).toContain('OpenAI/gpt-cheap');
+    expect(properties.model?.description).toContain('便宜快');
   });
 
   it('models 为空时 schema 不含 model 参数', () => {

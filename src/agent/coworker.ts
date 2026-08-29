@@ -36,14 +36,17 @@ const truncate = (text: string): string =>
 export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
   const typeList = deps.agentTypes.map((type) => type.name).join(', ');
   const modelNames = deps.models.map((option) => option.name);
+  const modelList = deps.models
+    .map((option) => option.name + (option.description ? ` (${option.description})` : ''))
+    .join('; ');
   const modelParam =
     deps.models.length > 0
       ? {
           model: {
             type: 'string',
             description:
-              `Model override for spawn: ${modelNames.join(', ')}. ` +
-              'Prefer a cheaper model for simple roles; omit to inherit the default.',
+              `Model override for spawn: ${modelList}. ` +
+              'Pick the cheapest model that fits the role; omit to inherit the default.',
           },
         }
       : {};

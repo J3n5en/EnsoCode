@@ -13,6 +13,7 @@ import type {
   Preset,
   Project,
   SkillEntry,
+  SubagentModelEntry,
 } from '@shared/types';
 import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
 
@@ -137,6 +138,10 @@ export interface SettingsState {
   // 注入组合预设（默认预设不入库，运行时合成）
   presets: Preset[];
   agentTypes: AgentTypeEntry[];
+  /** 允许主 agent 给 subagent/coworker 指定模型；缺省 false */
+  subagentModelsEnabled: boolean;
+  /** 子代理可选模型列表（模型 + 选型描述） */
+  subagentModels: SubagentModelEntry[];
   /** 被关闭的内置子代理类型（name 集合） */
   disabledBuiltinAgentTypes: string[];
   /** 被关闭的内置工具（id 集合;默认全开） */
@@ -215,6 +220,12 @@ export interface SettingsState {
   addPreset: (preset: Omit<Preset, 'id'>) => Preset;
   updatePreset: (id: string, updates: Partial<Omit<Preset, 'id'>>) => void;
   removePreset: (id: string) => void;
+
+  // Subagent model actions
+  setSubagentModelsEnabled: (value: boolean) => void;
+  addSubagentModel: (entry: Omit<SubagentModelEntry, 'id'>) => SubagentModelEntry;
+  updateSubagentModel: (id: string, updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
+  removeSubagentModel: (id: string) => void;
 
   // Agent type actions
   addAgentType: (entry: Omit<AgentTypeEntry, 'id'>) => AgentTypeEntry;
