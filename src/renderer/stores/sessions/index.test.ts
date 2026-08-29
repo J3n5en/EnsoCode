@@ -265,6 +265,42 @@ describe('typed Agent child projection', () => {
     expect(conversation.generation).toBeUndefined();
   });
 
+  it('partialize never persists started and resets stale running status to idle', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'running' as const,
+          sessionFile: '/tmp/parent.jsonl',
+        },
+        orphan: {
+          ...state.conversations.parent,
+          id: 'orphan',
+          started: true,
+          status: 'running' as const,
+          sessionFile: undefined,
+        },
+      },
+    }));
+    const partialize = sessionsModule.useSessionsStore.persist.getOptions().partialize;
+    const persisted = partialize?.(sessionsModule.useSessionsStore.getState()) as {
+      conversations: Record<
+        string,
+        { started: boolean; status: string; error?: string; sessionFile?: string }
+      >;
+    };
+    // started 是运行态，永不落盘；有 sessionFile 的降为 idle 等回放，
+    // 无 sessionFile 的无从回放，直接落终态带错误文案。
+    expect(persisted.conversations.parent).toMatchObject({ started: false, status: 'idle' });
+    expect(persisted.conversations.orphan).toMatchObject({
+      started: false,
+      status: 'failed',
+      error: 'Session ended — history not restored',
+    });
+  });
+
   it('creates and selects a fresh placeholder for every reservation without adding the task to parent messages', () => {
     onAgentEvent?.(reserve(1));
     onAgentEvent?.(reserve(2));

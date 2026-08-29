@@ -40,6 +40,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { electronStorage } from '@/stores/settings/storage';
+import { migrateSessions, SESSIONS_VERSION } from './migrate';
 import {
   applyAgentEvent,
   applyDispatchEvent,
@@ -1542,6 +1543,8 @@ export const useSessionsStore = create<SessionsState>()(
     },
     {
       name: 'enso-conversations',
+      version: SESSIONS_VERSION,
+      migrate: (persisted, version) => migrateSessions(persisted, version) as SessionsState,
       // 存 settings.json（localStorage 按 origin 隔离，dev 与打包版会分家）
       storage: createJSONStorage(() => electronStorage),
       // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
@@ -1561,10 +1564,11 @@ export const useSessionsStore = create<SessionsState>()(
               // started 是「worker 里这个会话还活着」的运行态。worker 随 app 一起重启，
               // 持久化它会让重启后 ChatView 的 `!started` 自动恢复门永假：会话点开空白、
               // 无 loading 无报错，且再也不会重试（打包版 worker 延后启动时必现）。
-              // 无 sessionFile 的已启动会话重启后无从回放，直接落终态。
+              // status 同理：把 running 写盘会让重启后的会话锁 composer 装忙；
+              // 有 sessionFile 的降为 idle 等回放，无 sessionFile 的无从回放，直接落终态。
               ...(conversation.started && !conversation.sessionFile
                 ? { status: 'failed' as const, error: 'Session ended — history not restored' }
-                : {}),
+                : { status: 'idle' as const }),
               started: false,
               runStartedAt: undefined,
               // 运行态字段不持久化：重启后由 worker snapshot 重建，避免 rehydrate 先摆出陈旧状态
@@ -1585,17 +1589,10 @@ export const useSessionsStore = create<SessionsState>()(
         order: state.order,
         activeId: state.activeId,
       }),
-      onRehydrateStorage: () => (state) => {
-        // partialize 只管写。旧版本已把 started:true 落盘的用户，升级后第一次
-        // 启动仍会读回陈旧的 true 而门死自动恢复，故读时再兜一次。
-        // worker 与 app 同生命周期，rehydrate 这一刻不可能有会话还活着；
-        // 真活着的（刷新场景）由随后的 snapshot 重新置回 true。
-        if (state) {
-          for (const conversation of Object.values(state.conversations)) {
-            conversation.started = false;
-          }
-        }
-        // 刷新时 worker 仍活着：要一份全量投影把消息接回来
+      onRehydrateStorage: () => () => {
+        // 刷新时 worker 仍活着：要一份全量投影把消息接回来（并把真活着的会话
+        // 的 started 重新置回 true）。陈旧 started 的清理在 migrate（一次性、回写）
+        // 与 partialize（写侧不落盘），不在这里做读侧补丁。
         void window.electronAPI.agent.requestSnapshot();
       },
     }
