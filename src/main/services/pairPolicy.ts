@@ -162,8 +162,18 @@ export const SNAPSHOT_TAIL_MESSAGES = 60;
 const SNAPSHOT_BYTE_BUDGET = 600_000;
 
 interface SnapshotSession {
-  sessionId: string;
+  /** 旧格式扁平 id；worker 新格式嵌在 identity 里，归一化后两者都有 */
+  sessionId?: string;
+  identity?: { sessionId?: string; generation?: string };
   messages?: unknown[];
+}
+
+/** worker 事件的会话归属：新格式在 identity.sessionId，旧格式在顶层 sessionId */
+function sessionIdOf(value: {
+  sessionId?: string;
+  identity?: { sessionId?: string; generation?: string };
+}): string | undefined {
+  return value.identity?.sessionId ?? value.sessionId;
 }
 
 /** 从尾部往前取，直到条数或字节预算耗尽；至少保 1 条（单条超预算也发，交给中继裁决） */
@@ -190,11 +200,13 @@ export function narrowSnapshot(
   if (!Array.isArray(event.sessions)) return null;
   if (!subscribedId) return null;
   const sessions = event.sessions
-    .filter((s) => s.sessionId === subscribedId)
+    .filter((s) => sessionIdOf(s) === subscribedId)
     .map((s) => {
-      if (!Array.isArray(s.messages)) return { ...s, baseIndex: 0 };
+      // 手机端按扁平 sessionId 消费（线上 PWA 不随桌面版同步发布），归一化补上
+      const base = { ...s, sessionId: subscribedId };
+      if (!Array.isArray(s.messages)) return { ...base, baseIndex: 0 };
       const tail = takeTail(s.messages, s.messages.length);
-      return { ...s, messages: tail.messages, baseIndex: tail.baseIndex };
+      return { ...base, messages: tail.messages, baseIndex: tail.baseIndex };
     });
   return sessions.length > 0 ? { type: 'snapshot', sessions } : null;
 }
@@ -214,15 +226,16 @@ export function sliceHistory(
  * subscribedId 为 null 表示手机在列表页，不看任何会话正文。
  */
 export function shouldForward(
-  event: { type: string; sessionId?: string; index?: number },
+  event: { type: string; sessionId?: string; identity?: { sessionId?: string; generation?: string }; index?: number },
   subscribedId: string | null,
   sinceIndex?: number
 ): boolean {
   if (ALWAYS_FORWARD.has(event.type)) return true;
   // snapshot 由 narrowSnapshot 单独裁剪后转发，不走这里
   if (event.type === 'snapshot') return false;
+  const sessionId = sessionIdOf(event);
   if (SESSION_SCOPED.has(event.type)) {
-    if (!subscribedId || event.sessionId !== subscribedId) return false;
+    if (!subscribedId || sessionId !== subscribedId) return false;
     // 增量续传：手机已有的旧消息不重发
     if (typeof sinceIndex === 'number' && typeof event.index === 'number') {
       return event.index > sinceIndex;
@@ -230,6 +243,6 @@ export function shouldForward(
     return true;
   }
   // 其余事件（subagent 更新、任务进度等）按会话归属过滤，无 sessionId 的放行
-  if (typeof event.sessionId === 'string') return event.sessionId === subscribedId;
+  if (typeof sessionId === 'string') return sessionId === subscribedId;
   return true;
 }

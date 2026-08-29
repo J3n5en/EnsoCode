@@ -229,8 +229,12 @@ export class PairClient {
     // 尾窗快照：批事件，按 baseIndex 偏移合并进已有投影。
     // 不能整张 Map 替换——用户可能已上滑加载了更早的分页，替换会把它们抹掉。
     if (type === 'snapshot') {
-      for (const snap of (event.sessions ?? []) as SessionSnapshot[]) {
-        const id = snap.sessionId;
+      for (const snap of (event.sessions ?? []) as (SessionSnapshot & {
+        sessionId?: string;
+        identity?: { sessionId?: string };
+      })[]) {
+        // host 归一化后有扁平 sessionId；identity 兜底防旧桌面版
+        const id = snap.sessionId ?? snap.identity?.sessionId;
         if (!id) continue;
         const base = snap.baseIndex ?? 0;
         const existing = this.sessions.get(id)?.messages;
@@ -277,15 +281,20 @@ export class PairClient {
       case 'turn-failed':
         view.status = 'failed';
         break;
-      case 'approval-request':
-        view.approvals = [...view.approvals, event as unknown as ApprovalRequestInfo];
+      case 'approval-request': {
+        // worker 新格式载荷嵌在 request 里；旧格式平铺在事件上，两者都兼容
+        const approval = (event.request ?? event) as unknown as ApprovalRequestInfo;
+        view.approvals = [...view.approvals, approval];
         break;
+      }
       case 'approval-resolved':
         view.approvals = view.approvals.filter((a) => a.requestId !== event.requestId);
         break;
-      case 'ask-request':
-        view.asks = [...view.asks, event as unknown as AskRequestInfo];
+      case 'ask-request': {
+        const ask = (event.ask ?? event) as unknown as AskRequestInfo;
+        view.asks = [...view.asks, ask];
         break;
+      }
       case 'ask-resolved':
         view.asks = view.asks.filter((a) => a.requestId !== event.requestId);
         break;

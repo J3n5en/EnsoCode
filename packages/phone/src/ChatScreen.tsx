@@ -187,7 +187,11 @@ export function ChatScreen(props: Props) {
                   </button>
                 ) : undefined
               }
-              onSend={(text, images) => void send(text, images)}
+              onSend={(payload) => {
+                // 手机端不支持 @mention 派发，只取文本与图片
+                void send(payload.text, payload.images);
+                return undefined;
+              }}
               onAbort={props.onAbort}
             />
           </div>

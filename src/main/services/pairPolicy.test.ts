@@ -164,6 +164,14 @@ describe('下行过滤', () => {
     expect(shouldForward({ type: 'message-upsert', sessionId: 'a', index: 1 }, null)).toBe(false);
   });
 
+  it('identity 形状事件（worker 新格式）按 identity.sessionId 过滤', () => {
+    const id = (sessionId: string) => ({ sessionId, generation: 'g1' });
+    expect(shouldForward({ type: 'message-upsert', identity: id('a'), index: 1 }, 'a')).toBe(true);
+    expect(shouldForward({ type: 'message-upsert', identity: id('b'), index: 1 }, 'a')).toBe(false);
+    expect(shouldForward({ type: 'subagent-update', identity: id('b') }, 'a')).toBe(false);
+    expect(shouldForward({ type: 'subagent-update', identity: id('a') }, 'a')).toBe(true);
+  });
+
   it('增量续传：只补 index 大于游标的消息', () => {
     const ev = (index: number) => ({ type: 'message-upsert', sessionId: 'a', index });
     expect(shouldForward(ev(5), 'a', 3)).toBe(true);
@@ -189,6 +197,23 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
 
   it('订阅会话不在快照里时不转发', () => {
     expect(narrowSnapshot(event, 'zzz')).toBeNull();
+  });
+
+  it('identity 形状快照（worker 新格式）按 identity.sessionId 匹配并补扁平 sessionId', () => {
+    const out = narrowSnapshot(
+      {
+        type: 'snapshot',
+        sessions: [
+          { identity: { sessionId: 'a', generation: 'g1' }, messages: [{ text: 'hi' }] },
+          { identity: { sessionId: 'b', generation: 'g1' } },
+        ],
+      },
+      'a'
+    );
+    const session = out?.sessions[0] as { sessionId?: string; messages?: unknown[] };
+    // 手机端按扁平 sessionId 消费，归一化必须补上
+    expect(session?.sessionId).toBe('a');
+    expect(session?.messages).toEqual([{ text: 'hi' }]);
   });
 
   it('snapshot 不走通用过滤（避免整包漏出）', () => {

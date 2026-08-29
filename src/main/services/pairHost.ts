@@ -595,18 +595,32 @@ async function sendMeta(conn: Connection): Promise<void> {
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
 export function forwardAgentEvent(event: RendererAgentEvent): void {
-  const e = event as { type: string; sessionId?: string; index?: number };
+  const e = event as {
+    type: string;
+    sessionId?: string;
+    identity?: { sessionId?: string };
+    index?: number;
+  };
+  // worker 新格式把会话归属嵌在 identity 里；手机端按扁平 sessionId 消费
+  //（线上 PWA 不随桌面版同步发布），下发前归一化补上
+  const flatSessionId = e.identity?.sessionId ?? e.sessionId;
   for (const conn of connections.values()) {
     if (!conn.phoneOnline) continue;
     // snapshot 是全量批事件，裁成只含订阅会话再发
     if (e.type === 'snapshot') {
       const full = event as {
         type: string;
-        sessions?: { sessionId: string; messages?: unknown[] }[];
+        sessions?: {
+          sessionId?: string;
+          identity?: { sessionId?: string };
+          messages?: unknown[];
+        }[];
       };
       // 有挂起的分页请求：切 beforeIndex 之前的一页发回，不重复发尾窗
       if (conn.pendingHistory !== undefined && conn.subscribedId) {
-        const session = full.sessions?.find((s) => s.sessionId === conn.subscribedId);
+        const session = full.sessions?.find(
+          (s) => (s.identity?.sessionId ?? s.sessionId) === conn.subscribedId
+        );
         if (session && Array.isArray(session.messages)) {
           const page = sliceHistory(session.messages, conn.pendingHistory);
           void send(conn, {
@@ -619,15 +633,15 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
         conn.pendingHistory = undefined;
         continue;
       }
-      const narrowed = narrowSnapshot(
-        event as { type: string; sessions?: { sessionId: string }[] },
-        conn.subscribedId
-      );
+      const narrowed = narrowSnapshot(full, conn.subscribedId);
       if (narrowed) void send(conn, { type: 'agent-event', event: narrowed });
       continue;
     }
     if (!shouldForward(e, conn.subscribedId, conn.sinceIndex)) continue;
-    void send(conn, { type: 'agent-event', event });
+    void send(conn, {
+      type: 'agent-event',
+      event: flatSessionId ? { ...event, sessionId: flatSessionId } : event,
+    });
   }
 }
 
