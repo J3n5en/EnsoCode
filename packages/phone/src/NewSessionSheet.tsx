@@ -26,10 +26,12 @@ interface Props {
   onCreate(request: NewSessionRequest): void;
 }
 
+// 与桌面 ApprovalModePicker 同义（i18n 键 Supervised / Auto-accept edits / Full access）；
+// full 是「完全放行」而非「全部需审批」——写反会让用户误以为选了最严档
 const APPROVAL_LABELS: Record<ApprovalMode, string> = {
-  full: '全部需审批',
-  'auto-edits': '自动改文件',
-  supervised: '受监督',
+  supervised: '受监督（每步确认）',
+  'auto-edits': '自动接受编辑',
+  full: '完全放行',
 };
 
 /** 新建会话：只能选桌面已添加的项目（cwd 由 main 反查）与已启用的模型 */
