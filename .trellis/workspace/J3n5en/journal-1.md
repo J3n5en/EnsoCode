@@ -56,3 +56,33 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: 子代理指定模型 + ask 通知修复 + 侧栏置顶/归档
+
+**Date**: 2026-08-30
+**Task**: 子代理指定模型 + ask 通知修复 + 侧栏置顶/归档
+**Branch**: `dev`
+
+### Summary
+
+subagent/coworker 支持主 agent 按任务指定模型:设置页「允许子代理指定模型」开关+模型/描述列表,凭证 main 解析随 spawn 下发,工具 schema 与 promptSnippet 注入选型引导(开关关闭零暴露)。修复 ask_user 未聚焦不弹系统通知并补 maybeNotify 回归测试。侧栏新增会话置顶/归档:纯排序函数可测,右键菜单删除,归档栏固定底部向上展开。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01dc99c` | (see git log) |
+| `0bad2f9` | (see git log) |
+| `ef9c928` | (see git log) |
+| `07e9a04` | (see git log) |
+| `58c99f5` | (see git log) |
+| `e898e80` | (see git log) |
+| `2d67e8c` | (see git log) |
+| `c854b38` | (see git log) |
+| `4f0a1d3` | (see git log) |
+| `9bece08` | (see git log) |
+
+### Status
+
+[OK] **Completed**
