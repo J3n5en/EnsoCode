@@ -17,6 +17,11 @@ export function installElectronApiShim(): void {
         search: async () => [],
         pathForFile: () => null,
       },
+      agentRegistry: {
+        // Composer 输入 @ 触发 useMentionSearch 拉 agent 注册表；缺这个字段会
+        // 直接 TypeError 打崩渲染树（移动端输 @ 白屏）。返回 null 即无 agent 候选。
+        list: async (): Promise<null> => null,
+      },
       agent: {
         stopTask: async () => ({ ok: false as const, error: 'not supported on phone' }),
       },
