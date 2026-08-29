@@ -33,6 +33,7 @@ export interface QueuedMessage {
   images?: AttachedImage[];
 }
 
+import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -83,6 +84,10 @@ export interface Conversation extends SessionProjection {
   agentType?: string;
   /** typed mention child 的 Main 权威 metadata；普通 coworker 无此字段。 */
   child?: ChildConversationMetadata;
+  /** 已结束 child：内容来自 safe journal 的只读回放，不可继续对话。不持久化。 */
+  historyOnly?: boolean;
+  /** 已尝试过只读回放（含失败），避免反复打 IPC。不持久化。 */
+  historyLoadAttempted?: boolean;
   /** 当前 child TAB 的危险 capability ASK；不持久化。 */
   pendingCapabilityAsks?: CapabilityAskRequest[];
   /** allow ACK 后留在 child TAB 的 OAuth 宿主请求；不持久化。 */
@@ -185,6 +190,36 @@ export const useSessionsStore = create<SessionsState>()(
     (set, get) => {
       const pendingSelectionUpdates = new Map<string, Promise<void>>();
       const pendingDispatchEvents = new Map<string, DispatchMainEvent[]>();
+
+      /**
+       * 已结束 child TAB 的惰性只读回放。四个条件全满足才发请求，失败也标记已尝试，
+       * 避免每次切 TAB 都打一次 IPC。活会话（started）走正常事件流，不走这里。
+       */
+      async function loadChildHistory(conversationId: string): Promise<void> {
+        const conversation = get().conversations[conversationId];
+        if (
+          !conversation?.parentId ||
+          conversation.started ||
+          conversation.messages.length > 0 ||
+          conversation.historyLoadAttempted
+        ) {
+          return;
+        }
+        set((state) => patch(state, conversationId, { historyLoadAttempted: true }));
+        const result = await window.electronAPI.agent.readChildHistory(conversationId);
+        if (!result.ok) return;
+        const timeline = projectSafeJournal(result.projection.records);
+        if (timeline.messages.length === 0 && timeline.customEntries.length === 0) return;
+        set((state) =>
+          state.conversations[conversationId]
+            ? patch(state, conversationId, {
+                messages: timeline.messages,
+                customEntries: timeline.customEntries,
+                historyOnly: true,
+              })
+            : state
+        );
+      }
 
       async function activateConversationAuthority(conversationId: string): Promise<{
         project: ProjectAuthorityProjection;
@@ -976,6 +1011,11 @@ export const useSessionsStore = create<SessionsState>()(
           const activeTab = get().conversations[activeId]?.activeTabId;
           const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
           const conversation = get().conversations[id];
+          // 只读回放的已结束实例：必须在乐观回显之前拦，否则会往只读历史里插一条
+          // 根本没发出去的用户消息。
+          if (conversation?.historyOnly) {
+            return 'this Agent instance has ended — its history is read-only';
+          }
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -1331,6 +1371,7 @@ export const useSessionsStore = create<SessionsState>()(
         selectTab(parentId, tabId) {
           if (!get().conversations[parentId]) return;
           set((state) => patch(state, parentId, { activeTabId: tabId }));
+          if (tabId && tabId !== parentId) void loadChildHistory(tabId);
         },
 
         dismissCoworkerFromUI(parentId, coworkerId) {
@@ -1453,6 +1494,8 @@ export const useSessionsStore = create<SessionsState>()(
               pendingAsks: [],
               pendingCapabilityAsks: [],
               activeOauthAsk: undefined,
+              historyOnly: undefined,
+              historyLoadAttempted: undefined,
               backgroundTasks: [],
               subagents: [],
               activeTabId: undefined,

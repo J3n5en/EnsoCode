@@ -31,6 +31,7 @@ import type {
   ApprovalMode,
   AttachedImage,
   AuthorityMutationResult,
+  ChildHistoryResult,
   ConversationAuthorityProjection,
   ConversationAuthorityRequest,
   CreateConversationAuthorityRequest,
@@ -236,6 +237,9 @@ const electronAPI = {
     /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
     requestSnapshot: (): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),
+    /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
+    readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
     setThinking: (sessionId: string, level: ThinkingLevel): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_THINKING, sessionId, level),
     setReasoning: (

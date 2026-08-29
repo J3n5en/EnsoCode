@@ -162,6 +162,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_ABORT: surfaces('conversations.abort'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
+  AGENT_CHILD_HISTORY_READ: excluded(
+    'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
+  ),
   AGENT_SET_THINKING: surfaces('conversations.set-thinking'),
   AGENT_SET_REASONING: surfaces('conversations.set-reasoning'),
   AGENT_APPROVAL_RESPOND: surfaces('conversations.approval.respond'),

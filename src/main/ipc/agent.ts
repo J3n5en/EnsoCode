@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { IPC_CHANNELS } from '@shared/types';
@@ -8,6 +8,7 @@ import type {
   AgentSpawnRequest,
   ApprovalDecision,
   ApprovalMode,
+  ChildHistoryResult,
   RendererAgentEvent,
   ThinkingLevel,
 } from '@shared/types/agent';
@@ -24,6 +25,7 @@ import {
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
 import { app, BrowserWindow, ipcMain, webContents } from 'electron';
+import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
 import {
@@ -162,6 +164,33 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * 已结束 child 的只读历史。只读不复活：不进 sessionIndex、不占容量、不注册能力授权。
+ *
+ * 路径的唯一来源是 Main 自己读的持久化会话记录，再叠两道校验：
+ * 必须落在 sessions 目录内（防穿越）、basename 必须是 enso- 前缀的 safe journal
+ * （不读 pi 的普通 session 文件，那里面没经过脱敏）。
+ */
+function readChildHistory(conversationId: string): ChildHistoryResult {
+  const persisted = agentSessionIndex.persistedConversation(conversationId);
+  const sessionFile = persisted?.sessionFile;
+  if (!isNonEmptyString(sessionFile)) {
+    return { ok: false, code: 'not-found', error: 'No persisted history for this conversation.' };
+  }
+  const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
+  const resolved = path.resolve(sessionFile);
+  const withinSessionDir =
+    resolved === path.resolve(sessionDir) ||
+    resolved.startsWith(`${path.resolve(sessionDir)}${path.sep}`);
+  if (!withinSessionDir || !path.basename(resolved).startsWith('enso-')) {
+    return { ok: false, code: 'unavailable', error: 'History file is not a safe journal.' };
+  }
+  if (!existsSync(resolved)) {
+    return { ok: false, code: 'not-found', error: 'History file is missing.' };
+  }
+  return { ok: true, projection: EnsoSafeJournal.restore(resolved) };
+}
+
 export function registerAgentHandlers(): void {
   const agentDataDir = path.join(app.getPath('userData'), 'agent');
   sourceAuthority = new SourceAuthorityRegistry({
@@ -295,6 +324,16 @@ export function registerAgentHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_TYPES_REGISTRY_LIST, () => agentTypeRegistrySnapshot());
+
+  // 已结束 child 的只读历史：渲染层只能给 conversationId，路径一律由 Main 从自己读的
+  // 持久化会话里推导。接受渲染层传路径等于开放任意文件读取。
+  ipcMain.handle(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, (_event, request: unknown) => {
+    const conversationId = asRecord(request)?.conversationId;
+    if (!isNonEmptyString(conversationId)) {
+      return { ok: false, code: 'not-found', error: 'conversationId is required' };
+    }
+    return readChildHistory(conversationId);
+  });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE, (event, request: unknown) => {
     const parsed = parseParentSourceBindingRequest(request);

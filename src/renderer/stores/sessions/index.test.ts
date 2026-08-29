@@ -81,6 +81,12 @@ const updateConversationSelection = vi.fn(
   }
 );
 
+const readChildHistory = vi.fn(async (_conversationId: string) => ({
+  ok: false as const,
+  code: 'not-found' as const,
+  error: 'none',
+}));
+
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
   documentElement: {
@@ -112,6 +118,7 @@ vi.stubGlobal('window', {
         return vi.fn();
       }),
       requestSnapshot: vi.fn(async () => ({ ok: true })),
+      readChildHistory,
       prompt: agentPrompt,
       spawn: vi.fn(async () => ({ ok: true })),
       dismissCoworker: vi.fn(async () => ({ ok: true })),
@@ -207,6 +214,7 @@ describe('typed Agent child projection', () => {
     selectConversation.mockClear();
     createConversation.mockClear();
     updateConversationSelection.mockClear();
+    readChildHistory.mockClear();
     sourceProjection = {
       projects: [
         {
@@ -580,6 +588,99 @@ describe('typed Agent child projection', () => {
     });
     expect(conversation.messages[0].content).toEqual([{ type: 'text', text: 'restored history' }]);
     expect(conversation.customEntries).toHaveLength(1);
+  });
+
+  describe('已结束 child 的只读回放', () => {
+    const receipt = { receiptId: 'r1', summary: 'theme: system → dark' } as never;
+
+    function endedChild() {
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          ended: {
+            ...state.conversations.parent,
+            id: 'ended',
+            parentId: 'parent',
+            started: false,
+            messages: [],
+            customEntries: [],
+            historyOnly: undefined,
+            historyLoadAttempted: undefined,
+          },
+        },
+      }));
+    }
+
+    it('切到已结束 child 时拉取历史并标记只读', async () => {
+      endedChild();
+      readChildHistory.mockResolvedValueOnce({
+        ok: true,
+        projection: {
+          records: [
+            { type: 'safe-user-text', text: '把主题改成暗色', at: 1 },
+            { type: 'capability-receipt', receipt, at: 2 },
+            { type: 'safe-assistant-text', text: '已完成', at: 3 },
+          ],
+          partial: false,
+        },
+      } as never);
+
+      sessionsModule.useSessionsStore.getState().selectTab('parent', 'ended');
+      await vi.waitFor(() =>
+        expect(sessionsModule.useSessionsStore.getState().conversations.ended.historyOnly).toBe(
+          true
+        )
+      );
+
+      const conversation = sessionsModule.useSessionsStore.getState().conversations.ended;
+      expect(conversation.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+      expect(conversation.customEntries).toEqual([{ kind: 'capability-receipt', receipt }]);
+      expect(readChildHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it('只读会话发不出消息，且文案说明实例已结束', async () => {
+      endedChild();
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          ended: { ...state.conversations.ended, historyOnly: true },
+          parent: { ...state.conversations.parent, activeTabId: 'ended' },
+        },
+        activeId: 'parent',
+      }));
+
+      const before = sessionsModule.useSessionsStore.getState().conversations.ended.messages.length;
+      const error = await sessionsModule.useSessionsStore
+        .getState()
+        .send('再来一次', { providerId: 'p', modelId: 'm', cwd: '/workspace' });
+
+      expect(error).toContain('read-only');
+      expect(agentPrompt).not.toHaveBeenCalled();
+      // 关键：拦截要发生在乐观回显之前。只断言错误文案会放过“消息已入只读历史”这个 bug。
+      expect(sessionsModule.useSessionsStore.getState().conversations.ended.messages).toHaveLength(
+        before
+      );
+    });
+
+    it('失败不重试，活会话不走这条路径', async () => {
+      endedChild();
+      sessionsModule.useSessionsStore.getState().selectTab('parent', 'ended');
+      await vi.waitFor(() => expect(readChildHistory).toHaveBeenCalledTimes(1));
+      sessionsModule.useSessionsStore.getState().selectTab('parent', 'ended');
+      await Promise.resolve();
+      expect(readChildHistory).toHaveBeenCalledTimes(1);
+
+      readChildHistory.mockClear();
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          live: { ...state.conversations.ended, id: 'live', started: true },
+        },
+      }));
+      sessionsModule.useSessionsStore.getState().selectTab('parent', 'live');
+      await Promise.resolve();
+      expect(readChildHistory).not.toHaveBeenCalled();
+    });
   });
 
   it('summon only pre-fills the parent composer and never dispatches', () => {

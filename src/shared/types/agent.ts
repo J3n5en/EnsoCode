@@ -305,6 +305,11 @@ export interface SafeJournalProjection {
   partial: boolean;
 }
 
+/** 已结束 child 的只读历史读取结果。失败一律给结构化码，渲染层据此决定是否重试。 */
+export type ChildHistoryResult =
+  | { ok: true; projection: SafeJournalProjection }
+  | { ok: false; code: 'not-found' | 'unavailable'; error: string };
+
 export type DispatchProgressPhase =
   | 'received'
   | 'source-bound'

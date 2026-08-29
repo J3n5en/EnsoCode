@@ -3,7 +3,7 @@
   "name": "child-history-replay",
   "title": "重启后回放 coworker child 历史",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
