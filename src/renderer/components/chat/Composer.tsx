@@ -2,6 +2,7 @@ import type { AttachedImage, SlashCommand } from '@shared/types/agent';
 import type {
   AgentTypeMentionCandidate,
   ChatMentionCandidate,
+  FileMentionCandidate,
   MentionCandidate,
 } from '@shared/types/mentions';
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
@@ -10,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { ChatMentionChip, MentionChip } from './MentionChip';
+import { ChatMentionChip, FileMentionChip, MentionChip } from './MentionChip';
 import { MentionPicker } from './MentionPicker';
 import type { ComposerPayload } from './mentionComposer';
 import {
@@ -239,7 +240,8 @@ export function Composer({
         );
         return;
       }
-      replaceToken('@', `@${candidate.relativePath} `);
+      // 文件同样走 chip 形态（色块 tag 无法在 textarea 内渲染），发送时追加 @path
+      replaceToken('@', '');
       setMentions((current) =>
         current.some(
           (mention) => mention.kind === 'file' && mention.relativePath === candidate.relativePath
@@ -288,7 +290,11 @@ export function Composer({
 
   const unresolvedToken = unresolvedMentionToken(text, mentions);
   const content = text.trim();
-  const hasContent = Boolean(content || slash || images.length > 0);
+  // 文件/会话 chip 不占文本，但发送时会追加引用，算有效内容
+  const hasChipMentions = mentions.some(
+    (mention) => mention.kind === 'file' || mention.kind === 'chat'
+  );
+  const hasContent = Boolean(content || slash || images.length > 0 || hasChipMentions);
   const agentRecipient = recipient !== undefined;
   const effectiveBusy = busy && !agentRecipient;
 
@@ -305,52 +311,34 @@ export function Composer({
     setSlashQuery(null);
   };
 
-  const insertAtCursor = useCallback(
-    (snippet: string) => {
-      const textarea = textareaRef.current;
-      const cursor = textarea ? textarea.selectionStart : text.length;
-      const next = text.slice(0, cursor) + snippet + text.slice(cursor);
-      setText(next);
-      const newCursor = cursor + snippet.length;
-      window.setTimeout(() => {
-        textarea?.focus();
-        textarea?.setSelectionRange(newCursor, newCursor);
-      }, 0);
-    },
-    [text]
-  );
-
-  const ingestFiles = useCallback(
-    (files: File[]) => {
-      for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-            setImages((current) => [...current, { data: base64, mimeType: file.type }]);
-          };
-          reader.readAsDataURL(file);
-          continue;
-        }
-        const filePath = window.electronAPI.files.pathForFile(file);
-        if (!filePath) continue;
-        insertAtCursor(`@${filePath} `);
-        setMentions((current) => [
-          ...current.filter(
-            (mention) => mention.kind !== 'file' || mention.relativePath !== filePath
-          ),
-          {
-            kind: 'file',
-            id: filePath,
-            label: file.name || filePath.split('/').at(-1) || filePath,
-            relativePath: filePath,
-          },
-        ]);
+  const ingestFiles = useCallback((files: File[]) => {
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+          setImages((current) => [...current, { data: base64, mimeType: file.type }]);
+        };
+        reader.readAsDataURL(file);
+        continue;
       }
-    },
-    [insertAtCursor]
-  );
+      const filePath = window.electronAPI.files.pathForFile(file);
+      if (!filePath) continue;
+      // 拖入的文件同样走 chip，不再往文本插 @path
+      setMentions((current) => [
+        ...current.filter(
+          (mention) => mention.kind !== 'file' || mention.relativePath !== filePath
+        ),
+        {
+          kind: 'file',
+          id: filePath,
+          label: file.name || filePath.split('/').at(-1) || filePath,
+          relativePath: filePath,
+        },
+      ]);
+    }
+  }, []);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing = event.nativeEvent.isComposing || composingRef.current;
@@ -527,6 +515,19 @@ export function Composer({
             />
           )}
           {mentions
+            .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
+            .map((mention) => (
+              <FileMentionChip
+                key={mention.id}
+                file={mention}
+                onRemove={() =>
+                  setMentions((current) =>
+                    current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
+                  )
+                }
+              />
+            ))}
+          {mentions
             .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
             .map((mention) => (
               <ChatMentionChip
@@ -561,13 +562,6 @@ export function Composer({
             onChange={(event) => {
               const next = event.target.value;
               setText(next);
-              setMentions((current) =>
-                current.filter(
-                  (mention) =>
-                    // chat/agent 走 chip 形态不占文本 token，只能由 chip 的 X 移除
-                    mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
-                )
-              );
               detect(next);
             }}
             onKeyDown={handleKeyDown}

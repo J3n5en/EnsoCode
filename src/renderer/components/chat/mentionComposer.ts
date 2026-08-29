@@ -113,16 +113,22 @@ export function createComposerPayload(input: {
 }): ComposerPayload {
   const content = input.text.trim();
   const base = input.slash ? (content ? `${input.slash} ${content}` : input.slash) : content;
-  // chat mention 不在文本里插 token（标题含空格会破坏 @ 解析），发送时统一追加
-  // 引用块：只给 jsonl 路径，agent 自己按需 read，不内联不摘要。
-  const chatRefs = input.mentions
-    .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
-    .map(
-      (mention) =>
-        `[Referenced past chat "${mention.label}" — transcript file: ${mention.sessionFile} (pi session jsonl; read it if relevant)]`
-    );
+  // 文件/会话 mention 都走 chip 形态不占文本 token（色块 tag 无法在 textarea 内渲染，
+  // 且会话标题含空格会破坏 @ 解析），发送时统一追加：文件给 @path token，
+  // 会话只给 jsonl 路径，agent 自己按需 read，不内联不摘要。
+  const refs = [
+    ...input.mentions
+      .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
+      .map((mention) => `@${mention.relativePath}`),
+    ...input.mentions
+      .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
+      .map(
+        (mention) =>
+          `[Referenced past chat "${mention.label}" — transcript file: ${mention.sessionFile} (pi session jsonl; read it if relevant)]`
+      ),
+  ];
   return {
-    text: chatRefs.length > 0 ? `${base}\n\n${chatRefs.join('\n')}` : base,
+    text: refs.length > 0 ? `${base}\n\n${refs.join('\n')}` : base,
     images: input.images,
     mentions: input.mentions,
     ...(input.recipient ? { recipient: input.recipient } : {}),

@@ -332,9 +332,9 @@ describe('typed multi-entity mentions', () => {
     ).toEqual({ type: 'close-folder' });
   });
 
-  it('appends past-chat reference blocks for chat mentions at send time', () => {
-    // 选中 chat 不往文本里插 token（标题含空格会破坏 @ 解析），
-    // 发送时统一追加引用块：agent 拿到 jsonl 路径自己按需 read。
+  it('appends file and past-chat references for chip mentions at send time', () => {
+    // 文件/会话都走 chip 形态不占文本 token（色块 tag 无法在 textarea 内渲染），
+    // 发送时统一追加：文件给 @path token，会话给 jsonl 路径引用块。
     const chat = {
       kind: 'chat' as const,
       id: 'c1',
@@ -349,12 +349,12 @@ describe('typed multi-entity mentions', () => {
     });
     expect(payload.text).toBe(
       'continue from where we left off\n\n' +
+        `@${duplicateNames[0].relativePath}\n` +
         '[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
     );
-    // 非 chat mention 不受影响；无 chat mention 时文本原样
+    // 无 chip mention 时文本原样；recipient(agent-type) 不产生引用块
     expect(
-      createComposerPayload({ text: 'hi', slash: null, images: [], mentions: [duplicateNames[0]] })
-        .text
+      createComposerPayload({ text: 'hi', slash: null, images: [], mentions: [agents[1]] }).text
     ).toBe('hi');
     // slash 前缀在引用块之前拼接
     expect(
@@ -366,7 +366,7 @@ describe('typed multi-entity mentions', () => {
 
   it('builds a typed recipient payload with explicit file context', () => {
     const payload = createComposerPayload({
-      text: 'summarize @src/main/index.ts',
+      text: 'summarize this file',
       slash: null,
       images: [],
       mentions: [duplicateNames[0], agents[1]],
@@ -377,5 +377,6 @@ describe('typed multi-entity mentions', () => {
       typeKey: 'builtin:scout',
     });
     expect(payload.mentions[0]).toMatchObject({ kind: 'file', id: 'src/main/index.ts' });
+    expect(payload.text).toBe('summarize this file\n\n@src/main/index.ts');
   });
 });

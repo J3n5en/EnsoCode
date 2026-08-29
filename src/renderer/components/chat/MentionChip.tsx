@@ -1,6 +1,44 @@
-import type { AgentTypeMentionCandidate, ChatMentionCandidate } from '@shared/types/mentions';
-import { Bot, History, X } from 'lucide-react';
+import type {
+  AgentTypeMentionCandidate,
+  ChatMentionCandidate,
+  FileMentionCandidate,
+} from '@shared/types/mentions';
+import { Bot, FileText, History, X } from 'lucide-react';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
+
+export type MentionKind = 'agent-type' | 'file' | 'chat';
+
+/**
+ * 提及 chip 与 SlashChip 同底座（色块 tag），按类型区分颜色：
+ * agent=primary、file=success、chat=warning；/skill 是 info，互不撞色。
+ * 浅底用实色字，避免 *-foreground 近白叠在 /15 底上看不清（同 SlashChip）。
+ */
+const COLORS: Record<MentionKind, string> = {
+  'agent-type': 'bg-primary/15 text-primary',
+  file: 'bg-success/15 text-success',
+  chat: 'bg-warning/25 text-warning-foreground dark:bg-warning/15 dark:text-warning',
+};
+
+export function mentionChipClass(kind: MentionKind): string {
+  return cn(
+    'inline-flex max-w-52 items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-xs font-medium',
+    COLORS[kind]
+  );
+}
+
+function RemoveButton({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      className="rounded-sm opacity-70 transition-opacity hover:opacity-100"
+      aria-label={label}
+    >
+      <X className="h-3 w-3" />
+    </button>
+  );
+}
 
 interface MentionChipProps {
   recipient: AgentTypeMentionCandidate;
@@ -10,27 +48,28 @@ interface MentionChipProps {
 export function MentionChip({ recipient, onRemove }: MentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className="mt-0.5 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/8 px-1.5 text-[11px] font-medium text-primary">
-      <Bot className="h-3 w-3" />
-      {t('Recipient')}: {recipient.label}
-      <span className="text-[9px] font-normal text-primary/70">
-        {t(
-          recipient.source === 'system'
-            ? 'System'
-            : recipient.source === 'builtin'
-              ? 'Built-in'
-              : 'Custom'
-        )}
-      </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-sm opacity-70 transition-opacity hover:opacity-100"
-        aria-label={t('Remove Agent recipient')}
-      >
-        <X className="h-3 w-3" />
-      </button>
+    <span className={cn(mentionChipClass('agent-type'), 'mt-0.5 shrink-0')}>
+      <Bot className="h-3 w-3 shrink-0" />
+      <span className="truncate">{recipient.label}</span>
+      <RemoveButton label={t('Remove Agent recipient')} onRemove={onRemove} />
       <span className="sr-only">{recipient.typeKey}</span>
+    </span>
+  );
+}
+
+interface FileMentionChipProps {
+  file: FileMentionCandidate;
+  onRemove: () => void;
+}
+
+/** 文件提及 chip：不再往文本插 @path token，发送时由 createComposerPayload 统一追加。 */
+export function FileMentionChip({ file, onRemove }: FileMentionChipProps) {
+  const { t } = useI18n();
+  return (
+    <span className={cn(mentionChipClass('file'), 'mt-0.5 shrink-0')} title={file.relativePath}>
+      <FileText className="h-3 w-3 shrink-0" />
+      <span className="truncate">{file.label}</span>
+      <RemoveButton label={t('Remove file reference')} onRemove={onRemove} />
     </span>
   );
 }
@@ -44,17 +83,10 @@ interface ChatMentionChipProps {
 export function ChatMentionChip({ chat, onRemove }: ChatMentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className="mt-0.5 inline-flex h-6 max-w-48 shrink-0 items-center gap-1 rounded-md border bg-muted/50 px-1.5 text-[11px] font-medium text-muted-foreground">
+    <span className={cn(mentionChipClass('chat'), 'mt-0.5 shrink-0')}>
       <History className="h-3 w-3 shrink-0" />
       <span className="truncate">{chat.label}</span>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-sm opacity-70 transition-opacity hover:opacity-100"
-        aria-label={t('Remove chat reference')}
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <RemoveButton label={t('Remove chat reference')} onRemove={onRemove} />
     </span>
   );
 }

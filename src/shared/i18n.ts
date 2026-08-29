@@ -213,6 +213,7 @@ export const zhTranslations: Record<string, string> = {
   Chat: '会话',
   Chats: '过去会话',
   'Remove chat reference': '移除会话引用',
+  'Remove file reference': '移除文件引用',
   'Mention suggestions': '提及建议',
   'Command suggestions': '命令建议',
   'Type @ to choose a file or Agent': '输入 @ 选择文件或 Agent',
