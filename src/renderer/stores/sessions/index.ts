@@ -1553,6 +1553,14 @@ export const useSessionsStore = create<SessionsState>()(
               lastSeq: 0,
               spawning: false,
               error: undefined,
+              // started 是「worker 里这个会话还活着」的运行态。worker 随 app 一起重启，
+              // 持久化它会让重启后 ChatView 的 `!started` 自动恢复门永假：会话点开空白、
+              // 无 loading 无报错，且再也不会重试（打包版 worker 延后启动时必现）。
+              // 无 sessionFile 的已启动会话重启后无从回放，直接落终态。
+              ...(conversation.started && !conversation.sessionFile
+                ? { status: 'failed' as const, error: 'Session ended — history not restored' }
+                : {}),
+              started: false,
               runStartedAt: undefined,
               // 运行态字段不持久化：重启后由 worker snapshot 重建，避免 rehydrate 先摆出陈旧状态
               pendingApprovals: [],
