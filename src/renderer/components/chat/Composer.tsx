@@ -524,58 +524,46 @@ export function Composer({
             ))}
           </div>
         )}
-        {(recipient || hasChipMentions) && (
-          <div
-            className={cn(
-              'flex flex-wrap items-center gap-1.5 px-3.5',
-              images.length > 0 ? 'pt-1.5' : 'pt-3'
-            )}
-          >
-            {recipient && (
-              <MentionChip
-                recipient={recipient}
-                onRemove={() => {
-                  setRecipient(undefined);
-                  setMentions((current) =>
-                    current.filter((mention) => mention.kind !== 'agent-type')
-                  );
-                }}
-              />
-            )}
-            {mentions
-              .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
-              .map((mention) => (
-                <FileMentionChip
-                  key={mention.id}
-                  file={mention}
-                  onRemove={() =>
-                    setMentions((current) =>
-                      current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
-                    )
-                  }
-                />
-              ))}
-            {mentions
-              .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
-              .map((mention) => (
-                <ChatMentionChip
-                  key={mention.id}
-                  chat={mention}
-                  onRemove={() =>
-                    setMentions((current) =>
-                      current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
-                    )
-                  }
-                />
-              ))}
-          </div>
-        )}
         <div
-          className={cn(
-            'flex items-start gap-1.5 px-3.5',
-            images.length > 0 || recipient || hasChipMentions ? 'pt-1.5' : 'pt-3'
-          )}
+          className={cn('flex items-start gap-1.5 px-3.5', images.length > 0 ? 'pt-1.5' : 'pt-3')}
         >
+          {recipient && (
+            <MentionChip
+              recipient={recipient}
+              onRemove={() => {
+                setRecipient(undefined);
+                setMentions((current) =>
+                  current.filter((mention) => mention.kind !== 'agent-type')
+                );
+              }}
+            />
+          )}
+          {mentions
+            .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
+            .map((mention) => (
+              <FileMentionChip
+                key={mention.id}
+                file={mention}
+                onRemove={() =>
+                  setMentions((current) =>
+                    current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
+                  )
+                }
+              />
+            ))}
+          {mentions
+            .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
+            .map((mention) => (
+              <ChatMentionChip
+                key={mention.id}
+                chat={mention}
+                onRemove={() =>
+                  setMentions((current) =>
+                    current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
+                  )
+                }
+              />
+            ))}
           {slash && (
             <SlashChip
               name={slash}
@@ -647,9 +635,7 @@ export function Composer({
           </p>
         )}
         {agentRecipient && !unresolvedToken && (
-          <p className="px-3.5 pt-1 text-[11px] text-primary/80">
-            {t('This message and selected files go only to the selected Agent')}
-          </p>
+          <p className="sr-only">{t('Send only to the selected Agent')}</p>
         )}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 items-center gap-1">{toolbar}</div>

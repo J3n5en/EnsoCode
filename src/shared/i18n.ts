@@ -221,8 +221,6 @@ export const zhTranslations: Record<string, string> = {
   Recipient: '接收者',
   'Remove Agent recipient': '移除 Agent 接收者',
   'Message the selected Agent…': '向所选 Agent 发送消息…',
-  'This message and selected files go only to the selected Agent':
-    '此消息和所选文件仅发送给所选 Agent',
   'Send only to the selected Agent': '仅发送给所选 Agent',
   Send: '发送',
   'Create or select a project to start a conversation': '创建或选择一个项目以开始对话',

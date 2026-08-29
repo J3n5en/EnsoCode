@@ -97,7 +97,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Recipient',
   'Remove Agent recipient',
   'Message the selected Agent…',
-  'This message and selected files go only to the selected Agent',
   'Send only to the selected Agent',
   'Inherits the conversation model and provides product capabilities',
   'This Agent name is reserved',

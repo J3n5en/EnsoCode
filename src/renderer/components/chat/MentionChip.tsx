@@ -49,7 +49,7 @@ interface MentionChipProps {
 export function MentionChip({ recipient, onRemove }: MentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('agent-type'), 'shrink-0')}>
+    <span className={cn(mentionChipClass('agent-type'), 'mt-0.5 shrink-0')}>
       <Bot className="h-3 w-3 shrink-0" />
       <span className="truncate">{recipient.label}</span>
       <RemoveButton label={t('Remove Agent recipient')} onRemove={onRemove} />
@@ -67,7 +67,7 @@ interface FileMentionChipProps {
 export function FileMentionChip({ file, onRemove }: FileMentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('file'), 'shrink-0')} title={file.relativePath}>
+    <span className={cn(mentionChipClass('file'), 'mt-0.5 shrink-0')} title={file.relativePath}>
       <FileText className="h-3 w-3 shrink-0" />
       <span className="truncate">{file.label}</span>
       <RemoveButton label={t('Remove file reference')} onRemove={onRemove} />
@@ -84,7 +84,7 @@ interface ChatMentionChipProps {
 export function ChatMentionChip({ chat, onRemove }: ChatMentionChipProps) {
   const { t } = useI18n();
   return (
-    <span className={cn(mentionChipClass('chat'), 'shrink-0')}>
+    <span className={cn(mentionChipClass('chat'), 'mt-0.5 shrink-0')}>
       <History className="h-3 w-3 shrink-0" />
       <span className="truncate">{chat.label}</span>
       <RemoveButton label={t('Remove chat reference')} onRemove={onRemove} />
