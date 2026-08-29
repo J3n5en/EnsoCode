@@ -104,6 +104,15 @@ export interface AgentTypeSpawnConfig {
   model?: SpawnModelConfig;
 }
 
+/**
+ * 下发 worker 的子代理可选模型（模型中心逐模型勾选，main 已解析凭证）。
+ * name 是给 LLM 看的唯一键（`{provider.name}/{modelId}`，冲突时追加 #n）。
+ */
+export interface SubagentModelOption {
+  name: string;
+  config: SpawnModelConfig;
+}
+
 /** 子代理状态（渲染层状态行与 snapshot 共用） */
 export interface SubagentInfo {
   id: string;
@@ -357,6 +366,7 @@ export type AgentCommand =
       instruction?: { path: string; content: string };
       approvalMode?: ApprovalMode;
       agentTypes?: AgentTypeSpawnConfig[];
+      subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
     }
   | {
@@ -747,6 +757,18 @@ function parseSpawnModelConfig(value: unknown): SpawnModelConfig | null {
     return null;
   }
   return value as unknown as SpawnModelConfig;
+}
+
+function parseSubagentModelOption(value: unknown): SubagentModelOption | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['name', 'config']) ||
+    !isNonEmptyString(value.name) ||
+    !parseSpawnModelConfig(value.config)
+  ) {
+    return null;
+  }
+  return value as unknown as SubagentModelOption;
 }
 
 function parseModelRef(value: unknown): ModelRef | null {
@@ -1250,12 +1272,16 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'instruction',
           'approvalMode',
           'agentTypes',
+          'subagentModels',
           'disabledTools',
         ]) ||
         !parseSessionIdentity(value.identity) ||
         typeof value.cwd !== 'string' ||
         !parseSpawnModelConfig(value.model) ||
-        (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile))
+        (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
+        (value.subagentModels !== undefined &&
+          (!Array.isArray(value.subagentModels) ||
+            value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null)))
       ) {
         return null;
       }
