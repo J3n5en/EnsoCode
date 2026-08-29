@@ -172,6 +172,8 @@ const server = createServer((req, res) => {
         parsed?.messages?.at(-1)?.content?.[0]?.text ?? parsed?.messages?.at(-1)?.content ?? ''
       ).slice(0, 120),
       toolNames: Array.isArray(parsed?.tools) ? parsed.tools.map((t) => t.name) : [],
+      // 用来区分请求实际用了哪个 provider 条目的凭证（AC12/AC18 需要）
+      authKey: String(req.headers['x-api-key'] || req.headers.authorization || '').slice(-6),
     });
 
     const messages = parsed?.messages;
