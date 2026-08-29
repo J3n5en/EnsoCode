@@ -13,12 +13,19 @@ import {
   PinOff,
   Settings,
   Trash2,
-  X,
 } from 'lucide-react';
+import type * as React from 'react';
 import { useEffect, useState } from 'react';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuPopup,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -293,53 +300,53 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             </div>
           );
         })}
-        {archivedIds.length > 0 && (
-          <div data-slot="archived-section" className="pt-1">
-            <button
-              type="button"
-              onClick={() => setArchivedOpen((open) => !open)}
-              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                <ChevronRight
-                  className={cn(
-                    'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                    archivedOpen && 'rotate-90'
-                  )}
-                />
-              </span>
-              <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                {t('Archived')}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">
-                {archivedIds.length}
-              </span>
-            </button>
-            {archivedOpen && (
-              <div className="mt-0.5 flex flex-col gap-y-0.5">
-                {archivedIds.map((id) => (
-                  <ConversationRow
-                    key={id}
-                    id={id}
-                    conversation={conversations[id]}
-                    active={activeId === id}
-                    locale={locale}
-                    nowTick={nowTick}
-                    hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                    onSelect={selectConversation}
-                    onTogglePin={togglePinConversation}
-                    onToggleArchive={toggleArchiveConversation}
-                    onRemove={(conversationId) =>
-                      setPendingRemove({ kind: 'conversation', id: conversationId })
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
+
+      {archivedIds.length > 0 && (
+        <div data-slot="archived-section" className="shrink-0 border-t p-2">
+          {/* 列表在折叠头上方：固定底部向上展开 */}
+          {archivedOpen && (
+            <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
+              {archivedIds.map((id) => (
+                <ConversationRow
+                  key={id}
+                  id={id}
+                  conversation={conversations[id]}
+                  active={activeId === id}
+                  locale={locale}
+                  nowTick={nowTick}
+                  subtitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                  onSelect={selectConversation}
+                  onTogglePin={togglePinConversation}
+                  onToggleArchive={toggleArchiveConversation}
+                  onRemove={(conversationId) =>
+                    setPendingRemove({ kind: 'conversation', id: conversationId })
+                  }
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setArchivedOpen((open) => !open)}
+            className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <ChevronRight
+                className={cn(
+                  'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                  archivedOpen ? '-rotate-90' : 'rotate-0'
+                )}
+              />
+            </span>
+            <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {t('Archived')}
+            </span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">{archivedIds.length}</span>
+          </button>
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center justify-between border-t p-2">
         <button
@@ -407,6 +414,8 @@ interface ConversationRowProps {
   nowTick: number;
   /** 顶部 Pinned 栏目里用项目名做 hover 提示 */
   hoverTitle?: string;
+  /** 已归档栏目里内联展示的项目名 */
+  subtitle?: string;
   onSelect: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleArchive: (id: string) => void;
@@ -414,8 +423,9 @@ interface ConversationRowProps {
 }
 
 /**
- * 侧栏会话行：Pinned/项目/Archived 三处共用。hover 时露出操作按钮：
- * 常规行 = 置顶 + 归档 + 删除；归档行 = 还原 + 删除（不可置顶）。
+ * 侧栏会话行：Pinned/项目/Archived 三处共用。
+ * 常规行 hover 只露置顶/归档，删除只在右键菜单里；
+ * 归档行是删除前的暂存区，hover 露还原 + 删除。
  */
 function ConversationRow({
   id,
@@ -424,6 +434,7 @@ function ConversationRow({
   locale,
   nowTick,
   hoverTitle,
+  subtitle,
   onSelect,
   onTogglePin,
   onToggleArchive,
@@ -433,7 +444,7 @@ function ConversationRow({
   const pinned = conversation.pinned === true;
   const archived = conversation.archived === true;
   const PinIcon = pinned ? PinOff : Pin;
-  return (
+  const row = (
     <div
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
@@ -450,7 +461,10 @@ function ConversationRow({
       title={hoverTitle}
     >
       <ConversationDot conversation={conversation} />
-      <span className="min-w-0 flex-1 truncate">{conversation.title || t('New conversation')}</span>
+      <span className="min-w-0 flex-1 truncate">
+        {conversation.title || t('New conversation')}
+        {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
+      </span>
       <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
         {formatRelativeTime(
           conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
@@ -486,17 +500,42 @@ function ConversationRow({
           <Archive className="h-3.5 w-3.5" />
         )}
       </button>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove(id);
-        }}
-        className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      {archived && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(id);
+          }}
+          className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
+          title={t('Delete')}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
+  );
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={row as React.ReactElement<Record<string, unknown>>} />
+      <ContextMenuPopup className="min-w-36">
+        {!archived && (
+          <ContextMenuItem onClick={() => onTogglePin(id)}>
+            <PinIcon />
+            {pinned ? t('Unpin') : t('Pin')}
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem onClick={() => onToggleArchive(id)}>
+          {archived ? <ArchiveRestore /> : <Archive />}
+          {archived ? t('Unarchive') : t('Archive')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onClick={() => onRemove(id)}>
+          <Trash2 />
+          {t('Delete')}
+        </ContextMenuItem>
+      </ContextMenuPopup>
+    </ContextMenu>
   );
 }
 

@@ -462,6 +462,7 @@ export const zhTranslations: Record<string, string> = {
   'When to use it, e.g. cheap and fast for simple subtasks':
     '什么时候用它，例如：便宜快，适合简单子任务',
   'Add model': '添加模型',
+  Delete: '删除',
   Archived: '已归档',
   Archive: '归档',
   Unarchive: '取消归档',

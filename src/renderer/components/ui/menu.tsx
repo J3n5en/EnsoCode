@@ -17,7 +17,7 @@ const Menu = MenuPrimitive.Root;
 
 const MenuPortal = MenuPrimitive.Portal;
 
-const MENU_POPUP_CLASS =
+export const MENU_POPUP_CLASS =
   // 优化动画：150ms，使用模拟 Spring 的 cubic-bezier 曲线
   "relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border bg-popover bg-clip-padding shadow-lg outline-none transition-[scale,opacity] duration-150 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus:outline-none has-data-starting-style:scale-95 has-data-starting-style:opacity-0 has-data-ending-style:scale-95 has-data-ending-style:opacity-0 dark:bg-clip-border dark:before:shadow-[0_-1px_--theme(--color-white/8%)]";
 
@@ -62,6 +62,10 @@ function MenuPopup({
   );
 }
 
+/** MenuItem 与 ContextMenuItem 共用的条目样式（含 destructive 变体） */
+export const MENU_ITEM_CLASS =
+  "[&_svg]:-mx-0.5 flex min-h-8 cursor-default select-none items-center gap-2 whitespace-nowrap rounded-sm px-2 py-1 text-base outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive data-highlighted:text-accent-foreground data-highlighted:data-[variant=destructive]:bg-destructive/10 data-highlighted:data-[variant=destructive]:text-destructive data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0";
+
 function MenuGroup(props: MenuPrimitive.Group.Props) {
   return <MenuPrimitive.Group data-slot="menu-group" {...props} />;
 }
@@ -78,10 +82,7 @@ function MenuItem({
 }) {
   return (
     <MenuPrimitive.Item
-      className={cn(
-        "[&_svg]:-mx-0.5 flex min-h-8 cursor-default select-none items-center gap-2 whitespace-nowrap rounded-sm px-2 py-1 text-base outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive data-highlighted:text-accent-foreground data-highlighted:data-[variant=destructive]:bg-destructive/10 data-highlighted:data-[variant=destructive]:text-destructive data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        className
-      )}
+      className={cn(MENU_ITEM_CLASS, className)}
       data-inset={inset}
       data-slot="menu-item"
       data-variant={variant}
