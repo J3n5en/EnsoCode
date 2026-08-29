@@ -1,5 +1,6 @@
+import type { CatalogEntry } from '@enso/pair';
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
-import { ChevronDown, PanelLeft, SquarePen } from 'lucide-react';
+import { Bot, ChevronDown, PanelLeft, SquarePen } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
@@ -10,6 +11,7 @@ import {
   type MessageTimelineHandle,
 } from '@/components/chat/MessageTimeline';
 import { TaskBar } from '@/components/chat/TaskBar';
+import { cn } from '@/lib/utils';
 import { buildTimeline } from '@/stores/sessions/timeline';
 import type { ConnState, SessionView } from './client';
 import { compressImage } from './image';
@@ -31,6 +33,9 @@ interface Props {
   /** 还有更早的历史可上滑加载 */
   hasOlder?: boolean;
   onLoadOlder?(): void;
+  /** coworker tab 组（仅当父会话雇有 coworker 时有值）：主会话 + 子会话 */
+  tabGroup?: { parent: CatalogEntry; children: CatalogEntry[] };
+  onSelectTab?(sessionId: string): void;
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -138,6 +143,40 @@ export function ChatScreen(props: Props) {
         </button>
       </header>
 
+      {/* coworker tab 条：与桌面 CoworkerTabs 同观感，无 coworker 时不渲染；手机不提供雇佣/解雇 */}
+      {props.tabGroup && props.tabGroup.children.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1">
+          <button
+            type="button"
+            className={tabClass(sessionId === props.tabGroup.parent.id)}
+            onClick={() => props.onSelectTab?.(props.tabGroup?.parent.id ?? '')}
+          >
+            <span className="max-w-40 truncate">{props.tabGroup.parent.title || '新对话'}</span>
+          </button>
+          {props.tabGroup.children.map((child) => (
+            <button
+              key={child.id}
+              type="button"
+              className={cn(tabClass(sessionId === child.id), 'shrink-0')}
+              onClick={() => props.onSelectTab?.(child.id)}
+            >
+              <Bot className="h-3 w-3 shrink-0" />
+              <span className="max-w-28 truncate">{child.title || 'coworker'}</span>
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  child.status === 'running'
+                    ? 'animate-pulse bg-blue-500'
+                    : child.status === 'failed'
+                      ? 'bg-destructive'
+                      : 'bg-muted-foreground/30'
+                )}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+
       {sessionId === null ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
           <p className="font-medium text-lg">EnsoCode</p>
@@ -207,6 +246,14 @@ export function ChatScreen(props: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 与桌面 CoworkerTabs 的 tabClass 同款 */
+function tabClass(active: boolean): string {
+  return cn(
+    'flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+    active ? 'bg-muted font-medium' : 'text-muted-foreground'
   );
 }
 

@@ -155,6 +155,14 @@ export function App() {
   }, [activeId, firstId]);
 
   const entry = useMemo(() => catalog.find((c) => c.id === activeId), [catalog, activeId]);
+  // coworker tab 组：当前会话是子会话则归组到其父，否则以自身为父；无 coworker 时不显示
+  const tabGroup = useMemo(() => {
+    if (!entry) return undefined;
+    const parent = entry.parentId ? catalog.find((c) => c.id === entry.parentId) : entry;
+    if (!parent) return undefined;
+    const children = catalog.filter((c) => c.parentId === parent.id);
+    return children.length > 0 ? { parent, children } : undefined;
+  }, [catalog, entry]);
   // 子会话（coworker）跟随父会话模型，与桌面一致不提供切换
   const configurable = entry && !entry.parentId;
   const modelLabel = configurable
@@ -227,6 +235,8 @@ export function App() {
         canCreate={state === 'online' && projects.length > 0}
         modelLabel={state === 'online' ? modelLabel : undefined}
         onOpenConfig={() => setConfigOpen(true)}
+        tabGroup={tabGroup}
+        onSelectTab={setActiveId}
         hasOlder={Boolean(
           activeId && view && view.messages.size > 0 && Math.min(...view.messages.keys()) > 0
         )}
