@@ -7,7 +7,7 @@ import type {
   ModelThinkingLevelOverride,
 } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { Bot, ChevronDown, Trash2 } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -126,6 +126,26 @@ export function ProviderModelRow({
             {model.id}
           </span>
         )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          data-slot="model-subagent-toggle"
+          data-active={model.subagent === true ? 'true' : 'false'}
+          title={t('Allow subagents to use this model')}
+          className={cn(
+            'h-6 w-6 transition-opacity',
+            model.subagent === true
+              ? 'text-primary'
+              : 'text-muted-foreground opacity-0 group-hover:opacity-100'
+          )}
+          onClick={() => {
+            const { subagent: _omitted, ...rest } = model;
+            onChange(model.subagent === true ? rest : { ...model, subagent: true });
+          }}
+        >
+          <Bot className="h-3.5 w-3.5" />
+        </Button>
         <Button
           type="button"
           variant="ghost"
