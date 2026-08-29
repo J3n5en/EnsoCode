@@ -75,6 +75,19 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       if ('cwd' in v || 'apiKey' in v || 'baseUrl' in v) {
         return { ok: false, error: 'cwd/apiKey/baseUrl not accepted from phone' };
       }
+      // 推理字段可选，但给了就必须合法（pairHost 会直接透传给 spawn）
+      if (v.reasoningEnabled !== undefined && typeof v.reasoningEnabled !== 'boolean') {
+        return { ok: false, error: 'invalid reasoningEnabled' };
+      }
+      if (
+        v.thinkingLevel !== undefined &&
+        v.thinkingLevel !== 'low' &&
+        v.thinkingLevel !== 'medium' &&
+        v.thinkingLevel !== 'high' &&
+        v.thinkingLevel !== 'max'
+      ) {
+        return { ok: false, error: 'invalid thinkingLevel' };
+      }
       return { ok: true, command: value as PhoneToHost };
     case 'set-model':
       if (!isStr(v.sessionId) || !isStr(v.providerId) || !isStr(v.modelId)) {
@@ -226,7 +239,12 @@ export function sliceHistory(
  * subscribedId 为 null 表示手机在列表页，不看任何会话正文。
  */
 export function shouldForward(
-  event: { type: string; sessionId?: string; identity?: { sessionId?: string; generation?: string }; index?: number },
+  event: {
+    type: string;
+    sessionId?: string;
+    identity?: { sessionId?: string; generation?: string };
+    index?: number;
+  },
   subscribedId: string | null,
   sinceIndex?: number
 ): boolean {

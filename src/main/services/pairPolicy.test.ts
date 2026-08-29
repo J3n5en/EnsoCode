@@ -70,6 +70,17 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ ...base, baseUrl: 'http://evil' }).ok).toBe(false);
   });
 
+  it('spawn 校验推理字段：reasoningEnabled 必须是 boolean，thinkingLevel 必须在枚举内', () => {
+    const base = { type: 'spawn', sessionId: 's', projectId: 'p', providerId: 'pr', modelId: 'm' };
+    expect(parsePhoneCommand({ ...base, reasoningEnabled: true }).ok).toBe(true);
+    expect(parsePhoneCommand({ ...base, reasoningEnabled: 'yes' }).ok).toBe(false);
+    expect(parsePhoneCommand({ ...base, thinkingLevel: 'max' }).ok).toBe(true);
+    expect(parsePhoneCommand({ ...base, thinkingLevel: 'ultra' }).ok).toBe(false);
+    expect(parsePhoneCommand({ ...base, reasoningEnabled: true, thinkingLevel: 'high' }).ok).toBe(
+      true
+    );
+  });
+
   it('set-model 结构校验：三个 id 必填', () => {
     expect(
       parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr', modelId: 'm' }).ok

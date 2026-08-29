@@ -1,4 +1,4 @@
-import type { ApprovalMode, ProjectEntry, ProviderEntry } from '@enso/pair';
+import type { ApprovalMode, ProjectEntry, ProviderEntry, ThinkingLevel } from '@enso/pair';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Switch } from '@/components/ui/switch';
 import { Z_INDEX } from '@/lib/z-index';
 
 export interface NewSessionRequest {
@@ -16,6 +17,8 @@ export interface NewSessionRequest {
   providerId: string;
   modelId: string;
   approvalMode?: ApprovalMode;
+  reasoningEnabled?: boolean;
+  thinkingLevel?: ThinkingLevel;
 }
 
 interface Props {
@@ -34,6 +37,14 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
   full: '完全放行',
 };
 
+// 与 SessionConfigSheet 同一套档位文案，保持两处选择器观感一致
+const LEVEL_LABELS: Record<ThinkingLevel, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  max: '最高',
+};
+
 /** 新建会话：只能选桌面已添加的项目（cwd 由 main 反查）与已启用的模型 */
 export function NewSessionSheet({ projects, providers, open, onClose, onCreate }: Props) {
   // 组件常驻挂载，目录是异步到达的：选中值存"用户是否显式选过"，
@@ -42,6 +53,8 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
   const [pickedProvider, setPickedProvider] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('full');
+  const [reasoningEnabled, setReasoningEnabled] = useState(false);
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
 
   const projectId = projects.find((p) => p.id === pickedProject)?.id ?? projects[0]?.id ?? '';
   const provider = providers.find((p) => p.id === pickedProvider) ??
@@ -141,6 +154,35 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
             </Select>
           </Field>
 
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground text-xs">推理</span>
+            <Switch checked={reasoningEnabled} onCheckedChange={setReasoningEnabled} />
+          </div>
+
+          {reasoningEnabled && (
+            <Field label="推理档位">
+              <Select
+                items={(Object.keys(LEVEL_LABELS) as ThinkingLevel[]).map((l) => ({
+                  value: l,
+                  label: LEVEL_LABELS[l],
+                }))}
+                value={thinkingLevel}
+                onValueChange={(v) => setThinkingLevel(v as ThinkingLevel)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                  {(Object.keys(LEVEL_LABELS) as ThinkingLevel[]).map((l) => (
+                    <SelectItem key={l} value={l}>
+                      {LEVEL_LABELS[l]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </Field>
+          )}
+
           {projects.length === 0 && (
             <p className="text-destructive text-xs">桌面端还没有项目，请先在桌面添加。</p>
           )}
@@ -154,7 +196,16 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
             </Button>
             <Button
               disabled={!canCreate}
-              onClick={() => onCreate({ projectId, providerId, modelId, approvalMode })}
+              onClick={() =>
+                onCreate({
+                  projectId,
+                  providerId,
+                  modelId,
+                  approvalMode,
+                  // 关着就不传：pairHost 对 falsy 不透传，保持命令最小
+                  ...(reasoningEnabled ? { reasoningEnabled, thinkingLevel } : {}),
+                })
+              }
             >
               创建
             </Button>
