@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleDot,
   Copy,
+  FileText,
   History,
   ListTodo,
   LoaderCircle,
@@ -35,7 +36,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { mentionChipClass } from './MentionChip';
-import { splitInlineFileTokens, splitMentionRefs } from './mentionComposer';
+import { splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { ReadFileView } from './ReadFileView';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
@@ -173,26 +174,54 @@ function SlashInvocation({ text }: { text: string }) {
   return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
 }
 
-/** 发出消息尾部的提及引用块渲染回 chip（与输入框 chip 同底座），不再裸文本曝露 */
-/** 内联 @文件 tag：与输入框高亮叠层完全同款（色块 + @完整路径，无图标无内边距），
- * 两端样式统一；保持在句子里的原位与顺序 */
-function InlineFileTag({ path }: { path: string }) {
+/** 内联提及卡片：与输入框编辑器的卡片完全同款（图标 + 文件名/标题），
+ * 保持在句子里的原位与顺序 */
+function InlineMentionCard({
+  kind,
+  label,
+  title,
+}: {
+  kind: 'file' | 'chat';
+  label: string;
+  title: string;
+}) {
+  const Icon = kind === 'file' ? FileText : History;
   return (
-    <span className="rounded-sm bg-success/15 text-success" title={path}>
-      @{path}
+    <span
+      className={cn(
+        mentionChipClass(kind),
+        'mx-0.5 max-w-52 translate-y-0.5 rounded-md px-1.5 align-baseline leading-5'
+      )}
+      title={title}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      <span className="truncate">{label}</span>
     </span>
   );
 }
 
-/** 正文里的 @path 原位渲染成 tag，其余文本原样 */
+/** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
 function InlineMentionText({ text }: { text: string }) {
-  const segments = splitInlineFileTokens(text);
+  const segments = splitInlineMentions(text);
   return (
     <span className="whitespace-pre-wrap">
       {segments.map((segment, index) =>
         segment.type === 'file' ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
-          <InlineFileTag key={index} path={segment.path} />
+          <InlineMentionCard
+            // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
+            key={index}
+            kind="file"
+            label={segment.path.split('/').at(-1) || segment.path}
+            title={segment.path}
+          />
+        ) : segment.type === 'chat' ? (
+          <InlineMentionCard
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            kind="chat"
+            label={segment.label}
+            title={segment.sessionFile}
+          />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
           <span key={index}>{segment.text}</span>
@@ -202,6 +231,7 @@ function InlineMentionText({ text }: { text: string }) {
   );
 }
 
+/** 旧格式历史消息：尾部追加的引用块渲染成同款卡片行 */
 function MentionRefChips({
   files,
   chats,
@@ -212,15 +242,20 @@ function MentionRefChips({
   return (
     <span className="mt-1.5 flex flex-wrap gap-1.5">
       {files.map((path) => (
-        <span key={`f:${path}`} className="rounded-sm bg-success/15 text-success" title={path}>
-          @{path}
-        </span>
+        <InlineMentionCard
+          key={`f:${path}`}
+          kind="file"
+          label={path.split('/').at(-1) || path}
+          title={path}
+        />
       ))}
       {chats.map((chat) => (
-        <span key={`c:${chat.sessionFile}`} className={mentionChipClass('chat')}>
-          <History className="h-3 w-3 shrink-0" />
-          <span className="truncate">{chat.label}</span>
-        </span>
+        <InlineMentionCard
+          key={`c:${chat.sessionFile}`}
+          kind="chat"
+          label={chat.label}
+          title={chat.sessionFile}
+        />
       ))}
     </span>
   );

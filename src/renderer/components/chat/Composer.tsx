@@ -10,15 +10,11 @@ import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { ChatMentionChip, MentionChip } from './MentionChip';
+import { MentionChip } from './MentionChip';
+import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
 import { MentionPicker } from './MentionPicker';
-import type { ComposerPayload } from './mentionComposer';
-import {
-  createComposerPayload,
-  extractMentionQuery,
-  resolvePopupKeyAction,
-  splitInlineFileTokens,
-} from './mentionComposer';
+import type { ComposerPayload, MentionSegment } from './mentionComposer';
+import { createEditorPayload, resolvePopupKeyAction } from './mentionComposer';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface ComposerProps {
@@ -47,23 +43,10 @@ interface ComposerProps {
   onAbort: () => void;
 }
 
-function findSlashStart(text: string, cursor: number): number | null {
-  for (let index = cursor - 1; index >= 0; index--) {
-    const character = text[index];
-    if (character === '/') {
-      const previous = index > 0 ? text[index - 1] : ' ';
-      return previous === ' ' || previous === '\n' ? index : null;
-    }
-    if (character === ' ' || character === '\n') return null;
-  }
-  return null;
-}
-
 interface ComposerDraft {
-  text: string;
+  segments: MentionSegment[];
   images: AttachedImage[];
   slash: string | null;
-  mentions: MentionCandidate[];
   recipient?: AgentTypeMentionCandidate;
 }
 
@@ -89,20 +72,18 @@ export function Composer({
 }: ComposerProps) {
   const { t } = useI18n();
   const mentionPickerId = useId();
-  const [text, setText] = useState('');
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [slash, setSlash] = useState<string | null>(null);
-  const [mentions, setMentions] = useState<MentionCandidate[]>(() =>
-    initialRecipient ? [initialRecipient] : []
-  );
   const [recipient, setRecipient] = useState<AgentTypeMentionCandidate | undefined>(
     initialRecipient
   );
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<MentionEditorHandle>(null);
   const composingRef = useRef(false);
+  // 编辑器的纯文本投影与卡片存在性（DOM 是事实源，这里只存渲染需要的派生态）
+  const [editorPlain, setEditorPlain] = useState('');
+  const [editorHasMentions, setEditorHasMentions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionGroups = useMentionSearch(cwd, mentionQuery, chatCandidates);
   const mentionItems = useMemo(
@@ -115,33 +96,37 @@ export function Composer({
   const [folderIndex, setFolderIndex] = useState(0);
   const slashListRef = useRef<HTMLDivElement>(null);
 
-  const detect = useCallback((value: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    window.setTimeout(() => {
-      const cursor = textarea.selectionStart;
-      const mention = extractMentionQuery(value, cursor);
-      setMentionQuery(mention);
-      const slashStart = mention === null ? findSlashStart(value, cursor) : null;
-      setSlashQuery(slashStart === null ? null : value.slice(slashStart + 1, cursor));
-      setActiveIndex(0);
-      setOpenFolderId(null);
-      setFolderIndex(0);
-    }, 0);
+  /** 编辑器每次输入/光标变化回流：同步 query 与派生态，重置弹窗选中 */
+  const handleEditorState = useCallback((state: MentionEditorState) => {
+    setEditorPlain(state.plainText);
+    setEditorHasMentions(state.hasMentions);
+    setMentionQuery((previous) => {
+      if (previous !== state.mentionQuery) {
+        setActiveIndex(0);
+        setOpenFolderId(null);
+        setFolderIndex(0);
+      }
+      return state.mentionQuery;
+    });
+    setSlashQuery(state.slashQuery);
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focusKey is a switch signal; values are captured at switch time.
   useEffect(() => {
     const previous = prevFocusKeyRef.current;
-    let nextText = text;
     if (previous !== focusKey) {
-      if (previous) drafts.set(previous, { text, images, slash, mentions, recipient });
+      if (previous) {
+        drafts.set(previous, {
+          segments: editorRef.current?.getSegments() ?? [],
+          images,
+          slash,
+          recipient,
+        });
+      }
       const draft = focusKey ? drafts.get(focusKey) : undefined;
-      nextText = draft?.text ?? '';
-      setText(nextText);
+      editorRef.current?.setSegments(draft?.segments ?? []);
       setImages(draft?.images ?? []);
       setSlash(draft?.slash ?? null);
-      setMentions(draft?.mentions ?? []);
       setRecipient(draft?.recipient);
       prevFocusKeyRef.current = focusKey;
       setMentionQuery(null);
@@ -150,20 +135,12 @@ export function Composer({
       setOpenFolderId(null);
       setFolderIndex(0);
     }
-    if (autoFocus) textareaRef.current?.focus();
-    if (previous !== focusKey) {
-      const restored = nextText;
-      setTimeout(() => detect(restored), 0);
-    }
+    if (autoFocus) editorRef.current?.focus();
   }, [focusKey]);
 
   useEffect(() => {
     if (!initialRecipient) return;
     setRecipient(initialRecipient);
-    setMentions((current) => [
-      ...current.filter((mention) => mention.kind !== 'agent-type'),
-      initialRecipient,
-    ]);
     onInitialRecipientConsumed?.();
   }, [initialRecipient, onInitialRecipientConsumed]);
 
@@ -172,12 +149,9 @@ export function Composer({
     if (!injectedDraft) return;
     const parsed = splitSlashCommand(injectedDraft);
     setSlash(parsed.slash);
-    setText(parsed.rest);
+    editorRef.current?.setSegments(parsed.rest ? [{ type: 'text', text: parsed.rest }] : []);
     onDraftConsumed?.();
-    window.setTimeout(() => {
-      textareaRef.current?.focus();
-      detect(parsed.rest);
-    }, 0);
+    window.setTimeout(() => editorRef.current?.focus(), 0);
   }, [injectedDraft]);
 
   const slashResults =
@@ -192,66 +166,17 @@ export function Composer({
     item?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
-  const replaceToken = useCallback(
-    (trigger: '@' | '/', replacement: string) => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const cursor = textarea.selectionStart;
-      let start = -1;
-      for (let index = cursor - 1; index >= 0; index--) {
-        if (text[index] === trigger) {
-          start = index;
-          break;
-        }
-        if (text[index] === ' ' || text[index] === '\n') break;
-      }
-      if (start === -1) return;
-      const next = text.slice(0, start) + replacement + text.slice(cursor);
-      setText(next);
+  const pickMention = useCallback((candidate: MentionCandidate) => {
+    if (candidate.kind === 'agent-type') {
+      editorRef.current?.consumeToken('@');
+      setRecipient(candidate);
       setMentionQuery(null);
-      setSlashQuery(null);
-      const newCursor = start + replacement.length;
-      window.setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(newCursor, newCursor);
-      }, 0);
-    },
-    [text]
-  );
-
-  const pickMention = useCallback(
-    (candidate: MentionCandidate) => {
-      if (candidate.kind === 'agent-type') {
-        replaceToken('@', '');
-        setRecipient(candidate);
-        setMentions((current) => [
-          ...current.filter((mention) => mention.kind !== 'agent-type'),
-          candidate,
-        ]);
-        return;
-      }
-      if (candidate.kind === 'chat') {
-        // 标题含空格/CJK，插进文本会破坏 @ token 解析；走 chip 形态，发送时追加引用块
-        replaceToken('@', '');
-        setMentions((current) =>
-          current.some((mention) => mention.kind === 'chat' && mention.id === candidate.id)
-            ? current
-            : [...current, candidate]
-        );
-        return;
-      }
-      // 文件 @ 是内联 token：在句子里有位置/顺序语义，留在光标处，不抽成 chip 怴到最后
-      replaceToken('@', `@${candidate.relativePath} `);
-      setMentions((current) =>
-        current.some(
-          (mention) => mention.kind === 'file' && mention.relativePath === candidate.relativePath
-        )
-          ? current
-          : [...current, candidate]
-      );
-    },
-    [replaceToken]
-  );
+      return;
+    }
+    // 文件/会话都是内联原子卡片：替换当前 @token，位置/顺序语义天然保留
+    editorRef.current?.insertMention(candidate);
+    setMentionQuery(null);
+  }, []);
 
   const popupKind =
     mentionQuery !== null && mentionItems.length > 0
@@ -273,7 +198,8 @@ export function Composer({
     } else if (popupKind === 'slash') {
       const item = slashResults[activeIndex];
       if (!item) return;
-      replaceToken('/', '');
+      editorRef.current?.consumeToken('/');
+      setSlashQuery(null);
       setSlash(item.name);
     }
   }, [
@@ -284,79 +210,49 @@ export function Composer({
     mentionItems,
     pickMention,
     popupKind,
-    replaceToken,
     slashResults,
   ]);
 
-  const content = text.trim();
-  // 文件/会话 chip 不占文本，但发送时会追加引用，算有效内容
-  const hasChipMentions = mentions.some(
-    (mention) => mention.kind === 'file' || mention.kind === 'chat'
-  );
-  const hasContent = Boolean(content || slash || images.length > 0 || hasChipMentions);
+  const content = editorPlain.replaceAll('\uFFFC', '').trim();
+  const hasContent = Boolean(content || slash || images.length > 0 || editorHasMentions);
   const agentRecipient = recipient !== undefined;
   const effectiveBusy = busy && !agentRecipient;
 
   const handleSend = () => {
     if (!hasContent) return;
-    const payload = createComposerPayload({ text, slash, images, mentions, recipient });
+    const payload = createEditorPayload({
+      segments: editorRef.current?.getSegments() ?? [],
+      slash,
+      images,
+      recipient,
+    });
     if (onSend(payload) === false) return;
-    setText('');
+    editorRef.current?.clear();
     setImages([]);
     setSlash(null);
-    setMentions([]);
     setRecipient(undefined);
     setMentionQuery(null);
     setSlashQuery(null);
   };
 
-  const insertAtCursor = useCallback(
-    (snippet: string) => {
-      const textarea = textareaRef.current;
-      const cursor = textarea ? textarea.selectionStart : text.length;
-      const next = text.slice(0, cursor) + snippet + text.slice(cursor);
-      setText(next);
-      const newCursor = cursor + snippet.length;
-      window.setTimeout(() => {
-        textarea?.focus();
-        textarea?.setSelectionRange(newCursor, newCursor);
-      }, 0);
-    },
-    [text]
-  );
-
-  const ingestFiles = useCallback(
-    (files: File[]) => {
-      for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-            setImages((current) => [...current, { data: base64, mimeType: file.type }]);
-          };
-          reader.readAsDataURL(file);
-          continue;
-        }
-        const filePath = window.electronAPI.files.pathForFile(file);
-        if (!filePath) continue;
-        // 拖入的文件也走内联 token，保持位置/顺序语义
-        insertAtCursor(`@${filePath} `);
-        setMentions((current) => [
-          ...current.filter(
-            (mention) => mention.kind !== 'file' || mention.relativePath !== filePath
-          ),
-          {
-            kind: 'file',
-            id: filePath,
-            label: file.name || filePath.split('/').at(-1) || filePath,
-            relativePath: filePath,
-          },
-        ]);
+  const ingestFiles = useCallback((files: File[]) => {
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+          setImages((current) => [...current, { data: base64, mimeType: file.type }]);
+        };
+        reader.readAsDataURL(file);
+        continue;
       }
-    },
-    [insertAtCursor]
-  );
+      const filePath = window.electronAPI.files.pathForFile(file);
+      if (!filePath) continue;
+      // 拖入的文件在光标处插原子卡片，位置/顺序语义保留
+      editorRef.current?.insertFileChip(filePath);
+    }
+  }, []);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing = event.nativeEvent.isComposing || composingRef.current;
@@ -409,34 +305,17 @@ export function Composer({
       }
     }
     if (isComposing) return;
-    if (event.key === 'Backspace' && slash && text.length === 0) {
+    if (event.key === 'Backspace' && slash && content.length === 0 && !editorHasMentions) {
       event.preventDefault();
       setSlash(null);
       return;
     }
-    // 光标在行首且无选区时，Backspace 按可视顺序从后往前删 chip（会话 → Agent），
-    // 对齐常见 pill 输入框交互；chip 不占文本 token，不这样做就只能鼠标点 X。
-    // 文件是内联 token，Backspace 自然删字符即可，不在此列。
-    if (
-      event.key === 'Backspace' &&
-      textareaRef.current?.selectionStart === 0 &&
-      textareaRef.current?.selectionEnd === 0
-    ) {
-      const chats = mentions.filter((mention) => mention.kind === 'chat');
-      const victim = chats.at(-1);
-      if (victim) {
-        event.preventDefault();
-        setMentions((current) =>
-          current.filter((item) => !(item.kind === victim.kind && item.id === victim.id))
-        );
-        return;
-      }
-      if (recipient) {
-        event.preventDefault();
-        setRecipient(undefined);
-        setMentions((current) => current.filter((mention) => mention.kind !== 'agent-type'));
-        return;
-      }
+    // 文件/会话卡片是 cE=false 原子块，Backspace 浏览器原生整块删除；
+    // 只剩 recipient（编辑器外的顶部 chip）需要在编辑器全空时兼顾
+    if (event.key === 'Backspace' && recipient && editorRef.current?.isEmpty() && !slash) {
+      event.preventDefault();
+      setRecipient(undefined);
+      return;
     }
     if (event.key === 'Enter' && !event.shiftKey && enterToSend) {
       event.preventDefault();
@@ -475,7 +354,8 @@ export function Composer({
               aria-selected={index === activeIndex}
               onClick={() => {
                 setActiveIndex(index);
-                replaceToken('/', '');
+                editorRef.current?.consumeToken('/');
+                setSlashQuery(null);
                 setSlash(item.name);
               }}
               onMouseMove={() => setActiveIndex(index)}
@@ -546,29 +426,8 @@ export function Composer({
           className={cn('flex items-start gap-1.5 px-3.5', images.length > 0 ? 'pt-1.5' : 'pt-3')}
         >
           {recipient && (
-            <MentionChip
-              recipient={recipient}
-              onRemove={() => {
-                setRecipient(undefined);
-                setMentions((current) =>
-                  current.filter((mention) => mention.kind !== 'agent-type')
-                );
-              }}
-            />
+            <MentionChip recipient={recipient} onRemove={() => setRecipient(undefined)} />
           )}
-          {mentions
-            .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
-            .map((mention) => (
-              <ChatMentionChip
-                key={mention.id}
-                chat={mention}
-                onRemove={() =>
-                  setMentions((current) =>
-                    current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
-                  )
-                }
-              />
-            ))}
           {slash && (
             <SlashChip
               name={slash}
@@ -585,96 +444,47 @@ export function Composer({
               }
             />
           )}
-          <div className="relative min-w-0 flex-1">
-            {/* 高亮叠层：与 textarea 同字体同排版的镜像，@文件 token 上色块；
-                textarea 文字透明、光标保留，宽度逐字对齐故编辑行为零改动。
-                真·卡片（藏 @、带图标）需要 contentEditable 重写，另议。 */}
-            <div
-              ref={highlightRef}
-              aria-hidden
-              className="pointer-events-none absolute inset-0 overflow-hidden pt-0.5 text-sm break-words whitespace-pre-wrap"
-            >
-              {text
-                ? splitInlineFileTokens(text).map((segment, index) =>
-                    segment.type === 'file' ? (
-                      <span
-                        // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-                        key={index}
-                        className="rounded-sm bg-success/15 text-success"
-                      >
-                        @{segment.path}
-                      </span>
-                    ) : (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-                      <span key={index}>{segment.text}</span>
-                    )
-                  )
-                : null}
-              {/* 尾部换行需要占位符才能擑高,与 textarea 滚动高度保持一致 */}
-              {text.endsWith('\n') ? '\u200b' : null}
-            </div>
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(event) => {
-                const next = event.target.value;
-                setText(next);
-                // 文件 token 被删时同步清掉 mention（dispatch 的 fileMentions 依赖它）；
-                // chat/agent 走 chip 形态不占文本，只能由 chip 的 X / Backspace 移除
-                setMentions((current) =>
-                  current.filter(
-                    (mention) =>
-                      mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
-                  )
-                );
-                detect(next);
-              }}
-              onScroll={(event) => {
-                if (highlightRef.current) {
-                  highlightRef.current.scrollTop = (event.target as HTMLTextAreaElement).scrollTop;
-                }
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={(event) => {
-                const files = Array.from(event.clipboardData.files);
-                if (files.length === 0) return;
-                event.preventDefault();
-                ingestFiles(files);
-              }}
-              onCompositionStart={() => {
-                composingRef.current = true;
-              }}
-              onCompositionEnd={(event) => {
-                composingRef.current = false;
-                detect((event.target as HTMLTextAreaElement).value);
-              }}
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={popupKind !== null}
-              aria-controls={popupKind === 'mention' ? mentionPickerId : undefined}
-              aria-activedescendant={
+          <MentionEditor
+            ref={editorRef}
+            placeholder={
+              slash
+                ? ''
+                : locked
+                  ? t('Resolve the pending approval to continue')
+                  : agentRecipient
+                    ? t('Message the selected Agent…')
+                    : running
+                      ? t('Message will queue until this round finishes…')
+                      : t('Type @ to choose a file or Agent')
+            }
+            disabled={locked}
+            onStateChange={handleEditorState}
+            onKeyDown={handleKeyDown}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files);
+              if (files.length === 0) return;
+              event.preventDefault();
+              ingestFiles(files);
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
+            ariaProps={{
+              role: 'combobox',
+              'aria-autocomplete': 'list',
+              'aria-expanded': popupKind !== null,
+              'aria-controls': popupKind === 'mention' ? mentionPickerId : undefined,
+              'aria-activedescendant':
                 popupKind === 'mention'
                   ? openFolderId
                     ? `${mentionPickerId}-sub-${folderIndex}`
                     : `${mentionPickerId}-option-${activeIndex}`
-                  : undefined
-              }
-              placeholder={
-                slash
-                  ? ''
-                  : locked
-                    ? t('Resolve the pending approval to continue')
-                    : agentRecipient
-                      ? t('Message the selected Agent…')
-                      : running
-                        ? t('Message will queue until this round finishes…')
-                        : t('Type @ to choose a file or Agent')
-              }
-              disabled={locked}
-              rows={2}
-              className="max-h-40 w-full resize-none bg-transparent pt-0.5 text-sm break-words whitespace-pre-wrap text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </div>
+                  : undefined,
+            }}
+          />
         </div>
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">

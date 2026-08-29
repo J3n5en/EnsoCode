@@ -77,9 +77,12 @@ export function resolvePopupKeyAction(input: {
   return { type: 'none' };
 }
 
-/** chat 引用行格式：发送侧（createComposerPayload）与渲染侧（splitMentionRefs）共享，两边必须同步改 */
+/** chat 引用行格式：发送侧（createEditorPayload/serializeSegments）与渲染侧（splitInlineMentions/splitMentionRefs）共享，两边必须同步改 */
 function chatRefLine(label: string, sessionFile: string): string {
-  return `[Referenced past chat "${label}" — transcript file: ${sessionFile} (pi session jsonl; read it if relevant)]`;
+  // 标题可能含 "/[/]/换行（旧版污染残留或用户自定义），嵌入前必须净化，
+  // 否则惰性 "(.+?)" 会在内层引号提前结束，破坏解析与标题折叠
+  const safe = label.replace(/["\[\]\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'untitled';
+  return `[Referenced past chat "${safe}" — transcript file: ${sessionFile} (pi session jsonl; read it if relevant)]`;
 }
 const CHAT_REF_LINE =
   /^\[Referenced past chat "(.+)" — transcript file: (.+) \(pi session jsonl; read it if relevant\)\]$/;
@@ -92,6 +95,62 @@ export interface SentMentionRefs {
 }
 
 export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; path: string };
+
+/** 编辑器段模型：文本 / 文件卡片 / 会话卡片，卡片内联在任意位置 */
+export type MentionSegment =
+  | { type: 'text'; text: string }
+  | { type: 'file'; path: string }
+  | { type: 'chat'; label: string; sessionFile: string };
+
+/** 编辑器段 → wire text：文件原位 @path，会话原位内联引用块（agent 拿路径自己 read） */
+export function serializeSegments(segments: readonly MentionSegment[]): string {
+  return segments
+    .map((segment) =>
+      segment.type === 'text'
+        ? segment.text
+        : segment.type === 'file'
+          ? `@${segment.path}`
+          : chatRefLine(segment.label, segment.sessionFile)
+    )
+    .join('');
+}
+
+const INLINE_CHAT_REF =
+  /\[Referenced past chat "(.+?)" — transcript file: (.+?) \(pi session jsonl; read it if relevant\)\]/g;
+
+/** 把 chat 引用块折叠成 @标题，供标题/纯文本展示用（引用块原文不得污染标题） */
+export function mentionDisplayText(text: string): string {
+  return text.replace(INLINE_CHAT_REF, (_match, label: string) => `@${label}`);
+}
+
+/**
+ * wire text → 段：全文扫描内联 chat 引用块与 @文件 token，供气泡原位渲染卡片。
+ * 与 serializeSegments 互为逆；旧格式尾部追加的引用块同样能解到（历史消息兼容）。
+ */
+export function splitInlineMentions(text: string): MentionSegment[] {
+  const segments: MentionSegment[] = [];
+  let cursor = 0;
+  INLINE_CHAT_REF.lastIndex = 0;
+  let match = INLINE_CHAT_REF.exec(text);
+  while (match) {
+    const before = text.slice(cursor, match.index);
+    for (const segment of splitInlineFileTokens(before)) {
+      if (segment.type === 'text' && segment.text === '') continue;
+      segments.push(segment);
+    }
+    segments.push({ type: 'chat', label: match[1], sessionFile: match[2] });
+    cursor = match.index + match[0].length;
+    match = INLINE_CHAT_REF.exec(text);
+  }
+  const tail = text.slice(cursor);
+  if (tail || segments.length === 0) {
+    for (const segment of splitInlineFileTokens(tail)) {
+      if (segment.type === 'text' && segment.text === '' && segments.length > 0) continue;
+      segments.push(segment);
+    }
+  }
+  return segments;
+}
 
 /** 内联文件 token：带扩展名才算（@src/main.ts、@.DS_Store、@.gitignore），
  * 避免误伤 @types/node 这类 npm scope（无点） */
@@ -162,25 +221,36 @@ export function splitMentionRefs(text: string): SentMentionRefs {
   return { body: lines.slice(0, index).join('\n').trimEnd(), files, chats };
 }
 
-export function createComposerPayload(input: {
-  text: string;
+/** 编辑器段 → 发送 payload：wire text 内联序列化，mentions 从段派生 */
+export function createEditorPayload(input: {
+  segments: readonly MentionSegment[];
   slash: string | null;
   images: AttachedImage[];
-  mentions: MentionCandidate[];
   recipient?: AgentTypeMentionCandidate;
 }): ComposerPayload {
-  const content = input.text.trim();
-  const base = input.slash ? (content ? `${input.slash} ${content}` : input.slash) : content;
-  // 文件 @ 是内联 token（有位置/顺序语义，留在用户输入原位）；会话是附件性质
-  // 无位置语义、标题含空格也做不了 token，发送时追加引用块：只给 jsonl 路径，
-  // agent 自己按需 read，不内联不摘要。
-  const refs = input.mentions
-    .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
-    .map((mention) => chatRefLine(mention.label, mention.sessionFile));
+  const content = serializeSegments(input.segments).trim();
+  const mentions: MentionCandidate[] = input.segments
+    .filter((segment) => segment.type !== 'text')
+    .map((segment) =>
+      segment.type === 'file'
+        ? {
+            kind: 'file' as const,
+            id: segment.path,
+            label: segment.path.split('/').at(-1) || segment.path,
+            relativePath: segment.path,
+          }
+        : {
+            kind: 'chat' as const,
+            id: segment.sessionFile,
+            label: segment.label,
+            sessionFile: segment.sessionFile,
+          }
+    );
+  if (input.recipient) mentions.push(input.recipient);
   return {
-    text: refs.length > 0 ? `${base}\n\n${refs.join('\n')}` : base,
+    text: input.slash ? (content ? `${input.slash} ${content}` : input.slash) : content,
     images: input.images,
-    mentions: input.mentions,
+    mentions,
     ...(input.recipient ? { recipient: input.recipient } : {}),
   };
 }

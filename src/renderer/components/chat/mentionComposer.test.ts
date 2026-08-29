@@ -9,10 +9,13 @@ import {
   toFileMentionCandidates,
 } from '../../hooks/useMentionSearch';
 import {
-  createComposerPayload,
+  createEditorPayload,
   extractMentionQuery,
+  mentionDisplayText,
   resolvePopupKeyAction,
+  serializeSegments,
   splitInlineFileTokens,
+  splitInlineMentions,
   splitMentionRefs,
 } from './mentionComposer';
 
@@ -343,37 +346,6 @@ describe('typed multi-entity mentions', () => {
     ).toEqual({ type: 'close-folder' });
   });
 
-  it('appends past-chat references only; file mentions stay inline in the text', () => {
-    // 文件 @ 是内联 token（有位置/顺序语义，留在用户输入的原位）；
-    // 会话是附件性质无位置语义，发送时追加引用块。
-    const chat = {
-      kind: 'chat' as const,
-      id: 'c1',
-      label: 'fix login',
-      sessionFile: '/sessions/c1.jsonl',
-    };
-    const payload = createComposerPayload({
-      text: 'compare @src/main/index.ts with the old approach',
-      slash: null,
-      images: [],
-      mentions: [chat, duplicateNames[0]],
-    });
-    expect(payload.text).toBe(
-      'compare @src/main/index.ts with the old approach\n\n' +
-        '[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
-    );
-    // 无 chip mention 时文本原样；recipient(agent-type) 不产生引用块
-    expect(
-      createComposerPayload({ text: 'hi', slash: null, images: [], mentions: [agents[1]] }).text
-    ).toBe('hi');
-    // slash 前缀在引用块之前拼接
-    expect(
-      createComposerPayload({ text: 'go', slash: '/plan', images: [], mentions: [chat] }).text
-    ).toBe(
-      '/plan go\n\n[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
-    );
-  });
-
   it('splits appended mention refs back out of a sent message for chip rendering', () => {
     const chat = {
       kind: 'chat' as const,
@@ -381,14 +353,9 @@ describe('typed multi-entity mentions', () => {
       label: 'fix login',
       sessionFile: '/sessions/my chats/c1.jsonl',
     };
-    const payload = createComposerPayload({
-      text: 'continue here',
-      slash: null,
-      images: [],
-      mentions: [chat],
-    });
-    // 发送侧追加的块，渲染侧必须能无损解回：两者共享同一套格式约定
-    expect(splitMentionRefs(payload.text)).toEqual({
+    // 旧格式尾部追加的引用块，渲染侧必须能无损解回：两者共享同一套格式约定
+    const wire = `continue here\n\n[Referenced past chat "${chat.label}" — transcript file: ${chat.sessionFile} (pi session jsonl; read it if relevant)]`;
+    expect(splitMentionRefs(wire)).toEqual({
       body: 'continue here',
       files: [],
       chats: [{ label: 'fix login', sessionFile: '/sessions/my chats/c1.jsonl' }],
@@ -439,19 +406,107 @@ describe('typed multi-entity mentions', () => {
     expect(splitInlineFileTokens('hello')).toEqual([{ type: 'text', text: 'hello' }]);
   });
 
-  it('builds a typed recipient payload with explicit file context', () => {
-    const payload = createComposerPayload({
-      text: 'summarize @src/main/index.ts',
+  it('round-trips editor segments through wire text: files and chats keep inline positions', () => {
+    const segments = [
+      { type: 'text' as const, text: 'compare ' },
+      { type: 'file' as const, path: 'src/main.ts' },
+      { type: 'text' as const, text: ' with ' },
+      {
+        type: 'chat' as const,
+        label: 'fix login',
+        sessionFile: '/s/c1.jsonl',
+      },
+      { type: 'text' as const, text: ' then summarize' },
+    ];
+    const wire = serializeSegments(segments);
+    expect(wire).toBe(
+      'compare @src/main.ts with ' +
+        '[Referenced past chat "fix login" — transcript file: /s/c1.jsonl (pi session jsonl; read it if relevant)]' +
+        ' then summarize'
+    );
+    // 气泡侧全文扫描解回同样的段：两端同一套格式约定，位置/顺序无损
+    expect(splitInlineMentions(wire)).toEqual(segments);
+  });
+
+  it('splitInlineMentions tolerates plain text and does not touch npm scopes or emails', () => {
+    expect(splitInlineMentions('upgrade @types/node mail user@a.com')).toEqual([
+      { type: 'text', text: 'upgrade @types/node mail user@a.com' },
+    ]);
+    expect(splitInlineMentions('asd @.DS_Store ok')).toEqual([
+      { type: 'text', text: 'asd ' },
+      { type: 'file', path: '.DS_Store' },
+      { type: 'text', text: ' ok' },
+    ]);
+    // 旧格式尾部追加的 chat 引用块也能被全文扫描解到（兼容历史消息）
+    expect(
+      splitInlineMentions(
+        'hi\n\n[Referenced past chat "old" — transcript file: /s/o.jsonl (pi session jsonl; read it if relevant)]'
+      )
+    ).toEqual([
+      { type: 'text', text: 'hi\n\n' },
+      { type: 'chat', label: 'old', sessionFile: '/s/o.jsonl' },
+    ]);
+  });
+
+  it('collapses chat ref blocks to @label for titles/plain display', () => {
+    const wire =
+      'see [Referenced past chat "fix login" — transcript file: /s/c1.jsonl (pi session jsonl; read it if relevant)] for context';
+    expect(mentionDisplayText(wire)).toBe('see @fix login for context');
+    expect(mentionDisplayText('plain text')).toBe('plain text');
+  });
+
+  it('sanitizes hostile labels so nested quotes/brackets cannot break the ref line format', () => {
+    // 被引用会话的标题可能含 " 或旧版污染残留的 [Referenced...] 前缀，
+    // 直接嵌入会破坏引用行解析（惰性 "(.+?)" 会在内层引号提前结束）
+    const hostile = '[Referenced past chat "inner" — transcript file: x] real title';
+    const segments = [
+      { type: 'chat' as const, label: hostile, sessionFile: '/s/c9.jsonl' },
+      { type: 'text' as const, text: ' go' },
+    ];
+    const wire = serializeSegments(segments);
+    const parsed = splitInlineMentions(wire);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].type).toBe('chat');
+    if (parsed[0].type === 'chat') {
+      expect(parsed[0].sessionFile).toBe('/s/c9.jsonl');
+      expect(parsed[0].label).not.toContain('"');
+      expect(parsed[0].label).not.toContain('[');
+    }
+    expect(parsed[1]).toEqual({ type: 'text', text: ' go' });
+  });
+
+  it('builds the payload from editor segments: wire text inline, mentions derived', () => {
+    const segments = [
+      { type: 'text' as const, text: 'compare ' },
+      { type: 'file' as const, path: 'src/main.ts' },
+      { type: 'text' as const, text: ' with ' },
+      { type: 'chat' as const, label: 'fix login', sessionFile: '/s/c1.jsonl' },
+    ];
+    const payload = createEditorPayload({
+      segments,
       slash: null,
       images: [],
-      mentions: [duplicateNames[0], agents[1]],
       recipient: agents[1],
     });
-    expect(payload.recipient).toMatchObject({
-      kind: 'agent-type',
-      typeKey: 'builtin:scout',
-    });
-    expect(payload.mentions[0]).toMatchObject({ kind: 'file', id: 'src/main/index.ts' });
-    expect(payload.text).toBe('summarize @src/main/index.ts');
+    expect(payload.text).toBe(
+      'compare @src/main.ts with ' +
+        '[Referenced past chat "fix login" — transcript file: /s/c1.jsonl (pi session jsonl; read it if relevant)]'
+    );
+    // mentions 从段派生：dispatch 的 fileMentions/回显都靠它
+    expect(payload.mentions).toEqual([
+      { kind: 'file', id: 'src/main.ts', label: 'main.ts', relativePath: 'src/main.ts' },
+      { kind: 'chat', id: '/s/c1.jsonl', label: 'fix login', sessionFile: '/s/c1.jsonl' },
+      agents[1],
+    ]);
+    expect(payload.recipient).toBe(agents[1]);
+    // slash 前缀拼接；空正文只发 slash
+    expect(createEditorPayload({ segments: [], slash: '/plan', images: [] }).text).toBe('/plan');
+    expect(
+      createEditorPayload({
+        segments: [{ type: 'text', text: ' go ' }],
+        slash: '/plan',
+        images: [],
+      }).text
+    ).toBe('/plan go');
   });
 });

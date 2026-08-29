@@ -12,6 +12,8 @@ import type {
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
 import type { PairCreatedSession } from '@shared/types/pair';
+// 纯逻辑模块(仅类型级依赖),store 引用不破坏 node 环境测试
+import { mentionDisplayText } from '@/components/chat/mentionComposer';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -190,9 +192,9 @@ function firstUserText(projection: SessionProjection): string {
     .map((part) => part.text)
     .join(' ')
     .trim();
-  // 只取首行：发送时追加的提及引用块（\n\n 分隔）不得污染标题，
+  // 只取首行，且 chat 引用块折叠成 @标题：引用块原文不得污染标题，
   // 否则带换行的标题会反过来破坏 chat 引用行的单行格式
-  const firstLine = text.split('\n')[0].trim();
+  const firstLine = mentionDisplayText(text).split('\n')[0].trim();
   return (firstLine || '[image]').slice(0, 40);
 }
 
@@ -1146,7 +1148,8 @@ export const useSessionsStore = create<SessionsState>()(
                 title:
                   conversation.title ||
                   spawnTitle ||
-                  (text.split('\n')[0].trim() || '[image]').slice(0, 40),
+                  // chat 引用块折叠成 @标题，与 firstUserText 同规则
+                  (mentionDisplayText(text).split('\n')[0].trim() || '[image]').slice(0, 40),
               })
             );
             const result = await window.electronAPI.agent.spawn({

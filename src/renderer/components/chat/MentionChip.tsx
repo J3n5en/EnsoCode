@@ -53,20 +53,3 @@ export function MentionChip({ recipient, onRemove }: MentionChipProps) {
     </span>
   );
 }
-
-interface ChatMentionChipProps {
-  chat: ChatMentionCandidate;
-  onRemove: () => void;
-}
-
-/** 过去会话引用 chip：标题含空格不能走文本 token，发送时由 createComposerPayload 追加引用块。 */
-export function ChatMentionChip({ chat, onRemove }: ChatMentionChipProps) {
-  const { t } = useI18n();
-  return (
-    <span className={cn(mentionChipClass('chat'), 'mt-0.5 shrink-0')}>
-      <History className="h-3 w-3 shrink-0" />
-      <span className="truncate">{chat.label}</span>
-      <RemoveButton label={t('Remove chat reference')} onRemove={onRemove} />
-    </span>
-  );
-}
