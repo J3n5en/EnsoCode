@@ -1,5 +1,7 @@
 import type { Project } from '@shared/types';
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   FolderGit2,
   FolderPlus,
@@ -21,7 +23,11 @@ import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { pinnedConversationIds, projectConversationIds } from '@/stores/sessions/pinned';
+import {
+  archivedConversationIds,
+  pinnedConversationIds,
+  projectConversationIds,
+} from '@/stores/sessions/pinned';
 import { useSettingsStore } from '@/stores/settings';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
@@ -48,6 +54,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const selectConversation = useSessionsStore((state) => state.selectConversation);
   const removeConversation = useSessionsStore((state) => state.removeConversation);
   const togglePinConversation = useSessionsStore((state) => state.togglePinConversation);
+  const toggleArchiveConversation = useSessionsStore((state) => state.toggleArchiveConversation);
 
   // 折叠的项目分组（记忆到 localStorage）
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
@@ -83,6 +90,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
   const pinnedIds = pinnedConversationIds(order, conversations);
+  const archivedIds = archivedConversationIds(order, conversations);
+  // 底部「已归档」栏目的折叠态(缺省收起,重启回到收起)
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   // 相对时间每分钟自刷（“3 分钟前”不随时间僵住）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -168,6 +178,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
                   onSelect={selectConversation}
                   onTogglePin={togglePinConversation}
+                  onToggleArchive={toggleArchiveConversation}
                   onRemove={(conversationId) =>
                     setPendingRemove({ kind: 'conversation', id: conversationId })
                   }
@@ -248,6 +259,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                       nowTick={nowTick}
                       onSelect={selectConversation}
                       onTogglePin={togglePinConversation}
+                      onToggleArchive={toggleArchiveConversation}
                       onRemove={(conversationId) =>
                         setPendingRemove({ kind: 'conversation', id: conversationId })
                       }
@@ -281,6 +293,52 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             </div>
           );
         })}
+        {archivedIds.length > 0 && (
+          <div data-slot="archived-section" className="pt-1">
+            <button
+              type="button"
+              onClick={() => setArchivedOpen((open) => !open)}
+              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <ChevronRight
+                  className={cn(
+                    'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                    archivedOpen && 'rotate-90'
+                  )}
+                />
+              </span>
+              <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                {t('Archived')}
+              </span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {archivedIds.length}
+              </span>
+            </button>
+            {archivedOpen && (
+              <div className="mt-0.5 flex flex-col gap-y-0.5">
+                {archivedIds.map((id) => (
+                  <ConversationRow
+                    key={id}
+                    id={id}
+                    conversation={conversations[id]}
+                    active={activeId === id}
+                    locale={locale}
+                    nowTick={nowTick}
+                    hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                    onSelect={selectConversation}
+                    onTogglePin={togglePinConversation}
+                    onToggleArchive={toggleArchiveConversation}
+                    onRemove={(conversationId) =>
+                      setPendingRemove({ kind: 'conversation', id: conversationId })
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center justify-between border-t p-2">
@@ -340,6 +398,7 @@ interface ConversationRowProps {
     status: string;
     spawning: boolean;
     pinned?: boolean;
+    archived?: boolean;
     createdAt: number;
     messages: { timestamp?: number }[];
   };
@@ -350,10 +409,14 @@ interface ConversationRowProps {
   hoverTitle?: string;
   onSelect: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onToggleArchive: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
-/** 侧栏会话行：Pinned 栏目与项目分组共用。hover 时露出置顶/删除按钮。 */
+/**
+ * 侧栏会话行：Pinned/项目/Archived 三处共用。hover 时露出操作按钮：
+ * 常规行 = 置顶 + 归档 + 删除；归档行 = 还原 + 删除（不可置顶）。
+ */
 function ConversationRow({
   id,
   conversation,
@@ -363,10 +426,12 @@ function ConversationRow({
   hoverTitle,
   onSelect,
   onTogglePin,
+  onToggleArchive,
   onRemove,
 }: ConversationRowProps) {
   const { t } = useI18n();
   const pinned = conversation.pinned === true;
+  const archived = conversation.archived === true;
   const PinIcon = pinned ? PinOff : Pin;
   return (
     <div
@@ -393,16 +458,33 @@ function ConversationRow({
           nowTick
         )}
       </span>
+      {!archived && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin(id);
+          }}
+          className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
+          title={pinned ? t('Unpin') : t('Pin')}
+        >
+          <PinIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onTogglePin(id);
+          onToggleArchive(id);
         }}
         className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
-        title={pinned ? t('Unpin') : t('Pin')}
+        title={archived ? t('Unarchive') : t('Archive')}
       >
-        <PinIcon className="h-3.5 w-3.5" />
+        {archived ? (
+          <ArchiveRestore className="h-3.5 w-3.5" />
+        ) : (
+          <Archive className="h-3.5 w-3.5" />
+        )}
       </button>
       <button
         type="button"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { pinnedConversationIds, projectConversationIds } from './pinned';
+import { archivedConversationIds, pinnedConversationIds, projectConversationIds } from './pinned';
 
-type Minimal = { projectId: string; pinned?: boolean; parentId?: string };
+type Minimal = { projectId: string; pinned?: boolean; archived?: boolean; parentId?: string };
 
 const conversations: Record<string, Minimal> = {
   a: { projectId: 'p1' },
@@ -15,6 +15,12 @@ const conversations: Record<string, Minimal> = {
 // order 新的在前
 const order = ['a', 'b', 'c', 'd', 'e'];
 
+const withArchived: Record<string, Minimal> = {
+  ...conversations,
+  b: { projectId: 'p1', pinned: true, archived: true },
+  d: { projectId: 'p1', archived: true },
+};
+
 describe('projectConversationIds', () => {
   it('置顶的排最前,组内保持 order 相对顺序', () => {
     expect(projectConversationIds(order, conversations, 'p1')).toEqual(['b', 'e', 'a', 'd']);
@@ -27,6 +33,21 @@ describe('projectConversationIds', () => {
 
   it('脏输入不崩:order 里有 conversations 缺失的 id', () => {
     expect(projectConversationIds(['x', 'b'], conversations, 'p1')).toEqual(['b']);
+  });
+});
+
+describe('archived 与分组的互斥', () => {
+  it('归档的不进项目分组', () => {
+    expect(projectConversationIds(order, withArchived, 'p1')).toEqual(['e', 'a']);
+  });
+
+  it('归档的不进置顶栏(即使还残留 pinned 标记)', () => {
+    expect(pinnedConversationIds(order, withArchived)).toEqual(['c', 'e']);
+  });
+
+  it('archivedConversationIds 按 order 收集归档会话', () => {
+    expect(archivedConversationIds(order, withArchived)).toEqual(['b', 'd']);
+    expect(archivedConversationIds(order, conversations)).toEqual([]);
   });
 });
 
