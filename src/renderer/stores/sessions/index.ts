@@ -1266,32 +1266,8 @@ export const useSessionsStore = create<SessionsState>()(
                 })
               : patch(state, id, { spawning: false, status: 'failed', error: result.error })
           );
-          if (!result.ok) return;
-          // 级联恢复 coworker：命令 sessionId 都是父 id,OperationGate 保证排在父 spawn 之后
-          for (const coworkerId of conversation.coworkerIds ?? []) {
-            const coworker = get().conversations[coworkerId];
-            if (!coworker?.sessionFile || coworker.started || coworker.spawning) continue;
-            set((state) => patch(state, coworkerId, { spawning: true }));
-            void window.electronAPI.agent
-              .spawnCoworker(
-                id,
-                coworkerId,
-                coworker.coworkerName ?? coworker.title,
-                coworker.agentType,
-                coworker.sessionFile
-              )
-              .then((res) => {
-                set((state) =>
-                  res.ok
-                    ? patch(state, coworkerId, { started: true })
-                    : patch(state, coworkerId, {
-                        spawning: false,
-                        status: 'failed',
-                        error: res.error,
-                      })
-                );
-              });
-          }
+          // child 的级联恢复在 Main 侧：parent-ready 后 Main 按自己读的持久化恢复
+          // 未 ended 的 child（渲染层不传路径、不指定身份），tab 由事件回流重建。
         },
 
         async addImportedConversation(projectId, imported) {
@@ -1569,30 +1545,12 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        async hireCoworker(parentId, name, agentType) {
+        async hireCoworker(parentId, name, _agentType) {
           const parent = get().conversations[parentId];
           if (!parent?.started) return 'conversation not started';
-          const slug = name
-            .toLowerCase()
-            .replace(/[^a-z0-9_-]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 32);
-          if (!slug) return 'invalid name';
-          const coworkerId = `${parentId}::cw-${slug}`;
-          const taken = (parent.coworkerIds ?? []).some(
-            (id) => id === coworkerId || get().conversations[id]?.coworkerName === name
-          );
-          if (taken) return 'name already in use';
-          const result = await window.electronAPI.agent.spawnCoworker(
-            parentId,
-            coworkerId,
-            name,
-            agentType
-          );
-          if (!result.ok) return result.error ?? 'hire failed';
-          // 会话对象由 coworker-update 回流建立;先切过去,displayed 在此之前回落父会话
-          set((state) => patch(state, parentId, { activeTabId: coworkerId }));
-          return null;
+          if (!name.trim()) return 'invalid name';
+          // 旧直雇通道已被 Main 权威派发架构封死；新 IPC 接 dispatchService 后恢复可用。
+          return 'hire is temporarily unavailable — use @Agent mention to dispatch';
         },
       };
     },

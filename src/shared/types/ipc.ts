@@ -64,7 +64,6 @@ export const IPC_CHANNELS = {
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
-  AGENT_SPAWN_COWORKER: 'agent:spawn-coworker',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',
 

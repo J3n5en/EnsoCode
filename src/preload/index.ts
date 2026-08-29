@@ -216,22 +216,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images),
     abort: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
-    /** 恢复 coworker（父会话 resume 级联;spawn 命令排在父 spawn 之后） */
-    spawnCoworker: (
-      parentSessionId: string,
-      coworkerId: string,
-      name: string,
-      agentType?: string,
-      resumeFile?: string
-    ): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(
-        IPC_CHANNELS.AGENT_SPAWN_COWORKER,
-        parentSessionId,
-        coworkerId,
-        name,
-        agentType,
-        resumeFile
-      ),
     respondAsk: (
       sessionId: string,
       requestId: string,

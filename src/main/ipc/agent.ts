@@ -500,14 +500,6 @@ export function registerAgentHandlers(): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.AGENT_SPAWN_COWORKER,
-    (): AgentActionResult => ({
-      ok: false,
-      error: 'Direct child identity is not allowed; use Main Agent dispatch.',
-    })
-  );
-
-  ipcMain.handle(
     IPC_CHANNELS.AGENT_DISMISS_COWORKER,
     (_event, parentSessionId: unknown, coworkerId: unknown, notify: unknown): AgentActionResult => {
       const parent = exactIdentity(parentSessionId);
