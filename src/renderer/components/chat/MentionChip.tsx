@@ -1,9 +1,5 @@
-import type {
-  AgentTypeMentionCandidate,
-  ChatMentionCandidate,
-  FileMentionCandidate,
-} from '@shared/types/mentions';
-import { Bot, FileText, History, X } from 'lucide-react';
+import type { AgentTypeMentionCandidate, ChatMentionCandidate } from '@shared/types/mentions';
+import { Bot, History, X } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -54,23 +50,6 @@ export function MentionChip({ recipient, onRemove }: MentionChipProps) {
       <span className="truncate">{recipient.label}</span>
       <RemoveButton label={t('Remove Agent recipient')} onRemove={onRemove} />
       <span className="sr-only">{recipient.typeKey}</span>
-    </span>
-  );
-}
-
-interface FileMentionChipProps {
-  file: FileMentionCandidate;
-  onRemove: () => void;
-}
-
-/** 文件提及 chip：不再往文本插 @path token，发送时由 createComposerPayload 统一追加。 */
-export function FileMentionChip({ file, onRemove }: FileMentionChipProps) {
-  const { t } = useI18n();
-  return (
-    <span className={cn(mentionChipClass('file'), 'mt-0.5 shrink-0')} title={file.relativePath}>
-      <FileText className="h-3 w-3 shrink-0" />
-      <span className="truncate">{file.label}</span>
-      <RemoveButton label={t('Remove file reference')} onRemove={onRemove} />
     </span>
   );
 }

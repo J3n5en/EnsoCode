@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleDot,
   Copy,
+  FileText,
   History,
   ListTodo,
   LoaderCircle,
@@ -34,6 +35,8 @@ import type { TimelineItem } from '@/stores/sessions/timeline';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
+import { mentionChipClass } from './MentionChip';
+import { splitMentionRefs } from './mentionComposer';
 import { ReadFileView } from './ReadFileView';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
@@ -171,9 +174,55 @@ function SlashInvocation({ text }: { text: string }) {
   return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
 }
 
+/** 发出消息尾部的提及引用块渲染回 chip（与输入框 chip 同底座），不再裸文本曝露 */
+function MentionRefChips({
+  files,
+  chats,
+}: {
+  files: string[];
+  chats: { label: string; sessionFile: string }[];
+}) {
+  return (
+    <span className="mt-1.5 flex flex-wrap gap-1.5">
+      {files.map((path) => (
+        <span key={`f:${path}`} className={mentionChipClass('file')} title={path}>
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="truncate">{path.split('/').at(-1) || path}</span>
+        </span>
+      ))}
+      {chats.map((chat) => (
+        <span key={`c:${chat.sessionFile}`} className={mentionChipClass('chat')}>
+          <History className="h-3 w-3 shrink-0" />
+          <span className="truncate">{chat.label}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({ text }: { text: string }) {
   const { t } = useI18n();
+  const refs = splitMentionRefs(text);
+  const hasRefs = refs.files.length > 0 || refs.chats.length > 0;
+  if (hasRefs) {
+    const parsed = splitSlashCommand(refs.body);
+    return (
+      <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
+        {parsed.slash ? (
+          <>
+            <SlashChip name={parsed.slash} />
+            {parsed.rest.trim() ? (
+              <span className="ml-1.5 align-middle whitespace-pre-wrap">{parsed.rest.trim()}</span>
+            ) : null}
+          </>
+        ) : (
+          <span className="whitespace-pre-wrap">{refs.body}</span>
+        )}
+        <MentionRefChips files={refs.files} chats={refs.chats} />
+      </div>
+    );
+  }
   if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
   if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const block = SYNTHETIC_BLOCK.exec(text);

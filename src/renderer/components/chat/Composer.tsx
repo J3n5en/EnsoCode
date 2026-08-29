@@ -2,7 +2,6 @@ import type { AttachedImage, SlashCommand } from '@shared/types/agent';
 import type {
   AgentTypeMentionCandidate,
   ChatMentionCandidate,
-  FileMentionCandidate,
   MentionCandidate,
 } from '@shared/types/mentions';
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
@@ -11,14 +10,13 @@ import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { ChatMentionChip, FileMentionChip, MentionChip } from './MentionChip';
+import { ChatMentionChip, MentionChip } from './MentionChip';
 import { MentionPicker } from './MentionPicker';
 import type { ComposerPayload } from './mentionComposer';
 import {
   createComposerPayload,
   extractMentionQuery,
   resolvePopupKeyAction,
-  unresolvedMentionToken,
 } from './mentionComposer';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
@@ -240,8 +238,8 @@ export function Composer({
         );
         return;
       }
-      // 文件同样走 chip 形态（色块 tag 无法在 textarea 内渲染），发送时追加 @path
-      replaceToken('@', '');
+      // 文件 @ 是内联 token：在句子里有位置/顺序语义，留在光标处，不抽成 chip 怴到最后
+      replaceToken('@', `@${candidate.relativePath} `);
       setMentions((current) =>
         current.some(
           (mention) => mention.kind === 'file' && mention.relativePath === candidate.relativePath
@@ -288,7 +286,6 @@ export function Composer({
     slashResults,
   ]);
 
-  const unresolvedToken = unresolvedMentionToken(text, mentions);
   const content = text.trim();
   // 文件/会话 chip 不占文本，但发送时会追加引用，算有效内容
   const hasChipMentions = mentions.some(
@@ -299,7 +296,7 @@ export function Composer({
   const effectiveBusy = busy && !agentRecipient;
 
   const handleSend = () => {
-    if (!hasContent || unresolvedToken) return;
+    if (!hasContent) return;
     const payload = createComposerPayload({ text, slash, images, mentions, recipient });
     if (onSend(payload) === false) return;
     setText('');
@@ -311,34 +308,53 @@ export function Composer({
     setSlashQuery(null);
   };
 
-  const ingestFiles = useCallback((files: File[]) => {
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-          setImages((current) => [...current, { data: base64, mimeType: file.type }]);
-        };
-        reader.readAsDataURL(file);
-        continue;
+  const insertAtCursor = useCallback(
+    (snippet: string) => {
+      const textarea = textareaRef.current;
+      const cursor = textarea ? textarea.selectionStart : text.length;
+      const next = text.slice(0, cursor) + snippet + text.slice(cursor);
+      setText(next);
+      const newCursor = cursor + snippet.length;
+      window.setTimeout(() => {
+        textarea?.focus();
+        textarea?.setSelectionRange(newCursor, newCursor);
+      }, 0);
+    },
+    [text]
+  );
+
+  const ingestFiles = useCallback(
+    (files: File[]) => {
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+            setImages((current) => [...current, { data: base64, mimeType: file.type }]);
+          };
+          reader.readAsDataURL(file);
+          continue;
+        }
+        const filePath = window.electronAPI.files.pathForFile(file);
+        if (!filePath) continue;
+        // 拖入的文件也走内联 token，保持位置/顺序语义
+        insertAtCursor(`@${filePath} `);
+        setMentions((current) => [
+          ...current.filter(
+            (mention) => mention.kind !== 'file' || mention.relativePath !== filePath
+          ),
+          {
+            kind: 'file',
+            id: filePath,
+            label: file.name || filePath.split('/').at(-1) || filePath,
+            relativePath: filePath,
+          },
+        ]);
       }
-      const filePath = window.electronAPI.files.pathForFile(file);
-      if (!filePath) continue;
-      // 拖入的文件同样走 chip，不再往文本插 @path
-      setMentions((current) => [
-        ...current.filter(
-          (mention) => mention.kind !== 'file' || mention.relativePath !== filePath
-        ),
-        {
-          kind: 'file',
-          id: filePath,
-          label: file.name || filePath.split('/').at(-1) || filePath,
-          relativePath: filePath,
-        },
-      ]);
-    }
-  }, []);
+    },
+    [insertAtCursor]
+  );
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing = event.nativeEvent.isComposing || composingRef.current;
@@ -396,16 +412,16 @@ export function Composer({
       setSlash(null);
       return;
     }
-    // 光标在行首且无选区时，Backspace 按可视顺序从后往前删 chip（会话 → 文件 → Agent），
+    // 光标在行首且无选区时，Backspace 按可视顺序从后往前删 chip（会话 → Agent），
     // 对齐常见 pill 输入框交互；chip 不占文本 token，不这样做就只能鼠标点 X。
+    // 文件是内联 token，Backspace 自然删字符即可，不在此列。
     if (
       event.key === 'Backspace' &&
       textareaRef.current?.selectionStart === 0 &&
       textareaRef.current?.selectionEnd === 0
     ) {
       const chats = mentions.filter((mention) => mention.kind === 'chat');
-      const files = mentions.filter((mention) => mention.kind === 'file');
-      const victim = chats.at(-1) ?? files.at(-1);
+      const victim = chats.at(-1);
       if (victim) {
         event.preventDefault();
         setMentions((current) =>
@@ -539,19 +555,6 @@ export function Composer({
             />
           )}
           {mentions
-            .filter((mention): mention is FileMentionCandidate => mention.kind === 'file')
-            .map((mention) => (
-              <FileMentionChip
-                key={mention.id}
-                file={mention}
-                onRemove={() =>
-                  setMentions((current) =>
-                    current.filter((item) => !(item.kind === 'file' && item.id === mention.id))
-                  )
-                }
-              />
-            ))}
-          {mentions
             .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
             .map((mention) => (
               <ChatMentionChip
@@ -586,6 +589,13 @@ export function Composer({
             onChange={(event) => {
               const next = event.target.value;
               setText(next);
+              // 文件 token 被删时同步清掉 mention（dispatch 的 fileMentions 依赖它）；
+              // chat/agent 走 chip 形态不占文本，只能由 chip 的 X / Backspace 移除
+              setMentions((current) =>
+                current.filter(
+                  (mention) => mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
+                )
+              );
               detect(next);
             }}
             onKeyDown={handleKeyDown}
@@ -629,14 +639,7 @@ export function Composer({
             className="max-h-40 min-w-0 flex-1 resize-none bg-transparent pt-0.5 text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
-        {unresolvedToken && (
-          <p role="alert" className="px-3.5 pt-1 text-[11px] text-destructive">
-            {t('Choose a mention suggestion before sending')}: @{unresolvedToken}
-          </p>
-        )}
-        {agentRecipient && !unresolvedToken && (
-          <p className="sr-only">{t('Send only to the selected Agent')}</p>
-        )}
+        {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
           {effectiveBusy ? (
@@ -648,7 +651,7 @@ export function Composer({
               size="icon"
               className="h-7 w-7 rounded-lg"
               onClick={handleSend}
-              disabled={!hasContent || Boolean(unresolvedToken) || locked}
+              disabled={!hasContent || locked}
               aria-label={agentRecipient ? t('Send only to the selected Agent') : t('Send')}
               title={agentRecipient ? t('Send only to the selected Agent') : t('Send')}
             >

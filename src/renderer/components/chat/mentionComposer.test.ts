@@ -12,7 +12,7 @@ import {
   createComposerPayload,
   extractMentionQuery,
   resolvePopupKeyAction,
-  unresolvedMentionToken,
+  splitMentionRefs,
 } from './mentionComposer';
 
 const registry: AgentTypeCandidate[] = [
@@ -144,6 +144,23 @@ describe('typed multi-entity mentions', () => {
       createdAt: i,
     }));
     expect(toChatMentionCandidates(many, 'p1', 'self')).toHaveLength(20);
+    // 旧数据污染：标题被追加引用块污染过（含换行），label 必须压成单行，
+    // 否则拼进 chat 引用行会破坏单行格式、渲染侧解不回 chip
+    expect(
+      toChatMentionCandidates(
+        [
+          {
+            id: 'dirty',
+            title: 'upgrade deps\n\n@README.md\n[Referenced',
+            projectId: 'p1',
+            sessionFile: '/s/dirty.jsonl',
+            createdAt: 1,
+          },
+        ],
+        'p1',
+        'self'
+      )[0].label
+    ).toBe('upgrade deps');
   });
 
   it('groups chat candidates by title match and nests them as a second folder', () => {
@@ -185,17 +202,9 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
-  it('detects only cursor-local mention tokens and refuses unresolved tokens', () => {
+  it('detects only cursor-local mention tokens', () => {
     expect(extractMentionQuery('hello @Ens', 10)).toBe('Ens');
     expect(extractMentionQuery('mail@example.com', 16)).toBeNull();
-    expect(unresolvedMentionToken('review @src/main/index.ts', duplicateNames)).toBeNull();
-    const spacedPath = toFileMentionCandidates([
-      { name: 'design notes.md', relativePath: 'docs/design notes.md' },
-    ]);
-    expect(unresolvedMentionToken('review @docs/design notes.md', spacedPath)).toBeNull();
-    expect(unresolvedMentionToken('review @not-selected.ts', duplicateNames)).toBe(
-      'not-selected.ts'
-    );
   });
 
   it('supports wraparound keyboard selection, Tab, Escape, and IME-safe Enter', () => {
@@ -333,9 +342,9 @@ describe('typed multi-entity mentions', () => {
     ).toEqual({ type: 'close-folder' });
   });
 
-  it('appends file and past-chat references for chip mentions at send time', () => {
-    // 文件/会话都走 chip 形态不占文本 token（色块 tag 无法在 textarea 内渲染），
-    // 发送时统一追加：文件给 @path token，会话给 jsonl 路径引用块。
+  it('appends past-chat references only; file mentions stay inline in the text', () => {
+    // 文件 @ 是内联 token（有位置/顺序语义，留在用户输入的原位）；
+    // 会话是附件性质无位置语义，发送时追加引用块。
     const chat = {
       kind: 'chat' as const,
       id: 'c1',
@@ -343,14 +352,13 @@ describe('typed multi-entity mentions', () => {
       sessionFile: '/sessions/c1.jsonl',
     };
     const payload = createComposerPayload({
-      text: 'continue from where we left off',
+      text: 'compare @src/main/index.ts with the old approach',
       slash: null,
       images: [],
       mentions: [chat, duplicateNames[0]],
     });
     expect(payload.text).toBe(
-      'continue from where we left off\n\n' +
-        `@${duplicateNames[0].relativePath}\n` +
+      'compare @src/main/index.ts with the old approach\n\n' +
         '[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
     );
     // 无 chip mention 时文本原样；recipient(agent-type) 不产生引用块
@@ -365,9 +373,44 @@ describe('typed multi-entity mentions', () => {
     );
   });
 
+  it('splits appended mention refs back out of a sent message for chip rendering', () => {
+    const chat = {
+      kind: 'chat' as const,
+      id: 'c1',
+      label: 'fix login',
+      sessionFile: '/sessions/my chats/c1.jsonl',
+    };
+    const payload = createComposerPayload({
+      text: 'continue here',
+      slash: null,
+      images: [],
+      mentions: [chat],
+    });
+    // 发送侧追加的块，渲染侧必须能无损解回：两者共享同一套格式约定
+    expect(splitMentionRefs(payload.text)).toEqual({
+      body: 'continue here',
+      files: [],
+      chats: [{ label: 'fix login', sessionFile: '/sessions/my chats/c1.jsonl' }],
+    });
+    // 无引用块：原样返回，不误伤正文里的 @ 与方括号
+    expect(splitMentionRefs('hi @someone\n\nsee [docs] please')).toEqual({
+      body: 'hi @someone\n\nsee [docs] please',
+      files: [],
+      chats: [],
+    });
+    // 历史消息兼容：旧版本追加过 @path 行，仍能解回 chip；只剥尾部完整匹配块
+    expect(
+      splitMentionRefs('para one\n\npara two\n\n@src/main/index.ts\n@src/renderer/index.ts')
+    ).toEqual({
+      body: 'para one\n\npara two',
+      files: ['src/main/index.ts', 'src/renderer/index.ts'],
+      chats: [],
+    });
+  });
+
   it('builds a typed recipient payload with explicit file context', () => {
     const payload = createComposerPayload({
-      text: 'summarize this file',
+      text: 'summarize @src/main/index.ts',
       slash: null,
       images: [],
       mentions: [duplicateNames[0], agents[1]],
@@ -378,6 +421,6 @@ describe('typed multi-entity mentions', () => {
       typeKey: 'builtin:scout',
     });
     expect(payload.mentions[0]).toMatchObject({ kind: 'file', id: 'src/main/index.ts' });
-    expect(payload.text).toBe('summarize this file\n\n@src/main/index.ts');
+    expect(payload.text).toBe('summarize @src/main/index.ts');
   });
 });

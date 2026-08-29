@@ -89,7 +89,9 @@ export function toChatMentionCandidates(
     .map((conversation) => ({
       kind: 'chat' as const,
       id: conversation.id,
-      label: conversation.title || 'Untitled chat',
+      // 旧数据的标题可能被追加引用块污染过（含换行）：取首行，
+      // 否则拼进 chat 引用行会破坏单行格式、渲染侧解不回 chip
+      label: conversation.title.split('\n')[0].trim() || 'Untitled chat',
       sessionFile: conversation.sessionFile as string,
     }));
 }
