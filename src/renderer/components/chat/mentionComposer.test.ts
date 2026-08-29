@@ -424,6 +424,13 @@ describe('typed multi-entity mentions', () => {
       { type: 'file', path: 'docs/a.md' },
       { type: 'text', text: '.' },
     ]);
+    // 隐藏文件与长扩展名：.DS_Store（下划线）、.gitignore（9 位）
+    expect(splitInlineFileTokens('asd @.DS_Store and @.gitignore')).toEqual([
+      { type: 'text', text: 'asd ' },
+      { type: 'file', path: '.DS_Store' },
+      { type: 'text', text: ' and ' },
+      { type: 'file', path: '.gitignore' },
+    ]);
     // 不误伤：无扩展名的 npm scope、邮箱（@ 前非空白）、裸 @
     expect(splitInlineFileTokens('upgrade @types/node mail user@a.com @ ok')).toEqual([
       { type: 'text', text: 'upgrade @types/node mail user@a.com @ ok' },

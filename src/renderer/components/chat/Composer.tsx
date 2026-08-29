@@ -17,6 +17,7 @@ import {
   createComposerPayload,
   extractMentionQuery,
   resolvePopupKeyAction,
+  splitInlineFileTokens,
 } from './mentionComposer';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
@@ -100,6 +101,7 @@ export function Composer({
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionGroups = useMentionSearch(cwd, mentionQuery, chatCandidates);
@@ -583,61 +585,96 @@ export function Composer({
               }
             />
           )}
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(event) => {
-              const next = event.target.value;
-              setText(next);
-              // 文件 token 被删时同步清掉 mention（dispatch 的 fileMentions 依赖它）；
-              // chat/agent 走 chip 形态不占文本，只能由 chip 的 X / Backspace 移除
-              setMentions((current) =>
-                current.filter(
-                  (mention) => mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
-                )
-              );
-              detect(next);
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={(event) => {
-              const files = Array.from(event.clipboardData.files);
-              if (files.length === 0) return;
-              event.preventDefault();
-              ingestFiles(files);
-            }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={(event) => {
-              composingRef.current = false;
-              detect((event.target as HTMLTextAreaElement).value);
-            }}
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={popupKind !== null}
-            aria-controls={popupKind === 'mention' ? mentionPickerId : undefined}
-            aria-activedescendant={
-              popupKind === 'mention'
-                ? openFolderId
-                  ? `${mentionPickerId}-sub-${folderIndex}`
-                  : `${mentionPickerId}-option-${activeIndex}`
-                : undefined
-            }
-            placeholder={
-              slash
-                ? ''
-                : locked
-                  ? t('Resolve the pending approval to continue')
-                  : agentRecipient
-                    ? t('Message the selected Agent…')
-                    : running
-                      ? t('Message will queue until this round finishes…')
-                      : t('Type @ to choose a file or Agent')
-            }
-            disabled={locked}
-            rows={2}
-            className="max-h-40 min-w-0 flex-1 resize-none bg-transparent pt-0.5 text-sm outline-none placeholder:text-muted-foreground"
-          />
+          <div className="relative min-w-0 flex-1">
+            {/* 高亮叠层：与 textarea 同字体同排版的镜像，@文件 token 上色块；
+                textarea 文字透明、光标保留，宽度逐字对齐故编辑行为零改动。
+                真·卡片（藏 @、带图标）需要 contentEditable 重写，另议。 */}
+            <div
+              ref={highlightRef}
+              aria-hidden
+              className="pointer-events-none absolute inset-0 overflow-hidden pt-0.5 text-sm break-words whitespace-pre-wrap"
+            >
+              {text
+                ? splitInlineFileTokens(text).map((segment, index) =>
+                    segment.type === 'file' ? (
+                      <span
+                        // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+                        key={index}
+                        className="rounded-sm bg-success/15 text-success"
+                      >
+                        @{segment.path}
+                      </span>
+                    ) : (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+                      <span key={index}>{segment.text}</span>
+                    )
+                  )
+                : null}
+              {/* 尾部换行需要占位符才能擑高,与 textarea 滚动高度保持一致 */}
+              {text.endsWith('\n') ? '\u200b' : null}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(event) => {
+                const next = event.target.value;
+                setText(next);
+                // 文件 token 被删时同步清掉 mention（dispatch 的 fileMentions 依赖它）；
+                // chat/agent 走 chip 形态不占文本，只能由 chip 的 X / Backspace 移除
+                setMentions((current) =>
+                  current.filter(
+                    (mention) =>
+                      mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
+                  )
+                );
+                detect(next);
+              }}
+              onScroll={(event) => {
+                if (highlightRef.current) {
+                  highlightRef.current.scrollTop = (event.target as HTMLTextAreaElement).scrollTop;
+                }
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files);
+                if (files.length === 0) return;
+                event.preventDefault();
+                ingestFiles(files);
+              }}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={(event) => {
+                composingRef.current = false;
+                detect((event.target as HTMLTextAreaElement).value);
+              }}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={popupKind !== null}
+              aria-controls={popupKind === 'mention' ? mentionPickerId : undefined}
+              aria-activedescendant={
+                popupKind === 'mention'
+                  ? openFolderId
+                    ? `${mentionPickerId}-sub-${folderIndex}`
+                    : `${mentionPickerId}-option-${activeIndex}`
+                  : undefined
+              }
+              placeholder={
+                slash
+                  ? ''
+                  : locked
+                    ? t('Resolve the pending approval to continue')
+                    : agentRecipient
+                      ? t('Message the selected Agent…')
+                      : running
+                        ? t('Message will queue until this round finishes…')
+                        : t('Type @ to choose a file or Agent')
+              }
+              disabled={locked}
+              rows={2}
+              className="max-h-40 w-full resize-none bg-transparent pt-0.5 text-sm break-words whitespace-pre-wrap text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
         </div>
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">

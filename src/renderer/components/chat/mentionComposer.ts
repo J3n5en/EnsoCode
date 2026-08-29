@@ -93,8 +93,9 @@ export interface SentMentionRefs {
 
 export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; path: string };
 
-/** 内联文件 token：末段带扩展名才算（@src/main.ts），避免误伤 @types/node 这类 npm scope */
-const INLINE_FILE_TOKEN = /^[\w./-]*\.[A-Za-z0-9]{1,8}$/;
+/** 内联文件 token：带扩展名才算（@src/main.ts、@.DS_Store、@.gitignore），
+ * 避免误伤 @types/node 这类 npm scope（无点） */
+const INLINE_FILE_TOKEN = /^[\w./-]*\.[\w-]{1,16}$/;
 
 /**
  * 把文本拆成普通段与内联 @文件 段，供发出的气泡原位渲染成 tag（Cursor 式）。

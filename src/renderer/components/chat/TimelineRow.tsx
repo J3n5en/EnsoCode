@@ -8,7 +8,6 @@ import {
   CircleAlert,
   CircleDot,
   Copy,
-  FileText,
   History,
   ListTodo,
   LoaderCircle,
@@ -175,12 +174,12 @@ function SlashInvocation({ text }: { text: string }) {
 }
 
 /** 发出消息尾部的提及引用块渲染回 chip（与输入框 chip 同底座），不再裸文本曝露 */
-/** 内联 @文件 tag（Cursor 式）：保持在句子里的原位与顺序，不是纯文字 */
+/** 内联 @文件 tag：与输入框高亮叠层完全同款（色块 + @完整路径，无图标无内边距），
+ * 两端样式统一；保持在句子里的原位与顺序 */
 function InlineFileTag({ path }: { path: string }) {
   return (
-    <span className={cn(mentionChipClass('file'), 'mx-0.5')} title={path}>
-      <FileText className="h-3 w-3 shrink-0" />
-      {path.split('/').at(-1) || path}
+    <span className="rounded-sm bg-success/15 text-success" title={path}>
+      @{path}
     </span>
   );
 }
@@ -213,9 +212,8 @@ function MentionRefChips({
   return (
     <span className="mt-1.5 flex flex-wrap gap-1.5">
       {files.map((path) => (
-        <span key={`f:${path}`} className={mentionChipClass('file')} title={path}>
-          <FileText className="h-3 w-3 shrink-0" />
-          <span className="truncate">{path.split('/').at(-1) || path}</span>
+        <span key={`f:${path}`} className="rounded-sm bg-success/15 text-success" title={path}>
+          @{path}
         </span>
       ))}
       {chats.map((chat) => (
