@@ -48,6 +48,8 @@ interface Props {
   connectionLabel: string;
   pushEnabled: boolean;
   pushAvailability: 'ok' | 'needs-install' | 'unsupported';
+  /** 已收到桌面的 push-config；旧版桌面不会发，此时开关禁用并提示升级 */
+  pushConfigReady: boolean;
   onTogglePush(next: boolean): void;
   onClose(): void;
   onSelect(sessionId: string): void;
@@ -67,6 +69,7 @@ export function SessionDrawer({
   connectionLabel,
   pushEnabled,
   pushAvailability,
+  pushConfigReady,
   onTogglePush,
   onClose,
   onSelect,
@@ -217,10 +220,15 @@ export function SessionDrawer({
                 <span className="min-w-0 flex-1 text-muted-foreground text-sm">推送通知</span>
                 <Switch
                   checked={pushEnabled}
-                  disabled={pushAvailability !== 'ok' || !connected}
+                  disabled={pushAvailability !== 'ok' || !connected || !pushConfigReady}
                   onCheckedChange={onTogglePush}
                 />
               </div>
+              {pushAvailability === 'ok' && connected && !pushConfigReady && (
+                <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+                  需先升级桌面端 EnsoCode 才能开启推送。
+                </p>
+              )}
               {pushAvailability === 'needs-install' && (
                 <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
                   iOS 需先用分享菜单「添加到主屏幕」，从主屏幕打开后才能开启。

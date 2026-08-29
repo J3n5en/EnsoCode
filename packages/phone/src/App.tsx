@@ -81,6 +81,8 @@ export function App() {
   const [pushEnabled, setPushEnabled] = useState(
     () => localStorage.getItem(PUSH_ENABLED_KEY) === 'on'
   );
+  /** 已收到桌面下发的 push-config；旧版桌面不会发，开关据此提示升级 */
+  const [pushConfigReady, setPushConfigReady] = useState(false);
   const clientRef = useRef<PairClient | null>(null);
   const activeIdRef = useRef<string | null>(null);
   /** VAPID 公钥（桌面下发）；用 ref 避免重建连接 effect */
@@ -110,6 +112,7 @@ export function App() {
       },
       onPushConfig: (key) => {
         vapidKeyRef.current = key;
+        setPushConfigReady(true);
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
         if (localStorage.getItem(PUSH_ENABLED_KEY) === 'on') {
           void subscribePush(key).then((subscription) => {
@@ -263,6 +266,7 @@ export function App() {
         }}
         pushEnabled={pushEnabled}
         pushAvailability={pushAvailability()}
+        pushConfigReady={pushConfigReady}
         onTogglePush={(next) => void togglePush(next)}
         onUnpair={() => {
           // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）
