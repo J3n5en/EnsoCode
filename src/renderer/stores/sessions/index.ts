@@ -69,6 +69,8 @@ export interface Conversation extends SessionProjection {
   createdAt: number;
   /** pi 会话 jsonl 路径，app 重启后凭它 resume */
   sessionFile?: string;
+  /** 侧栏置顶（项目内排最前 + 进顶部 Pinned 栏目）；随 partialize 持久化 */
+  pinned?: boolean;
   /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
   contextWindow?: number;
   /** 上次使用的模型，resume 时沿用 */
@@ -127,6 +129,8 @@ interface SessionsState {
   newConversation(projectId: string): Promise<string | null>;
   selectConversation(id: string): void;
   removeConversation(id: string): void;
+  /** 切换会话置顶 */
+  togglePinConversation(id: string): void;
   dispatchAgent(
     typeKey: AgentTypeKey,
     task: AgentDispatchTask,
@@ -870,6 +874,14 @@ export const useSessionsStore = create<SessionsState>()(
                 error: 'This conversation is history-only and cannot be dispatched.',
               })
             );
+          });
+        },
+
+        togglePinConversation(id) {
+          set((state) => {
+            const conversation = state.conversations[id];
+            if (!conversation) return state;
+            return patch(state, id, { pinned: conversation.pinned === true ? undefined : true });
           });
         },
 

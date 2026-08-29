@@ -462,6 +462,9 @@ export const zhTranslations: Record<string, string> = {
   'When to use it, e.g. cheap and fast for simple subtasks':
     '什么时候用它，例如：便宜快，适合简单子任务',
   'Add model': '添加模型',
+  Pinned: '已置顶',
+  Pin: '置顶',
+  Unpin: '取消置顶',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',
