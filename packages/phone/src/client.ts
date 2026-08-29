@@ -141,6 +141,19 @@ export class PairClient {
     };
   }
 
+  /** 回前台/网络恢复时调用：死链立即重连（跳过退避），活链立即探测 */
+  nudge(): void {
+    if (this.closed || this.revoked) return;
+    if (this.ws) {
+      this.heartbeat?.probe();
+      return;
+    }
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.attempt = 0;
+    this.connect();
+  }
+
   close(): void {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);

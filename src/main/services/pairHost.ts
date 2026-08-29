@@ -21,6 +21,7 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
+import { powerMonitor } from 'electron';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type { PairCreatedSession, PairStatus } from '@shared/types/pair';
 import {
@@ -117,9 +118,29 @@ function notifyStatus(): void {
 
 // ── 生命周期 ──────────────────────────────────────────────────────────
 
+let resumeHooked = false;
+
 export function startPairHost(): void {
+  if (!resumeHooked) {
+    resumeHooked = true;
+    // 睡眠唤醒后 TCP 多半已死但 close 事件不会来：活链立即探测，死链立即重连
+    powerMonitor.on('resume', probeAll);
+  }
   for (const device of loadDevices()) {
     openConnection(device);
+  }
+}
+
+function probeAll(): void {
+  for (const conn of connections.values()) {
+    if (conn.closed) continue;
+    if (conn.ws) {
+      conn.heartbeat?.probe();
+    } else {
+      if (conn.timer) clearTimeout(conn.timer);
+      conn.attempt = 0;
+      connect(conn);
+    }
   }
 }
 

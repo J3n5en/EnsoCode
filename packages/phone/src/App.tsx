@@ -66,7 +66,15 @@ export function App() {
     });
     clientRef.current = client;
     client.connect();
+    // 切后台时系统会掐死或冻结 socket 且不触发 close：回前台/网络恢复立即探活
+    const nudge = () => {
+      if (document.visibilityState === 'visible') client.nudge();
+    };
+    document.addEventListener('visibilitychange', nudge);
+    window.addEventListener('online', nudge);
     return () => {
+      document.removeEventListener('visibilitychange', nudge);
+      window.removeEventListener('online', nudge);
       client.close();
       clientRef.current = null;
     };
