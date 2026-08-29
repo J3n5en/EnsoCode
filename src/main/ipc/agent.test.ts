@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   restoreJournal: vi.fn(() => ({ records: [], partial: false })),
   existsSync: vi.fn(() => true),
   persistedConversation: vi.fn(),
+  currentIdentity: vi.fn(),
+  promptSession: vi.fn(),
+  steerSession: vi.fn(),
+  abortSession: vi.fn(),
+  setPairAgentBridge: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -25,7 +30,7 @@ vi.mock('../services/oauthProviders', () => ({
   readStoredOauthCredentialKeys: vi.fn(async () => new Set<string>()),
 }));
 vi.mock('../services/agentHost', () => ({
-  abortSession: vi.fn(),
+  abortSession: mocks.abortSession,
   agentTypeRegistrySnapshot: vi.fn(() => ({
     revision: 1,
     candidates: [
@@ -43,7 +48,7 @@ vi.mock('../services/agentHost', () => ({
   appendSessionCustomEntry: vi.fn(),
   dismissChildSession: vi.fn(),
   promptChildSession: vi.fn(),
-  promptSession: vi.fn(),
+  promptSession: mocks.promptSession,
   requestSnapshot: vi.fn(),
   resolveAgentTypeSpawnConfig: vi.fn(),
   resolveModelSelection: vi.fn(),
@@ -56,12 +61,17 @@ vi.mock('../services/agentHost', () => ({
   setSessionThinking: vi.fn(),
   spawnChildSession: vi.fn(),
   spawnSession: mocks.spawnSession,
-  steerSession: vi.fn(),
+  steerSession: mocks.steerSession,
   stopBackgroundTask: vi.fn(),
+}));
+vi.mock('../services/notifications', () => ({ maybeNotify: vi.fn() }));
+vi.mock('../services/pairHost', () => ({
+  forwardAgentEvent: vi.fn(),
+  setPairAgentBridge: mocks.setPairAgentBridge,
 }));
 vi.mock('./capabilities', () => ({
   agentSessionIndex: {
-    currentIdentity: vi.fn(),
+    currentIdentity: mocks.currentIdentity,
     prepareParent: vi.fn(),
     observe: vi.fn(),
     reserveChild: vi.fn(),
@@ -105,6 +115,11 @@ describe('agent IPC Main identity boundary', () => {
     mocks.restoreJournal.mockClear();
     mocks.existsSync.mockReturnValue(true);
     mocks.persistedConversation.mockReset();
+    mocks.currentIdentity.mockReset();
+    mocks.promptSession.mockClear();
+    mocks.steerSession.mockClear();
+    mocks.abortSession.mockClear();
+    mocks.setPairAgentBridge.mockClear();
     registerAgentHandlers();
   });
 
@@ -139,6 +154,42 @@ describe('agent IPC Main identity boundary', () => {
       })
     ).resolves.toEqual({ ok: false, error: 'invalid spawn request' });
     expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
+  describe('手机第二屏的会话命令桥', () => {
+    const parent = { sessionId: 'conv-1', generation: 'gen-1' };
+    const bridge = () => mocks.setPairAgentBridge.mock.calls.at(-1)?.[0] as {
+      prompt(sessionId: string, text: string): void;
+      abort(sessionId: string): void;
+    };
+
+    it('裸 sessionId 被解析成 exact identity 后才下发', () => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      bridge().prompt('conv-1', 'hello');
+      expect(mocks.promptSession).toHaveBeenCalledWith(parent, 'hello', undefined);
+    });
+
+    it('解析不出身份时丢弃命令，不降级成按 sessionId 盲发', () => {
+      // 手机只持有裸 sessionId；会话已结束/generation 已轮替时必须 fail-closed。
+      mocks.currentIdentity.mockReturnValue(undefined);
+      bridge().prompt('conv-gone', 'hello');
+      bridge().abort('conv-gone');
+      expect(mocks.promptSession).not.toHaveBeenCalled();
+      expect(mocks.abortSession).not.toHaveBeenCalled();
+    });
+
+    it('child 身份不能冒充父会话接收手机命令', () => {
+      mocks.currentIdentity.mockReturnValue({
+        sessionId: 'conv-1::cw-1',
+        generation: 'g',
+        parent,
+        instanceId: 'i',
+        instanceName: 'Enso-1',
+        typeKey: 'agent:enso',
+      });
+      bridge().prompt('conv-1::cw-1', 'hello');
+      expect(mocks.promptSession).not.toHaveBeenCalled();
+    });
   });
 
   describe('已结束 child 的只读历史读取', () => {
