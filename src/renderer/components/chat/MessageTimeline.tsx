@@ -88,6 +88,20 @@ export function MessageTimeline({
   const observerRef = useRef<ResizeObserver | null>(null);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
+  /*
+   * 导航条高亮必须 rAF 合帧后再落状态：Virtuoso 的 rangeChanged 在测量/布局的
+   * 同步阶段触发，大会话恢复（初始定位 LAST + 动态测高 + 回放追加）时 startIndex
+   * 会在相邻值间震荡，同步 setState 使每次都触发嵌套重渲染→再测量→再回调，
+   * 嵌套更新超过 React 上限直接 #185 崩整棵树（启动黑屏）。rAF 回调不在
+   * React 更新流程内，天然斩断嵌套链；一帧内多次 rangeChanged 也只落一次。
+   */
+  const navFrameRef = useRef(0);
+  const scheduleActiveNavKey = useCallback((compute: () => string | null) => {
+    cancelAnimationFrame(navFrameRef.current);
+    navFrameRef.current = requestAnimationFrame(() => setActiveNavKey(compute()));
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(navFrameRef.current), []);
+
   // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
   const toggleGroup = useCallback((key: string) => {
@@ -294,11 +308,13 @@ export function MessageTimeline({
           initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
           // 可视范围起点附近的 user 轮次作为导航条高亮
           rangeChanged={({ startIndex }) => {
-            let current: string | null = null;
-            for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
-              if (folded[i]?.kind === 'user') current = folded[i].key;
-            }
-            setActiveNavKey(current);
+            scheduleActiveNavKey(() => {
+              let current: string | null = null;
+              for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
+                if (folded[i]?.kind === 'user') current = folded[i].key;
+              }
+              return current;
+            });
           }}
           scrollerRef={(el) => {
             scrollerRef.current = el instanceof HTMLElement ? el : null;
