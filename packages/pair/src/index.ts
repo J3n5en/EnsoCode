@@ -12,7 +12,6 @@ export {
   type PairKeypair,
   sealFrame,
 } from './crypto';
-export { attachHeartbeat, type Heartbeat } from './heartbeat';
 export {
   buildPairLink,
   buildPairUri,
@@ -32,6 +31,7 @@ export {
   revokePairing,
   startHostPairing,
 } from './handshake';
+export { attachHeartbeat, type Heartbeat } from './heartbeat';
 export {
   type ApprovalDecision,
   type ApprovalMode,

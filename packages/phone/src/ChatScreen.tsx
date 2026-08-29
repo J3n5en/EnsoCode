@@ -1,5 +1,5 @@
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
-import { PanelLeft, SquarePen } from 'lucide-react';
+import { ChevronDown, PanelLeft, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
@@ -24,6 +24,9 @@ interface Props {
   canCreate: boolean;
   onOpenDrawer(): void;
   onNewSession(): void;
+  /** 当前模型标签；undefined = 子会话或目录未含模型信息，不显示切换入口 */
+  modelLabel?: string;
+  onOpenConfig?(): void;
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -146,6 +149,18 @@ export function ChatScreen(props: Props) {
               focusKey={sessionId}
               // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
               autoFocus={false}
+              toolbar={
+                props.modelLabel && props.onOpenConfig ? (
+                  <button
+                    type="button"
+                    onClick={props.onOpenConfig}
+                    className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <span className="truncate">{props.modelLabel}</span>
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  </button>
+                ) : undefined
+              }
               onSend={(text, images) => void send(text, images)}
               onAbort={props.onAbort}
             />

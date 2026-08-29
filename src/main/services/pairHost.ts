@@ -21,9 +21,9 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
-import { powerMonitor, powerSaveBlocker } from 'electron';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/types/pair';
+import { powerMonitor, powerSaveBlocker } from 'electron';
 import {
   abortSession,
   promptSession,
@@ -115,9 +115,7 @@ export function setPairSessionCreatedListener(
   onSessionCreated = listener;
 }
 
-export function setPairSessionConfigListener(
-  listener: (config: PairSessionConfig) => void
-): void {
+export function setPairSessionConfigListener(listener: (config: PairSessionConfig) => void): void {
   onSessionConfig = listener;
 }
 

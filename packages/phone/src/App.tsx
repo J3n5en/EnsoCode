@@ -11,6 +11,7 @@ import { ChatScreen } from './ChatScreen';
 import { type ConnState, PairClient, type SessionView } from './client';
 import { NewSessionSheet } from './NewSessionSheet';
 import { PairScreen } from './PairScreen';
+import { SessionConfigSheet } from './SessionConfigSheet';
 import { SessionDrawer } from './SessionDrawer';
 import { clearPairing, loadPairing, savePairing } from './storage';
 
@@ -50,6 +51,7 @@ export function App() {
   const [view, setView] = useState<SessionView | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [composing, setComposing] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const clientRef = useRef<PairClient | null>(null);
   const activeIdRef = useRef<string | null>(null);
 
@@ -95,6 +97,14 @@ export function App() {
   }, [activeId, firstId]);
 
   const entry = useMemo(() => catalog.find((c) => c.id === activeId), [catalog, activeId]);
+  // 子会话（coworker）跟随父会话模型，与桌面一致不提供切换
+  const configurable = entry && !entry.parentId;
+  const modelLabel = configurable
+    ? (providers.find((p) => p.id === entry.providerId)?.models.find((m) => m.id === entry.modelId)
+        ?.label ??
+      entry.modelId ??
+      '选择模型')
+    : undefined;
 
   if (!device) {
     return (
@@ -140,6 +150,8 @@ export function App() {
         onOpenDrawer={() => setDrawerOpen(true)}
         onNewSession={() => setComposing(true)}
         canCreate={state === 'online' && projects.length > 0}
+        modelLabel={state === 'online' ? modelLabel : undefined}
+        onOpenConfig={() => setConfigOpen(true)}
         onSend={(text, images) => {
           if (!activeId) return;
           send({
@@ -202,6 +214,27 @@ export function App() {
           setActiveId(sessionId);
         }}
       />
+
+      {configurable && activeId && (
+        <SessionConfigSheet
+          open={configOpen}
+          providers={providers}
+          config={{
+            providerId: entry.providerId,
+            modelId: entry.modelId,
+            reasoningEnabled: entry.reasoningEnabled,
+            thinkingLevel: entry.thinkingLevel,
+          }}
+          onClose={() => setConfigOpen(false)}
+          onSetModel={(providerId, modelId) =>
+            send({ type: 'set-model', sessionId: activeId, providerId, modelId })
+          }
+          onSetReasoning={(enabled) =>
+            send({ type: 'set-reasoning', sessionId: activeId, enabled })
+          }
+          onSetThinking={(level) => send({ type: 'set-thinking', sessionId: activeId, level })}
+        />
+      )}
     </>
   );
 }

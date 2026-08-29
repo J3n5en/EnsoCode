@@ -75,9 +75,7 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ type: 'set-model', sessionId: 's', providerId: 'pr' }).ok).toBe(
       false
     );
-    expect(parsePhoneCommand({ type: 'set-model', providerId: 'pr', modelId: 'm' }).ok).toBe(
-      false
-    );
+    expect(parsePhoneCommand({ type: 'set-model', providerId: 'pr', modelId: 'm' }).ok).toBe(false);
   });
 
   it('set-reasoning / set-thinking 结构校验', () => {
