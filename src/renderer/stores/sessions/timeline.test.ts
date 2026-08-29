@@ -95,6 +95,83 @@ describe('buildTimeline', () => {
     );
     expect(timeline).toHaveLength(0);
   });
+
+  it('merges parent custom notifications by time without converting them into messages', () => {
+    const messages: ProjectedMessage[] = [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'before' }],
+        timestamp: 10,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'after' }],
+        timestamp: 30,
+      },
+    ];
+    const customEntries = [
+      {
+        kind: 'agent-dispatch' as const,
+        child: {
+          sessionId: 'parent::cw-child',
+          generation: 'child-g1',
+          instanceId: '123e4567-e89b-42d3-a456-426614174000',
+          instanceName: 'Scout · a1',
+          typeKey: 'builtin:scout' as const,
+        },
+        at: 20,
+      },
+    ];
+    const timeline = buildTimeline(messages, false, customEntries);
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'session-custom', 'text']);
+    expect(messages).toHaveLength(2);
+    expect(timeline[1]).toMatchObject({
+      kind: 'session-custom',
+      entry: { kind: 'agent-dispatch' },
+    });
+  });
+
+  it('keeps the complete child capability receipt in a custom timeline row', () => {
+    const receiptEntry = {
+      kind: 'capability-receipt' as const,
+      receipt: {
+        receiptId: '123e4567-e89b-42d3-a456-426614174040',
+        operationId: '123e4567-e89b-42d3-a456-426614174041',
+        child: {
+          sessionId: 'parent::cw-enso',
+          generation: 'enso-g1',
+          parent: { sessionId: 'parent', generation: 'parent-g1' },
+          instanceId: '123e4567-e89b-42d3-a456-426614174042',
+          instanceName: 'Enso · a1',
+          typeKey: 'agent:enso' as const,
+          profileId: 'enso-locked-v1' as const,
+        },
+        turnId: 'turn-1',
+        requestId: '123e4567-e89b-42d3-a456-426614174043',
+        capabilityId: 'appearance.theme' as const,
+        risk: 'reversible' as const,
+        subject: { kind: 'setting' as const, id: 'theme', label: 'Theme' },
+        outcome: 'succeeded' as const,
+        summary: 'Theme changed to dark',
+        changes: [{ field: 'theme', previous: 'light', value: 'dark' }],
+        occurredAt: 20,
+        sequence: 1,
+      },
+    };
+    const timeline = buildTimeline([], false, [receiptEntry]);
+    expect(timeline).toMatchObject([
+      {
+        kind: 'session-custom',
+        entry: {
+          kind: 'capability-receipt',
+          receipt: {
+            outcome: 'succeeded',
+            changes: [{ field: 'theme', previous: 'light', value: 'dark' }],
+          },
+        },
+      },
+    ]);
+  });
 });
 
 const toolItem = (key: string, name = 'bash', edits: TimelineItem[] = []): TimelineItem =>

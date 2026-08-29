@@ -40,6 +40,26 @@ services 不 import `ipcMain`，这样才能被单独调用和推理。
 - [ ] 读取外部应用配置：文件不存在 / 格式损坏 / 权限不足是否都不会让扫描整体失败？
 - [ ] 改了主进程代码，dev 下需要**重启**才生效（渲染层才有 HMR）。
 
+## dev 与打包版的 userData 隔离
+
+`src/main/index.ts` 里 dev 缺省落在 `appData/enso-code-dev`，打包版才是 `appData/enso-code`：
+
+```ts
+app.setPath(
+  'userData',
+  developmentUserData
+    ? path.resolve(developmentUserData)                     // ENSO_USER_DATA_DIR，仅 dev
+    : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
+);
+```
+
+共用一份 userData 会让 `requestSingleInstanceLock()` 相互踢掉（dev 实例启动即退），
+且两个实例并发读写同一份 `settings.json` / `auth.json` / sessions。
+
+真机调试时注意：**`kill -9` 会跳过 `before-quit` 的 `flushSettings()`**，
+debounce 中的会话元数据会丢，表现得很像“持久化 bug”。
+验重启恢复类行为时要走优雅退出。
+
 ## 详细规范
 
 - [ipc.md](ipc.md) —— 通道三点式链路、参数校验、preload 出口

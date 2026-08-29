@@ -34,6 +34,58 @@ export const IPC_CHANNELS = {
 - 一个通道要同时出现在三处：`IPC_CHANNELS`、`src/main/ipc/<域>.ts` 的 handler、
   `src/preload/index.ts` 的暴露方法。缺一处就是断链，见 [../main/ipc.md](../main/ipc.md)。
 
+## 跨进程命令的解析器必须与生产端同步
+
+`parseAgentCommand` / `parseSpawnModelConfig` 这类严格解析器用 `hasOnlyKeys` 卡字段白名单。
+字段白名单、生产端构造函数、消费端读取处是**三方契约**，改一处就要全部对齐：
+
+```
+src/main/services/agentHost.ts  spawnModelConfig()   ← 生产（恒发 settingsProviderId）
+src/shared/types/agent.ts       parseSpawnModelConfig ← 白名单（漏了就全部拒掉）
+src/agent/supervisor.ts         settingsModelRef()   ← 消费（缺了就抛错）
+```
+
+曾经发生：生产端加了 `settingsProviderId`、消费端要求它，但白名单没加 ——
+所有 spawn 命令解析返回 null，**整个 app 的会话全部起不来**，而且无日志无报错。
+
+字段如果是消费端必需的，就在接口上写成**必填**并在解析器里强制校验，
+不要留成可选；typecheck 会把遗漏的构造点（含测试夹具）全部报出来。
+
+## 解析失败不得静默丢弃
+
+进程间消息入口拿不到合法命令时，**必须留下可观测痕迹**：
+
+```ts
+// Wrong：契约漂移时调用方只能等到握手超时，且没任何线索
+port.on('message', (event) => {
+  const command = parseAgentCommand(event.data);
+  if (command) supervisor.handleCommand(command);
+});
+
+// Correct
+if (!command) {
+  console.warn(`[agent] dropped unparsable command: ${type}`);
+  return;
+}
+```
+
+同理适用于任何 `if (parsed) { ... }` 形式的边界：静默丢弃会把“契约不匹配”
+伪装成“对端没响应”，排查成本差一个量级。
+
+## 关联键只能用同一命名空间的 id
+
+同一条链路上常常存在多个 `requestId` / `turnId`，分属不同命名空间：
+
+| id | 由谁生成 | 含义 |
+| --- | --- | --- |
+| `AgentDispatchRequest.requestId` | Renderer 发起派发时 | 一次派发 |
+| `CapabilityInvokeRequest.requestId` | `ensoApp` 每笔能力调用 | 一次能力调用 |
+| `managed.currentTurnId` | worker 每个内部 agent turn | 一个模型循环回合 |
+
+拿两个不同命名空间的 id 相比，条件**永远不成立**，表现是“事件静默消失”而不是报错
+（曾导致完成通知的 receiptSummary 恒为空）。写关联判断前先确认两边 id 同源；
+测试夹具不要图方便把它们写成同一个值，那会把真 bug 盖掉。
+
 ## 领域类型的判别式联合
 
 多形态的数据用 `kind` 作判别式，让渲染层能在一个列表里安全地分支。

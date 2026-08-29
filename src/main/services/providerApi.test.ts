@@ -1,6 +1,13 @@
 import type { ModelApiKind } from '@shared/types';
-import { describe, expect, it } from 'vitest';
-import { extractModelIds, resolveBase, toMessage, withVersionSegment } from './providerApi';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  extractModelIds,
+  listModels,
+  resolveBase,
+  testProvider,
+  toMessage,
+  withVersionSegment,
+} from './providerApi';
 
 describe('resolveBase', () => {
   const cfg = (baseUrl: string, api: ModelApiKind = 'openai-completions') => ({
@@ -95,5 +102,59 @@ describe('toMessage', () => {
   it('非 Error 值转成字符串', () => {
     expect(toMessage('boom')).toBe('boom');
     expect(toMessage(42)).toBe('42');
+  });
+});
+
+describe('远端错误边界', () => {
+  it('list/test 都只返回状态，不读取或回显恶意响应 body', async () => {
+    const secret = 'sk-provider-real-secret';
+    const text = vi.fn(async () => `malicious body ${secret}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text,
+      }))
+    );
+    const config = {
+      api: 'openai-completions' as const,
+      apiKey: secret,
+      baseUrl: 'https://example.test/v1',
+    };
+
+    await expect(listModels(config)).resolves.toEqual({
+      ok: false,
+      models: [],
+      error: 'HTTP 401 Unauthorized',
+    });
+    await expect(testProvider(config, 'model-1')).resolves.toMatchObject({
+      ok: false,
+      message: 'HTTP 401 Unauthorized',
+    });
+    expect(text).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('fetch抛错即使回显真实key也按值脱敏', async () => {
+    const secret = 'sk-provider-throw-secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error(`request failed https://example.test/models?key=${secret}`);
+      })
+    );
+    const config = {
+      api: 'openai-completions' as const,
+      apiKey: secret,
+      baseUrl: 'https://example.test/v1',
+    };
+
+    const listed = await listModels(config);
+    const tested = await testProvider(config, 'model-1');
+    expect(JSON.stringify([listed, tested])).not.toContain(secret);
+    expect(JSON.stringify([listed, tested])).toContain('[redacted]');
+    vi.unstubAllGlobals();
   });
 });

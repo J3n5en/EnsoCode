@@ -1,20 +1,28 @@
-import type {
-  ApprovalRequestInfo,
-  AskRequestInfo,
-  BackgroundTaskInfo,
-  NodeStatus,
-  ProjectedMessage,
-  RendererAgentEvent,
-  SlashCommand,
-  SubagentInfo,
+import {
+  type AgentSessionCustomEntry,
+  type ApprovalRequestInfo,
+  type AskRequestInfo,
+  type BackgroundTaskInfo,
+  type DispatchMainEvent,
+  type NodeStatus,
+  type ProjectedMessage,
+  type RendererAgentEvent,
+  type SessionIdentity,
+  type SlashCommand,
+  type SubagentInfo,
+  shouldApplyDispatchMainEvent,
 } from '@shared/types/agent';
 
 export interface SessionProjection {
+  generation?: string;
   status: NodeStatus;
   error?: string;
   messages: ProjectedMessage[];
+  customEntries: AgentSessionCustomEntry[];
   commands: SlashCommand[];
   lastSeq: number;
+  /** 独立Main派发流；worker seq不能修改或覆盖。 */
+  dispatchMainEvents: Record<string, DispatchMainEvent>;
   /** 累计 running 时长（统计条的吞吐分母，含工具执行时间） */
   activeMs: number;
   /** 挂起的工具审批请求（审批条与输入框锁定依赖） */
@@ -32,7 +40,9 @@ export interface SessionProjection {
 export const emptyProjection: SessionProjection = {
   status: 'idle',
   messages: [],
+  customEntries: [],
   commands: [],
+  dispatchMainEvents: {},
   lastSeq: 0,
   activeMs: 0,
   pendingApprovals: [],
@@ -41,9 +51,15 @@ export const emptyProjection: SessionProjection = {
   subagents: [],
 };
 
+const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
+  if (event.type === 'worker-exited' || event.type === 'snapshot') return null;
+  if (event.type === 'capability-invoke') return event.child;
+  return event.identity;
+};
+
 /**
  * 把 agent 事件归并进会话投影。纯函数，now 仅用于 running 计时（测试可注入）。
- * seq 单调守卫：过期事件（seq <= lastSeq）直接丢弃，重连/重放时保证不回退。
+ * `(sessionId, generation, seq)` 单调守卫：旧 generation 与低 seq 都直接丢弃。
  */
 export function applyAgentEvent(
   rawState: SessionProjection,
@@ -51,20 +67,25 @@ export function applyAgentEvent(
   event: RendererAgentEvent,
   now: number = Date.now()
 ): SessionProjection {
-  // persist 旧数据可能缺后加字段（undefined.map 会炸掉事件处理），入口统一归一
+  // persist 旧数据可能缺后加字段，入口统一归一，避免事件处理访问 undefined。
   const state: SessionProjection =
     rawState.pendingApprovals &&
     rawState.pendingAsks &&
     rawState.backgroundTasks &&
-    rawState.subagents
+    rawState.subagents &&
+    rawState.customEntries &&
+    rawState.dispatchMainEvents
       ? rawState
       : {
           ...rawState,
+          customEntries: rawState.customEntries ?? [],
+          dispatchMainEvents: rawState.dispatchMainEvents ?? {},
           pendingApprovals: rawState.pendingApprovals ?? [],
           pendingAsks: rawState.pendingAsks ?? [],
           backgroundTasks: rawState.backgroundTasks ?? [],
           subagents: rawState.subagents ?? [],
         };
+
   if (event.type === 'worker-exited') {
     return {
       ...settleTiming(state, now),
@@ -80,29 +101,71 @@ export function applyAgentEvent(
       ),
     };
   }
+
   if (event.type === 'snapshot') {
-    const snapshot = event.sessions.find((s) => s.sessionId === sessionId);
+    const snapshot = event.sessions.find((candidate) => candidate.identity.sessionId === sessionId);
     if (!snapshot) return state;
+    const sameGeneration = state.generation === snapshot.identity.generation;
     return {
+      generation: snapshot.identity.generation,
       status: snapshot.status,
       messages: snapshot.messages,
+      customEntries: snapshot.customEntries ?? [],
       commands: snapshot.commands,
+      dispatchMainEvents: {},
       lastSeq: 0,
-      activeMs: state.activeMs,
+      activeMs: sameGeneration ? state.activeMs : 0,
       pendingApprovals: snapshot.pendingApprovals ?? [],
       pendingAsks: snapshot.pendingAsks ?? [],
       backgroundTasks: snapshot.backgroundTasks ?? [],
       subagents: snapshot.subagents ?? [],
     };
   }
-  if (event.sessionId !== sessionId || event.seq <= state.lastSeq) return state;
+
+  const identity = eventIdentity(event);
+  if (
+    !identity ||
+    identity.sessionId !== sessionId ||
+    (state.generation !== undefined && state.generation !== identity.generation) ||
+    event.seq <= state.lastSeq
+  ) {
+    return state;
+  }
+  const current = state.generation ? state : { ...state, generation: identity.generation };
 
   switch (event.type) {
+    case 'parent-ready':
+    case 'child-ready':
+      return {
+        ...current,
+        status: 'idle',
+        error: undefined,
+        lastSeq: event.seq,
+      };
+    case 'parent-rejected':
+    case 'child-rejected':
+      return {
+        ...settleTiming(current, now),
+        status: 'failed',
+        error: event.reason,
+        pendingApprovals: [],
+        pendingAsks: [],
+        lastSeq: event.seq,
+      };
+    case 'parent-ended':
+    case 'child-ended':
+      return {
+        ...settleTiming(current, now),
+        status: 'idle',
+        pendingApprovals: [],
+        pendingAsks: [],
+        lastSeq: event.seq,
+      };
     case 'status': {
       const base =
         event.status === 'running'
-          ? { ...state, runStartedAt: state.runStartedAt ?? now }
-          : settleTiming(state, now);
+          ? { ...current, runStartedAt: current.runStartedAt ?? now }
+          : settleTiming(current, now);
       return {
         ...base,
         status: event.status,
@@ -111,64 +174,72 @@ export function applyAgentEvent(
       };
     }
     case 'message-upsert': {
-      const messages = state.messages.slice();
+      const messages = current.messages.slice();
       messages[event.index] = event.message;
-      return { ...state, messages, lastSeq: event.seq };
+      return { ...current, messages, lastSeq: event.seq };
     }
     case 'approval-request':
       return {
-        ...state,
-        pendingApprovals: [...state.pendingApprovals, event.request],
+        ...current,
+        pendingApprovals: current.pendingApprovals.some(
+          (request) => request.requestId === event.request.requestId
+        )
+          ? current.pendingApprovals
+          : [...current.pendingApprovals, event.request],
         lastSeq: event.seq,
       };
     case 'approval-resolved':
       return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
+        ...current,
+        pendingApprovals: current.pendingApprovals.filter(
           (request) => request.requestId !== event.requestId
         ),
         lastSeq: event.seq,
       };
     case 'ask-request':
       return {
-        ...state,
-        pendingAsks: [...state.pendingAsks, event.ask],
+        ...current,
+        pendingAsks: current.pendingAsks.some((ask) => ask.requestId === event.ask.requestId)
+          ? current.pendingAsks
+          : [...current.pendingAsks, event.ask],
         lastSeq: event.seq,
       };
     case 'ask-resolved':
       return {
-        ...state,
-        pendingAsks: state.pendingAsks.filter((ask) => ask.requestId !== event.requestId),
+        ...current,
+        pendingAsks: current.pendingAsks.filter((ask) => ask.requestId !== event.requestId),
         lastSeq: event.seq,
       };
     case 'subagent-update': {
-      const exists = state.subagents.some((agent) => agent.id === event.agent.id);
+      const exists = current.subagents.some((agent) => agent.id === event.agent.id);
       return {
-        ...state,
+        ...current,
         subagents: exists
-          ? state.subagents.map((agent) => (agent.id === event.agent.id ? event.agent : agent))
-          : [...state.subagents, event.agent],
+          ? current.subagents.map((agent) => (agent.id === event.agent.id ? event.agent : agent))
+          : [...current.subagents, event.agent],
         lastSeq: event.seq,
       };
     }
     case 'task-started':
       return {
-        ...state,
-        backgroundTasks: [...state.backgroundTasks, event.task],
+        ...current,
+        backgroundTasks: current.backgroundTasks.some((task) => task.taskId === event.task.taskId)
+          ? current.backgroundTasks
+          : [...current.backgroundTasks, event.task],
         lastSeq: event.seq,
       };
     case 'task-output':
       return {
-        ...state,
-        backgroundTasks: state.backgroundTasks.map((task) =>
+        ...current,
+        backgroundTasks: current.backgroundTasks.map((task) =>
           task.taskId === event.taskId ? { ...task, tail: event.tail, status: event.status } : task
         ),
         lastSeq: event.seq,
       };
     case 'task-ended':
       return {
-        ...state,
-        backgroundTasks: state.backgroundTasks.map((task) =>
+        ...current,
+        backgroundTasks: current.backgroundTasks.map((task) =>
           task.taskId === event.taskId
             ? { ...task, status: event.status, exitCode: event.exitCode }
             : task
@@ -176,21 +247,63 @@ export function applyAgentEvent(
         lastSeq: event.seq,
       };
     case 'turn-completed':
-      return { ...settleTiming(state, now), lastSeq: event.seq };
+      return { ...settleTiming(current, now), lastSeq: event.seq };
     case 'messages-truncated':
-      return { ...state, messages: state.messages.slice(0, event.length), lastSeq: event.seq };
+      return { ...current, messages: current.messages.slice(0, event.length), lastSeq: event.seq };
     case 'commands':
-      return { ...state, commands: event.commands, lastSeq: event.seq };
+      return { ...current, commands: event.commands, lastSeq: event.seq };
     case 'turn-failed':
       return {
-        ...settleTiming(state, now),
+        ...settleTiming(current, now),
         status: 'failed',
         error: event.error,
         lastSeq: event.seq,
       };
+    case 'session-custom-entry':
+      return {
+        ...current,
+        customEntries: [...current.customEntries, event.entry],
+        lastSeq: event.seq,
+      };
     default:
-      return state;
+      return { ...current, lastSeq: event.seq };
   }
+}
+/** 独立Main dispatch投影：exact child generation、同dispatch递增mainSeq、terminal单次收口。 */
+export function applyDispatchEvent(
+  rawState: SessionProjection,
+  sessionId: string,
+  event: DispatchMainEvent,
+  now: number = Date.now()
+): SessionProjection {
+  if (
+    event.child.sessionId !== sessionId ||
+    (rawState.generation !== undefined && rawState.generation !== event.child.generation)
+  ) {
+    return rawState;
+  }
+  const currentEvent = rawState.dispatchMainEvents?.[event.dispatchId] ?? null;
+  if (!shouldApplyDispatchMainEvent(currentEvent, event)) return rawState;
+  const state = rawState.dispatchMainEvents ? rawState : { ...rawState, dispatchMainEvents: {} };
+  const dispatchMainEvents = { ...state.dispatchMainEvents, [event.dispatchId]: event };
+  if (event.phase !== 'terminal') {
+    return {
+      ...state,
+      generation: state.generation ?? event.child.generation,
+      status: 'running',
+      error: undefined,
+      runStartedAt: state.runStartedAt ?? now,
+      dispatchMainEvents,
+    };
+  }
+  const settled = settleTiming(state, now);
+  return {
+    ...settled,
+    generation: settled.generation ?? event.child.generation,
+    status: event.terminal === 'failed' ? 'failed' : 'idle',
+    error: event.terminal === 'failed' ? event.receiptSummary : undefined,
+    dispatchMainEvents,
+  };
 }
 
 /** 结算进行中的 running 计时：把 runStartedAt 到 now 的时长并入 activeMs */

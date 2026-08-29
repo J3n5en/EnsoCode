@@ -12,16 +12,19 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
+import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialBootstrap';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { API_KIND_LABELS } from './constants';
+import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
-import { OauthProvidersDialog } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
+import { ProviderSetupWizard } from './ProviderSetupWizard';
 
 export function ProvidersSettings() {
   const { t } = useI18n();
@@ -29,8 +32,8 @@ export function ProvidersSettings() {
   const updateProvider = useSettingsStore((state) => state.updateProvider);
   const removeProvider = useSettingsStore((state) => state.removeProvider);
   const [importOpen, setImportOpen] = React.useState(false);
-  const [oauthOpen, setOauthOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<ModelProvider | 'new' | null>(null);
+  const [setupOpen, setSetupOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<ModelProvider | null>(null);
   const [pendingRemove, setPendingRemove] = React.useState<ModelProvider | null>(null);
   const [removingId, setRemovingId] = React.useState<string | null>(null);
   const [removeError, setRemoveError] = React.useState<{
@@ -38,14 +41,11 @@ export function ProvidersSettings() {
     message: string;
   } | null>(null);
 
-  /**
-   * 订阅 provider 展示信息：直接用官方 `OauthProviderInfo[]`（含 email/plan），
-   * 供 groupProviders 借官方名做分组标题，也供行内区分同厂商的多个账号。
-   * 单一事实源——不再另存一份 email 映射。订阅对话框关闭后重取，登录/登出后跟上。
-   */
+  /** 账号展示跟随非持久凭证快照 revision；跨窗口 invalidation 后会自动重拉。 */
+  const oauthRevision = useOauthCredentialStore((state) => state.snapshot.revision);
   const [oauthInfos, setOauthInfos] = React.useState<OauthProviderInfo[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision 是跨窗口凭证变化后的显式重拉信号。
   React.useEffect(() => {
-    if (oauthOpen) return;
     let cancelled = false;
     void window.electronAPI.providers.listOauth().then((infos) => {
       if (!cancelled) setOauthInfos(infos);
@@ -53,7 +53,7 @@ export function ProvidersSettings() {
     return () => {
       cancelled = true;
     };
-  }, [oauthOpen]);
+  }, [oauthRevision]);
 
   const groups = React.useMemo(
     () => groupProviders(providers, oauthInfos),
@@ -79,6 +79,7 @@ export function ProvidersSettings() {
     if (provider.oauthAccountKey && !options?.skipLogout) {
       try {
         await window.electronAPI.providers.oauthLogout(provider.oauthAccountKey);
+        await refreshOauthCredentialState();
       } catch (error) {
         setRemovingId(null);
         setRemoveError({
@@ -113,23 +114,20 @@ export function ProvidersSettings() {
             <HardDriveDownload className="h-4 w-4 mr-1.5" />
             {t('Import from local apps')}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setOauthOpen(true)}>
-            <BadgeCheck className="h-4 w-4 mr-1.5" />
-            {t('Subscription login')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditing('new')}>
+          <Button size="sm" onClick={() => setSetupOpen(true)}>
             <Plus className="h-4 w-4 mr-1.5" />
-            {t('Add provider')}
+            {t('Add model or provider')}
           </Button>
         </div>
       </div>
+      <DefaultModelPicker />
 
       {providers.length === 0 ? (
         <div className="rounded-md border border-dashed px-3 py-8 text-center">
           <Server className="mx-auto h-5 w-5 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium">{t('No providers yet')}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t('Import providers from local apps or add one manually to get started')}
+            {t('Import providers from local apps or use the unified setup to get started')}
           </p>
         </div>
       ) : (
@@ -270,7 +268,7 @@ export function ProvidersSettings() {
       )}
 
       <LocalImportDialog open={importOpen} onOpenChange={setImportOpen} />
-      <OauthProvidersDialog open={oauthOpen} onOpenChange={setOauthOpen} />
+      <ProviderSetupWizard open={setupOpen} onOpenChange={setSetupOpen} />
       <ProviderEditDialog provider={editing} onClose={() => setEditing(null)} />
       <ConfirmDialog
         open={pendingRemove !== null}

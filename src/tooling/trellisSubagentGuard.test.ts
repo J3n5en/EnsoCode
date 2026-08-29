@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  EXTENSION_RUNNER_SPECIFIERS,
   filterBeforeAgentStartResult,
   filterContextResult,
   installExtensionRunnerGuard,
@@ -217,14 +216,15 @@ describe('hashed template vs repo-owned overlay', () => {
     expect(guard).not.toMatch(/from\s+["'][^"']*src\//);
     expect(entry).not.toMatch(/pi\.on\(\s*["']session_start["']/);
     expect(guard).not.toMatch(/pi\.on\(\s*["']session_start["']/);
-    expect(EXTENSION_RUNNER_SPECIFIERS).toContain('@oh-my-pi/pi-coding-agent');
+    expect(entry).toContain('pi.pi');
+    expect(guard).not.toContain('import(');
     expect(existsSync(path.join(repoRoot, 'src/tooling/trellisSubagentGuard.ts'))).toBe(false);
   });
 
   it('加载 overlay 后会给宿主 ExtensionRunner 打上守卫（删 overlay 即红）', async () => {
     const overlay = await import('../../.omp/extensions/enso-subagent-guard/index');
     const { ExtensionRunner } = await import('@earendil-works/pi-coding-agent');
-    await overlay.default({});
+    await overlay.default({ pi: { ExtensionRunner } });
     expect(
       Object.getOwnPropertySymbols(ExtensionRunner.prototype).includes(RUNNER_GUARD_INSTALLED)
     ).toBe(true);

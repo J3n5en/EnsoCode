@@ -1,61 +1,102 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import {
-  type AgentCommand,
-  type AgentSpawnRequest,
-  type AgentTypeSpawnConfig,
-  type ApprovalDecision,
-  type ApprovalMode,
-  type AttachedImage,
-  type McpServerSpawnConfig,
-  parseAgentWorkerEvent,
-  type RendererAgentEvent,
-  type SpawnModelConfig,
-  type ThinkingLevel,
+  type AgentTypeKey,
+  type AgentTypeRegistrySnapshot,
+  buildAgentTypeRegistrySnapshot,
+  type ChildSessionIdentity,
+  ENSO_AGENT_TYPE_KEY,
+  ENSO_LOCKED_PROFILE,
+  isReservedAgentTypeName,
+  type SessionIdentity,
+} from '@shared/builtinAgents';
+import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
+import { type ModelCredentialContext, modelUsability } from '@shared/defaultModel';
+import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
+import type {
+  AgentCommand,
+  AgentSessionCustomEntry,
+  AgentSpawnRequest,
+  AgentTypeSpawnConfig,
+  AgentWorkerEvent,
+  ApprovalDecision,
+  ApprovalMode,
+  AttachedImage,
+  McpServerSpawnConfig,
+  ModelRef,
+  ResolvedAgentTypeSpawnConfig,
+  SpawnModelConfig,
+  ThinkingLevel,
 } from '@shared/types/agent';
-import { BUILTIN_AGENT_TYPES, DEFAULT_PRESET_ID, type Preset } from '@shared/types/assets';
+import { parseAgentWorkerEvent } from '@shared/types/agent';
+import {
+  type AgentTypeEntry,
+  BUILTIN_AGENT_TYPES,
+  DEFAULT_PRESET_ID,
+  type McpServerEntry,
+  type Preset,
+  type SkillEntry,
+} from '@shared/types/assets';
 import type { ModelEntry, ModelProvider } from '@shared/types/llm';
+import type { AgentDispatchTask } from '@shared/types/mentions';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
+import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
+import agentWorkerPath from '../../agent/index?modulePath';
 import { readSettings } from '../ipc/settings';
 import { resolveGlobalInstruction } from './instructionStore';
 
+export interface ResolvedModelSelection {
+  ref: ModelRef;
+  runtimeRef: ModelRef;
+  config: SpawnModelConfig;
+}
+
+export type ModelSelectionResult =
+  | { ok: true; selection: ResolvedModelSelection }
+  | { ok: false; error: string };
+
+export type AgentTypeResolution =
+  | {
+      ok: true;
+      config: ResolvedAgentTypeSpawnConfig;
+      expectedModel: ModelRef;
+      expectedToolIds: readonly string[];
+    }
+  | { ok: false; error: string };
+
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
-let onEvent: ((event: RendererAgentEvent) => void) | null = null;
+let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
 
-/** Main 收到 worker 事件 / worker 退出时的回调，由 IPC 层注册用于广播到窗口 */
-export function setAgentEventListener(listener: (event: RendererAgentEvent) => void): void {
+export function setAgentEventListener(
+  listener: (event: AgentWorkerEvent | { type: 'worker-exited' }) => void
+): void {
   onEvent = listener;
 }
 
 export function startAgentWorker(): void {
   if (worker) return;
-  const child = utilityProcess.fork(path.join(import.meta.dirname, 'agent.js'), [], {
+  const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: 'enso-agent-worker',
     env: {
       ...process.env,
-      // pi 的全局目录与会话目录都收进 userData，不碰用户的 ~/.pi
       ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
     },
   });
   worker = child;
 
-  // 进程就绪即预热 MCP 连接（stdio 子进程冷启动是 spawn 延迟大头，提前到 app 启动时段）
   child.once('spawn', () => {
     const servers = enabledMcpServers();
     if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
   });
-
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
     if (event) onEvent?.(event);
   });
-
   child.on('exit', () => {
     if (worker === child) worker = null;
-    // worker 没了等于全部活会话终止；Renderer 收到后把所有会话标 failed
     onEvent?.({ type: 'worker-exited' });
   });
 }
@@ -65,107 +106,370 @@ export function stopAgentWorker(): void {
   worker = null;
 }
 
-function sendCommand(command: AgentCommand): { ok: boolean; error?: string } {
+export function isAgentWorkerRunning(): boolean {
+  return worker !== null;
+}
+
+export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: string } {
   if (!worker) return { ok: false, error: 'agent worker not running' };
   worker.postMessage(command);
   return { ok: true };
 }
 
-/** 从 settings 取 provider，补全 apiKey 组装 spawn 命令。apiKey 到此为止，不回 Renderer */
-export function spawnSession(request: AgentSpawnRequest): { ok: boolean; error?: string } {
-  const provider = findProvider(request.providerId);
-  if (!provider) return { ok: false, error: `provider not found: ${request.providerId}` };
-  // resume 的 jsonl 已被删除时 pi 会静默打开空会话（内容全空、不报错），历史会话打开一片空白。
-  // 在此同步拦下，让 Renderer 经 IPC 返回值拿到明确错误
+export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
+  const state = readSettingsState();
+  const disabledBuiltinAgentTypes = Array.isArray(state?.disabledBuiltinAgentTypes)
+    ? state.disabledBuiltinAgentTypes.filter((name): name is string => typeof name === 'string')
+    : [];
+  const customAgentTypes = Array.isArray(state?.agentTypes)
+    ? state.agentTypes.filter(isAgentTypeEntry)
+    : [];
+  return buildAgentTypeRegistrySnapshot({
+    revision: settingsRevision(state),
+    disabledBuiltinAgentTypes,
+    customAgentTypes,
+  });
+}
+
+export function resolveModelSelection(
+  providerId: string,
+  modelId: string,
+  authenticatedAccountKeys: ReadonlySet<string>
+): ModelSelectionResult {
+  const providers = providersFromSettings();
+  const credentials: ModelCredentialContext = {
+    oauthCredentials: { status: 'ready', authenticatedAccountKeys },
+  };
+  const reason = modelUsability({ providerId, modelId }, providers, credentials);
+  if (reason !== 'usable') {
+    return { ok: false, error: `Model is unavailable: ${reason}` };
+  }
+  const provider = providers.find((entry) => entry.id === providerId);
+  if (!provider) return { ok: false, error: 'Model provider is unavailable.' };
+  const config = spawnModelConfig(provider, modelId);
+  return {
+    ok: true,
+    selection: {
+      ref: { providerId, modelId },
+      runtimeRef: { providerId: config.oauthAccountKey ?? config.api, modelId: config.modelId },
+      config,
+    },
+  };
+}
+
+export function resolveAgentTypeSpawnConfig(
+  typeKey: AgentTypeKey,
+  parentModel: ResolvedModelSelection,
+  authenticatedAccountKeys: ReadonlySet<string>
+): AgentTypeResolution {
+  const snapshot = agentTypeRegistrySnapshot();
+  const candidate = snapshot.candidates.find((entry) => entry.typeKey === typeKey);
+  if (!candidate) return { ok: false, error: 'Agent type is unavailable.' };
+
+  if (typeKey === ENSO_AGENT_TYPE_KEY) {
+    return {
+      ok: true,
+      config: {
+        typeKey,
+        displayName: 'Enso',
+        description: candidate.description,
+        spawnSpecId: randomUUID(),
+        systemPrompt: ENSO_SYSTEM_PROMPT,
+        model: parentModel.config,
+        tools: 'enso-locked',
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: createHash('sha256').update(ENSO_SYSTEM_PROMPT).digest('hex'),
+        lockedProfileId: ENSO_LOCKED_PROFILE.profileId,
+      },
+      expectedModel: parentModel.ref,
+      expectedToolIds: ENSO_LOCKED_PROFILE.toolIds,
+    };
+  }
+
+  const state = readSettingsState();
+  let definition: Omit<AgentTypeEntry, 'id'> | AgentTypeEntry | undefined;
+  if (typeKey.startsWith('builtin:')) {
+    const name = typeKey.slice('builtin:'.length);
+    definition = BUILTIN_AGENT_TYPES.find((entry) => entry.name === name);
+  } else {
+    const id = typeKey.slice('custom:'.length);
+    definition = Array.isArray(state?.agentTypes)
+      ? state.agentTypes.filter(isAgentTypeEntry).find((entry) => entry.id === id)
+      : undefined;
+  }
+  if (!definition || isReservedAgentTypeName(definition.name)) {
+    return { ok: false, error: 'Agent type definition is invalid.' };
+  }
+
+  let selectedModel = parentModel;
+  if (definition.providerId || definition.modelId) {
+    if (!definition.providerId || !definition.modelId) {
+      return { ok: false, error: 'Agent type model binding is incomplete.' };
+    }
+    const resolved = resolveModelSelection(
+      definition.providerId,
+      definition.modelId,
+      authenticatedAccountKeys
+    );
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    selectedModel = resolved.selection;
+  }
+
+  const resources = resolveAgentTypeResources(definition);
+  if (!resources.ok) return resources;
+  return {
+    ok: true,
+    config: {
+      typeKey,
+      displayName: candidate.displayName,
+      description: candidate.description,
+      spawnSpecId: randomUUID(),
+      systemPrompt: definition.systemPrompt,
+      model: selectedModel.config,
+      tools: definition.tools,
+      skillPaths: resources.skillPaths,
+      skillBindingIds: resources.skillPaths.map(() => randomUUID()),
+      mcpServers: resources.mcpServers,
+      mcpBindingIds: resources.mcpServers.map(() => randomUUID()),
+      systemPromptHash: createHash('sha256').update(definition.systemPrompt).digest('hex'),
+    },
+    expectedModel: selectedModel.ref,
+    expectedToolIds:
+      definition.tools === 'readonly'
+        ? ['read', 'grep', 'find', 'ls', 'message_main_agent']
+        : ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'message_main_agent'],
+  };
+}
+
+export function spawnSession(
+  identity: SessionIdentity,
+  request: AgentSpawnRequest,
+  authenticatedAccountKeys: ReadonlySet<string>
+): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
   }
-  // 指令随 spawn 命令下发，不写共享 AGENTS.md（多会话不同 preset 会抢同一文件）
+  const resolved = resolveModelSelection(
+    request.providerId,
+    request.modelId,
+    authenticatedAccountKeys
+  );
+  if (!resolved.ok) return { ok: false, error: resolved.error };
   const preset = resolvePreset(request.presetId);
   const instruction = resolveGlobalInstruction(
     preset ? { instructionId: preset.instructionId } : undefined
   );
-  const model = spawnModelConfig(provider, request.modelId);
-  return sendCommand({
-    type: 'spawn',
-    sessionId: request.sessionId,
+  const skillPaths = enabledSkillPaths(preset);
+  const mcpServers = enabledMcpServers(preset);
+  const agentTypes = configuredAgentTypes(authenticatedAccountKeys);
+  const state = readSettingsState();
+  const disabledTools = Array.isArray(state?.disabledBuiltinTools)
+    ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
+    : [];
+  return sendAgentCommand({
+    type: 'spawn-parent',
+    identity,
     cwd: request.cwd,
-    model,
+    model: resolved.selection.config,
     ...(request.resumeFile ? { resumeFile: request.resumeFile } : {}),
     ...(request.reasoningEnabled ? { reasoningEnabled: true } : {}),
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-    // 自定义预设即完整边界：关掉本机 skill 自动发现，只注入预设选定的
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
-    ...(() => {
-      const skillPaths = enabledSkillPaths(preset);
-      return skillPaths.length > 0 ? { skillPaths } : {};
-    })(),
-    ...(() => {
-      const mcpServers = enabledMcpServers(preset);
-      return mcpServers.length > 0 ? { mcpServers } : {};
-    })(),
+    ...(skillPaths.length > 0 ? { skillPaths } : {}),
+    ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
-    ...(() => {
-      const agentTypes = configuredAgentTypes();
-      return agentTypes.length > 0 ? { agentTypes } : {};
-    })(),
-    ...(() => {
-      const state = readSettingsState();
-      const disabled = Array.isArray(state?.disabledBuiltinTools)
-        ? (state.disabledBuiltinTools as string[])
-        : [];
-      return disabled.length > 0 ? { disabledTools: disabled } : {};
-    })(),
+    ...(agentTypes.length > 0 ? { agentTypes } : {}),
+    ...(disabledTools.length > 0 ? { disabledTools } : {}),
     ...(instruction ? { instruction } : {}),
   });
 }
 
-/** subagent 类型：内置（过滤已关闭）+ 自定义（同名覆盖内置）；绑定模型补 apiKey */
-function configuredAgentTypes(): AgentTypeSpawnConfig[] {
+/**
+ * 已启动会话就地换模型。不做这件事的后果见 issue #30：选择器显示新模型、
+ * 请求却仍打旧 provider，且该会话后续所有 @Agent 派发被永久拒绝。
+ */
+export function setSessionModel(
+  identity: SessionIdentity,
+  providerId: string,
+  modelId: string,
+  authenticatedAccountKeys: ReadonlySet<string>
+): { ok: boolean; error?: string } {
+  const resolved = resolveModelSelection(providerId, modelId, authenticatedAccountKeys);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  return sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+}
+
+export function spawnChildSession(
+  identity: ChildSessionIdentity,
+  cwd: string,
+  config: ResolvedAgentTypeSpawnConfig,
+  resumeFile?: string
+): { ok: boolean; error?: string } {
+  if (resumeFile && !existsSync(resumeFile)) {
+    return { ok: false, error: 'coworker 会话文件已丢失，无法恢复' };
+  }
+  return sendAgentCommand({
+    type: 'spawn-child',
+    identity,
+    cwd,
+    config,
+    ...(resumeFile ? { resumeFile } : {}),
+  });
+}
+
+export function promptChildSession(
+  identity: ChildSessionIdentity,
+  requestId: string,
+  task: AgentDispatchTask
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'prompt-child', identity, requestId, task });
+}
+
+export function dismissChildSession(
+  parent: SessionIdentity,
+  child: ChildSessionIdentity,
+  notify = false
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'dismiss-child',
+    parent,
+    child,
+    ...(notify ? { notify: true } : {}),
+  });
+}
+
+export function appendSessionCustomEntry(
+  identity: SessionIdentity,
+  entry: AgentSessionCustomEntry
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'append-session-custom-entry',
+    identity: { sessionId: identity.sessionId, generation: identity.generation },
+    entry,
+  });
+}
+
+export function sendCapabilityResultToSession(
+  child: ChildSessionIdentity,
+  turnId: string,
+  requestId: string,
+  envelope: CapabilityExecutionEnvelope
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'capability-result', child, turnId, requestId, envelope });
+}
+
+export function setSessionThinking(
+  identity: SessionIdentity,
+  level: ThinkingLevel
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'set-thinking', identity, level });
+}
+
+export function setSessionReasoning(
+  identity: SessionIdentity,
+  enabled: boolean,
+  level?: ThinkingLevel
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'set-reasoning',
+    identity,
+    enabled,
+    ...(level ? { level } : {}),
+  });
+}
+
+export function promptSession(
+  identity: SessionIdentity,
+  text: string,
+  images?: AttachedImage[]
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'prompt',
+    identity,
+    text,
+    ...(images?.length ? { images } : {}),
+  });
+}
+
+export function steerSession(
+  identity: SessionIdentity,
+  text: string,
+  images?: AttachedImage[]
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'steer',
+    identity,
+    text,
+    ...(images?.length ? { images } : {}),
+  });
+}
+
+export function abortSession(identity: SessionIdentity): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'abort', identity });
+}
+
+export function respondApproval(
+  identity: SessionIdentity,
+  requestId: string,
+  decision: ApprovalDecision
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'approval-respond', identity, requestId, decision });
+}
+
+export function respondAsk(
+  identity: SessionIdentity,
+  requestId: string,
+  answer: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'ask-respond', identity, requestId, answer });
+}
+
+export function rewindSession(
+  identity: SessionIdentity,
+  userIndexFromEnd: number,
+  restoreFiles?: boolean
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'rewind',
+    identity,
+    userIndexFromEnd,
+    ...(restoreFiles ? { restoreFiles } : {}),
+  });
+}
+
+export function stopBackgroundTask(
+  identity: SessionIdentity,
+  taskId: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'task-stop', identity, taskId });
+}
+
+export function setSessionApprovalMode(
+  identity: SessionIdentity,
+  mode: ApprovalMode
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'set-approval-mode', identity, mode });
+}
+
+export function requestSnapshot(): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'snapshot' });
+}
+
+function configuredAgentTypes(
+  authenticatedAccountKeys: ReadonlySet<string>
+): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
   const disabled = new Set(
     Array.isArray(state?.disabledBuiltinAgentTypes)
-      ? (state.disabledBuiltinAgentTypes as string[])
+      ? state.disabledBuiltinAgentTypes.filter((name): name is string => typeof name === 'string')
       : []
   );
-  const entries = Array.isArray(state?.agentTypes)
-    ? (state.agentTypes as {
-        name?: string;
-        description?: string;
-        systemPrompt?: string;
-        providerId?: string;
-        modelId?: string;
-        tools?: string;
-        skillIds?: string[];
-        mcpServerIds?: string[];
-      }[])
-    : [];
-  const allSkills = Array.isArray(state?.skills)
-    ? (state.skills as { id?: string; path?: string }[])
-    : [];
-  const allMcp = Array.isArray(state?.mcpServers)
-    ? (state.mcpServers as (McpServerSpawnConfig & { id?: string })[])
-    : [];
-  const resolveSkillPaths = (ids?: string[]): string[] =>
-    (ids ?? [])
-      .map((id) => allSkills.find((skill) => skill.id === id)?.path)
-      .filter((p): p is string => typeof p === 'string' && p.length > 0);
-  const resolveMcpServers = (ids?: string[]): McpServerSpawnConfig[] =>
-    (ids ?? [])
-      .map((id) => allMcp.find((server) => server.id === id))
-      .filter((server): server is McpServerSpawnConfig & { id?: string } =>
-        Boolean(server?.name && server?.transport)
-      )
-      .map(({ name, transport, command, args, env, url }) => ({
-        name,
-        transport,
-        ...(command ? { command } : {}),
-        ...(args?.length ? { args } : {}),
-        ...(env && Object.keys(env).length > 0 ? { env } : {}),
-        ...(url ? { url } : {}),
-      }));
-  const customNames = new Set(entries.map((entry) => entry.name));
-  const builtins: AgentTypeSpawnConfig[] = BUILTIN_AGENT_TYPES.filter(
+  const custom = Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [];
+  const customNames = new Set(custom.map((entry) => entry.name));
+  const builtins = BUILTIN_AGENT_TYPES.filter(
     (type) => !disabled.has(type.name) && !customNames.has(type.name)
   ).map((type) => ({
     name: type.name,
@@ -173,32 +477,56 @@ function configuredAgentTypes(): AgentTypeSpawnConfig[] {
     systemPrompt: type.systemPrompt,
     tools: type.tools,
   }));
-  const custom = entries
-    .filter((entry) => entry.name)
-    .map((entry) => {
-      const provider = entry.providerId ? findProvider(entry.providerId) : null;
-      const model =
-        provider && entry.modelId ? spawnModelConfig(provider, entry.modelId) : undefined;
-      return {
-        name: String(entry.name),
-        description: String(entry.description ?? ''),
-        systemPrompt: String(entry.systemPrompt ?? ''),
-        tools: entry.tools === 'readonly' ? ('readonly' as const) : ('all' as const),
-        ...(() => {
-          const skillPaths = resolveSkillPaths(entry.skillIds);
-          return skillPaths.length > 0 ? { skillPaths } : {};
-        })(),
-        ...(() => {
-          const servers = resolveMcpServers(entry.mcpServerIds);
-          return servers.length > 0 ? { mcpServers: servers } : {};
-        })(),
-        ...(model ? { model } : {}),
-      };
-    });
-  return [...builtins, ...custom];
+  const customs = custom.map((entry): AgentTypeSpawnConfig => {
+    const resources = resolveAgentTypeResources(entry);
+    const bound =
+      entry.providerId && entry.modelId
+        ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+        : null;
+    return {
+      name: entry.name,
+      description: entry.description,
+      systemPrompt: entry.systemPrompt,
+      tools: entry.tools,
+      ...(resources.ok && resources.skillPaths.length > 0
+        ? { skillPaths: [...resources.skillPaths] }
+        : {}),
+      ...(resources.ok && resources.mcpServers.length > 0
+        ? { mcpServers: [...resources.mcpServers] }
+        : {}),
+      ...(bound?.ok ? { model: bound.selection.config } : {}),
+    };
+  });
+  return [...builtins, ...customs];
 }
 
-/** 解析自定义预设；缺省 / default / 找不到（已删）都返回 undefined = 走 enabled 过滤 */
+function resolveAgentTypeResources(
+  definition: Pick<AgentTypeEntry, 'skillIds' | 'mcpServerIds'>
+):
+  | { ok: true; skillPaths: readonly string[]; mcpServers: readonly McpServerSpawnConfig[] }
+  | { ok: false; error: string } {
+  const state = readSettingsState();
+  const skills = Array.isArray(state?.skills) ? state.skills.filter(isSkillEntry) : [];
+  const servers = Array.isArray(state?.mcpServers) ? state.mcpServers.filter(isMcpServerEntry) : [];
+  const skillPaths = (definition.skillIds ?? []).map(
+    (id) => skills.find((skill) => skill.id === id)?.path
+  );
+  if (skillPaths.some((entry) => !entry)) {
+    return { ok: false, error: 'Agent type references an unavailable skill.' };
+  }
+  const mcpEntries = (definition.mcpServerIds ?? []).map((id) =>
+    servers.find((server) => server.id === id)
+  );
+  if (mcpEntries.some((entry) => !entry)) {
+    return { ok: false, error: 'Agent type references an unavailable MCP server.' };
+  }
+  return {
+    ok: true,
+    skillPaths: skillPaths as string[],
+    mcpServers: mcpEntries.map((entry) => toMcpSpawnConfig(entry!)),
+  };
+}
+
 function resolvePreset(presetId?: string): Preset | undefined {
   if (!presetId || presetId === DEFAULT_PRESET_ID) return undefined;
   const state = readSettingsState();
@@ -206,156 +534,33 @@ function resolvePreset(presetId?: string): Preset | undefined {
   return presets.find((preset) => preset?.id === presetId);
 }
 
-/** 注入的 skill 目录：默认走 enabled 过滤；自定义预设按 id 集合（忽略条目 enabled） */
 function enabledSkillPaths(preset?: Preset): string[] {
   const state = readSettingsState();
-  const skills = Array.isArray(state?.skills)
-    ? (state.skills as { id?: string; path?: string; enabled?: boolean }[])
-    : [];
+  const skills = Array.isArray(state?.skills) ? state.skills.filter(isSkillEntry) : [];
   const picked = preset
-    ? skills.filter((skill) => skill.id && preset.skillIds.includes(skill.id))
+    ? skills.filter((skill) => preset.skillIds.includes(skill.id))
     : skills.filter((skill) => skill.enabled !== false);
-  return picked
-    .filter((skill) => typeof skill.path === 'string' && skill.path)
-    .map((skill) => skill.path as string);
+  return picked.map((skill) => skill.path);
 }
 
-/** 注入的 MCP server：默认走 enabled 过滤；自定义预设按 id 集合（忽略条目 enabled） */
 function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
   const state = readSettingsState();
-  const servers = Array.isArray(state?.mcpServers)
-    ? (state.mcpServers as (McpServerSpawnConfig & { id?: string; enabled?: boolean })[])
-    : [];
+  const servers = Array.isArray(state?.mcpServers) ? state.mcpServers.filter(isMcpServerEntry) : [];
   const picked = preset
-    ? servers.filter((server) => server.id && preset.mcpServerIds.includes(server.id))
+    ? servers.filter((server) => preset.mcpServerIds.includes(server.id))
     : servers.filter((server) => server.enabled !== false);
-  return picked
-    .filter((server) => server.name && server.transport)
-    .map(({ name, transport, command, args, env, url }) => ({
-      name,
-      transport,
-      ...(command ? { command } : {}),
-      ...(args?.length ? { args } : {}),
-      ...(env && Object.keys(env).length > 0 ? { env } : {}),
-      ...(url ? { url } : {}),
-    }));
+  return picked.map(toMcpSpawnConfig);
 }
 
-/** 恢复/重建 coworker（渲染层 resume 级联调用;新建由 worker 内工具路径完成） */
-export function spawnCoworkerSession(
-  parentSessionId: string,
-  coworkerId: string,
-  name: string,
-  agentType?: string,
-  resumeFile?: string
-): { ok: boolean; error?: string } {
-  if (resumeFile && !existsSync(resumeFile)) {
-    return { ok: false, error: 'coworker 会话文件已丢失，无法恢复' };
-  }
-  return sendCommand({
-    type: 'spawn-coworker',
-    sessionId: parentSessionId,
-    coworkerId,
-    name,
-    ...(agentType ? { agentType } : {}),
-    ...(resumeFile ? { resumeFile } : {}),
-  });
-}
-
-export function dismissCoworker(
-  parentSessionId: string,
-  coworkerId: string,
-  notify = false
-): { ok: boolean; error?: string } {
-  return sendCommand({
-    type: 'dismiss-coworker',
-    sessionId: parentSessionId,
-    coworkerId,
-    ...(notify ? { notify: true } : {}),
-  });
-}
-
-export function setSessionThinking(
-  sessionId: string,
-  level: ThinkingLevel
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'set-thinking', sessionId, level });
-}
-
-export function setSessionReasoning(
-  sessionId: string,
-  enabled: boolean,
-  level?: ThinkingLevel
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'set-reasoning', sessionId, enabled, ...(level ? { level } : {}) });
-}
-
-export function promptSession(
-  sessionId: string,
-  text: string,
-  images?: AttachedImage[]
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'prompt', sessionId, text, ...(images?.length ? { images } : {}) });
-}
-
-export function steerSession(
-  sessionId: string,
-  text: string,
-  images?: AttachedImage[]
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'steer', sessionId, text, ...(images?.length ? { images } : {}) });
-}
-
-export function abortSession(sessionId: string): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'abort', sessionId });
-}
-
-export function respondApproval(
-  sessionId: string,
-  requestId: string,
-  decision: ApprovalDecision
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'approval-respond', sessionId, requestId, decision });
-}
-
-export function respondAsk(
-  sessionId: string,
-  requestId: string,
-  answer: string
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'ask-respond', sessionId, requestId, answer });
-}
-
-export function rewindSession(
-  sessionId: string,
-  userIndexFromEnd: number,
-  restoreFiles?: boolean
-): { ok: boolean; error?: string } {
-  return sendCommand({
-    type: 'rewind',
-    sessionId,
-    userIndexFromEnd,
-    ...(restoreFiles ? { restoreFiles } : {}),
-  });
-}
-
-export function stopBackgroundTask(
-  sessionId: string,
-  taskId: string
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'task-stop', sessionId, taskId });
-}
-
-export function setSessionApprovalMode(
-  sessionId: string,
-  mode: ApprovalMode
-): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'set-approval-mode', sessionId, mode });
-}
-
-/** 请求 worker 全量投影快照，结果经 AGENT_EVENT 广播回来 */
-export function requestSnapshot(): { ok: boolean; error?: string } {
-  return sendCommand({ type: 'snapshot' });
+function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
+  return {
+    name: server.name,
+    transport: server.transport,
+    ...(server.command ? { command: server.command } : {}),
+    ...(server.args?.length ? { args: server.args } : {}),
+    ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
+    ...(server.url ? { url: server.url } : {}),
+  };
 }
 
 function readSettingsState(): Record<string, unknown> | undefined {
@@ -363,21 +568,81 @@ function readSettingsState(): Record<string, unknown> | undefined {
   return (settings?.['enso-settings'] as { state?: Record<string, unknown> } | undefined)?.state;
 }
 
-function findProvider(providerId: string): ModelProvider | null {
-  const state = readSettingsState();
-  const providers = Array.isArray(state?.providers) ? (state.providers as ModelProvider[]) : [];
-  return providers.find((provider) => provider?.id === providerId) ?? null;
+function providersFromSettings(): ModelProvider[] {
+  const providers = readSettingsState()?.providers;
+  return Array.isArray(providers)
+    ? providers.filter(
+        (provider): provider is ModelProvider =>
+          Boolean(provider) &&
+          typeof provider === 'object' &&
+          typeof (provider as ModelProvider).id === 'string'
+      )
+    : [];
 }
 
-/** oauth 只走 catalog；apiKey 才把行覆盖带进 spawn。 */
-function spawnModelConfig(provider: ModelProvider, modelId: string): SpawnModelConfig {
+export function modelRefForSpawnConfig(config: SpawnModelConfig): ModelRef {
+  if (
+    'settingsProviderId' in config &&
+    typeof config.settingsProviderId === 'string' &&
+    config.settingsProviderId
+  ) {
+    return { providerId: config.settingsProviderId, modelId: config.modelId };
+  }
+  throw new Error('Spawn model is missing its settings provider identity.');
+}
+
+function spawnModelConfig(
+  provider: ModelProvider,
+  modelId: string
+): SpawnModelConfig & { settingsProviderId: string } {
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
   return {
     api: provider.api,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId,
+    settingsProviderId: provider.id,
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
     ...(!provider.oauthAccountKey ? pickModelCapabilityOverrides(entry) : {}),
   };
+}
+
+function isAgentTypeEntry(value: unknown): value is AgentTypeEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Partial<AgentTypeEntry>;
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.name === 'string' &&
+    typeof entry.description === 'string' &&
+    typeof entry.systemPrompt === 'string' &&
+    (entry.tools === 'all' || entry.tools === 'readonly')
+  );
+}
+
+function isSkillEntry(value: unknown): value is SkillEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Partial<SkillEntry>;
+  return typeof entry.id === 'string' && typeof entry.path === 'string';
+}
+
+function isMcpServerEntry(value: unknown): value is McpServerEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Partial<McpServerEntry>;
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.name === 'string' &&
+    (entry.transport === 'stdio' || entry.transport === 'http' || entry.transport === 'sse')
+  );
+}
+
+function settingsRevision(state: Record<string, unknown> | undefined): number {
+  const serialized = JSON.stringify({
+    disabledBuiltinAgentTypes: state?.disabledBuiltinAgentTypes ?? [],
+    agentTypes: state?.agentTypes ?? [],
+  });
+  let hash = 0;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash = (hash * 31 + serialized.charCodeAt(index)) >>> 0;
+  }
+  return hash;
 }

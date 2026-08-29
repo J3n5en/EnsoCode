@@ -22,7 +22,16 @@ const supervisor = new SessionSupervisor({
 
 port.on('message', (event) => {
   const command = parseAgentCommand(event.data);
-  if (command) supervisor.handleCommand(command);
+  if (!command) {
+    // 静默丢弃会让 Main 只能等到 ready 握手超时，且无任何诊断信息。
+    // 契约漂移（如 spawn 字段白名单与生产端不一致）必须在这里就看得见。
+    const type = (event.data as { type?: unknown } | null)?.type;
+    console.warn(
+      `[agent] dropped unparsable command: ${typeof type === 'string' ? type : '<unknown>'}`
+    );
+    return;
+  }
+  supervisor.handleCommand(command);
 });
 
 // utilityProcess.kill() 发 SIGTERM：退出前断开 MCP 连接，别留孤儿子进程

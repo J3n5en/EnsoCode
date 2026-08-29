@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"合并前确认变更边界、调用面与验证要求"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"PR 跨 main、preload、renderer、shared，需要核对跨层契约"}

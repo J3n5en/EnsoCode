@@ -13,11 +13,6 @@ export const TRELLIS_SUBAGENT_TYPES = [
    "trellis-research",
 ] as const;
 
-export const EXTENSION_RUNNER_SPECIFIERS = [
-   "@oh-my-pi/pi-coding-agent",
-   "@earendil-works/pi-coding-agent",
-] as const;
-
 const TRELLIS_SUBAGENTS = new Set<string>(TRELLIS_SUBAGENT_TYPES);
 export const RUNNER_GUARD_INSTALLED = Symbol.for("enso.trellisSubagentConsentGate");
 
@@ -34,6 +29,10 @@ export type BeforeAgentStartResult = {
 
 export type ExtensionRunnerLike = {
    prototype: object;
+};
+
+export type HostPackageExports = {
+   ExtensionRunner?: ExtensionRunnerLike;
 };
 
 export function isTrellisSubAgent(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -91,21 +90,10 @@ export function installExtensionRunnerGuard(Runner: ExtensionRunnerLike): void {
    }
 }
 
-export async function installHostExtensionRunnerGuard(): Promise<void> {
-   const tried: string[] = [];
-   for (const spec of EXTENSION_RUNNER_SPECIFIERS) {
-      tried.push(spec);
-      try {
-         const mod = (await import(spec)) as { ExtensionRunner?: ExtensionRunnerLike };
-         if (mod.ExtensionRunner) {
-            installExtensionRunnerGuard(mod.ExtensionRunner);
-            return;
-         }
-      } catch {
-         // Host package is not installed in this runtime; try the next specifier.
-      }
+export function installHostExtensionRunnerGuard(hostExports: HostPackageExports | undefined): void {
+   const Runner = hostExports?.ExtensionRunner;
+   if (!Runner) {
+      throw new Error("enso-subagent-guard: host pi exports do not expose ExtensionRunner");
    }
-   throw new Error(
-      `enso-subagent-guard: no host ExtensionRunner found (tried ${tried.join(", ")})`,
-   );
+   installExtensionRunnerGuard(Runner);
 }

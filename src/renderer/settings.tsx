@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-import { TitleBar } from '@/components/app/TitleBar';
+import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
+import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { SettingsContent } from '@/components/settings';
 import { useI18n } from '@/i18n';
 import './styles/globals.css';
@@ -10,7 +11,8 @@ function SettingsApp() {
 
   return (
     <div className="flex h-screen flex-col">
-      <TitleBar title={t('Settings')} />
+      <OauthCredentialBootstrap />
+      <TitleBar title={t('Settings')} actions={<SummonEnsoButton label={false} />} />
       <main className="min-h-0 flex-1">
         <SettingsContent />
       </main>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
-import { TitleBar } from '@/components/app/TitleBar';
+import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
@@ -32,6 +33,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
+
+  useEffect(
+    () =>
+      window.electronAPI.window.onAgentComposerPrefill((prefill) => {
+        useSessionsStore.getState().prefillAgent(prefill.typeKey);
+      }),
+    []
+  );
 
   // 手机第二屏：会话目录/项目/provider 只在 renderer，绑定后 debounce 同步给 main
   useEffect(() => {
@@ -71,7 +80,7 @@ export default function App() {
         const sessions = useSessionsStore.getState();
         const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
         const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-        if (projectId) sessions.newConversation(projectId);
+        if (projectId) void sessions.newConversation(projectId);
       } else if (pressed === bindings['next-tab']) {
         e.preventDefault();
         cycleTab(1);
@@ -87,7 +96,8 @@ export default function App() {
   return (
     <div className="relative isolate flex h-screen flex-col">
       <BackgroundLayer />
-      <TitleBar title="EnsoCode" />
+      <OauthCredentialBootstrap />
+      <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar

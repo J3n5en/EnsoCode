@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"静态门禁与合并前检查的通用约束"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"安全与质量复审需覆盖跨层数据流和边界"}

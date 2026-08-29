@@ -1,4 +1,30 @@
-import type { ModelApiKind, ModelCapabilityOverrides } from './llm';
+import {
+  type AgentTypeKey,
+  type ChildSessionIdentity,
+  ENSO_LOCKED_PROFILE_ID,
+  ENSO_LOCKED_TOOL_IDS,
+  isSameChildSessionIdentity,
+  isUuid,
+  parseAgentTypeKey,
+  parseChildSessionIdentity,
+  parseSessionIdentity,
+  type SessionIdentity,
+} from '../builtinAgents';
+import {
+  type CapabilityExecutionEnvelope,
+  type CapabilityReceipt,
+  type CapabilityResult,
+  parseCapabilityExecutionEnvelope,
+  parseCapabilityReceipt,
+  parseCapabilityResult,
+} from '../capabilities/types';
+import type { DefaultModelRef } from '../defaultModel';
+import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
+import { MODEL_API_KINDS, type ModelApiKind, type ModelCapabilityOverrides } from './llm';
+import { type AgentDispatchTask, parseAgentDispatchTask } from './mentions';
+
+export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
+export { parseChildSessionIdentity, parseSessionIdentity } from '../builtinAgents';
 
 /** 会话状态。waiting/done 属权限门与 subagent 刀，M1 不引入 */
 export type NodeStatus = 'idle' | 'running' | 'failed';
@@ -9,6 +35,12 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
   baseUrl: string;
   apiKey: string;
   modelId: string;
+  /**
+   * settings 里的 provider 条目 id。parent-ready / child-ready 必须用它回报模型身份
+   * （见 supervisor.settingsModelRef 与 agentHost.modelRefForSpawnConfig，缺失即抛错），
+   * 因此它是 spawn 命令的必填字段，解析器同样强制要求。
+   */
+  settingsProviderId: string;
   /**
    * 订阅账号 key（= 合成 provider id，见 shared/types/oauthProviders.ts）。
    * 存在时 worker 直取该 key 对应的 provider 与模型，凭证由 pi runtime 从 auth.json 解析。
@@ -99,6 +131,8 @@ export interface CoworkerInfo {
   /** `${parentId}::cw-${slug}` */
   id: string;
   /** 雇佣时的名字,coworker 工具按名寻址 */
+  /** typed mention child 的安全 identity/registry metadata */
+  child?: ChildConversationMetadata;
   name: string;
   /** agent 类型名（缺省 general） */
   agentType?: string;
@@ -119,63 +153,270 @@ export interface McpServerSpawnConfig {
   url?: string;
 }
 
-/** Main → worker 命令 */
+export interface ModelRef {
+  providerId: string;
+  modelId: string;
+}
+
+export interface ProjectAuthority {
+  projectId: string;
+  canonicalPath: string;
+  state: 'active' | 'removed';
+  version: number;
+}
+
+export type ProjectAuthorityProjection = ProjectAuthority;
+
+export interface ConversationAuthority {
+  conversationId: string;
+  projectId: string;
+  kind: 'root';
+  lifecycle: 'draft' | 'ready' | 'ended';
+  version: number;
+  sessionFile?: string;
+  selection?: DefaultModelRef & { revision: number };
+}
+
+export type ConversationAuthorityProjection = ConversationAuthority;
+
+export interface SourceAuthorityProjection {
+  projects: readonly ProjectAuthorityProjection[];
+  conversations: readonly ConversationAuthorityProjection[];
+}
+
+export interface CreateProjectAuthorityRequest {
+  requestId: string;
+  path: string;
+}
+
+export interface SelectProjectAuthorityRequest {
+  requestId: string;
+  projectId: string;
+  version: number;
+}
+
+export interface RemoveProjectAuthorityRequest {
+  requestId: string;
+  projectId: string;
+  version: number;
+}
+
+export interface CreateConversationAuthorityRequest {
+  requestId: string;
+  projectId: string;
+  projectVersion: number;
+}
+
+export interface ConversationAuthorityRequest {
+  requestId: string;
+  conversationId: string;
+  version: number;
+}
+
+export interface UpdateConversationSelectionRequest extends ConversationAuthorityRequest {
+  selection: DefaultModelRef;
+}
+
+export type AuthorityMutationResult<T> =
+  | { accepted: true; value: T }
+  | { accepted: false; error: string };
+
+export interface ResolvedAgentTypeSpawnConfig {
+  typeKey: AgentTypeKey;
+  displayName: string;
+  description: string;
+  spawnSpecId: string;
+  systemPrompt: string;
+  model: SpawnModelConfig;
+  tools: 'all' | 'readonly' | 'enso-locked';
+  skillPaths: readonly string[];
+  skillBindingIds: readonly string[];
+  mcpServers: readonly McpServerSpawnConfig[];
+  mcpBindingIds: readonly string[];
+  systemPromptHash: string;
+  lockedProfileId?: typeof ENSO_LOCKED_PROFILE_ID;
+}
+
+export interface ResolvedChildProfileProof {
+  spawnSpecId: string;
+  typeKey: AgentTypeKey;
+  model: ModelRef;
+  toolIds: readonly string[];
+  loadedSkillBindingIds: readonly string[];
+  loadedMcpBindingIds: readonly string[];
+  systemPromptHash: string;
+}
+
+export interface ChildConversationMetadata {
+  parentId: string;
+  childGeneration: string;
+  agentTypeKey: AgentTypeKey;
+  agentInstanceId: string;
+  agentInstanceName: string;
+  dispatchOrigin: 'typed-mention' | 'manual' | 'agent-tool';
+  lockedProfileId?: typeof ENSO_LOCKED_PROFILE_ID;
+}
+
+export interface SafeChildRef {
+  sessionId: string;
+  generation: string;
+  instanceId: string;
+  instanceName: string;
+  typeKey: AgentTypeKey;
+}
+
+export type AgentSessionCustomEntry =
+  | { kind: 'agent-dispatch'; child: SafeChildRef; at: number }
+  | {
+      kind: 'agent-completed';
+      child: SafeChildRef;
+      receiptSummary?: string;
+      at: number;
+    }
+  | {
+      kind: 'agent-failed';
+      child: SafeChildRef;
+      errorCode: string;
+      message: string;
+      at: number;
+    }
+  | { kind: 'capability-receipt'; receipt: CapabilityReceipt };
+
+export type SafeJournalRecord =
+  | { type: 'safe-user-text'; text: string; at: number }
+  | { type: 'safe-assistant-text'; text: string; at: number }
+  | {
+      type: 'enso-operation';
+      operationId: string;
+      capabilityId: ProductSurfaceId;
+      toolCallId: string;
+      at: number;
+    }
+  | {
+      type: 'safe-model-result';
+      toolCallId: string;
+      modelResult: CapabilityResult;
+      at: number;
+    }
+  | { type: 'capability-receipt'; receipt: CapabilityReceipt; at: number };
+
+export interface SafeJournalProjection {
+  records: readonly SafeJournalRecord[];
+  partial: boolean;
+}
+
+/** 已结束 child 的只读历史读取结果。失败一律给结构化码，渲染层据此决定是否重试。 */
+export type ChildHistoryResult =
+  | { ok: true; projection: SafeJournalProjection }
+  | { ok: false; code: 'not-found' | 'unavailable'; error: string };
+
+export type DispatchProgressPhase =
+  | 'received'
+  | 'source-bound'
+  | 'capacity-reserved'
+  | 'parent-spawning'
+  | 'parent-ready'
+  | 'child-spawning'
+  | 'child-ready'
+  | 'task-dispatched'
+  | 'running'
+  | 'waiting-user'
+  | 'waiting-approval';
+
+export type DispatchTerminal = 'completed' | 'failed' | 'cancelled';
+
+export type DispatchMainEvent =
+  | {
+      dispatchId: string;
+      child: ChildSessionIdentity;
+      mainSeq: number;
+      phase: DispatchProgressPhase;
+    }
+  | {
+      dispatchId: string;
+      child: ChildSessionIdentity;
+      mainSeq: number;
+      phase: 'terminal';
+      terminal: DispatchTerminal;
+      receiptSummary?: string;
+    };
+
+/** Main → worker。所有 session 控制均携 exact generation。 */
 export type AgentCommand =
   | {
-      type: 'spawn';
-      sessionId: string;
+      type: 'spawn-parent';
+      identity: SessionIdentity;
       cwd: string;
       model: SpawnModelConfig;
-      /** 从既有 jsonl 恢复会话（app 重启后 resume） */
       resumeFile?: string;
-      /** 是否开启推理；关闭时注册模型 reasoning:false，pi 完全不发 thinking */
       reasoningEnabled?: boolean;
       thinkingLevel?: ThinkingLevel;
-      /** 是否加载本机 skill（.agents/skills、.pi/skills）；默认 true */
       loadLocalSkills?: boolean;
-      /** 应用内登记的 skill 目录（设置里启用的条目），注入给 pi 的 resourceLoader */
       skillPaths?: string[];
-      /** 应用内登记的 MCP server（设置里启用的条目），工具注入会话 */
       mcpServers?: McpServerSpawnConfig[];
-      /** 本会话注入的全局指令。走命令载荷，不写共享 AGENTS.md，避免多 preset 抢同一文件 */
       instruction?: { path: string; content: string };
-      /** 审批档位；缺省 full（完全放行） */
       approvalMode?: ApprovalMode;
-      /** 自定义 subagent 类型表 */
       agentTypes?: AgentTypeSpawnConfig[];
-      /** 禁用的内置工具 id(设置页开关;禁用则不注册,模型看不到) */
       disabledTools?: string[];
     }
-  /** 雇佣/恢复 coworker。sessionId 填父会话 id：借 OperationGate 串到父 spawn 之后 */
   | {
-      type: 'spawn-coworker';
-      sessionId: string;
-      coworkerId: string;
-      name: string;
-      agentType?: string;
+      type: 'spawn-child';
+      identity: ChildSessionIdentity;
+      cwd: string;
+      config: ResolvedAgentTypeSpawnConfig;
       resumeFile?: string;
     }
-  /** notify=true 时通知主 agent(用户单独解雇);级联删除不通知 */
-  | { type: 'dismiss-coworker'; sessionId: string; coworkerId: string; notify?: boolean }
-  | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
-  | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
-  | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
-  | { type: 'set-reasoning'; sessionId: string; enabled: boolean; level?: ThinkingLevel }
+  | {
+      type: 'prompt-child';
+      identity: ChildSessionIdentity;
+      requestId: string;
+      task: AgentDispatchTask;
+    }
+  | {
+      type: 'dismiss-child';
+      parent: SessionIdentity;
+      child: ChildSessionIdentity;
+      notify?: boolean;
+    }
+  | { type: 'prompt'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
+  | { type: 'steer'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
+  | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
+  | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
+  | {
+      type: 'set-reasoning';
+      identity: SessionIdentity;
+      enabled: boolean;
+      level?: ThinkingLevel;
+    }
   | {
       type: 'approval-respond';
-      sessionId: string;
+      identity: SessionIdentity;
       requestId: string;
       decision: ApprovalDecision;
     }
-  | { type: 'set-approval-mode'; sessionId: string; mode: ApprovalMode }
-  | { type: 'ask-respond'; sessionId: string; requestId: string; answer: string }
-  | { type: 'task-stop'; sessionId: string; taskId: string }
-  /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；worker 侧换算 entry 并 navigateTree。
-   *  restoreFiles 时先把工作树还原到该轮首个写操作前的 checkpoint（无快照静默降级） */
-  | { type: 'rewind'; sessionId: string; userIndexFromEnd: number; restoreFiles?: boolean }
-  | { type: 'abort'; sessionId: string }
+  | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
+  | {
+      type: 'capability-result';
+      child: ChildSessionIdentity;
+      turnId: string;
+      requestId: string;
+      envelope: CapabilityExecutionEnvelope;
+    }
+  | { type: 'task-stop'; identity: SessionIdentity; taskId: string }
+  | {
+      type: 'rewind';
+      identity: SessionIdentity;
+      userIndexFromEnd: number;
+      restoreFiles?: boolean;
+    }
+  | { type: 'abort'; identity: SessionIdentity }
+  | {
+      type: 'append-session-custom-entry';
+      identity: SessionIdentity;
+      entry: AgentSessionCustomEntry;
+    }
   | { type: 'snapshot' }
-  /** 预热 MCP 连接（worker 启动时下发；连接进缓存，spawn 即取即用） */
   | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
 
 /** 随消息附带的图片（base64） */
@@ -251,7 +492,7 @@ export interface ProjectedMessage {
 }
 
 export interface SessionSnapshot {
-  sessionId: string;
+  identity: SessionIdentity;
   status: NodeStatus;
   messages: ProjectedMessage[];
   /**
@@ -260,17 +501,13 @@ export interface SessionSnapshot {
    */
   baseIndex?: number;
   commands: SlashCommand[];
-  /** 挂起的审批请求（渲染层刷新后恢复审批条） */
   pendingApprovals?: ApprovalRequestInfo[];
-  /** 挂起的用户提问（渲染层刷新后恢复提问条） */
   pendingAsks?: AskRequestInfo[];
-  /** 后台任务（渲染层刷新后恢复胶囊条） */
   backgroundTasks?: BackgroundTaskInfo[];
-  /** 子代理（渲染层刷新后恢复状态行） */
   subagents?: SubagentInfo[];
-  /** coworker 会话专有：父会话 id（渲染层刷新后重建挂回父） */
-  parentSessionId?: string;
-  coworkerName?: string;
+  child?: ChildConversationMetadata;
+  customEntries?: AgentSessionCustomEntry[];
+  safeJournal?: SafeJournalProjection;
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -279,21 +516,18 @@ export interface SlashCommand {
   description: string;
 }
 
-/** Renderer 发起开会话的请求。apiKey 由 Main 从 settings 补全，不经过 Renderer */
+/** 普通新会话 Renderer 请求；child 派发不复用此结构。 */
 export interface AgentSpawnRequest {
   sessionId: string;
   providerId: string;
   modelId: string;
   cwd: string;
-  /** 从既有 jsonl 恢复（app 重启后 resume） */
   resumeFile?: string;
   reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
   loadLocalSkills?: boolean;
   disabledTools?: string[];
-  /** 注入组合预设；缺省/default 走各条目 enabled 过滤（现行为） */
   presetId?: string;
-  /** 审批档位；缺省 full（完全放行） */
   approvalMode?: ApprovalMode;
 }
 
@@ -302,60 +536,141 @@ export interface AgentActionResult {
   error?: string;
 }
 
-/** Renderer 收到的事件流：worker 事件 + Main 合成的 worker 退出通知 */
-export type RendererAgentEvent = AgentWorkerEvent | { type: 'worker-exited' };
+export type ParentLifecycleEvent =
+  | {
+      type: 'parent-ready';
+      identity: SessionIdentity;
+      seq: number;
+      sessionFile: string;
+      model: ModelRef;
+    }
+  | {
+      /**
+       * 已启动会话就地换模型成功。Main 必须据此更新 agentSessionIndex 的
+       * 已启动模型，否则后续派发的 selection 校验会永远对不上（见 issue #30）。
+       */
+      type: 'model-changed';
+      identity: SessionIdentity;
+      seq: number;
+      model: ModelRef;
+    }
+  | {
+      type: 'parent-rejected';
+      identity: SessionIdentity;
+      seq: number;
+      reason: string;
+    }
+  | { type: 'parent-ended'; identity: SessionIdentity; seq: number; reason: string };
 
-/**
- * worker → Main → Renderer 事件。seq 为 per-session 单调递增，接收端丢弃过期事件。
- * message-upsert 携带该位置消息的完整投影（消息级快照，不做 delta），按 index 幂等写入。
- */
+export type ChildLifecycleEvent =
+  | {
+      type: 'child-reserved';
+      identity: ChildSessionIdentity;
+      seq: number;
+      requestId: string;
+      metadata: ChildConversationMetadata;
+    }
+  | {
+      type: 'child-ready';
+      identity: ChildSessionIdentity;
+      seq: number;
+      sessionFile: string;
+      proof: ResolvedChildProfileProof;
+    }
+  | {
+      type: 'child-rejected';
+      identity: ChildSessionIdentity;
+      seq: number;
+      reason: string;
+    }
+  | { type: 'child-ended'; identity: ChildSessionIdentity; seq: number; reason: string };
+
+export type RendererChildLifecycleEvent =
+  | Exclude<ChildLifecycleEvent, { type: 'child-ready' }>
+  | Omit<Extract<ChildLifecycleEvent, { type: 'child-ready' }>, 'proof'>;
+
+/** Renderer 收到统一普通+child事件流；exact profile proof 只在 worker→Main 边界。 */
+export type RendererAgentEvent =
+  | Exclude<AgentWorkerEvent, ChildLifecycleEvent>
+  | RendererChildLifecycleEvent
+  | { type: 'worker-exited' };
+
 export type AgentWorkerEvent =
-  | { type: 'status'; sessionId: string; seq: number; status: NodeStatus; error?: string }
+  | ParentLifecycleEvent
+  | ChildLifecycleEvent
+  | { type: 'status'; identity: SessionIdentity; seq: number; status: NodeStatus; error?: string }
   | {
       type: 'message-upsert';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       index: number;
       message: ProjectedMessage;
     }
-  | { type: 'turn-completed'; sessionId: string; seq: number }
-  | { type: 'turn-failed'; sessionId: string; seq: number; error: string }
-  | { type: 'messages-truncated'; sessionId: string; seq: number; length: number }
-  /** 回退完成；editorText = 被回退 user 消息的文本（预填输入框），失败/取消时缺省 */
+  | { type: 'turn-completed'; identity: SessionIdentity; seq: number; turnId: string }
+  | {
+      type: 'turn-failed';
+      identity: SessionIdentity;
+      seq: number;
+      turnId: string;
+      error: string;
+    }
+  | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
   | {
       type: 'rewind-done';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       editorText?: string;
-      /** 是否实际还原了工作树文件 */
       filesRestored?: boolean;
     }
-  | { type: 'commands'; sessionId: string; seq: number; commands: SlashCommand[] }
+  | { type: 'commands'; identity: SessionIdentity; seq: number; commands: SlashCommand[] }
   | {
       type: 'session-meta';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       sessionFile?: string;
-      /** 当前模型 catalog 的上下文窗口；缺省/非正数 = 未知 */
       contextWindow?: number;
     }
-  | { type: 'approval-request'; sessionId: string; seq: number; request: ApprovalRequestInfo }
-  | { type: 'approval-resolved'; sessionId: string; seq: number; requestId: string }
-  | { type: 'ask-request'; sessionId: string; seq: number; ask: AskRequestInfo }
-  | { type: 'ask-resolved'; sessionId: string; seq: number; requestId: string }
-  | { type: 'subagent-update'; sessionId: string; seq: number; agent: SubagentInfo }
-  | { type: 'coworker-update'; sessionId: string; seq: number; coworker: CoworkerInfo }
+  | {
+      type: 'approval-request';
+      identity: SessionIdentity;
+      seq: number;
+      request: ApprovalRequestInfo;
+    }
+  | {
+      type: 'approval-resolved';
+      identity: SessionIdentity;
+      seq: number;
+      requestId: string;
+    }
+  | { type: 'ask-request'; identity: SessionIdentity; seq: number; ask: AskRequestInfo }
+  | { type: 'ask-resolved'; identity: SessionIdentity; seq: number; requestId: string }
+  | { type: 'subagent-update'; identity: SessionIdentity; seq: number; agent: SubagentInfo }
+  | {
+      type: 'coworker-update';
+      identity: SessionIdentity;
+      seq: number;
+      coworker: CoworkerInfo;
+    }
+  | {
+      type: 'capability-invoke';
+      child: ChildSessionIdentity;
+      seq: number;
+      turnId: string;
+      requestId: string;
+      capabilityId: ProductSurfaceId;
+      params: unknown;
+    }
   | {
       type: 'goal-signal';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       kind: 'complete' | 'blocked' | 'wait';
       note: string;
     }
-  | { type: 'task-started'; sessionId: string; seq: number; task: BackgroundTaskInfo }
+  | { type: 'task-started'; identity: SessionIdentity; seq: number; task: BackgroundTaskInfo }
   | {
       type: 'task-output';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       taskId: string;
       tail: string;
@@ -363,11 +678,17 @@ export type AgentWorkerEvent =
     }
   | {
       type: 'task-ended';
-      sessionId: string;
+      identity: SessionIdentity;
       seq: number;
       taskId: string;
       status: BackgroundTaskInfo['status'];
       exitCode?: number;
+    }
+  | {
+      type: 'session-custom-entry';
+      identity: SessionIdentity;
+      seq: number;
+      entry: AgentSessionCustomEntry;
     }
   | { type: 'snapshot'; sessions: SessionSnapshot[]; partial?: boolean };
 
@@ -377,273 +698,829 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-/** 收窄 Main → worker 命令。脏输入返回 null，不抛 */
-export function parseAgentCommand(value: unknown): AgentCommand | null {
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && hasOnlyKeys(value, keys);
+
+const isSequence = (value: unknown): value is number =>
+  Number.isInteger(value) && (value as number) >= 0;
+
+const isProductSurfaceId = (value: unknown): value is ProductSurfaceId =>
+  typeof value === 'string' && Object.hasOwn(PRODUCT_SURFACE_INVENTORY, value);
+
+function parseAttachedImages(value: unknown): AttachedImage[] | null {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    if (!isRecord(item) || !hasExactKeys(item, ['data', 'mimeType'])) return null;
+    if (!isNonEmptyString(item.data) || !isNonEmptyString(item.mimeType)) return null;
+  }
+  return value as AttachedImage[];
+}
+
+const parseAnySessionIdentity = (value: unknown): SessionIdentity | ChildSessionIdentity | null =>
+  parseChildSessionIdentity(value) ?? parseSessionIdentity(value);
+
+function parseSpawnModelConfig(value: unknown): SpawnModelConfig | null {
   if (!isRecord(value)) return null;
+  if (
+    !hasOnlyKeys(value, [
+      'api',
+      'baseUrl',
+      'apiKey',
+      'modelId',
+      'settingsProviderId',
+      'oauthAccountKey',
+      'reasoning',
+      'thinkingLevel',
+      'contextWindow',
+      'maxTokens',
+    ]) ||
+    !MODEL_API_KINDS.includes(value.api as ModelApiKind) ||
+    typeof value.baseUrl !== 'string' ||
+    typeof value.apiKey !== 'string' ||
+    !isNonEmptyString(value.modelId) ||
+    !isNonEmptyString(value.settingsProviderId) ||
+    (value.oauthAccountKey !== undefined && !isNonEmptyString(value.oauthAccountKey))
+  ) {
+    return null;
+  }
+  return value as unknown as SpawnModelConfig;
+}
+
+function parseModelRef(value: unknown): ModelRef | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['providerId', 'modelId'])) return null;
+  return isNonEmptyString(value.providerId) && isNonEmptyString(value.modelId)
+    ? { providerId: value.providerId, modelId: value.modelId }
+    : null;
+}
+
+export function parseProjectAuthority(value: unknown): ProjectAuthority | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['projectId', 'canonicalPath', 'state', 'version']) ||
+    !isUuid(value.projectId) ||
+    !isNonEmptyString(value.canonicalPath) ||
+    (value.state !== 'active' && value.state !== 'removed') ||
+    !isSequence(value.version)
+  ) {
+    return null;
+  }
+  return value as unknown as ProjectAuthority;
+}
+
+export function parseConversationAuthority(value: unknown): ConversationAuthority | null {
+  if (!isRecord(value)) return null;
+  if (
+    !hasOnlyKeys(value, [
+      'conversationId',
+      'projectId',
+      'kind',
+      'lifecycle',
+      'version',
+      'sessionFile',
+      'selection',
+    ]) ||
+    !isUuid(value.conversationId) ||
+    !isUuid(value.projectId) ||
+    value.kind !== 'root' ||
+    (value.lifecycle !== 'draft' && value.lifecycle !== 'ready' && value.lifecycle !== 'ended') ||
+    !isSequence(value.version) ||
+    (value.sessionFile !== undefined && !isNonEmptyString(value.sessionFile))
+  ) {
+    return null;
+  }
+  if (value.selection !== undefined) {
+    if (!isRecord(value.selection)) return null;
+    if (
+      !hasExactKeys(value.selection, ['providerId', 'modelId', 'revision']) ||
+      !isNonEmptyString(value.selection.providerId) ||
+      !isNonEmptyString(value.selection.modelId) ||
+      !isSequence(value.selection.revision)
+    ) {
+      return null;
+    }
+  }
+  return value as unknown as ConversationAuthority;
+}
+
+export function parseSourceAuthorityProjection(value: unknown): SourceAuthorityProjection | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['projects', 'conversations']) ||
+    !Array.isArray(value.projects) ||
+    value.projects.some((project) => parseProjectAuthority(project) === null) ||
+    !Array.isArray(value.conversations) ||
+    value.conversations.some((conversation) => parseConversationAuthority(conversation) === null)
+  ) {
+    return null;
+  }
+  return value as unknown as SourceAuthorityProjection;
+}
+
+export function parseCreateProjectAuthorityRequest(
+  value: unknown
+): CreateProjectAuthorityRequest | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['requestId', 'path'])) return null;
+  return isNonEmptyString(value.requestId) && isNonEmptyString(value.path)
+    ? (value as unknown as CreateProjectAuthorityRequest)
+    : null;
+}
+
+export function parseSelectProjectAuthorityRequest(
+  value: unknown
+): SelectProjectAuthorityRequest | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['requestId', 'projectId', 'version']) ||
+    !isNonEmptyString(value.requestId) ||
+    !isUuid(value.projectId) ||
+    !isSequence(value.version)
+  ) {
+    return null;
+  }
+  return value as unknown as SelectProjectAuthorityRequest;
+}
+
+export function parseRemoveProjectAuthorityRequest(
+  value: unknown
+): RemoveProjectAuthorityRequest | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['requestId', 'projectId', 'version']) ||
+    !isNonEmptyString(value.requestId) ||
+    !isUuid(value.projectId) ||
+    !isSequence(value.version)
+  ) {
+    return null;
+  }
+  return value as unknown as RemoveProjectAuthorityRequest;
+}
+
+export function parseCreateConversationAuthorityRequest(
+  value: unknown
+): CreateConversationAuthorityRequest | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['requestId', 'projectId', 'projectVersion']) ||
+    !isNonEmptyString(value.requestId) ||
+    !isUuid(value.projectId) ||
+    !isSequence(value.projectVersion)
+  ) {
+    return null;
+  }
+  return value as unknown as CreateConversationAuthorityRequest;
+}
+
+export function parseConversationAuthorityRequest(
+  value: unknown
+): ConversationAuthorityRequest | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['requestId', 'conversationId', 'version']) ||
+    !isNonEmptyString(value.requestId) ||
+    !isUuid(value.conversationId) ||
+    !isSequence(value.version)
+  ) {
+    return null;
+  }
+  return value as unknown as ConversationAuthorityRequest;
+}
+
+export function parseUpdateConversationSelectionRequest(
+  value: unknown
+): UpdateConversationSelectionRequest | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['requestId', 'conversationId', 'version', 'selection']) ||
+    !parseConversationAuthorityRequest({
+      requestId: value.requestId,
+      conversationId: value.conversationId,
+      version: value.version,
+    }) ||
+    !parseModelRef(value.selection)
+  ) {
+    return null;
+  }
+  return value as unknown as UpdateConversationSelectionRequest;
+}
+
+export function parseChildConversationMetadata(value: unknown): ChildConversationMetadata | null {
+  if (!isRecord(value)) return null;
+  if (
+    !hasOnlyKeys(value, [
+      'parentId',
+      'childGeneration',
+      'agentTypeKey',
+      'agentInstanceId',
+      'agentInstanceName',
+      'dispatchOrigin',
+      'lockedProfileId',
+    ]) ||
+    Object.keys(value).length < 6
+  ) {
+    return null;
+  }
+  const typeKey = parseAgentTypeKey(value.agentTypeKey);
+  if (
+    !isNonEmptyString(value.parentId) ||
+    !isUuid(value.childGeneration) ||
+    !typeKey ||
+    !isUuid(value.agentInstanceId) ||
+    !isNonEmptyString(value.agentInstanceName) ||
+    (value.dispatchOrigin !== 'typed-mention' &&
+      value.dispatchOrigin !== 'manual' &&
+      value.dispatchOrigin !== 'agent-tool') ||
+    (typeKey === 'agent:enso' && value.lockedProfileId !== ENSO_LOCKED_PROFILE_ID) ||
+    (typeKey !== 'agent:enso' && value.lockedProfileId !== undefined)
+  ) {
+    return null;
+  }
+  return value as unknown as ChildConversationMetadata;
+}
+
+function parseSafeChildRef(value: unknown): SafeChildRef | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['sessionId', 'generation', 'instanceId', 'instanceName', 'typeKey'])
+  ) {
+    return null;
+  }
+  const typeKey = parseAgentTypeKey(value.typeKey);
+  return isNonEmptyString(value.sessionId) &&
+    isUuid(value.generation) &&
+    isUuid(value.instanceId) &&
+    isNonEmptyString(value.instanceName) &&
+    typeKey
+    ? (value as unknown as SafeChildRef)
+    : null;
+}
+
+export function parseAgentSessionCustomEntry(value: unknown): AgentSessionCustomEntry | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'capability-receipt') {
+    if (!hasExactKeys(value, ['kind', 'receipt'])) return null;
+    const receipt = parseCapabilityReceipt(value.receipt);
+    return receipt ? { kind: 'capability-receipt', receipt } : null;
+  }
+  const child = parseSafeChildRef(value.child);
+  if (!child || typeof value.at !== 'number' || !Number.isFinite(value.at)) return null;
+  if (value.kind === 'agent-dispatch' && hasExactKeys(value, ['kind', 'child', 'at'])) {
+    return value as unknown as AgentSessionCustomEntry;
+  }
+  if (
+    value.kind === 'agent-completed' &&
+    hasOnlyKeys(value, ['kind', 'child', 'receiptSummary', 'at']) &&
+    (value.receiptSummary === undefined || typeof value.receiptSummary === 'string')
+  ) {
+    return value as unknown as AgentSessionCustomEntry;
+  }
+  if (
+    value.kind === 'agent-failed' &&
+    hasExactKeys(value, ['kind', 'child', 'errorCode', 'message', 'at']) &&
+    isNonEmptyString(value.errorCode) &&
+    isNonEmptyString(value.message)
+  ) {
+    return value as unknown as AgentSessionCustomEntry;
+  }
+  return null;
+}
+
+export function parseResolvedChildProfileProof(value: unknown): ResolvedChildProfileProof | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'spawnSpecId',
+      'typeKey',
+      'model',
+      'toolIds',
+      'loadedSkillBindingIds',
+      'loadedMcpBindingIds',
+      'systemPromptHash',
+    ]) ||
+    !isUuid(value.spawnSpecId) ||
+    !parseAgentTypeKey(value.typeKey) ||
+    !parseModelRef(value.model) ||
+    !Array.isArray(value.toolIds) ||
+    !value.toolIds.every(isNonEmptyString) ||
+    !Array.isArray(value.loadedSkillBindingIds) ||
+    !value.loadedSkillBindingIds.every(isNonEmptyString) ||
+    !Array.isArray(value.loadedMcpBindingIds) ||
+    !value.loadedMcpBindingIds.every(isNonEmptyString) ||
+    !isNonEmptyString(value.systemPromptHash)
+  ) {
+    return null;
+  }
+  if (
+    value.typeKey === 'agent:enso' &&
+    (value.toolIds.length !== ENSO_LOCKED_TOOL_IDS.length ||
+      value.toolIds.some((toolId, index) => toolId !== ENSO_LOCKED_TOOL_IDS[index]) ||
+      value.loadedSkillBindingIds.length !== 0 ||
+      value.loadedMcpBindingIds.length !== 0)
+  ) {
+    return null;
+  }
+  return value as unknown as ResolvedChildProfileProof;
+}
+
+export function parseSafeJournalRecord(value: unknown): SafeJournalRecord | null {
+  if (!isRecord(value) || typeof value.at !== 'number' || !Number.isFinite(value.at)) {
+    return null;
+  }
   switch (value.type) {
-    case 'spawn': {
-      const model = value.model;
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.cwd === 'string' &&
-        (value.resumeFile === undefined || isNonEmptyString(value.resumeFile)) &&
-        isRecord(model) &&
-        isNonEmptyString(model.api) &&
-        typeof model.baseUrl === 'string' &&
-        typeof model.apiKey === 'string' &&
-        isNonEmptyString(model.modelId)
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    }
-    case 'spawn-coworker':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        isNonEmptyString(value.coworkerId) &&
-        isNonEmptyString(value.name) &&
-        (value.agentType === undefined || isNonEmptyString(value.agentType)) &&
-        (value.resumeFile === undefined || isNonEmptyString(value.resumeFile))
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    case 'dismiss-coworker':
-      return isNonEmptyString(value.sessionId) && isNonEmptyString(value.coworkerId)
-        ? (value as unknown as AgentCommand)
+    case 'safe-user-text':
+    case 'safe-assistant-text':
+      return hasExactKeys(value, ['type', 'text', 'at']) && typeof value.text === 'string'
+        ? (value as unknown as SafeJournalRecord)
         : null;
-    case 'prompt':
-    case 'steer': {
-      const hasImages =
-        Array.isArray(value.images) &&
-        value.images.length > 0 &&
-        value.images.every(
-          (image) =>
-            isRecord(image) && isNonEmptyString(image.data) && isNonEmptyString(image.mimeType)
-        );
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.text === 'string' &&
-        (value.text.length > 0 || hasImages) &&
-        (value.images === undefined || hasImages)
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    }
-    case 'abort':
-      return isNonEmptyString(value.sessionId) ? (value as unknown as AgentCommand) : null;
-    case 'set-thinking':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        THINKING_LEVELS.includes(value.level as ThinkingLevel)
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    case 'set-reasoning':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.enabled === 'boolean' &&
-        (value.level === undefined || THINKING_LEVELS.includes(value.level as ThinkingLevel))
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    case 'approval-respond':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        isNonEmptyString(value.requestId) &&
-        (value.decision === 'allow' ||
-          value.decision === 'allowSession' ||
-          value.decision === 'deny')
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    case 'set-approval-mode':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        APPROVAL_MODES.includes(value.mode as ApprovalMode)
-      ) {
-        return value as unknown as AgentCommand;
-      }
-      return null;
-    case 'ask-respond':
-      return isNonEmptyString(value.sessionId) &&
-        isNonEmptyString(value.requestId) &&
-        typeof value.answer === 'string' &&
-        value.answer.length > 0
-        ? (value as unknown as AgentCommand)
+    case 'enso-operation':
+      return hasExactKeys(value, ['type', 'operationId', 'capabilityId', 'toolCallId', 'at']) &&
+        isNonEmptyString(value.operationId) &&
+        isProductSurfaceId(value.capabilityId) &&
+        isNonEmptyString(value.toolCallId)
+        ? (value as unknown as SafeJournalRecord)
         : null;
-    case 'task-stop':
-      return isNonEmptyString(value.sessionId) && isNonEmptyString(value.taskId)
-        ? (value as unknown as AgentCommand)
+    case 'safe-model-result':
+      return hasExactKeys(value, ['type', 'toolCallId', 'modelResult', 'at']) &&
+        isNonEmptyString(value.toolCallId) &&
+        parseCapabilityResult(value.modelResult)
+        ? (value as unknown as SafeJournalRecord)
         : null;
-    case 'rewind':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.userIndexFromEnd === 'number' &&
-        value.userIndexFromEnd >= 0 &&
-        (value.restoreFiles === undefined || typeof value.restoreFiles === 'boolean')
-        ? (value as unknown as AgentCommand)
+    case 'capability-receipt':
+      return hasExactKeys(value, ['type', 'receipt', 'at']) && parseCapabilityReceipt(value.receipt)
+        ? (value as unknown as SafeJournalRecord)
         : null;
-    case 'snapshot':
-      return { type: 'snapshot' };
-    case 'warm-mcp':
-      return Array.isArray(value.servers) ? (value as unknown as AgentCommand) : null;
     default:
       return null;
   }
 }
 
-/** 收窄 worker → Main 事件。脏输入返回 null，不抛 */
-export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
+export function parseSafeJournalProjection(value: unknown): SafeJournalProjection | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['records', 'partial']) ||
+    !Array.isArray(value.records) ||
+    value.records.some((record) => parseSafeJournalRecord(record) === null) ||
+    typeof value.partial !== 'boolean'
+  ) {
+    return null;
+  }
+  return value as unknown as SafeJournalProjection;
+}
+
+export function parseDispatchMainEvent(value: unknown): DispatchMainEvent | null {
+  if (
+    !isRecord(value) ||
+    !isUuid(value.dispatchId) ||
+    !parseChildSessionIdentity(value.child) ||
+    !isSequence(value.mainSeq)
+  ) {
+    return null;
+  }
+  if (value.phase === 'terminal') {
+    return hasOnlyKeys(value, [
+      'dispatchId',
+      'child',
+      'mainSeq',
+      'phase',
+      'terminal',
+      'receiptSummary',
+    ]) &&
+      (value.terminal === 'completed' ||
+        value.terminal === 'failed' ||
+        value.terminal === 'cancelled') &&
+      (value.receiptSummary === undefined || typeof value.receiptSummary === 'string')
+      ? (value as unknown as DispatchMainEvent)
+      : null;
+  }
+  const phases: readonly DispatchProgressPhase[] = [
+    'received',
+    'source-bound',
+    'capacity-reserved',
+    'parent-spawning',
+    'parent-ready',
+    'child-spawning',
+    'child-ready',
+    'task-dispatched',
+    'running',
+    'waiting-user',
+    'waiting-approval',
+  ];
+  return hasExactKeys(value, ['dispatchId', 'child', 'mainSeq', 'phase']) &&
+    phases.includes(value.phase as DispatchProgressPhase)
+    ? (value as unknown as DispatchMainEvent)
+    : null;
+}
+
+export function shouldApplyDispatchMainEvent(
+  current: DispatchMainEvent | null,
+  next: DispatchMainEvent
+): boolean {
+  if (!current) return true;
+  return (
+    current.dispatchId === next.dispatchId &&
+    isSameChildSessionIdentity(current.child, next.child) &&
+    current.phase !== 'terminal' &&
+    next.mainSeq > current.mainSeq
+  );
+}
+
+function parseResolvedAgentTypeSpawnConfig(value: unknown): ResolvedAgentTypeSpawnConfig | null {
   if (!isRecord(value)) return null;
+  if (
+    !hasOnlyKeys(value, [
+      'typeKey',
+      'displayName',
+      'description',
+      'spawnSpecId',
+      'systemPrompt',
+      'model',
+      'tools',
+      'skillPaths',
+      'skillBindingIds',
+      'mcpServers',
+      'mcpBindingIds',
+      'systemPromptHash',
+      'lockedProfileId',
+    ]) ||
+    Object.keys(value).length < 12
+  ) {
+    return null;
+  }
+  const typeKey = parseAgentTypeKey(value.typeKey);
+  const model = parseSpawnModelConfig(value.model);
+  const skillPaths = Array.isArray(value.skillPaths) ? value.skillPaths : null;
+  const mcpServers = Array.isArray(value.mcpServers) ? value.mcpServers : null;
+  const skillBindingIds = Array.isArray(value.skillBindingIds) ? value.skillBindingIds : null;
+  const mcpBindingIds = Array.isArray(value.mcpBindingIds) ? value.mcpBindingIds : null;
+  if (
+    !typeKey ||
+    !model ||
+    !isUuid(value.spawnSpecId) ||
+    !isNonEmptyString(value.displayName) ||
+    typeof value.description !== 'string' ||
+    typeof value.systemPrompt !== 'string' ||
+    (value.tools !== 'all' && value.tools !== 'readonly' && value.tools !== 'enso-locked') ||
+    !skillPaths ||
+    !skillPaths.every(isNonEmptyString) ||
+    !skillBindingIds ||
+    !skillBindingIds.every(isNonEmptyString) ||
+    !mcpServers ||
+    !mcpServers.every(isRecord) ||
+    !mcpBindingIds ||
+    !mcpBindingIds.every(isNonEmptyString) ||
+    skillBindingIds.length !== skillPaths.length ||
+    mcpBindingIds.length !== mcpServers.length ||
+    !isNonEmptyString(value.systemPromptHash)
+  ) {
+    return null;
+  }
+  if (
+    (typeKey === 'agent:enso' &&
+      (value.lockedProfileId !== ENSO_LOCKED_PROFILE_ID ||
+        value.tools !== 'enso-locked' ||
+        skillPaths.length !== 0 ||
+        skillBindingIds.length !== 0 ||
+        mcpServers.length !== 0 ||
+        mcpBindingIds.length !== 0)) ||
+    (typeKey !== 'agent:enso' &&
+      (value.lockedProfileId !== undefined || value.tools === 'enso-locked'))
+  ) {
+    return null;
+  }
+  return value as unknown as ResolvedAgentTypeSpawnConfig;
+}
+
+export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
+  if (!isRecord(value)) return null;
+  if (
+    !hasOnlyKeys(value, [
+      'identity',
+      'status',
+      'messages',
+      'commands',
+      'pendingApprovals',
+      'pendingAsks',
+      'backgroundTasks',
+      'subagents',
+      'safeJournal',
+      'child',
+      'customEntries',
+    ]) ||
+    !parseAnySessionIdentity(value.identity) ||
+    (value.status !== 'idle' && value.status !== 'running' && value.status !== 'failed') ||
+    !Array.isArray(value.messages) ||
+    value.messages.some((message) => !isRecord(message)) ||
+    !Array.isArray(value.commands) ||
+    value.commands.some(
+      (command) =>
+        !isRecord(command) ||
+        !isNonEmptyString(command.name) ||
+        typeof command.description !== 'string'
+    ) ||
+    (value.child !== undefined && parseChildConversationMetadata(value.child) === null) ||
+    (value.safeJournal !== undefined && parseSafeJournalProjection(value.safeJournal) === null) ||
+    (value.customEntries !== undefined &&
+      (!Array.isArray(value.customEntries) ||
+        value.customEntries.some((entry) => parseAgentSessionCustomEntry(entry) === null)))
+  ) {
+    return null;
+  }
+  return value as unknown as SessionSnapshot;
+}
+
+/** 收窄 Main → worker 命令。旧 global/builtin session shape 一律拒绝。 */
+export function parseAgentCommand(value: unknown): AgentCommand | null {
+  if (!isRecord(value) || !isNonEmptyString(value.type)) return null;
   switch (value.type) {
-    case 'status':
+    case 'spawn-parent': {
       if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        (value.status === 'idle' || value.status === 'running' || value.status === 'failed')
+        !hasOnlyKeys(value, [
+          'type',
+          'identity',
+          'cwd',
+          'model',
+          'resumeFile',
+          'reasoningEnabled',
+          'thinkingLevel',
+          'loadLocalSkills',
+          'skillPaths',
+          'mcpServers',
+          'instruction',
+          'approvalMode',
+          'agentTypes',
+          'disabledTools',
+        ]) ||
+        !parseSessionIdentity(value.identity) ||
+        typeof value.cwd !== 'string' ||
+        !parseSpawnModelConfig(value.model) ||
+        (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile))
       ) {
-        return value as unknown as AgentWorkerEvent;
+        return null;
       }
+      return value as unknown as AgentCommand;
+    }
+    case 'spawn-child':
+      return hasOnlyKeys(value, ['type', 'identity', 'cwd', 'config', 'resumeFile']) &&
+        parseChildSessionIdentity(value.identity) &&
+        typeof value.cwd === 'string' &&
+        parseResolvedAgentTypeSpawnConfig(value.config) &&
+        (value.resumeFile === undefined || isNonEmptyString(value.resumeFile))
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'prompt-child':
+      return hasExactKeys(value, ['type', 'identity', 'requestId', 'task']) &&
+        parseChildSessionIdentity(value.identity) &&
+        isNonEmptyString(value.requestId) &&
+        parseAgentDispatchTask(value.task)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'dismiss-child': {
+      const parent = parseSessionIdentity(value.parent);
+      const child = parseChildSessionIdentity(value.child);
+      return hasOnlyKeys(value, ['type', 'parent', 'child', 'notify']) &&
+        parent &&
+        child &&
+        child.parent.sessionId === parent.sessionId &&
+        child.parent.generation === parent.generation &&
+        (value.notify === undefined || typeof value.notify === 'boolean')
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
+    case 'prompt':
+    case 'steer': {
+      const images = value.images === undefined ? [] : parseAttachedImages(value.images);
+      return hasOnlyKeys(value, ['type', 'identity', 'text', 'images']) &&
+        parseAnySessionIdentity(value.identity) &&
+        typeof value.text === 'string' &&
+        images !== null &&
+        (value.text.length > 0 || images.length > 0)
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
+    case 'set-model':
+      return hasExactKeys(value, ['type', 'identity', 'model']) &&
+        parseAnySessionIdentity(value.identity) &&
+        parseSpawnModelConfig(value.model)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-thinking':
+      return hasExactKeys(value, ['type', 'identity', 'level']) &&
+        parseAnySessionIdentity(value.identity) &&
+        THINKING_LEVELS.includes(value.level as ThinkingLevel)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-reasoning':
+      return hasOnlyKeys(value, ['type', 'identity', 'enabled', 'level']) &&
+        parseAnySessionIdentity(value.identity) &&
+        typeof value.enabled === 'boolean' &&
+        (value.level === undefined || THINKING_LEVELS.includes(value.level as ThinkingLevel))
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'approval-respond':
+      return hasExactKeys(value, ['type', 'identity', 'requestId', 'decision']) &&
+        parseAnySessionIdentity(value.identity) &&
+        isNonEmptyString(value.requestId) &&
+        (value.decision === 'allow' ||
+          value.decision === 'allowSession' ||
+          value.decision === 'deny')
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-approval-mode':
+      return hasExactKeys(value, ['type', 'identity', 'mode']) &&
+        parseAnySessionIdentity(value.identity) &&
+        APPROVAL_MODES.includes(value.mode as ApprovalMode)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'ask-respond':
+      return hasExactKeys(value, ['type', 'identity', 'requestId', 'answer']) &&
+        parseAnySessionIdentity(value.identity) &&
+        isNonEmptyString(value.requestId) &&
+        isNonEmptyString(value.answer)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'capability-result':
+      return hasExactKeys(value, ['type', 'child', 'turnId', 'requestId', 'envelope']) &&
+        parseChildSessionIdentity(value.child) &&
+        isNonEmptyString(value.turnId) &&
+        isNonEmptyString(value.requestId) &&
+        parseCapabilityExecutionEnvelope(value.envelope)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'task-stop':
+      return hasExactKeys(value, ['type', 'identity', 'taskId']) &&
+        parseAnySessionIdentity(value.identity) &&
+        isNonEmptyString(value.taskId)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'rewind':
+      return hasOnlyKeys(value, ['type', 'identity', 'userIndexFromEnd', 'restoreFiles']) &&
+        parseAnySessionIdentity(value.identity) &&
+        isSequence(value.userIndexFromEnd) &&
+        (value.restoreFiles === undefined || typeof value.restoreFiles === 'boolean')
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'abort':
+      return hasExactKeys(value, ['type', 'identity']) && parseAnySessionIdentity(value.identity)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'append-session-custom-entry':
+      return hasExactKeys(value, ['type', 'identity', 'entry']) &&
+        parseAnySessionIdentity(value.identity) &&
+        parseAgentSessionCustomEntry(value.entry)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'snapshot':
+      return hasExactKeys(value, ['type']) ? { type: 'snapshot' } : null;
+    case 'warm-mcp':
+      return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
+        ? (value as unknown as AgentCommand)
+        : null;
+    default:
       return null;
-    case 'message-upsert':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        typeof value.index === 'number' &&
-        value.index >= 0 &&
-        isRecord(value.message)
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'turn-completed':
-      if (isNonEmptyString(value.sessionId) && typeof value.seq === 'number') {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'rewind-done':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        (value.editorText === undefined || typeof value.editorText === 'string') &&
-        (value.filesRestored === undefined || typeof value.filesRestored === 'boolean')
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'messages-truncated':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        typeof value.length === 'number' &&
-        value.length >= 0
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'commands':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        Array.isArray(value.commands)
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'session-meta':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
-        (value.contextWindow === undefined ||
-          (typeof value.contextWindow === 'number' &&
-            Number.isFinite(value.contextWindow) &&
-            value.contextWindow > 0))
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'turn-failed':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        typeof value.error === 'string'
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'approval-request':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isRecord(value.request) &&
-        isNonEmptyString(value.request.requestId)
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'approval-resolved':
-      if (
-        isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isNonEmptyString(value.requestId)
-      ) {
-        return value as unknown as AgentWorkerEvent;
-      }
-      return null;
-    case 'subagent-update':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isRecord(value.agent)
+  }
+}
+
+function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent | null {
+  const identity =
+    value.type === 'child-reserved' ||
+    value.type === 'child-ready' ||
+    value.type === 'child-rejected' ||
+    value.type === 'child-ended'
+      ? parseChildSessionIdentity(value.identity)
+      : parseSessionIdentity(value.identity);
+  if (!identity || !isSequence(value.seq)) return null;
+  switch (value.type) {
+    case 'parent-ready':
+      return isNonEmptyString(value.sessionFile) && parseModelRef(value.model)
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'model-changed':
+      return parseModelRef(value.model) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'parent-rejected':
+    case 'parent-ended':
+    case 'child-rejected':
+    case 'child-ended':
+      return isNonEmptyString(value.reason) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'child-reserved':
+      return isNonEmptyString(value.requestId) && parseChildConversationMetadata(value.metadata)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'child-ready': {
+      const proof = parseResolvedChildProfileProof(value.proof);
+      if (
+        !hasExactKeys(value, ['type', 'identity', 'seq', 'sessionFile', 'proof']) ||
+        !isNonEmptyString(value.sessionFile) ||
+        !proof ||
+        !('typeKey' in identity) ||
+        proof.typeKey !== identity.typeKey
+      ) {
+        return null;
+      }
+      return value as unknown as AgentWorkerEvent;
+    }
+    default:
+      return null;
+  }
+}
+
+/** 收窄 worker → Main/Renderer 统一事件；缺 generation 的旧事件拒绝。 */
+export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
+  if (!isRecord(value) || !isNonEmptyString(value.type)) return null;
+  if (
+    value.type === 'parent-ready' ||
+    value.type === 'model-changed' ||
+    value.type === 'parent-rejected' ||
+    value.type === 'parent-ended' ||
+    value.type === 'child-reserved' ||
+    value.type === 'child-ready' ||
+    value.type === 'child-rejected' ||
+    value.type === 'child-ended'
+  ) {
+    return parseLifecycleEvent(value);
+  }
+  if (value.type === 'snapshot') {
+    return Array.isArray(value.sessions) &&
+      value.sessions.every((session) => parseSessionSnapshot(session) !== null)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'capability-invoke') {
+    return parseChildSessionIdentity(value.child) &&
+      isSequence(value.seq) &&
+      isNonEmptyString(value.turnId) &&
+      isNonEmptyString(value.requestId) &&
+      isProductSurfaceId(value.capabilityId) &&
+      Object.hasOwn(value, 'params')
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  const identity = parseAnySessionIdentity(value.identity);
+  if (!identity || !isSequence(value.seq)) return null;
+  switch (value.type) {
+    case 'status':
+      return value.status === 'idle' || value.status === 'running' || value.status === 'failed'
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'message-upsert':
+      return isSequence(value.index) && isRecord(value.message)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'turn-completed':
+      return isNonEmptyString(value.turnId) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'turn-failed':
+      return isNonEmptyString(value.turnId) && isNonEmptyString(value.error)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'messages-truncated':
+      return isSequence(value.length) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'rewind-done':
+      return (value.editorText === undefined || typeof value.editorText === 'string') &&
+        (value.filesRestored === undefined || typeof value.filesRestored === 'boolean')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'commands':
+      return Array.isArray(value.commands) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'session-meta':
+      return (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
+        (value.contextWindow === undefined ||
+          (typeof value.contextWindow === 'number' && value.contextWindow > 0))
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'approval-request':
+      return isRecord(value.request) && isNonEmptyString(value.request.requestId)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'approval-resolved':
+    case 'ask-resolved':
+      return isNonEmptyString(value.requestId) ? (value as unknown as AgentWorkerEvent) : null;
     case 'ask-request':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isRecord(value.ask) &&
+      return isRecord(value.ask) &&
         isNonEmptyString(value.ask.requestId) &&
         isNonEmptyString(value.ask.question)
         ? (value as unknown as AgentWorkerEvent)
         : null;
-    case 'ask-resolved':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isNonEmptyString(value.requestId)
+    case 'subagent-update':
+      return isRecord(value.agent) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'coworker-update':
+      return isRecord(value.coworker) && isNonEmptyString(value.coworker.id)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'goal-signal':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
+      return (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
         typeof value.note === 'string'
         ? (value as unknown as AgentWorkerEvent)
         : null;
-    case 'coworker-update':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isRecord(value.coworker) &&
-        isNonEmptyString(value.coworker.id)
-        ? (value as unknown as AgentWorkerEvent)
-        : null;
     case 'task-started':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isRecord(value.task)
-        ? (value as unknown as AgentWorkerEvent)
-        : null;
+      return isRecord(value.task) ? (value as unknown as AgentWorkerEvent) : null;
     case 'task-output':
     case 'task-ended':
-      return isNonEmptyString(value.sessionId) &&
-        typeof value.seq === 'number' &&
-        isNonEmptyString(value.taskId)
+      return isNonEmptyString(value.taskId) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'session-custom-entry':
+      return parseAgentSessionCustomEntry(value.entry)
         ? (value as unknown as AgentWorkerEvent)
         : null;
-    case 'snapshot':
-      return Array.isArray(value.sessions) ? (value as unknown as AgentWorkerEvent) : null;
     default:
       return null;
   }

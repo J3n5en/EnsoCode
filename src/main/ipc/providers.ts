@@ -1,3 +1,8 @@
+import {
+  parseOauthFlowControlRequest,
+  parseOauthFlowPromptResponse,
+  parseStartOauthWizardRequest,
+} from '@shared/capabilities/types';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
@@ -7,6 +12,7 @@ import {
   getOauthAccountUsage,
   listOauthProviders,
   oauthLogout,
+  readStoredOauthCredentialKeys,
   reopenOauthLogin,
   respondOauthPrompt,
   startOauthLogin,
@@ -90,25 +96,40 @@ export function registerProviderHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OAUTH_PROVIDERS_LIST, () => listOauthProviders());
+  ipcMain.handle(IPC_CHANNELS.OAUTH_CREDENTIAL_KEYS_LIST, async () => [
+    ...(await readStoredOauthCredentialKeys()),
+  ]);
 
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN, (event, providerId: unknown) => {
-    if (typeof providerId !== 'string') return;
-    // 不 await：登录流程持续到用户完成授权，事件经 OAUTH_LOGIN_EVENT 推送
-    void startOauthLogin(providerId, event.sender);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, (_event, requestId: unknown, value: unknown) => {
-    if (typeof requestId === 'string' && typeof value === 'string') {
-      respondOauthPrompt(requestId, value);
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN, (event, raw: unknown) => {
+    const request = parseStartOauthWizardRequest(raw);
+    if (!request) {
+      return { status: 'failed', code: 'invalid-request', message: 'Invalid OAuth login request' };
     }
+    return startOauthLogin(request.providerId, event.sender);
   });
 
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_CANCEL, () => cancelOauthLogin());
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_REOPEN, () => reopenOauthLogin());
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_RESPOND, (event, raw: unknown) => {
+    const request = parseOauthFlowPromptResponse(raw);
+    if (!request || request.locator.ownerWebContentsId !== event.sender.id) return false;
+    return respondOauthPrompt(request.locator, request.requestId, request.value);
+  });
 
-  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGOUT, (_event, accountKey: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_CANCEL, (event, raw: unknown) => {
+    const request = parseOauthFlowControlRequest(raw);
+    return request && request.locator.ownerWebContentsId === event.sender.id
+      ? cancelOauthLogin(request.locator)
+      : false;
+  });
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGIN_REOPEN, (event, raw: unknown) => {
+    const request = parseOauthFlowControlRequest(raw);
+    return request && request.locator.ownerWebContentsId === event.sender.id
+      ? reopenOauthLogin(request.locator)
+      : false;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OAUTH_LOGOUT, (event, accountKey: unknown) => {
     if (typeof accountKey !== 'string') return;
-    return oauthLogout(accountKey);
+    return oauthLogout(accountKey, event.sender);
   });
 
   ipcMain.handle(IPC_CHANNELS.OAUTH_ACCOUNT_INFO, (_event, accountKey: unknown) => {

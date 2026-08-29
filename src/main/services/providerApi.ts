@@ -1,17 +1,11 @@
+import { DEFAULT_BASE_URLS } from '@shared/providerCatalog';
 import type {
   ListModelsResult,
   ModelApiKind,
   ProviderApiConfig,
   TestProviderResult,
 } from '@shared/types';
-
-const DEFAULT_BASE_URLS: Record<ModelApiKind, string> = {
-  'openai-completions': 'https://api.openai.com/v1',
-  'openai-responses': 'https://api.openai.com/v1',
-  'anthropic-messages': 'https://api.anthropic.com',
-  'google-generative-ai': 'https://generativelanguage.googleapis.com',
-  ollama: 'http://127.0.0.1:11434',
-};
+import { createSecretSet } from './secretRedactor';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const TIMEOUT_MS = 15000;
@@ -36,9 +30,8 @@ async function request(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-async function errorText(response: Response): Promise<string> {
-  const body = (await response.text().catch(() => '')).slice(0, 300);
-  return `HTTP ${response.status}${body ? `: ${body}` : ''}`;
+function httpError(response: Response): string {
+  return `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
 }
 
 export function toMessage(error: unknown): string {
@@ -71,13 +64,14 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
     }
 
     const response = await request(url, { headers });
-    if (!response.ok) return { ok: false, models: [], error: await errorText(response) };
+    if (!response.ok) return { ok: false, models: [], error: httpError(response) };
 
     const data = (await response.json()) as Record<string, unknown>;
     const models = extractModelIds(config.api, data);
     return { ok: true, models };
   } catch (error) {
-    return { ok: false, models: [], error: toMessage(error) };
+    const secrets = createSecretSet([config.apiKey]);
+    return { ok: false, models: [], error: secrets.redactError(toMessage(error)) };
   }
 }
 
@@ -161,9 +155,14 @@ export async function testProvider(
 
     const response = await request(url, { method: 'POST', headers, body: JSON.stringify(body) });
     const latencyMs = Date.now() - started;
-    if (!response.ok) return { ok: false, latencyMs, message: await errorText(response) };
+    if (!response.ok) return { ok: false, latencyMs, message: httpError(response) };
     return { ok: true, latencyMs, message: model };
   } catch (error) {
-    return { ok: false, latencyMs: Date.now() - started, message: toMessage(error) };
+    const secrets = createSecretSet([config.apiKey]);
+    return {
+      ok: false,
+      latencyMs: Date.now() - started,
+      message: secrets.redactError(toMessage(error)),
+    };
   }
 }

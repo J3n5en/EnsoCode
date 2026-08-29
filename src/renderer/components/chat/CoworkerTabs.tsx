@@ -55,7 +55,9 @@ export function CoworkerTabs({
         </button>
         {coworkers.map((coworker) => {
           const needsAttention =
-            (coworker.pendingApprovals ?? []).length > 0 || (coworker.pendingAsks ?? []).length > 0;
+            (coworker.pendingApprovals ?? []).length > 0 ||
+            (coworker.pendingAsks ?? []).length > 0 ||
+            (coworker.pendingCapabilityAsks ?? []).length > 0;
           return (
             <div key={coworker.id} className="group/tab relative shrink-0">
               <button
@@ -69,7 +71,9 @@ export function CoworkerTabs({
                 onClick={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
               >
                 <Bot className="h-3 w-3 shrink-0" />
-                <span className="max-w-32 truncate">{coworker.coworkerName ?? coworker.title}</span>
+                <span className="max-w-32 truncate">
+                  {coworker.child?.agentInstanceName ?? coworker.coworkerName ?? coworker.title}
+                </span>
                 <span
                   className={cn(
                     'h-1.5 w-1.5 shrink-0 rounded-full',

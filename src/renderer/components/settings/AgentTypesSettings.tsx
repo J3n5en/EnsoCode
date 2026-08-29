@@ -1,3 +1,4 @@
+import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import type { AgentTypeEntry } from '@shared/types';
 import { hasProviderCredentials } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
@@ -37,7 +38,7 @@ export function AgentTypesSettings() {
   );
 }
 
-/** 类型清单(设置页与 onboarding 共用):内置可编辑成同名覆盖/开关禁用,自定义可增删改;编辑弹窗自足 */
+/** 类型清单：Enso 固定只读；内置可开关；自定义可增删改且保留名 fail-closed。 */
 export function AgentTypeList() {
   const { t } = useI18n();
   const agentTypes = useSettingsStore((state) => state.agentTypes);
@@ -48,11 +49,23 @@ export function AgentTypeList() {
   const [editing, setEditing] = React.useState<
     AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
   >(null);
-  // 被自定义同名覆盖的内置隐藏；编辑内置＝创建同名自定义副本（删除副本即恢复默认）
-  const overridden = new Set(agentTypes.map((entry) => entry.name));
 
   return (
     <div className="space-y-2">
+      <div className="flex items-center gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
+        <Bot className="h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            Enso
+            <Badge variant="secondary">{t('System')}</Badge>
+            <Badge variant="outline">{t('Locked')}</Badge>
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t('Inherits the conversation model and provides product capabilities')}
+          </p>
+        </div>
+      </div>
+
       <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
         <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -66,7 +79,7 @@ export function AgentTypeList() {
         </div>
       </div>
 
-      {BUILTIN_AGENT_TYPES.filter((type) => !overridden.has(type.name)).map((type) => (
+      {BUILTIN_AGENT_TYPES.map((type) => (
         <div key={type.name} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -141,13 +154,18 @@ const slugify = (value: string): string =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 32);
 
+export const isCustomAgentTypeNameAllowed = (value: string): boolean => {
+  const slug = slugify(value);
+  return Boolean(slug) && !isReservedAgentTypeName(value) && !isReservedAgentTypeName(slug);
+};
+
 export function AgentTypeEditDialog({
   entry,
   defaults,
   onClose,
 }: {
   entry: AgentTypeEntry | null;
-  /** 编辑内置时的预填内容（保存生成同名自定义覆盖） */
+  /** 编辑内置时的预填内容（保存生成独立 custom type；registry 以 typeKey 区分同名项） */
   defaults?: Omit<AgentTypeEntry, 'id'>;
   onClose: () => void;
 }) {
@@ -175,7 +193,7 @@ export function AgentTypeEditDialog({
 
   const save = () => {
     const slug = slugify(name);
-    if (!slug) return;
+    if (!isCustomAgentTypeNameAllowed(name)) return;
     const payload = {
       name: slug,
       description,
@@ -200,6 +218,9 @@ export function AgentTypeEditDialog({
           <Field>
             <FieldLabel>{t('Name (slug)')}</FieldLabel>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="scout" />
+            {!isCustomAgentTypeNameAllowed(name) && name.trim() && (
+              <p className="text-destructive text-xs">{t('This Agent name is reserved')}</p>
+            )}
           </Field>
           <Field>
             <FieldLabel>{t('Description (helps the agent pick this type)')}</FieldLabel>
@@ -311,7 +332,7 @@ export function AgentTypeEditDialog({
           <Button variant="ghost" onClick={onClose}>
             {t('Cancel')}
           </Button>
-          <Button onClick={save} disabled={!slugify(name)}>
+          <Button onClick={save} disabled={!isCustomAgentTypeNameAllowed(name)}>
             {t('Save')}
           </Button>
         </DialogFooter>

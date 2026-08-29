@@ -1,0 +1,14 @@
+{"file":".trellis/spec/main/ipc.md","reason":"实现 registry list、source binding/dispatch、summon/prefill、capability ASK 时遵循通道常量/handler/preload 三点式；删除旧 builtin Enso IPC 不留 alias。"}
+{"file":".trellis/spec/main/services.md","reason":"实现 AgentDispatchService、AgentSessionIndex reservation、agentHost generation/ready、child factory 与 secret boundary；业务逻辑留 services，IPC 只校验转发。"}
+{"file":".trellis/spec/main/settings-persistence.md","reason":"实现 Gateway settings patch 的 all-renderers 广播、defaultModel schema/migrate 与多窗口同步；不绕过缓存/防抖/原子写。"}
+{"file":".trellis/spec/main/windows.md","reason":"实现 MainWindow source ownership 与跨窗口 summon/focus/prefill；Settings/Onboarding 不创建第二输入面或 Enso window。"}
+{"file":".trellis/spec/shared/types.md","reason":"实现跨进程 AgentTypeKey、Session/Child identity+generation、ready lifecycle、strict dispatch、custom entry/receipt 与 snapshot 类型；旧形状 clean cutover。"}
+{"file":".trellis/spec/shared/conventions.md","reason":"新增共享类型/测试与最终 Biome 收口的命名、格式和测试约定。"}
+{"file":".trellis/spec/renderer/state.md","reason":"扩展 sessions/coworker store 为 child TAB 单一投影，按 generation+seq 归并，custom entry 与 messages 分离，jsonl snapshot恢复。"}
+{"file":".trellis/spec/renderer/components.md","reason":"实现多类型 MentionPicker/chip、CoworkerTabs placeholder/ready、child ASK/OAuth/receipt 与 parent custom timeline，复用现有组件。"}
+{"file":".trellis/spec/renderer/dialogs.md","reason":"OAuth 共享步骤与危险确认保持现有 Dialog/交互规范；旧独立 AgentComposer/HistoryDrawer 删除。"}
+{"file":".trellis/spec/renderer/i18n.md","reason":"R4 串行收口 Agent registry、容量、ready、summon、receipt/OAuth文案，并删除旧 Enso drawer/global history孤儿词条。"}
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"E0 前确认 source of truth、旧数据、敏感数据、多窗口、容量与持久化边界；不另造第二 registry/session/history。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"按完整往返实现 typed mention→Main dispatch→parent ready→child ready→prompt→AGENT_EVENT/TAB/custom notification，所有错误结构化返回。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"优先扩现有 child factory/coworker TAB/SessionManager/AskBar/OauthLoginStep，而不是复制新的 Enso runtime、drawer或history store。"}
+{"file":".trellis/spec/big-question/dedupe-identity.md","reason":"统一 provider/default/OAuth返工时保持订阅账号与API-key条目的身份、去重与删除口径不变。"}
