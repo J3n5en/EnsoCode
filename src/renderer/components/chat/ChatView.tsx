@@ -3,6 +3,7 @@ import { resolveChatModel } from '@shared/defaultModel';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
+import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import {
@@ -44,6 +45,15 @@ export function ChatView() {
   });
 
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
+  // @ chats 候选：同项目可回放的过去会话。ChatView 本就随 agent 事件重渲染，订阅全表不额外增负。
+  const allConversations = useSessionsStore((state) => state.conversations);
+  const chatCandidates = useMemo(
+    () =>
+      parent
+        ? toChatMentionCandidates(Object.values(allConversations), parent.projectId, parent.id)
+        : [],
+    [allConversations, parent]
+  );
   const enabledProviders = useMemo(
     () => usableProvidersForOauthSnapshot(providers, oauthSnapshot),
     [providers, oauthSnapshot]
@@ -287,6 +297,7 @@ export function ChatView() {
           )}
           <Composer
             cwd={project?.path}
+            chatCandidates={chatCandidates}
             commands={slashCommands}
             running={running}
             busy={busy}

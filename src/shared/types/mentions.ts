@@ -20,7 +20,21 @@ export interface AgentTypeMentionCandidate extends AgentTypeCandidate {
   label: string;
 }
 
-export type MentionCandidate = FileMentionCandidate | AgentTypeMentionCandidate;
+/** 过去会话引用（Cursor 式 @Past Chats）：发送时把 jsonl 路径以引用块追加进文本，agent 自己按需 read。 */
+export interface ChatMentionCandidate {
+  kind: 'chat';
+  /** sessionId */
+  id: string;
+  /** 会话标题（空标题已回落） */
+  label: string;
+  /** pi 会话 jsonl 路径 */
+  sessionFile: string;
+}
+
+export type MentionCandidate =
+  | FileMentionCandidate
+  | AgentTypeMentionCandidate
+  | ChatMentionCandidate;
 
 export interface FileMentionRef {
   id: string;
@@ -144,6 +158,17 @@ export function parseMentionCandidate(value: unknown): MentionCandidate | null {
       return null;
     }
     return candidate as unknown as FileMentionCandidate;
+  }
+  if (candidate.kind === 'chat') {
+    if (
+      !hasExactKeys(candidate, ['kind', 'id', 'label', 'sessionFile']) ||
+      !isNonEmptyString(candidate.id) ||
+      !isNonEmptyString(candidate.label) ||
+      !isNonEmptyString(candidate.sessionFile)
+    ) {
+      return null;
+    }
+    return candidate as unknown as ChatMentionCandidate;
   }
   if (candidate.kind !== 'agent-type') return null;
   const typeKey = parseAgentTypeKey(candidate.id);

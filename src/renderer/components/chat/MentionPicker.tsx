@@ -1,19 +1,21 @@
 import type { MentionCandidate } from '@shared/types/mentions';
-import { Bot, ChevronRight, FileText } from 'lucide-react';
+import { Bot, ChevronRight, FileText, History } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { flattenMentionRoot, type MentionSearchGroups } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
+type FolderId = 'agents' | 'chats';
+
 interface MentionPickerProps {
   groups: MentionSearchGroups;
   query: string;
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
-  folderOpen: boolean;
+  openFolderId: FolderId | null;
   folderIndex: number;
-  onFolderOpenChange: (open: boolean) => void;
+  onOpenFolderIdChange: (id: FolderId | null) => void;
   onFolderIndexChange: (index: number) => void;
   onSelect: (candidate: MentionCandidate) => void;
   id?: string;
@@ -24,9 +26,9 @@ export function MentionPicker({
   query,
   activeIndex,
   onActiveIndexChange,
-  folderOpen,
+  openFolderId,
   folderIndex,
-  onFolderOpenChange,
+  onOpenFolderIdChange,
   onFolderIndexChange,
   onSelect,
   id = 'composer-mention-picker',
@@ -34,20 +36,61 @@ export function MentionPicker({
   const { t } = useI18n();
   const items = useMemo(() => flattenMentionRoot(groups, query), [groups, query]);
   const optionRefs = useRef(new Map<number, HTMLButtonElement>());
-  const agentRefs = useRef(new Map<number, HTMLButtonElement>());
-  const nestAgents = items[0]?.type === 'folder';
+  const subRefs = useRef(new Map<number, HTMLButtonElement>());
+  const nested = items[0]?.type === 'folder';
 
   useEffect(() => {
     optionRefs.current.get(activeIndex)?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
   useEffect(() => {
-    if (!folderOpen) return;
-    agentRefs.current.get(folderIndex)?.scrollIntoView({ block: 'nearest' });
-  }, [folderOpen, folderIndex]);
+    if (!openFolderId) return;
+    subRefs.current.get(folderIndex)?.scrollIntoView({ block: 'nearest' });
+  }, [openFolderId, folderIndex]);
 
   if (items.length === 0) return null;
-  let flatIndex = nestAgents ? 1 : 0;
+  const folderLabels: Record<FolderId, string> = { agents: t('Agents'), chats: t('Chats') };
+  const folderIcons: Record<FolderId, typeof Bot> = { agents: Bot, chats: History };
+  const folderItems = openFolderId ? groups[openFolderId] : [];
+  let flatIndex = 0;
+
+  const renderGroup = (group: 'agents' | 'chats' | 'files', pad: boolean) => {
+    const candidates = groups[group];
+    if (candidates.length === 0) return null;
+    const label = group === 'files' ? t('Files') : folderLabels[group as FolderId];
+    return (
+      <div role="group" aria-label={label}>
+        <p
+          className={cn(
+            'px-2 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase',
+            pad ? 'pt-2' : 'pt-1.5'
+          )}
+        >
+          {label}
+        </p>
+        {candidates.map((candidate) => {
+          const index = flatIndex++;
+          return (
+            <MentionOption
+              key={`${group}:${candidate.id}`}
+              ref={(node) => {
+                if (node) optionRefs.current.set(index, node);
+                else optionRefs.current.delete(index);
+              }}
+              id={`${id}-option-${index}`}
+              candidate={candidate}
+              active={index === activeIndex}
+              onHover={() => {
+                onActiveIndexChange(index);
+                if (nested) onOpenFolderIdChange(null);
+              }}
+              onSelect={() => onSelect(candidate)}
+            />
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="absolute bottom-full left-0 z-10 mb-1.5">
@@ -57,132 +100,73 @@ export function MentionPicker({
         aria-label={t('Mention suggestions')}
         className="max-h-72 w-80 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
       >
-        {nestAgents ? (
+        {nested ? (
           <>
-            <button
-              ref={(node) => {
-                if (node) optionRefs.current.set(0, node);
-                else optionRefs.current.delete(0);
-              }}
-              id={`${id}-option-0`}
-              type="button"
-              role="option"
-              aria-selected={activeIndex === 0}
-              onClick={() => {
-                onActiveIndexChange(0);
-                onFolderOpenChange(true);
-                onFolderIndexChange(0);
-              }}
-              onMouseMove={() => {
-                onActiveIndexChange(0);
-                onFolderOpenChange(true);
-              }}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
-                activeIndex === 0 && 'bg-foreground/10'
-              )}
-            >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-                <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-              </span>
-              <span className="min-w-0 flex-1 font-medium">{t('Agents')}</span>
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </button>
-            {groups.files.length > 0 && (
-              <div role="group" aria-label={t('Files')}>
-                <p className="px-2 pt-2 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  {t('Files')}
-                </p>
-                {groups.files.map((candidate) => {
-                  const index = flatIndex++;
-                  return (
-                    <MentionOption
-                      key={`file:${candidate.id}`}
-                      ref={(node) => {
-                        if (node) optionRefs.current.set(index, node);
-                        else optionRefs.current.delete(index);
-                      }}
-                      id={`${id}-option-${index}`}
-                      candidate={candidate}
-                      active={index === activeIndex}
-                      onHover={() => {
-                        onActiveIndexChange(index);
-                        onFolderOpenChange(false);
-                      }}
-                      onSelect={() => onSelect(candidate)}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            {items
+              .filter((item): item is { type: 'folder'; id: FolderId } => item.type === 'folder')
+              .map((folder) => {
+                const index = flatIndex++;
+                const Icon = folderIcons[folder.id];
+                return (
+                  <button
+                    key={`folder:${folder.id}`}
+                    ref={(node) => {
+                      if (node) optionRefs.current.set(index, node);
+                      else optionRefs.current.delete(index);
+                    }}
+                    id={`${id}-option-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={activeIndex === index}
+                    onClick={() => {
+                      onActiveIndexChange(index);
+                      onOpenFolderIdChange(folder.id);
+                      onFolderIndexChange(0);
+                    }}
+                    onMouseMove={() => {
+                      onActiveIndexChange(index);
+                      if (openFolderId !== folder.id) {
+                        onOpenFolderIdChange(folder.id);
+                        onFolderIndexChange(0);
+                      }
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
+                      activeIndex === index && 'bg-foreground/10'
+                    )}
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
+                      <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                    </span>
+                    <span className="min-w-0 flex-1 font-medium">{folderLabels[folder.id]}</span>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                );
+              })}
+            {renderGroup('files', true)}
           </>
         ) : (
           <>
-            {groups.agents.length > 0 && (
-              <div role="group" aria-label={t('Agents')}>
-                <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  {t('Agents')}
-                </p>
-                {groups.agents.map((candidate) => {
-                  const index = flatIndex++;
-                  return (
-                    <MentionOption
-                      key={`agent:${candidate.id}`}
-                      ref={(node) => {
-                        if (node) optionRefs.current.set(index, node);
-                        else optionRefs.current.delete(index);
-                      }}
-                      id={`${id}-option-${index}`}
-                      candidate={candidate}
-                      active={index === activeIndex}
-                      onHover={() => onActiveIndexChange(index)}
-                      onSelect={() => onSelect(candidate)}
-                    />
-                  );
-                })}
-              </div>
-            )}
-            {groups.files.length > 0 && (
-              <div role="group" aria-label={t('Files')}>
-                <p className="px-2 pt-2 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  {t('Files')}
-                </p>
-                {groups.files.map((candidate) => {
-                  const index = flatIndex++;
-                  return (
-                    <MentionOption
-                      key={`file:${candidate.id}`}
-                      ref={(node) => {
-                        if (node) optionRefs.current.set(index, node);
-                        else optionRefs.current.delete(index);
-                      }}
-                      id={`${id}-option-${index}`}
-                      candidate={candidate}
-                      active={index === activeIndex}
-                      onHover={() => onActiveIndexChange(index)}
-                      onSelect={() => onSelect(candidate)}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            {renderGroup('agents', false)}
+            {renderGroup('chats', groups.agents.length > 0)}
+            {renderGroup('files', groups.agents.length > 0 || groups.chats.length > 0)}
           </>
         )}
       </div>
-      {nestAgents && folderOpen && groups.agents.length > 0 && (
+      {openFolderId && folderItems.length > 0 && (
         <div
           role="listbox"
-          aria-label={t('Agents')}
+          aria-label={folderLabels[openFolderId]}
           className="absolute top-0 left-full z-20 ml-1 max-h-72 w-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
         >
-          {groups.agents.map((candidate, index) => (
+          {folderItems.map((candidate, index) => (
             <MentionOption
-              key={`agent:${candidate.id}`}
+              key={`sub:${candidate.id}`}
               ref={(node) => {
-                if (node) agentRefs.current.set(index, node);
-                else agentRefs.current.delete(index);
+                if (node) subRefs.current.set(index, node);
+                else subRefs.current.delete(index);
               }}
-              id={`${id}-agent-${index}`}
+              id={`${id}-sub-${index}`}
               candidate={candidate}
               active={index === folderIndex}
               onHover={() => onFolderIndexChange(index)}
@@ -211,7 +195,8 @@ function MentionOption({
   onSelect: () => void;
 }) {
   const { t } = useI18n();
-  const Icon = candidate.kind === 'agent-type' ? Bot : FileText;
+  const Icon =
+    candidate.kind === 'agent-type' ? Bot : candidate.kind === 'chat' ? History : FileText;
   return (
     <button
       ref={ref}
@@ -246,7 +231,9 @@ function MentionOption({
                       ? 'Built-in'
                       : 'Custom'
                 )
-              : t('File')}
+              : candidate.kind === 'chat'
+                ? t('Chat')
+                : t('File')}
           </Badge>
           {candidate.kind === 'agent-type' && candidate.locked && (
             <Badge variant="secondary" className="px-1 py-0 text-[9px]">
@@ -255,7 +242,11 @@ function MentionOption({
           )}
         </span>
         <span className="block truncate text-muted-foreground">
-          {candidate.kind === 'agent-type' ? t(candidate.description) : candidate.relativePath}
+          {candidate.kind === 'agent-type'
+            ? t(candidate.description)
+            : candidate.kind === 'chat'
+              ? candidate.sessionFile.split('/').at(-1)
+              : candidate.relativePath}
         </span>
       </span>
     </button>

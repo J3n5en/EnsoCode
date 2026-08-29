@@ -5,6 +5,7 @@ import {
   flattenMentionRoot,
   groupMentionCandidates,
   toAgentMentionCandidates,
+  toChatMentionCandidates,
   toFileMentionCandidates,
 } from '../../hooks/useMentionSearch';
 import {
@@ -105,6 +106,64 @@ describe('typed multi-entity mentions', () => {
     const searched = groupMentionCandidates('scout', agents, duplicateNames);
     expect(flattenMentionRoot(searched, 'scout')).toEqual([
       { type: 'item', group: 'agents', candidate: agents[1] },
+    ]);
+  });
+
+  it('turns same-project root conversations with session files into chat candidates', () => {
+    const conversations = [
+      // 命中：同项目 root 会话且有 sessionFile
+      { id: 'c1', title: 'fix login', projectId: 'p1', sessionFile: '/s/c1.jsonl', createdAt: 3 },
+      { id: 'c2', title: '', projectId: 'p1', sessionFile: '/s/c2.jsonl', createdAt: 5 },
+      // 排除：当前会话
+      { id: 'self', title: 'me', projectId: 'p1', sessionFile: '/s/self.jsonl', createdAt: 9 },
+      // 排除：coworker 子会话
+      {
+        id: 'c3',
+        title: 'child',
+        projectId: 'p1',
+        parentId: 'c1',
+        sessionFile: '/s/c3.jsonl',
+        createdAt: 8,
+      },
+      // 排除：无 sessionFile（无从回放）
+      { id: 'c4', title: 'draft', projectId: 'p1', createdAt: 7 },
+      // 排除：其它项目
+      { id: 'c5', title: 'other', projectId: 'p2', sessionFile: '/s/c5.jsonl', createdAt: 6 },
+    ];
+    expect(toChatMentionCandidates(conversations, 'p1', 'self')).toEqual([
+      // createdAt 倒序；空标题回落
+      { kind: 'chat', id: 'c2', label: 'Untitled chat', sessionFile: '/s/c2.jsonl' },
+      { kind: 'chat', id: 'c1', label: 'fix login', sessionFile: '/s/c1.jsonl' },
+    ]);
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      id: `m${i}`,
+      title: `chat ${i}`,
+      projectId: 'p1',
+      sessionFile: `/s/m${i}.jsonl`,
+      createdAt: i,
+    }));
+    expect(toChatMentionCandidates(many, 'p1', 'self')).toHaveLength(20);
+  });
+
+  it('groups chat candidates by title match and nests them as a second folder', () => {
+    const chats = [
+      { kind: 'chat' as const, id: 'c1', label: 'fix login', sessionFile: '/s/c1.jsonl' },
+      { kind: 'chat' as const, id: 'c2', label: 'refactor store', sessionFile: '/s/c2.jsonl' },
+    ];
+    const grouped = groupMentionCandidates('login', agents, duplicateNames, chats);
+    expect(grouped.chats).toEqual([chats[0]]);
+    // 有关键词：摸平，顺序 agents → chats → files
+    expect(flattenMentionRoot(grouped, 'login').map((item) => item.type)).not.toContain('folder');
+    // 空查询：两个文件夹
+    const empty = groupMentionCandidates('', agents, duplicateNames, chats);
+    expect(flattenMentionRoot(empty, '').slice(0, 2)).toEqual([
+      { type: 'folder', id: 'agents' },
+      { type: 'folder', id: 'chats' },
+    ]);
+    // chats 为空：不出 chats 文件夹
+    const noChats = groupMentionCandidates('', agents, duplicateNames, []);
+    expect(flattenMentionRoot(noChats, '').filter((item) => item.type === 'folder')).toEqual([
+      { type: 'folder', id: 'agents' },
     ]);
   });
 
@@ -271,6 +330,38 @@ describe('typed multi-entity mentions', () => {
         folderItemCount: 0,
       })
     ).toEqual({ type: 'close-folder' });
+  });
+
+  it('appends past-chat reference blocks for chat mentions at send time', () => {
+    // 选中 chat 不往文本里插 token（标题含空格会破坏 @ 解析），
+    // 发送时统一追加引用块：agent 拿到 jsonl 路径自己按需 read。
+    const chat = {
+      kind: 'chat' as const,
+      id: 'c1',
+      label: 'fix login',
+      sessionFile: '/sessions/c1.jsonl',
+    };
+    const payload = createComposerPayload({
+      text: 'continue from where we left off',
+      slash: null,
+      images: [],
+      mentions: [chat, duplicateNames[0]],
+    });
+    expect(payload.text).toBe(
+      'continue from where we left off\n\n' +
+        '[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
+    );
+    // 非 chat mention 不受影响；无 chat mention 时文本原样
+    expect(
+      createComposerPayload({ text: 'hi', slash: null, images: [], mentions: [duplicateNames[0]] })
+        .text
+    ).toBe('hi');
+    // slash 前缀在引用块之前拼接
+    expect(
+      createComposerPayload({ text: 'go', slash: '/plan', images: [], mentions: [chat] }).text
+    ).toBe(
+      '/plan go\n\n[Referenced past chat "fix login" — transcript file: /sessions/c1.jsonl (pi session jsonl; read it if relevant)]'
+    );
   });
 
   it('builds a typed recipient payload with explicit file context', () => {

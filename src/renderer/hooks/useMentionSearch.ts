@@ -1,6 +1,7 @@
 import { type AgentTypeCandidate, parseAgentTypeRegistrySnapshot } from '@shared/builtinAgents';
 import type {
   AgentTypeMentionCandidate,
+  ChatMentionCandidate,
   FileMentionCandidate,
   MentionCandidate,
 } from '@shared/types/mentions';
@@ -9,29 +10,32 @@ import { useEffect, useMemo, useState } from 'react';
 export interface MentionSearchGroups {
   agents: AgentTypeMentionCandidate[];
   files: FileMentionCandidate[];
+  chats: ChatMentionCandidate[];
 }
 
 export interface MentionPickerItem {
   candidate: MentionCandidate;
-  group: 'agents' | 'files';
+  group: 'agents' | 'files' | 'chats';
 }
 
 export type MentionRootItem =
-  | { type: 'folder'; id: 'agents' }
-  | { type: 'item'; candidate: MentionCandidate; group: 'agents' | 'files' };
+  | { type: 'folder'; id: 'agents' | 'chats' }
+  | { type: 'item'; candidate: MentionCandidate; group: 'agents' | 'files' | 'chats' };
 
 export function flattenMentionGroups(groups: MentionSearchGroups): MentionPickerItem[] {
   return [
     ...groups.agents.map((candidate) => ({ candidate, group: 'agents' as const })),
+    ...groups.chats.map((candidate) => ({ candidate, group: 'chats' as const })),
     ...groups.files.map((candidate) => ({ candidate, group: 'files' as const })),
   ];
 }
 
-/** 空查询把 Agents 收成一级文件夹；有关键词时摊平，保证 @enso 仍能直接命中。 */
+/** 空查询把 Agents/Chats 各收成一级文件夹；有关键词时摊平，保证 @enso 仍能直接命中。 */
 export function flattenMentionRoot(groups: MentionSearchGroups, query: string): MentionRootItem[] {
-  if (!query.trim() && groups.agents.length > 0) {
+  if (!query.trim() && (groups.agents.length > 0 || groups.chats.length > 0)) {
     return [
-      { type: 'folder', id: 'agents' },
+      ...(groups.agents.length > 0 ? [{ type: 'folder' as const, id: 'agents' as const }] : []),
+      ...(groups.chats.length > 0 ? [{ type: 'folder' as const, id: 'chats' as const }] : []),
       ...groups.files.map((candidate) => ({
         type: 'item' as const,
         candidate,
@@ -49,6 +53,42 @@ export function flattenMentionRoot(groups: MentionSearchGroups, query: string): 
 interface FileHit {
   relativePath: string;
   name: string;
+}
+
+/** toChatMentionCandidates 只依赖这几个字段，避免耦合 sessions store 的完整 Conversation 形状。 */
+interface ChatCandidateSource {
+  id: string;
+  title: string;
+  projectId: string;
+  parentId?: string;
+  sessionFile?: string;
+  createdAt: number;
+}
+
+const MAX_CHAT_CANDIDATES = 20;
+
+/** 同项目 root 会话且有 jsonl 可读才成候选；排除当前会话，createdAt 倒序取前 20。 */
+export function toChatMentionCandidates(
+  conversations: readonly ChatCandidateSource[],
+  projectId: string,
+  currentId: string | undefined
+): ChatMentionCandidate[] {
+  return conversations
+    .filter(
+      (conversation) =>
+        conversation.projectId === projectId &&
+        conversation.id !== currentId &&
+        !conversation.parentId &&
+        !!conversation.sessionFile
+    )
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, MAX_CHAT_CANDIDATES)
+    .map((conversation) => ({
+      kind: 'chat' as const,
+      id: conversation.id,
+      label: conversation.title || 'Untitled chat',
+      sessionFile: conversation.sessionFile as string,
+    }));
 }
 
 export function toAgentMentionCandidates(
@@ -81,7 +121,8 @@ export function toFileMentionCandidates(hits: readonly FileHit[]): FileMentionCa
 export function groupMentionCandidates(
   query: string,
   agents: readonly AgentTypeMentionCandidate[],
-  files: readonly FileMentionCandidate[]
+  files: readonly FileMentionCandidate[],
+  chats: readonly ChatMentionCandidate[] = []
 ): MentionSearchGroups {
   const normalized = query.trim().toLocaleLowerCase();
   const matchingAgents = normalized
@@ -96,13 +137,17 @@ export function groupMentionCandidates(
         `${candidate.label}\n${candidate.relativePath}`.toLocaleLowerCase().includes(normalized)
       )
     : [...files];
-  return { agents: matchingAgents, files: matchingFiles };
+  const matchingChats = normalized
+    ? chats.filter((candidate) => candidate.label.toLocaleLowerCase().includes(normalized))
+    : [...chats];
+  return { agents: matchingAgents, files: matchingFiles, chats: matchingChats };
 }
 
 /** Agent candidates come from Main's registry snapshot; file search remains cwd-bound. */
 export function useMentionSearch(
   cwd: string | undefined,
-  query: string | null
+  query: string | null,
+  chats: readonly ChatMentionCandidate[] = []
 ): MentionSearchGroups {
   const [agents, setAgents] = useState<AgentTypeMentionCandidate[]>([]);
   const [files, setFiles] = useState<FileMentionCandidate[]>([]);
@@ -152,7 +197,9 @@ export function useMentionSearch(
 
   return useMemo(
     () =>
-      query === null ? { agents: [], files: [] } : groupMentionCandidates(query, agents, files),
-    [agents, files, query]
+      query === null
+        ? { agents: [], files: [], chats: [] }
+        : groupMentionCandidates(query, agents, files, chats),
+    [agents, files, chats, query]
   );
 }

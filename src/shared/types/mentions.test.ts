@@ -181,4 +181,12 @@ describe('Agent dispatch strict transport', () => {
     ).not.toBeNull();
     expect(parseMentionCandidate({ ...base, id: 'reviewer', typeKey: 'reviewer' })).toBeNull();
   });
+
+  it('parses chat mention candidates with a strict shape', () => {
+    const chat = { kind: 'chat', id: 'c1', label: 'fix login', sessionFile: '/s/c1.jsonl' };
+    expect(parseMentionCandidate(chat)).toEqual(chat);
+    expect(parseMentionCandidate({ ...chat, sessionFile: '' })).toBeNull();
+    expect(parseMentionCandidate({ ...chat, extra: 1 })).toBeNull();
+    expect(parseMentionCandidate({ kind: 'chat', id: 'c1', label: 'x' })).toBeNull();
+  });
 });

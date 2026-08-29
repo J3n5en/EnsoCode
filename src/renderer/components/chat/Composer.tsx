@@ -1,12 +1,16 @@
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
-import type { AgentTypeMentionCandidate, MentionCandidate } from '@shared/types/mentions';
+import type {
+  AgentTypeMentionCandidate,
+  ChatMentionCandidate,
+  MentionCandidate,
+} from '@shared/types/mentions';
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { MentionChip } from './MentionChip';
+import { ChatMentionChip, MentionChip } from './MentionChip';
 import { MentionPicker } from './MentionPicker';
 import type { ComposerPayload } from './mentionComposer';
 import {
@@ -37,6 +41,8 @@ interface ComposerProps {
   onDraftConsumed?: () => void;
   initialRecipient?: AgentTypeMentionCandidate;
   onInitialRecipientConsumed?: () => void;
+  /** @ 弹窗的过去会话候选（宿主从 sessions store 算好传入，保持本组件与 store 解耦） */
+  chatCandidates?: ChatMentionCandidate[];
   onSend: (payload: ComposerPayload) => boolean | undefined;
   onAbort: () => void;
 }
@@ -77,6 +83,7 @@ export function Composer({
   onDraftConsumed,
   initialRecipient,
   onInitialRecipientConsumed,
+  chatCandidates,
   onSend,
   onAbort,
 }: ComposerProps) {
@@ -96,14 +103,14 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const mentionGroups = useMentionSearch(cwd, mentionQuery);
+  const mentionGroups = useMentionSearch(cwd, mentionQuery, chatCandidates);
   const mentionItems = useMemo(
     () => flattenMentionRoot(mentionGroups, mentionQuery ?? ''),
     [mentionGroups, mentionQuery]
   );
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [folderOpen, setFolderOpen] = useState(false);
+  const [openFolderId, setOpenFolderId] = useState<'agents' | 'chats' | null>(null);
   const [folderIndex, setFolderIndex] = useState(0);
   const slashListRef = useRef<HTMLDivElement>(null);
 
@@ -117,7 +124,7 @@ export function Composer({
       const slashStart = mention === null ? findSlashStart(value, cursor) : null;
       setSlashQuery(slashStart === null ? null : value.slice(slashStart + 1, cursor));
       setActiveIndex(0);
-      setFolderOpen(false);
+      setOpenFolderId(null);
       setFolderIndex(0);
     }, 0);
   }, []);
@@ -139,7 +146,7 @@ export function Composer({
       setMentionQuery(null);
       setSlashQuery(null);
       setActiveIndex(0);
-      setFolderOpen(false);
+      setOpenFolderId(null);
       setFolderIndex(0);
     }
     if (autoFocus) textareaRef.current?.focus();
@@ -222,6 +229,16 @@ export function Composer({
         ]);
         return;
       }
+      if (candidate.kind === 'chat') {
+        // 标题含空格/CJK，插进文本会破坏 @ token 解析；走 chip 形态，发送时追加引用块
+        replaceToken('@', '');
+        setMentions((current) =>
+          current.some((mention) => mention.kind === 'chat' && mention.id === candidate.id)
+            ? current
+            : [...current, candidate]
+        );
+        return;
+      }
       replaceToken('@', `@${candidate.relativePath} `);
       setMentions((current) =>
         current.some(
@@ -244,9 +261,9 @@ export function Composer({
 
   const pickActive = useCallback(() => {
     if (popupKind === 'mention') {
-      if (folderOpen) {
-        const agent = mentionGroups.agents[folderIndex];
-        if (agent) pickMention(agent);
+      if (openFolderId) {
+        const candidate = mentionGroups[openFolderId][folderIndex];
+        if (candidate) pickMention(candidate);
         return;
       }
       const item = mentionItems[activeIndex];
@@ -260,8 +277,8 @@ export function Composer({
   }, [
     activeIndex,
     folderIndex,
-    folderOpen,
-    mentionGroups.agents,
+    openFolderId,
+    mentionGroups,
     mentionItems,
     pickMention,
     popupKind,
@@ -345,15 +362,15 @@ export function Composer({
         isComposing,
         activeIndex,
         itemCount: popupLength,
-        folderOpen: popupKind === 'mention' && folderOpen,
+        folderOpen: popupKind === 'mention' && openFolderId !== null,
         activeIsFolder: popupKind === 'mention' && activeItem?.type === 'folder',
         folderIndex,
-        folderItemCount: mentionGroups.agents.length,
+        folderItemCount: openFolderId ? mentionGroups[openFolderId].length : 0,
       });
       if (action.type === 'move') {
         event.preventDefault();
         setActiveIndex(action.index);
-        setFolderOpen(false);
+        setOpenFolderId(null);
         return;
       }
       if (action.type === 'move-folder') {
@@ -363,13 +380,13 @@ export function Composer({
       }
       if (action.type === 'open-folder') {
         event.preventDefault();
-        setFolderOpen(true);
+        if (activeItem?.type === 'folder') setOpenFolderId(activeItem.id);
         setFolderIndex(0);
         return;
       }
       if (action.type === 'close-folder') {
         event.preventDefault();
-        setFolderOpen(false);
+        setOpenFolderId(null);
         return;
       }
       if (action.type === 'pick') {
@@ -381,7 +398,7 @@ export function Composer({
         event.preventDefault();
         setMentionQuery(null);
         setSlashQuery(null);
-        setFolderOpen(false);
+        setOpenFolderId(null);
         return;
       }
     }
@@ -406,9 +423,9 @@ export function Composer({
           query={mentionQuery ?? ''}
           activeIndex={activeIndex}
           onActiveIndexChange={setActiveIndex}
-          folderOpen={folderOpen}
+          openFolderId={openFolderId}
           folderIndex={folderIndex}
-          onFolderOpenChange={setFolderOpen}
+          onOpenFolderIdChange={setOpenFolderId}
           onFolderIndexChange={setFolderIndex}
           onSelect={pickMention}
         />
@@ -509,6 +526,19 @@ export function Composer({
               }}
             />
           )}
+          {mentions
+            .filter((mention): mention is ChatMentionCandidate => mention.kind === 'chat')
+            .map((mention) => (
+              <ChatMentionChip
+                key={mention.id}
+                chat={mention}
+                onRemove={() =>
+                  setMentions((current) =>
+                    current.filter((item) => !(item.kind === 'chat' && item.id === mention.id))
+                  )
+                }
+              />
+            ))}
           {slash && (
             <SlashChip
               name={slash}
@@ -534,7 +564,8 @@ export function Composer({
               setMentions((current) =>
                 current.filter(
                   (mention) =>
-                    mention.kind === 'agent-type' || next.includes(`@${mention.relativePath}`)
+                    // chat/agent 走 chip 形态不占文本 token，只能由 chip 的 X 移除
+                    mention.kind !== 'file' || next.includes(`@${mention.relativePath}`)
                 )
               );
               detect(next);
@@ -559,8 +590,8 @@ export function Composer({
             aria-controls={popupKind === 'mention' ? mentionPickerId : undefined}
             aria-activedescendant={
               popupKind === 'mention'
-                ? folderOpen
-                  ? `${mentionPickerId}-agent-${folderIndex}`
+                ? openFolderId
+                  ? `${mentionPickerId}-sub-${folderIndex}`
                   : `${mentionPickerId}-option-${activeIndex}`
                 : undefined
             }
