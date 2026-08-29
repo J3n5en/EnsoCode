@@ -426,6 +426,13 @@ export class AgentSessionIndex {
     };
   }
 
+  /** 按 exact 父身份查 worker 直雇 coworker（只在 parent.coworkers 映射、不在 sessions 索引） */
+  coworkerOf(parent: SessionIdentity, coworkerId: string): CoworkerInfo | undefined {
+    const session = this.sessions.get(parent.sessionId);
+    if (!session || !isSameGeneration(session.identity, parent)) return undefined;
+    return session.coworkers.get(coworkerId);
+  }
+
   persistedConversation(conversationId: string): Record<string, unknown> | null {
     const state = conversationState(this.options.readSettings());
     return record(record(state.conversations)?.[conversationId]);

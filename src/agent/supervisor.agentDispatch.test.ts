@@ -321,6 +321,53 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await messageMain!.execute('call', { message: 'explicit handoff', urgent: true });
     expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'));
   });
+  it('dismiss-coworker 遥控解雇 worker 直雇 coworker：exact 父代执行，旧代拒绝', async () => {
+    // 双形状过渡命令：工具直雇 coworker 不在 Main sessions 索引，
+    // Main 只能按 parent.coworkers 映射发裸 id；worker 侧以 exact 父代为门。
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await settle();
+
+    // 旧代拒绝：不得发出 dismissed 回流（否则旧命令能解雇新代的 coworker）
+    supervisor.handleCommand({
+      type: 'dismiss-coworker',
+      parent: { sessionId: parent.sessionId, generation: 'stale-generation' },
+      coworkerId: 'parent::cw-bob',
+    });
+    await settle();
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'coworker-update' &&
+          (event as { coworker: { status: string } }).coworker.status === 'dismissed'
+      )
+    ).toBe(false);
+
+    supervisor.handleCommand({
+      type: 'dismiss-coworker',
+      parent,
+      coworkerId: 'parent::cw-bob',
+    });
+    await settle();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'coworker-update',
+        identity: parent,
+        coworker: expect.objectContaining({ id: 'parent::cw-bob', status: 'dismissed' }),
+      })
+    );
+  });
+
   it('rejects an ordinary exact profile when a configured MCP fails to establish', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

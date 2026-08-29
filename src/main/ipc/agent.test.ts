@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(() => true),
   persistedConversation: vi.fn(),
   currentIdentity: vi.fn(),
+  coworkerOf: vi.fn(),
+  dismissChildSession: vi.fn(() => ({ ok: true })),
+  dismissCoworkerSession: vi.fn(() => ({ ok: true })),
   promptSession: vi.fn(),
   steerSession: vi.fn(),
   abortSession: vi.fn(),
@@ -47,7 +50,8 @@ vi.mock('../services/agentHost', () => ({
     ],
   })),
   appendSessionCustomEntry: vi.fn(),
-  dismissChildSession: vi.fn(),
+  dismissChildSession: mocks.dismissChildSession,
+  dismissCoworkerSession: mocks.dismissCoworkerSession,
   promptChildSession: vi.fn(),
   promptSession: mocks.promptSession,
   requestSnapshot: vi.fn(),
@@ -80,6 +84,7 @@ vi.mock('./capabilities', () => ({
     releaseChild: vi.fn(),
     resolveTeamTarget: vi.fn(),
     persistedConversation: mocks.persistedConversation,
+    coworkerOf: mocks.coworkerOf,
   },
   capabilityGateway: {
     registerInvocation: vi.fn(() => true),
@@ -123,6 +128,9 @@ describe('agent IPC Main identity boundary', () => {
     mocks.abortSession.mockClear();
     mocks.setPairAgentBridge.mockClear();
     mocks.setSessionModel.mockClear();
+    mocks.coworkerOf.mockReset();
+    mocks.dismissChildSession.mockClear();
+    mocks.dismissCoworkerSession.mockClear();
     registerAgentHandlers();
   });
 
@@ -157,6 +165,62 @@ describe('agent IPC Main identity boundary', () => {
       })
     ).resolves.toEqual({ ok: false, error: 'invalid spawn request' });
     expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
+  describe('dismiss 降级链：typed child → legacy coworker → not-found', () => {
+    const parentIdentity = { sessionId: 'conv-1', generation: 'pg1' };
+    const childIdentity = {
+      sessionId: 'conv-1::cw-1',
+      generation: 'cg1',
+      parent: parentIdentity,
+      instanceId: 'i1',
+      instanceName: 'Scout · 1',
+      typeKey: 'builtin:scout',
+    };
+    const dismiss = (coworkerId: string) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_DISMISS_COWORKER)?.(event, 'conv-1', coworkerId, true);
+
+    it('typed child（在 sessions 索引）走 dismiss-child 现路径', () => {
+      mocks.currentIdentity.mockImplementation((sessionId: string) =>
+        sessionId === 'conv-1' ? parentIdentity : childIdentity
+      );
+      expect(dismiss('conv-1::cw-1')).toEqual({ ok: true });
+      expect(mocks.dismissChildSession).toHaveBeenCalledWith(parentIdentity, childIdentity, true);
+      expect(mocks.dismissCoworkerSession).not.toHaveBeenCalled();
+    });
+
+    it('工具直雇 coworker（不在索引、在 parent.coworkers 映射）走 dismiss-coworker 命令', () => {
+      // 39f4d3a 起的回归：这类 coworker 永远解不雇（'parent' in child 必然 false）
+      mocks.currentIdentity.mockImplementation((sessionId: string) =>
+        sessionId === 'conv-1' ? parentIdentity : undefined
+      );
+      mocks.coworkerOf.mockReturnValue({ id: 'conv-1::cw-bob', name: 'bob' });
+      expect(dismiss('conv-1::cw-bob')).toEqual({ ok: true });
+      expect(mocks.coworkerOf).toHaveBeenCalledWith(parentIdentity, 'conv-1::cw-bob');
+      expect(mocks.dismissCoworkerSession).toHaveBeenCalledWith(
+        parentIdentity,
+        'conv-1::cw-bob',
+        true
+      );
+      expect(mocks.dismissChildSession).not.toHaveBeenCalled();
+    });
+
+    it('两处都查不到（重启后的死 tab）返回 not-found，渲染层据此本地移除', () => {
+      mocks.currentIdentity.mockImplementation((sessionId: string) =>
+        sessionId === 'conv-1' ? parentIdentity : undefined
+      );
+      mocks.coworkerOf.mockReturnValue(undefined);
+      expect(dismiss('conv-1::cw-gone')).toMatchObject({ ok: false });
+      expect(mocks.dismissChildSession).not.toHaveBeenCalled();
+      expect(mocks.dismissCoworkerSession).not.toHaveBeenCalled();
+    });
+
+    it('父身份解析不出（旧代/已结束）一律拒绝，不碰任何命令', () => {
+      mocks.currentIdentity.mockReturnValue(undefined);
+      expect(dismiss('conv-1::cw-bob')).toMatchObject({ ok: false });
+      expect(mocks.dismissChildSession).not.toHaveBeenCalled();
+      expect(mocks.dismissCoworkerSession).not.toHaveBeenCalled();
+    });
   });
 
   it('已启动会话换模型走 exact identity，旧 generation 与 child 身份被拒', async () => {

@@ -263,6 +263,28 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('dismiss-coworker 绑 exact parent generation，coworkerId 必须属于该父会话', () => {
+    // worker 直雇 coworker（普通身份，不在 Main sessions 索引）的遥控解雇命令；
+    // 身份校验落在 parent 上，coworkerId 只做归属校验防跨会话误解雇。
+    const command = {
+      type: 'dismiss-coworker',
+      parent,
+      coworkerId: 'conversation-1::cw-bob',
+      notify: true,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, notify: undefined })).toEqual({
+      ...command,
+      notify: undefined,
+    });
+    // coworkerId 不属于 parent → 拒绝（防把别的会话的 coworker 解掉）
+    expect(parseAgentCommand({ ...command, coworkerId: 'conversation-2::cw-bob' })).toBeNull();
+    expect(parseAgentCommand({ ...command, coworkerId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, parent: { sessionId: 'conversation-1' } })).toBeNull();
+    // 未知字段拒绝（白名单三方一致）
+    expect(parseAgentCommand({ ...command, resumeFile: '/tmp/x.jsonl' })).toBeNull();
+  });
+
   it('capability-result 绑定 child/turn/request 并只接受 envelope', () => {
     const command = {
       type: 'capability-result',

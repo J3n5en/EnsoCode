@@ -33,6 +33,7 @@ import {
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
   dismissChildSession,
+  dismissCoworkerSession,
   promptChildSession,
   promptSession,
   requestSnapshot,
@@ -503,11 +504,19 @@ export function registerAgentHandlers(): void {
     IPC_CHANNELS.AGENT_DISMISS_COWORKER,
     (_event, parentSessionId: unknown, coworkerId: unknown, notify: unknown): AgentActionResult => {
       const parent = exactIdentity(parentSessionId);
-      const child = exactIdentity(coworkerId);
-      if (!parent || !child || !('parent' in child)) {
-        return { ok: false, error: 'invalid dismiss-child or stale generation' };
+      if (!parent || 'parent' in parent || !isNonEmptyString(coworkerId)) {
+        return { ok: false, error: 'invalid dismiss or stale generation' };
       }
-      return dismissChildSession(parent, child, notify === true);
+      // 降级链：typed child（sessions 索引）→ 工具直雇 coworker（parent.coworkers 映射）
+      // → 都查不到则 not-found，渲染层据此本地移除重启后无实体的死 tab。
+      const child = exactIdentity(coworkerId);
+      if (child && 'parent' in child) {
+        return dismissChildSession(parent, child, notify === true);
+      }
+      if (agentSessionIndex.coworkerOf(parent, coworkerId)) {
+        return dismissCoworkerSession(parent, coworkerId, notify === true);
+      }
+      return { ok: false, error: 'coworker not found' };
     }
   );
 

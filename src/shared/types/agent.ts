@@ -390,6 +390,14 @@ export type AgentCommand =
       child: ChildSessionIdentity;
       notify?: boolean;
     }
+  | {
+      /** 解雇 worker 直雇 coworker（普通身份，不在 Main sessions 索引）；
+       * 双形状过渡命令，统一到 typed child 后可删 */
+      type: 'dismiss-coworker';
+      parent: SessionIdentity;
+      coworkerId: string;
+      notify?: boolean;
+    }
   | { type: 'prompt'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: AttachedImage[] }
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
@@ -1313,6 +1321,17 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         child &&
         child.parent.sessionId === parent.sessionId &&
         child.parent.generation === parent.generation &&
+        (value.notify === undefined || typeof value.notify === 'boolean')
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
+    case 'dismiss-coworker': {
+      const parent = parseSessionIdentity(value.parent);
+      return hasOnlyKeys(value, ['type', 'parent', 'coworkerId', 'notify']) &&
+        parent &&
+        isNonEmptyString(value.coworkerId) &&
+        // 归属校验：coworker id 恒为 `父id::cw-…`，防跨会话误解雇
+        value.coworkerId.startsWith(`${parent.sessionId}::cw-`) &&
         (value.notify === undefined || typeof value.notify === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;

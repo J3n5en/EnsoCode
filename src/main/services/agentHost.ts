@@ -360,6 +360,20 @@ export function dismissChildSession(
   });
 }
 
+/** 解雇 worker 直雇 coworker（双形状过渡：无 ChildSessionIdentity，按裸 id + exact 父代下发） */
+export function dismissCoworkerSession(
+  parent: SessionIdentity,
+  coworkerId: string,
+  notify = false
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'dismiss-coworker',
+    parent,
+    coworkerId,
+    ...(notify ? { notify: true } : {}),
+  });
+}
+
 export function appendSessionCustomEntry(
   identity: SessionIdentity,
   entry: AgentSessionCustomEntry

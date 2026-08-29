@@ -357,7 +357,7 @@ export class SessionSupervisor {
     const identity =
       command.type === 'capability-result'
         ? command.child
-        : command.type === 'dismiss-child'
+        : command.type === 'dismiss-child' || command.type === 'dismiss-coworker'
           ? command.parent
           : command.identity;
     void this.gate
@@ -427,6 +427,20 @@ export class SessionSupervisor {
           return;
         }
         const name = await this.dismissCoworker(command.parent.sessionId, command.child.sessionId);
+        if (command.notify) {
+          this.notifier.notify(
+            command.parent.sessionId,
+            `The user dismissed coworker "${name}". Its session is closed; do not send to it again.`,
+            { urgent: true }
+          );
+        }
+        return;
+      }
+      case 'dismiss-coworker': {
+        // 双形状过渡：工具直雇 coworker 无 ChildSessionIdentity，Main 按
+        // parent.coworkers 映射发裸 id；这里以 exact 父代为门（must 抛即拒）。
+        this.must(command.parent);
+        const name = await this.dismissCoworker(command.parent.sessionId, command.coworkerId);
         if (command.notify) {
           this.notifier.notify(
             command.parent.sessionId,
