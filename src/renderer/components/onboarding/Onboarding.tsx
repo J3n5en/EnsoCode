@@ -1,9 +1,11 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { resolveChatModel } from '@shared/defaultModel';
 import { Bot, Check, Layers, Plug, Server, Sparkles, Wand2, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { AgentTypeList } from '../settings/AgentTypesSettings';
 import { LocalAssetImportDialog } from '../settings/LocalAssetImportDialog';
@@ -40,6 +42,17 @@ export function Onboarding() {
   const mcpServers = useSettingsStore((s) => s.mcpServers);
   const instructions = useSettingsStore((s) => s.instructions);
   const presets = useSettingsStore((s) => s.presets);
+  const defaultModel = useSettingsStore((s) => s.defaultModel);
+  const oauthSnapshot = useOauthCredentialStore((s) => s.snapshot);
+  // 「询问 Enso」会关掉引导并召唤 Enso，而 Enso 自己也要模型才能干活——
+  // 模型就绪前展示这个入口只会把用户引到死胡同（发不出消息且引导已被关）。
+  // 口径与 ChatView 一致：resolveChatModel 含默认模型/provider 启用/凭证三重判定。
+  const modelReady =
+    resolveChatModel({
+      defaultModel,
+      providers,
+      credentials: oauthCredentialContext(oauthSnapshot),
+    }).source !== 'none';
 
   const [stepIndex, setStepIndex] = React.useState(0);
   const [importKind, setImportKind] = React.useState<'skill' | 'mcp' | 'instruction' | null>(null);
@@ -191,15 +204,17 @@ export function Onboarding() {
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed px-3 py-2">
-          <p className="text-xs text-muted-foreground">
-            {t('Need help choosing a setup? Ask Enso.')}
-          </p>
-          <Button variant="ghost" size="sm" onClick={summonEnso}>
-            <Sparkles className="h-3.5 w-3.5" />
-            {t('Ask Enso')}
-          </Button>
-        </div>
+        {modelReady && (
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed px-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              {t('Need help choosing a setup? Ask Enso.')}
+            </p>
+            <Button variant="ghost" size="sm" onClick={summonEnso}>
+              <Sparkles className="h-3.5 w-3.5" />
+              {t('Ask Enso')}
+            </Button>
+          </div>
+        )}
 
         {/* 导航 */}
         <div className="mt-6 flex items-center justify-between">
