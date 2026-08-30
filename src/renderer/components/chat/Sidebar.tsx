@@ -1,5 +1,6 @@
 import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
+import { motion } from 'framer-motion';
 import {
   Archive,
   ArchiveRestore,
@@ -32,6 +33,7 @@ import {
 } from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -271,23 +273,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             </div>
             <div className="flex flex-col gap-y-0.5">
               {pinnedIds.map((id) => (
-                <ConversationRow
-                  key={id}
-                  id={id}
-                  conversation={conversations[id]}
-                  active={activeId === id}
-                  locale={locale}
-                  nowTick={nowTick}
-                  hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                  worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                  isolated={Boolean(conversations[id].worktree)}
-                  onSelect={selectConversation}
-                  onTogglePin={togglePinConversation}
-                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
-                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                />
+                <motion.div key={id} layout="position" transition={springStandard}>
+                  <ConversationRow
+                    id={id}
+                    conversation={conversations[id]}
+                    active={activeId === id}
+                    locale={locale}
+                    nowTick={nowTick}
+                    hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                    worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                    isolated={Boolean(conversations[id].worktree)}
+                    onSelect={selectConversation}
+                    onTogglePin={togglePinConversation}
+                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                    onCleanupWorktree={(conversationId) =>
+                      void handleCleanupWorktree(conversationId)
+                    }
+                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                  />
+                </motion.div>
               ))}
             </div>
           </div>
@@ -355,26 +360,31 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                     ? projectConversations
                     : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
                   ).map((id) => (
-                    <ConversationRow
-                      key={id}
-                      id={id}
-                      conversation={conversations[id]}
-                      active={activeId === id}
-                      locale={locale}
-                      nowTick={nowTick}
-                      worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                      isolated={Boolean(conversations[id].worktree)}
-                      onSelect={selectConversation}
-                      onTogglePin={togglePinConversation}
-                      onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                      onCleanupWorktree={(conversationId) =>
-                        void handleCleanupWorktree(conversationId)
-                      }
-                      onMoveToWorktree={(conversationId) =>
-                        void handleMoveToWorktree(conversationId)
-                      }
-                      onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                    />
+                    <motion.div key={id} layout="position" transition={springStandard}>
+                      <ConversationRow
+                        id={id}
+                        conversation={conversations[id]}
+                        active={activeId === id}
+                        locale={locale}
+                        nowTick={nowTick}
+                        worktreeStatus={
+                          conversations[id].worktree ? worktreeStatuses[id] : undefined
+                        }
+                        isolated={Boolean(conversations[id].worktree)}
+                        onSelect={selectConversation}
+                        onTogglePin={togglePinConversation}
+                        onToggleArchive={(conversationId) =>
+                          void handleToggleArchive(conversationId)
+                        }
+                        onCleanupWorktree={(conversationId) =>
+                          void handleCleanupWorktree(conversationId)
+                        }
+                        onMoveToWorktree={(conversationId) =>
+                          void handleMoveToWorktree(conversationId)
+                        }
+                        onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                      />
+                    </motion.div>
                   ))}
                   {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
                     <button
@@ -412,23 +422,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           {archivedOpen && (
             <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
               {archivedIds.map((id) => (
-                <ConversationRow
-                  key={id}
-                  id={id}
-                  conversation={conversations[id]}
-                  active={activeId === id}
-                  locale={locale}
-                  nowTick={nowTick}
-                  subtitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                  worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                  isolated={Boolean(conversations[id].worktree)}
-                  onSelect={selectConversation}
-                  onTogglePin={togglePinConversation}
-                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
-                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                />
+                <motion.div key={id} layout="position" transition={springStandard}>
+                  <ConversationRow
+                    id={id}
+                    conversation={conversations[id]}
+                    active={activeId === id}
+                    locale={locale}
+                    nowTick={nowTick}
+                    subtitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                    worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                    isolated={Boolean(conversations[id].worktree)}
+                    onSelect={selectConversation}
+                    onTogglePin={togglePinConversation}
+                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                    onCleanupWorktree={(conversationId) =>
+                      void handleCleanupWorktree(conversationId)
+                    }
+                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                  />
+                </motion.div>
               ))}
             </div>
           )}
