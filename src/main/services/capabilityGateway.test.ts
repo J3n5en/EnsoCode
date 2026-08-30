@@ -139,7 +139,7 @@ function fixture(options?: {
     readInstruction: vi.fn(() => ({ ok: true, content: '' })),
     writeInstruction: vi.fn(() => ({ ok: true, bytes: 0 })),
     deleteInstruction: vi.fn(),
-    getRecentProjects: vi.fn(() => []),
+    getRecentProjects: vi.fn(async () => []),
     updaterAvailable: vi.fn(() => true),
     checkForUpdates: vi.fn(async () => {}),
     downloadUpdate: vi.fn(async () => {}),

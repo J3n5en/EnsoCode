@@ -10,9 +10,9 @@ import { isMainWebContents } from '../windows/MainWindow';
 import { getSourceAuthorityRegistry } from './agent';
 
 export function registerProjectHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.PROJECTS_GET_RECENT, () => {
+  ipcMain.handle(IPC_CHANNELS.PROJECTS_GET_RECENT, async () => {
     try {
-      return getRecentProjects();
+      return await getRecentProjects();
     } catch (error) {
       console.warn('[RecentProjects] Failed:', error);
       return [];

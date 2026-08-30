@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RecentProject } from '@shared/types';
 import Database from 'better-sqlite3';
+import { readEnsoAiProjectPaths } from './ensoAiProjects';
 import { encodeClaudeProjectDir } from './sessionImport/claudeCode';
 
 const HOME = os.homedir();
@@ -339,13 +340,23 @@ function isUsableDir(target: string): boolean {
   }
 }
 
+async function readEnsoAiProjects(): Promise<Discovered[]> {
+  try {
+    const paths = await readEnsoAiProjectPaths();
+    return paths.map((repoPath) => ({ path: repoPath, sourceName: 'EnsoAI', lastUsed: 0 }));
+  } catch {
+    return [];
+  }
+}
+
 /** 从本机编辑器与编程应用读取最近打开过的目录 */
-export function getRecentProjects(): RecentProject[] {
+export async function getRecentProjects(): Promise<RecentProject[]> {
   const discovered = [
     ...EDITORS.flatMap(readEditorProjects),
     ...readClaudeProjects(),
     ...readCodexProjects(),
     ...readGrokProjects(),
+    ...(await readEnsoAiProjects()),
   ];
 
   const best = new Map<string, Discovered>();

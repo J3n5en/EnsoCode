@@ -100,7 +100,7 @@ export interface CapabilityDomainServices {
   readInstruction(id: string, local: boolean, sourcePath?: string): InstructionReadResult;
   writeInstruction(id: string, content: string): { ok: boolean; bytes: number };
   deleteInstruction(id: string): void;
-  getRecentProjects(): RecentProject[];
+  getRecentProjects(): Promise<RecentProject[]>;
   updaterAvailable(): boolean;
   checkForUpdates(): Promise<void>;
   downloadUpdate(): Promise<void>;
@@ -1062,7 +1062,7 @@ export function createCapabilityHandlers(
       );
     },
     'projects.list': () => success(settingsState(services.readSettings()).projects ?? []),
-    'projects.recent': () => success(services.getRecentProjects()),
+    'projects.recent': async () => success(await services.getRecentProjects()),
     'projects.remove': (context, params) => {
       const id = requiredString(params, 'id');
       if (!id) return invalid('id is required');
