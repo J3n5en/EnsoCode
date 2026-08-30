@@ -108,6 +108,32 @@ function cherryStudioLocation(): AppLocation {
   return appDataPath(`CherryStudio/${leveldbRelative}`);
 }
 
+/** EnsoAI 设置文件：userData（enso-ai）与 ~/.ensoai 都可能存在，取较新的一份 */
+function ensoAiLocation(): AppLocation {
+  let userDataLocation: AppLocation;
+  if (process.platform === 'linux') {
+    const filePath = path.join(
+      process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'),
+      'enso-ai/settings.json'
+    );
+    userDataLocation = { filePath, display: displayFor(filePath) };
+  } else {
+    userDataLocation = appDataPath('enso-ai/settings.json');
+  }
+  const homeLocation = homePath('.ensoai/settings.json');
+
+  const existing = [userDataLocation, homeLocation].flatMap((location) => {
+    try {
+      return [{ location, mtime: fs.statSync(location.filePath).mtimeMs }];
+    } catch {
+      return [];
+    }
+  });
+  if (existing.length === 0) return userDataLocation;
+  existing.sort((a, b) => b.mtime - a.mtime);
+  return existing[0].location;
+}
+
 /** Cursor IDE 的用户级状态库（VSCode 派生的 state.vscdb） */
 function cursorStateLocation(): AppLocation {
   const relative = 'Cursor/User/globalStorage/state.vscdb';
@@ -140,5 +166,7 @@ export function locateApp(appId: ScanAppId): AppLocation {
       return homePath('.grok/auth.json');
     case 'cursor':
       return cursorStateLocation();
+    case 'ensoai':
+      return ensoAiLocation();
   }
 }

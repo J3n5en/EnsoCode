@@ -18,6 +18,7 @@ import {
   readClaudeCode,
   readCodex,
   readCursor,
+  readEnsoAi,
   readGrok,
   readHermes,
   readOpenClaw,
@@ -33,6 +34,7 @@ const APP_NAMES: Record<ScanAppId, string> = {
   openclaw: 'OpenClaw',
   grok: 'Grok CLI',
   cursor: 'Cursor',
+  ensoai: 'EnsoAI',
 };
 
 /** 明显的占位 key 不导入 */
@@ -91,6 +93,8 @@ async function readApp(appId: ScanAppId, filePath: string): Promise<DiscoveredPr
       return readGrok(filePath);
     case 'cursor':
       return readCursor(filePath);
+    case 'ensoai':
+      return readEnsoAi(filePath);
   }
 }
 

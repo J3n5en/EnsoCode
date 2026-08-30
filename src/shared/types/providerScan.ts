@@ -11,6 +11,7 @@ export const SCAN_APP_IDS = [
   'openclaw',
   'grok',
   'cursor',
+  'ensoai',
 ] as const;
 export type ScanAppId = (typeof SCAN_APP_IDS)[number];
 

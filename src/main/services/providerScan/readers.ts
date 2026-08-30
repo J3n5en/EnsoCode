@@ -470,6 +470,38 @@ export function readGrok(authPath: string): DiscoveredProvider[] {
   ];
 }
 
+// ---- EnsoAI: settings.json 的 claudeCodeIntegration.providers（Claude Code provider 切换器） ----
+
+export function readEnsoAi(settingsPath: string): DiscoveredProvider[] {
+  const settings = obj(parseJson(fs.readFileSync(settingsPath, 'utf8')));
+  const state = obj(obj(settings['enso-settings']).state);
+  const providers = obj(state.claudeCodeIntegration).providers;
+  if (!Array.isArray(providers)) return [];
+
+  return providers.flatMap((provider) => {
+    const item = obj(provider);
+    const apiKey = str(item.authToken ?? item.apiKey);
+    if (!apiKey) return [];
+    const modelIds = [
+      str(item.model),
+      str(item.defaultOpusModel),
+      str(item.defaultSonnetModel),
+      str(item.defaultHaikuModel),
+      str(item.smallFastModel),
+    ].filter(Boolean);
+    return [
+      {
+        appId: 'ensoai' as const,
+        name: str(item.name) || 'EnsoAI Provider',
+        api: 'anthropic-messages' as const,
+        apiKey,
+        baseUrl: str(item.baseUrl),
+        models: toModelEntries(modelIds),
+      },
+    ];
+  });
+}
+
 // ---- Cursor: state.vscdb（sqlite）中 applicationUser 的自定义 OpenAI key ----
 
 export async function readCursor(stateDbPath: string): Promise<DiscoveredProvider[]> {
