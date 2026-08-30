@@ -10,7 +10,9 @@ import type {
   LocalAssetScanResult,
 } from '@shared/types';
 import { readSettings } from '../../ipc/settings';
+import { locateApp } from '../providerScan/locations';
 import { readCcSwitchMcp, readCcSwitchPrompts, readCcSwitchSkills } from './ccSwitch';
+import { readEnsoAiMcp, readEnsoAiPrompts } from './ensoAi';
 import { type DiscoveredInstruction, readInstructionFiles } from './instructions';
 import { type DiscoveredMcpServer, readClaudeMcp, readCodexMcp, readJsonMcp } from './mcp';
 import { type DiscoveredSkill, displayPath, readPluginSkills, readSkillsRoot } from './skills';
@@ -29,6 +31,7 @@ const SOURCE_NAMES: Record<AssetSourceId, string> = {
   factory: 'Factory',
   opencode: 'opencode',
   'cc-switch': 'CC Switch',
+  ensoai: 'EnsoAI',
 };
 
 interface SourceSpec {
@@ -111,6 +114,14 @@ function sourceSpec(sourceId: AssetSourceId): SourceSpec {
         readSkills: () => readCcSwitchSkills(dbFile, SOURCE_NAMES['cc-switch']),
         readMcp: () => readCcSwitchMcp(dbFile),
         readInstructions: () => readCcSwitchPrompts(dbFile),
+      };
+    }
+    case 'ensoai': {
+      const settingsFile = locateApp('ensoai').filePath;
+      return {
+        probe: settingsFile,
+        readMcp: () => readEnsoAiMcp(settingsFile),
+        readInstructions: () => readEnsoAiPrompts(settingsFile),
       };
     }
   }
