@@ -1,5 +1,5 @@
 import type { ChatMentionCandidate, FileMentionCandidate } from '@shared/types/mentions';
-import { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { extractMentionQuery, type MentionSegment } from './mentionComposer';
 
@@ -137,6 +137,33 @@ function caretContext(root: HTMLElement): { node: Text; offset: number } | null 
   return { node: anchorNode as Text, offset: anchorOffset };
 }
 
+/**
+ * iOS 第三方键盘（搜狗等）的光标移动键不发 KeyEvent，走 UITextInput 的
+ * setSelectedTextRange；光标已在最左端时再按一次，WebKit 会把折叠选区从文本
+ * 节点挪到元素节点锚点（如 (root, 0)），这种选区不绘制光标——表现为「光标消失」。
+ * 把元素锚点的折叠选区规范回相邻文本节点的等价位置即可恢复。
+ */
+function normalizedCaretRange(root: HTMLElement, selection: Selection): Range | null {
+  if (selection.rangeCount === 0 || !selection.isCollapsed) return null;
+  const { anchorNode, anchorOffset } = selection;
+  if (!anchorNode || anchorNode.nodeType === Node.TEXT_NODE) return null;
+  if (anchorNode !== root && !root.contains(anchorNode)) return null;
+  const children = anchorNode.childNodes;
+  const after = children[anchorOffset];
+  const before = anchorOffset > 0 ? children[anchorOffset - 1] : undefined;
+  const target =
+    after?.nodeType === Node.TEXT_NODE
+      ? { node: after as Text, offset: 0 }
+      : before?.nodeType === Node.TEXT_NODE
+        ? { node: before as Text, offset: (before as Text).length }
+        : null;
+  if (!target) return null;
+  const range = document.createRange();
+  range.setStart(target.node, target.offset);
+  range.collapse(true);
+  return range;
+}
+
 function placeCaretAfter(node: Node): void {
   const selection = window.getSelection();
   if (!selection) return;
@@ -163,6 +190,22 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
     ref
   ) {
     const rootRef = useRef<HTMLDivElement>(null);
+
+    // 修复 iOS IME 光标键在最左端把选区推成元素锚点导致光标消失（见 normalizedCaretRange）
+    useEffect(() => {
+      const handler = () => {
+        const root = rootRef.current;
+        if (!root || document.activeElement !== root) return;
+        const selection = window.getSelection();
+        if (!selection) return;
+        const range = normalizedCaretRange(root, selection);
+        if (!range) return;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+      document.addEventListener('selectionchange', handler);
+      return () => document.removeEventListener('selectionchange', handler);
+    }, []);
 
     const emitState = useCallback(() => {
       const root = rootRef.current;
