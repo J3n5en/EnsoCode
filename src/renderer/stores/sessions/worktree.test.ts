@@ -216,7 +216,7 @@ describe('send 使用 worktree cwd 并消费迁移提醒', () => {
   });
 });
 
-async function seedLocalConversation(id = 'conv-1'): Promise<string> {
+async function seedLocalConversation(): Promise<string> {
   const created = await sessions.useSessionsStore.getState().newConversation('project');
   if (!created) throw new Error('conversation not created');
   return created;
