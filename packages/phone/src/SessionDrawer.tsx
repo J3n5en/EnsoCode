@@ -349,6 +349,10 @@ export function SessionDrawer({
               </span>
             </button>
           )}
+
+          <p className="px-2 pt-0.5 text-center text-[10px] text-muted-foreground/60">
+            版本 {__COMMIT__}
+          </p>
         </div>
       </aside>
     </>

@@ -1,12 +1,25 @@
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+/** 构建时固化当前 commit 短哈希，侧边栏展示版本用（非 git 环境降级为 dev） */
+const commit = (() => {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return 'dev';
+  }
+})();
+
 const renderer = path.resolve(import.meta.dirname, '../../src/renderer');
 const stub = (name: string) => path.resolve(import.meta.dirname, `src/stubs/${name}`);
 
 export default defineConfig({
+  define: { __COMMIT__: JSON.stringify(commit) },
   plugins: [react(), tailwindcss()],
   resolve: {
     // 数组形式：按顺序匹配，桩必须排在通配的 '@' 之前
