@@ -26,6 +26,7 @@ import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
 import { PresetPicker } from './PresetPicker';
+import { RetryBar } from './RetryBar';
 import { StatsLine } from './StatsLine';
 import { TaskBar } from './TaskBar';
 
@@ -244,6 +245,9 @@ export function ChatView() {
 
       <div className="@container pt-1">
         <div className={CHAT_COL}>
+          {conversation.retry && (
+            <RetryBar conversationId={conversation.id} retry={conversation.retry} />
+          )}
           <TaskBar
             key={conversation.id}
             sessionId={conversation.id}

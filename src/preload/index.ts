@@ -216,6 +216,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER, sessionId, text, images),
     abort: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
+    abortRetry: (sessionId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT_RETRY, sessionId),
     respondAsk: (
       sessionId: string,
       requestId: string,

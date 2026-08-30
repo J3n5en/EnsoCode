@@ -590,6 +590,10 @@ export const zhTranslations: Record<string, string> = {
     '将永久删除「{{name}}」这项配置。',
   'Sign-out failed: {{message}}': '退登失败：{{message}}',
   Retry: '重试',
+  'Auto-retrying ({{attempt}}/{{max}})': '自动重试中 ({{attempt}}/{{max}})',
+  'retrying in {{seconds}}s': '{{seconds}}s 后重试',
+  'retrying…': '正在重试…',
+  'Cancel auto-retry': '取消自动重试',
   'Delete anyway': '仍要删除',
   // Provider model-row overrides（自定义 apiKey 条目展开编辑）
   Overridden: '已覆盖',

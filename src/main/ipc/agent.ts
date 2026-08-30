@@ -29,6 +29,7 @@ import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
 import {
+  abortRetrySession,
   abortSession,
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
@@ -488,6 +489,16 @@ export function registerAgentHandlers(): void {
       ? abortSession(identity)
       : { ok: false, error: 'invalid abort or stale session generation' };
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_ABORT_RETRY,
+    (_event, sessionId: unknown): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      return identity
+        ? abortRetrySession(identity)
+        : { ok: false, error: 'invalid abort-retry or stale session generation' };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
 

@@ -465,6 +465,11 @@ export function abortSession(identity: SessionIdentity): { ok: boolean; error?: 
   return sendAgentCommand({ type: 'abort', identity });
 }
 
+/** 取消自动重试倒计时（立即落终态失败，不中断正在流式输出的轮） */
+export function abortRetrySession(identity: SessionIdentity): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'abort-retry', identity });
+}
+
 export function respondApproval(
   identity: SessionIdentity,
   requestId: string,
