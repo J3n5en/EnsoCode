@@ -469,31 +469,35 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                                 : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
                               ).map((id) => (
                                 <motion.div key={id} layout="position" transition={springStandard}>
-                                  <ConversationRow
-                                    id={id}
-                                    conversation={conversations[id]}
-                                    active={activeId === id}
-                                    locale={locale}
-                                    nowTick={nowTick}
-                                    worktreeStatus={
-                                      conversations[id].worktree ? worktreeStatuses[id] : undefined
-                                    }
-                                    isolated={Boolean(conversations[id].worktree)}
-                                    onSelect={selectConversation}
-                                    onTogglePin={togglePinConversation}
-                                    onToggleArchive={(conversationId) =>
-                                      void handleToggleArchive(conversationId)
-                                    }
-                                    onCleanupWorktree={(conversationId) =>
-                                      void handleCleanupWorktree(conversationId)
-                                    }
-                                    onMoveToWorktree={(conversationId) =>
-                                      void handleMoveToWorktree(conversationId)
-                                    }
-                                    onRemove={(conversationId) =>
-                                      void openRemoveConversation(conversationId)
-                                    }
-                                  />
+                                  <DraggableChat id={id} conversation={conversations[id]}>
+                                    <ConversationRow
+                                      id={id}
+                                      conversation={conversations[id]}
+                                      active={activeId === id}
+                                      locale={locale}
+                                      nowTick={nowTick}
+                                      worktreeStatus={
+                                        conversations[id].worktree
+                                          ? worktreeStatuses[id]
+                                          : undefined
+                                      }
+                                      isolated={Boolean(conversations[id].worktree)}
+                                      onSelect={selectConversation}
+                                      onTogglePin={togglePinConversation}
+                                      onToggleArchive={(conversationId) =>
+                                        void handleToggleArchive(conversationId)
+                                      }
+                                      onCleanupWorktree={(conversationId) =>
+                                        void handleCleanupWorktree(conversationId)
+                                      }
+                                      onMoveToWorktree={(conversationId) =>
+                                        void handleMoveToWorktree(conversationId)
+                                      }
+                                      onRemove={(conversationId) =>
+                                        void openRemoveConversation(conversationId)
+                                      }
+                                    />
+                                  </DraggableChat>
                                 </motion.div>
                               ))}
                               {projectConversations.length > COLLAPSED_SESSION_LIMIT && (

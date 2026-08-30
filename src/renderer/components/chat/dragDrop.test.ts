@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMPOSER_DROP_ID, PINNED_DROP_ID, type DragPayload, routeDrop } from './dragDrop';
+import { COMPOSER_DROP_ID, type DragPayload, PINNED_DROP_ID, routeDrop } from './dragDrop';
 
 const project: DragPayload = {
   type: 'project',
