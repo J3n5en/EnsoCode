@@ -113,6 +113,8 @@ function session(options: Record<string, unknown>) {
     dispose: vi.fn(),
     setThinkingLevel: vi.fn(),
     navigateTree: vi.fn(async () => ({ cancelled: false })),
+    isStreaming: false,
+    isRetrying: false,
   };
   mocks.sessions.push(value);
   return value;
@@ -321,6 +323,28 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await messageMain!.execute('call', { message: 'explicit handoff', urgent: true });
     expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'));
   });
+
+  it('idle 投影但 pi 仍在 streaming 时 prompt 改走 steer，避免 AgentBusyError', async () => {
+    const supervisor = new SessionSupervisor({
+      emit: vi.fn(),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await settle();
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    parentSession.isStreaming = true;
+    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
+    await settle();
+    expect(parentSession.steer).toHaveBeenCalledWith('follow up', undefined);
+    expect(parentSession.prompt).not.toHaveBeenCalled();
+  });
+
   it('dismiss-coworker 遥控解雇 worker 直雇 coworker：exact 父代执行，旧代拒绝', async () => {
     // 双形状过渡命令：工具直雇 coworker 不在 Main sessions 索引，
     // Main 只能按 parent.coworkers 映射发裸 id；worker 侧以 exact 父代为门。

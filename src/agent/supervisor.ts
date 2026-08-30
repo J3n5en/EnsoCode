@@ -494,7 +494,10 @@ export class SessionSupervisor {
       case 'prompt': {
         const managed = this.must(command.identity);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
-        if (managed.status === 'running' && !(await this.interruptRetryIfAny(managed))) {
+        // 桌面投影可能已 idle，但 pi 仍 isStreaming（漏事件 / abort 收尾）。
+        // 这时再 prompt() 会抛 AgentBusyError，乐观消息随后被对账清掉。
+        const live = managed.session.isStreaming || managed.status === 'running';
+        if (live && !(await this.interruptRetryIfAny(managed))) {
           await managed.session.steer(command.text, images);
           return;
         }
@@ -1843,6 +1846,12 @@ export class SessionSupervisor {
     text: string,
     images?: { type: 'image'; data: string; mimeType: string }[]
   ): void {
+    if (managed.session.isStreaming) {
+      void managed.session.steer(text, images).catch((error) => {
+        this.failTurn(managed, toErrorMessage(error));
+      });
+      return;
+    }
     managed.currentTurnId = randomUUID();
     void managed.session
       .prompt(consumeRole(managed, text), images ? { images } : undefined)
