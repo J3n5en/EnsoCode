@@ -50,6 +50,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { heightVariants, springStandard } from '@/lib/motion';
@@ -57,9 +58,11 @@ import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import {
+  archivedConversationGroups,
   archivedConversationIds,
   pinnedConversationIds,
   projectConversationIds,
+  staleArchivedConversationIds,
 } from '@/stores/sessions/pinned';
 import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
@@ -67,6 +70,7 @@ import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
 const COLLAPSED_SESSION_LIMIT = 5;
+const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
 
 const ICON_BUTTON_CLASS =
   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
@@ -196,6 +200,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const [pendingRemove, setPendingRemove] = useState<
     | { kind: 'project'; project: Project; conversationIds: string[] }
     | { kind: 'conversation'; id: string; worktreeWarning?: string }
+    | { kind: 'archived'; days: number; conversationIds: string[]; projectName?: string }
     | null
   >(null);
   // 删除隔离会话前先查 worktree 有无未落地成果，确认文案里告知
@@ -213,8 +218,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
 
   const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds);
   const archivedIds = archivedConversationIds(order, conversations);
+  const archivedGroups = archivedConversationGroups(
+    order,
+    conversations,
+    orderedProjects.map((project) => project.id)
+  );
   // 底部「已归档」栏目的折叠态(缺省收起,重启回到收起)
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archiveCleanupOpen, setArchiveCleanupOpen] = useState<string | null>(null);
 
   // 相对时间每分钟自刷（“3 分钟前”不随时间僵住）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -573,66 +584,117 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   transition={springStandard}
                   className="overflow-hidden"
                 >
-                  <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
-                    {archivedIds.map((id) => (
-                      <motion.div key={id} layout="position" transition={springStandard}>
-                        <DraggableChat id={id} conversation={conversations[id]}>
-                          <ConversationRow
-                            id={id}
-                            conversation={conversations[id]}
-                            active={activeId === id}
-                            locale={locale}
-                            nowTick={nowTick}
-                            subtitle={
-                              projects.find((p) => p.id === conversations[id].projectId)?.name
-                            }
-                            worktreeStatus={
-                              conversations[id].worktree ? worktreeStatuses[id] : undefined
-                            }
-                            isolated={Boolean(conversations[id].worktree)}
-                            onSelect={selectConversation}
-                            onTogglePin={togglePinConversation}
-                            onToggleArchive={(conversationId) =>
-                              void handleToggleArchive(conversationId)
-                            }
-                            onCleanupWorktree={(conversationId) =>
-                              void handleCleanupWorktree(conversationId)
-                            }
-                            onMoveToWorktree={(conversationId) =>
-                              void handleMoveToWorktree(conversationId)
-                            }
-                            onRemove={(conversationId) =>
-                              void openRemoveConversation(conversationId)
-                            }
-                          />
-                        </DraggableChat>
-                      </motion.div>
-                    ))}
+                  <div className="mb-0.5 flex max-h-72 flex-col gap-y-1.5 overflow-y-auto">
+                    {archivedGroups.map((group) => {
+                      const projectName =
+                        projects.find((project) => project.id === group.projectId)?.name ??
+                        t('Other');
+                      return (
+                        <div key={group.projectId}>
+                          <div className="group flex items-center gap-1 rounded-md pr-0.5">
+                            <span className="min-w-0 flex-1 truncate px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                              {projectName}
+                            </span>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {group.ids.length}
+                            </span>
+                            <ArchiveCleanupMenu
+                              open={archiveCleanupOpen === group.projectId}
+                              onOpenChange={(open) =>
+                                setArchiveCleanupOpen(open ? group.projectId : null)
+                              }
+                              idsForDays={(days) =>
+                                staleArchivedConversationIds(
+                                  order,
+                                  conversations,
+                                  days,
+                                  Date.now(),
+                                  group.projectId
+                                )
+                              }
+                              onPick={(days, ids) =>
+                                setPendingRemove({
+                                  kind: 'archived',
+                                  days,
+                                  conversationIds: ids,
+                                  projectName,
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="flex flex-col gap-y-0.5">
+                            {group.ids.map((id) => (
+                              <motion.div key={id} layout="position" transition={springStandard}>
+                                <DraggableChat id={id} conversation={conversations[id]}>
+                                  <ConversationRow
+                                    id={id}
+                                    conversation={conversations[id]}
+                                    active={activeId === id}
+                                    locale={locale}
+                                    nowTick={nowTick}
+                                    worktreeStatus={
+                                      conversations[id].worktree ? worktreeStatuses[id] : undefined
+                                    }
+                                    isolated={Boolean(conversations[id].worktree)}
+                                    onSelect={selectConversation}
+                                    onTogglePin={togglePinConversation}
+                                    onToggleArchive={(conversationId) =>
+                                      void handleToggleArchive(conversationId)
+                                    }
+                                    onCleanupWorktree={(conversationId) =>
+                                      void handleCleanupWorktree(conversationId)
+                                    }
+                                    onMoveToWorktree={(conversationId) =>
+                                      void handleMoveToWorktree(conversationId)
+                                    }
+                                    onRemove={(conversationId) =>
+                                      void openRemoveConversation(conversationId)
+                                    }
+                                  />
+                                </DraggableChat>
+                              </motion.div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
-            <button
-              type="button"
-              onClick={() => setArchivedOpen((open) => !open)}
-              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                <ChevronRight
-                  className={cn(
-                    'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                    archivedOpen ? '-rotate-90' : 'rotate-0'
-                  )}
-                />
-              </span>
-              <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                {t('Archived')}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">
-                {archivedIds.length}
-              </span>
-            </button>
+            <div className="group flex items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-accent/30">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen((open) => !open)}
+                className="flex min-w-0 flex-1 items-center gap-1 px-2 py-2 text-left"
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                  <ChevronRight
+                    className={cn(
+                      'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                      archivedOpen ? '-rotate-90' : 'rotate-0'
+                    )}
+                  />
+                </span>
+                <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                  {t('Archived')}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {archivedIds.length}
+                </span>
+              </button>
+              <ArchiveCleanupMenu
+                open={archiveCleanupOpen === '*'}
+                onOpenChange={(open) => setArchiveCleanupOpen(open ? '*' : null)}
+                idsForDays={(days) =>
+                  staleArchivedConversationIds(order, conversations, days, Date.now())
+                }
+                onPick={(days, ids) =>
+                  setPendingRemove({ kind: 'archived', days, conversationIds: ids })
+                }
+              />
+            </div>
           </div>
         )}
 
@@ -683,18 +745,38 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         onOpenChange={(open) => {
           if (!open) setPendingRemove(null);
         }}
-        title={pendingRemove?.kind === 'project' ? t('Remove project?') : t('Delete conversation?')}
+        title={
+          pendingRemove?.kind === 'project'
+            ? t('Remove project?')
+            : pendingRemove?.kind === 'archived'
+              ? t('Delete archived conversations?')
+              : t('Delete conversation?')
+        }
         description={
           pendingRemove?.kind === 'project'
             ? t('"{{name}}" and its {{count}} conversations will be removed from the list.', {
                 name: pendingRemove.project.name,
                 count: pendingRemove.conversationIds.length,
               })
-            : pendingRemove?.kind === 'conversation' && pendingRemove.worktreeWarning
-              ? t('This conversation and its isolated worktree will be removed: {{warning}}.', {
-                  warning: pendingRemove.worktreeWarning,
-                })
-              : t('This conversation will be removed from the list.')
+            : pendingRemove?.kind === 'archived'
+              ? pendingRemove.projectName
+                ? t(
+                    '{{count}} conversations in "{{name}}" archived more than {{days}} days ago will be removed from the list.',
+                    {
+                      count: pendingRemove.conversationIds.length,
+                      days: pendingRemove.days,
+                      name: pendingRemove.projectName,
+                    }
+                  )
+                : t(
+                    '{{count}} conversations archived more than {{days}} days ago will be removed from the list.',
+                    { count: pendingRemove.conversationIds.length, days: pendingRemove.days }
+                  )
+              : pendingRemove?.kind === 'conversation' && pendingRemove.worktreeWarning
+                ? t('This conversation and its isolated worktree will be removed: {{warning}}.', {
+                    warning: pendingRemove.worktreeWarning,
+                  })
+                : t('This conversation will be removed from the list.')
         }
         confirmLabel={t('Remove')}
         onConfirm={() => {
@@ -702,6 +784,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           if (pendingRemove.kind === 'project') {
             for (const id of pendingRemove.conversationIds) removeConversation(id);
             void removeProject(pendingRemove.project.id);
+          } else if (pendingRemove.kind === 'archived') {
+            for (const id of pendingRemove.conversationIds) removeConversation(id);
           } else {
             removeConversation(pendingRemove.id);
           }
@@ -762,6 +846,49 @@ function SortableProject({
     },
     handleProps: listeners ?? {},
   });
+}
+
+function ArchiveCleanupMenu({
+  open,
+  onOpenChange,
+  idsForDays,
+  onPick,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  idsForDays: (days: number) => string[];
+  onPick: (days: number, ids: string[]) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <Menu open={open} onOpenChange={onOpenChange}>
+      <MenuTrigger
+        className={cn(
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive',
+          open && 'opacity-100'
+        )}
+        title={t('Clean up archived')}
+        aria-label={t('Clean up archived')}
+      >
+        <Eraser className="h-3.5 w-3.5" />
+      </MenuTrigger>
+      <MenuPopup align="end" side="top" className="min-w-40">
+        {ARCHIVE_PURGE_DAYS.map((days) => {
+          const ids = idsForDays(days);
+          return (
+            <MenuItem
+              key={days}
+              variant="destructive"
+              disabled={ids.length === 0}
+              onClick={() => onPick(days, ids)}
+            >
+              {t('Older than {{days}} days', { days })}
+            </MenuItem>
+          );
+        })}
+      </MenuPopup>
+    </Menu>
+  );
 }
 
 /** 置顶栏行:组内 sortable 拖拽重排,同时仍可拖入 Composer;独立 id 避免与项目组重复 */

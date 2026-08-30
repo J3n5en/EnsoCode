@@ -8,6 +8,7 @@ interface SidebarConversation {
   projectId: string;
   pinned?: boolean;
   archived?: boolean;
+  archivedAt?: number;
   createdAt: number;
   messages: { timestamp?: number }[];
 }
@@ -88,4 +89,53 @@ export function archivedConversationIds(
     order.filter((id) => conversations[id]?.archived === true),
     conversations
   );
+}
+
+/** 归档会话按项目分组:已知项目按传入顺序,未知项目(已删)追加末尾;组内按活跃时间倒序 */
+export function archivedConversationGroups(
+  order: readonly string[],
+  conversations: Conversations,
+  projectIds: readonly string[]
+): { projectId: string; ids: string[] }[] {
+  const idsByProject = new Map<string, string[]>();
+  for (const id of order) {
+    const conversation = conversations[id];
+    if (conversation?.archived !== true) continue;
+    const bucket = idsByProject.get(conversation.projectId);
+    if (bucket) bucket.push(id);
+    else idsByProject.set(conversation.projectId, [id]);
+  }
+  const groups: { projectId: string; ids: string[] }[] = [];
+  const seen = new Set<string>();
+  for (const projectId of projectIds) {
+    const ids = idsByProject.get(projectId);
+    if (!ids) continue;
+    seen.add(projectId);
+    groups.push({ projectId, ids: sortByActivity(ids, conversations) });
+  }
+  for (const [projectId, ids] of idsByProject) {
+    if (seen.has(projectId)) continue;
+    groups.push({ projectId, ids: sortByActivity(ids, conversations) });
+  }
+  return groups;
+}
+
+const DAY_MS = 86_400_000;
+
+/** 归档超过 N 天的会话 id。缺 archivedAt 的旧数据回落最后活跃时间。 */
+export function staleArchivedConversationIds(
+  order: readonly string[],
+  conversations: Conversations,
+  olderThanDays: number,
+  now: number,
+  projectId?: string
+): string[] {
+  const cutoff = now - olderThanDays * DAY_MS;
+  return order.filter((id) => {
+    const conversation = conversations[id];
+    if (conversation?.archived !== true) return false;
+    if (projectId !== undefined && conversation.projectId !== projectId) return false;
+    const archivedAt = conversation.archivedAt ?? lastActiveAt(conversation);
+    return archivedAt <= cutoff;
+  });
 }

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { archivedConversationIds, pinnedConversationIds, projectConversationIds } from './pinned';
+import {
+  archivedConversationGroups,
+  archivedConversationIds,
+  pinnedConversationIds,
+  projectConversationIds,
+  staleArchivedConversationIds,
+} from './pinned';
 
 type Minimal = {
   projectId: string;
   pinned?: boolean;
   archived?: boolean;
+  archivedAt?: number;
   parentId?: string;
   createdAt: number;
   messages: { timestamp?: number }[];
@@ -84,6 +91,59 @@ describe('archived 与分组的互斥', () => {
     // b(20) d(10)
     expect(archivedConversationIds(order, withArchived)).toEqual(['b', 'd']);
     expect(archivedConversationIds(order, conversations)).toEqual([]);
+  });
+
+  it('archivedConversationGroups 按项目顺序分组，组内按活跃时间倒序', () => {
+    const mixed: Record<string, Minimal> = {
+      ...withArchived,
+      c: conv('p2', 3, 30, { pinned: true, archived: true }),
+      gone: conv('missing', 6, 5, { archived: true }),
+    };
+    expect(archivedConversationGroups(order.concat('gone'), mixed, ['p2', 'p1'])).toEqual([
+      { projectId: 'p2', ids: ['c'] },
+      { projectId: 'p1', ids: ['b', 'd'] },
+      { projectId: 'missing', ids: ['gone'] },
+    ]);
+  });
+
+  it('没有归档的项目不占一组', () => {
+    expect(archivedConversationGroups(order, withArchived, ['p2', 'p1'])).toEqual([
+      { projectId: 'p1', ids: ['b', 'd'] },
+    ]);
+  });
+});
+
+describe('staleArchivedConversationIds', () => {
+  const day = 86_400_000;
+  const now = 30 * day;
+  const stale = {
+    recent: conv('p1', 1, 100, { archived: true, archivedAt: now - 2 * day }),
+    week: conv('p1', 2, 90, { archived: true, archivedAt: now - 8 * day }),
+    month: conv('p1', 3, 80, { archived: true, archivedAt: now - 20 * day }),
+    legacy: conv('p1', 4, now - 40 * day, { archived: true }),
+    live: conv('p1', 5, 70),
+  };
+  const ids = ['recent', 'week', 'month', 'legacy', 'live'];
+
+  it('按归档时间筛出超过 N 天的会话，缺 archivedAt 回落最后活跃时间', () => {
+    expect(staleArchivedConversationIds(ids, stale, 7, now)).toEqual(['week', 'month', 'legacy']);
+    expect(staleArchivedConversationIds(ids, stale, 15, now)).toEqual(['month', 'legacy']);
+    expect(staleArchivedConversationIds(ids, stale, 30, now)).toEqual(['legacy']);
+  });
+
+  it('未归档的不进清理名单', () => {
+    expect(staleArchivedConversationIds(ids, stale, 7, now)).not.toContain('live');
+  });
+
+  it('可限定到某个项目', () => {
+    const mixed = {
+      ...stale,
+      other: conv('p2', 6, 60, { archived: true, archivedAt: now - 20 * day }),
+    };
+    expect(staleArchivedConversationIds(['other', ...ids], mixed, 7, now, 'p2')).toEqual(['other']);
+    expect(staleArchivedConversationIds(['other', ...ids], mixed, 7, now, 'p1')).not.toContain(
+      'other'
+    );
   });
 });
 

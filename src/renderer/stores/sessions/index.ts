@@ -75,6 +75,8 @@ export interface Conversation extends SessionProjection {
   pinned?: boolean;
   /** 侧栏归档（移出项目分组/置顶栏,进底部 Archived 栏目）；随 partialize 持久化 */
   archived?: boolean;
+  /** 归档时刻；清理「N 天前已归档」用。取消归档时清掉 */
+  archivedAt?: number;
   /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
   contextWindow?: number;
   /** 上次使用的模型，resume 时沿用 */
@@ -1056,8 +1058,8 @@ export const useSessionsStore = create<SessionsState>()(
             const conversation = state.conversations[id];
             if (!conversation) return state;
             return conversation.archived === true
-              ? patch(state, id, { archived: undefined })
-              : patch(state, id, { archived: true, pinned: undefined });
+              ? patch(state, id, { archived: undefined, archivedAt: undefined })
+              : patch(state, id, { archived: true, pinned: undefined, archivedAt: Date.now() });
           });
         },
 

@@ -493,6 +493,14 @@ export const zhTranslations: Record<string, string> = {
   'Add model': '添加模型',
   Delete: '删除',
   Archived: '已归档',
+  'Clean up archived': '清理已归档',
+  'Older than {{days}} days': '{{days}} 天前',
+  'Delete archived conversations?': '删除已归档对话?',
+  '{{count}} conversations archived more than {{days}} days ago will be removed from the list.':
+    '{{count}} 个归档超过 {{days}} 天的对话将从列表移除。',
+  '{{count}} conversations in "{{name}}" archived more than {{days}} days ago will be removed from the list.':
+    '「{{name}}」中 {{count}} 个归档超过 {{days}} 天的对话将从列表移除。',
+  Other: '其他',
   Archive: '归档',
   Unarchive: '取消归档',
   Pinned: '已置顶',
