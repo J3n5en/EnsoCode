@@ -76,6 +76,10 @@ export function App() {
     () => takeSessionFromUrl() ?? localStorage.getItem(LAST_SESSION_KEY)
   );
   const [view, setView] = useState<SessionView | null>(null);
+  /** 订阅会话同步中（subscribe 已发、snapshot 未回）：此时时间线可能是陈旧的 */
+  const [syncing, setSyncing] = useState(false);
+  /** 横幅刚收起时短暂闪现「已是最新」，随后淡出 */
+  const [okFlash, setOkFlash] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -116,6 +120,11 @@ export function App() {
       onProviders: setProviders,
       onSession: (id, next) => {
         setView((prev) => (id === activeIdRef.current ? next : prev));
+      },
+      onSync: (state) => setSyncing(state === 'syncing'),
+      onGhostSession: (id) => {
+        // 订阅的会话已在桌面被删：跳回列表态，由 firstId 兑底选最近一条
+        if (id === activeIdRef.current) setActiveId(null);
       },
       onPushConfig: (key) => {
         vapidKeyRef.current = key;
@@ -184,6 +193,30 @@ export function App() {
       '选择模型')
     : undefined;
 
+  // TG 式状态横幅：非 online 显示连接状态；online 且订阅同步中显示同步中；
+  // 收起瞬间短暂闪现「已是最新」再淡出，不常驻占屏。
+  const bannerLabel =
+    state !== 'online' && state !== 'unauthorized'
+      ? STATE_LABEL[state]
+      : state === 'online' && syncing && activeId
+        ? '同步中…'
+        : null;
+  const prevBannerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevBannerRef.current;
+    prevBannerRef.current = bannerLabel;
+    if (prev && !bannerLabel) {
+      setOkFlash(true);
+      const timer = setTimeout(() => setOkFlash(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [bannerLabel]);
+  const banner = bannerLabel
+    ? { label: bannerLabel, tone: 'progress' as const }
+    : okFlash
+      ? { label: '已是最新', tone: 'ok' as const }
+      : null;
+
   if (!device) {
     return (
       <PairScreen
@@ -250,6 +283,7 @@ export function App() {
         view={view}
         connState={state}
         stateLabel={STATE_LABEL[state]}
+        banner={banner}
         onOpenDrawer={() => setDrawerOpen(true)}
         onNewSession={() => setComposing(true)}
         canCreate={state === 'online' && projects.length > 0}

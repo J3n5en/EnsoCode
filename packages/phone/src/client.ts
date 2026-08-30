@@ -23,6 +23,14 @@ import type {
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
 import { setTerminalAppearance } from './stubs/settings-store';
+import {
+  applyCatalog,
+  applySnapshot,
+  applySubscribe,
+  initialSync,
+  type SyncState,
+  type SyncTracking,
+} from './syncProjection';
 import { applyRetryEvent, applyTaskEvent, type RetryInfo } from './taskProjection';
 import { setHostTheme } from './theme';
 
@@ -54,6 +62,10 @@ export interface ClientEvents {
   onSession(sessionId: string, view: SessionView): void;
   /** 桌面下发 VAPID 公钥：有它才能 pushManager.subscribe */
   onPushConfig?(vapidPublicKey: string): void;
+  /** 订阅会话的同步状态：subscribe 发出 → snapshot 回包之间为 syncing */
+  onSync?(state: SyncState): void;
+  /** 订阅的会话已被桌面删除（曾在目录、现在消失）：上层应跳离该会话 */
+  onGhostSession?(sessionId: string): void;
 }
 
 export class PairClient {
@@ -69,6 +81,7 @@ export class PairClient {
   private sessions = new Map<string, SessionView>();
   /** 分页请求在途标记（每会话一次一发，响应或换订阅时清） */
   private historyPending = new Set<string>();
+  private sync: SyncTracking = initialSync;
 
   constructor(
     private device: PairedDevice,
@@ -190,9 +203,19 @@ export class PairClient {
       return;
     }
     switch (payload.type) {
-      case 'catalog':
+      case 'catalog': {
+        // 幽灵会话判定要在 onCatalog 前：上层可能据 ghost 立即切走
+        const { tracking, ghost } = applyCatalog(
+          this.sync,
+          this.subscribedId,
+          payload.entries.map((e) => e.id)
+        );
+        const ghostId = ghost ? this.subscribedId : null;
+        this.setSync(tracking);
+        if (ghostId) this.events.onGhostSession?.(ghostId);
         this.events.onCatalog(payload.entries);
         break;
+      }
       case 'projects':
         this.events.onProjects(payload.projects);
         break;
@@ -242,6 +265,13 @@ export class PairClient {
     // 尾窗快照：批事件，按 baseIndex 偏移合并进已有投影。
     // 不能整张 Map 替换——用户可能已上滑加载了更早的分页，替换会把它们抹掉。
     if (type === 'snapshot') {
+      // 与下方合并逻辑同规则：扁平 sessionId 优先，identity 兑底防旧桌面版
+      const snapshotIds = (
+        (event.sessions ?? []) as { sessionId?: string; identity?: { sessionId?: string } }[]
+      )
+        .map((s) => s.sessionId ?? s.identity?.sessionId)
+        .filter((id): id is string => typeof id === 'string');
+      this.setSync(applySnapshot(this.sync, this.subscribedId, snapshotIds));
       for (const snap of (event.sessions ?? []) as (SessionSnapshot & {
         sessionId?: string;
         identity?: { sessionId?: string };
@@ -343,10 +373,17 @@ export class PairClient {
     });
   }
 
+  private setSync(next: SyncTracking): void {
+    const changed = next.state !== this.sync.state;
+    this.sync = next;
+    if (changed) this.events.onSync?.(next.state);
+  }
+
   /** 订阅会话：带上本地游标，只补断线期间的增量 */
   subscribe(sessionId: string | null): void {
     this.subscribedId = sessionId;
     this.historyPending.clear();
+    this.setSync(applySubscribe(this.sync, sessionId));
     if (!sessionId) {
       this.send({ type: 'subscribe', sessionId: null });
       return;

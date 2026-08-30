@@ -1,6 +1,6 @@
 import type { CatalogEntry } from '@enso/pair';
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
-import { Bot, ChevronDown, PanelLeft, SquarePen } from 'lucide-react';
+import { Bot, ChevronDown, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
@@ -25,6 +25,8 @@ interface Props {
   view: SessionView | null;
   connState: ConnState;
   stateLabel: string;
+  /** TG 式状态横幅：progress = 连接/同步中，ok = 短暂闪现「已是最新」；null 不显示 */
+  banner: { label: string; tone: 'progress' | 'ok' } | null;
   canCreate: boolean;
   onOpenDrawer(): void;
   onNewSession(): void;
@@ -143,6 +145,23 @@ export function ChatScreen(props: Props) {
           <SquarePen className="h-4.5 w-4.5" />
         </button>
       </header>
+
+      {/* TG 式状态横幅：连接/同步中时诚实告知时间线可能陈旧，同步完短暂闪现已最新 */}
+      {props.banner && (
+        <div
+          className={cn(
+            'flex shrink-0 items-center justify-center gap-1.5 py-1 text-xs transition-colors',
+            props.banner.tone === 'ok'
+              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+          )}
+        >
+          {props.banner.tone === 'progress' && (
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+          )}
+          <span>{props.banner.label}</span>
+        </div>
+      )}
 
       {/* coworker tab 条：与桌面 CoworkerTabs 同观感，无 coworker 时不渲染；手机不提供雇佣/解雇 */}
       {props.tabGroup && props.tabGroup.children.length > 0 && (
