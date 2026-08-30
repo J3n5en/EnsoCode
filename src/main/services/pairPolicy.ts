@@ -176,6 +176,7 @@ const ALWAYS_FORWARD = new Set([
   'ask-request',
   'turn-completed',
   'turn-failed',
+  'turn-retry',
   'worker-exited',
 ]);
 

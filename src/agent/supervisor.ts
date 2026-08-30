@@ -492,23 +492,28 @@ export class SessionSupervisor {
       case 'prompt': {
         const managed = this.must(command.identity);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
-        if (managed.status === 'running') {
+        if (managed.status === 'running' && !(await this.interruptRetryIfAny(managed))) {
           await managed.session.steer(command.text, images);
           return;
         }
-        managed.currentTurnId = randomUUID();
-        void managed.session
-          .prompt(consumeRole(managed, command.text), images ? { images } : undefined)
-          .catch((error) => {
-            this.failTurn(managed, toErrorMessage(error));
-          });
+        this.promptFresh(managed, command.text, images);
         return;
       }
       case 'steer': {
+        const managed = this.must(command.identity);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
-        await this.must(command.identity).session.steer(command.text, images);
+        // 重试倒计时期间 renderer 看到的仍是 running 会发 steer：此时没有活轮可插，
+        // 语义是用户接管——打断重试，改为新轮 prompt
+        if (await this.interruptRetryIfAny(managed)) {
+          this.promptFresh(managed, command.text, images);
+          return;
+        }
+        await managed.session.steer(command.text, images);
         return;
       }
+      case 'abort-retry':
+        this.must(command.identity).session.abortRetry();
+        return;
       case 'set-thinking':
         this.must(command.identity).session.setThinkingLevel(command.level);
         return;
@@ -1606,6 +1611,27 @@ export class SessionSupervisor {
         }
         return;
       }
+      case 'auto_retry_start':
+        this.options.emit({
+          type: 'turn-retry',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          error: event.errorMessage || 'Unknown error',
+        });
+        return;
+      case 'auto_retry_end': {
+        // 重试被取消（abortRetry）时没有后续 agent_end，在这里收口；
+        // 重试耗尽则已由 agent_end(willRetry=false) 走 failTurn，status 守卫避免重复
+        if (event.success || managed.status !== 'running') return;
+        const lastError = [...managed.messages]
+          .reverse()
+          .find((message) => message.role === 'assistant' && message.errorMessage)?.errorMessage;
+        this.failTurn(managed, lastError ?? event.finalError ?? 'Auto-retry failed.');
+        return;
+      }
       case 'tool_execution_start':
         managed.toolStartAt.set(event.toolCallId, Date.now());
         return;
@@ -1619,7 +1645,18 @@ export class SessionSupervisor {
       }
       case 'agent_end': {
         this.reconcileMessages(managed, managed.session.messages as unknown[]);
+        // pi 将自动重试瞬态错误（随后 auto_retry_start）：非终态，不 settle、
+        // 不发 turn-completed、状态保持 running，否则输入框解锁后又自己跑起来
+        if (event.willRetry) return;
         if (this.tryAdaptiveDowngrade(managed)) return;
+        // 终态错误轮（重试耗尽或不可重试）按失败收口，不再误报「回复完成」
+        const lastAssistant = [...managed.messages]
+          .reverse()
+          .find((message) => message.role === 'assistant');
+        if (lastAssistant?.stopReason === 'error') {
+          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.');
+          return;
+        }
         const turnId = managed.currentTurnId ?? randomUUID();
         managed.currentTurnId = undefined;
         managed.status = 'idle';
@@ -1736,6 +1773,27 @@ export class SessionSupervisor {
         length: projected.length,
       });
     }
+  }
+
+  /** 重试倒计时中则打断并等待本轮收尾；返回是否发生了打断（用户输入接管重试） */
+  private async interruptRetryIfAny(managed: ManagedSession): Promise<boolean> {
+    if (!managed.session.isRetrying) return false;
+    managed.session.abortRetry();
+    await managed.session.waitForIdle();
+    return true;
+  }
+
+  private promptFresh(
+    managed: ManagedSession,
+    text: string,
+    images?: { type: 'image'; data: string; mimeType: string }[]
+  ): void {
+    managed.currentTurnId = randomUUID();
+    void managed.session
+      .prompt(consumeRole(managed, text), images ? { images } : undefined)
+      .catch((error) => {
+        this.failTurn(managed, toErrorMessage(error));
+      });
   }
 
   private failTurn(managed: ManagedSession, error: string): void {
