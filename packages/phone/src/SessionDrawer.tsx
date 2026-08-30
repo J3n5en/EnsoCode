@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import type { PushFailureReason } from './push';
 import {
   getThemePreference,
   setThemePreference,
@@ -37,6 +38,13 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: '深' },
 ];
 
+const PUSH_ERROR_TEXT: Record<PushFailureReason, string> = {
+  unsupported: '当前浏览器不支持推送。',
+  'permission-denied': '通知权限被拒绝，请在浏览器站点设置中允许后重试。',
+  'service-unreachable': '无法连接 Google 推送服务（FCM），请检查网络或代理后重试。',
+  'subscribe-failed': '订阅失败，请稍后重试。',
+};
+
 interface Props {
   open: boolean;
   projects: ProjectEntry[];
@@ -48,6 +56,10 @@ interface Props {
   connected: boolean;
   connectionLabel: string;
   pushEnabled: boolean;
+  /** 订阅进行中（权限弹框 + FCM 注册）：开关保持乐观已开但禁用 */
+  pushBusy: boolean;
+  /** 上次开启失败的原因；据此给出可自救的提示 */
+  pushError: PushFailureReason | null;
   pushAvailability: 'ok' | 'needs-install' | 'unsupported';
   /** 已收到桌面的 push-config；旧版桌面不会发，此时开关禁用并提示升级 */
   pushConfigReady: boolean;
@@ -69,6 +81,8 @@ export function SessionDrawer({
   connected,
   connectionLabel,
   pushEnabled,
+  pushBusy,
+  pushError,
   pushAvailability,
   pushConfigReady,
   onTogglePush,
@@ -277,10 +291,16 @@ export function SessionDrawer({
                 <span className="min-w-0 flex-1 text-muted-foreground text-sm">推送通知</span>
                 <Switch
                   checked={pushEnabled}
-                  disabled={pushAvailability !== 'ok' || !connected || !pushConfigReady}
+                  disabled={pushBusy || pushAvailability !== 'ok' || !connected || !pushConfigReady}
                   onCheckedChange={onTogglePush}
                 />
               </div>
+              {pushBusy && <p className="mt-1 pl-6 text-[11px] text-muted-foreground">正在开启…</p>}
+              {pushError && !pushBusy && (
+                <p className="mt-1 pl-6 text-[11px] text-destructive">
+                  {PUSH_ERROR_TEXT[pushError]}
+                </p>
+              )}
               {pushAvailability === 'ok' && connected && !pushConfigReady && (
                 <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
                   需先升级桌面端 EnsoCode 才能开启推送。

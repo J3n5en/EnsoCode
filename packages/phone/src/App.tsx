@@ -14,6 +14,7 @@ import { PairScreen } from './PairScreen';
 import {
   isPushSupported,
   isStandalone,
+  type PushFailureReason,
   registerServiceWorker,
   subscribePush,
   unsubscribePush,
@@ -83,6 +84,9 @@ export function App() {
   );
   /** 已收到桌面下发的 push-config；旧版桌面不会发，开关据此提示升级 */
   const [pushConfigReady, setPushConfigReady] = useState(false);
+  /** 订阅进行中：开关乐观显示已开但禁用，避免数秒无反馈 */
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState<PushFailureReason | null>(null);
   const clientRef = useRef<PairClient | null>(null);
   const activeIdRef = useRef<string | null>(null);
   /** VAPID 公钥（桌面下发）；用 ref 避免重建连接 effect */
@@ -118,8 +122,9 @@ export function App() {
         setPushConfigReady(true);
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
         if (localStorage.getItem(PUSH_ENABLED_KEY) === 'on') {
-          void subscribePush(key).then((subscription) => {
-            if (subscription) client.send({ type: 'push-subscribe', subscription });
+          void subscribePush(key).then((result) => {
+            if (result.ok)
+              client.send({ type: 'push-subscribe', subscription: result.subscription });
           });
         }
       },
@@ -212,6 +217,7 @@ export function App() {
   const send = (command: Parameters<PairClient['send']>[0]) => clientRef.current?.send(command);
 
   const togglePush = async (next: boolean) => {
+    setPushError(null);
     if (!next) {
       localStorage.setItem(PUSH_ENABLED_KEY, 'off');
       setPushEnabled(false);
@@ -221,11 +227,18 @@ export function App() {
     }
     const key = vapidKeyRef.current;
     if (!key) return; // 还没收到 push-config（未连上桌面），开关保持关闭
-    const subscription = await subscribePush(key);
-    if (!subscription) return; // 权限被拒或环境不支持
-    send({ type: 'push-subscribe', subscription });
-    localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+    // 乐观翻开 + busy：权限弹框与 FCM 注册要几秒，开关不动会被误认为没开
     setPushEnabled(true);
+    setPushBusy(true);
+    const result = await subscribePush(key);
+    setPushBusy(false);
+    if (!result.ok) {
+      setPushEnabled(false);
+      setPushError(result.reason);
+      return;
+    }
+    send({ type: 'push-subscribe', subscription: result.subscription });
+    localStorage.setItem(PUSH_ENABLED_KEY, 'on');
   };
 
   return (
@@ -285,6 +298,8 @@ export function App() {
           setComposing(true);
         }}
         pushEnabled={pushEnabled}
+        pushBusy={pushBusy}
+        pushError={pushError}
         pushAvailability={pushAvailability()}
         pushConfigReady={pushConfigReady}
         onTogglePush={(next) => void togglePush(next)}

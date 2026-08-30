@@ -34,11 +34,29 @@ function toServerKey(base64url: string): Uint8Array {
   return Uint8Array.from(raw, (c) => c.charCodeAt(0));
 }
 
-/** 申请权限并订阅；被拒或不支持返回 null（调用方提示） */
-export async function subscribePush(vapidPublicKey: string): Promise<PushSubscriptionJson | null> {
-  if (!isPushSupported()) return null;
+/** 订阅失败原因（UI 据此给出可自救的提示） */
+export type PushFailureReason =
+  | 'unsupported'
+  | 'permission-denied'
+  | 'service-unreachable'
+  | 'subscribe-failed';
+
+export type PushSubscribeResult =
+  | { ok: true; subscription: PushSubscriptionJson }
+  | { ok: false; reason: PushFailureReason };
+
+/** 把 subscribe 抛出的 DOMException 归类：AbortError = 推送服务（FCM）不可达 */
+export function classifyPushError(errorName: string): PushFailureReason {
+  if (errorName === 'AbortError') return 'service-unreachable';
+  if (errorName === 'NotAllowedError') return 'permission-denied';
+  return 'subscribe-failed';
+}
+
+/** 申请权限并订阅；失败返回原因，调用方据此提示 */
+export async function subscribePush(vapidPublicKey: string): Promise<PushSubscribeResult> {
+  if (!isPushSupported()) return { ok: false, reason: 'unsupported' };
   const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return null;
+  if (permission !== 'granted') return { ok: false, reason: 'permission-denied' };
   const registration = await navigator.serviceWorker.ready;
   try {
     const subscription = await registration.pushManager.subscribe({
@@ -46,13 +64,19 @@ export async function subscribePush(vapidPublicKey: string): Promise<PushSubscri
       applicationServerKey: toServerKey(vapidPublicKey) as BufferSource,
     });
     const json = subscription.toJSON();
-    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return null;
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      return { ok: false, reason: 'subscribe-failed' };
+    }
     return {
-      endpoint: json.endpoint,
-      keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+      ok: true,
+      subscription: {
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+      },
     };
-  } catch {
-    return null;
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    return { ok: false, reason: classifyPushError(name) };
   }
 }
 
