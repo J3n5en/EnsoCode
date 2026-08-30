@@ -26,6 +26,8 @@ import { createServer } from 'node:http';
 
 const PORT = Number(process.env.FAKE_PROVIDER_PORT || 8899);
 const requests = [];
+/** 接下来 N 次模型请求直接返回指定状态码（验证自动重试链路）：GET /__fail?count=2&status=503 */
+const failNext = { count: 0, status: 503 };
 
 function sse(res, events) {
   res.writeHead(200, {
@@ -149,7 +151,16 @@ const server = createServer((req, res) => {
     }
     if (url.includes('/__reset')) {
       requests.length = 0;
+      failNext.count = 0;
       res.writeHead(200).end('{}');
+      return;
+    }
+    if (url.includes('/__fail')) {
+      const params = new URL(url, 'http://x').searchParams;
+      failNext.count = Number(params.get('count') ?? 1);
+      failNext.status = Number(params.get('status') ?? 503);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(failNext));
       return;
     }
     if (url.includes('/v1/models')) {
@@ -175,6 +186,14 @@ const server = createServer((req, res) => {
       // 用来区分请求实际用了哪个 provider 条目的凭证（AC12/AC18 需要）
       authKey: String(req.headers['x-api-key'] || req.headers.authorization || '').slice(-6),
     });
+
+    if (failNext.count > 0) {
+      failNext.count -= 1;
+      console.log(`[fake-provider] simulated ${failNext.status} (${failNext.count} left)`);
+      res.writeHead(failNext.status, { 'Content-Type': 'text/plain' });
+      res.end('');
+      return;
+    }
 
     const messages = parsed?.messages;
     const calls = hasToolResult(messages) ? [] : parseToolDirectives(messages);
