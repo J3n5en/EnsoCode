@@ -12,6 +12,7 @@ import type {
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
 import type { PairCreatedSession } from '@shared/types/pair';
+import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 // 纯逻辑模块(仅类型级依赖),store 引用不破坏 node 环境测试
 import { mentionDisplayText } from '@/components/chat/mentionComposer';
 
@@ -49,6 +50,7 @@ import {
   emptyProjection,
   type SessionProjection,
 } from './reducer';
+import { workspaceFallbackNote, workspaceMigratedNote } from './worktree';
 
 function startGoalPrompt(objective: string): string {
   return (
@@ -112,6 +114,12 @@ export interface Conversation extends SessionProjection {
   goal?: SessionGoal;
   /** 回退后待预填输入框的文本(rewind-done 回流,ChatInput 消费一次) */
   draftText?: string;
+  /** 隔离会话的 worktree 绑定（main 权威的投影）；持久化，resume 时据此校验与定 cwd */
+  worktree?: SessionWorktree;
+  /** 工作区迁移/回退提醒，随下一条用户消息前置注入后清除；持久化 */
+  pendingWorkspaceNote?: string;
+  /** resume 时发现 worktree 丢失（驱动重建/回退选择 UI）；不持久化 */
+  worktreeMissing?: boolean;
 }
 
 interface SendTarget {
@@ -125,10 +133,24 @@ interface SessionsState {
   /** 新的在前 */
   order: string[];
   activeId: string | null;
+  /** 隔离会话的 worktree 状态快照（侧边栏徽标）；不持久化 */
+  worktreeStatuses: Record<string, WorktreeStatus>;
   /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
   pendingAgentPrefill?: AgentTypeKey;
 
   newConversation(projectId: string): Promise<string | null>;
+  /** 新建隔离会话：先建会话再建 worktree，worktree 失败则回滚会话并返回 null */
+  newIsolatedConversation(projectId: string): Promise<string | null>;
+  /** 半路切 worktree（仅主工作树干净时）；运行中会话先 release 再绑定。返回错误或 null */
+  moveConversationToWorktree(id: string): Promise<string | null>;
+  /** 清理 worktree 保留会话：cwd 回退主工作树 + 注入回退提醒。拦截确认在 UI 层 */
+  cleanupWorktree(id: string): Promise<string | null>;
+  /** resume 发现 worktree 丢失后：从记录分支/基准重建 */
+  rebuildWorktree(id: string): Promise<string | null>;
+  /** resume 发现 worktree 丢失后：回退主工作树继续 */
+  fallbackToMainWorkspace(id: string): Promise<void>;
+  /** 刷新全部隔离会话的 worktree 状态（侧边栏徽标） */
+  refreshWorktreeStatuses(): Promise<void>;
   selectConversation(id: string): void;
   removeConversation(id: string): void;
   /** 切换会话置顶 */
@@ -760,6 +782,128 @@ export const useSessionsStore = create<SessionsState>()(
         order: [],
         activeId: null,
         pendingAgentPrefill: undefined,
+        worktreeStatuses: {},
+
+        async newIsolatedConversation(projectId) {
+          const id = await get().newConversation(projectId);
+          if (!id) return null;
+          const created = await window.electronAPI.worktree.create(id, projectId);
+          if (!created.ok) {
+            // worktree 建不出来（非 git 仓库/无提交等）：回滚刚建的会话，错误由 UI 层 toast
+            get().removeConversation(id);
+            console.warn('[worktree] create failed:', created.error);
+            return null;
+          }
+          set((state) => patch(state, id, { worktree: created.value }));
+          return id;
+        },
+
+        async moveConversationToWorktree(id) {
+          const conversation = get().conversations[id];
+          if (!conversation) return 'conversation not found';
+          if (conversation.worktree) return 'conversation is already isolated';
+          if (conversation.parentId) return 'coworker sessions cannot be isolated';
+          const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
+          if (!clean.ok) return clean.error;
+          if (!clean.value) {
+            return 'main working tree has uncommitted changes — commit or stash them first';
+          }
+          // 运行中/已挂载的 worker 会话：cwd 在 spawn 时就固定了，必须释放后携新 cwd resume
+          if (conversation.started) {
+            const released = await window.electronAPI.agent.release(id);
+            if (!released.ok) return released.error ?? 'failed to release session';
+          }
+          const created = await window.electronAPI.worktree.create(id, conversation.projectId);
+          if (!created.ok) return created.error;
+          set((state) =>
+            patch(state, id, {
+              worktree: created.value,
+              started: false,
+              spawning: false,
+              status: 'idle',
+              pendingWorkspaceNote: workspaceMigratedNote(created.value.path),
+            })
+          );
+          return null;
+        },
+
+        async cleanupWorktree(id) {
+          const conversation = get().conversations[id];
+          if (!conversation?.worktree) return 'conversation has no worktree';
+          if (conversation.started) {
+            const released = await window.electronAPI.agent.release(id);
+            if (!released.ok) return released.error ?? 'failed to release session';
+          }
+          const removed = await window.electronAPI.worktree.remove(id);
+          if (!removed.ok) return removed.error;
+          const projectPath = useSettingsStore
+            .getState()
+            .projects.find((project) => project.id === conversation.projectId)?.path;
+          set((state) => ({
+            conversations: patch(state, id, {
+              worktree: undefined,
+              worktreeMissing: undefined,
+              started: false,
+              spawning: false,
+              status: 'idle',
+              ...(projectPath ? { pendingWorkspaceNote: workspaceFallbackNote(projectPath) } : {}),
+            }).conversations,
+            worktreeStatuses: Object.fromEntries(
+              Object.entries(state.worktreeStatuses).filter(([key]) => key !== id)
+            ),
+          }));
+          return null;
+        },
+
+        async rebuildWorktree(id) {
+          const conversation = get().conversations[id];
+          if (!conversation?.worktree) return 'conversation has no worktree';
+          const rebuilt = await window.electronAPI.worktree.rebuild(id);
+          if (!rebuilt.ok) return rebuilt.error;
+          set((state) =>
+            patch(state, id, {
+              worktree: rebuilt.value,
+              worktreeMissing: undefined,
+              // 重建可能落在新路径，同样需要告知 agent
+              pendingWorkspaceNote: workspaceMigratedNote(rebuilt.value.path),
+            })
+          );
+          return null;
+        },
+
+        async fallbackToMainWorkspace(id) {
+          const conversation = get().conversations[id];
+          if (!conversation?.worktree) return;
+          // 清掉 main 侧的登记与残留元数据（目录已丢，幂等）
+          await window.electronAPI.worktree.remove(id);
+          const projectPath = useSettingsStore
+            .getState()
+            .projects.find((project) => project.id === conversation.projectId)?.path;
+          set((state) =>
+            patch(state, id, {
+              worktree: undefined,
+              worktreeMissing: undefined,
+              ...(projectPath ? { pendingWorkspaceNote: workspaceFallbackNote(projectPath) } : {}),
+            })
+          );
+        },
+
+        async refreshWorktreeStatuses() {
+          const targets = Object.values(get().conversations).filter(
+            (conversation) => conversation.worktree
+          );
+          const entries = await Promise.all(
+            targets.map(async (conversation) => {
+              const status = await window.electronAPI.worktree.status(conversation.id);
+              return status.ok ? ([conversation.id, status.value] as const) : null;
+            })
+          );
+          set({
+            worktreeStatuses: Object.fromEntries(
+              entries.filter((entry): entry is [string, WorktreeStatus] => entry !== null)
+            ),
+          });
+        },
 
         async newConversation(projectId) {
           const projection = await window.electronAPI.sourceAuthority.read();
@@ -905,6 +1049,10 @@ export const useSessionsStore = create<SessionsState>()(
         removeConversation(id) {
           const conversation = get().conversations[id];
           if (!conversation) return;
+          // 隔离会话连带清理 worktree（拦截确认在 UI 层；分支保留）
+          if (conversation.worktree) {
+            void window.electronAPI.worktree.remove(id);
+          }
           // 级联解雇 coworker,防 worker 侧孤儿泄漏
           for (const coworkerId of conversation.coworkerIds ?? []) {
             if (conversation.started) {
@@ -1134,6 +1282,12 @@ export const useSessionsStore = create<SessionsState>()(
             spawnTitle = arg.slice(0, 40);
             text = startGoalPrompt(arg);
           }
+          // 工作区迁移/回退提醒：随下一条实际发出的消息前置注入一次（同 goal 模式，可见）
+          const workspaceNote = conversation.pendingWorkspaceNote;
+          if (workspaceNote && !(conversation.started && conversation.status === 'running')) {
+            text = `${workspaceNote}\n\n${text}`;
+            set((state) => patch(state, id, { pendingWorkspaceNote: undefined }));
+          }
           // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
           if (conversation.started && conversation.status === 'running') {
             const queuedId = crypto.randomUUID();
@@ -1185,7 +1339,8 @@ export const useSessionsStore = create<SessionsState>()(
               sessionId: id,
               providerId: target.providerId,
               modelId: target.modelId,
-              cwd: target.cwd,
+              // 隔离会话一律在自己的 worktree 里跑，不信任调用方传的 cwd
+              cwd: conversation.worktree?.path ?? target.cwd,
               resumeFile: conversation.sessionFile,
               reasoningEnabled: conversation.reasoningEnabled,
               thinkingLevel: conversation.thinkingLevel,
@@ -1242,12 +1397,21 @@ export const useSessionsStore = create<SessionsState>()(
             return;
           }
           const { providerId, modelId } = resolution;
+          // 隔离会话：resume 前先校验 worktree 还在不在（可能被 prune/手动删除）。
+          // 丢失时不自动重建，标记 worktreeMissing 让用户选重建/回退（设计决策）。
+          if (conversation.worktree) {
+            const status = await window.electronAPI.worktree.status(id);
+            if (!status.ok || !status.value.exists) {
+              set((state) => patch(state, id, { worktreeMissing: true }));
+              return;
+            }
+          }
           set((state) => patch(state, id, { spawning: true }));
           const result = await window.electronAPI.agent.spawn({
             sessionId: id,
             providerId,
             modelId,
-            cwd: project.path,
+            cwd: conversation.worktree?.path ?? project.path,
             resumeFile: conversation.sessionFile,
             reasoningEnabled: conversation.reasoningEnabled,
             thinkingLevel: conversation.thinkingLevel,
@@ -1600,6 +1764,8 @@ export const useSessionsStore = create<SessionsState>()(
               activeTabId: undefined,
               draftText: undefined,
               prefillAgentTypeKey: undefined,
+              // resume 时重新校验，不持久化陈旧的丢失标记
+              worktreeMissing: undefined,
             },
           ])
         ),
