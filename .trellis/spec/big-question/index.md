@@ -13,6 +13,7 @@
 | [agent-end-run-scoped-messages.md](agent-end-run-scoped-messages.md) | 多轮对话后历史消息消失，只剩最近一轮 |
 | [checkpoint-cross-session-wipe.md](checkpoint-cross-session-wipe.md) | 「回退+文件」不还原文件，无报错 |
 | [pi-auto-retry-willretry.md](pi-auto-retry-willretry.md) | 503 报错解锁输入后 agent 又自己跑起来；resume 回放重复红错 |
+| [worktree-move-races.md](worktree-move-races.md) | 会话切到隔离 worktree 后，文件仍写进主工作树；新命令被 worker 静默丢弃 |
 
 ## 共同教训
 
