@@ -322,6 +322,31 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'action',
     label: 'Clear session goal',
   },
+  'conversations.worktree.create': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Create isolated worktree for conversation',
+  },
+  'conversations.worktree.status': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Inspect conversation worktree status',
+  },
+  'conversations.worktree.remove': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Clean up conversation worktree',
+  },
+  'conversations.worktree.rebuild': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Rebuild missing conversation worktree',
+  },
+  'conversations.worktree.release': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Release live session for workspace migration',
+  },
   'conversations.rewind': { domain: 'conversations', kind: 'action', label: 'Rewind conversation' },
   'conversations.rewind-files': {
     domain: 'conversations',

@@ -465,6 +465,11 @@ export function abortSession(identity: SessionIdentity): { ok: boolean; error?: 
   return sendAgentCommand({ type: 'abort', identity });
 }
 
+/** 释放父会话（销毁 worker 侧会话树，jsonl 留盘），之后可携新 cwd resume */
+export function releaseParentSession(identity: SessionIdentity): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'release-parent', identity });
+}
+
 /** 取消自动重试倒计时（立即落终态失败，不中断正在流式输出的轮） */
 export function abortRetrySession(identity: SessionIdentity): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'abort-retry', identity });

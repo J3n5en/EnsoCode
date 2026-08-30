@@ -62,6 +62,7 @@ import type {
 } from '@shared/types/mentions';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type { UpdateStatus } from '@shared/types/updater';
+import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
@@ -218,6 +219,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
     abortRetry: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT_RETRY, sessionId),
+    /** 释放父会话（worker 侧销毁，jsonl 留盘），之后可携新 cwd resume（Move to worktree） */
+    release: (sessionId: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_RELEASE, sessionId),
     respondAsk: (
       sessionId: string,
       requestId: string,
@@ -313,6 +317,32 @@ const electronAPI = {
     },
   },
 
+  worktree: {
+    create: (
+      conversationId: string,
+      projectId: string
+    ): Promise<{ ok: true; value: SessionWorktree } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_CREATE, { conversationId, projectId }),
+    get: (conversationId: string): Promise<SessionWorktree | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET, conversationId),
+    list: (): Promise<SessionWorktree[]> => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_LIST),
+    status: (
+      conversationId: string
+    ): Promise<{ ok: true; value: WorktreeStatus } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_STATUS, conversationId),
+    remove: (
+      conversationId: string
+    ): Promise<{ ok: true; value: null } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_REMOVE, conversationId),
+    rebuild: (
+      conversationId: string
+    ): Promise<{ ok: true; value: SessionWorktree } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_REBUILD, conversationId),
+    repoClean: (
+      projectId: string
+    ): Promise<{ ok: true; value: boolean } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_REPO_CLEAN, projectId),
+  },
   sourceAuthority: {
     read: (): Promise<SourceAuthorityProjection> =>
       ipcRenderer.invoke(IPC_CHANNELS.SOURCE_AUTHORITY_READ),

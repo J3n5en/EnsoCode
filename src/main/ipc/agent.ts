@@ -31,6 +31,7 @@ import { AgentDispatchService } from '../services/agentDispatchService';
 import {
   abortRetrySession,
   abortSession,
+  releaseParentSession,
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
   dismissChildSession,
@@ -54,6 +55,7 @@ import {
   steerSession,
   stopBackgroundTask,
 } from '../services/agentHost';
+import { sessionWorktree } from './worktree';
 import { searchFiles } from '../services/fileSearch';
 import { maybeNotify } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -119,12 +121,16 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   if (!isMainWebContents(ownerWebContentsId) || request.sessionId.includes('::cw-')) return false;
   const conversation = sourceAuthority?.conversation(request.sessionId);
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-  return (
-    conversation?.kind === 'root' &&
-    conversation.lifecycle !== 'ended' &&
-    project?.state === 'active' &&
-    project.canonicalPath === request.cwd
-  );
+  if (
+    conversation?.kind !== 'root' ||
+    conversation.lifecycle === 'ended' ||
+    project?.state !== 'active'
+  ) {
+    return false;
+  }
+  // cwd 授权：项目主工作树，或该会话在 main 登记过的隔离 worktree（不信任其它路径）
+  if (project.canonicalPath === request.cwd) return true;
+  return sessionWorktree(request.sessionId)?.path === request.cwd;
 }
 
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
@@ -499,6 +505,15 @@ export function registerAgentHandlers(): void {
         : { ok: false, error: 'invalid abort-retry or stale session generation' };
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_RELEASE, (event, sessionId: unknown): AgentActionResult => {
+    // 仅主窗口可释放；释放后 worker 侧会话销毁，jsonl 留盘，可携新 cwd resume
+    if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'not authorized' };
+    const identity = exactIdentity(sessionId);
+    return identity
+      ? releaseParentSession(identity)
+      : { ok: false, error: 'invalid release or stale session generation' };
+  });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
 

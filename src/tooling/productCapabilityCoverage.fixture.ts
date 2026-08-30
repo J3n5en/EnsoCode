@@ -214,6 +214,14 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_DISMISS_COWORKER: surfaces('team.dismiss-coworker'),
   AGENT_HIRE_COWORKER: surfaces('team.hire-coworker'),
   AGENT_ASK_RESPOND: surfaces('conversations.ask.respond'),
+  AGENT_RELEASE: surfaces('conversations.worktree.release'),
+  WORKTREE_CREATE: surfaces('conversations.worktree.create'),
+  WORKTREE_GET: surfaces('conversations.worktree.status'),
+  WORKTREE_LIST: surfaces('conversations.worktree.status'),
+  WORKTREE_STATUS: surfaces('conversations.worktree.status'),
+  WORKTREE_REMOVE: surfaces('conversations.worktree.remove'),
+  WORKTREE_REBUILD: surfaces('conversations.worktree.rebuild'),
+  WORKTREE_REPO_CLEAN: surfaces('conversations.worktree.status'),
   AGENT_TYPES_REGISTRY_LIST: surfaces('agent-types.list'),
   AGENT_MODEL_SELECTION_REGISTER: excluded(
     'Renderer submits only model selector ids; Main validates and signs selection binding.'

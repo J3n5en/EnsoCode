@@ -297,6 +297,8 @@ export const zhTranslations: Record<string, string> = {
   'Allow or deny a pending coding-agent tool request.': '允许或拒绝待处理的编码 Agent 工具请求。',
   'Answer a pending question from the coding agent.': '回答编码 Agent 的待处理问题。',
   'Stop a coding-agent background task.': '停止编码 Agent 的后台任务。',
+  'Clean up the isolated worktree of a conversation.': '清理会话的隔离 worktree。',
+  'Release a live session for workspace migration.': '释放运行中的会话以迁移工作区。',
   'Rewind origin conversation history without restoring files.': '回退来源对话历史，但不恢复文件。',
   'Rewind origin conversation history and restore project files.':
     '回退来源对话历史并恢复项目文件。',

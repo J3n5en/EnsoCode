@@ -442,6 +442,9 @@ export type AgentCommand =
     }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'abort-retry'; identity: SessionIdentity }
+  /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
+   *  用于 Move to worktree 等需要换 cwd 重新 spawn 的场景。 */
+  | { type: 'release-parent'; identity: SessionIdentity }
   | {
       type: 'append-session-custom-entry';
       identity: SessionIdentity;

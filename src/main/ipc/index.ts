@@ -9,6 +9,7 @@ import { registerProviderHandlers } from './providers';
 import { registerSettingsHandlers } from './settings';
 import { registerUpdaterHandlers } from './updater';
 import { attachWindowStateEvents, registerWindowHandlers } from './window';
+import { registerWorktreeHandlers } from './worktree';
 
 export function registerIpcHandlers(): void {
   registerSettingsHandlers();
@@ -21,6 +22,7 @@ export function registerIpcHandlers(): void {
   registerProjectHandlers();
   registerFileHandlers();
   registerPairHandlers();
+  registerWorktreeHandlers();
 
   // 所有新建窗口自动挂载状态事件
   app.on('browser-window-created', (_, win) => {
