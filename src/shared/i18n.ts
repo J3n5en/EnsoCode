@@ -425,6 +425,8 @@ export const zhTranslations: Record<string, string> = {
   Add: '添加',
   'New conversation': '新对话',
   'Local workspace': '本地工作区',
+  'Workspace moved to an isolated worktree': '工作区已迁移到隔离 worktree',
+  'Workspace fell back to the main working tree': '工作区已回退到主工作树',
   'Work directly in the main working tree': '直接在主工作树里工作',
   'Run this session on its own git worktree': '让这个会话在独立的 git worktree 里运行',
   'Move to worktree': '切到隔离 worktree',

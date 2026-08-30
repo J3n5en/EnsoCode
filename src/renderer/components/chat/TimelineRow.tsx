@@ -9,6 +9,7 @@ import {
   CircleDot,
   Copy,
   FileText,
+  GitBranch,
   History,
   ListTodo,
   LoaderCircle,
@@ -114,6 +115,29 @@ const SYNTHETIC_BLOCK =
   /^<(agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 /** coworker 首条的角色前缀 */
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
+/** 工作区迁移/回退提醒：前置在用户消息之前，渲染成系统事件行而非原始 XML */
+const WORKSPACE_MIGRATED_PREFIX = /^<workspace-migrated>\n?([\s\S]*?)\n?<\/workspace-migrated>\s*/;
+
+/** 迁移提醒横幅：图标 + 一句话 + 目标路径，完整原文放 hover title */
+function WorkspaceMigratedBanner({ note }: { note: string }) {
+  const { t } = useI18n();
+  const path = /(?:moved to|main working tree): (.+)$/m.exec(note)?.[1]?.trim();
+  const fallback = note.includes('main working tree');
+  return (
+    <div
+      title={note}
+      className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground"
+    >
+      <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0">
+        {fallback
+          ? t('Workspace fell back to the main working tree')
+          : t('Workspace moved to an isolated worktree')}
+        {path && <span className="ml-1.5 break-all font-mono text-[11px] opacity-80">{path}</span>}
+      </span>
+    </div>
+  );
+}
 /** 主 agent 发给 coworker 的消息包裹 */
 const MAIN_AGENT_BLOCK =
   /^<message-from-main-agent>\n?([\s\S]*?)\n?<\/message-from-main-agent>\s*$/;
@@ -289,6 +313,20 @@ function UserText({ text }: { text: string }) {
   }
   if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
   if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
+  const migrated = WORKSPACE_MIGRATED_PREFIX.exec(text);
+  if (migrated) {
+    const remainder = text.slice(migrated[0].length).trim();
+    return (
+      <div className="flex w-full flex-col items-end gap-1.5">
+        <WorkspaceMigratedBanner note={migrated[1]} />
+        {remainder && (
+          <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
+            <InlineMentionText text={remainder} />
+          </div>
+        )}
+      </div>
+    );
+  }
   const block = SYNTHETIC_BLOCK.exec(text);
   if (block) {
     return (
