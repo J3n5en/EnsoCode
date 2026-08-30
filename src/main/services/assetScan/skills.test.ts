@@ -117,7 +117,11 @@ describe('listProjectSkills', () => {
     const home = path.join(tmp, 'home');
     writeSkill(path.join(cwd, '.agents', 'skills'), 'proj-a', 'name: proj-a\ndescription: p');
     writeSkill(path.join(home, '.agents', 'skills'), 'global-a', 'name: global-a\ndescription: g');
-    writeSkill(path.join(home, '.pi', 'agent', 'skills'), 'global-b', 'name: global-b\ndescription: g2');
+    writeSkill(
+      path.join(home, '.pi', 'agent', 'skills'),
+      'global-b',
+      'name: global-b\ndescription: g2'
+    );
     const names = listProjectSkills(cwd, home).map((skill) => skill.name);
     expect(names).toContain('proj-a');
     expect(names).toContain('global-a');

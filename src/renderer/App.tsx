@@ -1,3 +1,12 @@
+import {
+  type CollisionDetection,
+  DndContext,
+  PointerSensor,
+  pointerWithin,
+  rectIntersection,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
 import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
@@ -13,6 +22,12 @@ import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
+
+/** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
+const dndCollision: CollisionDetection = (args) => {
+  const withPointer = pointerWithin(args);
+  return withPointer.length > 0 ? withPointer : rectIntersection(args);
+};
 
 const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
@@ -94,6 +109,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [keybindings]);
 
+  // 拖拽：侧栏项目排序 / 会话拖入 Composer / 拖到 Pinned 区。
+  // 6px 启动阈值：行点击与行内按钮不受影响。onDragEnd 在 Sidebar 的 useDndMonitor 里。
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+
   return (
     <div className="relative isolate flex h-screen flex-col">
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
@@ -103,13 +124,15 @@ export default function App() {
       <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <Sidebar
-          width={collapsed ? undefined : width}
-          collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((v) => !v)}
-        />
-        {!collapsed && <ResizeHandle onResize={handleResize} />}
-        <ChatView />
+        <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
+          <Sidebar
+            width={collapsed ? undefined : width}
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((v) => !v)}
+          />
+          {!collapsed && <ResizeHandle onResize={handleResize} />}
+          <ChatView />
+        </DndContext>
       </div>
       {!onboarded && <Onboarding />}
     </div>

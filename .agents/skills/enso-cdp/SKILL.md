@@ -22,9 +22,28 @@ node scripts/cdp.mjs eval '...' --page settings.html # 设置窗口
 node scripts/cdp.mjs shot /tmp/x.png                # 截图
 node scripts/cdp.mjs keys ArrowDown Enter           # 受信任按键（真实输入管线）
 node scripts/cdp.mjs type '@rev'                    # 受信任文本输入
+node scripts/cdp.mjs drag '<fromJS>' '<toJS>'       # 受信任鼠标拖拽（from/to 为返回 {x,y} 的 JS）
 ```
 
 合成事件（eval 里 dispatchEvent）`isTrusted=false` 且不过 IME/焦点管线；排查“真实键盘行为”用 `keys`/`type`。
+
+## 鼠标拖拽 / 点击（Input.dispatchMouseEvent）
+
+**窗口必须可见**：`document.visibilityState === 'hidden'`（窗口被遮挡/后台/另一 Space）时，
+Chromium 会静默丢弃 CDP 的 `mousePressed`/`mouseReleased`（`mouseMoved` 照常送达）——
+表现为拖拽/点击“时好时坏”，极易误判为产品 bug。`Page.bringToFront` 无效，要 OS 级激活：
+
+```bash
+osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "Electron") to true'
+```
+
+`cdp.mjs drag` 已内置这个检查与自动激活；手写鼠标序列时先 eval `document.visibilityState` 确认。
+
+其它要点：
+- dnd-kit 等 PointerSensor 库必须走真实指针管线；eval 里合成 PointerEvent/HTML5 drag 事件无效。
+- 拖拽需要 press 后**分段** move（越过 activation 距离阈值），落点前悬停 ~150ms 让 droppable 识别。
+- 拖到“拖动中才出现的落点”（如临时 drop bar）：先 press+小幅 move 激活拖拽，再 query 落点坐标继续 move。
+- 验证断言别用 class 子串（如 `border-ring`）：Tailwind 的 `focus-within:border-ring` 会让 `className.includes()` 永真。
 
 隔离验证环境（不碰真实 userData）：
 

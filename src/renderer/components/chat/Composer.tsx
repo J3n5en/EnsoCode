@@ -1,3 +1,4 @@
+import { useDroppable } from '@dnd-kit/core';
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
 import type {
   AgentTypeMentionCandidate,
@@ -10,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { registerComposerInsert } from './composerMentionBridge';
+import { COMPOSER_DROP_ID } from './dragDrop';
 import { MentionChip } from './MentionChip';
 import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
 import { MentionPicker } from './MentionPicker';
@@ -79,6 +82,14 @@ export function Composer({
   );
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
+
+  // 侧栏拖入(dnd-kit):会话/项目行落到输入区插 mention chip。
+  // 与 OS 文件拖入(HTML5 dnd)互不干扰:两套事件体系独立。
+  const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({ id: COMPOSER_DROP_ID });
+  useEffect(
+    () => registerComposerInsert((candidate) => editorRef.current?.insertMention(candidate)),
+    []
+  );
   const editorRef = useRef<MentionEditorHandle>(null);
   const composingRef = useRef(false);
   // 编辑器的纯文本投影与卡片存在性（DOM 是事实源，这里只存渲染需要的派生态）
@@ -376,10 +387,11 @@ export function Composer({
       )}
 
       <div
+        ref={setDropRef}
         data-slot="composer"
         className={cn(
           'rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring',
-          dragging && 'border-ring bg-muted/30',
+          (dragging || dndOver) && 'border-ring bg-muted/30',
           agentRecipient && 'border-primary/35 shadow-primary/5'
         )}
         onDragOver={(event) => {
