@@ -113,3 +113,40 @@ subagent/coworker 支持主 agent 按任务指定模型:设置页「允许子代
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: 移动端增强——推理档位 / 子任务输出 / Web Push 通知
+
+**Date**: 2026-08-31
+**Task**: 08-30-phone-enhancements（已归档）
+**Branch**: `dev`
+
+### Summary
+
+移动端三连：① 新建会话直接设推理开关+档位（协议早已支持，补 UI 与校验）；
+② 会话内查看 subagent/后台任务输出（taskProjection TDD + 复用桌面 TaskBar），
+coworker 以头部 tab 条呈现（修复 catalog 不含子会话的死代码）；③ Web Push
+桌面直发（VAPID 落盘 + SW + 订阅开关，relay 零改动），真机验证暴露 iOS 锁屏
+半开 socket 误判在线——新增 presence 帧改门控为「离线或不可见」。追加置顶/
+归档同步。新旧版本双向兼容（旧桌面时推送开关禁用并提示升级）。PWA 已部署。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e04b91b` | feat(phone): 新建会话支持设置推理开关与档位 |
+| `3d07118` | feat(phone): 会话内可查看 subagent 与后台任务输出 |
+| `faa1124` | feat(pair/main): Web Push 通道 |
+| `0eb193f` | feat(phone): Web Push 通知 SW 与订阅开关 |
+| `9988712` | fix(phone): 旧桌面时推送开关禁用并提示升级 |
+| `82bf409` | fix(phone): 换绑重置 VAPID |
+| `98180f1` | fix(renderer): pair catalog 补发 coworker 子会话 |
+| `73d76d7` | feat(phone): coworker 头部 tab 条 |
+| `f51887b` | fix(pair): 推送门控改为「离线或不可见」 |
+| `47c0180` | feat(phone): 置顶与归档同步到手机抽屉 |
+| `f0f6f07` | style(phone): 归档栏对齐桌面 |
+| `a0f543c` | fix(phone): 修复 JSX 注释构建失败 |
+
+### Status
+
+[OK] **Completed**
