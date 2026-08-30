@@ -496,6 +496,7 @@ export const zhTranslations: Record<string, string> = {
   Archive: '归档',
   Unarchive: '取消归档',
   Pinned: '已置顶',
+  'Drop here to pin': '拖到此处置顶',
   Pin: '置顶',
   Unpin: '取消置顶',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':

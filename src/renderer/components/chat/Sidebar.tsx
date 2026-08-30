@@ -1,3 +1,12 @@
+import {
+  DragOverlay,
+  useDndContext,
+  useDndMonitor,
+  useDraggable,
+  useDroppable,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -21,8 +30,17 @@ import {
 } from 'lucide-react';
 import type * as React from 'react';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
+import { insertComposerMention } from '@/components/chat/composerMentionBridge';
+import {
+  chatDragId,
+  type DragPayload,
+  PINNED_DROP_ID,
+  projectDragId,
+  routeDrop,
+} from '@/components/chat/dragDrop';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import {
   ContextMenu,
@@ -44,6 +62,7 @@ import {
 } from '@/stores/sessions/pinned';
 import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
+import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
 const COLLAPSED_SESSION_LIMIT = 5;
@@ -90,6 +109,58 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       return next;
     });
   };
+
+  // 项目自定义顺序(拖拽重排,存 localStorage;新项目追加末尾)
+  const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('enso-project-order') ?? '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const orderedProjects = applyProjectOrder(projects, projectOrderIds);
+
+  // 拖拽中的源对象(用于 Overlay 预览与临时 Pinned 落点)
+  const { active: dndActive } = useDndContext();
+  const dragPayload = dndActive?.data.current as DragPayload | undefined;
+
+  useDndMonitor({
+    onDragEnd: (event) => {
+      const payload = event.active.data.current as DragPayload | undefined;
+      if (!payload) return;
+      const overId = event.over ? String(event.over.id) : null;
+      const action = routeDrop(payload, overId, activeId ?? undefined);
+      if (!action) return;
+      switch (action.kind) {
+        case 'reorder-projects': {
+          const next = moveProject(projects, projectOrderIds, action.activeId, action.overId);
+          setProjectOrderIds(next);
+          localStorage.setItem('enso-project-order', JSON.stringify(next));
+          break;
+        }
+        case 'insert-file-mention':
+          insertComposerMention({
+            kind: 'file',
+            id: action.path,
+            label: action.label,
+            relativePath: action.path,
+          });
+          break;
+        case 'insert-chat-mention':
+          insertComposerMention({
+            kind: 'chat',
+            id: action.conversationId,
+            label: action.label,
+            sessionFile: action.sessionFile,
+          });
+          break;
+        case 'pin-conversation':
+          togglePinConversation(action.conversationId);
+          break;
+      }
+    },
+  });
 
   const [addOpen, setAddOpen] = useState(false);
   const handleAddProject = (path: string) => {
@@ -265,8 +336,17 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               {t('Add a project to start')}
             </button>
           )}
+          {/* 无置顶会话时,拖动会话中露出临时落点条 */}
+          {pinnedIds.length === 0 && dragPayload?.type === 'chat' && !dragPayload.pinned && (
+            <PinnedDropZone>
+              <div className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-2 py-2 text-xs text-muted-foreground">
+                <Pin className="h-3.5 w-3.5" />
+                {t('Drop here to pin')}
+              </div>
+            </PinnedDropZone>
+          )}
           {pinnedIds.length > 0 && (
-            <div data-slot="pinned-section">
+            <PinnedDropZone data-slot="pinned-section">
               <div className="flex items-center gap-1.5 px-2 py-2">
                 <Pin className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium">{t('Pinned')}</span>
@@ -274,161 +354,181 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               <div className="flex flex-col gap-y-0.5">
                 {pinnedIds.map((id) => (
                   <motion.div key={id} layout="position" transition={springStandard}>
-                    <ConversationRow
-                      id={id}
-                      conversation={conversations[id]}
-                      active={activeId === id}
-                      locale={locale}
-                      nowTick={nowTick}
-                      hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                      worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                      isolated={Boolean(conversations[id].worktree)}
-                      onSelect={selectConversation}
-                      onTogglePin={togglePinConversation}
-                      onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                      onCleanupWorktree={(conversationId) =>
-                        void handleCleanupWorktree(conversationId)
-                      }
-                      onMoveToWorktree={(conversationId) =>
-                        void handleMoveToWorktree(conversationId)
-                      }
-                      onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                    />
+                    <DraggableChat id={id} conversation={conversations[id]}>
+                      <ConversationRow
+                        id={id}
+                        conversation={conversations[id]}
+                        active={activeId === id}
+                        locale={locale}
+                        nowTick={nowTick}
+                        hoverTitle={
+                          projects.find((p) => p.id === conversations[id].projectId)?.name
+                        }
+                        worktreeStatus={
+                          conversations[id].worktree ? worktreeStatuses[id] : undefined
+                        }
+                        isolated={Boolean(conversations[id].worktree)}
+                        onSelect={selectConversation}
+                        onTogglePin={togglePinConversation}
+                        onToggleArchive={(conversationId) =>
+                          void handleToggleArchive(conversationId)
+                        }
+                        onCleanupWorktree={(conversationId) =>
+                          void handleCleanupWorktree(conversationId)
+                        }
+                        onMoveToWorktree={(conversationId) =>
+                          void handleMoveToWorktree(conversationId)
+                        }
+                        onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                      />
+                    </DraggableChat>
                   </motion.div>
                 ))}
               </div>
-            </div>
+            </PinnedDropZone>
           )}
-          {projects.map((project) => {
-            const projectConversations = projectConversationIds(order, conversations, project.id);
-            const folded = collapsedProjects[project.id] === true;
-            return (
-              <div key={project.id}>
-                {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸） */}
-                <div className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30">
-                  <button
-                    type="button"
-                    onClick={() => toggleProject(project.id)}
-                    className="flex min-w-0 flex-1 items-center gap-1 text-left"
-                    title={project.path}
-                  >
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                      <ChevronRight
-                        className={cn(
-                          'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                          !folded && 'rotate-90'
-                        )}
-                      />
-                    </span>
-                    <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {project.name}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void newConversation(project.id)}
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title={t('New conversation')}
-                  >
-                    <MessageSquarePlus className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setImportProject(project)}
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title={t('Import session')}
-                  >
-                    <HardDriveDownload className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPendingRemove({
-                        kind: 'project',
-                        project,
-                        conversationIds: projectConversations,
-                      })
-                    }
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-                    title={t('Remove project')}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <AnimatePresence initial={false}>
-                  {!folded && (
-                    <motion.div
-                      initial="initial"
-                      animate="animate"
-                      exit="exit"
-                      variants={heightVariants}
-                      transition={springStandard}
-                      className="overflow-hidden"
-                    >
-                      <div className="mt-0.5 flex flex-col gap-y-0.5">
-                        {(expandedProjects[project.id]
-                          ? projectConversations
-                          : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
-                        ).map((id) => (
-                          <motion.div key={id} layout="position" transition={springStandard}>
-                            <ConversationRow
-                              id={id}
-                              conversation={conversations[id]}
-                              active={activeId === id}
-                              locale={locale}
-                              nowTick={nowTick}
-                              worktreeStatus={
-                                conversations[id].worktree ? worktreeStatuses[id] : undefined
-                              }
-                              isolated={Boolean(conversations[id].worktree)}
-                              onSelect={selectConversation}
-                              onTogglePin={togglePinConversation}
-                              onToggleArchive={(conversationId) =>
-                                void handleToggleArchive(conversationId)
-                              }
-                              onCleanupWorktree={(conversationId) =>
-                                void handleCleanupWorktree(conversationId)
-                              }
-                              onMoveToWorktree={(conversationId) =>
-                                void handleMoveToWorktree(conversationId)
-                              }
-                              onRemove={(conversationId) =>
-                                void openRemoveConversation(conversationId)
-                              }
+          <SortableContext
+            items={orderedProjects.map((project) => projectDragId(project.id))}
+            strategy={verticalListSortingStrategy}
+          >
+            {orderedProjects.map((project) => {
+              const projectConversations = projectConversationIds(order, conversations, project.id);
+              const folded = collapsedProjects[project.id] === true;
+              return (
+                <SortableProject key={project.id} project={project}>
+                  {(drag) => (
+                    <div ref={drag.setNodeRef} style={drag.style}>
+                      {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸）；整行可拖拽排序 */}
+                      <div
+                        className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30"
+                        {...drag.handleProps}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleProject(project.id)}
+                          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                          title={project.path}
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                            <ChevronRight
+                              className={cn(
+                                'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                                !folded && 'rotate-90'
+                              )}
                             />
-                          </motion.div>
-                        ))}
-                        {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedProjects((prev) => ({
-                                ...prev,
-                                [project.id]: !prev[project.id],
-                              }))
-                            }
-                            className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                          >
-                            {expandedProjects[project.id]
-                              ? t('Collapse')
-                              : t('Show {{n}} more', {
-                                  n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
-                                })}
-                          </button>
-                        )}
-                        {projectConversations.length === 0 && (
-                          <p className="py-1.5 pl-9 text-xs text-muted-foreground">
-                            {t('No conversations yet')}
-                          </p>
-                        )}
+                          </span>
+                          <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {project.name}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void newConversation(project.id)}
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title={t('New conversation')}
+                        >
+                          <MessageSquarePlus className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setImportProject(project)}
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title={t('Import session')}
+                        >
+                          <HardDriveDownload className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPendingRemove({
+                              kind: 'project',
+                              project,
+                              conversationIds: projectConversations,
+                            })
+                          }
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+                          title={t('Remove project')}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                    </motion.div>
+                      <AnimatePresence initial={false}>
+                        {!folded && (
+                          <motion.div
+                            initial="initial"
+                            animate="animate"
+                            exit="exit"
+                            variants={heightVariants}
+                            transition={springStandard}
+                            className="overflow-hidden"
+                          >
+                            <div className="mt-0.5 flex flex-col gap-y-0.5">
+                              {(expandedProjects[project.id]
+                                ? projectConversations
+                                : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
+                              ).map((id) => (
+                                <motion.div key={id} layout="position" transition={springStandard}>
+                                  <ConversationRow
+                                    id={id}
+                                    conversation={conversations[id]}
+                                    active={activeId === id}
+                                    locale={locale}
+                                    nowTick={nowTick}
+                                    worktreeStatus={
+                                      conversations[id].worktree ? worktreeStatuses[id] : undefined
+                                    }
+                                    isolated={Boolean(conversations[id].worktree)}
+                                    onSelect={selectConversation}
+                                    onTogglePin={togglePinConversation}
+                                    onToggleArchive={(conversationId) =>
+                                      void handleToggleArchive(conversationId)
+                                    }
+                                    onCleanupWorktree={(conversationId) =>
+                                      void handleCleanupWorktree(conversationId)
+                                    }
+                                    onMoveToWorktree={(conversationId) =>
+                                      void handleMoveToWorktree(conversationId)
+                                    }
+                                    onRemove={(conversationId) =>
+                                      void openRemoveConversation(conversationId)
+                                    }
+                                  />
+                                </motion.div>
+                              ))}
+                              {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedProjects((prev) => ({
+                                      ...prev,
+                                      [project.id]: !prev[project.id],
+                                    }))
+                                  }
+                                  className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                                >
+                                  {expandedProjects[project.id]
+                                    ? t('Collapse')
+                                    : t('Show {{n}} more', {
+                                        n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
+                                      })}
+                                </button>
+                              )}
+                              {projectConversations.length === 0 && (
+                                <p className="py-1.5 pl-9 text-xs text-muted-foreground">
+                                  {t('No conversations yet')}
+                                </p>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
+                </SortableProject>
+              );
+            })}
+          </SortableContext>
         </div>
 
         {archivedIds.length > 0 && (
@@ -447,32 +547,36 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
                     {archivedIds.map((id) => (
                       <motion.div key={id} layout="position" transition={springStandard}>
-                        <ConversationRow
-                          id={id}
-                          conversation={conversations[id]}
-                          active={activeId === id}
-                          locale={locale}
-                          nowTick={nowTick}
-                          subtitle={
-                            projects.find((p) => p.id === conversations[id].projectId)?.name
-                          }
-                          worktreeStatus={
-                            conversations[id].worktree ? worktreeStatuses[id] : undefined
-                          }
-                          isolated={Boolean(conversations[id].worktree)}
-                          onSelect={selectConversation}
-                          onTogglePin={togglePinConversation}
-                          onToggleArchive={(conversationId) =>
-                            void handleToggleArchive(conversationId)
-                          }
-                          onCleanupWorktree={(conversationId) =>
-                            void handleCleanupWorktree(conversationId)
-                          }
-                          onMoveToWorktree={(conversationId) =>
-                            void handleMoveToWorktree(conversationId)
-                          }
-                          onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                        />
+                        <DraggableChat id={id} conversation={conversations[id]}>
+                          <ConversationRow
+                            id={id}
+                            conversation={conversations[id]}
+                            active={activeId === id}
+                            locale={locale}
+                            nowTick={nowTick}
+                            subtitle={
+                              projects.find((p) => p.id === conversations[id].projectId)?.name
+                            }
+                            worktreeStatus={
+                              conversations[id].worktree ? worktreeStatuses[id] : undefined
+                            }
+                            isolated={Boolean(conversations[id].worktree)}
+                            onSelect={selectConversation}
+                            onTogglePin={togglePinConversation}
+                            onToggleArchive={(conversationId) =>
+                              void handleToggleArchive(conversationId)
+                            }
+                            onCleanupWorktree={(conversationId) =>
+                              void handleCleanupWorktree(conversationId)
+                            }
+                            onMoveToWorktree={(conversationId) =>
+                              void handleMoveToWorktree(conversationId)
+                            }
+                            onRemove={(conversationId) =>
+                              void openRemoveConversation(conversationId)
+                            }
+                          />
+                        </DraggableChat>
                       </motion.div>
                     ))}
                   </div>
@@ -574,7 +678,107 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           }
         }}
       />
+
+      {/* 拖拽预览:侧栏 overflow-hidden 会裁切,portal 到 body */}
+      {createPortal(
+        <DragOverlay dropAnimation={null}>
+          {dragPayload && (
+            <div className="flex w-56 items-center gap-2 rounded-lg border bg-background/95 px-3 py-1.5 text-sm shadow-md">
+              {dragPayload.type === 'project' ? (
+                <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 flex-1 truncate">
+                {dragPayload.type === 'project'
+                  ? dragPayload.name
+                  : dragPayload.title.split('\n')[0].trim() || t('New conversation')}
+              </span>
+            </div>
+          )}
+        </DragOverlay>,
+        document.body
+      )}
     </motion.aside>
+  );
+}
+
+/** 项目块的 sortable 包装:render prop 把 ref/transform/监听器交给现有 JSX,不重排结构 */
+function SortableProject({
+  project,
+  children,
+}: {
+  project: Project;
+  children: (drag: {
+    setNodeRef: (node: HTMLElement | null) => void;
+    style: React.CSSProperties;
+    handleProps: Record<string, unknown>;
+  }) => React.ReactNode;
+}) {
+  const { setNodeRef, transform, transition, listeners, isDragging } = useSortable({
+    id: projectDragId(project.id),
+    data: {
+      type: 'project',
+      projectId: project.id,
+      path: project.path,
+      name: project.name,
+    } satisfies DragPayload,
+  });
+  return children({
+    setNodeRef,
+    style: {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.4 : undefined,
+    },
+    handleProps: listeners ?? {},
+  });
+}
+
+/** 会话行的拖拽源:拖入 Composer 成 mention / 拖到 Pinned 区置顶;原行拖动中降透明度 */
+function DraggableChat({
+  id,
+  conversation,
+  children,
+}: {
+  id: string;
+  conversation: { title: string; sessionFile?: string; pinned?: boolean };
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, listeners, isDragging } = useDraggable({
+    id: chatDragId(id),
+    data: {
+      type: 'chat',
+      conversationId: id,
+      title: conversation.title,
+      sessionFile: conversation.sessionFile,
+      pinned: conversation.pinned === true,
+    } satisfies DragPayload,
+  });
+  return (
+    <div ref={setNodeRef} {...listeners} style={{ opacity: isDragging ? 0.4 : undefined }}>
+      {children}
+    </div>
+  );
+}
+
+/** Pinned 栏目落点:拖会话悬停时高亮 */
+function PinnedDropZone({
+  children,
+  ...rest
+}: {
+  children: React.ReactNode;
+} & Record<string, unknown>) {
+  const { setNodeRef, isOver, active } = useDroppable({ id: PINNED_DROP_ID });
+  const draggingChat = (active?.data.current as DragPayload | undefined)?.type === 'chat';
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn('rounded-lg', isOver && draggingChat && 'bg-accent/40 ring-1 ring-ring')}
+      {...rest}
+    >
+      {children}
+    </div>
   );
 }
 
