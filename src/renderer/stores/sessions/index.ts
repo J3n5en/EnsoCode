@@ -120,6 +120,9 @@ export interface Conversation extends SessionProjection {
   pendingWorkspaceNote?: string;
   /** resume 时发现 worktree 丢失（驱动重建/回退选择 UI）；不持久化 */
   worktreeMissing?: boolean;
+  /** 工作区迁移进行中：挡住自动 resume。不能复用 spawning——它会被 worker 事件
+   *  （含 release 触发的 parent-ended）清掉，守卫窗口期失效（CDP 实测）；不持久化 */
+  workspaceMigrating?: boolean;
 }
 
 interface SendTarget {
@@ -803,56 +806,73 @@ export const useSessionsStore = create<SessionsState>()(
           if (!conversation) return 'conversation not found';
           if (conversation.worktree) return 'conversation is already isolated';
           if (conversation.parentId) return 'coworker sessions cannot be isolated';
-          const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
-          if (!clean.ok) return clean.error;
-          if (!clean.value) {
-            return 'main working tree has uncommitted changes — commit or stash them first';
+          // 迁移门必须在任何 await 之前立起来：未 started 的会话随时可能被
+          // ChatView 自动 resume 用旧 cwd 复活（CDP 实测连续踩到多种时序）。
+          set((state) => patch(state, id, { workspaceMigrating: true }));
+          try {
+            const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
+            if (!clean.ok) return clean.error;
+            if (!clean.value) {
+              return 'main working tree has uncommitted changes — commit or stash them first';
+            }
+            // 运行中/已挂载的 worker 会话：cwd 在 spawn 时就固定了，必须释放后携新 cwd resume。
+            // 重读 started：守卫立起前可能有 resume 溠进来把会话复活了
+            if (get().conversations[id]?.started) {
+              const released = await window.electronAPI.agent.release(id);
+              if (!released.ok) return released.error ?? 'failed to release session';
+            }
+            const created = await window.electronAPI.worktree.create(id, conversation.projectId);
+            if (!created.ok) return created.error;
+            set((state) =>
+              patch(state, id, {
+                worktree: created.value,
+                started: false,
+                status: 'idle',
+                pendingWorkspaceNote: workspaceMigratedNote(created.value.path),
+              })
+            );
+            return null;
+          } finally {
+            set((state) => patch(state, id, { workspaceMigrating: undefined }));
           }
-          // 运行中/已挂载的 worker 会话：cwd 在 spawn 时就固定了，必须释放后携新 cwd resume
-          if (conversation.started) {
-            const released = await window.electronAPI.agent.release(id);
-            if (!released.ok) return released.error ?? 'failed to release session';
-          }
-          const created = await window.electronAPI.worktree.create(id, conversation.projectId);
-          if (!created.ok) return created.error;
-          set((state) =>
-            patch(state, id, {
-              worktree: created.value,
-              started: false,
-              spawning: false,
-              status: 'idle',
-              pendingWorkspaceNote: workspaceMigratedNote(created.value.path),
-            })
-          );
-          return null;
         },
 
         async cleanupWorktree(id) {
           const conversation = get().conversations[id];
           if (!conversation?.worktree) return 'conversation has no worktree';
-          if (conversation.started) {
-            const released = await window.electronAPI.agent.release(id);
-            if (!released.ok) return released.error ?? 'failed to release session';
+          // 同 moveConversationToWorktree：迁移门挡住 release 后的自动 resume，
+          // 否则会用即将被删的 worktree cwd 复活会话
+          set((state) => patch(state, id, { workspaceMigrating: true }));
+          try {
+            // 重读 started：守卫立起前可能有自动 resume 溠进来把会话复活了
+            if (get().conversations[id]?.started) {
+              const released = await window.electronAPI.agent.release(id);
+              if (!released.ok) return released.error ?? 'failed to release session';
+            }
+            const removed = await window.electronAPI.worktree.remove(id);
+            if (!removed.ok) return removed.error;
+            const projectPath = useSettingsStore
+              .getState()
+              .projects.find((project) => project.id === conversation.projectId)?.path;
+            set((state) => ({
+              conversations: patch(state, id, {
+                worktree: undefined,
+                worktreeMissing: undefined,
+                started: false,
+                spawning: false,
+                status: 'idle',
+                ...(projectPath
+                  ? { pendingWorkspaceNote: workspaceFallbackNote(projectPath) }
+                  : {}),
+              }).conversations,
+              worktreeStatuses: Object.fromEntries(
+                Object.entries(state.worktreeStatuses).filter(([key]) => key !== id)
+              ),
+            }));
+            return null;
+          } finally {
+            set((state) => patch(state, id, { workspaceMigrating: undefined }));
           }
-          const removed = await window.electronAPI.worktree.remove(id);
-          if (!removed.ok) return removed.error;
-          const projectPath = useSettingsStore
-            .getState()
-            .projects.find((project) => project.id === conversation.projectId)?.path;
-          set((state) => ({
-            conversations: patch(state, id, {
-              worktree: undefined,
-              worktreeMissing: undefined,
-              started: false,
-              spawning: false,
-              status: 'idle',
-              ...(projectPath ? { pendingWorkspaceNote: workspaceFallbackNote(projectPath) } : {}),
-            }).conversations,
-            worktreeStatuses: Object.fromEntries(
-              Object.entries(state.worktreeStatuses).filter(([key]) => key !== id)
-            ),
-          }));
-          return null;
         },
 
         async rebuildWorktree(id) {
@@ -1373,7 +1393,15 @@ export const useSessionsStore = create<SessionsState>()(
 
         async resumeConversation(id) {
           const conversation = get().conversations[id];
-          if (!conversation || conversation.started || conversation.spawning) return;
+          if (
+            !conversation ||
+            conversation.started ||
+            conversation.spawning ||
+            // 工作区迁移中：此刻 resume 会用错 cwd 把会话复活（spawning 会被 worker 事件清掉，挡不住）
+            conversation.workspaceMigrating
+          ) {
+            return;
+          }
           if (!conversation.sessionFile) return;
           const settings = useSettingsStore.getState();
           const project = settings.projects.find((p) => p.id === conversation.projectId);
@@ -1764,8 +1792,9 @@ export const useSessionsStore = create<SessionsState>()(
               activeTabId: undefined,
               draftText: undefined,
               prefillAgentTypeKey: undefined,
-              // resume 时重新校验，不持久化陈旧的丢失标记
+              // resume 时重新校验，不持久化陈旧的丢失/迁移标记
               worktreeMissing: undefined,
+              workspaceMigrating: undefined,
             },
           ])
         ),

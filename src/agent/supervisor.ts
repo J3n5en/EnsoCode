@@ -1050,7 +1050,7 @@ export class SessionSupervisor {
     if (isCursorModel(piModel)) attachCursorBridgeToSession(session, customTools, cwd);
     console.log(
       `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
-        ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
+        ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools, cwd ${cwd})`
     );
 
     managedRef = this.registerManagedSession(identity, session, gate, model.modelId, {

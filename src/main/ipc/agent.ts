@@ -31,13 +31,13 @@ import { AgentDispatchService } from '../services/agentDispatchService';
 import {
   abortRetrySession,
   abortSession,
-  releaseParentSession,
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
   dismissChildSession,
   dismissCoworkerSession,
   promptChildSession,
   promptSession,
+  releaseParentSession,
   requestSnapshot,
   resolveAgentTypeSpawnConfig,
   resolveModelSelection,
@@ -55,7 +55,6 @@ import {
   steerSession,
   stopBackgroundTask,
 } from '../services/agentHost';
-import { sessionWorktree } from './worktree';
 import { searchFiles } from '../services/fileSearch';
 import { maybeNotify } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -69,6 +68,7 @@ import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
+import { sessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -441,7 +441,13 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SPAWN, async (event, request: unknown) => {
-    const parsed = parseSpawnRequest(request);
+    const parsedRaw = parseSpawnRequest(request);
+    // 隔离会话的 cwd 以 main 登记的 worktree 为准，无条件覆写：
+    // 渲染层的自动 resume 可能携陈旧 cwd 抢先 spawn（Move to worktree 竞态，CDP 实测），
+    // 在权威侧收口后整类问题消失。
+    const registeredWorktree = parsedRaw ? sessionWorktree(parsedRaw.sessionId) : undefined;
+    const parsed =
+      parsedRaw && registeredWorktree ? { ...parsedRaw, cwd: registeredWorktree.path } : parsedRaw;
     if (!parsed || !persistedRootSpawn(parsed, event.sender.id)) {
       return { ok: false, error: 'invalid spawn request' };
     }
@@ -506,14 +512,17 @@ export function registerAgentHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_RELEASE, (event, sessionId: unknown): AgentActionResult => {
-    // 仅主窗口可释放；释放后 worker 侧会话销毁，jsonl 留盘，可携新 cwd resume
-    if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'not authorized' };
-    const identity = exactIdentity(sessionId);
-    return identity
-      ? releaseParentSession(identity)
-      : { ok: false, error: 'invalid release or stale session generation' };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_RELEASE,
+    async (event, sessionId: unknown): Promise<AgentActionResult> => {
+      // 仅主窗口可释放；等 parent-ended 回流才返回（避免与后续 spawn 竞态）
+      if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'not authorized' };
+      const identity = exactIdentity(sessionId);
+      return identity
+        ? await releaseParentSession(identity)
+        : { ok: false, error: 'invalid release or stale session generation' };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
 

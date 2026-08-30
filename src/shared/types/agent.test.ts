@@ -162,6 +162,12 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('release-parent 可解析（Move to worktree 依赖；漏白名单会被 worker 静默丢弃）', () => {
+    const command = { type: 'release-parent', identity: parent };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ type: 'release-parent' })).toBeNull();
+  });
+
   it('spawn-parent 携 subagentModels:合法通过,坏条目整条拒绝', () => {
     const option = { name: 'openai/gpt', config: model, description: '便宜快,适合简单任务' };
     const command = {

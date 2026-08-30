@@ -1454,6 +1454,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     case 'abort':
     case 'abort-retry':
+    case 'release-parent':
       return hasExactKeys(value, ['type', 'identity']) && parseAnySessionIdentity(value.identity)
         ? (value as unknown as AgentCommand)
         : null;
