@@ -81,7 +81,11 @@ export function resolvePopupKeyAction(input: {
 function chatRefLine(label: string, sessionFile: string): string {
   // 标题可能含 "/[/]/换行（旧版污染残留或用户自定义），嵌入前必须净化，
   // 否则惰性 "(.+?)" 会在内层引号提前结束，破坏解析与标题折叠
-  const safe = label.replace(/["\[\]\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'untitled';
+  const safe =
+    label
+      .replace(/["[\]\n]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || 'untitled';
   return `[Referenced past chat "${safe}" — transcript file: ${sessionFile} (pi session jsonl; read it if relevant)]`;
 }
 const CHAT_REF_LINE =

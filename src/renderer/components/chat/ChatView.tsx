@@ -29,6 +29,8 @@ import { PresetPicker } from './PresetPicker';
 import { RetryBar } from './RetryBar';
 import { StatsLine } from './StatsLine';
 import { TaskBar } from './TaskBar';
+import { WorktreeMissingDialog } from './WorktreeMissingDialog';
+import { WorktreePicker } from './WorktreePicker';
 
 export function ChatView() {
   const { t } = useI18n();
@@ -192,7 +194,8 @@ export function ChatView() {
   useEffect(() => {
     // modelResolution 变化代表默认/provider/OAuth 可用性已变化，需重试先前 fail-closed 的恢复。
     void modelResolution;
-    if (parent && !parent.started && parent.sessionFile) {
+    // worktreeMissing：resume 已发现 worktree 丢失，等用户选重建/回退，不要重试循环
+    if (parent && !parent.started && parent.sessionFile && !parent.worktreeMissing) {
       void useSessionsStore.getState().resumeConversation(parent.id);
     }
   }, [modelResolution, parent]);
@@ -210,6 +213,7 @@ export function ChatView() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      {parent && <WorktreeMissingDialog conversationId={parent.id} />}
       {parent && (
         <CoworkerTabs
           parent={parent}
@@ -219,9 +223,10 @@ export function ChatView() {
               {project && (
                 <span
                   className="truncate font-mono text-xs text-muted-foreground"
-                  title={project.path}
+                  title={parent?.worktree ? parent.worktree.path : project.path}
                 >
                   {project.name}
+                  {parent?.worktree ? ` · ${parent.worktree.branch}` : ''}
                 </span>
               )}
               <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
@@ -334,6 +339,7 @@ export function ChatView() {
                         useSessionsStore.getState().setPreset(conversation.id, presetId)
                       }
                     />
+                    <WorktreePicker conversationId={conversation.id} />
                     <ApprovalModePicker
                       mode={conversation.approvalMode ?? 'full'}
                       onSelect={(mode) =>

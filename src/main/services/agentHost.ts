@@ -105,7 +105,10 @@ export function startAgentWorker(): void {
   });
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
-    if (event) onEvent?.(event);
+    if (event) {
+      resolveReleaseWaiters(event);
+      onEvent?.(event);
+    }
   });
   child.on('exit', () => {
     if (worker === child) {
@@ -463,6 +466,50 @@ export function steerSession(
 
 export function abortSession(identity: SessionIdentity): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'abort', identity });
+}
+
+/** release 等待者：sessionId → resolve。parent-ended/worker-exited 到达时唤醒 */
+const releaseWaiters = new Map<string, (() => void)[]>();
+
+function resolveReleaseWaiters(event: AgentWorkerEvent): void {
+  if (event.type !== 'parent-ended' && event.type !== 'parent-rejected') return;
+  const waiters = releaseWaiters.get(event.identity.sessionId);
+  if (!waiters) return;
+  releaseWaiters.delete(event.identity.sessionId);
+  for (const resolve of waiters) resolve();
+}
+
+/**
+ * 释放父会话（销毁 worker 侧会话树，jsonl 留盘），之后可携新 cwd resume。
+ * 必须等到 parent-ended 回流才返回：否则后续 spawn 会和 release 竞态，
+ * 老会话还在 map 里被同 generation 短路复用，新 cwd 永远不生效（CDP 实测踩到）。
+ */
+export function releaseParentSession(
+  identity: SessionIdentity
+): Promise<{ ok: boolean; error?: string }> {
+  const posted = sendAgentCommand({ type: 'release-parent', identity });
+  if (!posted.ok) return Promise.resolve(posted);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      // 超时兕底：不永久挂起调用方；调用方拿到失败后不会继续建 worktree
+      const waiters = releaseWaiters.get(identity.sessionId);
+      if (waiters) {
+        releaseWaiters.set(
+          identity.sessionId,
+          waiters.filter((w) => w !== done)
+        );
+      }
+      resolve({ ok: false, error: 'release timed out' });
+    }, 8000);
+    const done = () => {
+      clearTimeout(timer);
+      resolve({ ok: true });
+    };
+    releaseWaiters.set(identity.sessionId, [
+      ...(releaseWaiters.get(identity.sessionId) ?? []),
+      done,
+    ]);
+  });
 }
 
 /** 取消自动重试倒计时（立即落终态失败，不中断正在流式输出的轮） */

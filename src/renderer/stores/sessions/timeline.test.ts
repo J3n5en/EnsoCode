@@ -1,11 +1,6 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import {
-  buildTimeline,
-  foldTimeline,
-  terminalErrorText,
-  type TimelineItem,
-} from './timeline';
+import { buildTimeline, foldTimeline, type TimelineItem, terminalErrorText } from './timeline';
 
 const user = (text: string): ProjectedMessage => ({
   role: 'user',

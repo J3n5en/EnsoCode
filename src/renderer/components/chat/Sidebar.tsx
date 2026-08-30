@@ -1,10 +1,14 @@
 import type { Project } from '@shared/types';
+import type { WorktreeStatus } from '@shared/types/worktree';
 import {
   Archive,
   ArchiveRestore,
   ChevronRight,
+  Eraser,
   FolderGit2,
   FolderPlus,
+  GitBranch,
+  GitBranchPlus,
   HardDriveDownload,
   MessageSquarePlus,
   PanelLeft,
@@ -26,6 +30,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -35,6 +40,7 @@ import {
   pinnedConversationIds,
   projectConversationIds,
 } from '@/stores/sessions/pinned';
+import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
@@ -62,6 +68,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const removeConversation = useSessionsStore((state) => state.removeConversation);
   const togglePinConversation = useSessionsStore((state) => state.togglePinConversation);
   const toggleArchiveConversation = useSessionsStore((state) => state.toggleArchiveConversation);
+  const moveConversationToWorktree = useSessionsStore((state) => state.moveConversationToWorktree);
+  const cleanupWorktree = useSessionsStore((state) => state.cleanupWorktree);
+  const refreshWorktreeStatuses = useSessionsStore((state) => state.refreshWorktreeStatuses);
+  const worktreeStatuses = useSessionsStore((state) => state.worktreeStatuses);
 
   // 折叠的项目分组（记忆到 localStorage）
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
@@ -90,9 +100,19 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   // 待确认的删除动作(项目连带其对话 / 单个对话)
   const [pendingRemove, setPendingRemove] = useState<
     | { kind: 'project'; project: Project; conversationIds: string[] }
-    | { kind: 'conversation'; id: string }
+    | { kind: 'conversation'; id: string; worktreeWarning?: string }
     | null
   >(null);
+  // 删除隔离会话前先查 worktree 有无未落地成果，确认文案里告知
+  const openRemoveConversation = async (id: string) => {
+    const conversation = conversations[id];
+    let worktreeWarning: string | undefined;
+    if (conversation?.worktree) {
+      const status = await freshWorktreeStatus(id);
+      if (worktreeHasPendingWork(status)) worktreeWarning = worktreeWarningText(status);
+    }
+    setPendingRemove({ kind: 'conversation', id, worktreeWarning });
+  };
   // 展开显示全部会话的项目(会话级状态,重启回到折叠)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
@@ -107,6 +127,82 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     const timer = setInterval(() => setNowTick(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  // worktree 徽标状态：挂载 + 窗口聚焦 + 30s 轻量轮询（只查隔离会话，不每帧跑 git）
+  useEffect(() => {
+    void refreshWorktreeStatuses();
+    const timer = setInterval(() => void refreshWorktreeStatuses(), 30_000);
+    const onFocus = () => void refreshWorktreeStatuses();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [refreshWorktreeStatuses]);
+
+  // 隔离会话有未落地成果时的清理/归档拦截确认
+  const [pendingWorktreeAction, setPendingWorktreeAction] = useState<{
+    kind: 'cleanup' | 'archive';
+    id: string;
+    status?: WorktreeStatus;
+  } | null>(null);
+
+  const freshWorktreeStatus = async (id: string): Promise<WorktreeStatus | undefined> => {
+    const result = await window.electronAPI.worktree.status(id);
+    return result.ok ? result.value : undefined;
+  };
+
+  const runCleanup = async (id: string, archiveAfter: boolean) => {
+    const error = await cleanupWorktree(id);
+    if (error) {
+      addToast({ type: 'error', title: t('Failed to clean up worktree'), description: error });
+      return;
+    }
+    if (archiveAfter) toggleArchiveConversation(id);
+    void refreshWorktreeStatuses();
+  };
+
+  const handleCleanupWorktree = async (id: string) => {
+    const status = await freshWorktreeStatus(id);
+    if (worktreeHasPendingWork(status)) {
+      setPendingWorktreeAction({ kind: 'cleanup', id, status });
+      return;
+    }
+    await runCleanup(id, false);
+  };
+
+  const handleToggleArchive = async (id: string) => {
+    const conversation = conversations[id];
+    if (!conversation) return;
+    // 只有「归档隔离会话」需要拦截；取消归档/本地会话直接走
+    if (conversation.archived || !conversation.worktree) {
+      toggleArchiveConversation(id);
+      return;
+    }
+    const status = await freshWorktreeStatus(id);
+    if (worktreeHasPendingWork(status)) {
+      setPendingWorktreeAction({ kind: 'archive', id, status });
+      return;
+    }
+    await runCleanup(id, true);
+  };
+
+  const handleMoveToWorktree = async (id: string) => {
+    const error = await moveConversationToWorktree(id);
+    if (error) {
+      addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
+      return;
+    }
+    void refreshWorktreeStatuses();
+  };
+
+  const worktreeWarningText = (status?: WorktreeStatus): string => {
+    const parts: string[] = [];
+    if (status?.dirty) parts.push(t('uncommitted changes will be lost'));
+    if (status && status.ahead > 0)
+      parts.push(t('{{n}} unmerged commits (branch is kept)', { n: status.ahead }));
+    return parts.join('; ');
+  };
 
   if (collapsed) {
     return (
@@ -183,12 +279,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   locale={locale}
                   nowTick={nowTick}
                   hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                  worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                  isolated={Boolean(conversations[id].worktree)}
                   onSelect={selectConversation}
                   onTogglePin={togglePinConversation}
-                  onToggleArchive={toggleArchiveConversation}
-                  onRemove={(conversationId) =>
-                    setPendingRemove({ kind: 'conversation', id: conversationId })
-                  }
+                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
+                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                 />
               ))}
             </div>
@@ -264,12 +362,18 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                       active={activeId === id}
                       locale={locale}
                       nowTick={nowTick}
+                      worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                      isolated={Boolean(conversations[id].worktree)}
                       onSelect={selectConversation}
                       onTogglePin={togglePinConversation}
-                      onToggleArchive={toggleArchiveConversation}
-                      onRemove={(conversationId) =>
-                        setPendingRemove({ kind: 'conversation', id: conversationId })
+                      onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                      onCleanupWorktree={(conversationId) =>
+                        void handleCleanupWorktree(conversationId)
                       }
+                      onMoveToWorktree={(conversationId) =>
+                        void handleMoveToWorktree(conversationId)
+                      }
+                      onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                     />
                   ))}
                   {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
@@ -316,12 +420,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   locale={locale}
                   nowTick={nowTick}
                   subtitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                  worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                  isolated={Boolean(conversations[id].worktree)}
                   onSelect={selectConversation}
                   onTogglePin={togglePinConversation}
-                  onToggleArchive={toggleArchiveConversation}
-                  onRemove={(conversationId) =>
-                    setPendingRemove({ kind: 'conversation', id: conversationId })
-                  }
+                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
+                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                 />
               ))}
             </div>
@@ -370,6 +476,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAddProject} />
       <ImportSessionDialog project={importProject} onClose={() => setImportProject(null)} />
       <ConfirmDialog
+        open={pendingWorktreeAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingWorktreeAction(null);
+        }}
+        title={
+          pendingWorktreeAction?.kind === 'archive'
+            ? t('Archive session and clean up worktree?')
+            : t('Clean up worktree?')
+        }
+        description={t(
+          'The isolated worktree has unfinished work: {{warning}}. The session falls back to the main working tree.',
+          { warning: worktreeWarningText(pendingWorktreeAction?.status) }
+        )}
+        confirmLabel={pendingWorktreeAction?.kind === 'archive' ? t('Archive') : t('Clean up')}
+        onConfirm={() => {
+          if (!pendingWorktreeAction) return;
+          void runCleanup(pendingWorktreeAction.id, pendingWorktreeAction.kind === 'archive');
+        }}
+      />
+      <ConfirmDialog
         open={pendingRemove !== null}
         onOpenChange={(open) => {
           if (!open) setPendingRemove(null);
@@ -381,7 +507,11 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 name: pendingRemove.project.name,
                 count: pendingRemove.conversationIds.length,
               })
-            : t('This conversation will be removed from the list.')
+            : pendingRemove?.kind === 'conversation' && pendingRemove.worktreeWarning
+              ? t('This conversation and its isolated worktree will be removed: {{warning}}.', {
+                  warning: pendingRemove.worktreeWarning,
+                })
+              : t('This conversation will be removed from the list.')
         }
         confirmLabel={t('Remove')}
         onConfirm={() => {
@@ -416,9 +546,15 @@ interface ConversationRowProps {
   hoverTitle?: string;
   /** 已归档栏目里内联展示的项目名 */
   subtitle?: string;
+  /** 隔离会话（有 worktree 绑定） */
+  isolated?: boolean;
+  /** 隔离会话的 worktree 状态（徽标：未提交/未合并） */
+  worktreeStatus?: WorktreeStatus;
   onSelect: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleArchive: (id: string) => void;
+  onCleanupWorktree?: (id: string) => void;
+  onMoveToWorktree?: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
@@ -435,9 +571,13 @@ function ConversationRow({
   nowTick,
   hoverTitle,
   subtitle,
+  isolated,
+  worktreeStatus,
   onSelect,
   onTogglePin,
   onToggleArchive,
+  onCleanupWorktree,
+  onMoveToWorktree,
   onRemove,
 }: ConversationRowProps) {
   const { t } = useI18n();
@@ -461,6 +601,7 @@ function ConversationRow({
       title={hoverTitle}
     >
       <ConversationDot conversation={conversation} />
+      {isolated && <WorktreeBadge status={worktreeStatus} />}
       <span className="min-w-0 flex-1 truncate">
         {conversation.title || t('New conversation')}
         {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
@@ -529,6 +670,20 @@ function ConversationRow({
           {archived ? <ArchiveRestore /> : <Archive />}
           {archived ? t('Unarchive') : t('Archive')}
         </ContextMenuItem>
+        {!archived &&
+          (isolated
+            ? onCleanupWorktree && (
+                <ContextMenuItem onClick={() => onCleanupWorktree(id)}>
+                  <Eraser />
+                  {t('Clean up worktree')}
+                </ContextMenuItem>
+              )
+            : onMoveToWorktree && (
+                <ContextMenuItem onClick={() => onMoveToWorktree(id)}>
+                  <GitBranchPlus />
+                  {t('Move to worktree')}
+                </ContextMenuItem>
+              ))}
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onClick={() => onRemove(id)}>
           <Trash2 />
@@ -536,6 +691,28 @@ function ConversationRow({
         </ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
+  );
+}
+
+/** 隔离会话徽标：分支图标，未提交改动琥珀色、未合并蓝色、干净灰色 */
+function WorktreeBadge({ status }: { status?: WorktreeStatus }) {
+  const { t } = useI18n();
+  const dirty = status?.dirty === true;
+  const unmerged = !dirty && (status?.ahead ?? 0) > 0;
+  const title = dirty
+    ? t('Isolated worktree · uncommitted changes')
+    : unmerged
+      ? t('Isolated worktree · {{n}} unmerged commits', { n: status?.ahead ?? 0 })
+      : t('Isolated worktree');
+  return (
+    <span title={title} className="flex shrink-0 items-center">
+      <GitBranch
+        className={cn(
+          'h-3 w-3',
+          dirty ? 'text-amber-500' : unmerged ? 'text-blue-500' : 'text-muted-foreground/60'
+        )}
+      />
+    </span>
   );
 }
 

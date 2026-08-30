@@ -84,8 +84,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
   }, [server]);
 
   const canSave =
-    Boolean(name.trim()) &&
-    (transport === 'stdio' ? Boolean(command.trim()) : Boolean(url.trim()));
+    Boolean(name.trim()) && (transport === 'stdio' ? Boolean(command.trim()) : Boolean(url.trim()));
 
   const handleSave = () => {
     if (!server || !canSave) return;

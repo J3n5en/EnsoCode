@@ -648,6 +648,46 @@ export class SessionSupervisor {
         await managed.session.abort();
         return;
       }
+      case 'release-parent': {
+        // 释放父会话：中断 + 销毁 worker 侧会话树，jsonl 留盘。下游靠 parent-ended
+        // 把 started 清回 false，之后可携新 cwd + resumeFile 重新 spawn（Move to worktree）。
+        const managed = this.must(command.identity);
+        const parentId = command.identity.sessionId;
+        // 先收掉整棵子会话（coworker/child 都以 `${parentId}::` 为键前缀）
+        for (const [id, child] of [...this.sessions]) {
+          if (!id.startsWith(`${parentId}::`)) continue;
+          child.gate.cancelAll();
+          child.asks.cancelAll();
+          child.ensoApp?.cancelAll('Parent released');
+          try {
+            await child.session.abort();
+          } catch {}
+          child.unsubscribe();
+          try {
+            child.session.dispose();
+          } catch {}
+          this.sessions.delete(id);
+        }
+        managed.coworkers.clear();
+        managed.gate.cancelAll();
+        managed.asks.cancelAll();
+        managed.ensoApp?.cancelAll('Session released');
+        try {
+          await managed.session.abort();
+        } catch {}
+        managed.unsubscribe();
+        try {
+          managed.session.dispose();
+        } catch {}
+        this.sessions.delete(parentId);
+        this.options.emit({
+          type: 'parent-ended',
+          identity: managed.identity,
+          seq: managed.seq + 1,
+          reason: 'released',
+        });
+        return;
+      }
     }
   }
 
@@ -1010,7 +1050,7 @@ export class SessionSupervisor {
     if (isCursorModel(piModel)) attachCursorBridgeToSession(session, customTools, cwd);
     console.log(
       `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
-        ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools)`
+        ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools, cwd ${cwd})`
     );
 
     managedRef = this.registerManagedSession(identity, session, gate, model.modelId, {
@@ -1629,10 +1669,7 @@ export class SessionSupervisor {
         // 重试被取消（abortRetry）时没有后续 agent_end，在这里收口；
         // 重试耗尽则已由 agent_end(willRetry=false) 走 failTurn，status 守卫避免重复
         if (event.success || managed.status !== 'running') return;
-        this.failTurn(
-          managed,
-          managed.lastRetryError ?? event.finalError ?? 'Auto-retry failed.'
-        );
+        this.failTurn(managed, managed.lastRetryError ?? event.finalError ?? 'Auto-retry failed.');
         return;
       }
       case 'tool_execution_start':

@@ -68,6 +68,15 @@ export const IPC_CHANNELS = {
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_HIRE_COWORKER: 'agent:hire-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',
+  AGENT_RELEASE: 'agent:release',
+
+  WORKTREE_CREATE: 'worktree:create',
+  WORKTREE_GET: 'worktree:get',
+  WORKTREE_LIST: 'worktree:list',
+  WORKTREE_STATUS: 'worktree:status',
+  WORKTREE_REMOVE: 'worktree:remove',
+  WORKTREE_REBUILD: 'worktree:rebuild',
+  WORKTREE_REPO_CLEAN: 'worktree:repo-clean',
 
   // Agent type registry + sender-bound deterministic child dispatch
   AGENT_TYPES_REGISTRY_LIST: 'agent-types:registry-list',

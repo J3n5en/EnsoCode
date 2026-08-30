@@ -37,6 +37,7 @@ import {
   dismissCoworkerSession,
   promptChildSession,
   promptSession,
+  releaseParentSession,
   requestSnapshot,
   resolveAgentTypeSpawnConfig,
   resolveModelSelection,
@@ -67,6 +68,7 @@ import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
+import { sessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -119,12 +121,16 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   if (!isMainWebContents(ownerWebContentsId) || request.sessionId.includes('::cw-')) return false;
   const conversation = sourceAuthority?.conversation(request.sessionId);
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-  return (
-    conversation?.kind === 'root' &&
-    conversation.lifecycle !== 'ended' &&
-    project?.state === 'active' &&
-    project.canonicalPath === request.cwd
-  );
+  if (
+    conversation?.kind !== 'root' ||
+    conversation.lifecycle === 'ended' ||
+    project?.state !== 'active'
+  ) {
+    return false;
+  }
+  // cwd 授权：项目主工作树，或该会话在 main 登记过的隔离 worktree（不信任其它路径）
+  if (project.canonicalPath === request.cwd) return true;
+  return sessionWorktree(request.sessionId)?.path === request.cwd;
 }
 
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
@@ -435,7 +441,13 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SPAWN, async (event, request: unknown) => {
-    const parsed = parseSpawnRequest(request);
+    const parsedRaw = parseSpawnRequest(request);
+    // 隔离会话的 cwd 以 main 登记的 worktree 为准，无条件覆写：
+    // 渲染层的自动 resume 可能携陈旧 cwd 抢先 spawn（Move to worktree 竞态，CDP 实测），
+    // 在权威侧收口后整类问题消失。
+    const registeredWorktree = parsedRaw ? sessionWorktree(parsedRaw.sessionId) : undefined;
+    const parsed =
+      parsedRaw && registeredWorktree ? { ...parsedRaw, cwd: registeredWorktree.path } : parsedRaw;
     if (!parsed || !persistedRootSpawn(parsed, event.sender.id)) {
       return { ok: false, error: 'invalid spawn request' };
     }
@@ -497,6 +509,18 @@ export function registerAgentHandlers(): void {
       return identity
         ? abortRetrySession(identity)
         : { ok: false, error: 'invalid abort-retry or stale session generation' };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_RELEASE,
+    async (event, sessionId: unknown): Promise<AgentActionResult> => {
+      // 仅主窗口可释放；等 parent-ended 回流才返回（避免与后续 spawn 竞态）
+      if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'not authorized' };
+      const identity = exactIdentity(sessionId);
+      return identity
+        ? await releaseParentSession(identity)
+        : { ok: false, error: 'invalid release or stale session generation' };
     }
   );
 
