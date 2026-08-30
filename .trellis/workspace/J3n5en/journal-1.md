@@ -185,3 +185,30 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed** — typecheck/802 tests/biome 全绿，relay 部署版本 fcc28f80
+
+
+## Session 6: dnd-kit 拖拽:项目排序 / 拖拽转 mention / 拖会话置顶 / Pinned 组内手动排序
+
+**Date**: 2026-08-30
+**Task**: dnd-kit 拖拽:项目排序 / 拖拽转 mention / 拖会话置顶 / Pinned 组内手动排序
+**Branch**: `feat/dnd-kit-drag`
+
+### Summary
+
+侧栏引入 @dnd-kit(PR #36):项目行拖拽排序(localStorage 持久化)、会话/项目拖入 Composer 转 @过去会话/@文件 chip(项目用根绝对路径)、拖会话到 Pinned 区置顶、Pinned 组内手动拖排(与活跃时间自动排序分域共存)。routeDrop/applyProjectOrder/pinnedConversationIds 纯函数 TDD 共 28 例;修 dnd-kit 重复 id 隐患与 pointerWithin 碰撞策略。CDP 真机验证全部交互;沉淀 enso-cdp skill drag 命令与 big-question(窗口 hidden 丢弃 CDP 鼠标按键事件)。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0df3fb6` | (see git log) |
+| `2a106f3` | (see git log) |
+| `1c59c9d` | (see git log) |
+| `5f26e5e` | (see git log) |
+| `9318826` | (see git log) |
+| `2392450` | (see git log) |
+| `12e11ff` | (see git log) |
+
+### Status
+
+[OK] **Completed**
