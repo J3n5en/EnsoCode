@@ -52,6 +52,8 @@ export interface SessionProjection {
   runStartedAt?: number;
   /** 最近一次权威 message-upsert 落地时间：运行中计时显示「距上次返回」，随 running 结束清空 */
   lastOutputAt?: number;
+  /** 自动重试中（非终态）：turn-retry 设置，下一个 status/turn-* 事件清除 */
+  retry?: { attempt: number; maxAttempts: number; delayMs: number; error: string; at: number };
 }
 
 export const emptyProjection: SessionProjection = {
@@ -204,9 +206,22 @@ export function applyAgentEvent(
         ...base,
         status: event.status,
         error: event.error,
+        retry: undefined,
         lastSeq: event.seq,
       };
     }
+    case 'turn-retry':
+      return {
+        ...current,
+        retry: {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          error: event.error,
+          at: now,
+        },
+        lastSeq: event.seq,
+      };
     case 'message-upsert': {
       // 乐观回显是未确认的本地尾巴：权威 upsert 只写权威区，尾巴永远浮在后面。
       // running 中 steer 的回显若按裸 index 覆盖，会被当前轮的 assistant 消息
@@ -302,7 +317,7 @@ export function applyAgentEvent(
         lastSeq: event.seq,
       };
     case 'turn-completed':
-      return { ...settleTiming(current, now), lastSeq: event.seq };
+      return { ...settleTiming(current, now), retry: undefined, lastSeq: event.seq };
     case 'messages-truncated':
       return { ...current, messages: current.messages.slice(0, event.length), lastSeq: event.seq };
     case 'commands':
@@ -312,6 +327,7 @@ export function applyAgentEvent(
         ...settleTiming(current, now),
         status: 'failed',
         error: event.error,
+        retry: undefined,
         lastSeq: event.seq,
       };
     case 'session-custom-entry':

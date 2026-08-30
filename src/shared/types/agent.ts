@@ -441,6 +441,7 @@ export type AgentCommand =
       restoreFiles?: boolean;
     }
   | { type: 'abort'; identity: SessionIdentity }
+  | { type: 'abort-retry'; identity: SessionIdentity }
   | {
       type: 'append-session-custom-entry';
       identity: SessionIdentity;
@@ -642,6 +643,16 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       seq: number;
       turnId: string;
+      error: string;
+    }
+  | {
+      /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
+      type: 'turn-retry';
+      identity: SessionIdentity;
+      seq: number;
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
       error: string;
     }
   | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
@@ -1439,6 +1450,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'abort':
+    case 'abort-retry':
       return hasExactKeys(value, ['type', 'identity']) && parseAnySessionIdentity(value.identity)
         ? (value as unknown as AgentCommand)
         : null;
@@ -1548,6 +1560,15 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.turnId) ? (value as unknown as AgentWorkerEvent) : null;
     case 'turn-failed':
       return isNonEmptyString(value.turnId) && isNonEmptyString(value.error)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'turn-retry':
+      return Number.isInteger(value.attempt) &&
+        (value.attempt as number) >= 1 &&
+        Number.isInteger(value.maxAttempts) &&
+        (value.maxAttempts as number) >= 1 &&
+        isSequence(value.delayMs) &&
+        isNonEmptyString(value.error)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'messages-truncated':

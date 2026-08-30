@@ -363,6 +363,32 @@ describe('generation lifecycle/events', () => {
     ).toBeNull();
   });
 
+  it('turn-retry 事件携重试元信息，缺字段或类型不符拒绝', () => {
+    const retry = {
+      type: 'turn-retry',
+      identity: child,
+      seq: 3,
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 4000,
+      error: '503 status code (no body)',
+    };
+    expect(parseAgentWorkerEvent(retry)).toEqual(retry);
+    expect(parseAgentWorkerEvent({ ...retry, attempt: 0 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...retry, maxAttempts: '3' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...retry, delayMs: -1 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...retry, error: '' })).toBeNull();
+    const { error: _dropped, ...withoutError } = retry;
+    expect(parseAgentWorkerEvent(withoutError)).toBeNull();
+  });
+
+  it('abort-retry 命令只携 identity，多余字段拒绝', () => {
+    const command = { type: 'abort-retry', identity: parent };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, extra: true })).toBeNull();
+    expect(parseAgentCommand({ type: 'abort-retry' })).toBeNull();
+  });
+
   it('turn/capability 事件必须 exact identity generation + turnId', () => {
     expect(
       parseAgentWorkerEvent({

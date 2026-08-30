@@ -332,6 +332,56 @@ describe('applyAgentEvent', () => {
     expect(failed).toMatchObject({ status: 'failed', error: 'boom', activeMs: 3500 });
   });
 
+  it('turn-retry records retry info while status stays running', () => {
+    const running = applyAgentEvent(base, 's1', status(1, 'running'), 1000);
+    const retrying = applyAgentEvent(
+      running,
+      's1',
+      {
+        type: 'turn-retry',
+        identity: identity(),
+        seq: 2,
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 4000,
+        error: '503 status code (no body)',
+      },
+      2000
+    );
+    expect(retrying.status).toBe('running');
+    expect(retrying.retry).toEqual({
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 4000,
+      error: '503 status code (no body)',
+      at: 2000,
+    });
+    // 重试真正开跑后 agent_start 会再发 status running，横幅应消失
+    const resumed = applyAgentEvent(retrying, 's1', status(3, 'running'), 6000);
+    expect(resumed.retry).toBeUndefined();
+  });
+
+  it('turn-failed clears retry info', () => {
+    const retrying = applyAgentEvent(base, 's1', {
+      type: 'turn-retry',
+      identity: identity(),
+      seq: 1,
+      attempt: 3,
+      maxAttempts: 3,
+      delayMs: 4000,
+      error: 'boom',
+    });
+    const failed = applyAgentEvent(retrying, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(failed.retry).toBeUndefined();
+    expect(failed.status).toBe('failed');
+  });
+
   it('worker-exited has no seq threshold and fails the live projection', () => {
     const next = applyAgentEvent(base, 's1', { type: 'worker-exited' });
     expect(next.status).toBe('failed');
