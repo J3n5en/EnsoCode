@@ -1,6 +1,6 @@
 import type { BackgroundTaskInfo, SubagentInfo } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { applyTaskEvent, type TaskState } from './taskProjection';
+import { applyRetryEvent, applyTaskEvent, type TaskState } from './taskProjection';
 
 const task = (over: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo => ({
   taskId: 't1',
@@ -81,5 +81,45 @@ describe('applyTaskEvent', () => {
   it('脏输入不崩：缺 task/agent 字段的事件按无关处理', () => {
     expect(applyTaskEvent(empty, { type: 'task-started' })).toBeNull();
     expect(applyTaskEvent(empty, { type: 'subagent-update', agent: null })).toBeNull();
+  });
+});
+
+describe('applyRetryEvent', () => {
+  const retryEvent = {
+    type: 'turn-retry',
+    attempt: 1,
+    maxAttempts: 3,
+    delayMs: 4000,
+    error: '503 status code (no body)',
+  };
+
+  it('turn-retry 设置 retry（at 用注入的 now）', () => {
+    expect(applyRetryEvent(undefined, retryEvent, 2000)).toEqual({
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 4000,
+      error: '503 status code (no body)',
+      at: 2000,
+    });
+  });
+
+  it('status / turn-completed / turn-failed 清除 retry，与桌面 reducer 同规则', () => {
+    const current = applyRetryEvent(undefined, retryEvent, 2000);
+    for (const type of ['status', 'turn-completed', 'turn-failed']) {
+      expect(applyRetryEvent(current, { type }, 3000)).toBeUndefined();
+    }
+  });
+
+  it('无关事件保持现状', () => {
+    const current = applyRetryEvent(undefined, retryEvent, 2000);
+    expect(applyRetryEvent(current, { type: 'message-upsert' }, 3000)).toBe(current);
+    expect(applyRetryEvent(undefined, { type: 'message-upsert' }, 3000)).toBeUndefined();
+  });
+
+  it('脏输入不崩：字段缺失或类型不符时不设置', () => {
+    expect(applyRetryEvent(undefined, { type: 'turn-retry' }, 1000)).toBeUndefined();
+    expect(
+      applyRetryEvent(undefined, { ...retryEvent, attempt: 'x' as unknown as number }, 1000)
+    ).toBeUndefined();
   });
 });

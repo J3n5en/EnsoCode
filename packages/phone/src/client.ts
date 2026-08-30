@@ -23,7 +23,7 @@ import type {
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
 import { setTerminalAppearance } from './stubs/settings-store';
-import { applyTaskEvent } from './taskProjection';
+import { applyRetryEvent, applyTaskEvent, type RetryInfo } from './taskProjection';
 import { setHostTheme } from './theme';
 
 /**
@@ -42,6 +42,8 @@ export interface SessionView {
   /** 后台任务 / subagent 状态（TaskBar 胶囊用，与桌面同源事件投影） */
   tasks: BackgroundTaskInfo[];
   subagents: SubagentInfo[];
+  /** 自动重试中（非终态）：与桌面 SessionProjection.retry 同规则 */
+  retry?: RetryInfo;
 }
 
 export interface ClientEvents {
@@ -279,6 +281,9 @@ export class PairClient {
       tasks: [],
       subagents: [],
     };
+
+    // 自动重试横幅：turn-retry 设置，status/turn-* 清除（与桌面 reducer 同规则）
+    view.retry = applyRetryEvent(view.retry, event);
 
     // 后台任务 / subagent 事件：纯函数投影，命中则直接推视图
     const taskNext = applyTaskEvent({ tasks: view.tasks, subagents: view.subagents }, event);

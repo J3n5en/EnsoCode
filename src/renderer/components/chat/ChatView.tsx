@@ -246,7 +246,10 @@ export function ChatView() {
       <div className="@container pt-1">
         <div className={CHAT_COL}>
           {conversation.retry && (
-            <RetryBar conversationId={conversation.id} retry={conversation.retry} />
+            <RetryBar
+              retry={conversation.retry}
+              onCancel={() => void window.electronAPI.agent.abortRetry(conversation.id)}
+            />
           )}
           <TaskBar
             key={conversation.id}

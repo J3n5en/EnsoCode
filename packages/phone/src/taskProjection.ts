@@ -11,6 +11,47 @@ export interface TaskState {
   subagents: SubagentInfo[];
 }
 
+/** 自动重试中的非终态投影（与桌面 SessionProjection.retry 同形） */
+export interface RetryInfo {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error: string;
+  at: number;
+}
+
+/**
+ * turn-retry 设置、status/turn-completed/turn-failed 清除（与桌面 sessions/reducer 同规则）；
+ * 无关事件保持现状。纯函数，now 可注入。
+ */
+export function applyRetryEvent(
+  current: RetryInfo | undefined,
+  event: Record<string, unknown>,
+  now: number = Date.now()
+): RetryInfo | undefined {
+  switch (event.type) {
+    case 'turn-retry': {
+      const { attempt, maxAttempts, delayMs, error } = event;
+      if (
+        typeof attempt !== 'number' ||
+        typeof maxAttempts !== 'number' ||
+        typeof delayMs !== 'number' ||
+        typeof error !== 'string' ||
+        error.length === 0
+      ) {
+        return current;
+      }
+      return { attempt, maxAttempts, delayMs, error, at: now };
+    }
+    case 'status':
+    case 'turn-completed':
+    case 'turn-failed':
+      return undefined;
+    default:
+      return current;
+  }
+}
+
 /** 返回 null 表示事件与任务投影无关（或字段缺失），调用方跳过更新 */
 export function applyTaskEvent(state: TaskState, event: Record<string, unknown>): TaskState | null {
   switch (event.type) {

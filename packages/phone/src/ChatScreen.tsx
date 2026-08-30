@@ -10,6 +10,7 @@ import {
   MessageTimeline,
   type MessageTimelineHandle,
 } from '@/components/chat/MessageTimeline';
+import { RetryBar } from '@/components/chat/RetryBar';
 import { TaskBar } from '@/components/chat/TaskBar';
 import { cn } from '@/lib/utils';
 import { buildTimeline } from '@/stores/sessions/timeline';
@@ -205,6 +206,8 @@ export function ChatScreen(props: Props) {
         // home indicator 的实际高度，不再叠加，避免下方留出多余空白
         <div className="@container shrink-0 pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className={CHAT_COL}>
+            {/* 自动重试横幅：只展示不可取消（pair 桥无 abort-retry 通道，整轮 abort 已够用） */}
+            {view?.retry && <RetryBar retry={view.retry} />}
             {/* 后台任务 / subagent 胶囊：复用桌面组件，停止按钮经 stub 降级为无操作 */}
             <TaskBar
               sessionId={sessionId}

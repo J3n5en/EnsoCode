@@ -12,9 +12,10 @@ export interface RetryInfo {
 
 /**
  * 自动重试状态条（非终态）：瞬态错误后 pi 正在退避重试。
- * 显示 (n/m) 与倒计时，可取消（取消 = 立即落终态失败，由用户接管）。
+ * 显示 (n/m) 与倒计时；onCancel 可选（取消 = 立即落终态失败，由用户接管；
+ * 手机第二屏无 abort-retry 通道，不传则不渲染按钮）。
  */
-export function RetryBar({ conversationId, retry }: { conversationId: string; retry: RetryInfo }) {
+export function RetryBar({ retry, onCancel }: { retry: RetryInfo; onCancel?: () => void }) {
   const { t } = useI18n();
   const [now, setNow] = useState(() => Date.now());
 
@@ -42,14 +43,16 @@ export function RetryBar({ conversationId, retry }: { conversationId: string; re
           {retry.error}
         </span>
       </span>
-      <button
-        type="button"
-        title={t('Cancel auto-retry')}
-        onClick={() => void window.electronAPI.agent.abortRetry(conversationId)}
-        className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      {onCancel && (
+        <button
+          type="button"
+          title={t('Cancel auto-retry')}
+          onClick={onCancel}
+          className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
