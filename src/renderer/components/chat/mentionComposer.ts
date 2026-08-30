@@ -24,6 +24,28 @@ export function extractMentionQuery(text: string, cursor: number): string | null
   return null;
 }
 
+export interface MentionPopupLayoutInput {
+  /** @ token / 光标相对定位父级的 left */
+  anchorLeft: number;
+  containerWidth: number;
+  popupWidth: number;
+  flyoutWidth: number;
+  flyoutGap: number;
+}
+
+export interface MentionPopupLayout {
+  left: number;
+  flyoutSide: 'left' | 'right';
+}
+
+/** 弹窗跟锚点，夹进容器；右侧放不下 flyout 时翻到左边 */
+export function mentionPopupLayout(input: MentionPopupLayoutInput): MentionPopupLayout {
+  const maxLeft = Math.max(0, input.containerWidth - input.popupWidth);
+  const left = Math.min(Math.max(0, input.anchorLeft), maxLeft);
+  const spaceRight = input.containerWidth - left - input.popupWidth - input.flyoutGap;
+  return { left, flyoutSide: spaceRight >= input.flyoutWidth ? 'right' : 'left' };
+}
+
 export type PopupKeyAction =
   | { type: 'none' }
   | { type: 'move'; index: number }

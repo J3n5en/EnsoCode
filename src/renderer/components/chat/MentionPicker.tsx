@@ -19,6 +19,8 @@ interface MentionPickerProps {
   onFolderIndexChange: (index: number) => void;
   onSelect: (candidate: MentionCandidate) => void;
   id?: string;
+  left?: number;
+  flyoutSide?: 'left' | 'right';
 }
 
 export function MentionPicker({
@@ -32,6 +34,8 @@ export function MentionPicker({
   onFolderIndexChange,
   onSelect,
   id = 'composer-mention-picker',
+  left = 0,
+  flyoutSide = 'right',
 }: MentionPickerProps) {
   const { t } = useI18n();
   const items = useMemo(() => flattenMentionRoot(groups, query), [groups, query]);
@@ -93,12 +97,16 @@ export function MentionPicker({
   };
 
   return (
-    <div className="absolute bottom-full left-0 z-10 mb-1.5">
+    <div
+      data-slot="mention-picker"
+      className="absolute bottom-full z-10 mb-1.5 max-w-full"
+      style={{ left }}
+    >
       <div
         id={id}
         role="listbox"
         aria-label={t('Mention suggestions')}
-        className="max-h-72 w-80 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+        className="max-h-72 w-80 max-w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
       >
         {nested ? (
           <>
@@ -157,7 +165,11 @@ export function MentionPicker({
         <div
           role="listbox"
           aria-label={folderLabels[openFolderId]}
-          className="absolute top-0 left-full z-20 ml-1 max-h-72 w-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+          data-slot="mention-flyout"
+          className={cn(
+            'absolute top-0 z-20 max-h-72 w-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md',
+            flyoutSide === 'right' ? 'left-full ml-1' : 'right-full mr-1'
+          )}
         >
           {folderItems.map((candidate, index) => (
             <MentionOption

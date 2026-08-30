@@ -32,6 +32,8 @@ export interface MentionEditorHandle {
   consumeToken(prefix: '@' | '/'): void;
   /** 在光标处插入文件卡片(拖拽文件用,无 token 语义) */
   insertFileChip(path: string): void;
+  /** 活动 @ token 首字符的视口矩形，给 mention 弹窗锚点用 */
+  getMentionAnchorRect(): DOMRect | null;
 }
 
 interface MentionEditorProps {
@@ -357,6 +359,14 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         },
         insertFileChip: (path) => {
           insertNodeAtCaret(() => buildChip({ type: 'file', path }), false);
+        },
+        getMentionAnchorRect: () => {
+          const token = activeTokenRange('@');
+          if (!token) return null;
+          const range = document.createRange();
+          range.setStart(token.node, token.start);
+          range.setEnd(token.node, Math.min(token.start + 1, token.node.length));
+          return range.getBoundingClientRect();
         },
       }),
       [activeTokenRange, emitState, insertNodeAtCaret]

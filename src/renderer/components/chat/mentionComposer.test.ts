@@ -12,6 +12,7 @@ import {
   createEditorPayload,
   extractMentionQuery,
   mentionDisplayText,
+  mentionPopupLayout,
   resolvePopupKeyAction,
   serializeSegments,
   splitInlineFileTokens,
@@ -508,5 +509,83 @@ describe('typed multi-entity mentions', () => {
         images: [],
       }).text
     ).toBe('/plan go');
+  });
+});
+
+describe('mentionPopupLayout', () => {
+  const popupWidth = 280;
+  const flyoutWidth = 252;
+  const flyoutGap = 4;
+
+  it('锚在 caret 左侧，左边有空间时不偏移', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: 48,
+        containerWidth: 640,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).left
+    ).toBe(48);
+  });
+
+  it('caret 靠右会溢出时把弹窗夹进容器右缘', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: 500,
+        containerWidth: 640,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).left
+    ).toBe(360);
+  });
+
+  it('caret 在容器外或为负时不小于 0', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: -20,
+        containerWidth: 640,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).left
+    ).toBe(0);
+  });
+
+  it('弹窗比容器还宽时仍贴左，避免负 left', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: 80,
+        containerWidth: 200,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).left
+    ).toBe(0);
+  });
+
+  it('夹紧后右侧仍放得下 flyout 时向右展开', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: 40,
+        containerWidth: 640,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).flyoutSide
+    ).toBe('right');
+  });
+
+  it('贴右后右侧不够放 flyout 时翻到左边', () => {
+    expect(
+      mentionPopupLayout({
+        anchorLeft: 500,
+        containerWidth: 640,
+        popupWidth,
+        flyoutWidth,
+        flyoutGap,
+      }).flyoutSide
+    ).toBe('left');
   });
 });

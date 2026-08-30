@@ -6,7 +6,7 @@ import type {
   MentionCandidate,
 } from '@shared/types/mentions';
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
@@ -17,7 +17,7 @@ import { MentionChip } from './MentionChip';
 import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
 import { MentionPicker } from './MentionPicker';
 import type { ComposerPayload, MentionSegment } from './mentionComposer';
-import { createEditorPayload, resolvePopupKeyAction } from './mentionComposer';
+import { createEditorPayload, mentionPopupLayout, resolvePopupKeyAction } from './mentionComposer';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface ComposerProps {
@@ -91,7 +91,12 @@ export function Composer({
     []
   );
   const editorRef = useRef<MentionEditorHandle>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
+  const [popupLayout, setPopupLayout] = useState<{
+    left: number;
+    flyoutSide: 'left' | 'right';
+  }>({ left: 0, flyoutSide: 'right' });
   // 编辑器的纯文本投影与卡片存在性（DOM 是事实源，这里只存渲染需要的派生态）
   const [editorPlain, setEditorPlain] = useState('');
   const [editorHasMentions, setEditorHasMentions] = useState(false);
@@ -195,6 +200,33 @@ export function Composer({
       : slashQuery !== null && slashResults.length > 0
         ? 'slash'
         : null;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 光标移动、picker 挂载、flyout 打开都要重测宽高
+  useLayoutEffect(() => {
+    if (popupKind !== 'mention') return;
+    const container = composerRef.current;
+    if (!container) return;
+    const sync = () => {
+      const containerRect = container.getBoundingClientRect();
+      const picker = container.querySelector('[data-slot="mention-picker"]');
+      const listbox = picker?.querySelector('[role="listbox"]');
+      const flyout = picker?.querySelector('[data-slot="mention-flyout"]');
+      const anchor = editorRef.current?.getMentionAnchorRect();
+      const next = mentionPopupLayout({
+        anchorLeft: anchor ? anchor.left - containerRect.left : 0,
+        containerWidth: containerRect.width,
+        popupWidth: listbox instanceof HTMLElement ? listbox.offsetWidth : 280,
+        flyoutWidth: flyout instanceof HTMLElement ? flyout.offsetWidth : 252,
+        flyoutGap: 4,
+      });
+      setPopupLayout((previous) =>
+        previous.left === next.left && previous.flyoutSide === next.flyoutSide ? previous : next
+      );
+    };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => window.removeEventListener('resize', sync);
+  }, [mentionQuery, editorPlain, openFolderId, popupKind]);
   const popupLength = popupKind === 'mention' ? mentionItems.length : slashResults.length;
 
   const pickActive = useCallback(() => {
@@ -335,7 +367,7 @@ export function Composer({
   };
 
   return (
-    <div className="relative">
+    <div ref={composerRef} className="relative">
       {popupKind === 'mention' && (
         <MentionPicker
           id={mentionPickerId}
@@ -348,6 +380,8 @@ export function Composer({
           onOpenFolderIdChange={setOpenFolderId}
           onFolderIndexChange={setFolderIndex}
           onSelect={pickMention}
+          left={popupLayout.left}
+          flyoutSide={popupLayout.flyoutSide}
         />
       )}
       {popupKind === 'slash' && (
