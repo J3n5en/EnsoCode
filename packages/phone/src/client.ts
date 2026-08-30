@@ -287,7 +287,7 @@ export class PairClient {
           existing && base <= prevMax + 1 ? new Map(existing) : new Map<number, ProjectedMessage>();
         for (const [i, message] of (snap.messages ?? []).entries()) {
           messages.set(base + i, message);
-          saveCursor(id, base + i);
+          saveCursor(this.device.pairId, id, base + i);
         }
         const view: SessionView = {
           messages,
@@ -328,7 +328,7 @@ export class PairClient {
       case 'message-upsert': {
         const index = event.index as number;
         view.messages.set(index, event.message as ProjectedMessage);
-        saveCursor(sessionId, index);
+        saveCursor(this.device.pairId, sessionId, index);
         break;
       }
       case 'status':
@@ -388,7 +388,7 @@ export class PairClient {
       this.send({ type: 'subscribe', sessionId: null });
       return;
     }
-    const sinceIndex = loadCursors()[sessionId];
+    const sinceIndex = loadCursors(this.device.pairId)[sessionId];
     this.send({
       type: 'subscribe',
       sessionId,
