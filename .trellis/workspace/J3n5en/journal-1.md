@@ -86,3 +86,30 @@ subagent/coworker 支持主 agent 按任务指定模型:设置页「允许子代
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: 重启后 coworker 级联恢复与死 tab 修复
+
+**Date**: 2026-08-30
+**Task**: 重启后 coworker 级联恢复与死 tab 修复
+**Branch**: `dev`
+
+### Summary
+
+修复 39f4d3a 架构切换遗留：重启后 coworker 不恢复且死 tab 关不掉。落地 08-28 design §7.3 的 Main 级联恢复（restoreChildren + reserveChildResume + resume-coworker/dismiss-coworker 双形状过渡命令），dismiss 三段降级链，手动雇佣接 Main dispatch，child ended 终态落盘。真机验证发现并修复 resume 撞名自撞 bug；隔离环境完整走通雇佣→退出→重启→恢复→解雇链路。spec 沉淀两条铁律到 main/services.md。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ca96deb` | (see git log) |
+| `241fd72` | (see git log) |
+| `5cd4575` | (see git log) |
+| `46fe22d` | (see git log) |
+| `68d09a1` | (see git log) |
+| `0e8fc11` | (see git log) |
+| `ad0f7b5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
