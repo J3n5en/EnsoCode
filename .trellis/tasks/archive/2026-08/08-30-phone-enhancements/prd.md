@@ -79,3 +79,29 @@
 - 手机端停止/发起后台任务与 subagent。
 - 推送携带消息正文（隐私考量，只发通用文案）。
 - relay 改动。
+
+---
+
+## 执行结果（2026-08-31 完结）
+
+三项需求全部落地并经真机验证通过，另修复验证中暴露的 4 个问题：
+
+1. **推理档位**：NewSessionSheet UI + pairPolicy 校验（e04b91b）。
+2. **子任务输出**：taskProjection 纯函数（TDD）+ TaskBar 复用 + coworker 入口
+   （3d07118）。验证发现 catalog 从不含子会话（parentId 展开是死代码，
+   coworker 不进 order），修复为 catalog 补发（98180f1）；入口形态按用户
+   要求从抽屉嵌套改为会话头部 tab 条，与桌面同观感（73d76d7）。
+3. **Web Push**：协议帧 + pushNotifier + SW + 订阅开关（faa1124、0eb193f）。
+   验证发现锁屏收不到：iOS 锁屏 socket 半开不 close，桌面误判在线跳过推送
+   ——新增 presence 上行帧，门控改为「离线或不可见」（f51887b）。
+   兼容加固：旧桌面时开关禁用并提示升级（9988712）、换绑重置 VAPID（82bf409）。
+4. **追加**：置顶/归档同步到手机抽屉，归档栏对齐桌面设计（47c0180、f0f6f07）。
+
+PWA 已多轮部署至 enso-relay.j3.do。质量门：769 测试全绿、typecheck/biome 干净。
+
+### 经验沉淀候选
+
+- pairCatalog 只遍历 sessions.order，任何「不进 order」的会话（coworker）
+  对手机不可见——新增会话形态时要同时想到手机目录。
+- 手机在线判定不可信：iOS 半开 socket 不触发 close，凡依赖 phoneOnline 的
+  逻辑都要考虑 presence 显式上报。
