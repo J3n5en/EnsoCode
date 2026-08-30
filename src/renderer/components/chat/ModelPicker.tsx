@@ -1,3 +1,4 @@
+import { resolveCustomModelView } from '@shared/modelCatalog';
 import { clampProjectThinkingLevel } from '@shared/modelThinking';
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
 import type { ModelEntry, ModelMeta, ModelProvider, OauthProviderInfo } from '@shared/types';
@@ -174,8 +175,14 @@ function ModelRowContent({
   selected: boolean;
 }) {
   const { t } = useI18n();
-  const windowTokens = meta?.contextWindow;
-  const estimated = windowTokens !== undefined && meta?.source === 'catalog-fallback';
+  // 行覆盖（ModelEntry.contextWindow，含 Fetch Models 落地的元数据）优先于 catalog；
+  // 与设置页 ProviderModelRow 同一套分层，不另写一份判定。
+  const view = resolveCustomModelView(model, meta);
+  const windowTokens = view.contextWindow;
+  const estimated =
+    windowTokens !== undefined &&
+    view.source.contextWindow === 'catalog' &&
+    meta?.source === 'catalog-fallback';
   return (
     <>
       <span className="min-w-0 flex-1 truncate">{model.label ?? model.id}</span>
