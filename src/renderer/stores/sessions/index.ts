@@ -142,9 +142,8 @@ interface SessionsState {
   pendingAgentPrefill?: AgentTypeKey;
 
   newConversation(projectId: string): Promise<string | null>;
-  /** 新建隔离会话：先建会话再建 worktree，worktree 失败则回滚会话并返回 null */
-  newIsolatedConversation(projectId: string): Promise<string | null>;
-  /** 半路切 worktree（仅主工作树干净时）；运行中会话先 release 再绑定。返回错误或 null */
+  /** 会话切到隔离 worktree（composer 选择器/右键菜单入口）。
+   *  fresh（未开聊）直接绑定；已有内容走完整迁移（主树干净检查 + release + 迁移提醒）。返回错误或 null */
   moveConversationToWorktree(id: string): Promise<string | null>;
   /** 清理 worktree 保留会话：cwd 回退主工作树 + 注入回退提醒。拦截确认在 UI 层 */
   cleanupWorktree(id: string): Promise<string | null>;
@@ -787,20 +786,6 @@ export const useSessionsStore = create<SessionsState>()(
         pendingAgentPrefill: undefined,
         worktreeStatuses: {},
 
-        async newIsolatedConversation(projectId) {
-          const id = await get().newConversation(projectId);
-          if (!id) return null;
-          const created = await window.electronAPI.worktree.create(id, projectId);
-          if (!created.ok) {
-            // worktree 建不出来（非 git 仓库/无提交等）：回滚刚建的会话，错误由 UI 层 toast
-            get().removeConversation(id);
-            console.warn('[worktree] create failed:', created.error);
-            return null;
-          }
-          set((state) => patch(state, id, { worktree: created.value }));
-          return id;
-        },
-
         async moveConversationToWorktree(id) {
           const conversation = get().conversations[id];
           if (!conversation) return 'conversation not found';
@@ -809,11 +794,19 @@ export const useSessionsStore = create<SessionsState>()(
           // 迁移门必须在任何 await 之前立起来：未 started 的会话随时可能被
           // ChatView 自动 resume 用旧 cwd 复活（CDP 实测连续踩到多种时序）。
           set((state) => patch(state, id, { workspaceMigrating: true }));
+          // fresh = 还没开聊的会话（composer 选择器入口）：没有需要「干净切换」的会话内容，
+          // 不查主树干净（worktree 从 HEAD 建，主树脏不脏无关），也不注迁移提醒（无旧路径可失效）
+          const fresh =
+            !conversation.started &&
+            !conversation.sessionFile &&
+            conversation.messages.length === 0;
           try {
-            const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
-            if (!clean.ok) return clean.error;
-            if (!clean.value) {
-              return 'main working tree has uncommitted changes — commit or stash them first';
+            if (!fresh) {
+              const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
+              if (!clean.ok) return clean.error;
+              if (!clean.value) {
+                return 'main working tree has uncommitted changes — commit or stash them first';
+              }
             }
             // 运行中/已挂载的 worker 会话：cwd 在 spawn 时就固定了，必须释放后携新 cwd resume。
             // 重读 started：守卫立起前可能有 resume 溠进来把会话复活了
@@ -828,7 +821,9 @@ export const useSessionsStore = create<SessionsState>()(
                 worktree: created.value,
                 started: false,
                 status: 'idle',
-                pendingWorkspaceNote: workspaceMigratedNote(created.value.path),
+                ...(fresh
+                  ? {}
+                  : { pendingWorkspaceNote: workspaceMigratedNote(created.value.path) }),
               })
             );
             return null;

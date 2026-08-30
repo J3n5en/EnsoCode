@@ -30,6 +30,7 @@ import { RetryBar } from './RetryBar';
 import { StatsLine } from './StatsLine';
 import { TaskBar } from './TaskBar';
 import { WorktreeMissingDialog } from './WorktreeMissingDialog';
+import { WorktreePicker } from './WorktreePicker';
 
 export function ChatView() {
   const { t } = useI18n();
@@ -338,6 +339,7 @@ export function ChatView() {
                         useSessionsStore.getState().setPreset(conversation.id, presetId)
                       }
                     />
+                    <WorktreePicker conversationId={conversation.id} />
                     <ApprovalModePicker
                       mode={conversation.approvalMode ?? 'full'}
                       onSelect={(mode) =>

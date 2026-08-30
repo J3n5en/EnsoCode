@@ -164,27 +164,37 @@ describe('helpers', () => {
   });
 });
 
-describe('newIsolatedConversation', () => {
-  it('创建会话并绑定 worktree', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    expect(id).toBe('conv-1');
-    expect(wtCreate).toHaveBeenCalledWith('conv-1', 'project');
-    const conversation = sessions.useSessionsStore.getState().conversations['conv-1'];
-    expect(conversation.worktree?.path).toBe('/managed/conv-1');
+/** composer 选择器的入口：新建普通会话后在输入框下方切隔离（fresh 路径） */
+async function seedIsolatedConversation(): Promise<string> {
+  const id = await sessions.useSessionsStore.getState().newConversation('project');
+  if (!id) throw new Error('conversation not created');
+  const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
+  if (error) throw new Error(error);
+  return id;
+}
+
+describe('fresh 会话切隔离（composer 选择器路径）', () => {
+  it('未开聊的会话：不查主树干净、不注迁移提醒，直接绑定 worktree', async () => {
+    const id = await seedIsolatedConversation();
+    const conversation = sessions.useSessionsStore.getState().conversations[id];
+    expect(wtRepoClean).not.toHaveBeenCalled(); // 主树脏不脏与 fresh 隔离无关
+    expect(conversation.worktree?.path).toBe(`/managed/${id}`);
+    expect(conversation.pendingWorkspaceNote).toBeUndefined();
   });
 
-  it('worktree 创建失败：会话移除并返回 null', async () => {
+  it('worktree 创建失败：返回错误，会话保持本地', async () => {
+    const id = await sessions.useSessionsStore.getState().newConversation('project');
+    if (!id) throw new Error('setup failed');
     wtCreate.mockResolvedValueOnce({ ok: false, error: 'not a git repository' } as never);
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    expect(id).toBeNull();
-    expect(sessions.useSessionsStore.getState().conversations['conv-1']).toBeUndefined();
+    const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
+    expect(error).toContain('not a git repository');
+    expect(sessions.useSessionsStore.getState().conversations[id].worktree).toBeUndefined();
   });
 });
 
 describe('send 使用 worktree cwd 并消费迁移提醒', () => {
   it('隔离会话 spawn 用 worktree.path 而非 target.cwd，pendingWorkspaceNote 前置一次', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     sessions.useSessionsStore.setState((state) => ({
       conversations: {
         ...state.conversations,
@@ -222,9 +232,16 @@ async function seedLocalConversation(): Promise<string> {
   return created;
 }
 
-describe('moveConversationToWorktree', () => {
+describe('moveConversationToWorktree（非 fresh：已有对话内容）', () => {
   it('主工作树脏 → 拒绝并返回错误', async () => {
     const id = await seedLocalConversation();
+    // 有 sessionFile = 非 fresh，走完整迁移语义（脏检查 + 提醒）
+    sessions.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        [id]: { ...state.conversations[id], sessionFile: '/tmp/s.jsonl' },
+      },
+    }));
     wtRepoClean.mockResolvedValueOnce({ ok: true, value: false } as never);
     const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
     expect(error).toBeTruthy();
@@ -249,8 +266,7 @@ describe('moveConversationToWorktree', () => {
   });
 
   it('已隔离的会话拒绝重复迁移', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
     expect(error).toBeTruthy();
   });
@@ -258,8 +274,7 @@ describe('moveConversationToWorktree', () => {
 
 describe('cleanupWorktree', () => {
   it('移除 worktree、清字段、写回退提醒；运行中先 release', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     sessions.useSessionsStore.setState((state) => ({
       conversations: {
         ...state.conversations,
@@ -279,8 +294,7 @@ describe('cleanupWorktree', () => {
 
 describe('resumeConversation 的 worktree 校验', () => {
   async function seedResumable(): Promise<string> {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     sessions.useSessionsStore.setState((state) => ({
       conversations: {
         ...state.conversations,
@@ -362,8 +376,7 @@ describe('resumeConversation 的 worktree 校验', () => {
 
 describe('removeConversation 连带清理 worktree', () => {
   it('删除隔离会话时调用 worktree.remove', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     sessions.useSessionsStore.getState().removeConversation(id);
     expect(wtRemove).toHaveBeenCalledWith(id);
   });
@@ -371,8 +384,7 @@ describe('removeConversation 连带清理 worktree', () => {
 
 describe('refreshWorktreeStatuses', () => {
   it('拉取所有隔离会话状态进 worktreeStatuses', async () => {
-    const id = await sessions.useSessionsStore.getState().newIsolatedConversation('project');
-    if (!id) throw new Error('setup failed');
+    const id = await seedIsolatedConversation();
     wtStatus.mockResolvedValueOnce({ ok: true, value: { exists: true, dirty: true, ahead: 3 } });
     await sessions.useSessionsStore.getState().refreshWorktreeStatuses();
     expect(sessions.useSessionsStore.getState().worktreeStatuses[id]).toEqual({

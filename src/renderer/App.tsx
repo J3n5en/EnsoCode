@@ -7,6 +7,7 @@ import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
@@ -95,6 +96,8 @@ export default function App() {
 
   return (
     <div className="relative isolate flex h-screen flex-col">
+      {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
+      <ToastProvider />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
       <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />

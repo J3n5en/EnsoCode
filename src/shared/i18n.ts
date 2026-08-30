@@ -424,10 +424,9 @@ export const zhTranslations: Record<string, string> = {
   'No matching projects found': '没有匹配的项目',
   Add: '添加',
   'New conversation': '新对话',
-  'New isolated session (git worktree)': '新建隔离会话（git worktree）',
-  'Failed to create isolated session': '创建隔离会话失败',
-  'The project must be a git repository with at least one commit.':
-    '项目必须是有至少一次提交的 git 仓库。',
+  'Local workspace': '本地工作区',
+  'Work directly in the main working tree': '直接在主工作树里工作',
+  'Run this session on its own git worktree': '让这个会话在独立的 git worktree 里运行',
   'Move to worktree': '切到隔离 worktree',
   'Failed to move to worktree': '切到隔离 worktree 失败',
   'Clean up worktree': '清理 worktree',

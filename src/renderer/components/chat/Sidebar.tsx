@@ -68,7 +68,6 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   const removeConversation = useSessionsStore((state) => state.removeConversation);
   const togglePinConversation = useSessionsStore((state) => state.togglePinConversation);
   const toggleArchiveConversation = useSessionsStore((state) => state.toggleArchiveConversation);
-  const newIsolatedConversation = useSessionsStore((state) => state.newIsolatedConversation);
   const moveConversationToWorktree = useSessionsStore((state) => state.moveConversationToWorktree);
   const cleanupWorktree = useSessionsStore((state) => state.cleanupWorktree);
   const refreshWorktreeStatuses = useSessionsStore((state) => state.refreshWorktreeStatuses);
@@ -192,19 +191,6 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     const error = await moveConversationToWorktree(id);
     if (error) {
       addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
-      return;
-    }
-    void refreshWorktreeStatuses();
-  };
-
-  const handleNewIsolated = async (projectId: string) => {
-    const id = await newIsolatedConversation(projectId);
-    if (!id) {
-      addToast({
-        type: 'error',
-        title: t('Failed to create isolated session'),
-        description: t('The project must be a git repository with at least one commit.'),
-      });
       return;
     }
     void refreshWorktreeStatuses();
@@ -339,14 +325,6 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   title={t('New conversation')}
                 >
                   <MessageSquarePlus className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleNewIsolated(project.id)}
-                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title={t('New isolated session (git worktree)')}
-                >
-                  <GitBranchPlus className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
