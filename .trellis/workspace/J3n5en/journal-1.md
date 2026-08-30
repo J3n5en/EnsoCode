@@ -150,3 +150,38 @@ coworker 以头部 tab 条呈现（修复 catalog 不含子会话的死代码）
 ### Status
 
 [OK] **Completed**
+
+---
+
+## Session: 2026-08-30 — pi 自动重试状态贯通（08-30-auto-retry-status）
+
+### Summary
+
+修复「503 报错解锁输入后 agent 又自己跑起来」的状态冲突。根因：pi SDK 内置
+自动重试，supervisor 未消费 `agent_end.willRetry` / `auto_retry_start/end`，
+把非终态误 settle 成 turn-completed。完整贯通：① supervisor 尊重 willRetry
+（不 settle、终态错误改走 turn-failed、取消重试经 auto_retry_end 收口、
+输入接管 = abortRetry + 新轮）；② 新事件 turn-retry + 命令 abort-retry 全链路
+（shared 类型/narrowing → IPC → renderer reducer）；③ RetryBar 黄色横幅
+（倒计时 + 可取消）；④ 瞬态错误渲染规则收进 buildTimeline 纯函数（紧跟
+assistant = 已重试、末条且 running = 倒计时中，都不渲染）——同时解决实时
+抽搐与 resume 回放重复红错，手机端复用同一函数天然生效；⑤ 手机端 RetryBar
+（applyRetryEvent 纯投影，取消按钮改可选注入）。fake provider 增加 /__fail
+端点，隔离环境真机验证成功/耗尽/回放三场景。relay 已部署。
+spec 新增 big-question/pi-auto-retry-willretry.md。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `820d18a` | feat(shared,renderer): turn-retry 事件与 abort-retry 命令的类型与投影 |
+| `11f05a9` | fix(agent): 尊重 pi 自动重试，重试期间不再误报轮次完成 |
+| `b7e58ce` | feat(renderer): 自动重试状态条——倒计时展示与取消入口 |
+| `61df9ac` | chore(scripts): fake provider 支持 /__fail 模拟连续 N 次 5xx |
+| `6a69942` | fix(renderer): 瞬态错误只在真正终态渲染，覆盖实时与 resume 回放 |
+| `ea4bb4e` | feat(phone): 手机第二屏显示自动重试横幅 |
+| `e73e9ff` | docs(spec): 记录 pi 自动重试 willRetry 陷阱与瞬态内容渲染教训 |
+
+### Status
+
+[OK] **Completed** — typecheck/802 tests/biome 全绿，relay 部署版本 fcc28f80
