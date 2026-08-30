@@ -34,6 +34,20 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 UI 组件、Electron 窗口行为等 spec 中「暂未覆盖」的范围不强制，但新增的
 纯逻辑若刻意绕开测试（塞进组件里躲避），审查会要求拆出来。
 
+### TDD 的角色分离（可选，大改动推荐）
+
+TDD 纪律最容易坏在两处：「红」造假（测试和实现同一个脑子写，
+测试贴着既定实现走形式）和「绿」自证（实现者自己宣布通过）。
+逻辑面大的改动（跨模块、用例多、协议/解析器类），推荐用 coworker
+做角色分离，在结构上防住这两点：
+
+- **测试先行者**（coworker）：只读 PRD 与接口契约，产出失败测试并确认红灯；
+- **实现者**（主会话或另一 coworker）：只许改实现，不许动测试文件让灯变绿；
+- 验收用 `gate: "pnpm test"`，以退出码为准，不采信文字汇报。
+
+小的纯函数改动不必拉 coworker，inline Red-Green 即可——判断标准：
+测试文件预计 < 50 行，或用例 < 10 个，直接 inline。
+
 ## 小步提交
 
 每完成一个**可独立描述**的改动就 commit——一个 fix、一个 feat、一次重构，
