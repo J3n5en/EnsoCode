@@ -270,10 +270,30 @@ function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): T
       }
     });
     if (message.errorMessage) {
-      items.push({ kind: 'error', key: `${messageIndex}-err`, text: message.errorMessage });
+      // 瞬态错误不渲染：后面紧跟另一条 assistant = 已重试过（覆盖 resume 回放）；
+      // 末条且 running = 重试倒计时中（错误文本展示在 RetryBar 上，先渲染再删会抽搐）。
+      // 只有真正的终态错误（非 running 的末次尝试）才落红。
+      const retried = messages[messageIndex + 1]?.role === 'assistant';
+      const pendingRetry = running && messageIndex === messages.length - 1;
+      if (!retried && !pendingRetry) {
+        items.push({ kind: 'error', key: `${messageIndex}-err`, text: message.errorMessage });
+      }
     }
   });
   return items;
+}
+
+/**
+ * 底部终态错误行的去重：turn-failed 的 error 与末条错误消息同文本时（503 等），
+ * 时间线里已有带图标的错误项，不再重复渲染；spawn 失败等没有消息载体的错误照常显示。
+ */
+export function terminalErrorText(
+  messages: readonly ProjectedMessage[],
+  error: string | undefined
+): string | undefined {
+  if (!error) return undefined;
+  const lastErrored = [...messages].reverse().find((message) => message.errorMessage);
+  return lastErrored?.errorMessage === error ? undefined : error;
 }
 
 const customEntryTime = (entry: AgentSessionCustomEntry): number =>

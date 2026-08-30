@@ -1,6 +1,11 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, foldTimeline, type TimelineItem } from './timeline';
+import {
+  buildTimeline,
+  foldTimeline,
+  terminalErrorText,
+  type TimelineItem,
+} from './timeline';
 
 const user = (text: string): ProjectedMessage => ({
   role: 'user',
@@ -198,6 +203,68 @@ const thinkingItem = (key: string): TimelineItem => ({
   text: 't',
   streaming: false,
   durationMs: null,
+});
+
+describe('重试过的瞬态错误不渲染', () => {
+  const err = (text = '503 status code (no body)'): ProjectedMessage => ({
+    role: 'assistant',
+    content: [],
+    stopReason: 'error',
+    errorMessage: text,
+  });
+  const assistant = (text: string): ProjectedMessage => ({
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+  });
+  const user = (text: string): ProjectedMessage => ({
+    role: 'user',
+    content: [{ type: 'text', text }],
+  });
+
+  it('错误消息紧跟另一条 assistant（已重试）时不产生 error 项，末条保留', () => {
+    // 回放场景：耗尽失败的一轮在 session 文件里留下每次尝试的错误消息
+    const items = buildTimeline([user('q'), err(), err(), err(), err()], false);
+    expect(items.filter((item) => item.kind === 'error')).toHaveLength(1);
+  });
+
+  it('重试成功后回放：错误项全部隐藏', () => {
+    const items = buildTimeline([user('q'), err(), assistant('ok')], false);
+    expect(items.filter((item) => item.kind === 'error')).toHaveLength(0);
+  });
+
+  it('终态错误后面是新一轮 user 消息：错误项保留', () => {
+    const items = buildTimeline([user('q'), err(), user('again'), assistant('ok')], false);
+    expect(items.filter((item) => item.kind === 'error')).toHaveLength(1);
+  });
+
+  it('running 中的末条错误（重试倒计时）从一开始就不渲染，终态（非 running）才渲染', () => {
+    // 先渲染再删除会导致屏幕抽搐：running 期间错误文本只展示在 RetryBar 上
+    const messages = [user('q'), err()];
+    expect(buildTimeline(messages, true).filter((item) => item.kind === 'error')).toHaveLength(0);
+    expect(buildTimeline(messages, false).filter((item) => item.kind === 'error')).toHaveLength(1);
+  });
+});
+
+describe('terminalErrorText', () => {
+  const errored: ProjectedMessage = {
+    role: 'assistant',
+    content: [],
+    stopReason: 'error',
+    errorMessage: '503 status code (no body)',
+  };
+
+  it('消息已展示同一错误时不重复显示底部错误', () => {
+    expect(terminalErrorText([errored], '503 status code (no body)')).toBeUndefined();
+  });
+
+  it('无同文本错误消息时原样返回（spawn 失败等没有消息载体的错误）', () => {
+    expect(terminalErrorText([], 'invalid spawn request')).toBe('invalid spawn request');
+    expect(terminalErrorText([errored], 'other error')).toBe('other error');
+  });
+
+  it('error 为空时返回 undefined', () => {
+    expect(terminalErrorText([errored], undefined)).toBeUndefined();
+  });
 });
 
 describe('foldTimeline', () => {

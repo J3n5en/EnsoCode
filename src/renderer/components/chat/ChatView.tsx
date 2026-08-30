@@ -13,7 +13,7 @@ import {
 } from '@/stores/oauthCredentials';
 
 import { useSessionsStore } from '@/stores/sessions';
-import { buildTimeline } from '@/stores/sessions/timeline';
+import { buildTimeline, terminalErrorText } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
@@ -239,7 +239,7 @@ export function ChatView() {
         running={running}
         runStartedAt={conversation.runStartedAt}
         lastOutputAt={conversation.lastOutputAt}
-        error={conversation.error}
+        error={terminalErrorText(conversation.messages, conversation.error)}
         emptyTitle={project?.name ?? 'EnsoCode'}
       />
 

@@ -124,6 +124,8 @@ interface ManagedSession {
   promptedRequestIds: Set<string>;
   ensoApp?: EnsoAppInvoker;
   adaptiveDowngraded: boolean;
+  /** 最近一次 auto_retry_start 携带的原始错误（取消重试时的终态错误文案） */
+  lastRetryError?: string;
   timings: (MessageTiming | undefined)[];
   toolStartAt: Map<string, number>;
   toolDurations: Map<string, number>;
@@ -1612,6 +1614,7 @@ export class SessionSupervisor {
         return;
       }
       case 'auto_retry_start':
+        managed.lastRetryError = event.errorMessage || 'Unknown error';
         this.options.emit({
           type: 'turn-retry',
           identity: managed.identity,
@@ -1626,10 +1629,10 @@ export class SessionSupervisor {
         // 重试被取消（abortRetry）时没有后续 agent_end，在这里收口；
         // 重试耗尽则已由 agent_end(willRetry=false) 走 failTurn，status 守卫避免重复
         if (event.success || managed.status !== 'running') return;
-        const lastError = [...managed.messages]
-          .reverse()
-          .find((message) => message.role === 'assistant' && message.errorMessage)?.errorMessage;
-        this.failTurn(managed, lastError ?? event.finalError ?? 'Auto-retry failed.');
+        this.failTurn(
+          managed,
+          managed.lastRetryError ?? event.finalError ?? 'Auto-retry failed.'
+        );
         return;
       }
       case 'tool_execution_start':
@@ -1647,7 +1650,22 @@ export class SessionSupervisor {
         this.reconcileMessages(managed, managed.session.messages as unknown[]);
         // pi 将自动重试瞬态错误（随后 auto_retry_start）：非终态，不 settle、
         // 不发 turn-completed、状态保持 running，否则输入框解锁后又自己跑起来
-        if (event.willRetry) return;
+        if (event.willRetry) {
+          // pi 的 _prepareRetry 稍后会把这条瞬态错误 assistant 消息从自身状态删掉重发；
+          // 提前对齐投影，重试期间时间线不闪现错误（错误文本已在 RetryBar 上）
+          const last = managed.messages.at(-1);
+          if (last?.role === 'assistant' && last.stopReason === 'error') {
+            managed.messages.length -= 1;
+            managed.timings.length = managed.messages.length;
+            this.options.emit({
+              type: 'messages-truncated',
+              identity: managed.identity,
+              seq: ++managed.seq,
+              length: managed.messages.length,
+            });
+          }
+          return;
+        }
         if (this.tryAdaptiveDowngrade(managed)) return;
         // 终态错误轮（重试耗尽或不可重试）按失败收口，不再误报「回复完成」
         const lastAssistant = [...managed.messages]
