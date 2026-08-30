@@ -139,9 +139,11 @@ function caretContext(root: HTMLElement): { node: Text; offset: number } | null 
 
 /**
  * iOS 第三方键盘（搜狗等）的光标移动键不发 KeyEvent，走 UITextInput 的
- * setSelectedTextRange；光标已在最左端时再按一次，WebKit 会把折叠选区从文本
- * 节点挪到元素节点锚点（如 (root, 0)），这种选区不绘制光标——表现为「光标消失」。
- * 把元素锚点的折叠选区规范回相邻文本节点的等价位置即可恢复。
+ * setSelectedTextRange，到达边界后再按会越界，有两种形态：
+ * a) 折叠选区从文本节点挪到元素节点锚点（如 (root, 0)），WebKit 不绘制光标；
+ * b) 选区直接被推出编辑器到周围 DOM（光标「滑出输入框」）。
+ * 形态 a 由本函数规范回相邻文本节点的等价位置；形态 b 在 selectionchange
+ * 监听里拉回最近一次编辑器内的位置。
  */
 function normalizedCaretRange(root: HTMLElement, selection: Selection): Range | null {
   if (selection.rangeCount === 0 || !selection.isCollapsed) return null;
@@ -190,16 +192,38 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
     ref
   ) {
     const rootRef = useRef<HTMLDivElement>(null);
+    /** 最近一次落在编辑器内文本节点上的光标，选区被 IME 推出去时用它拉回 */
+    const lastCaretRef = useRef<{ node: Text; offset: number } | null>(null);
 
-    // 修复 iOS IME 光标键在最左端把选区推成元素锚点导致光标消失（见 normalizedCaretRange）
+    // 修复 iOS IME 光标键的两种越界形态（见 normalizedCaretRange 注释）。
+    // 用户点击编辑器外会先转移焦点，activeElement 守卫保证不干扰正常交互。
     useEffect(() => {
       const handler = () => {
         const root = rootRef.current;
         if (!root || document.activeElement !== root) return;
         const selection = window.getSelection();
-        if (!selection) return;
-        const range = normalizedCaretRange(root, selection);
-        if (!range) return;
+        if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
+        const anchor = selection.anchorNode;
+        if (anchor && (anchor === root || root.contains(anchor))) {
+          const normalized = normalizedCaretRange(root, selection);
+          if (normalized) {
+            selection.removeAllRanges();
+            selection.addRange(normalized);
+          } else if (anchor.nodeType === Node.TEXT_NODE) {
+            lastCaretRef.current = { node: anchor as Text, offset: selection.anchorOffset };
+          }
+          return;
+        }
+        // 焦点还在编辑器而选区已在外面：IME 把光标推出去了，拉回最近位置
+        const last = lastCaretRef.current;
+        const range = document.createRange();
+        if (last?.node.isConnected && root.contains(last.node)) {
+          range.setStart(last.node, Math.min(last.offset, last.node.length));
+          range.collapse(true);
+        } else {
+          range.selectNodeContents(root);
+          range.collapse(true);
+        }
         selection.removeAllRanges();
         selection.addRange(range);
       };
