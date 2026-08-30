@@ -277,6 +277,34 @@ export const useSessionsStore = create<SessionsState>()(
         );
       }
 
+      async function adoptMissingRootAuthority(
+        conversationId: string,
+        projectId: string
+      ): Promise<boolean> {
+        const projection = await window.electronAPI.sourceAuthority.read();
+        if (
+          projection.conversations.some(
+            (candidate) =>
+              candidate.conversationId === conversationId &&
+              candidate.kind === 'root' &&
+              candidate.lifecycle !== 'ended'
+          )
+        ) {
+          return true;
+        }
+        const project = projection.projects.find(
+          (candidate) => candidate.projectId === projectId && candidate.state === 'active'
+        );
+        if (!project) return false;
+        const created = await window.electronAPI.sourceAuthority.createConversation({
+          requestId: crypto.randomUUID(),
+          projectId: project.projectId,
+          projectVersion: project.version,
+          conversationId,
+        });
+        return created.accepted;
+      }
+
       async function activateConversationAuthority(conversationId: string): Promise<{
         project: ProjectAuthorityProjection;
         conversation: ConversationAuthorityProjection;
@@ -1020,11 +1048,15 @@ export const useSessionsStore = create<SessionsState>()(
             conversations: { ...state.conversations, [session.sessionId]: conversation },
             order: [session.sessionId, ...state.order],
           }));
+          // 手机 spawn 自带 sessionId，桌面 newConversation 才会走 Main 发号。
+          // 不登记的话点开会话会被当成 history-only。
+          void adoptMissingRootAuthority(session.sessionId, session.projectId);
         },
 
         selectConversation(id) {
           if (!get().conversations[id]) return;
           const pendingAgentPrefill = get().pendingAgentPrefill;
+          const local = get().conversations[id];
           set((state) => ({
             activeId: id,
             pendingAgentPrefill: undefined,
@@ -1035,14 +1067,18 @@ export const useSessionsStore = create<SessionsState>()(
                 }).conversations
               : state.conversations,
           }));
-          void activateConversationAuthority(id).then((authority) => {
+          void (async () => {
+            if (local && !local.parentId) {
+              await adoptMissingRootAuthority(id, local.projectId);
+            }
+            const authority = await activateConversationAuthority(id);
             if (authority || !get().conversations[id]) return;
             set((state) =>
               patch(state, id, {
                 error: 'This conversation is history-only and cannot be dispatched.',
               })
             );
-          });
+          })();
         },
 
         togglePinConversation(id) {

@@ -128,6 +128,27 @@ describe('Main-owned source authority contracts', () => {
       })
     ).not.toBeNull();
     expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        conversationId,
+      })
+    ).toEqual({
+      requestId: 'c1',
+      projectId,
+      projectVersion: 1,
+      conversationId,
+    });
+    expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        conversationId: 'not-a-uuid',
+      })
+    ).toBeNull();
+    expect(
       parseConversationAuthorityRequest({ requestId: 'c2', conversationId, version: 2 })
     ).not.toBeNull();
     expect(

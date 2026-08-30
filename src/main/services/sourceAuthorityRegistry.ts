@@ -140,8 +140,21 @@ export class SourceAuthorityRegistry {
     if (project?.state !== 'active' || project.version !== request.projectVersion) {
       return { accepted: false, error: 'Project authority is stale or unavailable.' };
     }
+    if (request.conversationId) {
+      if (!validId(request.conversationId)) {
+        return { accepted: false, error: 'Conversation authority is stale or unavailable.' };
+      }
+      const existing = this.conversations.get(request.conversationId);
+      if (existing) {
+        return existing.projectId === project.projectId &&
+          existing.kind === 'root' &&
+          existing.lifecycle !== 'ended'
+          ? { accepted: true, value: this.copyConversation(existing) }
+          : { accepted: false, error: 'Conversation authority is stale or unavailable.' };
+      }
+    }
     const value: ConversationAuthority = {
-      conversationId: this.randomUuid(),
+      conversationId: request.conversationId ?? this.randomUuid(),
       projectId: project.projectId,
       kind: 'root',
       lifecycle: 'draft',
@@ -149,7 +162,7 @@ export class SourceAuthorityRegistry {
     };
     this.conversations.set(value.conversationId, value);
     this.commit();
-    return { accepted: true, value: { ...value } };
+    return { accepted: true, value: this.copyConversation(value) };
   }
 
   selectConversation(

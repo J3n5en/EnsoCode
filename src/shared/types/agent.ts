@@ -216,6 +216,8 @@ export interface CreateConversationAuthorityRequest {
   requestId: string;
   projectId: string;
   projectVersion: number;
+  /** 手机配对等已有 id：登记为 root，不再由 Main 另发 UUID */
+  conversationId?: string;
 }
 
 export interface ConversationAuthorityRequest {
@@ -920,10 +922,11 @@ export function parseCreateConversationAuthorityRequest(
 ): CreateConversationAuthorityRequest | null {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['requestId', 'projectId', 'projectVersion']) ||
+    !hasOnlyKeys(value, ['requestId', 'projectId', 'projectVersion', 'conversationId']) ||
     !isNonEmptyString(value.requestId) ||
     !isUuid(value.projectId) ||
-    !isSequence(value.projectVersion)
+    !isSequence(value.projectVersion) ||
+    (value.conversationId !== undefined && !isUuid(value.conversationId))
   ) {
     return null;
   }

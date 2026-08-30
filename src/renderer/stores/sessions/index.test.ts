@@ -44,20 +44,28 @@ const selectConversation = vi.fn(async (request: { conversationId: string }) => 
     (conversation) => conversation.conversationId === request.conversationId
   )!,
 }));
-const createConversation = vi.fn(async () => {
-  const value = {
-    conversationId: 'parent',
-    projectId: 'project',
-    kind: 'root' as const,
-    lifecycle: 'draft' as const,
-    version: 1,
-  };
-  sourceProjection = {
-    ...sourceProjection,
-    conversations: [...sourceProjection.conversations, value],
-  };
-  return { accepted: true as const, value };
-});
+const createConversation = vi.fn(
+  async (request?: { projectId?: string; conversationId?: string }) => {
+    const value = {
+      conversationId: request?.conversationId ?? 'parent',
+      projectId: request?.projectId ?? 'project',
+      kind: 'root' as const,
+      lifecycle: 'draft' as const,
+      version: 1,
+    };
+    if (
+      !sourceProjection.conversations.some(
+        (conversation) => conversation.conversationId === value.conversationId
+      )
+    ) {
+      sourceProjection = {
+        ...sourceProjection,
+        conversations: [...sourceProjection.conversations, value],
+      };
+    }
+    return { accepted: true as const, value };
+  }
+);
 const updateConversationSelection = vi.fn(
   async (request: {
     conversationId: string;
@@ -882,6 +890,65 @@ describe('typed Agent child projection', () => {
         .hireCoworker('parent', 'bob');
       expect(notStarted).toBe('conversation not started');
       expect(hireCoworker).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('手机新建会话的 Source Authority', () => {
+    const phoneSessionId = '77777777-7777-4777-8777-777777777777';
+    const pairSession = {
+      sessionId: phoneSessionId,
+      projectId: 'project',
+      providerId: 'p',
+      modelId: 'm',
+      reasoningEnabled: true,
+      thinkingLevel: 'medium',
+    };
+
+    it('adoptPairSession 用手机 sessionId 登记 root 权威', async () => {
+      createConversation.mockClear();
+      sessionsModule.useSessionsStore.getState().adoptPairSession(pairSession);
+      await vi.waitFor(() =>
+        expect(createConversation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            projectId: 'project',
+            projectVersion: 1,
+            conversationId: phoneSessionId,
+          })
+        )
+      );
+      expect(sessionsModule.useSessionsStore.getState().conversations[phoneSessionId]?.id).toBe(
+        phoneSessionId
+      );
+    });
+
+    it('点开未登记权威的手机会话会补登记，不标 history-only', async () => {
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          [phoneSessionId]: {
+            ...state.conversations.parent,
+            id: phoneSessionId,
+            title: 'from phone',
+            started: true,
+            parentId: undefined,
+            error: undefined,
+          },
+        },
+        order: [phoneSessionId, ...state.order],
+      }));
+      createConversation.mockClear();
+      sessionsModule.useSessionsStore.getState().selectConversation(phoneSessionId);
+      await vi.waitFor(() =>
+        expect(createConversation).toHaveBeenCalledWith(
+          expect.objectContaining({ conversationId: phoneSessionId, projectId: 'project' })
+        )
+      );
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[phoneSessionId]?.error
+      ).toBeUndefined();
+      expect(selectConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: phoneSessionId })
+      );
     });
   });
 

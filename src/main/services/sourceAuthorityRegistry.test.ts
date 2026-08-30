@@ -108,4 +108,89 @@ describe('SourceAuthorityRegistry', () => {
       registry.conversation('44444444-4444-4444-8444-444444444444')?.sessionFile
     ).toBeUndefined();
   });
+
+  it('adopts a phone-generated root id instead of minting a new one', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const phoneSessionId = '55555555-5555-4555-8555-555555555555';
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+      randomUuid: () => 'should-not-mint',
+    });
+    const project = registry.createProject({ requestId: 'p', path: projectPath });
+    expect(project.accepted).toBe(true);
+    if (!project.accepted) return;
+    const created = registry.createConversation({
+      requestId: 'c',
+      projectId: project.value.projectId,
+      projectVersion: project.value.version,
+      conversationId: phoneSessionId,
+    });
+    expect(created).toEqual({
+      accepted: true,
+      value: {
+        conversationId: phoneSessionId,
+        projectId: project.value.projectId,
+        kind: 'root',
+        lifecycle: 'draft',
+        version: 1,
+      },
+    });
+    expect(registry.conversation(phoneSessionId)?.conversationId).toBe(phoneSessionId);
+  });
+
+  it('adopts the same live root id idempotently and refuses ended or foreign roots', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const otherPath = path.join(root, 'other');
+    mkdirSync(otherPath);
+    const phoneSessionId = '66666666-6666-4666-8666-666666666666';
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+    });
+    const project = registry.createProject({ requestId: 'p', path: projectPath });
+    const other = registry.createProject({ requestId: 'o', path: otherPath });
+    expect(project.accepted && other.accepted).toBe(true);
+    if (!project.accepted || !other.accepted) return;
+    const first = registry.createConversation({
+      requestId: 'c1',
+      projectId: project.value.projectId,
+      projectVersion: project.value.version,
+      conversationId: phoneSessionId,
+    });
+    expect(first.accepted).toBe(true);
+    if (!first.accepted) return;
+    expect(
+      registry.createConversation({
+        requestId: 'c2',
+        projectId: project.value.projectId,
+        projectVersion: project.value.version,
+        conversationId: phoneSessionId,
+      })
+    ).toEqual(first);
+    expect(
+      registry.createConversation({
+        requestId: 'c3',
+        projectId: other.value.projectId,
+        projectVersion: other.value.version,
+        conversationId: phoneSessionId,
+      })
+    ).toEqual({ accepted: false, error: 'Conversation authority is stale or unavailable.' });
+    const ended = registry.endConversation({
+      requestId: 'e',
+      conversationId: phoneSessionId,
+      version: first.value.version,
+    });
+    expect(ended.accepted).toBe(true);
+    expect(
+      registry.createConversation({
+        requestId: 'c4',
+        projectId: project.value.projectId,
+        projectVersion: project.value.version,
+        conversationId: phoneSessionId,
+      })
+    ).toEqual({ accepted: false, error: 'Conversation authority is stale or unavailable.' });
+  });
 });
