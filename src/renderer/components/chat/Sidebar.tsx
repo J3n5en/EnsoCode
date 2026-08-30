@@ -1,6 +1,6 @@
 import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Archive,
   ArchiveRestore,
@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { springStandard } from '@/lib/motion';
+import { heightVariants, springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -206,10 +206,15 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     return parts.join('; ');
   };
 
-  if (collapsed) {
-    return (
-      <>
-        <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
+  return (
+    <motion.aside
+      initial={false}
+      animate={{ width: collapsed ? 48 : width }}
+      transition={springStandard}
+      className="flex shrink-0 flex-col overflow-hidden border-r bg-background"
+    >
+      {collapsed && (
+        <div className="flex w-12 flex-1 flex-col items-center gap-1 py-2">
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -235,255 +240,287 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           >
             <Settings className="h-4 w-4" />
           </button>
-        </aside>
-        <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAddProject} />
-      </>
-    );
-  }
-
-  return (
-    <aside className="flex shrink-0 flex-col border-r bg-background" style={{ width }}>
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
-        <span className="text-sm font-medium">{t('Projects')}</span>
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className={ICON_BUTTON_CLASS}
-          title={t('Add project')}
-        >
-          <FolderPlus className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-        {projects.length === 0 && (
+        </div>
+      )}
+      <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
+        <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
+          <span className="text-sm font-medium">{t('Projects')}</span>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+            className={ICON_BUTTON_CLASS}
+            title={t('Add project')}
           >
-            {t('Add a project to start')}
-          </button>
-        )}
-        {pinnedIds.length > 0 && (
-          <div data-slot="pinned-section">
-            <div className="flex items-center gap-1.5 px-2 py-2">
-              <Pin className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-sm font-medium">{t('Pinned')}</span>
-            </div>
-            <div className="flex flex-col gap-y-0.5">
-              {pinnedIds.map((id) => (
-                <motion.div key={id} layout="position" transition={springStandard}>
-                  <ConversationRow
-                    id={id}
-                    conversation={conversations[id]}
-                    active={activeId === id}
-                    locale={locale}
-                    nowTick={nowTick}
-                    hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                    worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                    isolated={Boolean(conversations[id].worktree)}
-                    onSelect={selectConversation}
-                    onTogglePin={togglePinConversation}
-                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                    onCleanupWorktree={(conversationId) =>
-                      void handleCleanupWorktree(conversationId)
-                    }
-                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        )}
-        {projects.map((project) => {
-          const projectConversations = projectConversationIds(order, conversations, project.id);
-          const folded = collapsedProjects[project.id] === true;
-          return (
-            <div key={project.id}>
-              {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸） */}
-              <div className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30">
-                <button
-                  type="button"
-                  onClick={() => toggleProject(project.id)}
-                  className="flex min-w-0 flex-1 items-center gap-1 text-left"
-                  title={project.path}
-                >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                    <ChevronRight
-                      className={cn(
-                        'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                        !folded && 'rotate-90'
-                      )}
-                    />
-                  </span>
-                  <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {project.name}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void newConversation(project.id)}
-                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title={t('New conversation')}
-                >
-                  <MessageSquarePlus className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportProject(project)}
-                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title={t('Import session')}
-                >
-                  <HardDriveDownload className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPendingRemove({
-                      kind: 'project',
-                      project,
-                      conversationIds: projectConversations,
-                    })
-                  }
-                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-                  title={t('Remove project')}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {!folded && (
-                <div className="mt-0.5 flex flex-col gap-y-0.5">
-                  {(expandedProjects[project.id]
-                    ? projectConversations
-                    : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
-                  ).map((id) => (
-                    <motion.div key={id} layout="position" transition={springStandard}>
-                      <ConversationRow
-                        id={id}
-                        conversation={conversations[id]}
-                        active={activeId === id}
-                        locale={locale}
-                        nowTick={nowTick}
-                        worktreeStatus={
-                          conversations[id].worktree ? worktreeStatuses[id] : undefined
-                        }
-                        isolated={Boolean(conversations[id].worktree)}
-                        onSelect={selectConversation}
-                        onTogglePin={togglePinConversation}
-                        onToggleArchive={(conversationId) =>
-                          void handleToggleArchive(conversationId)
-                        }
-                        onCleanupWorktree={(conversationId) =>
-                          void handleCleanupWorktree(conversationId)
-                        }
-                        onMoveToWorktree={(conversationId) =>
-                          void handleMoveToWorktree(conversationId)
-                        }
-                        onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                      />
-                    </motion.div>
-                  ))}
-                  {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedProjects((prev) => ({
-                          ...prev,
-                          [project.id]: !prev[project.id],
-                        }))
-                      }
-                      className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                    >
-                      {expandedProjects[project.id]
-                        ? t('Collapse')
-                        : t('Show {{n}} more', {
-                            n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
-                          })}
-                    </button>
-                  )}
-                  {projectConversations.length === 0 && (
-                    <p className="py-1.5 pl-9 text-xs text-muted-foreground">
-                      {t('No conversations yet')}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {archivedIds.length > 0 && (
-        <div data-slot="archived-section" className="shrink-0 border-t p-2">
-          {/* 列表在折叠头上方：固定底部向上展开 */}
-          {archivedOpen && (
-            <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
-              {archivedIds.map((id) => (
-                <motion.div key={id} layout="position" transition={springStandard}>
-                  <ConversationRow
-                    id={id}
-                    conversation={conversations[id]}
-                    active={activeId === id}
-                    locale={locale}
-                    nowTick={nowTick}
-                    subtitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
-                    worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
-                    isolated={Boolean(conversations[id].worktree)}
-                    onSelect={selectConversation}
-                    onTogglePin={togglePinConversation}
-                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                    onCleanupWorktree={(conversationId) =>
-                      void handleCleanupWorktree(conversationId)
-                    }
-                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setArchivedOpen((open) => !open)}
-            className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-              <ChevronRight
-                className={cn(
-                  'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                  archivedOpen ? '-rotate-90' : 'rotate-0'
-                )}
-              />
-            </span>
-            <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {t('Archived')}
-            </span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">{archivedIds.length}</span>
+            <FolderPlus className="h-4 w-4" />
           </button>
         </div>
-      )}
 
-      <div className="flex shrink-0 items-center justify-between border-t p-2">
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className={ICON_BUTTON_CLASS}
-          title={t('Collapse sidebar')}
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => window.electronAPI.window.openSettings()}
-          className={ICON_BUTTON_CLASS}
-          title={t('Settings')}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+          {projects.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+            >
+              {t('Add a project to start')}
+            </button>
+          )}
+          {pinnedIds.length > 0 && (
+            <div data-slot="pinned-section">
+              <div className="flex items-center gap-1.5 px-2 py-2">
+                <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-sm font-medium">{t('Pinned')}</span>
+              </div>
+              <div className="flex flex-col gap-y-0.5">
+                {pinnedIds.map((id) => (
+                  <motion.div key={id} layout="position" transition={springStandard}>
+                    <ConversationRow
+                      id={id}
+                      conversation={conversations[id]}
+                      active={activeId === id}
+                      locale={locale}
+                      nowTick={nowTick}
+                      hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                      worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
+                      isolated={Boolean(conversations[id].worktree)}
+                      onSelect={selectConversation}
+                      onTogglePin={togglePinConversation}
+                      onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                      onCleanupWorktree={(conversationId) =>
+                        void handleCleanupWorktree(conversationId)
+                      }
+                      onMoveToWorktree={(conversationId) =>
+                        void handleMoveToWorktree(conversationId)
+                      }
+                      onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                    />
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
+          {projects.map((project) => {
+            const projectConversations = projectConversationIds(order, conversations, project.id);
+            const folded = collapsedProjects[project.id] === true;
+            return (
+              <div key={project.id}>
+                {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸） */}
+                <div className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30">
+                  <button
+                    type="button"
+                    onClick={() => toggleProject(project.id)}
+                    className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                    title={project.path}
+                  >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                      <ChevronRight
+                        className={cn(
+                          'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                          !folded && 'rotate-90'
+                        )}
+                      />
+                    </span>
+                    <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {project.name}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void newConversation(project.id)}
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title={t('New conversation')}
+                  >
+                    <MessageSquarePlus className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImportProject(project)}
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title={t('Import session')}
+                  >
+                    <HardDriveDownload className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingRemove({
+                        kind: 'project',
+                        project,
+                        conversationIds: projectConversations,
+                      })
+                    }
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+                    title={t('Remove project')}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <AnimatePresence initial={false}>
+                  {!folded && (
+                    <motion.div
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      variants={heightVariants}
+                      transition={springStandard}
+                      className="overflow-hidden"
+                    >
+                      <div className="mt-0.5 flex flex-col gap-y-0.5">
+                        {(expandedProjects[project.id]
+                          ? projectConversations
+                          : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
+                        ).map((id) => (
+                          <motion.div key={id} layout="position" transition={springStandard}>
+                            <ConversationRow
+                              id={id}
+                              conversation={conversations[id]}
+                              active={activeId === id}
+                              locale={locale}
+                              nowTick={nowTick}
+                              worktreeStatus={
+                                conversations[id].worktree ? worktreeStatuses[id] : undefined
+                              }
+                              isolated={Boolean(conversations[id].worktree)}
+                              onSelect={selectConversation}
+                              onTogglePin={togglePinConversation}
+                              onToggleArchive={(conversationId) =>
+                                void handleToggleArchive(conversationId)
+                              }
+                              onCleanupWorktree={(conversationId) =>
+                                void handleCleanupWorktree(conversationId)
+                              }
+                              onMoveToWorktree={(conversationId) =>
+                                void handleMoveToWorktree(conversationId)
+                              }
+                              onRemove={(conversationId) =>
+                                void openRemoveConversation(conversationId)
+                              }
+                            />
+                          </motion.div>
+                        ))}
+                        {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedProjects((prev) => ({
+                                ...prev,
+                                [project.id]: !prev[project.id],
+                              }))
+                            }
+                            className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                          >
+                            {expandedProjects[project.id]
+                              ? t('Collapse')
+                              : t('Show {{n}} more', {
+                                  n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
+                                })}
+                          </button>
+                        )}
+                        {projectConversations.length === 0 && (
+                          <p className="py-1.5 pl-9 text-xs text-muted-foreground">
+                            {t('No conversations yet')}
+                          </p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+
+        {archivedIds.length > 0 && (
+          <div data-slot="archived-section" className="shrink-0 border-t p-2">
+            {/* 列表在折叠头上方：固定底部向上展开 */}
+            <AnimatePresence initial={false}>
+              {archivedOpen && (
+                <motion.div
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  variants={heightVariants}
+                  transition={springStandard}
+                  className="overflow-hidden"
+                >
+                  <div className="mb-0.5 flex max-h-64 flex-col gap-y-0.5 overflow-y-auto">
+                    {archivedIds.map((id) => (
+                      <motion.div key={id} layout="position" transition={springStandard}>
+                        <ConversationRow
+                          id={id}
+                          conversation={conversations[id]}
+                          active={activeId === id}
+                          locale={locale}
+                          nowTick={nowTick}
+                          subtitle={
+                            projects.find((p) => p.id === conversations[id].projectId)?.name
+                          }
+                          worktreeStatus={
+                            conversations[id].worktree ? worktreeStatuses[id] : undefined
+                          }
+                          isolated={Boolean(conversations[id].worktree)}
+                          onSelect={selectConversation}
+                          onTogglePin={togglePinConversation}
+                          onToggleArchive={(conversationId) =>
+                            void handleToggleArchive(conversationId)
+                          }
+                          onCleanupWorktree={(conversationId) =>
+                            void handleCleanupWorktree(conversationId)
+                          }
+                          onMoveToWorktree={(conversationId) =>
+                            void handleMoveToWorktree(conversationId)
+                          }
+                          onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <button
+              type="button"
+              onClick={() => setArchivedOpen((open) => !open)}
+              className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/30"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <ChevronRight
+                  className={cn(
+                    'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+                    archivedOpen ? '-rotate-90' : 'rotate-0'
+                  )}
+                />
+              </span>
+              <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                {t('Archived')}
+              </span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {archivedIds.length}
+              </span>
+            </button>
+          </div>
+        )}
+
+        <div className="flex shrink-0 items-center justify-between border-t p-2">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className={ICON_BUTTON_CLASS}
+            title={t('Collapse sidebar')}
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => window.electronAPI.window.openSettings()}
+            className={ICON_BUTTON_CLASS}
+            title={t('Settings')}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAddProject} />
@@ -537,7 +574,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           }
         }}
       />
-    </aside>
+    </motion.aside>
   );
 }
 
