@@ -31,6 +31,7 @@ import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/
 import { powerMonitor, powerSaveBlocker } from 'electron';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot } from './agentHost';
+import { MacosSystemSleepAssertion } from './macosSystemSleepAssertion';
 import {
   checkSetModel,
   checkSpawn,
@@ -40,6 +41,7 @@ import {
   shouldForward,
   sliceHistory,
 } from './pairPolicy';
+import { applyPairPowerTaskEvent, shouldHoldPairPowerKeepAlive } from './pairPowerKeepAlive';
 import {
   isSecureStorageAvailable,
   loadDevices,
@@ -151,15 +153,28 @@ export function setPairSessionConfigListener(listener: (config: PairSessionConfi
 }
 
 let powerBlockerId: number | null = null;
+const macosSystemSleepAssertion = new MacosSystemSleepAssertion();
+let runningTaskIds = new Set<string>();
 
-/** 有手机在线时阻止系统 idle 休眠（屏幕仍可熄）：休眠会掐死中继连接，手机端直接失联 */
+/**
+ * 手机在线或任务在跑时阻止 idle 休眠（屏幕仍可熄）。
+ * 任务在跑也锁：手机切后台后 socket 常断，不锁会睡死、任务和重连一起没。
+ * macOS 额外请求 caffeinate -i -s：尝试挡住系统睡 / 合盖睡（插电才有 -s；合盖仍可能被系统强制睡）。
+ */
 function syncPowerBlocker(): void {
   const anyOnline = [...connections.values()].some((c) => c.phoneOnline);
-  if (anyOnline && powerBlockerId === null) {
-    powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
-  } else if (!anyOnline && powerBlockerId !== null) {
-    powerSaveBlocker.stop(powerBlockerId);
-    powerBlockerId = null;
+  const shouldBlock = shouldHoldPairPowerKeepAlive(anyOnline, runningTaskIds.size);
+  if (shouldBlock) {
+    if (powerBlockerId === null) {
+      powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    }
+    macosSystemSleepAssertion.start('pair-keep-alive');
+  } else {
+    if (powerBlockerId !== null) {
+      powerSaveBlocker.stop(powerBlockerId);
+      powerBlockerId = null;
+    }
+    macosSystemSleepAssertion.stop('pair-keep-alive');
   }
 }
 
@@ -620,6 +635,8 @@ async function sendMeta(conn: Connection): Promise<void> {
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
 export function forwardAgentEvent(event: RendererAgentEvent): void {
+  runningTaskIds = applyPairPowerTaskEvent(runningTaskIds, event);
+  syncPowerBlocker();
   const e = event as {
     type: string;
     sessionId?: string;
