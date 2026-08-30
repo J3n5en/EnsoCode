@@ -18,9 +18,11 @@ export function worktreeHasPendingWork(status: WorktreeStatus | undefined): bool
 export function workspaceMigratedNote(path: string): string {
   return (
     '<workspace-migrated>\n' +
-    `This session's workspace has moved to: ${path}\n` +
-    'Absolute paths mentioned earlier in this conversation are stale. ' +
-    'Re-resolve paths against the new workspace root before reading or editing files.\n' +
+    `FYI: this session's workspace has moved to: ${path}\n` +
+    'Absolute paths mentioned earlier in this conversation are stale; ' +
+    'resolve paths against the new workspace root when you read or edit files.\n' +
+    'This is background information only — not a task, request, or goal. ' +
+    'Do not act on it and do not call goal tools for it; just answer the message below.\n' +
     '</workspace-migrated>'
   );
 }
@@ -29,9 +31,11 @@ export function workspaceMigratedNote(path: string): string {
 export function workspaceFallbackNote(path: string): string {
   return (
     '<workspace-migrated>\n' +
-    `This session's isolated worktree is gone. The workspace is now the main working tree: ${path}\n` +
-    'Absolute paths mentioned earlier in this conversation are stale. ' +
-    'Re-resolve paths against the new workspace root before reading or editing files.\n' +
+    `FYI: this session's isolated worktree is gone. The workspace is now the main working tree: ${path}\n` +
+    'Absolute paths mentioned earlier in this conversation are stale; ' +
+    'resolve paths against the new workspace root when you read or edit files.\n' +
+    'This is background information only — not a task, request, or goal. ' +
+    'Do not act on it and do not call goal tools for it; just answer the message below.\n' +
     '</workspace-migrated>'
   );
 }
