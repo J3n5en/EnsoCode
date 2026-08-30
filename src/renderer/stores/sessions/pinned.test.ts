@@ -88,12 +88,26 @@ describe('archived 与分组的互斥', () => {
 });
 
 describe('pinnedConversationIds', () => {
-  it('跨项目收集置顶会话,按最后活跃时间倒序', () => {
+  it('跨项目收集置顶会话,无手动顺序时按最后活跃时间倒序', () => {
     // e(40) c(30) b(20)
     expect(pinnedConversationIds(order, conversations)).toEqual(['e', 'c', 'b']);
   });
 
   it('不含 order 之外的会话(coworker 等)', () => {
     expect(pinnedConversationIds(order, conversations)).not.toContain('ghost');
+  });
+
+  it('手动顺序优先,未收录的新置顶按活跃时间追加末尾', () => {
+    // 手动 [b, e];c 不在手动序里 → 追加
+    expect(pinnedConversationIds(order, conversations, ['b', 'e'])).toEqual(['b', 'e', 'c']);
+  });
+
+  it('手动序里失效的 id 忽略', () => {
+    expect(pinnedConversationIds(order, conversations, ['ghost2', 'c'])).toEqual(['c', 'e', 'b']);
+  });
+
+  it('手动序里已取消置顶/已归档的不回流', () => {
+    // withArchived 里 b 归档了:手动序含 b 也不应出现
+    expect(pinnedConversationIds(order, withArchived, ['b', 'c'])).toEqual(['c', 'e']);
   });
 });

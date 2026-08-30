@@ -7,9 +7,13 @@
 export const COMPOSER_DROP_ID = 'composer-drop';
 export const PINNED_DROP_ID = 'pinned-drop';
 const PROJECT_PREFIX = 'project:';
+const PINNED_CHAT_PREFIX = 'pinned-chat:';
 
 export const projectDragId = (projectId: string): string => `${PROJECT_PREFIX}${projectId}`;
 export const chatDragId = (conversationId: string): string => `chat:${conversationId}`;
+/** 置顶栏行用独立 id:同一会话同时出现在置顶栏与项目组,dnd-kit 不允许重复 id */
+export const pinnedChatDragId = (conversationId: string): string =>
+  `${PINNED_CHAT_PREFIX}${conversationId}`;
 
 export type DragPayload =
   | { type: 'project'; projectId: string; path: string; name: string }
@@ -23,6 +27,7 @@ export type DragPayload =
 
 export type DropAction =
   | { kind: 'reorder-projects'; activeId: string; overId: string }
+  | { kind: 'reorder-pinned'; activeId: string; overId: string }
   | { kind: 'insert-file-mention'; path: string; label: string }
   | { kind: 'insert-chat-mention'; conversationId: string; label: string; sessionFile: string }
   | { kind: 'pin-conversation'; conversationId: string };
@@ -68,6 +73,13 @@ export function routeDrop(
   if (overId === PINNED_DROP_ID) {
     if (active.pinned) return null;
     return { kind: 'pin-conversation', conversationId: active.conversationId };
+  }
+  if (overId.startsWith(PINNED_CHAT_PREFIX)) {
+    const targetId = overId.slice(PINNED_CHAT_PREFIX.length);
+    if (targetId === active.conversationId) return null;
+    // 未置顶的拖到置顶行上 = 拖进置顶区;已置顶的 = 组内重排
+    if (!active.pinned) return { kind: 'pin-conversation', conversationId: active.conversationId };
+    return { kind: 'reorder-pinned', activeId: active.conversationId, overId: targetId };
   }
   return null;
 }

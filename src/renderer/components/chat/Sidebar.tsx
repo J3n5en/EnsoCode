@@ -38,6 +38,7 @@ import {
   chatDragId,
   type DragPayload,
   PINNED_DROP_ID,
+  pinnedChatDragId,
   projectDragId,
   routeDrop,
 } from '@/components/chat/dragDrop';
@@ -121,6 +122,16 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   });
   const orderedProjects = applyProjectOrder(projects, projectOrderIds);
 
+  // 置顶组的手动顺序(组内拖拽重排;未收录的新置顶按活跃时间追加)
+  const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('enso-pinned-order') ?? '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+
   // 拖拽中的源对象(用于 Overlay 预览与临时 Pinned 落点)
   const { active: dndActive } = useDndContext();
   const dragPayload = dndActive?.data.current as DragPayload | undefined;
@@ -158,6 +169,17 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         case 'pin-conversation':
           togglePinConversation(action.conversationId);
           break;
+        case 'reorder-pinned': {
+          const next = moveProject(
+            pinnedIds.map((id) => ({ id })),
+            pinnedOrderIds,
+            action.activeId,
+            action.overId
+          );
+          setPinnedOrderIds(next);
+          localStorage.setItem('enso-pinned-order', JSON.stringify(next));
+          break;
+        }
       }
     },
   });
@@ -189,7 +211,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   // 展开显示全部会话的项目(会话级状态,重启回到折叠)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
-  const pinnedIds = pinnedConversationIds(order, conversations);
+  const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds);
   const archivedIds = archivedConversationIds(order, conversations);
   // 底部「已归档」栏目的折叠态(缺省收起,重启回到收起)
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -352,9 +374,12 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 <span className="text-sm font-medium">{t('Pinned')}</span>
               </div>
               <div className="flex flex-col gap-y-0.5">
-                {pinnedIds.map((id) => (
-                  <motion.div key={id} layout="position" transition={springStandard}>
-                    <DraggableChat id={id} conversation={conversations[id]}>
+                <SortableContext
+                  items={pinnedIds.map((id) => pinnedChatDragId(id))}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pinnedIds.map((id) => (
+                    <SortablePinnedChat key={id} id={id} conversation={conversations[id]}>
                       <ConversationRow
                         id={id}
                         conversation={conversations[id]}
@@ -381,9 +406,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                         }
                         onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                       />
-                    </DraggableChat>
-                  </motion.div>
-                ))}
+                    </SortablePinnedChat>
+                  ))}
+                </SortableContext>
               </div>
             </PinnedDropZone>
           )}
@@ -737,6 +762,41 @@ function SortableProject({
     },
     handleProps: listeners ?? {},
   });
+}
+
+/** 置顶栏行:组内 sortable 拖拽重排,同时仍可拖入 Composer;独立 id 避免与项目组重复 */
+function SortablePinnedChat({
+  id,
+  conversation,
+  children,
+}: {
+  id: string;
+  conversation: { title: string; sessionFile?: string; pinned?: boolean };
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, transform, transition, listeners, isDragging } = useSortable({
+    id: pinnedChatDragId(id),
+    data: {
+      type: 'chat',
+      conversationId: id,
+      title: conversation.title,
+      sessionFile: conversation.sessionFile,
+      pinned: conversation.pinned === true,
+    } satisfies DragPayload,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : undefined,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** 会话行的拖拽源:拖入 Composer 成 mention / 拖到 Pinned 区置顶;原行拖动中降透明度 */

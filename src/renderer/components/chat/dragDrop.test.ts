@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { COMPOSER_DROP_ID, type DragPayload, PINNED_DROP_ID, routeDrop } from './dragDrop';
+import {
+  COMPOSER_DROP_ID,
+  type DragPayload,
+  PINNED_DROP_ID,
+  pinnedChatDragId,
+  routeDrop,
+} from './dragDrop';
 
 const project: DragPayload = {
   type: 'project',
@@ -79,6 +85,31 @@ describe('routeDrop: 会话', () => {
 
   it('会话拖到项目行 → 不动(不支持跨项目移动)', () => {
     expect(routeDrop(chat, 'project:p2', undefined)).toBeNull();
+  });
+});
+
+describe('routeDrop: Pinned 组内排序', () => {
+  it('置顶会话拖到另一置顶行 → 组内重排', () => {
+    expect(routeDrop({ ...chat, pinned: true }, pinnedChatDragId('c9'), undefined)).toEqual({
+      kind: 'reorder-pinned',
+      activeId: 'c1',
+      overId: 'c9',
+    });
+  });
+
+  it('拖到自身 → 不动', () => {
+    expect(routeDrop({ ...chat, pinned: true }, pinnedChatDragId('c1'), undefined)).toBeNull();
+  });
+
+  it('未置顶会话拖到置顶行上 → 视为拖入置顶区(置顶)', () => {
+    expect(routeDrop(chat, pinnedChatDragId('c9'), undefined)).toEqual({
+      kind: 'pin-conversation',
+      conversationId: 'c1',
+    });
+  });
+
+  it('项目拖到置顶行 → 不动', () => {
+    expect(routeDrop(project, pinnedChatDragId('c9'), undefined)).toBeNull();
   });
 });
 

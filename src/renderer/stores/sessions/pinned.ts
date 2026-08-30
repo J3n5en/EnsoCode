@@ -49,17 +49,34 @@ export function projectConversationIds(
   ];
 }
 
-/** 全部置顶会话 id(跨项目,按最后活跃时间倒序);归档的与 order 之外的会话(coworker)不参与 */
+/**
+ * 全部置顶会话 id(跨项目)。manualIds 是用户拖拽过的手动顺序:
+ * 命中的按其顺序排前,未收录的新置顶按活跃时间追加末尾,失效 id 忽略。
+ * 归档的与 order 之外的会话(coworker)不参与。
+ */
 export function pinnedConversationIds(
   order: readonly string[],
-  conversations: Conversations
+  conversations: Conversations,
+  manualIds: readonly string[] = []
 ): string[] {
-  return sortByActivity(
+  const byActivity = sortByActivity(
     order.filter(
       (id) => conversations[id]?.pinned === true && conversations[id]?.archived !== true
     ),
     conversations
   );
+  const remaining = new Set(byActivity);
+  const ordered: string[] = [];
+  for (const id of manualIds) {
+    if (remaining.has(id)) {
+      ordered.push(id);
+      remaining.delete(id);
+    }
+  }
+  for (const id of byActivity) {
+    if (remaining.has(id)) ordered.push(id);
+  }
+  return ordered;
 }
 
 /** 全部归档会话 id(跨项目,按最后活跃时间倒序) */
