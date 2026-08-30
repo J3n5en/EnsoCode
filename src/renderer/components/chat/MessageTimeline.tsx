@@ -174,8 +174,11 @@ export function MessageTimeline({
       }
       pinToBottom();
       // 纠正期间保持贴底判定：iOS 首帧写 scrollTop 会被布局钳位，
-      // 钳位触发的 scroll 事件会把 atBottom 误判成 false、中断跟随
+      // 钳位触发的 scroll 事件会把 atBottom 误判成 false、中断跟随。
+      // ref 与状态必须一起归位：只改 ref 会留下幽灵「回到底部」按钮
+      // （状态驱动按钮，同值 setState 被 React 跳过，无额外重渲染）。
       atBottomRef.current = true;
+      setAtBottom(true);
       if (Date.now() < deadline) settleRef.current = requestAnimationFrame(settle);
       else abort();
     };
