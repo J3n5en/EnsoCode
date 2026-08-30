@@ -1,3 +1,4 @@
+import { mergeFetchedModels } from '@shared/modelEntry';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import {
@@ -104,13 +105,7 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
       setStatus({ ok: false, text: result.error ?? 'Failed' });
       return;
     }
-    setModels((current) => {
-      const known = new Set(current.map((model) => model.id));
-      const fresh = result.models
-        .filter((id) => !known.has(id))
-        .map((id) => ({ id, enabled: true }) satisfies ModelEntry);
-      return [...current, ...fresh];
-    });
+    setModels((current) => mergeFetchedModels(current, result.models));
     setStatus({ ok: true, text: t('Fetched {{count}} models', { count: result.models.length }) });
   };
 

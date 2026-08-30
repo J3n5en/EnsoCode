@@ -107,7 +107,7 @@ function fixture(options?: {
     readSettings,
     patchSettings,
     removeProject: vi.fn(() => ({ ok: true, previous: {}, value: null })),
-    listModels: vi.fn(async () => ({ ok: true, models: ['model-1'] })),
+    listModels: vi.fn(async () => ({ ok: true, models: [{ id: 'model-1' }] })),
     testProvider:
       options?.testProvider ??
       vi.fn(async () => ({ ok: true, latencyMs: 1, message: 'Connected' })),

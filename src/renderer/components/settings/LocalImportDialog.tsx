@@ -1,3 +1,4 @@
+import { mergeFetchedModels } from '@shared/modelEntry';
 import type { CollectedProvider, LocalProviderScanResult, ScanCandidate } from '@shared/types';
 import { CircleAlert, Download, RefreshCw } from 'lucide-react';
 import * as React from 'react';
@@ -281,11 +282,7 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
     });
     setBusy(false);
     if (result.ok) {
-      const known = new Set(provider.models.map((m) => m.id));
-      const fresh = result.models
-        .filter((id) => !known.has(id))
-        .map((id) => ({ id, enabled: true }));
-      updateProvider(providerId, { models: [...provider.models, ...fresh] });
+      updateProvider(providerId, { models: mergeFetchedModels(provider.models, result.models) });
     } else {
       setError(result.error ?? t('Fetch failed'));
     }

@@ -1,5 +1,7 @@
+import { positiveFiniteNumber } from '@shared/modelCatalog';
 import { DEFAULT_BASE_URLS } from '@shared/providerCatalog';
 import type {
+  FetchedModel,
   ListModelsResult,
   ModelApiKind,
   ProviderApiConfig,
@@ -67,7 +69,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
     if (!response.ok) return { ok: false, models: [], error: httpError(response) };
 
     const data = (await response.json()) as Record<string, unknown>;
-    const models = extractModelIds(config.api, data);
+    const models = extractModelEntries(config.api, data);
     return { ok: true, models };
   } catch (error) {
     const secrets = createSecretSet([config.apiKey]);
@@ -75,7 +77,61 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
   }
 }
 
-export function extractModelIds(api: ModelApiKind, data: Record<string, unknown>): string[] {
+/**
+ * 各家 "OpenAI 兼容" 站与 Google 官方对上下文窗口 / 最大输出的字段名各不相同，
+ * 按 "更具体的字段名优先" 依次探测（清单参考 DeepChat new-api 分支 + OpenRouter/Groq/Gemini）。
+ * 官方 OpenAI / Anthropic 不返回这些字段，探不到就缺省，下游走 catalog/default 兜底。
+ */
+const CONTEXT_WINDOW_FIELDS = [
+  'context_length',
+  'contextLength',
+  'input_token_limit',
+  'max_input_tokens',
+  'context_window',
+  'context_size',
+  'inputTokenLimit',
+] as const;
+
+const MAX_TOKENS_FIELDS = [
+  'max_completion_tokens',
+  'max_output_tokens',
+  'output_token_limit',
+  'max_tokens',
+  'outputTokenLimit',
+] as const;
+
+function firstPositiveField(
+  item: Record<string, unknown>,
+  fields: readonly string[]
+): number | undefined {
+  for (const field of fields) {
+    const value = positiveFiniteNumber(item[field]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+/** 非正 / 非有限 / 非数字一律视为缺失，不留假数字 */
+function attachTokenLimits(id: string, item: Record<string, unknown>): FetchedModel {
+  const contextWindow = firstPositiveField(item, CONTEXT_WINDOW_FIELDS);
+  let maxTokens = firstPositiveField(item, MAX_TOKENS_FIELDS);
+  if (maxTokens === undefined && item.top_provider && typeof item.top_provider === 'object') {
+    // OpenRouter 形状：最大输出藏在 top_provider 里
+    maxTokens = firstPositiveField(item.top_provider as Record<string, unknown>, [
+      'max_completion_tokens',
+    ]);
+  }
+  return {
+    id,
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+  };
+}
+
+export function extractModelEntries(
+  api: ModelApiKind,
+  data: Record<string, unknown>
+): FetchedModel[] {
   // 条目可能是 null 或非对象，先过滤再取字段，避免响应结构异常时抛错
   const objects = (value: unknown): Record<string, unknown>[] =>
     Array.isArray(value)
@@ -85,20 +141,22 @@ export function extractModelIds(api: ModelApiKind, data: Record<string, unknown>
       : [];
 
   if (api === 'ollama') {
+    // /api/tags 不携带上下文信息（需要逐个调 /api/show，不在本列表接口里做）
     return objects(data.models)
       .map((item) => item.model ?? item.name)
-      .filter((id): id is string => typeof id === 'string');
+      .filter((id): id is string => typeof id === 'string')
+      .map((id) => ({ id }));
   }
   if (api === 'google-generative-ai') {
     return objects(data.models)
-      .map((item) =>
-        typeof item.name === 'string' ? item.name.replace(/^models\//, '') : undefined
+      .filter(
+        (item): item is Record<string, unknown> & { name: string } => typeof item.name === 'string'
       )
-      .filter((id): id is string => typeof id === 'string');
+      .map((item) => attachTokenLimits(item.name.replace(/^models\//, ''), item));
   }
   return objects(data.data)
-    .map((item) => item.id)
-    .filter((id): id is string => typeof id === 'string');
+    .filter((item): item is Record<string, unknown> & { id: string } => typeof item.id === 'string')
+    .map((item) => attachTokenLimits(item.id, item));
 }
 
 export async function testProvider(

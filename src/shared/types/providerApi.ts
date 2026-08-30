@@ -7,9 +7,16 @@ export interface ProviderApiConfig {
   baseUrl: string;
 }
 
+/** 拉取模型列表时从响应里识别出的单个模型（元数据字段可能缺失） */
+export interface FetchedModel {
+  id: string;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
 export interface ListModelsResult {
   ok: boolean;
-  models: string[];
+  models: FetchedModel[];
   error?: string;
 }
 

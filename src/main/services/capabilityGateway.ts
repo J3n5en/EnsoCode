@@ -651,8 +651,9 @@ export function createCapabilityHandlers(
       const provider = providerById(providerId);
       if (!provider) return unavailable(`Provider not found: ${providerId}`);
       const result = await services.listModels(providerConfig(provider));
+      // capability 契约保持 string id 数组；元数据只供设置 UI 落地，不对 agent 工具暴露
       return result.ok
-        ? success({ models: result.models })
+        ? success({ models: result.models.map((model) => model.id) })
         : failed(result.error ?? 'Model fetch failed');
     },
     'providers.test-connection': async (_context, params) => {
