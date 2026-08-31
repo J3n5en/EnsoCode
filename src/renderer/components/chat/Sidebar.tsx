@@ -189,8 +189,11 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   });
 
   const [addOpen, setAddOpen] = useState(false);
-  const handleAddProject = (request: { path: string; sshHost?: string }) => {
-    void addProject(request.path, request.sshHost ? { sshHost: request.sshHost } : undefined)
+  const handleAddProject = (request: { path: string; sshConnectionId?: string }) => {
+    void addProject(
+      request.path,
+      request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined
+    )
       .then((project) => {
         if (project) void newConversation(project.id);
       })

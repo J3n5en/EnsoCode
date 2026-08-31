@@ -28,7 +28,7 @@ import {
 } from '@shared/modelCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
-import { buildSshShellCommand } from '@shared/ssh';
+import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -75,7 +75,12 @@ import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
-import { createSshExecutor, resolveSshControlPath, type SshExecutor } from './ssh/executor';
+import {
+  createSshExecutor,
+  resolveSshControlPath,
+  type SshExecutor,
+  sshPasswordEnv,
+} from './ssh/executor';
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
@@ -759,7 +764,7 @@ export class SessionSupervisor {
       ? (() => {
           const controlDir = path.join(this.options.agentDir, 'ssh');
           mkdirSync(controlDir, { recursive: true });
-          return createSshExecutor(remote.host, controlDir);
+          return createSshExecutor(remote.host, controlDir, undefined, remote);
         })()
       : undefined;
     const remoteOps = sshExecutor ? createRemoteOperations(sshExecutor) : undefined;
@@ -849,13 +854,28 @@ export class SessionSupervisor {
           ];
     // 后台任务 manager 本体始终本地 spawn:远程会话把命令变换成本地 ssh 命令
     const backgroundTransform = remote
-      ? (command: string, taskCwd: string) => ({
-          command: buildSshShellCommand(remote.host, command, {
+      ? (command: string, taskCwd: string) => {
+          const controlDir = path.join(this.options.agentDir, 'ssh');
+          let sshCommand = buildSshShellCommand(remote.host, command, {
             cwd: taskCwd,
-            controlPath: resolveSshControlPath(path.join(this.options.agentDir, 'ssh')),
-          }),
-          cwd: process.cwd(),
-        })
+            controlPath: resolveSshControlPath(controlDir),
+            auth: remote.auth,
+            port: remote.port,
+          });
+          if (remote.auth === 'password' && remote.password) {
+            const env = sshPasswordEnv(controlDir, remote.password);
+            sshCommand = `${[
+              'SSH_ASKPASS',
+              'SSH_ASKPASS_REQUIRE',
+              'DISPLAY',
+              'ENSO_SSH_ASKPASS_PASSWORD',
+              'SSH_AUTH_SOCK',
+            ]
+              .map((key) => `${key}=${shellQuote(env[key] ?? '')}`)
+              .join(' ')} ${sshCommand}`;
+          }
+          return { command: sshCommand, cwd: process.cwd() };
+        }
       : undefined;
     const buildBaseTools = (toolGate: ApprovalGate, cp?: CheckpointManager): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);

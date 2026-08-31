@@ -1,7 +1,7 @@
 {
-  "id": "remote-ssh-projects",
-  "name": "remote-ssh-projects",
-  "title": "Remote SSH projects with local chat history",
+  "id": "ssh-connection-profiles",
+  "name": "ssh-connection-profiles",
+  "title": "SSH 连接配置：密码/免密与测试",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "08-31-ssh-connection-profiles"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "08-31-remote-ssh-projects",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

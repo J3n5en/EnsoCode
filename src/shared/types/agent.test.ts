@@ -86,18 +86,34 @@ describe('Main-owned source authority contracts', () => {
     expect(parseProjectAuthority({ ...project, version: -1 })).toBeNull();
     expect(parseProjectAuthority({ ...project, rendererOwned: true })).toBeNull();
 
-    // 远程项目：kind/sshHost 可选字段；存量无 kind 对象（上面）必须继续通过
-    const sshProject = { ...project, kind: 'ssh', sshHost: 'user@dev-box' };
+    // 远程项目：必须同时有 sshHost(展示/目标串) 与 sshConnectionId
+    const sshProject = {
+      ...project,
+      kind: 'ssh',
+      sshHost: 'user@dev-box',
+      sshConnectionId: projectId,
+    };
     expect(parseProjectAuthority(sshProject)).toEqual(sshProject);
     const localKind = { ...project, kind: 'local' };
     expect(parseProjectAuthority(localKind)).toEqual(localKind);
-    // kind:'ssh' 必须有非空 sshHost
     expect(parseProjectAuthority({ ...project, kind: 'ssh' })).toBeNull();
-    expect(parseProjectAuthority({ ...project, kind: 'ssh', sshHost: '' })).toBeNull();
-    // 非法 kind / local 带 sshHost 拒绝
+    expect(
+      parseProjectAuthority({ ...project, kind: 'ssh', sshHost: 'user@dev-box' })
+    ).toBeNull();
+    expect(
+      parseProjectAuthority({
+        ...project,
+        kind: 'ssh',
+        sshHost: 'user@dev-box',
+        sshConnectionId: 'not-uuid',
+      })
+    ).toBeNull();
     expect(parseProjectAuthority({ ...project, kind: 'ftp', sshHost: 'h' })).toBeNull();
     expect(parseProjectAuthority({ ...project, sshHost: 'user@dev-box' })).toBeNull();
     expect(parseProjectAuthority({ ...project, kind: 'local', sshHost: 'h' })).toBeNull();
+    expect(
+      parseProjectAuthority({ ...project, kind: 'local', sshConnectionId: projectId })
+    ).toBeNull();
 
     const conversation = {
       conversationId,
@@ -127,7 +143,18 @@ describe('Main-owned source authority contracts', () => {
     expect(
       parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/repo', projectId })
     ).toBeNull();
-    // 远程项目创建请求
+    // 远程项目创建：只收 sshConnectionId,不收自由 sshHost
+    expect(
+      parseCreateProjectAuthorityRequest({
+        requestId: 'p1',
+        path: '/srv/app',
+        kind: 'ssh',
+        sshConnectionId: projectId,
+      })
+    ).not.toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/srv/app', kind: 'ssh' })
+    ).toBeNull();
     expect(
       parseCreateProjectAuthorityRequest({
         requestId: 'p1',
@@ -135,19 +162,20 @@ describe('Main-owned source authority contracts', () => {
         kind: 'ssh',
         sshHost: 'user@dev-box',
       })
-    ).not.toBeNull();
-    expect(
-      parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/srv/app', kind: 'ssh' })
     ).toBeNull();
     expect(
-      parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/srv/app', sshHost: 'h' })
+      parseCreateProjectAuthorityRequest({
+        requestId: 'p1',
+        path: '/srv/app',
+        sshConnectionId: projectId,
+      })
     ).toBeNull();
     expect(
       parseCreateProjectAuthorityRequest({
         requestId: 'p1',
         path: '/srv/app',
         kind: 'bogus',
-        sshHost: 'h',
+        sshConnectionId: projectId,
       })
     ).toBeNull();
     expect(
@@ -221,12 +249,28 @@ describe('parent/child commands', () => {
 
   it('spawn-parent 携 remote:合法通过,坏 shape 拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/srv/app', model };
-    const withRemote = { ...base, remote: { host: 'user@dev-box' } };
+    const withRemote = { ...base, remote: { host: 'user@dev-box', auth: 'key' } };
     expect(parseAgentCommand(withRemote)).toEqual(withRemote);
-    expect(parseAgentCommand({ ...base, remote: { host: '' } })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: { host: 'user@dev-box' } })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: { host: '' , auth: 'key' } })).toBeNull();
     expect(parseAgentCommand({ ...base, remote: {} })).toBeNull();
     expect(parseAgentCommand({ ...base, remote: 'user@dev-box' })).toBeNull();
-    expect(parseAgentCommand({ ...base, remote: { host: 'h', port: 22 } })).toBeNull();
+    const withPort = { ...base, remote: { host: 'h', auth: 'key', port: 22 } };
+    expect(parseAgentCommand(withPort)).toEqual(withPort);
+    const withPassword = {
+      ...base,
+      remote: { host: 'h', auth: 'password', password: 's3cret' },
+    };
+    expect(parseAgentCommand(withPassword)).toEqual(withPassword);
+    expect(
+      parseAgentCommand({ ...base, remote: { host: 'h', auth: 'password' } })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({
+        ...base,
+        remote: { host: 'h', auth: 'key', password: 'nope' },
+      })
+    ).toBeNull();
   });
 
   it('release-parent 可解析（Move to worktree 依赖；漏白名单会被 worker 静默丢弃）', () => {

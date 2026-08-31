@@ -1,3 +1,4 @@
+import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import {
   parseCreateProjectAuthorityRequest,
@@ -6,6 +7,7 @@ import {
 } from '@shared/types/agent';
 import { ipcMain } from 'electron';
 import { getRecentProjects } from '../services/recentProjects';
+import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { sshProbeDirectory } from '../services/sshProbe';
 import { isMainWebContents } from '../windows/MainWindow';
 import { getSourceAuthorityRegistry } from './agent';
@@ -27,8 +29,14 @@ export function registerProjectHandlers(): void {
       return { accepted: false, error: 'Invalid project request.' };
     }
     // ssh 项目：registry 是同步契约，远端目录存在性在这里异步预校验
-    if (parsed.kind === 'ssh' && parsed.sshHost) {
-      const failure = await sshProbeDirectory(parsed.sshHost, parsed.path);
+    if (parsed.kind === 'ssh' && parsed.sshConnectionId) {
+      const secret = getSshConnectionStore().getSecret(parsed.sshConnectionId);
+      if (!secret) return { accepted: false, error: 'SSH 连接不存在。' };
+      const failure = await sshProbeDirectory(resolveSshTarget(secret), parsed.path, {
+        auth: secret.auth,
+        port: secret.port,
+        password: secret.password,
+      });
       if (failure) return { accepted: false, error: failure };
     }
     return registry.createProject(parsed);

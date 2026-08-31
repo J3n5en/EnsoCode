@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { resolveSshTarget } from '@shared/ssh';
 import type {
   AuthorityMutationResult,
   ConversationAuthority,
@@ -37,6 +38,7 @@ export interface SourceAuthorityRegistryOptions {
   safeSessionRoot?: string;
   randomUuid?: () => string;
   onChanged?: (projection: SourceAuthorityProjection) => void;
+  resolveSshConnection?: (id: string) => { host: string; user?: string } | null;
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -69,9 +71,16 @@ export class SourceAuthorityRegistry {
     if (!this.load()) this.migrateLegacy(options.legacySettings?.());
   }
 
+  private hydrateProject(value: ProjectAuthority): ProjectAuthority {
+    if (value.kind !== 'ssh' || !value.sshConnectionId) return { ...value };
+    const connection = this.options.resolveSshConnection?.(value.sshConnectionId);
+    if (!connection) return { ...value };
+    return { ...value, sshHost: resolveSshTarget(connection) };
+  }
+
   projection(): SourceAuthorityProjection {
     return {
-      projects: [...this.projects.values()].map((value) => ({ ...value })),
+      projects: [...this.projects.values()].map((value) => this.hydrateProject(value)),
       conversations: [...this.conversations.values()].map((value) => ({
         ...value,
         ...(value.selection ? { selection: { ...value.selection } } : {}),
@@ -81,7 +90,7 @@ export class SourceAuthorityRegistry {
 
   project(projectId: string): ProjectAuthority | undefined {
     const value = this.projects.get(projectId);
-    return value ? { ...value } : undefined;
+    return value ? this.hydrateProject(value) : undefined;
   }
 
   conversation(conversationId: string): ConversationAuthority | undefined {
@@ -127,15 +136,19 @@ export class SourceAuthorityRegistry {
   private createSshProject(
     request: CreateProjectAuthorityRequest
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
-    const sshHost = request.sshHost;
-    if (typeof sshHost !== 'string' || sshHost.length === 0)
-      throw new Error('Remote project requires an SSH host.');
+    const connectionId = request.sshConnectionId;
+    if (typeof connectionId !== 'string' || connectionId.length === 0) {
+      return { accepted: false, error: 'Remote project requires an SSH connection.' };
+    }
+    const connection = this.options.resolveSshConnection?.(connectionId);
+    if (!connection) return { accepted: false, error: 'SSH 连接不存在。' };
+    const sshHost = resolveSshTarget(connection);
     const canonicalPath = normalizeRemoteProjectPath(request.path);
-    if (!canonicalPath) throw new Error('Remote project path must be absolute.');
+    if (!canonicalPath) return { accepted: false, error: 'Remote project path must be absolute.' };
     const existing = [...this.projects.values()].find(
       (project) =>
         project.kind === 'ssh' &&
-        project.sshHost === sshHost &&
+        project.sshConnectionId === connectionId &&
         project.canonicalPath === canonicalPath &&
         project.state === 'active'
     );
@@ -145,9 +158,19 @@ export class SourceAuthorityRegistry {
       canonicalPath,
       kind: 'ssh',
       sshHost,
+      sshConnectionId: connectionId,
       state: 'active',
       version: 1,
     });
+  }
+
+  sshConnectionInUse(connectionId: string): boolean {
+    return [...this.projects.values()].some(
+      (project) =>
+        project.state === 'active' &&
+        project.kind === 'ssh' &&
+        project.sshConnectionId === connectionId
+    );
   }
 
   private insertProject(

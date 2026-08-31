@@ -269,6 +269,10 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_STATUS: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_SESSION_CONFIG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  SSH_CONNECTIONS_LIST: excluded('SSH connection profiles for remote projects.'),
+  SSH_CONNECTIONS_UPSERT: excluded('SSH connection profiles for remote projects.'),
+  SSH_CONNECTIONS_DELETE: excluded('SSH connection profiles for remote projects.'),
+  SSH_CONNECTIONS_TEST: excluded('SSH connection profiles for remote projects.'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

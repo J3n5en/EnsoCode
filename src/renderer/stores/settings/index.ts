@@ -482,14 +482,16 @@ export const useSettingsStore = create<SettingsState>()(
         const existing = projection.projects.find((project) => {
           if (project.state !== 'active' || project.canonicalPath !== path) return false;
           // 本地/远程不互认:ssh 项目还要同 host
-          return remote ? project.sshHost === remote.sshHost : project.kind !== 'ssh';
+          return remote
+            ? project.sshConnectionId === remote.sshConnectionId
+            : project.kind !== 'ssh';
         });
         const result = existing
           ? { accepted: true as const, value: existing }
           : await window.electronAPI.sourceAuthority.createProject({
               requestId: crypto.randomUUID(),
               path,
-              ...(remote ? { kind: 'ssh' as const, sshHost: remote.sshHost } : {}),
+              ...(remote ? { kind: 'ssh' as const, sshConnectionId: remote.sshConnectionId } : {}),
             });
         if (!result.accepted) {
           throw new Error(
@@ -504,7 +506,11 @@ export const useSettingsStore = create<SettingsState>()(
             result.value.canonicalPath,
           path: result.value.canonicalPath,
           ...(result.value.kind === 'ssh'
-            ? { kind: 'ssh' as const, sshHost: result.value.sshHost }
+            ? {
+                kind: 'ssh' as const,
+                sshHost: result.value.sshHost,
+                sshConnectionId: result.value.sshConnectionId,
+              }
             : {}),
         };
         set((state) => ({
@@ -575,7 +581,13 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
       id: project.projectId,
       name: project.canonicalPath.split('/').filter(Boolean).pop() ?? project.canonicalPath,
       path: project.canonicalPath,
-      ...(project.kind === 'ssh' ? { kind: 'ssh' as const, sshHost: project.sshHost } : {}),
+      ...(project.kind === 'ssh'
+        ? {
+            kind: 'ssh' as const,
+            sshHost: project.sshHost,
+            sshConnectionId: project.sshConnectionId,
+          }
+        : {}),
     }));
   // 投影未变时必须不写 state：persist 的每次 setState 都会落盘并广播 SETTINGS_CHANGED，
   // 而收到广播的窗口 rehydrate 后又会重投影。无条件写会让两个窗口互相广播成死循环
@@ -596,7 +608,8 @@ function sameProjectProjection(
       project.name === candidate.name &&
       project.path === candidate.path &&
       project.kind === candidate.kind &&
-      project.sshHost === candidate.sshHost
+      project.sshHost === candidate.sshHost &&
+      project.sshConnectionId === candidate.sshConnectionId
     );
   });
 }

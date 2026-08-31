@@ -35,6 +35,15 @@ export interface SshExecArgsOptions {
   controlPersistSeconds?: number;
   /** 建连超时秒数,默认 10 */
   connectTimeoutSeconds?: number;
+  /** key=BatchMode;password=ASKPASS 侧关 BatchMode */
+  auth?: 'key' | 'password';
+  /** 非 22 才写 -p */
+  port?: number;
+}
+
+/** 有 user 则 user@host,否则 host(ssh config 别名) */
+export function resolveSshTarget(conn: { host: string; user?: string }): string {
+  return conn.user ? `${conn.user}@${conn.host}` : conn.host;
 }
 
 /** 把远端命令拼成本地 shell(spawn shell:true)可执行的单条 ssh 命令(后台任务/gate 用) */
@@ -54,7 +63,19 @@ export function buildSshExecArgs(
   remoteCommand: string,
   options: SshExecArgsOptions = {}
 ): string[] {
-  const args = ['-o', 'BatchMode=yes'];
+  const args: string[] = [];
+  if (options.auth !== 'password') args.push('-o', 'BatchMode=yes');
+  else {
+    args.push(
+      '-o',
+      'PreferredAuthentications=password,keyboard-interactive',
+      '-o',
+      'NumberOfPasswordPrompts=1',
+      '-o',
+      'IdentitiesOnly=yes'
+    );
+  }
+  if (options.port && options.port !== 22) args.push('-p', String(options.port));
   args.push('-o', `ConnectTimeout=${options.connectTimeoutSeconds ?? 10}`);
   if (options.controlPath) {
     args.push(

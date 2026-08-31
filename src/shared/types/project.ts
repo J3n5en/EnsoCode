@@ -7,6 +7,7 @@ export interface Project {
   kind?: 'local' | 'ssh';
   /** kind='ssh' 时的 ssh 目标(user@host 或 ssh config 别名) */
   sshHost?: string;
+  sshConnectionId?: string;
 }
 
 /** 从本地编辑器 / 编程应用读到的最近打开目录 */

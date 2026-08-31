@@ -6,8 +6,10 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { buildRemoteCommand, buildSshExecArgs } from '@shared/ssh';
+import type { AgentRemoteConfig } from '@shared/types/agent';
 
 export interface SshExecResult {
   stdout: string;
@@ -37,7 +39,29 @@ export interface SshStreamOptions {
   cwd?: string;
 }
 
-export type SpawnLike = (command: string, args: readonly string[]) => ChildProcess;
+export type SpawnLike = (
+  command: string,
+  args: readonly string[],
+  options?: { env?: NodeJS.ProcessEnv }
+) => ChildProcess;
+
+export function writeSshAskpassHelper(dir: string): string {
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'askpass.sh');
+  writeFileSync(file, '#!/bin/sh\nprintf %s "$ENSO_SSH_ASKPASS_PASSWORD"\n', { mode: 0o700 });
+  return file;
+}
+
+export function sshPasswordEnv(dir: string, password: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    SSH_ASKPASS: writeSshAskpassHelper(dir),
+    SSH_ASKPASS_REQUIRE: 'force',
+    DISPLAY: process.env.DISPLAY || ':',
+    ENSO_SSH_ASKPASS_PASSWORD: password,
+    SSH_AUTH_SOCK: '',
+  };
+}
 
 export interface SshExecutor {
   readonly host: string;
@@ -66,15 +90,25 @@ export function resolveSshControlPath(controlDir: string): string {
 export function createSshExecutor(
   host: string,
   controlDir: string,
-  spawnImpl: SpawnLike = spawn
+  spawnImpl: SpawnLike = spawn,
+  remote: Pick<AgentRemoteConfig, 'auth' | 'port' | 'password'> = { auth: 'key' }
 ): SshExecutor {
   const controlPath = resolveSshControlPath(controlDir);
+  const sshOptions = {
+    controlPath,
+    auth: remote.auth,
+    ...(remote.port ? { port: remote.port } : {}),
+  };
+  const env =
+    remote.auth === 'password' && remote.password
+      ? sshPasswordEnv(controlDir, remote.password)
+      : undefined;
 
   function run(command: string[] | string, options: SshExecOptions): Promise<SshExecRawResult> {
     return new Promise((resolve, reject) => {
       const remoteCommand = buildRemoteCommand(command, { cwd: options.cwd });
-      const args = buildSshExecArgs(host, remoteCommand, { controlPath });
-      const proc = spawnImpl('ssh', args);
+      const args = buildSshExecArgs(host, remoteCommand, sshOptions);
+      const proc = spawnImpl('ssh', args, env ? { env } : undefined);
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       let settled = false;
@@ -133,7 +167,11 @@ export function createSshExecutor(
   ): Promise<{ exitCode: number | null }> {
     return new Promise((resolve, reject) => {
       const remoteCommand = buildRemoteCommand(command, { cwd: options.cwd });
-      const proc = spawnImpl('ssh', buildSshExecArgs(host, remoteCommand, { controlPath }));
+      const proc = spawnImpl(
+        'ssh',
+        buildSshExecArgs(host, remoteCommand, sshOptions),
+        env ? { env } : undefined
+      );
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (exitCode: number | null) => {

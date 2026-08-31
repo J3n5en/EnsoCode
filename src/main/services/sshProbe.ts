@@ -1,50 +1,99 @@
 import { execFile } from 'node:child_process';
-import { buildRemoteCommand, buildSshExecArgs } from '@shared/ssh';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildRemoteCommand, buildSshExecArgs, type SshExecArgsOptions } from '@shared/ssh';
 
-/** ssh 探测超时(秒);BatchMode 下认证不可交互,挂死风险低但连接可能长等 */
 const CONNECT_TIMEOUT_SECONDS = 10;
-/** 整个 probe 进程的硬超时(ms),覆盖 DNS/代理等 ConnectTimeout 不管的阶段 */
 const PROBE_TIMEOUT_MS = 15_000;
 
-/** 构建 `ssh <host> test -d <path>` 的 argv;路径经单引号防远端 shell 展开 */
-export function buildSshProbeArgs(host: string, remotePath: string): string[] {
+export function buildSshProbeArgs(
+  host: string,
+  remotePath: string,
+  options: SshExecArgsOptions = {}
+): string[] {
   return buildSshExecArgs(host, buildRemoteCommand(['test', '-d', remotePath]), {
     connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+    ...options,
   });
 }
 
-/** 把 ssh 退出码 + stderr 归为用户可读错误(中文,面向 AddProjectDialog 内联展示) */
-export function classifySshProbeFailure(code: number, stderr: string): string {
+export function buildSshLoginProbeArgs(host: string, options: SshExecArgsOptions = {}): string[] {
+  return buildSshExecArgs(host, buildRemoteCommand(['true']), {
+    connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+    ...options,
+  });
+}
+
+export function classifySshProbeFailure(
+  code: number,
+  stderr: string,
+  auth: SshExecArgsOptions['auth'] = 'key'
+): string {
   if (code === 255) {
     if (/permission denied|authentication/i.test(stderr)) {
-      return 'SSH 认证失败:请确认已配置密钥登录(BatchMode 不支持密码交互)。';
+      return auth === 'password'
+        ? 'SSH 认证失败:用户名或密码不正确。'
+        : 'SSH 认证失败:请确认已配置密钥登录。';
     }
     return `无法连接到远程主机:${stderr.trim() || '连接失败'}`;
   }
   return '远程路径不存在或不是目录。';
 }
 
-/**
- * 用系统 ssh 校验远端目录存在。成功 resolve null,失败 resolve 可读错误文案。
- * 不抛异常——调用方(IPC handler)直接把文案回给 renderer。
- */
-export function sshProbeDirectory(host: string, remotePath: string): Promise<string | null> {
+function probeEnv(password?: string): NodeJS.ProcessEnv | undefined {
+  if (!password) return undefined;
+  const helper = path.join(tmpdir(), 'enso-ssh-askpass.sh');
+  writeFileSync(helper, '#!/bin/sh\nprintf %s "$ENSO_SSH_ASKPASS_PASSWORD"\n', { mode: 0o700 });
+  return {
+    ...process.env,
+    SSH_ASKPASS: helper,
+    SSH_ASKPASS_REQUIRE: 'force',
+    DISPLAY: process.env.DISPLAY || ':',
+    ENSO_SSH_ASKPASS_PASSWORD: password,
+    SSH_AUTH_SOCK: '',
+  };
+}
+
+function runSshProbe(
+  args: string[],
+  options: SshExecArgsOptions & { password?: string },
+  onOtherCode: string
+): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       'ssh',
-      buildSshProbeArgs(host, remotePath),
-      { timeout: PROBE_TIMEOUT_MS },
+      args,
+      { timeout: PROBE_TIMEOUT_MS, env: probeEnv(options.password) ?? process.env },
       (error, _stdout, stderr) => {
         if (!error) return resolve(null);
         const code =
           typeof (error as { code?: unknown }).code === 'number'
             ? ((error as { code?: number }).code as number)
             : 255;
-        if ((error as { killed?: boolean }).killed) {
-          return resolve('连接远程主机超时。');
-        }
-        resolve(classifySshProbeFailure(code, stderr ?? ''));
+        if ((error as { killed?: boolean }).killed) return resolve('连接远程主机超时。');
+        if (code === 255) return resolve(classifySshProbeFailure(code, stderr ?? '', options.auth));
+        resolve(onOtherCode);
       }
     );
   });
+}
+
+export function sshProbeDirectory(
+  host: string,
+  remotePath: string,
+  options: SshExecArgsOptions & { password?: string } = {}
+): Promise<string | null> {
+  return runSshProbe(
+    buildSshProbeArgs(host, remotePath, options),
+    options,
+    '远程路径不存在或不是目录。'
+  );
+}
+
+export function sshProbeLogin(
+  host: string,
+  options: SshExecArgsOptions & { password?: string } = {}
+): Promise<string | null> {
+  return runSshProbe(buildSshLoginProbeArgs(host, options), options, '远程命令执行失败。');
 }

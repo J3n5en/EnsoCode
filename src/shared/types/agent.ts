@@ -179,6 +179,8 @@ export interface ProjectAuthority {
   kind?: ProjectKind;
   /** ssh config 别名或 user@host；kind==='ssh' 时必有，否则禁止 */
   sshHost?: string;
+  /** 设置里的连接档案；kind==='ssh' 时必有 */
+  sshConnectionId?: string;
   state: 'active' | 'removed';
   version: number;
 }
@@ -206,7 +208,7 @@ export interface CreateProjectAuthorityRequest {
   requestId: string;
   path: string;
   kind?: ProjectKind;
-  sshHost?: string;
+  sshConnectionId?: string;
 }
 
 export interface SelectProjectAuthorityRequest {
@@ -567,6 +569,10 @@ export interface SlashCommand {
 export interface AgentRemoteConfig {
   /** ssh config 别名或 user@host */
   host: string;
+  auth: 'key' | 'password';
+  port?: number;
+  /** 仅 password 认证、仅 spawn 内存,禁止落盘 */
+  password?: string;
 }
 
 /** 普通新会话 Renderer 请求；child 派发不复用此结构。 */
@@ -832,15 +838,43 @@ function parseModelRef(value: unknown): ModelRef | null {
     : null;
 }
 
-/** kind/sshHost 组合约束：ssh 必带非空 sshHost；非 ssh 禁止 sshHost */
+/** ssh 必带 host+connectionId；非 ssh 禁止这两个字段 */
 function isValidProjectRemoteFields(value: Record<string, unknown>): boolean {
-  if (value.kind === 'ssh') return isNonEmptyString(value.sshHost);
-  if (value.kind === 'local' || value.kind === undefined) return value.sshHost === undefined;
+  if (value.kind === 'ssh') {
+    return isNonEmptyString(value.sshHost) && isUuid(value.sshConnectionId);
+  }
+  if (value.kind === 'local' || value.kind === undefined) {
+    return value.sshHost === undefined && value.sshConnectionId === undefined;
+  }
+  return false;
+}
+
+function isValidCreateProjectRemoteFields(value: Record<string, unknown>): boolean {
+  if (value.kind === 'ssh') return isUuid(value.sshConnectionId) && value.sshHost === undefined;
+  if (value.kind === 'local' || value.kind === undefined) {
+    return value.sshHost === undefined && value.sshConnectionId === undefined;
+  }
   return false;
 }
 
 export function parseAgentRemoteConfig(value: unknown): AgentRemoteConfig | null {
-  if (!isRecord(value) || !hasExactKeys(value, ['host']) || !isNonEmptyString(value.host)) {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['host', 'auth', 'port', 'password']) ||
+    !isNonEmptyString(value.host) ||
+    (value.auth !== 'key' && value.auth !== 'password')
+  ) {
+    return null;
+  }
+  if (
+    value.port !== undefined &&
+    (!Number.isInteger(value.port) || (value.port as number) < 1 || (value.port as number) > 65535)
+  ) {
+    return null;
+  }
+  if (value.auth === 'password') {
+    if (!isNonEmptyString(value.password)) return null;
+  } else if (value.password !== undefined) {
     return null;
   }
   return value as unknown as AgentRemoteConfig;
@@ -849,7 +883,15 @@ export function parseAgentRemoteConfig(value: unknown): AgentRemoteConfig | null
 export function parseProjectAuthority(value: unknown): ProjectAuthority | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['projectId', 'canonicalPath', 'kind', 'sshHost', 'state', 'version']) ||
+    !hasOnlyKeys(value, [
+      'projectId',
+      'canonicalPath',
+      'kind',
+      'sshHost',
+      'sshConnectionId',
+      'state',
+      'version',
+    ]) ||
     !isUuid(value.projectId) ||
     !isNonEmptyString(value.canonicalPath) ||
     !isValidProjectRemoteFields(value) ||
@@ -913,12 +955,12 @@ export function parseSourceAuthorityProjection(value: unknown): SourceAuthorityP
 export function parseCreateProjectAuthorityRequest(
   value: unknown
 ): CreateProjectAuthorityRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['requestId', 'path', 'kind', 'sshHost'])) {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['requestId', 'path', 'kind', 'sshConnectionId'])) {
     return null;
   }
   return isNonEmptyString(value.requestId) &&
     isNonEmptyString(value.path) &&
-    isValidProjectRemoteFields(value)
+    isValidCreateProjectRemoteFields(value)
     ? (value as unknown as CreateProjectAuthorityRequest)
     : null;
 }

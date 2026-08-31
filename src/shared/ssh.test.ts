@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildRemoteCommand, buildSshExecArgs, buildSshShellCommand, shellQuote } from './ssh';
+import {
+  buildRemoteCommand,
+  buildSshExecArgs,
+  buildSshShellCommand,
+  resolveSshTarget,
+  shellQuote,
+} from './ssh';
 
 describe('shellQuote', () => {
   it('单引号包裹,内嵌单引号/换行/UTF-8/空串安全', () => {
@@ -46,6 +52,33 @@ describe('buildSshExecArgs', () => {
   it('不带 controlPath 时无 ControlMaster 参数(probe 单次场景)', () => {
     const args = buildSshExecArgs('h', 'test -d /x', {});
     expect(args.join(' ')).not.toContain('ControlMaster');
+  });
+
+  it('密码认证:不加 BatchMode,限制只试密码,可选 -p',
+    () => {
+      const args = buildSshExecArgs('u@h', 'true', { auth: 'password', port: 2222 });
+      const joined = args.join(' ');
+      expect(joined).not.toContain('BatchMode');
+      expect(joined).toContain('PreferredAuthentications=password');
+      expect(args).toContain('-p');
+      expect(args).toContain('2222');
+      expect(args[args.length - 2]).toBe('u@h');
+    }
+  );
+
+  it('端口 22 或未设不传 -p;key 默认仍 BatchMode', () => {
+    expect(buildSshExecArgs('h', 'true', { auth: 'key', port: 22 }).includes('-p')).toBe(
+      false
+    );
+    expect(buildSshExecArgs('h', 'true', {}).join(' ')).toContain('BatchMode=yes');
+  });
+});
+
+describe('resolveSshTarget', () => {
+  it('有 user 则 user@host,否则原样(含 ssh 别名)', () => {
+    expect(resolveSshTarget({ host: 'dev-box', user: 'root' })).toBe('root@dev-box');
+    expect(resolveSshTarget({ host: 'jump' })).toBe('jump');
+    expect(resolveSshTarget({ host: 'jump', user: '' })).toBe('jump');
   });
 });
 

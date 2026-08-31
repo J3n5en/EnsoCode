@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
+import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
   AgentActionResult,
@@ -66,6 +67,7 @@ import {
   readExternalSession,
 } from '../services/sessionImport';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
+import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
@@ -140,7 +142,19 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
 function remoteConfigFor(sessionId: string): AgentRemoteConfig | undefined {
   const conversation = sourceAuthority?.conversation(sessionId);
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-  return project?.kind === 'ssh' && project.sshHost ? { host: project.sshHost } : undefined;
+  if (project?.kind !== 'ssh') return undefined;
+  const secret = project.sshConnectionId
+    ? getSshConnectionStore().getSecret(project.sshConnectionId)
+    : undefined;
+  if (secret) {
+    return {
+      host: resolveSshTarget(secret),
+      auth: secret.auth,
+      ...(secret.port ? { port: secret.port } : {}),
+      ...(secret.auth === 'password' && secret.password ? { password: secret.password } : {}),
+    };
+  }
+  return project.sshHost ? { host: project.sshHost, auth: 'key' } : undefined;
 }
 
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
@@ -271,6 +285,10 @@ export function registerAgentHandlers(): void {
     registryFile: path.join(agentDataDir, 'source-registry.json'),
     safeSessionRoot: path.join(agentDataDir, 'sessions'),
     legacySettings: readSettings,
+    resolveSshConnection: (id) => {
+      const row = getSshConnectionStore().getSecret(id);
+      return row ? { host: row.host, user: row.user } : null;
+    },
     onChanged: (projection) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed() && !window.webContents.isDestroyed()) {

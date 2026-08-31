@@ -28,7 +28,7 @@ import { useSettingsStore } from '@/stores/settings';
 interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (request: { path: string; sshHost?: string }) => void;
+  onAdd: (request: { path: string; sshConnectionId?: string }) => void;
 }
 
 export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialogProps) {
@@ -36,16 +36,23 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
   const projects = useSettingsStore((state) => state.projects);
   const [mode, setMode] = React.useState<'local' | 'ssh'>('local');
   const [pathValue, setPathValue] = React.useState('');
-  const [sshHost, setSshHost] = React.useState('');
+  const [sshConnectionId, setSshConnectionId] = React.useState('');
   const [sshPath, setSshPath] = React.useState('');
+  const [connections, setConnections] = React.useState<
+    Awaited<ReturnType<typeof window.electronAPI.sshConnections.list>>
+  >([]);
   const [recent, setRecent] = React.useState<RecentProject[]>([]);
 
   React.useEffect(() => {
     if (!open) return;
     setMode('local');
     setPathValue('');
-    setSshHost('');
+    setSshConnectionId('');
     setSshPath('');
+    window.electronAPI.sshConnections
+      .list()
+      .then(setConnections)
+      .catch(() => setConnections([]));
     window.electronAPI.projects
       .getRecent()
       .then(setRecent)
@@ -79,13 +86,13 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
   const canSubmit =
     mode === 'local'
       ? pathValue.trim().length > 0
-      : sshHost.trim().length > 0 && sshPath.trim().startsWith('/');
+      : sshConnectionId.length > 0 && sshPath.trim().startsWith('/');
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
     if (mode === 'ssh') {
-      onAdd({ path: sshPath.trim(), sshHost: sshHost.trim() });
+      onAdd({ path: sshPath.trim(), sshConnectionId });
     } else {
       onAdd({ path: pathValue.trim() });
     }
@@ -113,15 +120,26 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
             {mode === 'ssh' ? (
               <>
                 <Field className="w-full">
-                  <FieldLabel>{t('SSH host')}</FieldLabel>
-                  <Input
-                    value={sshHost}
-                    onChange={(event) => setSshHost(event.target.value)}
-                    placeholder={t('user@host or an alias from ~/.ssh/config')}
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                  />
+                  <FieldLabel>{t('SSH connection')}</FieldLabel>
+                  {connections.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t('Add an SSH connection in Settings first.')}
+                    </p>
+                  ) : (
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={sshConnectionId}
+                      onChange={(event) => setSshConnectionId(event.target.value)}
+                    >
+                      <option value="">{t('Select an SSH connection')}</option>
+                      {connections.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.name} ({connection.user ? `${connection.user}@` : ''}
+                          {connection.host})
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </Field>
                 <Field className="w-full">
                   <FieldLabel>{t('Remote directory')}</FieldLabel>
@@ -135,9 +153,7 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
                   />
                 </Field>
                 <p className="text-xs text-muted-foreground">
-                  {t(
-                    'Requires key-based SSH access. Tools run on the remote host; chat history stays local.'
-                  )}
+                  {t('Tools run on the remote host; chat history stays local.')}
                 </p>
               </>
             ) : (

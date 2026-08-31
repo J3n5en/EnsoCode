@@ -244,6 +244,6 @@ export interface SettingsState {
   // Project actions
   /** Main authority创建project并返回canonical projection。 */
   /** remote 传入时创建 ssh 远程项目;创建被拒(含远端探测失败)时抛 Error(message 可直接展示) */
-  addProject: (path: string, remote?: { sshHost: string }) => Promise<Project | null>;
+  addProject: (path: string, remote?: { sshConnectionId: string }) => Promise<Project | null>;
   removeProject: (id: string) => Promise<boolean>;
 }

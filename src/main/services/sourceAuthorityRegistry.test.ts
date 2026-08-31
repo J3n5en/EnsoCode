@@ -194,55 +194,73 @@ describe('SourceAuthorityRegistry', () => {
     ).toEqual({ accepted: false, error: 'Conversation authority is stale or unavailable.' });
   });
 
-  it('ssh 项目：跳过本地 FS 校验、持久化 kind/sshHost、按 host+路径去重', () => {
+  it('ssh 项目：跳过本地 FS 校验、持久化 connectionId、按连接+路径去重', () => {
     const root = temporary();
     const registryFile = path.join(root, 'registry.json');
-    const registry = new SourceAuthorityRegistry({ registryFile });
-    // 远端路径在本机并不存在，不得走 realpathSync
+    const connA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const connB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const registry = new SourceAuthorityRegistry({
+      registryFile,
+      resolveSshConnection: (id) => {
+        if (id === connA) return { host: 'dev-box', user: 'user' };
+        if (id === connB) return { host: 'other-box', user: 'user' };
+        return null;
+      },
+    });
     const created = registry.createProject({
       requestId: 'p1',
       path: '/srv/app/',
       kind: 'ssh',
-      sshHost: 'user@dev-box',
+      sshConnectionId: connA,
     });
     expect(created.accepted).toBe(true);
     if (!created.accepted) return;
     expect(created.value.kind).toBe('ssh');
     expect(created.value.sshHost).toBe('user@dev-box');
-    expect(created.value.canonicalPath).toBe('/srv/app'); // 尾斜杠规范化
+    expect(created.value.sshConnectionId).toBe(connA);
+    expect(created.value.canonicalPath).toBe('/srv/app');
+    expect(registry.sshConnectionInUse(connA)).toBe(true);
 
-    // 同 host 同路径去重（含尾斜杠变体）
     const dup = registry.createProject({
       requestId: 'p2',
       path: '/srv/app',
       kind: 'ssh',
-      sshHost: 'user@dev-box',
+      sshConnectionId: connA,
     });
     expect(dup).toEqual({ accepted: true, value: created.value });
-    // 不同 host 同路径是不同项目
     const otherHost = registry.createProject({
       requestId: 'p3',
       path: '/srv/app',
       kind: 'ssh',
-      sshHost: 'user@other-box',
+      sshConnectionId: connB,
     });
     expect(otherHost.accepted).toBe(true);
     if (!otherHost.accepted) return;
     expect(otherHost.value.projectId).not.toBe(created.value.projectId);
 
-    // 非绝对路径拒绝
     expect(
-      registry.createProject({ requestId: 'p4', path: 'srv/app', kind: 'ssh', sshHost: 'h' })
-        .accepted
+      registry.createProject({
+        requestId: 'p4',
+        path: 'srv/app',
+        kind: 'ssh',
+        sshConnectionId: connA,
+      }).accepted
     ).toBe(false);
+    expect(
+      registry.createProject({
+        requestId: 'p4b',
+        path: '/srv/app',
+        kind: 'ssh',
+        sshConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      })
+    ).toEqual({ accepted: false, error: 'SSH 连接不存在。' });
 
-    // 重新加载后 kind/sshHost 保留
     const reloaded = new SourceAuthorityRegistry({ registryFile });
     const project = reloaded.project(created.value.projectId);
     expect(project?.kind).toBe('ssh');
     expect(project?.sshHost).toBe('user@dev-box');
+    expect(project?.sshConnectionId).toBe(connA);
 
-    // 本地项目不受 ssh 去重影响：同路径的 local 创建仍走本地校验（不存在 → 拒绝）
     expect(registry.createProject({ requestId: 'p5', path: '/srv/app' }).accepted).toBe(false);
   });
 });
