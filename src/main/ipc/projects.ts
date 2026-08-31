@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import {
@@ -5,8 +6,9 @@ import {
   parseRemoveProjectAuthorityRequest,
   parseSelectProjectAuthorityRequest,
 } from '@shared/types/agent';
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import { getRecentProjects } from '../services/recentProjects';
+import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { sshProbeDirectory } from '../services/sshProbe';
 import { isMainWebContents } from '../windows/MainWindow';
@@ -51,8 +53,25 @@ export function registerProjectHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SOURCE_PROJECT_REMOVE, (event, request: unknown) => {
     const parsed = parseRemoveProjectAuthorityRequest(request);
     const registry = getSourceAuthorityRegistry();
-    return parsed && registry && isMainWebContents(event.sender.id)
-      ? registry.removeProject(parsed)
-      : { accepted: false, error: 'Invalid project request.' };
+    if (!parsed || !registry || !isMainWebContents(event.sender.id)) {
+      return { accepted: false, error: 'Invalid project request.' };
+    }
+    // 删除前先快照该项目的会话：渲染层逐会话的 removeConversation 与 removeProject
+    // 存在竞态（项目先置 removed 会让 endConversation 失败），Main 侧在这里兑底清理 jsonl。
+    const conversations = registry
+      .projection()
+      .conversations.filter((conversation) => conversation.projectId === parsed.projectId);
+    const result = registry.removeProject(parsed);
+    if (result.accepted) {
+      const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
+      for (const conversation of conversations) {
+        removeConversationSessionFiles({
+          sessionDir,
+          conversationId: conversation.conversationId,
+          ...(conversation.sessionFile ? { sessionFile: conversation.sessionFile } : {}),
+        });
+      }
+    }
+    return result;
   });
 }

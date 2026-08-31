@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   createProject: vi.fn(),
   selectProject: vi.fn(),
   removeProject: vi.fn(),
+  projection: vi.fn(),
+  removeConversationSessionFiles: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -13,6 +15,10 @@ vi.mock('electron', () => ({
       mocks.handlers.set(channel, handler);
     }),
   },
+  app: { getPath: () => '/tmp/enso-test-user-data' },
+}));
+vi.mock('../services/sessionFileCleanup', () => ({
+  removeConversationSessionFiles: mocks.removeConversationSessionFiles,
 }));
 vi.mock('../windows/MainWindow', () => ({ isMainWebContents: (id: number) => id === 1 }));
 vi.mock('./agent', () => ({
@@ -20,6 +26,7 @@ vi.mock('./agent', () => ({
     createProject: mocks.createProject,
     selectProject: mocks.selectProject,
     removeProject: mocks.removeProject,
+    projection: mocks.projection,
   }),
 }));
 vi.mock('../services/recentProjects', () => ({ getRecentProjects: () => [] }));
@@ -35,6 +42,8 @@ describe('project authority IPC', () => {
     mocks.createProject.mockReset().mockReturnValue({ accepted: true, value: {} });
     mocks.selectProject.mockReset().mockReturnValue({ accepted: true, value: {} });
     mocks.removeProject.mockReset().mockReturnValue({ accepted: true, value: {} });
+    mocks.projection.mockReset().mockReturnValue({ projects: [], conversations: [] });
+    mocks.removeConversationSessionFiles.mockReset();
     registerProjectHandlers();
   });
 
@@ -75,5 +84,42 @@ describe('project authority IPC', () => {
       projectId,
       version: 2,
     });
+  });
+
+  it('删除项目时级联清理该项目全部会话的 session 文件', () => {
+    const remove = mocks.handlers.get(IPC_CHANNELS.SOURCE_PROJECT_REMOVE)!;
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    mocks.projection.mockReturnValue({
+      projects: [],
+      conversations: [
+        { conversationId: 'conversation-a', projectId, sessionFile: '/tmp/a.jsonl' },
+        { conversationId: 'conversation-b', projectId },
+        { conversationId: 'conversation-other', projectId: 'other-project' },
+      ],
+    });
+    expect(remove(event(1), { requestId: 'remove', projectId, version: 2 })).toMatchObject({
+      accepted: true,
+    });
+    expect(mocks.removeConversationSessionFiles).toHaveBeenCalledTimes(2);
+    expect(mocks.removeConversationSessionFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conversation-a', sessionFile: '/tmp/a.jsonl' })
+    );
+    expect(mocks.removeConversationSessionFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conversation-b' })
+    );
+  });
+
+  it('removeProject 被拒绝时不清理任何文件', () => {
+    const remove = mocks.handlers.get(IPC_CHANNELS.SOURCE_PROJECT_REMOVE)!;
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    mocks.projection.mockReturnValue({
+      projects: [],
+      conversations: [{ conversationId: 'conversation-a', projectId }],
+    });
+    mocks.removeProject.mockReturnValue({ accepted: false, error: 'stale' });
+    expect(remove(event(1), { requestId: 'remove', projectId, version: 1 })).toMatchObject({
+      accepted: false,
+    });
+    expect(mocks.removeConversationSessionFiles).not.toHaveBeenCalled();
   });
 });
