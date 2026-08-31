@@ -284,6 +284,11 @@ export const zhTranslations: Record<string, string> = {
   'Delete a custom agent type.': '删除自定义 Agent 类型。',
   'Remove a project and its conversations from the application list.':
     '从应用列表中移除项目及其对话。',
+  'Add an SSH connection profile.': '添加 SSH 连接档案。',
+  'Remove one SSH connection profile; connections used by projects are protected.':
+    '移除一个 SSH 连接档案；仍被项目使用的连接受保护。',
+  'Test an SSH connection; this performs a real login attempt.':
+    '测试 SSH 连接；会发起一次真实登录尝试。',
   'Hire a coworker into the origin coding conversation.': '为来源编码对话加入一名队员。',
   'Dismiss a coworker from the origin coding conversation.': '从来源编码对话中移除一名队员。',
   'Scan local AI applications and import selected providers.': '扫描本地 AI 应用并导入所选提供商。',

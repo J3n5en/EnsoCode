@@ -725,6 +725,32 @@ export const CAPABILITY_CATALOG = {
     targetContext: 'global',
     inputSchema: ID_INPUT_SCHEMA,
   }),
+  'projects.ssh-connections': executable(
+    'projects.ssh-connections',
+    readGlobal('List SSH connection profiles without credentials.')
+  ),
+  'projects.ssh-connections.add': unavailable('projects.ssh-connections.add', {
+    ...reversibleGlobal('Add an SSH connection profile.'),
+    risk: 'dangerous',
+    reason: 'SSH passwords must never enter Enso context; profile setup uses the settings form.',
+    suggestedAction: 'Open Settings and add the SSH connection there.',
+  }),
+  'projects.ssh-connections.update': unavailable('projects.ssh-connections.update', {
+    ...reversibleGlobal('Edit an SSH connection profile.'),
+    reason:
+      'Editing host or credentials could redirect a stored password to an attacker-chosen host.',
+    suggestedAction: 'Edit the SSH connection in Settings.',
+  }),
+  'projects.ssh-connections.remove': executable('projects.ssh-connections.remove', {
+    description: 'Remove one SSH connection profile; connections used by projects are protected.',
+    risk: 'dangerous',
+    targetContext: 'global',
+    inputSchema: ID_INPUT_SCHEMA,
+  }),
+  'projects.ssh-connections.test': executable('projects.ssh-connections.test', {
+    ...readGlobal('Test an SSH connection; this performs a real login attempt.', ID_INPUT_SCHEMA),
+    risk: 'dangerous',
+  }),
 
   'conversations.list': executable(
     'conversations.list',
@@ -1185,6 +1211,9 @@ export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId
   'projects.list': true,
   'projects.recent': true,
   'projects.remove': true,
+  'projects.ssh-connections': true,
+  'projects.ssh-connections.remove': true,
+  'projects.ssh-connections.test': true,
   'conversations.list': true,
   'team.list-agent-types': true,
   'team.list-coworkers': true,

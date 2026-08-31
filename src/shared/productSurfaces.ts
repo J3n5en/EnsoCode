@@ -247,6 +247,31 @@ export const PRODUCT_SURFACE_INVENTORY = {
   'projects.recent': { domain: 'projects', kind: 'action', label: 'List recent projects' },
   'projects.add': { domain: 'projects', kind: 'action', label: 'Add project' },
   'projects.remove': { domain: 'projects', kind: 'action', label: 'Remove project' },
+  'projects.ssh-connections': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'List SSH connection profiles',
+  },
+  'projects.ssh-connections.add': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Add SSH connection profile',
+  },
+  'projects.ssh-connections.update': {
+    domain: 'projects',
+    kind: 'setting',
+    label: 'Edit SSH connection profile',
+  },
+  'projects.ssh-connections.remove': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Remove SSH connection profile',
+  },
+  'projects.ssh-connections.test': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Test SSH connection',
+  },
 
   'conversations.list': { domain: 'conversations', kind: 'action', label: 'List conversations' },
   'conversations.create': {

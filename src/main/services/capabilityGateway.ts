@@ -31,6 +31,7 @@ import {
   MODEL_THINKING_LEVEL_OVERRIDES,
   type ModelProvider,
   type Preset,
+  type SshConnection,
 } from '@shared/types';
 import type { ModelMetaResult } from '@shared/types/modelMeta';
 import type {
@@ -117,6 +118,12 @@ export interface CapabilityDomainServices {
     coworkerId: string,
     guard?: TeamExecutionGuard
   ): Promise<CapabilityResult>;
+  /** SSH 连接档案：只暴露公开形态（无密码）；删除/探测在 main 侧完成凭证解析 */
+  listSshConnections(): SshConnection[];
+  deleteSshConnection(
+    id: string
+  ): Promise<{ ok: true; value: null } | { ok: false; error: string }>;
+  testSshConnection(id: string): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /**
@@ -1186,6 +1193,23 @@ export function createCapabilityHandlers(
       );
     },
     'projects.list': () => success(settingsState(services.readSettings()).projects ?? []),
+    'projects.ssh-connections': () => success(services.listSshConnections()),
+    'projects.ssh-connections.remove': async (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const stale = context.assertExecutionCurrent();
+      if (stale) return stale;
+      const result = await services.deleteSshConnection(id);
+      return result.ok ? success({ id }) : failed(result.error);
+    },
+    'projects.ssh-connections.test': async (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const stale = context.assertExecutionCurrent();
+      if (stale) return stale;
+      const result = await services.testSshConnection(id);
+      return result.ok ? success({ connected: true }) : failed(result.error);
+    },
     'projects.recent': async () => success(await services.getRecentProjects()),
     'projects.remove': (context, params) => {
       const id = requiredString(params, 'id');
