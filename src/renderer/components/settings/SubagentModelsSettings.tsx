@@ -60,7 +60,7 @@ function ReasoningControls({
         <SelectTrigger
           size="sm"
           data-slot="subagent-model-reasoning"
-          className="h-7 min-h-7 shrink-0 text-xs"
+          className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
         >
           <SelectValue />
         </SelectTrigger>
@@ -89,7 +89,7 @@ function ReasoningControls({
           <SelectTrigger
             size="sm"
             data-slot="subagent-model-thinking-level"
-            className="h-7 min-h-7 shrink-0 text-xs"
+            className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
           >
             <SelectValue />
           </SelectTrigger>
