@@ -30,6 +30,8 @@ export const SETTINGS_STATE_FIELDS = [
   'autoUpdate',
   'providers',
   'defaultModel',
+  'subagentModelsEnabled',
+  'subagentModels',
   'skills',
   'mcpServers',
   'instructions',
