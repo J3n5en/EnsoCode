@@ -379,11 +379,11 @@ export class PairClient {
     if (changed) this.events.onSync?.(next.state);
   }
 
-  /** 订阅会话：带上本地游标，只补断线期间的增量 */
-  subscribe(sessionId: string | null): void {
+  /** 订阅会话：带上本地游标，只补断线期间的增量。fresh = 手机刚 spawn 的全新会话，不进 syncing */
+  subscribe(sessionId: string | null, opts?: { fresh?: boolean }): void {
     this.subscribedId = sessionId;
     this.historyPending.clear();
-    this.setSync(applySubscribe(this.sync, sessionId));
+    this.setSync(applySubscribe(this.sync, sessionId, opts));
     if (!sessionId) {
       this.send({ type: 'subscribe', sessionId: null });
       return;

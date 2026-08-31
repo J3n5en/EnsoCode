@@ -184,10 +184,18 @@ export function App() {
     };
   }, [device?.pairId, device?.token, device?.relayUrl, device?.contentKey]);
 
+  /** 手机刚 spawn 的会话 id（一次性）：首次订阅不进 syncing——全新会话没有历史可陈旧，
+   * 而 spawn 在途时 host 回的快照不含它，会让「同步中」横幅挂到切会话才消 */
+  const freshIdsRef = useRef(new Set<string>());
   // biome-ignore lint/correctness/useExhaustiveDependencies: pairId 变化时也要在新 client 上重订阅
   useEffect(() => {
     activeIdRef.current = activeId;
-    clientRef.current?.subscribe(activeId);
+    // 用 has 而非读时删除：StrictMode 下 effect 双跑，第二跑不能把标记吞掉；切走时才消费
+    const fresh = activeId !== null && freshIdsRef.current.has(activeId);
+    clientRef.current?.subscribe(activeId, { fresh });
+    for (const id of freshIdsRef.current) {
+      if (id !== activeId) freshIdsRef.current.delete(id);
+    }
     setView(activeId ? (clientRef.current?.getSession(activeId) ?? null) : null);
     if (device) saveLastSession(device.pairId, activeId);
   }, [activeId, device?.pairId]);
@@ -429,6 +437,7 @@ export function App() {
         onCreate={(req) => {
           const sessionId = crypto.randomUUID();
           send({ type: 'spawn', sessionId, ...req });
+          freshIdsRef.current.add(sessionId);
           setComposing(false);
           setActiveId(sessionId);
         }}

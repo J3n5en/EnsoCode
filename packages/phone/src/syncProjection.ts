@@ -14,9 +14,17 @@ export interface SyncTracking {
 
 export const initialSync: SyncTracking = { state: 'synced', knownIds: new Set() };
 
-/** 订阅切换（含重连后重订阅）：订阅具体会话进入 syncing；回列表页无正文可等，视为已同步 */
-export function applySubscribe(t: SyncTracking, sessionId: string | null): SyncTracking {
-  return { ...t, state: sessionId ? 'syncing' : 'synced' };
+/**
+ * 订阅切换（含重连后重订阅）：订阅具体会话进入 syncing；回列表页无正文可等，视为已同步。
+ * fresh = 手机刚 spawn 的全新会话：没有历史可陈旧，直接 synced——否则会因
+ * spawn 在途时的快照不含它而永远等不到同步完成（没人再发新快照）。
+ */
+export function applySubscribe(
+  t: SyncTracking,
+  sessionId: string | null,
+  opts?: { fresh?: boolean }
+): SyncTracking {
+  return { ...t, state: sessionId && !opts?.fresh ? 'syncing' : 'synced' };
 }
 
 /** 快照到达：含订阅会话即完成同步 */

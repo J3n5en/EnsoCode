@@ -7,6 +7,10 @@ describe('syncProjection', () => {
     expect(applySubscribe(initialSync, null).state).toBe('synced');
   });
 
+  it('刚 spawn 的全新会话：订阅即 synced，没有历史可陈旧', () => {
+    expect(applySubscribe(initialSync, 's1', { fresh: true }).state).toBe('synced');
+  });
+
   it('快照含订阅会话 → synced；不含则保持 syncing', () => {
     const syncing = applySubscribe(initialSync, 's1');
     expect(applySnapshot(syncing, 's1', ['s1', 's2']).state).toBe('synced');
