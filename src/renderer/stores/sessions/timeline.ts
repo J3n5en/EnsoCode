@@ -183,6 +183,16 @@ function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): T
     }
   }
 
+  // 工具只可能在最后一轮运行：它所在的 assistant 消息之后只会紧跟 toolResult。
+  // 更晚出现 user/assistant = 轮次已推进，缺结果只是 abort 残留或同步未齐（手机端
+  // 分帧同步），不得标 running——否则 ToolRow 会把历史 diff 自动展开。
+  let lastTurnIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'toolResult') {
+      lastTurnIndex = i;
+      break;
+    }
+  }
   const items: TimelineItem[] = [];
   messages.forEach((message, messageIndex) => {
     const isLastMessage = messageIndex === messages.length - 1;
@@ -256,7 +266,13 @@ function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): T
             name: part.name,
             summary: summarizeArgs(part.arguments),
             output: result ? result.output : null,
-            state: result ? (result.isError ? 'error' : 'ok') : running ? 'running' : 'ok',
+            state: result
+              ? result.isError
+                ? 'error'
+                : 'ok'
+              : running && messageIndex === lastTurnIndex
+                ? 'running'
+                : 'ok',
             edits: extractEdits(part.name, part.arguments),
             writeContent: extractWriteContent(part.name, part.arguments),
             todos: result?.todos ?? null,

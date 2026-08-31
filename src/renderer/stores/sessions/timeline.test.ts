@@ -51,6 +51,48 @@ describe('buildTimeline', () => {
     expect(timeline[0]).toMatchObject({ kind: 'tool', state: 'running', summary: 'pnpm test' });
   });
 
+  it('历史轮次里缺结果的 toolCall（abort 残留/同步未齐）不标 running，即使会话正在运行', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't1', name: 'edit', arguments: { path: 'a.ts' } }],
+        },
+        user('继续'),
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't2', name: 'bash', arguments: { command: 'ls' } }],
+        },
+      ],
+      true
+    );
+    expect(timeline[0]).toMatchObject({ kind: 'tool', name: 'edit', state: 'ok' });
+    expect(timeline[2]).toMatchObject({ kind: 'tool', name: 'bash', state: 'running' });
+  });
+
+  it('末条 assistant 后只跟 toolResult：已完成的标终态，并行未完成的仍标 running', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'a.ts' } },
+            { type: 'toolCall', id: 't2', name: 'bash', arguments: { command: 'pnpm test' } },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          isError: false,
+          content: [{ type: 'text', text: 'body' }],
+        },
+      ],
+      true
+    );
+    expect(timeline[0]).toMatchObject({ kind: 'tool', name: 'read', state: 'ok' });
+    expect(timeline[1]).toMatchObject({ kind: 'tool', name: 'bash', state: 'running' });
+  });
+
   it('失败的 toolResult 标为 error', () => {
     const timeline = buildTimeline(
       [
