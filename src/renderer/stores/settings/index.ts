@@ -477,24 +477,35 @@ export const useSettingsStore = create<SettingsState>()(
         }),
 
       // Project execution authority is created/removed only through the dedicated Main registry.
-      addProject: async (path) => {
+      addProject: async (path, remote) => {
         const projection = await window.electronAPI.sourceAuthority.read();
-        const existing = projection.projects.find(
-          (project) => project.state === 'active' && project.canonicalPath === path
-        );
+        const existing = projection.projects.find((project) => {
+          if (project.state !== 'active' || project.canonicalPath !== path) return false;
+          // 本地/远程不互认:ssh 项目还要同 host
+          return remote ? project.sshHost === remote.sshHost : project.kind !== 'ssh';
+        });
         const result = existing
           ? { accepted: true as const, value: existing }
           : await window.electronAPI.sourceAuthority.createProject({
               requestId: crypto.randomUUID(),
               path,
+              ...(remote ? { kind: 'ssh' as const, sshHost: remote.sshHost } : {}),
             });
-        if (!result.accepted) return null;
+        if (!result.accepted) {
+          throw new Error(
+            ('error' in result && typeof result.error === 'string' && result.error) ||
+              'Failed to add project.'
+          );
+        }
         const project = {
           id: result.value.projectId,
           name:
             result.value.canonicalPath.split('/').filter(Boolean).pop() ??
             result.value.canonicalPath,
           path: result.value.canonicalPath,
+          ...(result.value.kind === 'ssh'
+            ? { kind: 'ssh' as const, sshHost: result.value.sshHost }
+            : {}),
         };
         set((state) => ({
           projects: [...state.projects.filter((candidate) => candidate.id !== project.id), project],
@@ -564,6 +575,7 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
       id: project.projectId,
       name: project.canonicalPath.split('/').filter(Boolean).pop() ?? project.canonicalPath,
       path: project.canonicalPath,
+      ...(project.kind === 'ssh' ? { kind: 'ssh' as const, sshHost: project.sshHost } : {}),
     }));
   // 投影未变时必须不写 state：persist 的每次 setState 都会落盘并广播 SETTINGS_CHANGED，
   // 而收到广播的窗口 rehydrate 后又会重投影。无条件写会让两个窗口互相广播成死循环
@@ -582,7 +594,9 @@ function sameProjectProjection(
     return (
       project.id === candidate.id &&
       project.name === candidate.name &&
-      project.path === candidate.path
+      project.path === candidate.path &&
+      project.kind === candidate.kind &&
+      project.sshHost === candidate.sshHost
     );
   });
 }

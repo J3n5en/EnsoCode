@@ -189,10 +189,18 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   });
 
   const [addOpen, setAddOpen] = useState(false);
-  const handleAddProject = (path: string) => {
-    void addProject(path).then((project) => {
-      if (project) void newConversation(project.id);
-    });
+  const handleAddProject = (request: { path: string; sshHost?: string }) => {
+    void addProject(request.path, request.sshHost ? { sshHost: request.sshHost } : undefined)
+      .then((project) => {
+        if (project) void newConversation(project.id);
+      })
+      .catch((error: unknown) => {
+        addToast({
+          type: 'error',
+          title: t('Failed to add project'),
+          description: error instanceof Error ? error.message : String(error),
+        });
+      });
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
@@ -454,8 +462,20 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                             />
                           </span>
                           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          <span
+                            className="min-w-0 flex-1 truncate text-sm font-medium"
+                            title={
+                              project.kind === 'ssh'
+                                ? `${project.sshHost}:${project.path}`
+                                : project.path
+                            }
+                          >
                             {project.name}
+                            {project.kind === 'ssh' && (
+                              <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground">
+                                {project.sshHost}
+                              </span>
+                            )}
                           </span>
                         </button>
                         <button
