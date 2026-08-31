@@ -2,6 +2,7 @@ import { toPairProjectEntry } from '@enso/pair';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useSessionsStore } from '@/stores/sessions';
+import { setPairViewedSession } from '@/stores/sessions/unread';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder } from '@/stores/settings/projectOrder';
 import {
@@ -44,6 +45,7 @@ function buildPayload(): PairCatalogPayload {
     ...(c.lastModelId ? { modelId: c.lastModelId } : {}),
     ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
     ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
+    ...(c.unread === true ? { unread: true } : {}),
   });
 
   const topLevel = sessions.order
@@ -118,6 +120,8 @@ export function bindPairCatalogSync(): void {
   subscribeSidebarOrder(schedulePush);
   // 手机订阅历史会话时恢复它，worker 才有投影可发（resume 对已启动会话自动忽略）
   window.electronAPI.pair.onResumeSession((sessionId) => {
+    setPairViewedSession(sessionId);
+    useSessionsStore.getState().markConversationRead(sessionId);
     void useSessionsStore.getState().resumeConversation(sessionId);
   });
   // 手机新建的会话登记进桌面列表；不登记的话它的 agent 事件会因「未知会话」被丢弃

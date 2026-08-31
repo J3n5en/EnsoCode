@@ -50,7 +50,7 @@ import {
   emptyProjection,
   type SessionProjection,
 } from './reducer';
-import { nextUnread } from './unread';
+import { isPairViewed, nextUnread } from './unread';
 import { workspaceFallbackNote, workspaceMigratedNote } from './worktree';
 
 function startGoalPrompt(objective: string): string {
@@ -164,6 +164,8 @@ interface SessionsState {
   /** 刷新全部隔离会话的 worktree 状态（侧边栏徽标） */
   refreshWorktreeStatuses(): Promise<void>;
   selectConversation(id: string): void;
+  /** 手机打开会话时清未读，不改桌面选中 */
+  markConversationRead(id: string): void;
   removeConversation(id: string): void;
   /** 切换会话置顶 */
   togglePinConversation(id: string): void;
@@ -673,7 +675,7 @@ export const useSessionsStore = create<SessionsState>()(
               prevStatus: conversation.status,
               nextStatus: (next as Conversation).status,
               prevUnread: conversation.unread,
-              viewed: state.activeId === id,
+              viewed: state.activeId === id || isPairViewed(id),
             }),
             title,
             spawning: false,
@@ -1065,6 +1067,11 @@ export const useSessionsStore = create<SessionsState>()(
           // 手机 spawn 自带 sessionId，桌面 newConversation 才会走 Main 发号。
           // 不登记的话点开会话会被当成 history-only。
           void adoptMissingRootAuthority(session.sessionId, session.projectId);
+        },
+
+        markConversationRead(id) {
+          if (!get().conversations[id]) return;
+          set((state) => patch(state, id, { unread: false }));
         },
 
         selectConversation(id) {

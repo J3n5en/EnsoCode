@@ -51,6 +51,7 @@ export interface PairCatalogPayload {
     projectName: string;
     projectId: string;
     status: string;
+    unread?: boolean;
     parentId?: string;
     /** 最后活动时间（末条消息或创建时间） */
     updatedAt?: number;

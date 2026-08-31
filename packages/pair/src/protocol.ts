@@ -102,6 +102,8 @@ export interface CatalogEntry {
   projectName: string;
   projectId: string;
   status: string;
+  /** 完成后未查看：桌面绿点、手机灰点 */
+  unread?: boolean;
   parentId?: string;
   /** 最后活动时间（末条消息或创建时间），手机端显示相对时间 */
   updatedAt?: number;

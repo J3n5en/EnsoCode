@@ -453,7 +453,7 @@ function SessionRow({
         active ? 'bg-muted' : 'hover:bg-muted/50'
       )}
     >
-      <StatusDot status={session.status} />
+      <StatusDot status={session.status} unread={session.unread} />
       <span className="min-w-0 flex-1 truncate">
         {session.title || '新对话'}
         {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
@@ -560,15 +560,18 @@ function ProjectGroup({
 }
 
 /** 与桌面 ConversationDot 同款 */
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status, unread }: { status: string; unread?: boolean }) {
   const running = status === 'running';
+  const failed = !running && status === 'failed';
+  const showUnread = !running && !failed && unread === true;
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
         running && 'animate-pulse bg-blue-500',
-        status === 'failed' && 'bg-destructive',
-        !running && status !== 'failed' && 'bg-muted-foreground/30'
+        failed && 'bg-destructive',
+        showUnread && 'bg-muted-foreground',
+        !running && !failed && !showUnread && 'bg-muted-foreground/30'
       )}
     />
   );
