@@ -202,8 +202,8 @@ describe('SourceAuthorityRegistry', () => {
     const registry = new SourceAuthorityRegistry({
       registryFile,
       resolveSshConnection: (id) => {
-        if (id === connA) return { host: 'dev-box', user: 'user' };
-        if (id === connB) return { host: 'other-box', user: 'user' };
+        if (id === connA) return { host: 'dev-box', user: 'user', name: 'prod' };
+        if (id === connB) return { host: 'other-box', user: 'user', name: 'staging' };
         return null;
       },
     });
@@ -217,6 +217,7 @@ describe('SourceAuthorityRegistry', () => {
     if (!created.accepted) return;
     expect(created.value.kind).toBe('ssh');
     expect(created.value.sshHost).toBe('user@dev-box');
+    expect(created.value.sshConnectionName).toBe('prod');
     expect(created.value.sshConnectionId).toBe(connA);
     expect(created.value.canonicalPath).toBe('/srv/app');
     expect(registry.sshConnectionInUse(connA)).toBe(true);

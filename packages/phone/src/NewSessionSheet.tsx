@@ -1,4 +1,10 @@
-import type { ApprovalMode, ProjectEntry, ProviderEntry, ThinkingLevel } from '@enso/pair';
+import {
+  type ApprovalMode,
+  type ProjectEntry,
+  type ProviderEntry,
+  pairProjectListLabel,
+  type ThinkingLevel,
+} from '@enso/pair';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -74,7 +80,7 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
         <div className="space-y-4 p-4 pt-0">
           <Field label="项目">
             <Select
-              items={projects.map((p) => ({ value: p.id, label: p.name }))}
+              items={projects.map((p) => ({ value: p.id, label: pairProjectListLabel(p) }))}
               value={projectId}
               onValueChange={(v) => setPickedProject(v as string)}
             >
@@ -84,7 +90,7 @@ export function NewSessionSheet({ projects, providers, open, onClose, onCreate }
               <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.name}
+                    {pairProjectListLabel(p)}
                   </SelectItem>
                 ))}
               </SelectPopup>

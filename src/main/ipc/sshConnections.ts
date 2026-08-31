@@ -41,7 +41,9 @@ export function registerSshConnectionHandlers(): void {
     if (!isTrustedWindow(event.sender.id)) return { ok: false, error: 'Invalid request.' };
     const parsed = parseUpsert(request);
     if (!parsed) return { ok: false, error: 'Invalid SSH connection.' };
-    return getSshConnectionStore().upsert(parsed);
+    const result = getSshConnectionStore().upsert(parsed);
+    if (result.ok) getSourceAuthorityRegistry()?.notifyProjection();
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_DELETE, (event, id: unknown) => {

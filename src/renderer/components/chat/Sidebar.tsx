@@ -510,7 +510,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                             {project.name}
                             {project.kind === 'ssh' && (
                               <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground">
-                                {project.sshHost}
+                                {project.sshConnectionName ?? project.sshHost}
                               </span>
                             )}
                           </span>

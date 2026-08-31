@@ -220,11 +220,7 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
       onAdd({
         path: sshPath.trim(),
         sshConnectionId,
-        sshHost: connection
-          ? connection.user
-            ? `${connection.user}@${connection.host}`
-            : connection.host
-          : undefined,
+        sshHost: connection?.name,
       });
     } else {
       onAdd({ path: pathValue.trim() });

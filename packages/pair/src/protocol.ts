@@ -118,6 +118,9 @@ export interface ProjectEntry {
   id: string;
   name: string;
   path: string;
+  kind?: 'local' | 'ssh';
+  sshConnectionName?: string;
+  sshHost?: string;
 }
 /** provider 剥密后下发，只够手机做 provider/model 选择 */
 export interface ProviderEntry {

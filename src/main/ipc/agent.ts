@@ -287,7 +287,7 @@ export function registerAgentHandlers(): void {
     legacySettings: readSettings,
     resolveSshConnection: (id) => {
       const row = getSshConnectionStore().getSecret(id);
-      return row ? { host: row.host, user: row.user } : null;
+      return row ? { host: row.host, user: row.user, name: row.name } : null;
     },
     onChanged: (projection) => {
       for (const window of BrowserWindow.getAllWindows()) {

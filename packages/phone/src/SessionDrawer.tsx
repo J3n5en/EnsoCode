@@ -1,4 +1,4 @@
-import type { CatalogEntry, ProjectEntry } from '@enso/pair';
+import { type CatalogEntry, type ProjectEntry, sshProjectLabel } from '@enso/pair';
 import {
   Archive,
   Bell,
@@ -204,6 +204,7 @@ export function SessionDrawer({
             <ProjectGroup
               key={project.id}
               name={project.name}
+              badge={sshProjectLabel(project)}
               sessions={orderProjectSessions(active.filter((c) => c.projectId === project.id))}
               folded={foldedProjects[project.id] === true}
               expanded={expandedProjects[project.id] === true}
@@ -468,6 +469,7 @@ function SessionRow({
 
 function ProjectGroup({
   name,
+  badge,
   sessions,
   folded,
   expanded,
@@ -480,6 +482,7 @@ function ProjectGroup({
   onNew,
 }: {
   name: string;
+  badge?: string;
   sessions: CatalogEntry[];
   folded: boolean;
   expanded: boolean;
@@ -509,7 +512,14 @@ function ProjectGroup({
             />
           </span>
           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-medium text-sm">{name}</span>
+          <span className="min-w-0 flex-1 truncate font-medium text-sm">
+            {name}
+            {badge && (
+              <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground">
+                {badge}
+              </span>
+            )}
+          </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">{sessions.length}</span>
         </button>
         {canCreate && onNew && (

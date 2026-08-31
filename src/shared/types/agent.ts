@@ -181,6 +181,7 @@ export interface ProjectAuthority {
   sshHost?: string;
   /** 设置里的连接档案；kind==='ssh' 时必有 */
   sshConnectionId?: string;
+  sshConnectionName?: string;
   state: 'active' | 'removed';
   version: number;
 }

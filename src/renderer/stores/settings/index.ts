@@ -510,6 +510,7 @@ export const useSettingsStore = create<SettingsState>()(
                 kind: 'ssh' as const,
                 sshHost: result.value.sshHost,
                 sshConnectionId: result.value.sshConnectionId,
+                sshConnectionName: result.value.sshConnectionName,
               }
             : {}),
         };
@@ -586,6 +587,7 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
             kind: 'ssh' as const,
             sshHost: project.sshHost,
             sshConnectionId: project.sshConnectionId,
+            sshConnectionName: project.sshConnectionName,
           }
         : {}),
     }));
@@ -609,7 +611,8 @@ function sameProjectProjection(
       project.path === candidate.path &&
       project.kind === candidate.kind &&
       project.sshHost === candidate.sshHost &&
-      project.sshConnectionId === candidate.sshConnectionId
+      project.sshConnectionId === candidate.sshConnectionId &&
+      project.sshConnectionName === candidate.sshConnectionName
     );
   });
 }

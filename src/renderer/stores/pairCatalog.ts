@@ -1,3 +1,4 @@
+import { toPairProjectEntry } from '@enso/pair';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useSessionsStore } from '@/stores/sessions';
@@ -73,7 +74,7 @@ function buildPayload(): PairCatalogPayload {
     catalog,
     // 置顶组的手动拖拽顺序：手机置顶栏按它排前，未收录的按活跃倒序
     pinnedOrder: readSidebarOrder(PINNED_ORDER_KEY),
-    projects: orderedProjects.map((p) => ({ id: p.id, name: p.name, path: p.path })),
+    projects: orderedProjects.map(toPairProjectEntry),
     providers,
     // 仅 main 侧用于 spawn 反查 cwd，不下发手机
     projectPaths: settings.projects.map((p) => ({ id: p.id, path: p.path })),

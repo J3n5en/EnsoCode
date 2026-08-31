@@ -38,7 +38,7 @@ export interface SourceAuthorityRegistryOptions {
   safeSessionRoot?: string;
   randomUuid?: () => string;
   onChanged?: (projection: SourceAuthorityProjection) => void;
-  resolveSshConnection?: (id: string) => { host: string; user?: string } | null;
+  resolveSshConnection?: (id: string) => { host: string; user?: string; name?: string } | null;
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -75,7 +75,11 @@ export class SourceAuthorityRegistry {
     if (value.kind !== 'ssh' || !value.sshConnectionId) return { ...value };
     const connection = this.options.resolveSshConnection?.(value.sshConnectionId);
     if (!connection) return { ...value };
-    return { ...value, sshHost: resolveSshTarget(connection) };
+    return {
+      ...value,
+      sshHost: resolveSshTarget(connection),
+      ...(connection.name ? { sshConnectionName: connection.name } : {}),
+    };
   }
 
   projection(): SourceAuthorityProjection {
@@ -152,7 +156,7 @@ export class SourceAuthorityRegistry {
         project.canonicalPath === canonicalPath &&
         project.state === 'active'
     );
-    if (existing) return { accepted: true, value: { ...existing } };
+    if (existing) return { accepted: true, value: this.hydrateProject(existing) };
     return this.insertProject({
       projectId: this.randomUuid(),
       canonicalPath,
@@ -162,6 +166,10 @@ export class SourceAuthorityRegistry {
       state: 'active',
       version: 1,
     });
+  }
+
+  notifyProjection(): void {
+    this.options.onChanged?.(this.projection());
   }
 
   sshConnectionInUse(connectionId: string): boolean {
@@ -178,7 +186,7 @@ export class SourceAuthorityRegistry {
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     this.projects.set(value.projectId, value);
     this.commit();
-    return { accepted: true, value: { ...value } };
+    return { accepted: true, value: this.hydrateProject(value) };
   }
 
   selectProject(
@@ -186,7 +194,7 @@ export class SourceAuthorityRegistry {
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     const project = this.projects.get(request.projectId);
     return project && project.state === 'active' && project.version === request.version
-      ? { accepted: true, value: { ...project } }
+      ? { accepted: true, value: this.hydrateProject(project) }
       : { accepted: false, error: 'Project authority is stale or unavailable.' };
   }
 
