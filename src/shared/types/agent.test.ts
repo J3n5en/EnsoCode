@@ -86,6 +86,19 @@ describe('Main-owned source authority contracts', () => {
     expect(parseProjectAuthority({ ...project, version: -1 })).toBeNull();
     expect(parseProjectAuthority({ ...project, rendererOwned: true })).toBeNull();
 
+    // 远程项目：kind/sshHost 可选字段；存量无 kind 对象（上面）必须继续通过
+    const sshProject = { ...project, kind: 'ssh', sshHost: 'user@dev-box' };
+    expect(parseProjectAuthority(sshProject)).toEqual(sshProject);
+    const localKind = { ...project, kind: 'local' };
+    expect(parseProjectAuthority(localKind)).toEqual(localKind);
+    // kind:'ssh' 必须有非空 sshHost
+    expect(parseProjectAuthority({ ...project, kind: 'ssh' })).toBeNull();
+    expect(parseProjectAuthority({ ...project, kind: 'ssh', sshHost: '' })).toBeNull();
+    // 非法 kind / local 带 sshHost 拒绝
+    expect(parseProjectAuthority({ ...project, kind: 'ftp', sshHost: 'h' })).toBeNull();
+    expect(parseProjectAuthority({ ...project, sshHost: 'user@dev-box' })).toBeNull();
+    expect(parseProjectAuthority({ ...project, kind: 'local', sshHost: 'h' })).toBeNull();
+
     const conversation = {
       conversationId,
       projectId,
@@ -113,6 +126,29 @@ describe('Main-owned source authority contracts', () => {
     expect(parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/repo' })).not.toBeNull();
     expect(
       parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/repo', projectId })
+    ).toBeNull();
+    // 远程项目创建请求
+    expect(
+      parseCreateProjectAuthorityRequest({
+        requestId: 'p1',
+        path: '/srv/app',
+        kind: 'ssh',
+        sshHost: 'user@dev-box',
+      })
+    ).not.toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/srv/app', kind: 'ssh' })
+    ).toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/srv/app', sshHost: 'h' })
+    ).toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({
+        requestId: 'p1',
+        path: '/srv/app',
+        kind: 'bogus',
+        sshHost: 'h',
+      })
     ).toBeNull();
     expect(
       parseSelectProjectAuthorityRequest({ requestId: 'p2', projectId, version: 1 })
@@ -181,6 +217,16 @@ describe('parent/child commands', () => {
     expect(
       parseAgentCommand({ type: 'spawn', sessionId: parent.sessionId, cwd: '/repo', model })
     ).toBeNull();
+  });
+
+  it('spawn-parent 携 remote:合法通过,坏 shape 拒绝', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/srv/app', model };
+    const withRemote = { ...base, remote: { host: 'user@dev-box' } };
+    expect(parseAgentCommand(withRemote)).toEqual(withRemote);
+    expect(parseAgentCommand({ ...base, remote: { host: '' } })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: {} })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: 'user@dev-box' })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: { host: 'h', port: 22 } })).toBeNull();
   });
 
   it('release-parent 可解析（Move to worktree 依赖；漏白名单会被 worker 静默丢弃）', () => {

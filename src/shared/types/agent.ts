@@ -169,9 +169,16 @@ export interface ModelRef {
   modelId: string;
 }
 
+export type ProjectKind = 'local' | 'ssh';
+
 export interface ProjectAuthority {
   projectId: string;
+  /** ssh 项目时为远端绝对路径 */
   canonicalPath: string;
+  /** 缺省 local（存量数据无此字段） */
+  kind?: ProjectKind;
+  /** ssh config 别名或 user@host；kind==='ssh' 时必有，否则禁止 */
+  sshHost?: string;
   state: 'active' | 'removed';
   version: number;
 }
@@ -198,6 +205,8 @@ export interface SourceAuthorityProjection {
 export interface CreateProjectAuthorityRequest {
   requestId: string;
   path: string;
+  kind?: ProjectKind;
+  sshHost?: string;
 }
 
 export interface SelectProjectAuthorityRequest {
@@ -372,6 +381,8 @@ export type AgentCommand =
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
+      /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
+      remote?: AgentRemoteConfig;
     }
   | {
       type: 'spawn-child';
@@ -550,6 +561,12 @@ export interface SessionSnapshot {
 export interface SlashCommand {
   name: string;
   description: string;
+}
+
+/** ssh 远程执行配置（spawn-parent 携带，worker 据此分流工具） */
+export interface AgentRemoteConfig {
+  /** ssh config 别名或 user@host */
+  host: string;
 }
 
 /** 普通新会话 Renderer 请求；child 派发不复用此结构。 */
@@ -815,12 +832,27 @@ function parseModelRef(value: unknown): ModelRef | null {
     : null;
 }
 
+/** kind/sshHost 组合约束：ssh 必带非空 sshHost；非 ssh 禁止 sshHost */
+function isValidProjectRemoteFields(value: Record<string, unknown>): boolean {
+  if (value.kind === 'ssh') return isNonEmptyString(value.sshHost);
+  if (value.kind === 'local' || value.kind === undefined) return value.sshHost === undefined;
+  return false;
+}
+
+export function parseAgentRemoteConfig(value: unknown): AgentRemoteConfig | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['host']) || !isNonEmptyString(value.host)) {
+    return null;
+  }
+  return value as unknown as AgentRemoteConfig;
+}
+
 export function parseProjectAuthority(value: unknown): ProjectAuthority | null {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['projectId', 'canonicalPath', 'state', 'version']) ||
+    !hasOnlyKeys(value, ['projectId', 'canonicalPath', 'kind', 'sshHost', 'state', 'version']) ||
     !isUuid(value.projectId) ||
     !isNonEmptyString(value.canonicalPath) ||
+    !isValidProjectRemoteFields(value) ||
     (value.state !== 'active' && value.state !== 'removed') ||
     !isSequence(value.version)
   ) {
@@ -881,8 +913,12 @@ export function parseSourceAuthorityProjection(value: unknown): SourceAuthorityP
 export function parseCreateProjectAuthorityRequest(
   value: unknown
 ): CreateProjectAuthorityRequest | null {
-  if (!isRecord(value) || !hasExactKeys(value, ['requestId', 'path'])) return null;
-  return isNonEmptyString(value.requestId) && isNonEmptyString(value.path)
+  if (!isRecord(value) || !hasOnlyKeys(value, ['requestId', 'path', 'kind', 'sshHost'])) {
+    return null;
+  }
+  return isNonEmptyString(value.requestId) &&
+    isNonEmptyString(value.path) &&
+    isValidProjectRemoteFields(value)
     ? (value as unknown as CreateProjectAuthorityRequest)
     : null;
 }
@@ -1312,11 +1348,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'agentTypes',
           'subagentModels',
           'disabledTools',
+          'remote',
         ]) ||
         !parseSessionIdentity(value.identity) ||
         typeof value.cwd !== 'string' ||
         !parseSpawnModelConfig(value.model) ||
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
+        (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null)))
