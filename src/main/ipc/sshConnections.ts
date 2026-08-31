@@ -4,7 +4,12 @@ import { ipcMain } from 'electron';
 import { getSshConnectionStore, type SshConnectionUpsert } from '../services/sshConnectionStore';
 import { sshListRemoteDirs, sshProbeLogin } from '../services/sshProbe';
 import { isMainWebContents } from '../windows/MainWindow';
+import { isSettingsWebContents } from '../windows/SettingsWindow';
 import { getSourceAuthorityRegistry } from './agent';
+
+function isTrustedWindow(webContentsId: number): boolean {
+  return isMainWebContents(webContentsId) || isSettingsWebContents(webContentsId);
+}
 
 function parseUpsert(value: unknown): SshConnectionUpsert | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -28,19 +33,19 @@ function parseUpsert(value: unknown): SshConnectionUpsert | null {
 
 export function registerSshConnectionHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_LIST, (event) => {
-    if (!isMainWebContents(event.sender.id)) return [];
+    if (!isTrustedWindow(event.sender.id)) return [];
     return getSshConnectionStore().list();
   });
 
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_UPSERT, (event, request: unknown) => {
-    if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'Invalid request.' };
+    if (!isTrustedWindow(event.sender.id)) return { ok: false, error: 'Invalid request.' };
     const parsed = parseUpsert(request);
     if (!parsed) return { ok: false, error: 'Invalid SSH connection.' };
     return getSshConnectionStore().upsert(parsed);
   });
 
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_DELETE, (event, id: unknown) => {
-    if (!isMainWebContents(event.sender.id) || typeof id !== 'string') {
+    if (!isTrustedWindow(event.sender.id) || typeof id !== 'string') {
       return { ok: false, error: 'Invalid request.' };
     }
     const registry = getSourceAuthorityRegistry();
@@ -52,16 +57,16 @@ export function registerSshConnectionHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.SSH_CONNECTIONS_LIST_DIRS,
-    async (event, id: unknown, path: unknown) => {
-      if (!isMainWebContents(event.sender.id) || typeof id !== 'string') {
+    async (event, id: unknown, remotePath: unknown) => {
+      if (!isTrustedWindow(event.sender.id) || typeof id !== 'string') {
         return { ok: false, error: 'Invalid request.' };
       }
-      if (path !== undefined && typeof path !== 'string') {
+      if (remotePath !== undefined && typeof remotePath !== 'string') {
         return { ok: false, error: 'Invalid request.' };
       }
       const secret = getSshConnectionStore().getSecret(id);
       if (!secret) return { ok: false, error: '连接不存在。' };
-      return sshListRemoteDirs(resolveSshTarget(secret), path || undefined, {
+      return sshListRemoteDirs(resolveSshTarget(secret), remotePath || undefined, {
         auth: secret.auth,
         port: secret.port,
         password: secret.password,
@@ -70,7 +75,7 @@ export function registerSshConnectionHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_TEST, async (event, id: unknown) => {
-    if (!isMainWebContents(event.sender.id) || typeof id !== 'string') {
+    if (!isTrustedWindow(event.sender.id) || typeof id !== 'string') {
       return { ok: false, error: 'Invalid request.' };
     }
     const secret = getSshConnectionStore().getSecret(id);
