@@ -1,5 +1,5 @@
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
-import type { ModelProvider, OauthProviderInfo } from '@shared/types';
+import type { ModelProvider, OauthAccountUsage, OauthProviderInfo } from '@shared/types';
 import {
   BadgeCheck,
   HardDriveDownload,
@@ -23,9 +23,26 @@ import { useSettingsStore } from '@/stores/settings';
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
+import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
+
+/** 订阅行额度：每次打开设置页按账号拉一次，复用向导里的展示块；拉取失败静默隐藏 */
+function SubscriptionUsage({ accountKey }: { accountKey: string }) {
+  const [info, setInfo] = React.useState<OauthAccountUsage | undefined>();
+  React.useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI.providers.oauthAccountUsage(accountKey).then((result) => {
+      if (!cancelled) setInfo(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountKey]);
+  if (!info || info.error) return null;
+  return <AccountUsageBlock info={info} />;
+}
 
 export function ProvidersSettings() {
   const { t } = useI18n();
@@ -160,46 +177,54 @@ export function ProvidersSettings() {
                     return (
                       <React.Fragment key={provider.id}>
                         <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
-                          <div className="flex min-w-0 items-center gap-2">
-                            {isSubscription ? (
-                              <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            ) : (
-                              <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            )}
-                            <span
-                              className={cn(
-                                'truncate text-sm font-medium',
-                                !provider.enabled && 'text-muted-foreground line-through'
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              {isSubscription ? (
+                                <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                               )}
-                            >
-                              {primaryLabel}
-                            </span>
-                            {isSubscription ? (
-                              account?.plan && (
-                                <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
-                                  {account.plan}
+                              <span
+                                className={cn(
+                                  'truncate text-sm font-medium',
+                                  !provider.enabled && 'text-muted-foreground line-through'
+                                )}
+                              >
+                                {primaryLabel}
+                              </span>
+                              {isSubscription ? (
+                                account?.plan && (
+                                  <Badge
+                                    variant="outline"
+                                    className="shrink-0 text-[10px] uppercase"
+                                  >
+                                    {account.plan}
+                                  </Badge>
+                                )
+                              ) : (
+                                <Badge variant="outline" className="shrink-0 text-[11px]">
+                                  {API_KIND_LABELS[provider.api] ?? provider.api}
                                 </Badge>
-                              )
-                            ) : (
-                              <Badge variant="outline" className="shrink-0 text-[11px]">
-                                {API_KIND_LABELS[provider.api] ?? provider.api}
-                              </Badge>
+                              )}
+                              {provider.importedFrom && (
+                                <Badge variant="secondary" className="shrink-0 text-[11px]">
+                                  {provider.importedFrom}
+                                </Badge>
+                              )}
+                              <span className="min-w-0 truncate text-xs text-muted-foreground">
+                                {[
+                                  isSubscription ? undefined : provider.baseUrl,
+                                  provider.models.length > 0
+                                    ? t('{{count}} models', { count: provider.models.length })
+                                    : undefined,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </span>
+                            </div>
+                            {provider.oauthAccountKey && (
+                              <SubscriptionUsage accountKey={provider.oauthAccountKey} />
                             )}
-                            {provider.importedFrom && (
-                              <Badge variant="secondary" className="shrink-0 text-[11px]">
-                                {provider.importedFrom}
-                              </Badge>
-                            )}
-                            <span className="min-w-0 truncate text-xs text-muted-foreground">
-                              {[
-                                isSubscription ? undefined : provider.baseUrl,
-                                provider.models.length > 0
-                                  ? t('{{count}} models', { count: provider.models.length })
-                                  : undefined,
-                              ]
-                                .filter(Boolean)
-                                .join(' · ')}
-                            </span>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <Switch

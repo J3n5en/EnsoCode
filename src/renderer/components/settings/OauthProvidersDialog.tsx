@@ -132,7 +132,7 @@ export function OauthProviderAccounts({
   );
 }
 
-function AccountUsageBlock({ info }: { info: OauthAccountUsage | undefined }) {
+export function AccountUsageBlock({ info }: { info: OauthAccountUsage | undefined }) {
   const { t } = useI18n();
   if (!info) return null;
   if (info.error) {
