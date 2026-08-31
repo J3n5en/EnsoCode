@@ -1,9 +1,17 @@
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { notifications, windows } = vi.hoisted(() => ({
+const { notifications, windows, execFileCalls, appState } = vi.hoisted(() => ({
   notifications: [] as { title: string; body: string }[],
   windows: [] as { isFocused: () => boolean }[],
+  execFileCalls: [] as unknown[][],
+  appState: { isPackaged: true },
+}));
+
+vi.mock('node:child_process', () => ({
+  execFile: (...args: unknown[]) => {
+    execFileCalls.push(args);
+  },
 }));
 
 vi.mock('electron', () => {
@@ -18,7 +26,14 @@ vi.mock('electron', () => {
   return {
     Notification,
     BrowserWindow: { getAllWindows: () => windows },
-    app: { getPath: () => '/tmp/enso-code-test', getName: () => 'enso-code', on: () => {} },
+    app: {
+      getPath: () => '/tmp/enso-code-test',
+      getName: () => 'enso-code',
+      on: () => {},
+      get isPackaged() {
+        return appState.isPackaged;
+      },
+    },
     ipcMain: { handle: () => {}, on: () => {} },
   };
 });
@@ -41,6 +56,8 @@ describe('maybeNotify', () => {
   beforeEach(() => {
     notifications.length = 0;
     windows.length = 0; // 缺省无聚焦窗口 = 用户不在
+    execFileCalls.length = 0;
+    appState.isPackaged = true;
     setViewedSession(null);
   });
 
@@ -104,6 +121,27 @@ describe('maybeNotify', () => {
       ask: { requestId: 'r3', question: '选哪个方案?' },
     } as unknown as RendererAgentEvent);
     expect(notifications).toHaveLength(1);
+  });
+
+  it('macOS 未打包(未签名)时直接走 osascript,不碰原生 Notification', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    appState.isPackaged = false;
+    try {
+      maybeNotify(askEvent('在吗'));
+    } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform);
+    }
+    expect(notifications).toHaveLength(0);
+    expect(execFileCalls).toHaveLength(1);
+    expect(execFileCalls[0][0]).toBe('osascript');
+    expect(String((execFileCalls[0][1] as string[])[1])).toContain('在吗');
+  });
+
+  it('打包后走原生 Notification,不走 osascript', () => {
+    maybeNotify(askEvent('在吗'));
+    expect(notifications).toHaveLength(1);
+    expect(execFileCalls).toHaveLength(0);
   });
 
   it('无关事件不弹', () => {

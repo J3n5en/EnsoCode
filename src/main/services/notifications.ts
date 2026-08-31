@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import { BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
 import { readSettings } from '../ipc/settings';
 
 // 文案本地内联：main 段引入 @shared/i18n 会触发 rollup 多入口 chunk 异常
@@ -50,17 +50,18 @@ function focusSession(sessionId: string): void {
 }
 
 function notify(sessionId: string, title: string, body: string): void {
-  if (!Notification.isSupported()) return;
-  const notification = new Notification({ title, body, silent: false });
-  notification.on('click', () => focusSession(sessionId));
-  // dev 模式未签名 app 会被 macOS 拒绝（UNErrorDomain 1），退回 osascript 通知
+  // macOS 未打包（未签名）app 的原生通知会被 UNUserNotificationCenter 静默丢弃，
+  // 且 Electron 的 'failed' 事件是 Windows-only 兜不住——直接走 osascript
   // （无点击跳转，但至少可见；打包签名后走原生路径）
-  notification.on('failed', () => {
-    if (process.platform !== 'darwin') return;
+  if (process.platform === 'darwin' && !app.isPackaged) {
     const safeBody = body.replace(/[\\"]/g, ' ');
     const safeTitle = title.replace(/[\\"]/g, ' ');
     execFile('osascript', ['-e', `display notification "${safeBody}" with title "${safeTitle}"`]);
-  });
+    return;
+  }
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body, silent: false });
+  notification.on('click', () => focusSession(sessionId));
   notification.show();
 }
 
