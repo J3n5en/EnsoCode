@@ -1,26 +1,16 @@
 import { execFile } from 'node:child_process';
+import { buildRemoteCommand, buildSshExecArgs } from '@shared/ssh';
 
 /** ssh 探测超时(秒);BatchMode 下认证不可交互,挂死风险低但连接可能长等 */
 const CONNECT_TIMEOUT_SECONDS = 10;
 /** 整个 probe 进程的硬超时(ms),覆盖 DNS/代理等 ConnectTimeout 不管的阶段 */
 const PROBE_TIMEOUT_MS = 15_000;
 
-/** POSIX shell 单引号安全包裹(内嵌单引号转 '\'' ) */
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
 /** 构建 `ssh <host> test -d <path>` 的 argv;路径经单引号防远端 shell 展开 */
 export function buildSshProbeArgs(host: string, remotePath: string): string[] {
-  return [
-    '-o',
-    'BatchMode=yes',
-    '-o',
-    `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`,
-    '--',
-    host,
-    `test -d ${shellQuote(remotePath)}`,
-  ];
+  return buildSshExecArgs(host, buildRemoteCommand(['test', '-d', remotePath]), {
+    connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+  });
 }
 
 /** 把 ssh 退出码 + stderr 归为用户可读错误(中文,面向 AddProjectDialog 内联展示) */
