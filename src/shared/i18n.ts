@@ -422,6 +422,7 @@ export const zhTranslations: Record<string, string> = {
   'Exit fullscreen': '退出全屏',
   Projects: '项目',
   'Add project': '添加项目',
+  'Adding...': '正在添加...',
   'Add a project to start': '添加一个项目开始',
   'Add a local directory as the conversation working folder.': '把本地目录加为对话的工作目录。',
   'Type a path or select from recent projects...': '输入路径或从最近项目中选择...',

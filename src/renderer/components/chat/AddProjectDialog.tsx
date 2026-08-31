@@ -150,7 +150,7 @@ function RemoteDirBrowser({
 interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (request: { path: string; sshConnectionId?: string }) => void;
+  onAdd: (request: { path: string; sshConnectionId?: string; sshHost?: string }) => void;
 }
 
 export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialogProps) {
@@ -216,7 +216,16 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
     event.preventDefault();
     if (!canSubmit) return;
     if (mode === 'ssh') {
-      onAdd({ path: sshPath.trim(), sshConnectionId });
+      const connection = connections.find((item) => item.id === sshConnectionId);
+      onAdd({
+        path: sshPath.trim(),
+        sshConnectionId,
+        sshHost: connection
+          ? connection.user
+            ? `${connection.user}@${connection.host}`
+            : connection.host
+          : undefined,
+      });
     } else {
       onAdd({ path: pathValue.trim() });
     }

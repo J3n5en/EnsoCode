@@ -20,6 +20,7 @@ import {
   GitBranch,
   GitBranchPlus,
   HardDriveDownload,
+  Loader2,
   MessageSquarePlus,
   PanelLeft,
   PanelLeftClose,
@@ -185,7 +186,23 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   });
 
   const [addOpen, setAddOpen] = useState(false);
-  const handleAddProject = (request: { path: string; sshConnectionId?: string }) => {
+  const [pendingProject, setPendingProject] = useState<{
+    name: string;
+    path: string;
+    sshHost?: string;
+  } | null>(null);
+  const handleAddProject = (request: {
+    path: string;
+    sshConnectionId?: string;
+    sshHost?: string;
+  }) => {
+    if (request.sshConnectionId) {
+      setPendingProject({
+        name: request.path.split('/').filter(Boolean).pop() ?? request.path,
+        path: request.path,
+        sshHost: request.sshHost,
+      });
+    }
     void addProject(
       request.path,
       request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined
@@ -199,7 +216,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           title: t('Failed to add project'),
           description: error instanceof Error ? error.message : String(error),
         });
-      });
+      })
+      .finally(() => setPendingProject(null));
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
@@ -429,6 +447,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 </SortableContext>
               </div>
             </PinnedDropZone>
+          )}
+          {pendingProject && (
+            <div className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-muted-foreground">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              </span>
+              <FolderGit2 className="h-4 w-4 shrink-0" />
+              <span
+                className="min-w-0 flex-1 truncate text-sm font-medium"
+                title={pendingProject.path}
+              >
+                {pendingProject.name}
+                {pendingProject.sshHost && (
+                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal">
+                    {pendingProject.sshHost}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-xs">{t('Adding...')}</span>
+            </div>
           )}
           <SortableContext
             items={orderedProjects.map((project) => projectDragId(project.id))}
