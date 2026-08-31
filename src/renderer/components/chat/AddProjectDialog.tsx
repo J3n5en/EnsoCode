@@ -1,4 +1,5 @@
 import type { RecentProject } from '@shared/types';
+import { Loader2 } from 'lucide-react';
 import * as React from 'react';
 import {
   Autocomplete,
@@ -105,25 +106,31 @@ function RemoteDirBrowser({
           {t('Close')}
         </Button>
       </div>
-      <div className="max-h-40 space-y-0.5 overflow-y-auto">
+      <div className="relative min-h-16 max-h-40 overflow-y-auto">
         {error ? (
           <p className="px-1 py-2 text-destructive text-xs">{error}</p>
-        ) : loading && dirs.length === 0 ? (
-          <p className="px-1 py-2 text-muted-foreground text-xs">{t('Loading...')}</p>
-        ) : dirs.length === 0 ? (
+        ) : dirs.length === 0 && !loading ? (
           <p className="px-1 py-2 text-muted-foreground text-xs">{t('No subdirectories')}</p>
         ) : (
-          dirs.map((dir) => (
-            <button
-              key={dir}
-              type="button"
-              className="block w-full truncate rounded px-1.5 py-1 text-left font-mono text-xs hover:bg-muted"
-              disabled={loading}
-              onClick={() => path && load(path === '/' ? `/${dir}` : `${path}/${dir}`)}
-            >
-              {dir}/
-            </button>
-          ))
+          <div className={loading ? 'pointer-events-none space-y-0.5 opacity-40' : 'space-y-0.5'}>
+            {dirs.map((dir) => (
+              <button
+                key={dir}
+                type="button"
+                className="block w-full truncate rounded px-1.5 py-1 text-left font-mono text-xs hover:bg-muted"
+                disabled={loading}
+                onClick={() => path && load(path === '/' ? `/${dir}` : `${path}/${dir}`)}
+              >
+                {dir}/
+              </button>
+            ))}
+          </div>
+        )}
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="sr-only">{t('Loading...')}</span>
+          </div>
         )}
       </div>
       <Button
