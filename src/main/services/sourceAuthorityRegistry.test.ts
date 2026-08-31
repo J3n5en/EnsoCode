@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SourceAuthorityRegistry } from './sourceAuthorityRegistry';
+import { normalizeRemoteProjectPath, SourceAuthorityRegistry } from './sourceAuthorityRegistry';
 
 const roots: string[] = [];
 const temporary = () => {
@@ -192,5 +192,71 @@ describe('SourceAuthorityRegistry', () => {
         conversationId: phoneSessionId,
       })
     ).toEqual({ accepted: false, error: 'Conversation authority is stale or unavailable.' });
+  });
+
+  it('ssh 项目：跳过本地 FS 校验、持久化 kind/sshHost、按 host+路径去重', () => {
+    const root = temporary();
+    const registryFile = path.join(root, 'registry.json');
+    const registry = new SourceAuthorityRegistry({ registryFile });
+    // 远端路径在本机并不存在，不得走 realpathSync
+    const created = registry.createProject({
+      requestId: 'p1',
+      path: '/srv/app/',
+      kind: 'ssh',
+      sshHost: 'user@dev-box',
+    });
+    expect(created.accepted).toBe(true);
+    if (!created.accepted) return;
+    expect(created.value.kind).toBe('ssh');
+    expect(created.value.sshHost).toBe('user@dev-box');
+    expect(created.value.canonicalPath).toBe('/srv/app'); // 尾斜杠规范化
+
+    // 同 host 同路径去重（含尾斜杠变体）
+    const dup = registry.createProject({
+      requestId: 'p2',
+      path: '/srv/app',
+      kind: 'ssh',
+      sshHost: 'user@dev-box',
+    });
+    expect(dup).toEqual({ accepted: true, value: created.value });
+    // 不同 host 同路径是不同项目
+    const otherHost = registry.createProject({
+      requestId: 'p3',
+      path: '/srv/app',
+      kind: 'ssh',
+      sshHost: 'user@other-box',
+    });
+    expect(otherHost.accepted).toBe(true);
+    if (!otherHost.accepted) return;
+    expect(otherHost.value.projectId).not.toBe(created.value.projectId);
+
+    // 非绝对路径拒绝
+    expect(
+      registry.createProject({ requestId: 'p4', path: 'srv/app', kind: 'ssh', sshHost: 'h' })
+        .accepted
+    ).toBe(false);
+
+    // 重新加载后 kind/sshHost 保留
+    const reloaded = new SourceAuthorityRegistry({ registryFile });
+    const project = reloaded.project(created.value.projectId);
+    expect(project?.kind).toBe('ssh');
+    expect(project?.sshHost).toBe('user@dev-box');
+
+    // 本地项目不受 ssh 去重影响：同路径的 local 创建仍走本地校验（不存在 → 拒绝）
+    expect(registry.createProject({ requestId: 'p5', path: '/srv/app' }).accepted).toBe(false);
+  });
+});
+
+describe('normalizeRemoteProjectPath', () => {
+  it('规范化远端绝对路径，拒绝相对/空/带 .. 的路径', () => {
+    expect(normalizeRemoteProjectPath('/srv/app')).toBe('/srv/app');
+    expect(normalizeRemoteProjectPath('/srv/app/')).toBe('/srv/app');
+    expect(normalizeRemoteProjectPath('/srv//app///')).toBe('/srv/app');
+    expect(normalizeRemoteProjectPath('/')).toBe('/');
+    expect(normalizeRemoteProjectPath('relative/path')).toBeNull();
+    expect(normalizeRemoteProjectPath('')).toBeNull();
+    expect(normalizeRemoteProjectPath('~/app')).toBeNull();
+    expect(normalizeRemoteProjectPath('/srv/../etc')).toBeNull();
+    expect(normalizeRemoteProjectPath('/srv/./app')).toBeNull();
   });
 });

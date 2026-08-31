@@ -130,6 +130,8 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   }
   // cwd 授权：项目主工作树，或该会话在 main 登记过的隔离 worktree（不信任其它路径）
   if (project.canonicalPath === request.cwd) return true;
+  // ssh 项目无 worktree：cwd 只允许等于远端 canonicalPath
+  if (project.kind === 'ssh') return false;
   return sessionWorktree(request.sessionId)?.path === request.cwd;
 }
 

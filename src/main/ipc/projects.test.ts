@@ -38,19 +38,19 @@ describe('project authority IPC', () => {
     registerProjectHandlers();
   });
 
-  it('accepts strict dedicated mutations only from MainWindow', () => {
+  it('accepts strict dedicated mutations only from MainWindow', async () => {
     const create = mocks.handlers.get(IPC_CHANNELS.SOURCE_PROJECT_CREATE)!;
-    expect(create(event(1), { requestId: 'request', path: '/project' })).toMatchObject({
+    await expect(create(event(1), { requestId: 'request', path: '/project' })).resolves.toMatchObject({
       accepted: true,
     });
     expect(mocks.createProject).toHaveBeenCalledWith({ requestId: 'request', path: '/project' });
-    expect(create(event(2), { requestId: 'request', path: '/forged' })).toEqual({
+    await expect(create(event(2), { requestId: 'request', path: '/forged' })).resolves.toEqual({
       accepted: false,
       error: 'Invalid project request.',
     });
-    expect(create(event(1), { requestId: 'request', path: '/project', target: '/forged' })).toEqual(
-      { accepted: false, error: 'Invalid project request.' }
-    );
+    await expect(
+      create(event(1), { requestId: 'request', path: '/project', target: '/forged' })
+    ).resolves.toEqual({ accepted: false, error: 'Invalid project request.' });
   });
 
   it('passes exact versioned select/remove mutations', () => {
