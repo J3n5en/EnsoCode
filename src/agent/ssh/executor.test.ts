@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { createSshExecutor, type SpawnLike } from './executor';
+import { createSshExecutor, resolveSshControlPath, type SpawnLike } from './executor';
 
 class FakeProc extends EventEmitter {
   stdout = new EventEmitter();
@@ -34,12 +34,22 @@ function setup() {
   return { procs, executor };
 }
 
+describe('resolveSshControlPath', () => {
+  it('压到 /tmp/ec-ssh/<8位哈希>/%C,展开后仍低于 Darwin 104 字节上限', () => {
+    const long = '/Users/j3n5en/Library/Application Support/enso-code/agent/pi-agent/ssh';
+    const resolved = resolveSshControlPath(long);
+    expect(resolved).toMatch(/^\/tmp\/ec-ssh\/[0-9a-f]{8}\/%C$/);
+    expect(resolved.replace('%C', '0'.repeat(40)).length).toBeLessThan(104);
+    expect(resolveSshControlPath(long)).toBe(resolved);
+  });
+});
+
 describe('SshExecutor', () => {
   it('argv 模式:spawn ssh 带 ControlPath,收集 stdout/stderr/code', async () => {
     const { procs, executor } = setup();
     const pending = executor.exec(['ls', '-la'], { cwd: '/srv/app' });
     const { args, proc } = procs[0];
-    expect(args.join(' ')).toContain('ControlPath=/tmp/ctl/%C');
+    expect(args.join(' ')).toContain(`ControlPath=${resolveSshControlPath('/tmp/ctl')}`);
     expect(args[args.length - 2]).toBe('user@dev-box');
     expect(args[args.length - 1]).toBe("cd '/srv/app' && 'ls' '-la'");
     proc.stdout.emit('data', Buffer.from('file1\n'));

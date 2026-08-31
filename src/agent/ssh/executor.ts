@@ -5,6 +5,8 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { buildRemoteCommand, buildSshExecArgs } from '@shared/ssh';
 
 export interface SshExecResult {
@@ -49,12 +51,24 @@ export interface SshExecutor {
   ): Promise<{ exitCode: number | null }>;
 }
 
+/**
+ * Darwin AF_UNIX 路径上限 104 字节;%C 展开约 40 字节。
+ * userData/agent/ssh/%C 在 macOS 上会直接超限导致全部 ssh 失败,
+ * 所以 socket 落 /tmp/ec-ssh/<controlDir 8 位哈希>/%C(同 agentDir 复用同一条 multiplex)。
+ */
+export function resolveSshControlPath(controlDir: string): string {
+  const digest = createHash('sha1').update(controlDir).digest('hex').slice(0, 8);
+  const dir = `/tmp/ec-ssh/${digest}`;
+  mkdirSync(dir, { recursive: true });
+  return `${dir}/%C`;
+}
+
 export function createSshExecutor(
   host: string,
   controlDir: string,
   spawnImpl: SpawnLike = spawn
 ): SshExecutor {
-  const controlPath = `${controlDir}/%C`;
+  const controlPath = resolveSshControlPath(controlDir);
 
   function run(command: string[] | string, options: SshExecOptions): Promise<SshExecRawResult> {
     return new Promise((resolve, reject) => {

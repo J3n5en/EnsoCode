@@ -75,7 +75,7 @@ import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
-import { createSshExecutor, type SshExecutor } from './ssh/executor';
+import { createSshExecutor, resolveSshControlPath, type SshExecutor } from './ssh/executor';
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
@@ -852,7 +852,7 @@ export class SessionSupervisor {
       ? (command: string, taskCwd: string) => ({
           command: buildSshShellCommand(remote.host, command, {
             cwd: taskCwd,
-            controlPath: path.join(this.options.agentDir, 'ssh', '%C'),
+            controlPath: resolveSshControlPath(path.join(this.options.agentDir, 'ssh')),
           }),
           cwd: process.cwd(),
         })
