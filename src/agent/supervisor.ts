@@ -1746,6 +1746,15 @@ export class SessionSupervisor {
             timing.thinkingEndMs = Date.now();
           }
         }
+        // 工具耗时起点 = toolCall part 首次流式出现（含模型生成参数的时间），
+        // 与渲染层运行中计时器（工具行出现即起表）口径一致，避免完成后骤降为 0s
+        if (projected?.role === 'assistant') {
+          for (const part of projected.content) {
+            if (part.type === 'toolCall' && !managed.toolStartAt.has(part.id)) {
+              managed.toolStartAt.set(part.id, Date.now());
+            }
+          }
+        }
         this.replaceLastMessage(managed, projected);
         return;
       }
@@ -1787,7 +1796,10 @@ export class SessionSupervisor {
         return;
       }
       case 'tool_execution_start':
-        managed.toolStartAt.set(event.toolCallId, Date.now());
+        // message_update 已在生成阶段记过起点；这里兜底（如工具调用未经流式直接执行）
+        if (!managed.toolStartAt.has(event.toolCallId)) {
+          managed.toolStartAt.set(event.toolCallId, Date.now());
+        }
         return;
       case 'tool_execution_end': {
         const start = managed.toolStartAt.get(event.toolCallId);
