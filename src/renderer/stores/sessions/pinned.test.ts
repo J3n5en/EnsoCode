@@ -150,6 +150,13 @@ describe('staleArchivedConversationIds', () => {
     expect(staleArchivedConversationIds(ids, stale, 7, now)).toEqual(['week', 'month', 'legacy']);
     expect(staleArchivedConversationIds(ids, stale, 15, now)).toEqual(['month', 'legacy']);
     expect(staleArchivedConversationIds(ids, stale, 30, now)).toEqual(['legacy']);
+    // days=0 = 全部已归档（「全部删除」入口）
+    expect(staleArchivedConversationIds(ids, stale, 0, now)).toEqual([
+      'recent',
+      'week',
+      'month',
+      'legacy',
+    ]);
   });
 
   it('未归档的不进清理名单', () => {

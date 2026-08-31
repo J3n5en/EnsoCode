@@ -816,19 +816,31 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                 count: pendingRemove.conversationIds.length,
               })
             : pendingRemove?.kind === 'archived'
-              ? pendingRemove.projectName
-                ? t(
-                    '{{count}} conversations in "{{name}}" archived more than {{days}} days ago will be removed from the list.',
-                    {
+              ? pendingRemove.days === 0
+                ? pendingRemove.projectName
+                  ? t(
+                      'All {{count}} archived conversations in "{{name}}" will be removed from the list.',
+                      {
+                        count: pendingRemove.conversationIds.length,
+                        name: pendingRemove.projectName,
+                      }
+                    )
+                  : t('All {{count}} archived conversations will be removed from the list.', {
                       count: pendingRemove.conversationIds.length,
-                      days: pendingRemove.days,
-                      name: pendingRemove.projectName,
-                    }
-                  )
-                : t(
-                    '{{count}} conversations archived more than {{days}} days ago will be removed from the list.',
-                    { count: pendingRemove.conversationIds.length, days: pendingRemove.days }
-                  )
+                    })
+                : pendingRemove.projectName
+                  ? t(
+                      '{{count}} conversations in "{{name}}" archived more than {{days}} days ago will be removed from the list.',
+                      {
+                        count: pendingRemove.conversationIds.length,
+                        days: pendingRemove.days,
+                        name: pendingRemove.projectName,
+                      }
+                    )
+                  : t(
+                      '{{count}} conversations archived more than {{days}} days ago will be removed from the list.',
+                      { count: pendingRemove.conversationIds.length, days: pendingRemove.days }
+                    )
               : pendingRemove?.kind === 'conversation' && pendingRemove.worktreeWarning
                 ? t('This conversation and its isolated worktree will be removed: {{warning}}.', {
                     warning: pendingRemove.worktreeWarning,
@@ -943,6 +955,18 @@ function ArchiveCleanupMenu({
             </MenuItem>
           );
         })}
+        {(() => {
+          const ids = idsForDays(0);
+          return (
+            <MenuItem
+              variant="destructive"
+              disabled={ids.length === 0}
+              onClick={() => onPick(0, ids)}
+            >
+              {t('Delete all archived')}
+            </MenuItem>
+          );
+        })()}
       </MenuPopup>
     </Menu>
   );

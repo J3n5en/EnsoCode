@@ -535,6 +535,11 @@ export const zhTranslations: Record<string, string> = {
   Archived: '已归档',
   'Clean up archived': '清理已归档',
   'Older than {{days}} days': '{{days}} 天前',
+  'Delete all archived': '全部删除',
+  'All {{count}} archived conversations will be removed from the list.':
+    '全部 {{count}} 个已归档对话将从列表移除。',
+  'All {{count}} archived conversations in "{{name}}" will be removed from the list.':
+    '「{{name}}」中全部 {{count}} 个已归档对话将从列表移除。',
   'Delete archived conversations?': '删除已归档对话?',
   '{{count}} conversations archived more than {{days}} days ago will be removed from the list.':
     '{{count}} 个归档超过 {{days}} 天的对话将从列表移除。',
