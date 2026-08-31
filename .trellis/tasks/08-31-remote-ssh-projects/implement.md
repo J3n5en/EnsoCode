@@ -67,3 +67,25 @@ pnpm typecheck && pnpm test && pnpm exec biome check src
 - checkpoint 命令序列打包单跳(高 RTT 优化)。
 - 档位 2:远端 relay(参照 ~/project/orca 的 src/relay)。
 - skills 目录远程加载、远端目录浏览 UI。
+
+## 进度(2026-09-01)
+
+全部 6 步已实现并分步提交(feat/remote-ssh-projects 分支):
+
+- Step 1 `c661dff` shared 类型/parser
+- Step 2 `0faf403` registry + IPC + sshProbe + spawn 授权
+- Step 3 `ed5a00a` SshExecutor + shared/ssh 纯函数
+- Step 4 `8ed58a2` + `fa2bd1b` RemoteOperations/远程 grep/supervisor 接线/后台任务变换/gate/远端 AGENTS.md/main 派生 remote
+- Step 5 `b866d74` CheckpointHost 抽象 + ssh 实现(stat 批量化)
+- Step 6 `0f4c41b` AddProjectDialog SSH 页签 + store + 侧栏徽标
+
+实现中的设计修订:
+- SDK 工具支持 operations 注入 → 6/7 工具无需重写定义,只实现 Operations over SshExecutor;
+  grep 例外(搜索本体本地 spawn rg),换整个 ToolDefinition 的 execute
+- BashOperations.timeout 单位是秒(SDK resolveTimeoutMs),executor 层转 ms
+- 后台任务:manager 本体不感知远程,withBackground 增加命令变换口子,
+  把远端命令包成本地可 spawn 的 ssh 单条命令
+- gate 经 SessionFactory.runGate 统一出口,coworker gate 复用父会话执行面
+
+待办:真机 E2E(AC1–AC8)需要一台可 ssh 的主机,未执行。
+worktree 菜单项对 ssh 项目未隐藏(main 已拒绝,UI 上是优雅失败),可作后续打磨。
