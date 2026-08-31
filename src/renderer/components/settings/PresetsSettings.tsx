@@ -21,6 +21,8 @@ export function PresetsSettings() {
   const { t } = useI18n();
   const presets = useSettingsStore((state) => state.presets);
   const removePreset = useSettingsStore((state) => state.removePreset);
+  const defaultPresetId = useSettingsStore((state) => state.defaultPresetId);
+  const setDefaultPresetId = useSettingsStore((state) => state.setDefaultPresetId);
   const [editing, setEditing] = React.useState<Preset | 'new' | null>(null);
 
   return (
@@ -41,25 +43,33 @@ export function PresetsSettings() {
       </div>
 
       <div className="space-y-2">
-        {/* 默认预设：只读，跟随各条目的 enabled 开关 */}
+        {/* 内置全局预设：只读，跟随各条目的 enabled 开关 */}
         <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
           <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-2 text-sm font-medium">
-              {t('Default preset')}
-              <Badge variant="secondary">{t('Default')}</Badge>
+              {t('Global')}
+              {defaultPresetId === 'default' && <Badge variant="secondary">{t('Default')}</Badge>}
             </p>
             <p className="text-muted-foreground text-xs">
               {t('Follows the enabled switches on the Skills / MCP / Instructions pages')}
             </p>
           </div>
+          {defaultPresetId !== 'default' && (
+            <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId('default')}>
+              {t('Set as default')}
+            </Button>
+          )}
         </div>
 
         {presets.map((preset) => (
           <div key={preset.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
             <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{preset.name}</p>
+              <p className="flex items-center gap-2 truncate text-sm font-medium">
+                {preset.name}
+                {defaultPresetId === preset.id && <Badge variant="secondary">{t('Default')}</Badge>}
+              </p>
               <p className="text-muted-foreground text-xs">
                 {t('{{skills}} skills · {{mcp}} MCP · {{instruction}} instruction', {
                   skills: preset.skillIds.length,
@@ -68,6 +78,11 @@ export function PresetsSettings() {
                 })}
               </p>
             </div>
+            {defaultPresetId !== preset.id && (
+              <Button variant="ghost" size="sm" onClick={() => setDefaultPresetId(preset.id)}>
+                {t('Set as default')}
+              </Button>
+            )}
             <Button variant="ghost" size="icon" onClick={() => setEditing(preset)}>
               <Pencil className="h-4 w-4" />
             </Button>

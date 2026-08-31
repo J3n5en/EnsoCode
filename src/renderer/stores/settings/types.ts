@@ -137,6 +137,8 @@ export interface SettingsState {
 
   // 注入组合预设（默认预设不入库，运行时合成）
   presets: Preset[];
+  /** 新会话默认预设；'default' = 内置全局预设（跟随 enabled 开关） */
+  defaultPresetId: string;
   agentTypes: AgentTypeEntry[];
   /** 允许主 agent 给 subagent/coworker 指定模型；缺省 false */
   subagentModelsEnabled: boolean;
@@ -220,6 +222,7 @@ export interface SettingsState {
   addPreset: (preset: Omit<Preset, 'id'>) => Preset;
   updatePreset: (id: string, updates: Partial<Omit<Preset, 'id'>>) => void;
   removePreset: (id: string) => void;
+  setDefaultPresetId: (id: string) => void;
 
   // Subagent model actions
   setSubagentModelsEnabled: (value: boolean) => void;

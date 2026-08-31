@@ -36,6 +36,7 @@ export const SETTINGS_STATE_FIELDS = [
   'mcpServers',
   'instructions',
   'presets',
+  'defaultPresetId',
   'agentTypes',
   'disabledBuiltinAgentTypes',
   'disabledBuiltinTools',

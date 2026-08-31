@@ -1016,6 +1016,12 @@ export const useSessionsStore = create<SessionsState>()(
           if (!created.accepted) return null;
           const id = created.value.conversationId;
           const pendingAgentPrefill = get().pendingAgentPrefill;
+          // 新会话应用默认预设；'default'（内置全局）或预设已删除时不写，spawn 时自然回落全局
+          const { defaultPresetId, presets } = useSettingsStore.getState();
+          const defaultPreset =
+            defaultPresetId !== 'default' && presets.some((preset) => preset.id === defaultPresetId)
+              ? { presetId: defaultPresetId }
+              : {};
           const conversation: Conversation = {
             ...emptyProjection,
             id,
@@ -1026,6 +1032,7 @@ export const useSessionsStore = create<SessionsState>()(
             createdAt: Date.now(),
             reasoningEnabled: true,
             thinkingLevel: 'medium',
+            ...defaultPreset,
             ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
           };
           set((state) => ({

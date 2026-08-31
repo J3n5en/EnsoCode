@@ -122,6 +122,7 @@ const initialState = {
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
   presets: [] as import('@shared/types').Preset[],
+  defaultPresetId: 'default',
   agentTypes: [] as import('@shared/types').AgentTypeEntry[],
   subagentModelsEnabled: false,
   subagentModels: [] as import('@shared/types').SubagentModelEntry[],
@@ -416,7 +417,14 @@ export const useSettingsStore = create<SettingsState>()(
           presets: state.presets.map((p) => (p.id === id ? { ...p, ...updates } : p)),
         })),
 
-      removePreset: (id) => set((state) => ({ presets: state.presets.filter((p) => p.id !== id) })),
+      removePreset: (id) =>
+        set((state) => ({
+          presets: state.presets.filter((p) => p.id !== id),
+          // 默认预设被删除时回落内置全局预设
+          ...(state.defaultPresetId === id ? { defaultPresetId: 'default' } : {}),
+        })),
+
+      setDefaultPresetId: (defaultPresetId) => set({ defaultPresetId }),
 
       setSubagentModelsEnabled: (subagentModelsEnabled) => set({ subagentModelsEnabled }),
 

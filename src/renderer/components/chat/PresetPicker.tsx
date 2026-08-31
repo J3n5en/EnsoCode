@@ -20,7 +20,7 @@ export function PresetPicker({ presetId, onSelect, disabled }: PresetPickerProps
   const [open, setOpen] = useState(false);
 
   const options = [
-    { id: DEFAULT_PRESET_ID, name: t('Default') },
+    { id: DEFAULT_PRESET_ID, name: t('Global') },
     ...presets.map((preset) => ({ id: preset.id, name: preset.name })),
   ];
   // 被删除的预设回落默认显示

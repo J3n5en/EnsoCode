@@ -197,6 +197,7 @@ function resultSettingField(capabilityId: string): string | null {
     'providers.subagent-models.add': 'subagentModels',
     'providers.subagent-models.update': 'subagentModels',
     'providers.subagent-models.remove': 'subagentModels',
+    'presets.set-default': 'defaultPresetId',
     'tools.toggle-builtin': 'disabledBuiltinTools',
     'agent-types.toggle-builtin': 'disabledBuiltinAgentTypes',
   };
@@ -1095,6 +1096,19 @@ export function createCapabilityHandlers(
       const stale = context.assertExecutionCurrent();
       return (
         stale ?? updateArrayById(services, 'presets', id, () => null, context.ownerWebContentsId)
+      );
+    },
+    'presets.set-default': (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const current = settingsState(services.readSettings()).presets;
+      const exists =
+        id === 'default' ||
+        (Array.isArray(current) && current.map(asRecord).some((entry) => entry?.id === id));
+      if (!exists) return unavailable(`presets entry not found: ${id}`);
+      return patchResult(
+        services.patchSettings('defaultPresetId', id, context.ownerWebContentsId),
+        'defaultPresetId'
       );
     },
     'agent-types.list': () => success(services.sessionIndex.listAgentTypes()),

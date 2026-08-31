@@ -653,7 +653,8 @@ export const zhTranslations: Record<string, string> = {
   Presets: '预设',
   'New preset': '新建预设',
   'Edit preset': '编辑预设',
-  'Default preset': '默认预设',
+  Global: '全局',
+  'Set as default': '设为默认',
   Default: '默认',
   None: '不注入',
   'Injection bundles of skills, MCP servers and instruction files, chosen per conversation':

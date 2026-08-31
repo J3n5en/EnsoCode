@@ -653,6 +653,13 @@ export const CAPABILITY_CATALOG = {
     targetContext: 'global',
     inputSchema: ID_INPUT_SCHEMA,
   }),
+  'presets.set-default': executable(
+    'presets.set-default',
+    reversibleGlobal(
+      "Set the default preset applied to new conversations ('default' = built-in global preset).",
+      ID_INPUT_SCHEMA
+    )
+  ),
   'presets.select-for-conversation': unavailable('presets.select-for-conversation', {
     description: 'Select the preset for the origin conversation.',
     risk: 'reversible',
@@ -1201,6 +1208,7 @@ export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId
   'presets.create': true,
   'presets.edit': true,
   'presets.delete': true,
+  'presets.set-default': true,
   'agent-types.list': true,
   'agent-types.create': true,
   'agent-types.edit': true,
