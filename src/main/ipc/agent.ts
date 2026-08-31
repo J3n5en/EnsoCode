@@ -61,6 +61,7 @@ import { searchFiles } from '../services/fileSearch';
 import { maybeNotify } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
+import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
   importExternalSession,
   listExternalSessions,
@@ -391,7 +392,14 @@ export function registerAgentHandlers(): void {
     if (!parsed || !isMainWebContents(event.sender.id))
       return { accepted: false, error: 'Invalid conversation request.' };
     const result = sourceAuthority!.removeConversation(parsed);
-    if (result.accepted) sourceBindings!.invalidateConversation(parsed.conversationId);
+    if (result.accepted) {
+      sourceBindings!.invalidateConversation(parsed.conversationId);
+      removeConversationSessionFiles({
+        sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
+        conversationId: parsed.conversationId,
+        ...(result.value.sessionFile ? { sessionFile: result.value.sessionFile } : {}),
+      });
+    }
     return result;
   });
   ipcMain.handle(
