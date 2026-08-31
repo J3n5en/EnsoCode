@@ -67,6 +67,12 @@ import {
 import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
+import {
+  PINNED_ORDER_KEY,
+  PROJECT_ORDER_KEY,
+  readSidebarOrder,
+  writeSidebarOrder,
+} from '@/stores/settings/sidebarOrderStorage';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
 const COLLAPSED_SESSION_LIMIT = 5;
@@ -116,25 +122,15 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
 
   // 项目自定义顺序(拖拽重排,存 localStorage;新项目追加末尾)
-  const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('enso-project-order') ?? '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
-  });
+  const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() =>
+    readSidebarOrder(PROJECT_ORDER_KEY)
+  );
   const orderedProjects = applyProjectOrder(projects, projectOrderIds);
 
   // 置顶组的手动顺序(组内拖拽重排;未收录的新置顶按活跃时间追加)
-  const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('enso-pinned-order') ?? '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
-  });
+  const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() =>
+    readSidebarOrder(PINNED_ORDER_KEY)
+  );
 
   // 拖拽中的源对象(用于 Overlay 预览与临时 Pinned 落点)
   const { active: dndActive } = useDndContext();
@@ -151,7 +147,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         case 'reorder-projects': {
           const next = moveProject(projects, projectOrderIds, action.activeId, action.overId);
           setProjectOrderIds(next);
-          localStorage.setItem('enso-project-order', JSON.stringify(next));
+          writeSidebarOrder(PROJECT_ORDER_KEY, next);
           break;
         }
         case 'insert-file-mention':
@@ -181,7 +177,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             action.overId
           );
           setPinnedOrderIds(next);
-          localStorage.setItem('enso-pinned-order', JSON.stringify(next));
+          writeSidebarOrder(PINNED_ORDER_KEY, next);
           break;
         }
       }

@@ -84,6 +84,8 @@ export function App() {
   const [adding, setAdding] = useState(false);
   const [state, setState] = useState<ConnState>('connecting');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  /** 桌面置顶组的手动拖拽顺序（旧桌面不下发，空 = 按活跃倒序） */
+  const [pinnedOrder, setPinnedOrder] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
   const [activeId, setActiveId] = useState<string | null>(() => {
@@ -138,7 +140,10 @@ export function App() {
     setPushConfigReady(false);
     const client = new PairClient(device, {
       onState: setState,
-      onCatalog: setCatalog,
+      onCatalog: (entries, order) => {
+        setCatalog(entries);
+        setPinnedOrder(order ?? []);
+      },
       onProjects: setProjects,
       onProviders: setProviders,
       onSession: (id, next) => {
@@ -399,6 +404,7 @@ export function App() {
         open={drawerOpen}
         projects={projects}
         catalog={catalog}
+        pinnedOrder={pinnedOrder}
         activeId={activeId}
         canCreate={state === 'online'}
         devices={devices}

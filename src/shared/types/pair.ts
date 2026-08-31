@@ -60,6 +60,8 @@ export interface PairCatalogPayload {
     reasoningEnabled?: boolean;
     thinkingLevel?: string;
   }[];
+  /** 置顶组手动拖拽顺序（会话 id）；项目手动顺序已直接体现在 projects 排序里 */
+  pinnedOrder?: string[];
   projects: { id: string; name: string; path: string }[];
   providers: { id: string; name: string; models: { id: string; label?: string }[] }[];
   /** 仅供 main 侧 spawn 反查 cwd，不下发手机 */

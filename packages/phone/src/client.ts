@@ -56,7 +56,7 @@ export interface SessionView {
 
 export interface ClientEvents {
   onState(state: ConnState): void;
-  onCatalog(entries: CatalogEntry[]): void;
+  onCatalog(entries: CatalogEntry[], pinnedOrder?: string[]): void;
   onProjects(projects: ProjectEntry[]): void;
   onProviders(providers: ProviderEntry[]): void;
   onSession(sessionId: string, view: SessionView): void;
@@ -213,7 +213,7 @@ export class PairClient {
         const ghostId = ghost ? this.subscribedId : null;
         this.setSync(tracking);
         if (ghostId) this.events.onGhostSession?.(ghostId);
-        this.events.onCatalog(payload.entries);
+        this.events.onCatalog(payload.entries, payload.pinnedOrder);
         break;
       }
       case 'projects':

@@ -19,6 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { StoredDevice } from './deviceList';
+import { orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
 import type { PushFailureReason } from './push';
 import {
   getThemePreference,
@@ -53,6 +54,8 @@ interface Props {
   open: boolean;
   projects: ProjectEntry[];
   catalog: CatalogEntry[];
+  /** 桌面置顶组的手动拖拽顺序；缺省（旧桌面）按活跃倒序 */
+  pinnedOrder?: string[];
   activeId: string | null;
   canCreate: boolean;
   /** 已配对的桌面列表（切换式：一次只连活跃那台） */
@@ -84,6 +87,7 @@ export function SessionDrawer({
   open,
   projects,
   catalog,
+  pinnedOrder = [],
   activeId,
   canCreate,
   devices,
@@ -130,13 +134,16 @@ export function SessionDrawer({
 
   // 与桌面侧栏同语义：归档不进项目组，只进底部栏目；置顶另起一栏且组内靠前
   const topLevel = catalog.filter((c) => !c.parentId);
-  const pinnedSessions = topLevel.filter((c) => c.pinned && !c.archived);
-  const archivedSessions = topLevel.filter((c) => c.archived);
+  const pinnedSessions = orderPinned(
+    topLevel.filter((c) => c.pinned && !c.archived),
+    pinnedOrder
+  );
+  const archivedSessions = sortByActivity(topLevel.filter((c) => c.archived));
   const active = topLevel.filter((c) => !c.archived);
 
   // 没有项目归属的会话（项目已删等）单独归到「其他」
   const known = new Set(projects.map((p) => p.id));
-  const orphans = active.filter((c) => !known.has(c.projectId));
+  const orphans = orderProjectSessions(active.filter((c) => !known.has(c.projectId)));
 
   return (
     <>
@@ -197,7 +204,7 @@ export function SessionDrawer({
             <ProjectGroup
               key={project.id}
               name={project.name}
-              sessions={sortPinnedFirst(active.filter((c) => c.projectId === project.id))}
+              sessions={orderProjectSessions(active.filter((c) => c.projectId === project.id))}
               folded={foldedProjects[project.id] === true}
               expanded={expandedProjects[project.id] === true}
               activeId={activeId}
@@ -420,11 +427,6 @@ export function SessionDrawer({
       </aside>
     </>
   );
-}
-
-/** 组内置顶靠前，其余保持 catalog 相对顺序（与桌面 projectConversationIds 同语义） */
-function sortPinnedFirst(sessions: CatalogEntry[]): CatalogEntry[] {
-  return [...sessions.filter((s) => s.pinned), ...sessions.filter((s) => !s.pinned)];
 }
 
 /** 置顶/归档/项目组共用的会话行（subtitle = 归档栏内联的项目名，与桌面一致） */

@@ -164,7 +164,12 @@ export interface TerminalPalette {
 
 /** 下行信封：pair 自有的目录类帧 + 透传的现有 RendererAgentEvent（此处不重定义，按 unknown 透传） */
 export type HostToPhone =
-  | { type: 'catalog'; entries: CatalogEntry[] }
+  | {
+      type: 'catalog';
+      entries: CatalogEntry[];
+      /** 桌面置顶组的手动拖拽顺序；缺省（旧桌面）时手机按活跃倒序 */
+      pinnedOrder?: string[];
+    }
   | { type: 'projects'; projects: ProjectEntry[] }
   | { type: 'providers'; providers: ProviderEntry[] }
   | {
