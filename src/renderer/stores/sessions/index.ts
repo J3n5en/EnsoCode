@@ -50,6 +50,7 @@ import {
   emptyProjection,
   type SessionProjection,
 } from './reducer';
+import { nextUnread } from './unread';
 import { workspaceFallbackNote, workspaceMigratedNote } from './worktree';
 
 function startGoalPrompt(objective: string): string {
@@ -115,6 +116,8 @@ export interface Conversation extends SessionProjection {
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
   activeTabId?: string;
+  /** 完成未读:后台完成且用户未查看(侧栏绿点);选中时清除。持久化 */
+  unread?: boolean;
   /** 排队待发消息(running 时用户消息先入队) */
   queuedMessages?: QueuedMessage[];
   /** 会话目标(设定后空闲自动续跑) */
@@ -666,6 +669,12 @@ export const useSessionsStore = create<SessionsState>()(
           const title = conversation.title || firstUserText(next) || '';
           return patch(state, id, {
             ...next,
+            unread: nextUnread({
+              prevStatus: conversation.status,
+              nextStatus: (next as Conversation).status,
+              prevUnread: conversation.unread,
+              viewed: state.activeId === id,
+            }),
             title,
             spawning: false,
             ...(event.type === 'parent-ready'
@@ -984,12 +993,12 @@ export const useSessionsStore = create<SessionsState>()(
             set((state) => ({
               activeId: existing,
               pendingAgentPrefill: undefined,
-              conversations: pendingAgentPrefill
-                ? patch(state, existing, {
-                    activeTabId: undefined,
-                    prefillAgentTypeKey: pendingAgentPrefill,
-                  }).conversations
-                : state.conversations,
+              conversations: patch(state, existing, {
+                unread: false,
+                ...(pendingAgentPrefill
+                  ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
+                  : {}),
+              }).conversations,
             }));
             return existing;
           }
@@ -1065,12 +1074,12 @@ export const useSessionsStore = create<SessionsState>()(
           set((state) => ({
             activeId: id,
             pendingAgentPrefill: undefined,
-            conversations: pendingAgentPrefill
-              ? patch(state, id, {
-                  activeTabId: undefined,
-                  prefillAgentTypeKey: pendingAgentPrefill,
-                }).conversations
-              : state.conversations,
+            conversations: patch(state, id, {
+              unread: false,
+              ...(pendingAgentPrefill
+                ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
+                : {}),
+            }).conversations,
           }));
           void (async () => {
             if (local && !local.parentId) {

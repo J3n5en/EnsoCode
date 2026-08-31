@@ -1224,16 +1224,19 @@ function WorktreeBadge({ status }: { status?: WorktreeStatus }) {
 function ConversationDot({
   conversation,
 }: {
-  conversation: { status: string; spawning: boolean };
+  conversation: { status: string; spawning: boolean; unread?: boolean };
 }) {
   const running = conversation.status === 'running' || conversation.spawning;
+  const failed = !running && conversation.status === 'failed';
+  const unread = !running && !failed && conversation.unread === true;
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
         running && 'animate-pulse bg-blue-500',
-        conversation.status === 'failed' && 'bg-destructive',
-        !running && conversation.status !== 'failed' && 'bg-muted-foreground/30'
+        failed && 'bg-destructive',
+        unread && 'bg-green-500',
+        !running && !failed && !unread && 'bg-muted-foreground/30'
       )}
     />
   );
