@@ -570,7 +570,7 @@ function StatusDot({ status, unread }: { status: string; unread?: boolean }) {
         'h-1.5 w-1.5 shrink-0 rounded-full',
         running && 'animate-pulse bg-blue-500',
         failed && 'bg-destructive',
-        showUnread && 'bg-muted-foreground',
+        showUnread && 'bg-green-500',
         !running && !failed && !showUnread && 'bg-muted-foreground/30'
       )}
     />
