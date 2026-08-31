@@ -148,6 +148,32 @@ const PROVIDER_MODEL_TOGGLE_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const satisfies JsonSchema;
 
+/** 条目级推理覆盖：'follow' 表示清除覆盖回到跟随父会话（存储层不落 'follow'） */
+const SUBAGENT_MODEL_FIELDS = {
+  providerId: { type: 'string', minLength: 1 },
+  modelId: { type: 'string', minLength: 1 },
+  description: { type: 'string' },
+  reasoning: { type: 'string', enum: ['on', 'off', 'follow'] },
+  thinkingLevel: { type: 'string', enum: ['low', 'medium', 'high', 'max', 'follow'] },
+} as const satisfies Readonly<Record<string, JsonSchema>>;
+
+const SUBAGENT_MODEL_ADD_INPUT_SCHEMA = {
+  type: 'object',
+  properties: SUBAGENT_MODEL_FIELDS,
+  required: ['providerId', 'modelId'],
+  additionalProperties: false,
+} as const satisfies JsonSchema;
+
+const SUBAGENT_MODEL_UPDATE_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    ...SUBAGENT_MODEL_FIELDS,
+  },
+  required: ['id'],
+  additionalProperties: false,
+} as const satisfies JsonSchema;
+
 const ACCOUNT_INPUT_SCHEMA = {
   type: 'object',
   properties: { accountKey: { type: 'string', minLength: 1 } },
@@ -463,10 +489,33 @@ export const CAPABILITY_CATALOG = {
     ...reversibleGlobal('Set or clear the global default model.', MODEL_REF_INPUT_SCHEMA),
     availability: [{ kind: 'configured-provider' }],
   }),
-  'providers.subagent-models': unavailable('providers.subagent-models', {
-    ...reversibleGlobal('Maintain the list of models the agent may pick for subagents.'),
-    reason: 'The list pairs model refs with free-form guidance text and needs the review UI.',
-    suggestedAction: 'Open Model Providers and configure "Let the agent pick subagent models".',
+  'providers.subagent-models': executable(
+    'providers.subagent-models',
+    readGlobal('List subagent model entries and whether the feature is enabled.')
+  ),
+  'providers.subagent-models.toggle': executable(
+    'providers.subagent-models.toggle',
+    reversibleGlobal(
+      'Enable or disable letting the agent pick subagent models.',
+      BOOLEAN_VALUE_INPUT_SCHEMA
+    )
+  ),
+  'providers.subagent-models.add': executable(
+    'providers.subagent-models.add',
+    reversibleGlobal(
+      'Add one subagent model entry with optional guidance text and reasoning override.',
+      SUBAGENT_MODEL_ADD_INPUT_SCHEMA
+    )
+  ),
+  'providers.subagent-models.update': executable(
+    'providers.subagent-models.update',
+    reversibleGlobal(
+      'Edit one subagent model entry; "follow" clears a reasoning override.',
+      SUBAGENT_MODEL_UPDATE_INPUT_SCHEMA
+    )
+  ),
+  'providers.subagent-models.remove': executable('providers.subagent-models.remove', {
+    ...reversibleGlobal('Remove one subagent model entry.', ID_INPUT_SCHEMA),
   }),
   'providers.oauth.list': executable(
     'providers.oauth.list',
@@ -1100,6 +1149,11 @@ export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId
   'providers.toggle-provider': true,
   'providers.toggle-model': true,
   'providers.default-model': true,
+  'providers.subagent-models': true,
+  'providers.subagent-models.toggle': true,
+  'providers.subagent-models.add': true,
+  'providers.subagent-models.update': true,
+  'providers.subagent-models.remove': true,
   'providers.oauth.list': true,
   'providers.oauth.login': true,
   'providers.oauth.logout': true,

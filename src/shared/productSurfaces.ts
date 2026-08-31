@@ -116,6 +116,26 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Models the agent may pick for subagents',
   },
+  'providers.subagent-models.toggle': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Enable or disable subagent model picking',
+  },
+  'providers.subagent-models.add': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Add subagent model entry',
+  },
+  'providers.subagent-models.update': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Edit subagent model entry',
+  },
+  'providers.subagent-models.remove': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Remove subagent model entry',
+  },
   'providers.oauth.list': {
     domain: 'providers',
     kind: 'action',

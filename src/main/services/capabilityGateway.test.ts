@@ -464,6 +464,87 @@ describe('CapabilityGateway OAuth/default/secret/receipt', () => {
     await expect(busyPending).resolves.toMatchObject({ receipt: { outcome: 'failed' } });
   });
 
+  it('subagent-models: list/toggle/add/update/remove 全链受控,引用与推理值校验', async () => {
+    const { gateway, state } = fixture();
+    const list = await gateway.invoke(request('sm-1', 'providers.subagent-models', {}));
+    expect(list.modelResult).toMatchObject({
+      ok: true,
+      data: { enabled: false, entries: [] },
+    });
+
+    const toggled = await gateway.invoke(
+      request('sm-2', 'providers.subagent-models.toggle', { value: true })
+    );
+    expect(toggled.modelResult).toMatchObject({ ok: true });
+    expect(state.subagentModelsEnabled).toBe(true);
+
+    const added = await gateway.invoke(
+      request('sm-3', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'model-1',
+        description: 'cheap and fast',
+        reasoning: 'on',
+        thinkingLevel: 'high',
+      })
+    );
+    expect(added.modelResult).toMatchObject({ ok: true });
+    // patchSettings 每次替换整个数组,断言必须重读 state
+    const entriesOf = () => state.subagentModels as Array<Record<string, unknown>>;
+    expect(entriesOf()).toHaveLength(1);
+    expect(entriesOf()[0]).toMatchObject({
+      providerId: 'provider-1',
+      modelId: 'model-1',
+      description: 'cheap and fast',
+      reasoning: 'on',
+      thinkingLevel: 'high',
+    });
+    const id = entriesOf()[0].id as string;
+
+    // 未知模型拒绝且零写
+    const ghost = await gateway.invoke(
+      request('sm-4', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'ghost',
+      })
+    );
+    expect(ghost.modelResult).toMatchObject({ ok: false });
+    expect(state.subagentModels).toHaveLength(1);
+
+    // 非法推理值被 schema 拒绝
+    const badReasoning = await gateway.invoke(
+      request('sm-5', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'model-1',
+        reasoning: 'maybe',
+      })
+    );
+    expect(badReasoning.modelResult).toMatchObject({ ok: false, code: 'invalid' });
+
+    const updated = await gateway.invoke(
+      request('sm-6', 'providers.subagent-models.update', {
+        id,
+        description: 'strong',
+        reasoning: 'off',
+      })
+    );
+    expect(updated.modelResult).toMatchObject({ ok: true });
+    expect(entriesOf()[0]).toMatchObject({ description: 'strong', reasoning: 'off' });
+
+    // 'follow' 清除覆盖（回到跟随父会话）
+    const followed = await gateway.invoke(
+      request('sm-7', 'providers.subagent-models.update', { id, reasoning: 'follow' })
+    );
+    expect(followed.modelResult).toMatchObject({ ok: true });
+    expect(entriesOf()[0]).not.toHaveProperty('reasoning');
+    expect(entriesOf()[0]).not.toHaveProperty('thinkingLevel');
+
+    const removed = await gateway.invoke(
+      request('sm-8', 'providers.subagent-models.remove', { id })
+    );
+    expect(removed.modelResult).toMatchObject({ ok: true });
+    expect(state.subagentModels).toEqual([]);
+  });
+
   it('default使用auth真keys与shared usability；disabled/空key/logout组合全部零写', async () => {
     for (const unusable of [
       provider({ enabled: false }),
