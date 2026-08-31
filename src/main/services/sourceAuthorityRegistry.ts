@@ -110,10 +110,17 @@ export class SourceAuthorityRegistry {
     if (!statSync(canonicalPath).isDirectory()) throw new Error('Project path is not a directory.');
     const existing = [...this.projects.values()].find(
       (project) =>
-        project.kind !== 'ssh' && project.canonicalPath === canonicalPath && project.state === 'active'
+        project.kind !== 'ssh' &&
+        project.canonicalPath === canonicalPath &&
+        project.state === 'active'
     );
     if (existing) return { accepted: true, value: { ...existing } };
-    return this.insertProject({ projectId: this.randomUuid(), canonicalPath, state: 'active', version: 1 });
+    return this.insertProject({
+      projectId: this.randomUuid(),
+      canonicalPath,
+      state: 'active',
+      version: 1,
+    });
   }
 
   /** 远端目录存在性由 IPC handler 先行 ssh 校验（registry 保持同步契约），这里只做路径规范化与去重 */

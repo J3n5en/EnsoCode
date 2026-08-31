@@ -13,9 +13,10 @@ interface Call {
   options?: SshExecOptions | SshStreamOptions;
 }
 
-function fakeExecutor(
-  respond: (call: Call) => { stdout?: string; code?: number } = () => ({})
-): { calls: Call[]; executor: SshExecutor } {
+function fakeExecutor(respond: (call: Call) => { stdout?: string; code?: number } = () => ({})): {
+  calls: Call[];
+  executor: SshExecutor;
+} {
   const calls: Call[] = [];
   const executor: SshExecutor = {
     host: 'h',
@@ -57,9 +58,11 @@ describe('read/edit/write operations', () => {
     const ops = createRemoteOperations(executor);
     await ops.write.writeFile('/srv/dir/b.txt', "content with 'quotes'\n\0bin");
     const write = calls.find((c) => typeof c.command === 'string' && c.command.includes('cat >'));
-    expect(write).toBeDefined();
-    expect(write?.command).toBe("cat > '/srv/dir/b.txt'");
-    expect((write?.options as SshExecOptions).stdin?.toString()).toBe("content with 'quotes'\n\0bin");
+    if (!write) throw new Error('未找到写入调用');
+    expect(write.command).toBe("cat > '/srv/dir/b.txt'");
+    expect((write.options as SshExecOptions).stdin?.toString()).toBe(
+      "content with 'quotes'\n\0bin"
+    );
   });
 
   it('edit ops 的 access 校验读写权限', async () => {

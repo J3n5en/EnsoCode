@@ -36,9 +36,10 @@ export function sshProbeDirectory(host: string, remotePath: string): Promise<str
       { timeout: PROBE_TIMEOUT_MS },
       (error, _stdout, stderr) => {
         if (!error) return resolve(null);
-        const code = typeof (error as { code?: unknown }).code === 'number'
-          ? ((error as { code?: number }).code as number)
-          : 255;
+        const code =
+          typeof (error as { code?: unknown }).code === 'number'
+            ? ((error as { code?: number }).code as number)
+            : 255;
         if ((error as { killed?: boolean }).killed) {
           return resolve('连接远程主机超时。');
         }

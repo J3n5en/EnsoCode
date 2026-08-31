@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRemoteCommand, buildSshExecArgs, shellQuote } from './ssh';
+import { buildRemoteCommand, buildSshExecArgs, buildSshShellCommand, shellQuote } from './ssh';
 
 describe('shellQuote', () => {
   it('单引号包裹,内嵌单引号/换行/UTF-8/空串安全', () => {
@@ -46,5 +46,19 @@ describe('buildSshExecArgs', () => {
   it('不带 controlPath 时无 ControlMaster 参数(probe 单次场景)', () => {
     const args = buildSshExecArgs('h', 'test -d /x', {});
     expect(args.join(' ')).not.toContain('ControlMaster');
+  });
+});
+
+describe('buildSshShellCommand', () => {
+  it('拼成可经本地 shell spawn 的单条命令,逐参 quote', () => {
+    const cmd = buildSshShellCommand('user@dev-box', 'npm run dev', {
+      cwd: '/srv/my app',
+      controlPath: '/tmp/ctl/%C',
+    });
+    expect(cmd.startsWith('ssh ')).toBe(true);
+    expect(cmd).toContain("'ControlPath=/tmp/ctl/%C'");
+    expect(cmd).toContain("'user@dev-box'");
+    // 远端命令整体作为最后一个参数,内层 quote 嵌套安全
+    expect(cmd).toContain(shellQuote("cd '/srv/my app' && bash -lc 'npm run dev'"));
   });
 });

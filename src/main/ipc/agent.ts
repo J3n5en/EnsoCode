@@ -5,6 +5,7 @@ import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgent
 import { IPC_CHANNELS } from '@shared/types';
 import type {
   AgentActionResult,
+  AgentRemoteConfig,
   AgentSpawnRequest,
   ApprovalDecision,
   ApprovalMode,
@@ -135,6 +136,13 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   return sessionWorktree(request.sessionId)?.path === request.cwd;
 }
 
+/** ssh 项目→远程执行配置。只认 main 侧项目权威,渲染层请求里不存在也不采信此字段 */
+function remoteConfigFor(sessionId: string): AgentRemoteConfig | undefined {
+  const conversation = sourceAuthority?.conversation(sessionId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  return project?.kind === 'ssh' && project.sshHost ? { host: project.sshHost } : undefined;
+}
+
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
   const request = asRecord(value);
   if (!request) return null;
@@ -251,7 +259,7 @@ function wirePairAgentBridge(): void {
       } catch {
         return { ok: false, error: 'model credentials unavailable' };
       }
-      return spawnSession(identity, request, credentialKeys);
+      return spawnSession(identity, request, credentialKeys, remoteConfigFor(request.sessionId));
     },
   });
 }
@@ -464,7 +472,7 @@ export function registerAgentHandlers(): void {
     } catch {
       return { ok: false, error: 'model credentials unavailable' };
     }
-    return spawnSession(identity, parsed, credentialKeys);
+    return spawnSession(identity, parsed, credentialKeys, remoteConfigFor(parsed.sessionId));
   });
 
   ipcMain.handle(

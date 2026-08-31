@@ -5,7 +5,16 @@ import { createSshExecutor, type SpawnLike } from './executor';
 class FakeProc extends EventEmitter {
   stdout = new EventEmitter();
   stderr = new EventEmitter();
-  stdin = { written: [] as unknown[], ended: false, write(d: unknown) { this.written.push(d); }, end() { this.ended = true; } };
+  stdin = {
+    written: [] as unknown[],
+    ended: false,
+    write(d: unknown) {
+      this.written.push(d);
+    },
+    end() {
+      this.ended = true;
+    },
+  };
   killed = false;
   kill = vi.fn(() => {
     this.killed = true;

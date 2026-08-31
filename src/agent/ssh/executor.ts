@@ -43,7 +43,10 @@ export interface SshExecutor {
   exec(command: string[] | string, options?: SshExecOptions): Promise<SshExecResult>;
   execRaw(command: string[] | string, options?: SshExecOptions): Promise<SshExecRawResult>;
   /** 流式执行(bash 工具用)：stdout/stderr 合流回调；中止/超时时 exitCode=null,对齐 BashOperations */
-  execStream(command: string[] | string, options: SshStreamOptions): Promise<{ exitCode: number | null }>;
+  execStream(
+    command: string[] | string,
+    options: SshStreamOptions
+  ): Promise<{ exitCode: number | null }>;
 }
 
 export function createSshExecutor(

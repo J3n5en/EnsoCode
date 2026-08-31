@@ -37,9 +37,7 @@ export function buildRemoteFindScript(
   cwd: string,
   options: { ignore: string[]; limit: number }
 ): string {
-  const prunes = options.ignore
-    .map((dir) => `-name ${shellQuote(dir)} -prune -o`)
-    .join(' ');
+  const prunes = options.ignore.map((dir) => `-name ${shellQuote(dir)} -prune -o`).join(' ');
   const matcher = pattern.includes('/')
     ? `-path ${shellQuote(`${cwd}/${pattern.replaceAll('**/', '*').replaceAll('**', '*')}`)}`
     : `-name ${shellQuote(pattern)}`;

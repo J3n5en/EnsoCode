@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import {
   type AgentSession,
@@ -27,8 +28,10 @@ import {
 } from '@shared/modelCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
+import { buildSshShellCommand } from '@shared/ssh';
 import type {
   AgentCommand,
+  AgentRemoteConfig,
   AgentSessionCustomEntry,
   AgentTypeSpawnConfig,
   AgentWorkerEvent,
@@ -71,6 +74,9 @@ import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
+import { createSshExecutor, type SshExecutor } from './ssh/executor';
+import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
+import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
 import { createTodoTool } from './todo';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
@@ -90,6 +96,8 @@ interface ChildSessionResult {
 /** 会话工厂：父 runtime/resource/tool 配置的唯一 child 创建入口。 */
 interface SessionFactory {
   cwd: string;
+  /** gate 验收命令执行器(远程会话走 ssh,本地会话走 /bin/sh) */
+  runGate: (gate: string) => Promise<string>;
   agentTypes: AgentTypeSpawnConfig[];
   subagentModels: SubagentModelOption[];
   modelId: string;
@@ -172,13 +180,22 @@ function createSessionResourceLoader(options: {
   noSkills: boolean;
   skillPaths: string[];
   instruction?: { path: string; content: string };
+  /** 远程会话:替换掉本地 cwd 扫描出的 AGENTS.md(cwd 在本机不存在),只用预取的远端文件 */
+  remoteAgentsFiles?: Array<{ path: string; content: string }>;
 }): DefaultResourceLoader {
   return new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
     noSkills: options.noSkills,
     ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
-    agentsFilesOverride: sessionAgentsFilesOverride(options.agentDir, options.instruction),
+    agentsFilesOverride: options.remoteAgentsFiles
+      ? () => ({
+          agentsFiles: [
+            ...(options.instruction ? [options.instruction] : []),
+            ...(options.remoteAgentsFiles ?? []),
+          ],
+        })
+      : sessionAgentsFilesOverride(options.agentDir, options.instruction),
   });
 }
 
@@ -410,7 +427,8 @@ export class SessionSupervisor {
           command.agentTypes,
           command.disabledTools,
           command.instruction,
-          command.subagentModels
+          command.subagentModels,
+          command.remote
         );
         return;
       case 'spawn-child':
@@ -708,7 +726,8 @@ export class SessionSupervisor {
     agentTypes: AgentTypeSpawnConfig[] = [],
     disabledTools: string[] = [],
     instruction?: { path: string; content: string },
-    subagentModels: SubagentModelOption[] = []
+    subagentModels: SubagentModelOption[] = [],
+    remote?: AgentRemoteConfig
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -734,12 +753,32 @@ export class SessionSupervisor {
       reasoningEnabled,
       model.modelId
     );
+    // 远程会话：ssh 执行器(ControlMaster 按 host 哈希共享连接) + 远端 AGENTS.md 单文件预取
+    const sshExecutor = remote
+      ? (() => {
+          const controlDir = path.join(this.options.agentDir, 'ssh');
+          mkdirSync(controlDir, { recursive: true });
+          return createSshExecutor(remote.host, controlDir);
+        })()
+      : undefined;
+    const remoteOps = sshExecutor ? createRemoteOperations(sshExecutor) : undefined;
+    const remoteAgentsFiles = sshExecutor
+      ? await sshExecutor
+          .exec(['cat', '--', `${cwd}/AGENTS.md`], { timeoutMs: 15_000 })
+          .then((result) =>
+            result.code === 0 && result.stdout.trim().length > 0
+              ? [{ path: `${cwd}/AGENTS.md`, content: result.stdout }]
+              : []
+          )
+          .catch(() => [] as Array<{ path: string; content: string }>)
+      : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
       noSkills: loadLocalSkills === false,
       skillPaths,
       instruction,
+      remoteAgentsFiles,
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
@@ -785,13 +824,32 @@ export class SessionSupervisor {
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
     type Def = Parameters<typeof withApproval>[2];
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
-    // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座
-    const readOnlyTools = (): Def[] => [
-      createReadToolDefinition(cwd) as unknown as Def,
-      createGrepToolDefinition(cwd) as unknown as Def,
-      createFindToolDefinition(cwd) as unknown as Def,
-      createLsToolDefinition(cwd) as unknown as Def,
-    ];
+    // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
+    // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
+    const readOnlyTools = (): Def[] =>
+      remoteOps && sshExecutor
+        ? [
+            createReadToolDefinition(cwd, { operations: remoteOps.read }) as unknown as Def,
+            createRemoteGrepToolDefinition(cwd, sshExecutor) as unknown as Def,
+            createFindToolDefinition(cwd, { operations: remoteOps.find }) as unknown as Def,
+            createLsToolDefinition(cwd, { operations: remoteOps.ls }) as unknown as Def,
+          ]
+        : [
+            createReadToolDefinition(cwd) as unknown as Def,
+            createGrepToolDefinition(cwd) as unknown as Def,
+            createFindToolDefinition(cwd) as unknown as Def,
+            createLsToolDefinition(cwd) as unknown as Def,
+          ];
+    // 后台任务 manager 本体始终本地 spawn:远程会话把命令变换成本地 ssh 命令
+    const backgroundTransform = remote
+      ? (command: string, taskCwd: string) => ({
+          command: buildSshShellCommand(remote.host, command, {
+            cwd: taskCwd,
+            controlPath: path.join(this.options.agentDir, 'ssh', '%C'),
+          }),
+          cwd: process.cwd(),
+        })
+      : undefined;
     const buildBaseTools = (toolGate: ApprovalGate, cp?: CheckpointManager): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
       return [
@@ -801,18 +859,33 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createBashToolDefinition(cwd) as unknown as Def,
+              createBashToolDefinition(
+                cwd,
+                remoteOps ? { operations: remoteOps.bash } : undefined
+              ) as unknown as Def,
               this.bgTasks,
               sessionId,
-              cwd
+              cwd,
+              backgroundTransform
             )
           )
         ),
-        withApproval(toolGate, 'file-edit', guarded(createLenientEditTool(cwd))),
+        withApproval(
+          toolGate,
+          'file-edit',
+          guarded(
+            createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
+          )
+        ),
         withApproval(
           toolGate,
           'file-write',
-          guarded(createWriteToolDefinition(cwd) as unknown as Def)
+          guarded(
+            createWriteToolDefinition(
+              cwd,
+              remoteOps ? { operations: remoteOps.write } : undefined
+            ) as unknown as Def
+          )
         ),
       ];
     };
@@ -826,6 +899,7 @@ export class SessionSupervisor {
     // coworker 用独立门(否则审批条落错 tab、allowSession 白名单跨会话泄漏)
     const factory: SessionFactory = {
       cwd,
+      runGate: (gateCommand) => runGateCommand(cwd, gateCommand, sshExecutor),
       agentTypes,
       subagentModels,
       modelId: model.modelId,
@@ -911,6 +985,7 @@ export class SessionSupervisor {
               noSkills: resolved || agentType ? true : loadLocalSkills === false,
               skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
               instruction,
+              remoteAgentsFiles,
             });
         await subLoader.reload();
         const safeJournal =
@@ -965,7 +1040,7 @@ export class SessionSupervisor {
       models: subagentModels,
       createSubSession: async (agentType, modelOverride) =>
         (await factory.createChildSession({ agentType, modelOverride, gate })).session,
-      runGate: (gateCommand) => runGateCommand(cwd, gateCommand),
+      runGate: (gateCommand) => runGateCommand(cwd, gateCommand, sshExecutor),
       notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
       emitUpdate: (agent) => {
         const managed = managedRef ?? this.sessions.get(sessionId);
@@ -1591,8 +1666,10 @@ export class SessionSupervisor {
       summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
     if (gateCommand) {
-      const cwd = this.sessions.get(managed.parentId ?? '')?.factory?.cwd ?? process.cwd();
-      summary += `\n\n${await runGateCommand(cwd, gateCommand)}`;
+      const parentFactory = this.sessions.get(managed.parentId ?? '')?.factory;
+      summary += `\n\n${await (parentFactory
+        ? parentFactory.runGate(gateCommand)
+        : runGateCommand(process.cwd(), gateCommand))}`;
     }
     return summary;
   }
@@ -1938,8 +2015,16 @@ export class SessionSupervisor {
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
 
-/** gate 验收:在会话 cwd 跑命令,退出码即结论(比再叫一个模型评审便宜且诚实) */
-export function runGateCommand(cwd: string, gate: string): Promise<string> {
+/** gate 验收:在会话 cwd 跑命令,退出码即结论(比再叫一个模型评审便宜且诚实)。
+ * 远程会话传 executor,命令改在远端 cwd 执行 */
+export function runGateCommand(cwd: string, gate: string, executor?: SshExecutor): Promise<string> {
+  if (executor) {
+    return executor.exec(gate, { cwd, timeoutMs: 300_000 }).then((result) => {
+      if (result.code === 0) return `GATE PASSED: \`${gate}\``;
+      const tail = `${result.stdout}\n${result.stderr}`.trim().slice(-1500);
+      return `GATE FAILED \`${gate}\` (${result.code ?? 'timeout'}):\n${tail}`;
+    });
+  }
   return new Promise((resolve) => {
     execFile(
       '/bin/sh',

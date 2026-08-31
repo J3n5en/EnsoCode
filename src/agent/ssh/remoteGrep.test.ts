@@ -27,7 +27,8 @@ function fakeExecutor(handler: (command: string[] | string) => { stdout?: string
 describe('createRemoteGrepToolDefinition', () => {
   it('保留原厂 schema/name;首次执行探测 rg 并缓存;输出透传', async () => {
     const { calls, executor } = fakeExecutor((cmd) => {
-      if (typeof cmd === 'string' && cmd.includes('command -v rg')) return { stdout: '/usr/bin/rg' };
+      if (typeof cmd === 'string' && cmd.includes('command -v rg'))
+        return { stdout: '/usr/bin/rg' };
       return { stdout: 'src/a.ts:3:match line\n' };
     });
     const tool = createRemoteGrepToolDefinition('/srv/app', executor);
@@ -40,7 +41,9 @@ describe('createRemoteGrepToolDefinition', () => {
 
     await tool.execute('t2', { pattern: 'again' }, undefined, undefined, ctx);
     // rg 探测只发生一次
-    expect(calls.filter((c) => typeof c === 'string' && c.includes('command -v rg'))).toHaveLength(1);
+    expect(calls.filter((c) => typeof c === 'string' && c.includes('command -v rg'))).toHaveLength(
+      1
+    );
   });
 
   it('无 rg 时降级 grep;无命中输出 No matches', async () => {
@@ -51,6 +54,9 @@ describe('createRemoteGrepToolDefinition', () => {
     const tool = createRemoteGrepToolDefinition('/srv/app', executor);
     const result = await tool.execute('t1', { pattern: 'x' }, undefined, undefined, ctx);
     expect(calls.some((c) => typeof c === 'string' && c.includes('grep -rn'))).toBe(true);
-    expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/no matches/i) });
+    expect(result.content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringMatching(/no matches/i),
+    });
   });
 });

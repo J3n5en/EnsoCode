@@ -37,6 +37,17 @@ export interface SshExecArgsOptions {
   connectTimeoutSeconds?: number;
 }
 
+/** 把远端命令拼成本地 shell(spawn shell:true)可执行的单条 ssh 命令(后台任务/gate 用) */
+export function buildSshShellCommand(
+  host: string,
+  script: string,
+  options: RemoteCommandOptions & SshExecArgsOptions = {}
+): string {
+  const remoteCommand = buildRemoteCommand(script, { cwd: options.cwd });
+  const args = buildSshExecArgs(host, remoteCommand, options);
+  return `ssh ${args.map(shellQuote).join(' ')}`;
+}
+
 /** 构建 `ssh <opts> -- <host> <remoteCommand>` 的 argv */
 export function buildSshExecArgs(
   host: string,

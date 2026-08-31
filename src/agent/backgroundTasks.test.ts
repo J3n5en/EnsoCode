@@ -1,8 +1,9 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
-import { BackgroundTaskManager, type TaskEvents } from './backgroundTasks';
+import { BackgroundTaskManager, type TaskEvents, withBackground } from './backgroundTasks';
 
 const makeManager = () => {
   const notified: string[] = [];
@@ -30,6 +31,37 @@ const until = (pred: () => boolean, ms = 5000) =>
       }
     }, 50);
   });
+
+describe('withBackground 命令变换(远程会话用)', () => {
+  it('传入 transform 时,background 命令经变换后交给 manager', async () => {
+    const { manager } = makeManager();
+    const base = {
+      name: 'bash',
+      label: 'bash',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [], details: undefined }),
+    } as unknown as ToolDefinition;
+    const wrapped = withBackground(base, manager, 's1', '/srv/app', (command, cwd) => ({
+      command: `ssh h ${JSON.stringify(`cd ${cwd} && ${command}`)}`,
+      cwd: process.cwd(),
+    }));
+    const startCalls: { command: string; cwd: string }[] = [];
+    manager.start = ((_sessionId: string, command: string, cwd: string) => {
+      startCalls.push({ command, cwd });
+      return 'task-1';
+    }) as typeof manager.start;
+    await wrapped.execute(
+      't1',
+      { command: 'sleep 999', background: true },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(startCalls[0].command).toBe('ssh h "cd /srv/app && sleep 999"');
+    expect(startCalls[0].cwd).toBe(process.cwd());
+  });
+});
 
 describe('BackgroundTaskManager', () => {
   it('任务完成:输出捕获、exit 事件、未知情则自动通知(含 log 路径)', async () => {

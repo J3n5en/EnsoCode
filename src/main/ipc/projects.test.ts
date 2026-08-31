@@ -40,7 +40,9 @@ describe('project authority IPC', () => {
 
   it('accepts strict dedicated mutations only from MainWindow', async () => {
     const create = mocks.handlers.get(IPC_CHANNELS.SOURCE_PROJECT_CREATE)!;
-    await expect(create(event(1), { requestId: 'request', path: '/project' })).resolves.toMatchObject({
+    await expect(
+      create(event(1), { requestId: 'request', path: '/project' })
+    ).resolves.toMatchObject({
       accepted: true,
     });
     expect(mocks.createProject).toHaveBeenCalledWith({ requestId: 'request', path: '/project' });
