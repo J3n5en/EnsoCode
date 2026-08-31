@@ -1002,6 +1002,7 @@ interface ConversationRowProps {
     pinned?: boolean;
     archived?: boolean;
     createdAt: number;
+    projectId: string;
     messages: { timestamp?: number }[];
   };
   active: boolean;
@@ -1143,7 +1144,9 @@ function ConversationRow({
                   {t('Clean up worktree')}
                 </ContextMenuItem>
               )
-            : onMoveToWorktree && (
+            : onMoveToWorktree &&
+              useSettingsStore.getState().projects.find((p) => p.id === conversation.projectId)
+                ?.kind !== 'ssh' && (
                 <ContextMenuItem onClick={() => onMoveToWorktree(id)}>
                   <GitBranchPlus />
                   {t('Move to worktree')}
