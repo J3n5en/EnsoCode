@@ -20,6 +20,7 @@ import {
   GitBranch,
   GitBranchPlus,
   HardDriveDownload,
+  Loader2,
   MessageSquarePlus,
   PanelLeft,
   PanelLeftClose,
@@ -67,6 +68,12 @@ import {
 import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
+import {
+  PINNED_ORDER_KEY,
+  PROJECT_ORDER_KEY,
+  readSidebarOrder,
+  writeSidebarOrder,
+} from '@/stores/settings/sidebarOrderStorage';
 
 /** 每个项目默认露出的会话数,超过折叠进「展开」 */
 const COLLAPSED_SESSION_LIMIT = 5;
@@ -116,25 +123,15 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
 
   // 项目自定义顺序(拖拽重排,存 localStorage;新项目追加末尾)
-  const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('enso-project-order') ?? '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
-  });
+  const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() =>
+    readSidebarOrder(PROJECT_ORDER_KEY)
+  );
   const orderedProjects = applyProjectOrder(projects, projectOrderIds);
 
   // 置顶组的手动顺序(组内拖拽重排;未收录的新置顶按活跃时间追加)
-  const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('enso-pinned-order') ?? '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
-  });
+  const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() =>
+    readSidebarOrder(PINNED_ORDER_KEY)
+  );
 
   // 拖拽中的源对象(用于 Overlay 预览与临时 Pinned 落点)
   const { active: dndActive } = useDndContext();
@@ -151,7 +148,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         case 'reorder-projects': {
           const next = moveProject(projects, projectOrderIds, action.activeId, action.overId);
           setProjectOrderIds(next);
-          localStorage.setItem('enso-project-order', JSON.stringify(next));
+          writeSidebarOrder(PROJECT_ORDER_KEY, next);
           break;
         }
         case 'insert-file-mention':
@@ -181,7 +178,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             action.overId
           );
           setPinnedOrderIds(next);
-          localStorage.setItem('enso-pinned-order', JSON.stringify(next));
+          writeSidebarOrder(PINNED_ORDER_KEY, next);
           break;
         }
       }
@@ -189,10 +186,38 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   });
 
   const [addOpen, setAddOpen] = useState(false);
-  const handleAddProject = (path: string) => {
-    void addProject(path).then((project) => {
-      if (project) void newConversation(project.id);
-    });
+  const [pendingProject, setPendingProject] = useState<{
+    name: string;
+    path: string;
+    sshHost?: string;
+  } | null>(null);
+  const handleAddProject = (request: {
+    path: string;
+    sshConnectionId?: string;
+    sshHost?: string;
+  }) => {
+    if (request.sshConnectionId) {
+      setPendingProject({
+        name: request.path.split('/').filter(Boolean).pop() ?? request.path,
+        path: request.path,
+        sshHost: request.sshHost,
+      });
+    }
+    void addProject(
+      request.path,
+      request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined
+    )
+      .then((project) => {
+        if (project) void newConversation(project.id);
+      })
+      .catch((error: unknown) => {
+        addToast({
+          type: 'error',
+          title: t('Failed to add project'),
+          description: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => setPendingProject(null));
   };
 
   const [importProject, setImportProject] = useState<Project | null>(null);
@@ -423,6 +448,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               </div>
             </PinnedDropZone>
           )}
+          {pendingProject && (
+            <div className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-muted-foreground">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              </span>
+              <FolderGit2 className="h-4 w-4 shrink-0" />
+              <span
+                className="min-w-0 flex-1 truncate text-sm font-medium"
+                title={pendingProject.path}
+              >
+                {pendingProject.name}
+                {pendingProject.sshHost && (
+                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal">
+                    {pendingProject.sshHost}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-xs">{t('Adding...')}</span>
+            </div>
+          )}
           <SortableContext
             items={orderedProjects.map((project) => projectDragId(project.id))}
             strategy={verticalListSortingStrategy}
@@ -454,8 +499,20 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                             />
                           </span>
                           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          <span
+                            className="min-w-0 flex-1 truncate text-sm font-medium"
+                            title={
+                              project.kind === 'ssh'
+                                ? `${project.sshHost}:${project.path}`
+                                : project.path
+                            }
+                          >
                             {project.name}
+                            {project.kind === 'ssh' && (
+                              <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground">
+                                {project.sshHost}
+                              </span>
+                            )}
                           </span>
                         </button>
                         <button
@@ -982,6 +1039,7 @@ interface ConversationRowProps {
     pinned?: boolean;
     archived?: boolean;
     createdAt: number;
+    projectId: string;
     messages: { timestamp?: number }[];
   };
   active: boolean;
@@ -1123,7 +1181,9 @@ function ConversationRow({
                   {t('Clean up worktree')}
                 </ContextMenuItem>
               )
-            : onMoveToWorktree && (
+            : onMoveToWorktree &&
+              useSettingsStore.getState().projects.find((p) => p.id === conversation.projectId)
+                ?.kind !== 'ssh' && (
                 <ContextMenuItem onClick={() => onMoveToWorktree(id)}>
                   <GitBranchPlus />
                   {t('Move to worktree')}

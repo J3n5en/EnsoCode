@@ -30,3 +30,12 @@ export function openSettingsWindow(): BrowserWindow {
 export function getSettingsWindow(): BrowserWindow | null {
   return settingsWindow;
 }
+
+export function isSettingsWebContents(webContentsId: number): boolean {
+  return Boolean(
+    settingsWindow &&
+      !settingsWindow.isDestroyed() &&
+      !settingsWindow.webContents.isDestroyed() &&
+      settingsWindow.webContents.id === webContentsId
+  );
+}

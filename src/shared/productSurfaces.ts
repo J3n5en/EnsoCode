@@ -116,6 +116,26 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Models the agent may pick for subagents',
   },
+  'providers.subagent-models.toggle': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Enable or disable subagent model picking',
+  },
+  'providers.subagent-models.add': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Add subagent model entry',
+  },
+  'providers.subagent-models.update': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Edit subagent model entry',
+  },
+  'providers.subagent-models.remove': {
+    domain: 'providers',
+    kind: 'setting',
+    label: 'Remove subagent model entry',
+  },
   'providers.oauth.list': {
     domain: 'providers',
     kind: 'action',
@@ -227,6 +247,31 @@ export const PRODUCT_SURFACE_INVENTORY = {
   'projects.recent': { domain: 'projects', kind: 'action', label: 'List recent projects' },
   'projects.add': { domain: 'projects', kind: 'action', label: 'Add project' },
   'projects.remove': { domain: 'projects', kind: 'action', label: 'Remove project' },
+  'projects.ssh-connections': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'List SSH connection profiles',
+  },
+  'projects.ssh-connections.add': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Add SSH connection profile',
+  },
+  'projects.ssh-connections.update': {
+    domain: 'projects',
+    kind: 'setting',
+    label: 'Edit SSH connection profile',
+  },
+  'projects.ssh-connections.remove': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Remove SSH connection profile',
+  },
+  'projects.ssh-connections.test': {
+    domain: 'projects',
+    kind: 'action',
+    label: 'Test SSH connection',
+  },
 
   'conversations.list': { domain: 'conversations', kind: 'action', label: 'List conversations' },
   'conversations.create': {

@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
+import { useSettingsStore } from '@/stores/settings';
 
 /**
  * composer 工具行的工作区选择（紧跟预设选择器）：本地工作区 / 隔离 worktree。
@@ -24,7 +25,12 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
   const [busy, setBusy] = useState(false);
   const [pendingCleanup, setPendingCleanup] = useState<WorktreeStatus | null>(null);
 
+  const project = useSettingsStore((state) =>
+    conversation ? state.projects.find((p) => p.id === conversation.projectId) : undefined
+  );
   if (!conversation || conversation.parentId) return null;
+  // ssh 远程项目没有本机 git worktree可用,main 也会拒绝——入口直接隐藏
+  if (project?.kind === 'ssh') return null;
   const isolated = Boolean(conversation.worktree);
 
   const runCleanup = async () => {

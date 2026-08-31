@@ -25,6 +25,7 @@ import type {
   PairStatus,
   ProviderApiConfig,
   RecentProject,
+  SshConnection,
   TestProviderResult,
 } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
@@ -342,6 +343,28 @@ const electronAPI = {
       projectId: string
     ): Promise<{ ok: true; value: boolean } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_REPO_CLEAN, projectId),
+  },
+  sshConnections: {
+    list: (): Promise<SshConnection[]> => ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_LIST),
+    upsert: (request: {
+      id?: string;
+      name: string;
+      host: string;
+      user?: string;
+      port?: number;
+      auth: SshConnection['auth'];
+      password?: string;
+    }): Promise<{ ok: true; value: SshConnection } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_UPSERT, request),
+    delete: (id: string): Promise<{ ok: true; value: null } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_DELETE, id),
+    test: (id: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_TEST, id),
+    listDirs: (
+      id: string,
+      path?: string
+    ): Promise<{ ok: true; path: string; dirs: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_LIST_DIRS, id, path),
   },
   sourceAuthority: {
     read: (): Promise<SourceAuthorityProjection> =>

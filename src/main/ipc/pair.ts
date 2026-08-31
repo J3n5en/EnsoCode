@@ -68,6 +68,7 @@ export function registerPairHandlers(): void {
   ipcMain.on(IPC_CHANNELS.PAIR_CATALOG, (_event, payload: unknown) => {
     const p = payload as {
       catalog?: CatalogEntry[];
+      pinnedOrder?: string[];
       projects?: ProjectEntry[];
       providers?: ProviderEntry[];
       projectPaths?: { id: string; path: string }[];
@@ -78,6 +79,7 @@ export function registerPairHandlers(): void {
     if (!p || typeof p !== 'object') return;
     updatePairCatalog({
       catalog: Array.isArray(p.catalog) ? p.catalog : [],
+      pinnedOrder: Array.isArray(p.pinnedOrder) ? p.pinnedOrder : [],
       projects: Array.isArray(p.projects) ? p.projects : [],
       providers: Array.isArray(p.providers) ? p.providers : [],
       projectPaths: Array.isArray(p.projectPaths) ? p.projectPaths : [],

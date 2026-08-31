@@ -2,6 +2,13 @@ import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
+import { applyProjectOrder } from '@/stores/settings/projectOrder';
+import {
+  PINNED_ORDER_KEY,
+  PROJECT_ORDER_KEY,
+  readSidebarOrder,
+  subscribeSidebarOrder,
+} from '@/stores/settings/sidebarOrderStorage';
 
 /**
  * 会话目录同步：会话标题、项目、provider 只存在于 renderer，
@@ -16,6 +23,8 @@ let bound = false;
 function buildPayload(): PairCatalogPayload {
   const settings = useSettingsStore.getState();
   const sessions = useSessionsStore.getState();
+  // 与桌面侧栏一致的项目手动顺序（拖拽偏好存 localStorage，不进 settings store）
+  const orderedProjects = applyProjectOrder(settings.projects, readSidebarOrder(PROJECT_ORDER_KEY));
   const projectName = new Map(settings.projects.map((p) => [p.id, p.name]));
 
   type Conversation = NonNullable<(typeof sessions.conversations)[string]>;
@@ -62,7 +71,9 @@ function buildPayload(): PairCatalogPayload {
 
   return {
     catalog,
-    projects: settings.projects.map((p) => ({ id: p.id, name: p.name, path: p.path })),
+    // 置顶组的手动拖拽顺序：手机置顶栏按它排前，未收录的按活跃倒序
+    pinnedOrder: readSidebarOrder(PINNED_ORDER_KEY),
+    projects: orderedProjects.map((p) => ({ id: p.id, name: p.name, path: p.path })),
     providers,
     // 仅 main 侧用于 spawn 反查 cwd，不下发手机
     projectPaths: settings.projects.map((p) => ({ id: p.id, path: p.path })),
@@ -102,6 +113,8 @@ export function bindPairCatalogSync(): void {
       schedulePush();
     }
   });
+  // 侧栏拖拽重排（项目/置顶）落盘后同步给手机
+  subscribeSidebarOrder(schedulePush);
   // 手机订阅历史会话时恢复它，worker 才有投影可发（resume 对已启动会话自动忽略）
   window.electronAPI.pair.onResumeSession((sessionId) => {
     void useSessionsStore.getState().resumeConversation(sessionId);

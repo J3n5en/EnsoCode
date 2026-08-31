@@ -28,8 +28,10 @@ import {
   type AgentTypeEntry,
   BUILTIN_AGENT_TYPES,
   BUILTIN_TOOLS,
+  MODEL_THINKING_LEVEL_OVERRIDES,
   type ModelProvider,
   type Preset,
+  type SshConnection,
 } from '@shared/types';
 import type { ModelMetaResult } from '@shared/types/modelMeta';
 import type {
@@ -116,6 +118,12 @@ export interface CapabilityDomainServices {
     coworkerId: string,
     guard?: TeamExecutionGuard
   ): Promise<CapabilityResult>;
+  /** SSH 连接档案：只暴露公开形态（无密码）；删除/探测在 main 侧完成凭证解析 */
+  listSshConnections(): SshConnection[];
+  deleteSshConnection(
+    id: string
+  ): Promise<{ ok: true; value: null } | { ok: false; error: string }>;
+  testSshConnection(id: string): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /**
@@ -185,6 +193,10 @@ function resultSettingField(capabilityId: string): string | null {
     'appearance.favorite-terminal-themes': 'favoriteTerminalThemes',
     'appearance.status-line-segments': 'statusLineSegments',
     'providers.default-model': 'defaultModel',
+    'providers.subagent-models.toggle': 'subagentModelsEnabled',
+    'providers.subagent-models.add': 'subagentModels',
+    'providers.subagent-models.update': 'subagentModels',
+    'providers.subagent-models.remove': 'subagentModels',
     'tools.toggle-builtin': 'disabledBuiltinTools',
     'agent-types.toggle-builtin': 'disabledBuiltinAgentTypes',
   };
@@ -434,6 +446,67 @@ function referencedIds(
     }
   }
   return null;
+}
+
+/**
+ * subagent-models 条目字段解析：providerId/modelId 必须指向已配置且启用的模型行；
+ * reasoning/thinkingLevel 的 'follow' 表示清除覆盖（存储层不落 'follow'）；
+ * 推理非 'on' 时档位无意义，一律丢弃，与设置页交互保持一致。
+ */
+function parseSubagentModelFields(
+  params: Record<string, unknown>,
+  services: CapabilityDomainServices,
+  existing?: Record<string, unknown>
+): { value: Record<string, unknown> } | CapabilityResult {
+  const providerId =
+    requiredString(params, 'providerId') ??
+    (typeof existing?.providerId === 'string' ? existing.providerId : null);
+  const modelId =
+    requiredString(params, 'modelId') ??
+    (typeof existing?.modelId === 'string' ? existing.modelId : null);
+  if (!providerId || !modelId) return invalid('providerId and modelId are required');
+  const provider = providersOf(services).find((entry) => entry.id === providerId);
+  if (!provider || provider.enabled === false) {
+    return unavailable(`provider not available: ${providerId}`);
+  }
+  const model = Array.isArray(provider.models)
+    ? provider.models.find((entry) => asRecord(entry)?.id === modelId)
+    : undefined;
+  if (!model || model.enabled === false) return unavailable(`model not available: ${modelId}`);
+  const description =
+    typeof params.description === 'string'
+      ? params.description
+      : typeof existing?.description === 'string'
+        ? existing.description
+        : '';
+  const reasoning =
+    params.reasoning === 'follow'
+      ? undefined
+      : params.reasoning === 'on' || params.reasoning === 'off'
+        ? params.reasoning
+        : existing?.reasoning === 'on' || existing?.reasoning === 'off'
+          ? existing.reasoning
+          : undefined;
+  const levelInput =
+    params.thinkingLevel === 'follow'
+      ? undefined
+      : typeof params.thinkingLevel === 'string' &&
+          (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(params.thinkingLevel)
+        ? params.thinkingLevel
+        : typeof existing?.thinkingLevel === 'string' &&
+            (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(existing.thinkingLevel)
+          ? existing.thinkingLevel
+          : undefined;
+  const thinkingLevel = reasoning === 'on' ? levelInput : undefined;
+  return {
+    value: {
+      providerId,
+      modelId,
+      description,
+      ...(reasoning ? { reasoning } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+    },
+  };
 }
 
 function parsePresetFields(
@@ -734,6 +807,63 @@ export function createCapabilityHandlers(
       return patchResult(
         services.patchSettings('defaultModel', selection, context.ownerWebContentsId),
         'defaultModel'
+      );
+    },
+    'providers.subagent-models': () => {
+      const state = settingsState(services.readSettings());
+      return success({
+        enabled: state.subagentModelsEnabled === true,
+        entries: Array.isArray(state.subagentModels) ? state.subagentModels : [],
+      });
+    },
+    'providers.subagent-models.toggle': (context, params) => {
+      if (typeof params.value !== 'boolean') return invalid('value must be a boolean');
+      return patchResult(
+        services.patchSettings('subagentModelsEnabled', params.value, context.ownerWebContentsId),
+        'subagentModelsEnabled'
+      );
+    },
+    'providers.subagent-models.add': (context, params) => {
+      const parsed = parseSubagentModelFields(params, services);
+      if (!('value' in parsed)) return parsed;
+      const current = settingsState(services.readSettings()).subagentModels;
+      const entry = { id: randomUUID(), ...parsed.value };
+      const stale = context.assertExecutionCurrent();
+      if (stale) return stale;
+      return patchResult(
+        services.patchSettings(
+          'subagentModels',
+          [...(Array.isArray(current) ? current : []), entry],
+          context.ownerWebContentsId
+        ),
+        'subagentModels'
+      );
+    },
+    'providers.subagent-models.update': (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const current = settingsState(services.readSettings()).subagentModels;
+      const existing = Array.isArray(current)
+        ? current.map(asRecord).find((entry) => entry?.id === id)
+        : undefined;
+      if (!existing) return unavailable(`subagent model entry not found: ${id}`);
+      const parsed = parseSubagentModelFields(params, services, existing);
+      if (!('value' in parsed)) return parsed;
+      return updateArrayById(
+        services,
+        'subagentModels',
+        id,
+        () => ({ id, ...parsed.value }),
+        context.ownerWebContentsId
+      );
+    },
+    'providers.subagent-models.remove': (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const stale = context.assertExecutionCurrent();
+      return (
+        stale ??
+        updateArrayById(services, 'subagentModels', id, () => null, context.ownerWebContentsId)
       );
     },
     'providers.oauth.list': async () => success(await services.listOauthProviders()),
@@ -1063,6 +1193,23 @@ export function createCapabilityHandlers(
       );
     },
     'projects.list': () => success(settingsState(services.readSettings()).projects ?? []),
+    'projects.ssh-connections': () => success(services.listSshConnections()),
+    'projects.ssh-connections.remove': async (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const stale = context.assertExecutionCurrent();
+      if (stale) return stale;
+      const result = await services.deleteSshConnection(id);
+      return result.ok ? success({ id }) : failed(result.error);
+    },
+    'projects.ssh-connections.test': async (context, params) => {
+      const id = requiredString(params, 'id');
+      if (!id) return invalid('id is required');
+      const stale = context.assertExecutionCurrent();
+      if (stale) return stale;
+      const result = await services.testSshConnection(id);
+      return result.ok ? success({ connected: true }) : failed(result.error);
+    },
     'projects.recent': async () => success(await services.getRecentProjects()),
     'projects.remove': (context, params) => {
       const id = requiredString(params, 'id');

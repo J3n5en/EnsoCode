@@ -16,6 +16,7 @@ import { type ModelCredentialContext, modelUsability } from '@shared/defaultMode
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type {
   AgentCommand,
+  AgentRemoteConfig,
   AgentSessionCustomEntry,
   AgentSpawnRequest,
   AgentTypeSpawnConfig,
@@ -267,7 +268,9 @@ export function resolveAgentTypeSpawnConfig(
 export function spawnSession(
   identity: SessionIdentity,
   request: AgentSpawnRequest,
-  authenticatedAccountKeys: ReadonlySet<string>
+  authenticatedAccountKeys: ReadonlySet<string>,
+  /** 由 main 从项目权威派生(渲染层不可伪造):ssh 项目的会话工具走远端执行 */
+  remote?: AgentRemoteConfig
 ): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
@@ -306,6 +309,7 @@ export function spawnSession(
     ...(subagentModels.length > 0 ? { subagentModels } : {}),
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
     ...(instruction ? { instruction } : {}),
+    ...(remote ? { remote } : {}),
   });
 }
 
@@ -630,7 +634,12 @@ function configuredSubagentModels(
     if (resolved.ok) {
       options.push({
         name: ref.name,
-        config: resolved.selection.config,
+        // 条目级推理覆盖赢过模型行覆盖；缺省保留行级/跟随语义
+        config: {
+          ...resolved.selection.config,
+          ...(ref.reasoning ? { reasoning: ref.reasoning } : {}),
+          ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}),
+        },
         ...(ref.description ? { description: ref.description } : {}),
       });
     }

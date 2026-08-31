@@ -1,5 +1,6 @@
 import {
   type CatalogEntry,
+  type PairedDevice,
   type ProjectEntry,
   type ProviderEntry,
   revokePairing,
@@ -9,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatScreen } from './ChatScreen';
 import { type ConnState, PairClient, type SessionView } from './client';
+import { pickActive, removeDevice, renameDevice, upsertDevice } from './deviceList';
 import { NewSessionSheet } from './NewSessionSheet';
 import { PairScreen } from './PairScreen';
 import {
@@ -21,7 +23,15 @@ import {
 } from './push';
 import { SessionConfigSheet } from './SessionConfigSheet';
 import { SessionDrawer } from './SessionDrawer';
-import { clearPairing, loadPairing, savePairing } from './storage';
+import {
+  clearDeviceData,
+  loadActiveDeviceId,
+  loadDevices,
+  loadLastSession,
+  saveActiveDeviceId,
+  saveDevices,
+  saveLastSession,
+} from './storage';
 
 /**
  * 扫码直达：桌面二维码是 https 链接，系统相机可直接打开本页并带上 #relay=…&pk=…。
@@ -43,7 +53,6 @@ const STATE_LABEL: Record<ConnState, string> = {
   offline: '重连中…',
 };
 
-const LAST_SESSION_KEY = 'enso-phone-last-session';
 const PUSH_ENABLED_KEY = 'enso-phone-push';
 
 /** 通知点击冷启动时带的 ?session=：取出即抹掉，优先于上次会话 */
@@ -65,17 +74,29 @@ function pushAvailability(): 'ok' | 'needs-install' | 'unsupported' {
 }
 
 export function App() {
-  const [device, setDevice] = useState(loadPairing);
+  const [devices, setDevices] = useState(loadDevices);
+  const [activeDeviceId, setActiveDeviceId] = useState(loadActiveDeviceId);
+  /** 活跃桌面：失配（已被删）回落第一台；无配对时为 null 进配对页 */
+  const device = pickActive(devices, activeDeviceId);
   // 只在首次挂载时取一次：内部会抹掉 hash，重复调用取不到
   const [urlInvite] = useState(takeInviteFromUrl);
+  /** 已配对状态下的「配对新电脑」流程（覆盖 PairScreen） */
+  const [adding, setAdding] = useState(false);
   const [state, setState] = useState<ConnState>('connecting');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  /** 桌面置顶组的手动拖拽顺序（旧桌面不下发，空 = 按活跃倒序） */
+  const [pinnedOrder, setPinnedOrder] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(
-    () => takeSessionFromUrl() ?? localStorage.getItem(LAST_SESSION_KEY)
-  );
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    const initial = pickActive(loadDevices(), loadActiveDeviceId());
+    return takeSessionFromUrl() ?? (initial ? loadLastSession(initial.pairId) : null);
+  });
   const [view, setView] = useState<SessionView | null>(null);
+  /** 订阅会话同步中（subscribe 已发、snapshot 未回）：此时时间线可能是陈旧的 */
+  const [syncing, setSyncing] = useState(false);
+  /** 横幅刚收起时短暂闪现「已是最新」，随后淡出 */
+  const [okFlash, setOkFlash] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -104,6 +125,14 @@ export function App() {
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
   }, []);
 
+  // 已配对状态下扫桌面二维码（地址栏带 #pk=）：进入添加流程，不再覆盖旧配对
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在挂载时判一次
+  useEffect(() => {
+    if (urlInvite && devices.length > 0) setAdding(true);
+  }, []);
+
+  // 只按凭据重建连接：重命名只换 label，不该断重连，故用字段级依赖
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 见上，device 按 pairId/token/relayUrl/contentKey 变化才重连
   useEffect(() => {
     if (!device) return;
     // 换绑另一台桌面时清掉上一台的 VAPID 公钥，等新桌面重新下发
@@ -111,11 +140,19 @@ export function App() {
     setPushConfigReady(false);
     const client = new PairClient(device, {
       onState: setState,
-      onCatalog: setCatalog,
+      onCatalog: (entries, order) => {
+        setCatalog(entries);
+        setPinnedOrder(order ?? []);
+      },
       onProjects: setProjects,
       onProviders: setProviders,
       onSession: (id, next) => {
         setView((prev) => (id === activeIdRef.current ? next : prev));
+      },
+      onSync: (state) => setSyncing(state === 'syncing'),
+      onGhostSession: (id) => {
+        // 订阅的会话已在桌面被删：跳回列表态，由 firstId 兑底选最近一条
+        if (id === activeIdRef.current) setActiveId(null);
       },
       onPushConfig: (key) => {
         vapidKeyRef.current = key;
@@ -150,15 +187,23 @@ export function App() {
       client.close();
       clientRef.current = null;
     };
-  }, [device]);
+  }, [device?.pairId, device?.token, device?.relayUrl, device?.contentKey]);
 
+  /** 手机刚 spawn 的会话 id（一次性）：首次订阅不进 syncing——全新会话没有历史可陈旧，
+   * 而 spawn 在途时 host 回的快照不含它，会让「同步中」横幅挂到切会话才消 */
+  const freshIdsRef = useRef(new Set<string>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pairId 变化时也要在新 client 上重订阅
   useEffect(() => {
     activeIdRef.current = activeId;
-    clientRef.current?.subscribe(activeId);
+    // 用 has 而非读时删除：StrictMode 下 effect 双跑，第二跑不能把标记吞掉；切走时才消费
+    const fresh = activeId !== null && freshIdsRef.current.has(activeId);
+    clientRef.current?.subscribe(activeId, { fresh });
+    for (const id of freshIdsRef.current) {
+      if (id !== activeId) freshIdsRef.current.delete(id);
+    }
     setView(activeId ? (clientRef.current?.getSession(activeId) ?? null) : null);
-    if (activeId) localStorage.setItem(LAST_SESSION_KEY, activeId);
-    else localStorage.removeItem(LAST_SESSION_KEY);
-  }, [activeId]);
+    if (device) saveLastSession(device.pairId, activeId);
+  }, [activeId, device?.pairId]);
 
   // 首次连上且没有选中会话时，落到最近一条
   const firstId = catalog.find((c) => !c.parentId)?.id;
@@ -184,31 +229,106 @@ export function App() {
       '选择模型')
     : undefined;
 
-  if (!device) {
+  // TG 式状态横幅：非 online 显示连接状态；online 且订阅同步中显示同步中；
+  // 收起瞬间短暂闪现「已是最新」再淡出，不常驻占屏。
+  const bannerLabel =
+    state !== 'online' && state !== 'unauthorized'
+      ? STATE_LABEL[state]
+      : state === 'online' && syncing && activeId
+        ? '同步中…'
+        : null;
+  const prevBannerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevBannerRef.current;
+    prevBannerRef.current = bannerLabel;
+    if (prev && !bannerLabel) {
+      setOkFlash(true);
+      const timer = setTimeout(() => setOkFlash(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [bannerLabel]);
+  const banner = bannerLabel
+    ? { label: bannerLabel, tone: 'progress' as const }
+    : okFlash
+      ? { label: '已是最新', tone: 'ok' as const }
+      : null;
+
+  /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
+  const resetHostState = (nextActiveId: string | null) => {
+    setCatalog([]);
+    setProjects([]);
+    setProviders([]);
+    setView(null);
+    setSyncing(false);
+    setActiveId(nextActiveId);
+  };
+
+  const switchDevice = (pairId: string) => {
+    if (pairId === device?.pairId) return;
+    saveActiveDeviceId(pairId);
+    setActiveDeviceId(pairId);
+    // 旧连接状态不属于新桌面：乐观置回连接中，避免闪现 unauthorized/host-offline 旧屏
+    setState('connecting');
+    resetHostState(loadLastSession(pairId));
+    setDrawerOpen(false);
+  };
+
+  const addDevice = (d: PairedDevice) => {
+    const next = upsertDevice(devices, d);
+    setDevices(next);
+    saveDevices(next);
+    saveActiveDeviceId(d.pairId);
+    setActiveDeviceId(d.pairId);
+    resetHostState(loadLastSession(d.pairId));
+    setAdding(false);
+  };
+
+  const unpairDevice = (pairId: string) => {
+    const target = devices.find((d) => d.pairId === pairId);
+    // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）；已被对端解绑时失败无妄
+    if (target) void revokePairing(target.relayUrl, target.pairId, target.token).catch(() => {});
+    clearDeviceData(pairId);
+    const next = removeDevice(devices, pairId);
+    setDevices(next);
+    saveDevices(next);
+    if (pairId === (device?.pairId ?? null)) {
+      const fallback = pickActive(next, null);
+      saveActiveDeviceId(fallback?.pairId ?? null);
+      setActiveDeviceId(fallback?.pairId ?? null);
+      if (fallback) setState('connecting');
+      resetHostState(fallback ? loadLastSession(fallback.pairId) : null);
+      if (!fallback) setDrawerOpen(false);
+    }
+  };
+
+  const handleRename = (pairId: string, label: string) => {
+    const next = renameDevice(devices, pairId, label);
+    setDevices(next);
+    saveDevices(next);
+  };
+
+  if (!device || adding) {
     return (
       <PairScreen
         autoInvite={urlInvite}
-        onPaired={(d) => {
-          savePairing(d);
-          setDevice(d);
-        }}
+        onPaired={addDevice}
+        onCancel={device ? () => setAdding(false) : undefined}
       />
     );
   }
 
   if (state === 'unauthorized') {
+    const others = devices.length > 1;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <Smartphone className="h-8 w-8 text-muted-foreground" />
         <h1 className="font-medium text-lg">配对已失效</h1>
-        <p className="text-muted-foreground text-sm">桌面端已解绑此设备，请重新扫码配对。</p>
-        <Button
-          onClick={() => {
-            clearPairing();
-            setDevice(null);
-          }}
-        >
-          重新配对
+        <p className="text-muted-foreground text-sm">
+          「{device.label}」已解绑此设备，
+          {others ? '可移除它并切到其他电脑。' : '请重新扫码配对。'}
+        </p>
+        <Button onClick={() => unpairDevice(device.pairId)}>
+          {others ? '移除此配对' : '重新配对'}
         </Button>
       </div>
     );
@@ -250,6 +370,7 @@ export function App() {
         view={view}
         connState={state}
         stateLabel={STATE_LABEL[state]}
+        banner={banner}
         onOpenDrawer={() => setDrawerOpen(true)}
         onNewSession={() => setComposing(true)}
         canCreate={state === 'online' && projects.length > 0}
@@ -283,9 +404,11 @@ export function App() {
         open={drawerOpen}
         projects={projects}
         catalog={catalog}
+        pinnedOrder={pinnedOrder}
         activeId={activeId}
         canCreate={state === 'online'}
-        deviceName={device.deviceName}
+        devices={devices}
+        activeDevicePairId={device.pairId}
         connected={state === 'online'}
         connectionLabel={STATE_LABEL[state]}
         onClose={() => setDrawerOpen(false)}
@@ -303,18 +426,13 @@ export function App() {
         pushAvailability={pushAvailability()}
         pushConfigReady={pushConfigReady}
         onTogglePush={(next) => void togglePush(next)}
-        onUnpair={() => {
-          // 手机侧持 deviceToken，可一并清掉中继房间（桌面重连即被拒）
-          void revokePairing(device.relayUrl, device.pairId, device.token).catch(() => {});
-          clearPairing();
-          localStorage.removeItem(LAST_SESSION_KEY);
+        onSwitchDevice={switchDevice}
+        onAddDevice={() => {
           setDrawerOpen(false);
-          setActiveId(null);
-          setCatalog([]);
-          setProjects([]);
-          setProviders([]);
-          setDevice(null);
+          setAdding(true);
         }}
+        onRenameDevice={handleRename}
+        onUnpairDevice={unpairDevice}
       />
 
       <NewSessionSheet
@@ -325,6 +443,7 @@ export function App() {
         onCreate={(req) => {
           const sessionId = crypto.randomUUID();
           send({ type: 'spawn', sessionId, ...req });
+          freshIdsRef.current.add(sessionId);
           setComposing(false);
           setActiveId(sessionId);
         }}

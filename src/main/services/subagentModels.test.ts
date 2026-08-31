@@ -77,6 +77,30 @@ describe('pickSubagentModelRefs', () => {
     ]);
   });
 
+  it('条目级推理覆盖透传;非法值丢弃;缺省不透传', () => {
+    const providers = [provider({})];
+    expect(
+      pickSubagentModelRefs([entry({ reasoning: 'on', thinkingLevel: 'high' })], providers)[0]
+    ).toMatchObject({ reasoning: 'on', thinkingLevel: 'high' });
+    expect(pickSubagentModelRefs([entry({ reasoning: 'off' })], providers)[0]).toMatchObject({
+      reasoning: 'off',
+    });
+    const plain = pickSubagentModelRefs([entry({})], providers)[0];
+    expect(plain).not.toHaveProperty('reasoning');
+    expect(plain).not.toHaveProperty('thinkingLevel');
+    const bad = pickSubagentModelRefs(
+      [
+        entry({
+          reasoning: 'maybe' as unknown as SubagentModelEntry['reasoning'],
+          thinkingLevel: 'ultra' as unknown as SubagentModelEntry['thinkingLevel'],
+        }),
+      ],
+      providers
+    )[0];
+    expect(bad).not.toHaveProperty('reasoning');
+    expect(bad).not.toHaveProperty('thinkingLevel');
+  });
+
   it('脏输入不崩:models 非数组/条目缺字段直接跳过', () => {
     const dirty = provider({ models: undefined as unknown as ModelProvider['models'] });
     const badEntry = { id: 'x' } as unknown as SubagentModelEntry;

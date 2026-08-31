@@ -153,22 +153,32 @@ export function MessageTimeline({
    * 只在没贴底时写——贴住后循环空转也不会再动画面；
    * 不混用 scrollToIndex——它算出的落点与直接写 scrollTop 不一致，同帧调用会来回拉扯。
    */
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     cancelAnimationFrame(settleRef.current);
-    const scroller = scrollerRef.current;
     const deadline = Date.now() + 1200;
     // 用户一碰屏幕就交还控制权：真机上 iOS 的惯性滚动与我们的纠正会互相打架，
     // 表现为持续闪烁；有这道闸，最坏情况下一次触摸即可终止。
+    // scroller 惰性读取：换会话重挂时子节点 ref 先于父级赋值，首帧可能还是 null。
+    let bound: HTMLElement | null = null;
     const abort = () => {
       cancelAnimationFrame(settleRef.current);
-      scroller?.removeEventListener('touchstart', abort);
-      scroller?.removeEventListener('wheel', abort);
+      bound?.removeEventListener('touchstart', abort);
+      bound?.removeEventListener('wheel', abort);
     };
-    scroller?.addEventListener('touchstart', abort, { passive: true, once: true });
-    scroller?.addEventListener('wheel', abort, { passive: true, once: true });
 
     const settle = () => {
+      if (!bound && scrollerRef.current) {
+        bound = scrollerRef.current;
+        bound.addEventListener('touchstart', abort, { passive: true, once: true });
+        bound.addEventListener('wheel', abort, { passive: true, once: true });
+      }
       pinToBottom();
+      // 纠正期间保持贴底判定：iOS 首帧写 scrollTop 会被布局钳位，
+      // 钳位触发的 scroll 事件会把 atBottom 误判成 false、中断跟随。
+      // ref 与状态必须一起归位：只改 ref 会留下幽灵「回到底部」按钮
+      // （状态驱动按钮，同值 setState 被 React 跳过，无额外重渲染）。
+      atBottomRef.current = true;
+      setAtBottom(true);
       if (Date.now() < deadline) settleRef.current = requestAnimationFrame(settle);
       else abort();
     };
@@ -176,7 +186,7 @@ export function MessageTimeline({
 
     setAtBottom(true);
     atBottomRef.current = true;
-  };
+  }, [pinToBottom]);
   useEffect(() => () => cancelAnimationFrame(settleRef.current), []);
 
   /*
@@ -196,8 +206,14 @@ export function MessageTimeline({
       });
       observer.observe(el);
       observerRef.current = observer;
+      /*
+       * 内容挂载 = 换会话重挂或快照首次到达。此时必须用纠正循环而不是单次贴底：
+       * iOS 上大会话首帧写 scrollTop 时布局未完成会被钳位停在半截，钳位滚动
+       * 事件再把 atBottom 判成 false，跟随从此中断（表现为切会话跳到中间）。
+       */
+      scrollToBottom();
     },
-    [pinToBottom]
+    [pinToBottom, scrollToBottom]
   );
   useEffect(() => () => observerRef.current?.disconnect(), []);
   useImperativeHandle(ref, () => ({

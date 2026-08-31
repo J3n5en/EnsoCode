@@ -110,6 +110,13 @@ export const IPC_CHANNELS = {
   // Recent projects from local apps
   PROJECTS_GET_RECENT: 'projects:get-recent',
 
+  // SSH connection profiles (settings + add-project picker)
+  SSH_CONNECTIONS_LIST: 'ssh-connections:list',
+  SSH_CONNECTIONS_UPSERT: 'ssh-connections:upsert',
+  SSH_CONNECTIONS_DELETE: 'ssh-connections:delete',
+  SSH_CONNECTIONS_TEST: 'ssh-connections:test',
+  SSH_CONNECTIONS_LIST_DIRS: 'ssh-connections:list-dirs',
+
   // File search (@ mention)
   FILES_SEARCH: 'files:search',
   FILES_READ: 'files:read',

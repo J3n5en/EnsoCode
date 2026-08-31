@@ -23,6 +23,14 @@ import type {
 } from '@shared/types/agent';
 import { loadCursors, saveCursor } from './storage';
 import { setTerminalAppearance } from './stubs/settings-store';
+import {
+  applyCatalog,
+  applySnapshot,
+  applySubscribe,
+  initialSync,
+  type SyncState,
+  type SyncTracking,
+} from './syncProjection';
 import { applyRetryEvent, applyTaskEvent, type RetryInfo } from './taskProjection';
 import { setHostTheme } from './theme';
 
@@ -48,12 +56,16 @@ export interface SessionView {
 
 export interface ClientEvents {
   onState(state: ConnState): void;
-  onCatalog(entries: CatalogEntry[]): void;
+  onCatalog(entries: CatalogEntry[], pinnedOrder?: string[]): void;
   onProjects(projects: ProjectEntry[]): void;
   onProviders(providers: ProviderEntry[]): void;
   onSession(sessionId: string, view: SessionView): void;
   /** 桌面下发 VAPID 公钥：有它才能 pushManager.subscribe */
   onPushConfig?(vapidPublicKey: string): void;
+  /** 订阅会话的同步状态：subscribe 发出 → snapshot 回包之间为 syncing */
+  onSync?(state: SyncState): void;
+  /** 订阅的会话已被桌面删除（曾在目录、现在消失）：上层应跳离该会话 */
+  onGhostSession?(sessionId: string): void;
 }
 
 export class PairClient {
@@ -69,6 +81,7 @@ export class PairClient {
   private sessions = new Map<string, SessionView>();
   /** 分页请求在途标记（每会话一次一发，响应或换订阅时清） */
   private historyPending = new Set<string>();
+  private sync: SyncTracking = initialSync;
 
   constructor(
     private device: PairedDevice,
@@ -190,9 +203,19 @@ export class PairClient {
       return;
     }
     switch (payload.type) {
-      case 'catalog':
-        this.events.onCatalog(payload.entries);
+      case 'catalog': {
+        // 幽灵会话判定要在 onCatalog 前：上层可能据 ghost 立即切走
+        const { tracking, ghost } = applyCatalog(
+          this.sync,
+          this.subscribedId,
+          payload.entries.map((e) => e.id)
+        );
+        const ghostId = ghost ? this.subscribedId : null;
+        this.setSync(tracking);
+        if (ghostId) this.events.onGhostSession?.(ghostId);
+        this.events.onCatalog(payload.entries, payload.pinnedOrder);
         break;
+      }
       case 'projects':
         this.events.onProjects(payload.projects);
         break;
@@ -242,6 +265,13 @@ export class PairClient {
     // 尾窗快照：批事件，按 baseIndex 偏移合并进已有投影。
     // 不能整张 Map 替换——用户可能已上滑加载了更早的分页，替换会把它们抹掉。
     if (type === 'snapshot') {
+      // 与下方合并逻辑同规则：扁平 sessionId 优先，identity 兑底防旧桌面版
+      const snapshotIds = (
+        (event.sessions ?? []) as { sessionId?: string; identity?: { sessionId?: string } }[]
+      )
+        .map((s) => s.sessionId ?? s.identity?.sessionId)
+        .filter((id): id is string => typeof id === 'string');
+      this.setSync(applySnapshot(this.sync, this.subscribedId, snapshotIds));
       for (const snap of (event.sessions ?? []) as (SessionSnapshot & {
         sessionId?: string;
         identity?: { sessionId?: string };
@@ -257,7 +287,7 @@ export class PairClient {
           existing && base <= prevMax + 1 ? new Map(existing) : new Map<number, ProjectedMessage>();
         for (const [i, message] of (snap.messages ?? []).entries()) {
           messages.set(base + i, message);
-          saveCursor(id, base + i);
+          saveCursor(this.device.pairId, id, base + i);
         }
         const view: SessionView = {
           messages,
@@ -298,7 +328,7 @@ export class PairClient {
       case 'message-upsert': {
         const index = event.index as number;
         view.messages.set(index, event.message as ProjectedMessage);
-        saveCursor(sessionId, index);
+        saveCursor(this.device.pairId, sessionId, index);
         break;
       }
       case 'status':
@@ -343,15 +373,22 @@ export class PairClient {
     });
   }
 
-  /** 订阅会话：带上本地游标，只补断线期间的增量 */
-  subscribe(sessionId: string | null): void {
+  private setSync(next: SyncTracking): void {
+    const changed = next.state !== this.sync.state;
+    this.sync = next;
+    if (changed) this.events.onSync?.(next.state);
+  }
+
+  /** 订阅会话：带上本地游标，只补断线期间的增量。fresh = 手机刚 spawn 的全新会话，不进 syncing */
+  subscribe(sessionId: string | null, opts?: { fresh?: boolean }): void {
     this.subscribedId = sessionId;
     this.historyPending.clear();
+    this.setSync(applySubscribe(this.sync, sessionId, opts));
     if (!sessionId) {
       this.send({ type: 'subscribe', sessionId: null });
       return;
     }
-    const sinceIndex = loadCursors()[sessionId];
+    const sinceIndex = loadCursors(this.device.pairId)[sessionId];
     this.send({
       type: 'subscribe',
       sessionId,

@@ -1,8 +1,10 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
+  type CheckpointHost,
   createCheckpoint,
   getRepoRoot,
   loadAllCheckpoints,
+  localCheckpointHost,
   pruneCheckpoints,
   pruneStaleCheckpoints,
   restoreCheckpoint,
@@ -27,7 +29,9 @@ export class CheckpointManager {
     private readonly cwd: string,
     private readonly sessionId: string,
     /** 当前分支最后一个 user entry(即本轮的 user 消息);供快照关联 */
-    private readonly getTurnEntry: () => { entryId?: string; entryTimestamp?: number }
+    private readonly getTurnEntry: () => { entryId?: string; entryTimestamp?: number },
+    /** 执行面:本地会话缺省本机 git,远程会话传 ssh 实现(快照打在远端 repo) */
+    private readonly host: CheckpointHost = localCheckpointHost
   ) {}
 
   /** agent_start 时调用,放行本轮的一次快照 */
@@ -37,7 +41,7 @@ export class CheckpointManager {
 
   private async resolveRoot(): Promise<string | null> {
     if (this.root === undefined) {
-      this.root = await getRepoRoot(this.cwd).catch(() => null);
+      this.root = await getRepoRoot(this.cwd, this.host).catch(() => null);
     }
     return this.root;
   }
@@ -53,16 +57,19 @@ export class CheckpointManager {
         return;
       }
       const { entryId, entryTimestamp } = this.getTurnEntry();
-      await createCheckpoint({
-        root,
-        id: `tool-${this.sessionId}-${Date.now()}`,
-        sessionId: this.sessionId,
-        trigger: 'tool',
-        toolName,
-        entryId,
-        entryTimestamp,
-      });
-      void pruneCheckpoints(root, this.sessionId).catch(() => {});
+      await createCheckpoint(
+        {
+          root,
+          id: `tool-${this.sessionId}-${Date.now()}`,
+          sessionId: this.sessionId,
+          trigger: 'tool',
+          toolName,
+          entryId,
+          entryTimestamp,
+        },
+        this.host
+      );
+      void pruneCheckpoints(root, this.sessionId, undefined, this.host).catch(() => {});
       this.failures = 0;
     } catch {
       if (++this.failures >= 3) this.disabled = true;
@@ -79,7 +86,7 @@ export class CheckpointManager {
   async restoreForEntry(entryId: string, entryTimestamp: number): Promise<boolean> {
     const root = await this.resolveRoot();
     if (!root) return false;
-    const all = await loadAllCheckpoints(root, this.sessionId);
+    const all = await loadAllCheckpoints(root, this.sessionId, this.host);
     const candidates = all.filter((cp) => cp.trigger === 'tool');
     const exact = candidates.find((cp) => cp.entryId === entryId);
     const target =
@@ -88,20 +95,23 @@ export class CheckpointManager {
         .filter((cp) => (cp.entryTimestamp ?? cp.timestamp) >= entryTimestamp)
         .sort((a, b) => (a.entryTimestamp ?? a.timestamp) - (b.entryTimestamp ?? b.timestamp))[0];
     if (!target) return false;
-    await createCheckpoint({
-      root,
-      id: `before-restore-${this.sessionId}-${Date.now()}`,
-      sessionId: this.sessionId,
-      trigger: 'before-restore',
-    });
-    await restoreCheckpoint(root, target);
+    await createCheckpoint(
+      {
+        root,
+        id: `before-restore-${this.sessionId}-${Date.now()}`,
+        sessionId: this.sessionId,
+        trigger: 'before-restore',
+      },
+      this.host
+    );
+    await restoreCheckpoint(root, target, this.host);
     return true;
   }
 
   /** spawn 后清理过期快照(fire-and-forget;不按会话清,同 repo 多会话并存) */
   cleanupOldSessions(): void {
     void this.resolveRoot().then((root) => {
-      if (root) void pruneStaleCheckpoints(root).catch(() => {});
+      if (root) void pruneStaleCheckpoints(root, undefined, this.host).catch(() => {});
     });
   }
 }

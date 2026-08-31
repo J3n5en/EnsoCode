@@ -8,6 +8,7 @@ import {
   Settings,
   Smartphone,
   Sparkles,
+  Terminal,
   Wrench,
 } from 'lucide-react';
 import * as React from 'react';
@@ -24,6 +25,7 @@ import { PhoneSettings } from './PhoneSettings';
 import { PresetsSettings } from './PresetsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { SkillsSettings } from './SkillsSettings';
+import { SshSettings } from './SshSettings';
 
 export function SettingsContent() {
   const { t } = useI18n();
@@ -40,6 +42,7 @@ export function SettingsContent() {
     { id: 'mcp', icon: Plug, label: t('MCP Servers') },
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
     { id: 'phone', icon: Smartphone, label: t('Phone') },
+    { id: 'ssh', icon: Terminal, label: t('SSH') },
   ];
 
   return (
@@ -76,6 +79,7 @@ export function SettingsContent() {
         {activeCategory === 'agents' && <AgentTypesSettings />}
         {activeCategory === 'tools' && <BuiltinToolsSettings />}
         {activeCategory === 'phone' && <PhoneSettings />}
+        {activeCategory === 'ssh' && <SshSettings />}
       </div>
     </div>
   );

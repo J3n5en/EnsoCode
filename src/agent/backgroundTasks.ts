@@ -254,7 +254,9 @@ export function withBackground(
   definition: ToolDefinition,
   manager: BackgroundTaskManager,
   sessionId: string,
-  cwd: string
+  cwd: string,
+  /** 远程会话：把远端命令变换成本地可 spawn 的 ssh 命令(manager 本体始终本地 spawn) */
+  transform?: (command: string, cwd: string) => { command: string; cwd: string }
 ): ToolDefinition {
   const baseParams = definition.parameters as unknown as {
     properties?: Record<string, unknown>;
@@ -282,7 +284,10 @@ export function withBackground(
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
       if (record.background && typeof record.command === 'string') {
-        const taskId = manager.start(sessionId, record.command, cwd);
+        const launch = transform
+          ? transform(record.command, cwd)
+          : { command: record.command, cwd };
+        const taskId = manager.start(sessionId, launch.command, launch.cwd);
         return {
           content: [
             {

@@ -14,6 +14,7 @@ type Minimal = {
   archivedAt?: number;
   parentId?: string;
   createdAt: number;
+  lastActiveAt?: number;
   messages: { timestamp?: number }[];
 };
 
@@ -61,6 +62,26 @@ describe('projectConversationIds', () => {
       fresh: conv('p1', 2),
     };
     expect(projectConversationIds(['old', 'fresh'], plain, 'p1')).toEqual(['fresh', 'old']);
+  });
+
+  it('messages 被持久化剥离后,用持久化的 lastActiveAt 排序而非 createdAt', () => {
+    // 场景:昨晚创建、今早才活跃的会话,重启后 messages=[];
+    // 若回落 createdAt 会掉到旧会话堆里(真实事故:白屏会话「消失」)
+    const rehydrated = {
+      builtLastNightUsedToday: conv('p1', 1, undefined, { lastActiveAt: 100 }),
+      usedYesterday: conv('p1', 5, undefined, { lastActiveAt: 50 }),
+    };
+    expect(
+      projectConversationIds(['usedYesterday', 'builtLastNightUsedToday'], rehydrated, 'p1')
+    ).toEqual(['builtLastNightUsedToday', 'usedYesterday']);
+  });
+
+  it('内存里的最后一条消息时间优先于持久化 lastActiveAt(活会话不被陈旧盘面拖后)', () => {
+    const live = {
+      stale: conv('p1', 1, 200, { lastActiveAt: 10 }),
+      other: conv('p1', 2, 100),
+    };
+    expect(projectConversationIds(['other', 'stale'], live, 'p1')).toEqual(['stale', 'other']);
   });
 
   it('活跃时间相同保持 order 相对顺序(稳定)', () => {

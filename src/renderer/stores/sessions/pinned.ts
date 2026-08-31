@@ -10,14 +10,18 @@ interface SidebarConversation {
   archived?: boolean;
   archivedAt?: number;
   createdAt: number;
+  /** 持久化的最后活跃时刻:partialize 剥离 messages 前留下的标量,重启后排序靠它 */
+  lastActiveAt?: number;
   messages: { timestamp?: number }[];
 }
 
 type Conversations = Record<string, SidebarConversation | undefined>;
 
-/** 会话的最后活跃时刻:最后一条消息时间,没消息回落创建时间 */
+/** 会话的最后活跃时刻:最后一条消息时间 → 持久化 lastActiveAt(messages 被剥离时) → createdAt */
 function lastActiveAt(conversation: SidebarConversation): number {
-  return conversation.messages.at(-1)?.timestamp ?? conversation.createdAt;
+  return (
+    conversation.messages.at(-1)?.timestamp ?? conversation.lastActiveAt ?? conversation.createdAt
+  );
 }
 
 /** 按最后活跃时间倒序;时间相同保持传入顺序(sort 稳定) */

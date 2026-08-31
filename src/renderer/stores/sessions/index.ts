@@ -77,6 +77,11 @@ export interface Conversation extends SessionProjection {
   archived?: boolean;
   /** 归档时刻；清理「N 天前已归档」用。取消归档时清掉 */
   archivedAt?: number;
+  /**
+   * 最后活跃时刻（最后一条消息的 timestamp）。partialize 剥离 messages 前写入，
+   * 重启后侧栏排序靠它——否则回落 createdAt，「昨晚建、今早用」的会话会掉序消失
+   */
+  lastActiveAt?: number;
   /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
   contextWindow?: number;
   /** 上次使用的模型，resume 时沿用 */
@@ -1795,6 +1800,11 @@ export const useSessionsStore = create<SessionsState>()(
             id,
             {
               ...conversation,
+              // 剥离 messages 前留下活跃时刻标量，重启后侧栏排序用（pinned.ts lastActiveAt）
+              lastActiveAt:
+                conversation.messages.at(-1)?.timestamp ??
+                conversation.lastActiveAt ??
+                conversation.createdAt,
               messages: [],
               customEntries: [],
               dispatchMainEvents: {},

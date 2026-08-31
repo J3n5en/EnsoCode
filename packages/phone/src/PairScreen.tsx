@@ -20,10 +20,13 @@ function isPairPayload(value: string): boolean {
 export function PairScreen({
   onPaired,
   autoInvite,
+  onCancel,
 }: {
   onPaired: (device: PairedDevice) => void;
   /** 扫码直达时从地址栏取到的邀请链接，挂载后自动完成配对 */
   autoInvite?: string | null;
+  /** 已配对状态下添加新电脑时提供：显示返回按钮 */
+  onCancel?: () => void;
 }) {
   const [uri, setUri] = useState('');
   const [busy, setBusy] = useState(false);
@@ -191,6 +194,12 @@ export function PairScreen({
       </div>
 
       {error && <p className="max-w-sm text-center text-destructive text-xs">{error}</p>}
+
+      {onCancel && (
+        <Button variant="ghost" className="w-full max-w-sm" onClick={onCancel}>
+          返回
+        </Button>
+      )}
     </div>
   );
 }

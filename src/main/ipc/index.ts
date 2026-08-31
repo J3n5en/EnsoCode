@@ -7,6 +7,7 @@ import { registerPairHandlers } from './pair';
 import { registerProjectHandlers } from './projects';
 import { registerProviderHandlers } from './providers';
 import { registerSettingsHandlers } from './settings';
+import { registerSshConnectionHandlers } from './sshConnections';
 import { registerUpdaterHandlers } from './updater';
 import { attachWindowStateEvents, registerWindowHandlers } from './window';
 import { registerWorktreeHandlers } from './worktree';
@@ -20,6 +21,7 @@ export function registerIpcHandlers(): void {
   registerAgentHandlers();
   registerUpdaterHandlers();
   registerProjectHandlers();
+  registerSshConnectionHandlers();
   registerFileHandlers();
   registerPairHandlers();
   registerWorktreeHandlers();

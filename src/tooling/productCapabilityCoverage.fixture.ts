@@ -41,7 +41,7 @@ export const SETTINGS_DATA_COVERAGE = {
   instructions: surfaces('instructions.list'),
   presets: surfaces('presets.list'),
   agentTypes: surfaces('agent-types.list'),
-  subagentModelsEnabled: surfaces('providers.subagent-models'),
+  subagentModelsEnabled: surfaces('providers.subagent-models.toggle'),
   subagentModels: surfaces('providers.subagent-models'),
   disabledBuiltinAgentTypes: surfaces('agent-types.toggle-builtin'),
   disabledBuiltinTools: surfaces('tools.toggle-builtin'),
@@ -101,10 +101,10 @@ export const SETTINGS_ACTION_COVERAGE = {
   addPreset: surfaces('presets.create'),
   updatePreset: surfaces('presets.edit'),
   removePreset: surfaces('presets.delete'),
-  setSubagentModelsEnabled: surfaces('providers.subagent-models'),
-  addSubagentModel: surfaces('providers.subagent-models'),
-  updateSubagentModel: surfaces('providers.subagent-models'),
-  removeSubagentModel: surfaces('providers.subagent-models'),
+  setSubagentModelsEnabled: surfaces('providers.subagent-models.toggle'),
+  addSubagentModel: surfaces('providers.subagent-models.add'),
+  updateSubagentModel: surfaces('providers.subagent-models.update'),
+  removeSubagentModel: surfaces('providers.subagent-models.remove'),
   addAgentType: surfaces('agent-types.create'),
   updateAgentType: surfaces('agent-types.edit'),
   removeAgentType: surfaces('agent-types.delete'),
@@ -269,6 +269,16 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_STATUS: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_SESSION_CONFIG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
+  SSH_CONNECTIONS_UPSERT: surfaces(
+    'projects.ssh-connections.add',
+    'projects.ssh-connections.update'
+  ),
+  SSH_CONNECTIONS_DELETE: surfaces('projects.ssh-connections.remove'),
+  SSH_CONNECTIONS_TEST: surfaces('projects.ssh-connections.test'),
+  SSH_CONNECTIONS_LIST_DIRS: excluded(
+    'Remote directory browsing helper for the add-project picker.'
+  ),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

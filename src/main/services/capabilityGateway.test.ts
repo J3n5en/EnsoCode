@@ -154,6 +154,21 @@ function fixture(options?: {
       code: 'unavailable' as const,
       error: 'none',
     })),
+    listSshConnections: vi.fn(() => [
+      {
+        id: 'ssh-conn-1',
+        name: 'Build box',
+        host: 'build.example.test',
+        auth: 'password' as const,
+        hasPassword: true,
+      },
+    ]),
+    deleteSshConnection: vi.fn(async (id: string) =>
+      id === 'ssh-conn-1'
+        ? { ok: true as const, value: null }
+        : { ok: false as const, error: '连接不存在。' }
+    ),
+    testSshConnection: vi.fn(async () => ({ ok: true as const })),
   };
   const gateway = new CapabilityGateway(services, transport);
   expect(gateway.registerInvocation(context)).toBe(true);
@@ -462,6 +477,118 @@ describe('CapabilityGateway OAuth/default/secret/receipt', () => {
       decision: 'allow',
     });
     await expect(busyPending).resolves.toMatchObject({ receipt: { outcome: 'failed' } });
+  });
+
+  it('ssh-connections: list 无密钥;remove/test 走 ASK 危险门;add/update 保持封禁', async () => {
+    const { gateway, services, asks } = fixture();
+    const list = await gateway.invoke(request('ssh-1', 'projects.ssh-connections', {}));
+    expect(list.modelResult).toMatchObject({ ok: true });
+    expect(JSON.stringify(list.modelResult)).toContain('ssh-conn-1');
+    expect(JSON.stringify(list.modelResult)).not.toContain('password":"');
+
+    const removing = gateway.invoke(
+      request('ssh-2', 'projects.ssh-connections.remove', { id: 'ssh-conn-1' })
+    );
+    await waitForAsk(asks, 1);
+    gateway.respond(7, { child, turnId: 'turn-1', requestId: 'ssh-2', decision: 'allow' });
+    const removed = await removing;
+    expect(removed.modelResult).toMatchObject({ ok: true });
+    expect(services.deleteSshConnection).toHaveBeenCalledWith('ssh-conn-1');
+
+    const testing = gateway.invoke(
+      request('ssh-3', 'projects.ssh-connections.test', { id: 'ssh-conn-1' })
+    );
+    await waitForAsk(asks, 2);
+    gateway.respond(7, { child, turnId: 'turn-1', requestId: 'ssh-3', decision: 'allow' });
+    const tested = await testing;
+    expect(tested.modelResult).toMatchObject({ ok: true });
+
+    // add/update 封禁：凭证不得经过 Enso 上下文（schema 不声明字段，避免引导模型传密钥）
+    const added = await gateway.invoke(request('ssh-4', 'projects.ssh-connections.add', {}));
+    expect(added.modelResult).toMatchObject({ ok: false, code: 'unavailable' });
+    const updated = await gateway.invoke(request('ssh-5', 'projects.ssh-connections.update', {}));
+    expect(updated.modelResult).toMatchObject({ ok: false, code: 'unavailable' });
+  });
+
+  it('subagent-models: list/toggle/add/update/remove 全链受控,引用与推理值校验', async () => {
+    const { gateway, state } = fixture();
+    const list = await gateway.invoke(request('sm-1', 'providers.subagent-models', {}));
+    expect(list.modelResult).toMatchObject({
+      ok: true,
+      data: { enabled: false, entries: [] },
+    });
+
+    const toggled = await gateway.invoke(
+      request('sm-2', 'providers.subagent-models.toggle', { value: true })
+    );
+    expect(toggled.modelResult).toMatchObject({ ok: true });
+    expect(state.subagentModelsEnabled).toBe(true);
+
+    const added = await gateway.invoke(
+      request('sm-3', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'model-1',
+        description: 'cheap and fast',
+        reasoning: 'on',
+        thinkingLevel: 'high',
+      })
+    );
+    expect(added.modelResult).toMatchObject({ ok: true });
+    // patchSettings 每次替换整个数组,断言必须重读 state
+    const entriesOf = () => state.subagentModels as Array<Record<string, unknown>>;
+    expect(entriesOf()).toHaveLength(1);
+    expect(entriesOf()[0]).toMatchObject({
+      providerId: 'provider-1',
+      modelId: 'model-1',
+      description: 'cheap and fast',
+      reasoning: 'on',
+      thinkingLevel: 'high',
+    });
+    const id = entriesOf()[0].id as string;
+
+    // 未知模型拒绝且零写
+    const ghost = await gateway.invoke(
+      request('sm-4', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'ghost',
+      })
+    );
+    expect(ghost.modelResult).toMatchObject({ ok: false });
+    expect(state.subagentModels).toHaveLength(1);
+
+    // 非法推理值被 schema 拒绝
+    const badReasoning = await gateway.invoke(
+      request('sm-5', 'providers.subagent-models.add', {
+        providerId: 'provider-1',
+        modelId: 'model-1',
+        reasoning: 'maybe',
+      })
+    );
+    expect(badReasoning.modelResult).toMatchObject({ ok: false, code: 'invalid' });
+
+    const updated = await gateway.invoke(
+      request('sm-6', 'providers.subagent-models.update', {
+        id,
+        description: 'strong',
+        reasoning: 'off',
+      })
+    );
+    expect(updated.modelResult).toMatchObject({ ok: true });
+    expect(entriesOf()[0]).toMatchObject({ description: 'strong', reasoning: 'off' });
+
+    // 'follow' 清除覆盖（回到跟随父会话）
+    const followed = await gateway.invoke(
+      request('sm-7', 'providers.subagent-models.update', { id, reasoning: 'follow' })
+    );
+    expect(followed.modelResult).toMatchObject({ ok: true });
+    expect(entriesOf()[0]).not.toHaveProperty('reasoning');
+    expect(entriesOf()[0]).not.toHaveProperty('thinkingLevel');
+
+    const removed = await gateway.invoke(
+      request('sm-8', 'providers.subagent-models.remove', { id })
+    );
+    expect(removed.modelResult).toMatchObject({ ok: true });
+    expect(state.subagentModels).toEqual([]);
   });
 
   it('default使用auth真keys与shared usability；disabled/空key/logout组合全部零写', async () => {

@@ -19,6 +19,8 @@ import {
 } from '../services/oauthProviders';
 import { listModels, testProvider } from '../services/providerApi';
 import { getRecentProjects } from '../services/recentProjects';
+import { getSshConnectionStore } from '../services/sshConnectionStore';
+import { sshProbeLogin } from '../services/sshProbe';
 import { patchSettingsState, readSettings, removeProjectAndConversations } from './settings';
 
 function senderById(webContentsId?: number): Electron.WebContents | undefined {
@@ -126,6 +128,28 @@ export const capabilityGateway = new CapabilityGateway(
             error: result.error,
             suggestedAction: result.suggestedAction,
           };
+    },
+    listSshConnections: () => getSshConnectionStore().list(),
+    deleteSshConnection: async (id) => {
+      // 与设置页同规则：仍被远程项目引用的连接不得删除（动态 import 避模块初始化环）
+      const { getSourceAuthorityRegistry } = await import('./agent');
+      if (getSourceAuthorityRegistry()?.sshConnectionInUse(id)) {
+        return { ok: false, error: 'Connection is still used by a remote project.' };
+      }
+      const result = getSshConnectionStore().delete(id);
+      return result.ok ? { ok: true, value: null } : { ok: false, error: result.error };
+    },
+    testSshConnection: async (id) => {
+      const store = getSshConnectionStore();
+      const secret = store.getSecret(id);
+      if (!secret) return { ok: false, error: 'Connection not found.' };
+      const { resolveSshTarget } = await import('@shared/ssh');
+      const failure = await sshProbeLogin(resolveSshTarget(secret), {
+        auth: secret.auth,
+        port: secret.port,
+        password: secret.password,
+      });
+      return failure ? { ok: false, error: failure } : { ok: true };
     },
   },
   transport

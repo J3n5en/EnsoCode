@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
+import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
   AgentActionResult,
+  AgentRemoteConfig,
   AgentSpawnRequest,
   ApprovalDecision,
   ApprovalMode,
@@ -65,6 +67,7 @@ import {
   readExternalSession,
 } from '../services/sessionImport';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
+import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
@@ -130,7 +133,28 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   }
   // cwd 授权：项目主工作树，或该会话在 main 登记过的隔离 worktree（不信任其它路径）
   if (project.canonicalPath === request.cwd) return true;
+  // ssh 项目无 worktree：cwd 只允许等于远端 canonicalPath
+  if (project.kind === 'ssh') return false;
   return sessionWorktree(request.sessionId)?.path === request.cwd;
+}
+
+/** ssh 项目→远程执行配置。只认 main 侧项目权威,渲染层请求里不存在也不采信此字段 */
+function remoteConfigFor(sessionId: string): AgentRemoteConfig | undefined {
+  const conversation = sourceAuthority?.conversation(sessionId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  if (project?.kind !== 'ssh') return undefined;
+  const secret = project.sshConnectionId
+    ? getSshConnectionStore().getSecret(project.sshConnectionId)
+    : undefined;
+  if (secret) {
+    return {
+      host: resolveSshTarget(secret),
+      auth: secret.auth,
+      ...(secret.port ? { port: secret.port } : {}),
+      ...(secret.auth === 'password' && secret.password ? { password: secret.password } : {}),
+    };
+  }
+  return project.sshHost ? { host: project.sshHost, auth: 'key' } : undefined;
 }
 
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
@@ -249,7 +273,7 @@ function wirePairAgentBridge(): void {
       } catch {
         return { ok: false, error: 'model credentials unavailable' };
       }
-      return spawnSession(identity, request, credentialKeys);
+      return spawnSession(identity, request, credentialKeys, remoteConfigFor(request.sessionId));
     },
   });
 }
@@ -261,6 +285,10 @@ export function registerAgentHandlers(): void {
     registryFile: path.join(agentDataDir, 'source-registry.json'),
     safeSessionRoot: path.join(agentDataDir, 'sessions'),
     legacySettings: readSettings,
+    resolveSshConnection: (id) => {
+      const row = getSshConnectionStore().getSecret(id);
+      return row ? { host: row.host, user: row.user } : null;
+    },
     onChanged: (projection) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
@@ -462,7 +490,7 @@ export function registerAgentHandlers(): void {
     } catch {
       return { ok: false, error: 'model credentials unavailable' };
     }
-    return spawnSession(identity, parsed, credentialKeys);
+    return spawnSession(identity, parsed, credentialKeys, remoteConfigFor(parsed.sessionId));
   });
 
   ipcMain.handle(

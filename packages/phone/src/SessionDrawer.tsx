@@ -4,9 +4,12 @@ import {
   Bell,
   ChevronRight,
   FolderGit2,
+  Laptop,
   MessageSquarePlus,
   Palette,
+  Pencil,
   Pin,
+  Plus,
   Unplug,
   X,
 } from 'lucide-react';
@@ -15,6 +18,8 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import type { StoredDevice } from './deviceList';
+import { orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
 import type { PushFailureReason } from './push';
 import {
   getThemePreference,
@@ -49,10 +54,14 @@ interface Props {
   open: boolean;
   projects: ProjectEntry[];
   catalog: CatalogEntry[];
+  /** 桌面置顶组的手动拖拽顺序；缺省（旧桌面）按活跃倒序 */
+  pinnedOrder?: string[];
   activeId: string | null;
   canCreate: boolean;
-  /** 已配对的桌面标识（配对时记录的设备名） */
-  deviceName: string;
+  /** 已配对的桌面列表（切换式：一次只连活跃那台） */
+  devices: StoredDevice[];
+  activeDevicePairId: string | null;
+  /** 活跃那台的连接状态 */
   connected: boolean;
   connectionLabel: string;
   pushEnabled: boolean;
@@ -67,17 +76,22 @@ interface Props {
   onClose(): void;
   onSelect(sessionId: string): void;
   onNewConversation(projectId: string): void;
-  /** 解绑并回到配对页 */
-  onUnpair(): void;
+  onSwitchDevice(pairId: string): void;
+  onAddDevice(): void;
+  onRenameDevice(pairId: string, label: string): void;
+  /** 解绑指定那台；删到没有时回配对页 */
+  onUnpairDevice(pairId: string): void;
 }
 
 export function SessionDrawer({
   open,
   projects,
   catalog,
+  pinnedOrder = [],
   activeId,
   canCreate,
-  deviceName,
+  devices,
+  activeDevicePairId,
   connected,
   connectionLabel,
   pushEnabled,
@@ -89,13 +103,17 @@ export function SessionDrawer({
   onClose,
   onSelect,
   onNewConversation,
-  onUnpair,
+  onSwitchDevice,
+  onAddDevice,
+  onRenameDevice,
+  onUnpairDevice,
 }: Props) {
   const [foldedProjects, setFoldedProjects] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   // 底部「已归档」栏目的折叠态（与桌面一致：缺省收起）
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const [confirmUnpair, setConfirmUnpair] = useState(false);
+  /** 待确认解绑的 pairId；null = 无确认框 */
+  const [confirmUnpair, setConfirmUnpair] = useState<string | null>(null);
   const [themePref, setThemePref] = useState<ThemePreference>(getThemePreference);
 
   // 主题可能由桌面下发触发变化，订阅后同步按钮高亮
@@ -103,7 +121,7 @@ export function SessionDrawer({
 
   // 抽屉关闭时收起确认态，避免下次打开还停在确认框
   useEffect(() => {
-    if (!open) setConfirmUnpair(false);
+    if (!open) setConfirmUnpair(null);
   }, [open]);
 
   // 相对时间每分钟自刷（与桌面一致，避免「3 分钟前」僵住）
@@ -116,13 +134,16 @@ export function SessionDrawer({
 
   // 与桌面侧栏同语义：归档不进项目组，只进底部栏目；置顶另起一栏且组内靠前
   const topLevel = catalog.filter((c) => !c.parentId);
-  const pinnedSessions = topLevel.filter((c) => c.pinned && !c.archived);
-  const archivedSessions = topLevel.filter((c) => c.archived);
+  const pinnedSessions = orderPinned(
+    topLevel.filter((c) => c.pinned && !c.archived),
+    pinnedOrder
+  );
+  const archivedSessions = sortByActivity(topLevel.filter((c) => c.archived));
   const active = topLevel.filter((c) => !c.archived);
 
   // 没有项目归属的会话（项目已删等）单独归到「其他」
   const known = new Set(projects.map((p) => p.id));
-  const orphans = active.filter((c) => !known.has(c.projectId));
+  const orphans = orderProjectSessions(active.filter((c) => !known.has(c.projectId)));
 
   return (
     <>
@@ -183,7 +204,7 @@ export function SessionDrawer({
             <ProjectGroup
               key={project.id}
               name={project.name}
-              sessions={sortPinnedFirst(active.filter((c) => c.projectId === project.id))}
+              sessions={orderProjectSessions(active.filter((c) => c.projectId === project.id))}
               folded={foldedProjects[project.id] === true}
               expanded={expandedProjects[project.id] === true}
               activeId={activeId}
@@ -319,36 +340,85 @@ export function SessionDrawer({
             </div>
           )}
 
-          {confirmUnpair ? (
-            <div className="space-y-2 rounded-lg border border-dashed p-3">
-              <p className="text-xs">取消配对后需重新扫码才能连接，确定吗？</p>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setConfirmUnpair(false)}>
-                  取消
-                </Button>
-                <Button variant="destructive" size="sm" onClick={onUnpair}>
-                  确定解绑
-                </Button>
-              </div>
-            </div>
-          ) : (
+          <div className="space-y-0.5">
+            {devices.map((d) => {
+              const isActive = d.pairId === activeDevicePairId;
+              if (confirmUnpair === d.pairId) {
+                return (
+                  <div key={d.pairId} className="space-y-2 rounded-lg border border-dashed p-3">
+                    <p className="text-xs">解绑「{d.label}」后需重新扫码才能连接，确定吗？</p>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setConfirmUnpair(null)}>
+                        取消
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          setConfirmUnpair(null);
+                          onUnpairDevice(d.pairId);
+                        }}
+                      >
+                        确定解绑
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={d.pairId} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onSwitchDevice(d.pairId)}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-accent/50',
+                      isActive ? 'text-foreground' : 'text-muted-foreground'
+                    )}
+                  >
+                    <Laptop className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{d.label}</span>
+                    {isActive && (
+                      <span
+                        className={cn(
+                          'shrink-0 text-[10px]',
+                          connected ? 'text-muted-foreground' : 'text-destructive'
+                        )}
+                      >
+                        {connectionLabel}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`重命名 ${d.label}`}
+                    onClick={() => {
+                      const label = window.prompt('给这台电脑起个名：', d.label);
+                      if (label?.trim()) onRenameDevice(d.pairId, label);
+                    }}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`解绑 ${d.label}`}
+                    onClick={() => setConfirmUnpair(d.pairId)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                  >
+                    <Unplug className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
             <button
               type="button"
-              onClick={() => setConfirmUnpair(true)}
+              onClick={onAddDevice}
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-muted-foreground text-sm transition-colors hover:bg-accent/50 hover:text-foreground"
             >
-              <Unplug className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{deviceName}</span>
-              <span
-                className={cn(
-                  'shrink-0 text-[10px]',
-                  connected ? 'text-muted-foreground' : 'text-destructive'
-                )}
-              >
-                {connectionLabel}
-              </span>
+              <Plus className="h-4 w-4 shrink-0" />
+              <span>配对新电脑</span>
             </button>
-          )}
+          </div>
 
           <p className="px-2 pt-0.5 text-center text-[10px] text-muted-foreground/60">
             版本 {__COMMIT__}
@@ -357,11 +427,6 @@ export function SessionDrawer({
       </aside>
     </>
   );
-}
-
-/** 组内置顶靠前，其余保持 catalog 相对顺序（与桌面 projectConversationIds 同语义） */
-function sortPinnedFirst(sessions: CatalogEntry[]): CatalogEntry[] {
-  return [...sessions.filter((s) => s.pinned), ...sessions.filter((s) => !s.pinned)];
 }
 
 /** 置顶/归档/项目组共用的会话行（subtitle = 归档栏内联的项目名，与桌面一致） */

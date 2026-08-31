@@ -50,6 +50,8 @@ const isNonEmptyString = (value: unknown): value is string =>
 function resolveRepoPath(projectId: string): string | null {
   const authority = getSourceAuthorityRegistry();
   const project = authority?.project(projectId);
+  // ssh 项目的 canonicalPath 是远端路径，本地 git worktree 操作无意义，一律拒绝（UI 已隐藏，此处防御）
+  if (project?.kind === 'ssh') return null;
   return project?.state === 'active' ? project.canonicalPath : null;
 }
 

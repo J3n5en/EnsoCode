@@ -1,5 +1,14 @@
-import type { ModelProvider, SubagentModelEntry } from '@shared/types';
-import { hasProviderCredentials } from '@shared/types';
+import type {
+  ModelProvider,
+  ModelReasoningOverride,
+  ModelThinkingLevelOverride,
+  SubagentModelEntry,
+} from '@shared/types';
+import {
+  hasProviderCredentials,
+  MODEL_REASONING_OVERRIDES,
+  MODEL_THINKING_LEVEL_OVERRIDES,
+} from '@shared/types';
 
 export interface SubagentModelRef {
   /** 给 LLM 看的唯一键：`{provider.name}/{modelId}`,冲突时追加 `#n` */
@@ -8,6 +17,9 @@ export interface SubagentModelRef {
   modelId: string;
   /** 用户写的选型依据(空串不透传) */
   description?: string;
+  /** 条目级推理覆盖(缺省 = 跟随父会话;非法值不透传) */
+  reasoning?: ModelReasoningOverride;
+  thinkingLevel?: ModelThinkingLevelOverride;
 }
 
 /**
@@ -39,11 +51,21 @@ export function pickSubagentModelRefs(
     const count = (named.get(base) ?? 0) + 1;
     named.set(base, count);
     const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+    const reasoning = MODEL_REASONING_OVERRIDES.includes(entry.reasoning as ModelReasoningOverride)
+      ? entry.reasoning
+      : undefined;
+    const thinkingLevel = MODEL_THINKING_LEVEL_OVERRIDES.includes(
+      entry.thinkingLevel as ModelThinkingLevelOverride
+    )
+      ? entry.thinkingLevel
+      : undefined;
     refs.push({
       name: count === 1 ? base : `${base}#${count}`,
       providerId: provider.id,
       modelId: model.id,
       ...(description ? { description } : {}),
+      ...(reasoning ? { reasoning } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
     });
   }
   return refs;

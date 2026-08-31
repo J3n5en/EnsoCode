@@ -104,6 +104,7 @@ let onSessionConfig: ((config: PairSessionConfig) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
+let pinnedOrder: string[] = [];
 let projects: ProjectEntry[] = [];
 let providers: ProviderEntry[] = [];
 /** 桌面外观偏好，随目录下发给手机作为默认值 */
@@ -620,7 +621,7 @@ async function send(conn: Connection, message: HostToPhone): Promise<void> {
 }
 
 async function sendMeta(conn: Connection): Promise<void> {
-  await send(conn, { type: 'catalog', entries: catalog });
+  await send(conn, { type: 'catalog', entries: catalog, pinnedOrder });
   await send(conn, { type: 'projects', projects });
   await send(conn, { type: 'providers', providers });
   await send(conn, {
@@ -700,6 +701,7 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
 /** renderer 推来的目录/项目/provider（provider 已剥 apiKey/baseUrl） */
 export function updatePairCatalog(payload: {
   catalog: CatalogEntry[];
+  pinnedOrder?: string[];
   projects: ProjectEntry[];
   providers: ProviderEntry[];
   projectPaths: { id: string; path: string }[];
@@ -708,6 +710,7 @@ export function updatePairCatalog(payload: {
   terminalFontFamily?: string;
 }): void {
   catalog = payload.catalog;
+  pinnedOrder = payload.pinnedOrder ?? [];
   projects = payload.projects;
   providers = payload.providers;
   theme = payload.theme;

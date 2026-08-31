@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { resolveSshTarget } from '@shared/ssh';
 import type {
   AuthorityMutationResult,
   ConversationAuthority,
@@ -37,12 +38,24 @@ export interface SourceAuthorityRegistryOptions {
   safeSessionRoot?: string;
   randomUuid?: () => string;
   onChanged?: (projection: SourceAuthorityProjection) => void;
+  resolveSshConnection?: (id: string) => { host: string; user?: string } | null;
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+/**
+ * 规范化远端项目绝对路径：去重复/尾斜杠。本机无法 realpath 远端路径，
+ * 所以拒绝一切需要解析的形态（相对路径、~、. / ..分量），只收字面绝对路径。
+ */
+export function normalizeRemoteProjectPath(value: string): string | null {
+  if (!value.startsWith('/')) return null;
+  const segments = value.split('/').filter((s) => s.length > 0);
+  if (segments.some((s) => s === '.' || s === '..')) return null;
+  return segments.length === 0 ? '/' : `/${segments.join('/')}`;
+}
 
 const validId = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -58,9 +71,16 @@ export class SourceAuthorityRegistry {
     if (!this.load()) this.migrateLegacy(options.legacySettings?.());
   }
 
+  private hydrateProject(value: ProjectAuthority): ProjectAuthority {
+    if (value.kind !== 'ssh' || !value.sshConnectionId) return { ...value };
+    const connection = this.options.resolveSshConnection?.(value.sshConnectionId);
+    if (!connection) return { ...value };
+    return { ...value, sshHost: resolveSshTarget(connection) };
+  }
+
   projection(): SourceAuthorityProjection {
     return {
-      projects: [...this.projects.values()].map((value) => ({ ...value })),
+      projects: [...this.projects.values()].map((value) => this.hydrateProject(value)),
       conversations: [...this.conversations.values()].map((value) => ({
         ...value,
         ...(value.selection ? { selection: { ...value.selection } } : {}),
@@ -70,7 +90,7 @@ export class SourceAuthorityRegistry {
 
   project(projectId: string): ProjectAuthority | undefined {
     const value = this.projects.get(projectId);
-    return value ? { ...value } : undefined;
+    return value ? this.hydrateProject(value) : undefined;
   }
 
   conversation(conversationId: string): ConversationAuthority | undefined {
@@ -84,25 +104,81 @@ export class SourceAuthorityRegistry {
     request: CreateProjectAuthorityRequest
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     try {
-      const canonicalPath = realpathSync(request.path);
-      if (!statSync(canonicalPath).isDirectory())
-        throw new Error('Project path is not a directory.');
-      const existing = [...this.projects.values()].find(
-        (project) => project.canonicalPath === canonicalPath && project.state === 'active'
-      );
-      if (existing) return { accepted: true, value: { ...existing } };
-      const value: ProjectAuthority = {
-        projectId: this.randomUuid(),
-        canonicalPath,
-        state: 'active',
-        version: 1,
-      };
-      this.projects.set(value.projectId, value);
-      this.commit();
-      return { accepted: true, value: { ...value } };
+      return request.kind === 'ssh'
+        ? this.createSshProject(request)
+        : this.createLocalProject(request);
     } catch (error) {
       return { accepted: false, error: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  private createLocalProject(
+    request: CreateProjectAuthorityRequest
+  ): AuthorityMutationResult<ProjectAuthorityProjection> {
+    const canonicalPath = realpathSync(request.path);
+    if (!statSync(canonicalPath).isDirectory()) throw new Error('Project path is not a directory.');
+    const existing = [...this.projects.values()].find(
+      (project) =>
+        project.kind !== 'ssh' &&
+        project.canonicalPath === canonicalPath &&
+        project.state === 'active'
+    );
+    if (existing) return { accepted: true, value: { ...existing } };
+    return this.insertProject({
+      projectId: this.randomUuid(),
+      canonicalPath,
+      state: 'active',
+      version: 1,
+    });
+  }
+
+  /** 远端目录存在性由 IPC handler 先行 ssh 校验（registry 保持同步契约），这里只做路径规范化与去重 */
+  private createSshProject(
+    request: CreateProjectAuthorityRequest
+  ): AuthorityMutationResult<ProjectAuthorityProjection> {
+    const connectionId = request.sshConnectionId;
+    if (typeof connectionId !== 'string' || connectionId.length === 0) {
+      return { accepted: false, error: 'Remote project requires an SSH connection.' };
+    }
+    const connection = this.options.resolveSshConnection?.(connectionId);
+    if (!connection) return { accepted: false, error: 'SSH 连接不存在。' };
+    const sshHost = resolveSshTarget(connection);
+    const canonicalPath = normalizeRemoteProjectPath(request.path);
+    if (!canonicalPath) return { accepted: false, error: 'Remote project path must be absolute.' };
+    const existing = [...this.projects.values()].find(
+      (project) =>
+        project.kind === 'ssh' &&
+        project.sshConnectionId === connectionId &&
+        project.canonicalPath === canonicalPath &&
+        project.state === 'active'
+    );
+    if (existing) return { accepted: true, value: { ...existing } };
+    return this.insertProject({
+      projectId: this.randomUuid(),
+      canonicalPath,
+      kind: 'ssh',
+      sshHost,
+      sshConnectionId: connectionId,
+      state: 'active',
+      version: 1,
+    });
+  }
+
+  sshConnectionInUse(connectionId: string): boolean {
+    return [...this.projects.values()].some(
+      (project) =>
+        project.state === 'active' &&
+        project.kind === 'ssh' &&
+        project.sshConnectionId === connectionId
+    );
+  }
+
+  private insertProject(
+    value: ProjectAuthority
+  ): AuthorityMutationResult<ProjectAuthorityProjection> {
+    this.projects.set(value.projectId, value);
+    this.commit();
+    return { accepted: true, value: { ...value } };
   }
 
   selectProject(
