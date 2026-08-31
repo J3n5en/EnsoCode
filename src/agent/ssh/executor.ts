@@ -28,6 +28,13 @@ export interface SshExecOptions {
   cwd?: string;
 }
 
+export interface SshStreamOptions {
+  onData: (chunk: Buffer) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  cwd?: string;
+}
+
 export type SpawnLike = (command: string, args: readonly string[]) => ChildProcess;
 
 export interface SshExecutor {
@@ -35,6 +42,8 @@ export interface SshExecutor {
   /** argv 数组 = 精确参数;字符串 = 远端 bash -lc 脚本 */
   exec(command: string[] | string, options?: SshExecOptions): Promise<SshExecResult>;
   execRaw(command: string[] | string, options?: SshExecOptions): Promise<SshExecRawResult>;
+  /** 流式执行(bash 工具用)：stdout/stderr 合流回调；中止/超时时 exitCode=null,对齐 BashOperations */
+  execStream(command: string[] | string, options: SshStreamOptions): Promise<{ exitCode: number | null }>;
 }
 
 export function createSshExecutor(
@@ -101,6 +110,47 @@ export function createSshExecutor(
     });
   }
 
+  function stream(
+    command: string[] | string,
+    options: SshStreamOptions
+  ): Promise<{ exitCode: number | null }> {
+    return new Promise((resolve, reject) => {
+      const remoteCommand = buildRemoteCommand(command, { cwd: options.cwd });
+      const proc = spawnImpl('ssh', buildSshExecArgs(host, remoteCommand, { controlPath }));
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        options.signal?.removeEventListener('abort', onAbort);
+        resolve({ exitCode });
+      };
+      const onAbort = () => {
+        proc.kill('SIGTERM');
+        finish(null);
+      };
+      if (options.timeoutMs !== undefined) {
+        timer = setTimeout(onAbort, options.timeoutMs);
+      }
+      if (options.signal) {
+        if (options.signal.aborted) return onAbort();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+      proc.stdout?.on('data', (chunk: Buffer) => options.onData(chunk));
+      proc.stderr?.on('data', (chunk: Buffer) => options.onData(chunk));
+      proc.on('error', (error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        options.signal?.removeEventListener('abort', onAbort);
+        reject(new Error(`failed to spawn ssh: ${error.message}`));
+      });
+      proc.on('close', (code) => finish(code));
+      proc.stdin?.end();
+    });
+  }
+
   return {
     host,
     async exec(command, options = {}) {
@@ -108,5 +158,6 @@ export function createSshExecutor(
       return { ...result, stdout: result.stdout.toString('utf8') };
     },
     execRaw: (command, options = {}) => run(command, options),
+    execStream: stream,
   };
 }

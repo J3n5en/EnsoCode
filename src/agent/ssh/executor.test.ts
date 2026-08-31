@@ -85,6 +85,35 @@ describe('SshExecutor', () => {
     await rejection;
   });
 
+  it('execStream:stdout/stderr 合流逐块回调,返回 exitCode', async () => {
+    const { procs, executor } = setup();
+    const chunks: string[] = [];
+    const pending = executor.execStream('make build', {
+      cwd: '/srv/app',
+      onData: (d) => chunks.push(d.toString()),
+    });
+    const { args, proc } = procs[0];
+    expect(args[args.length - 1]).toBe("cd '/srv/app' && bash -lc 'make build'");
+    proc.stdout.emit('data', Buffer.from('out1'));
+    proc.stderr.emit('data', Buffer.from('err1'));
+    proc.stdout.emit('data', Buffer.from('out2'));
+    proc.emit('close', 2);
+    await expect(pending).resolves.toEqual({ exitCode: 2 });
+    expect(chunks).toEqual(['out1', 'err1', 'out2']);
+  });
+
+  it('execStream 被信号中止时 exitCode 为 null(对齐 BashOperations 契约)', async () => {
+    const { procs, executor } = setup();
+    const controller = new AbortController();
+    const pending = executor.execStream('sleep 100', {
+      onData: () => {},
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect(procs[0].proc.kill).toHaveBeenCalled();
+    await expect(pending).resolves.toEqual({ exitCode: null });
+  });
+
   it('code 255(ssh 自身失败)保留 stderr 供上层归因', async () => {
     const { procs, executor } = setup();
     const pending = executor.exec(['ls']);
