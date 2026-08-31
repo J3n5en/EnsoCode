@@ -115,6 +115,7 @@ export const IPC_CHANNELS = {
   SSH_CONNECTIONS_UPSERT: 'ssh-connections:upsert',
   SSH_CONNECTIONS_DELETE: 'ssh-connections:delete',
   SSH_CONNECTIONS_TEST: 'ssh-connections:test',
+  SSH_CONNECTIONS_LIST_DIRS: 'ssh-connections:list-dirs',
 
   // File search (@ mention)
   FILES_SEARCH: 'files:search',

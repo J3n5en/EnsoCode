@@ -25,6 +25,121 @@ import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 
+/** 内嵌远程目录浏览：逐级钻取，选中回填路径输入框（避免嵌套 Dialog） */
+function RemoteDirBrowser({
+  connectionId,
+  initialPath,
+  onSelect,
+  onClose,
+}: {
+  connectionId: string;
+  initialPath?: string;
+  onSelect: (path: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [path, setPath] = React.useState<string | null>(null);
+  const [dirs, setDirs] = React.useState<string[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const requestSeq = React.useRef(0);
+
+  const load = React.useCallback(
+    (target?: string) => {
+      const seq = ++requestSeq.current;
+      setLoading(true);
+      setError('');
+      window.electronAPI.sshConnections
+        .listDirs(connectionId, target)
+        .then((result) => {
+          if (seq !== requestSeq.current) return;
+          if (result.ok) {
+            setPath(result.path);
+            setDirs(result.dirs);
+          } else {
+            setError(result.error);
+          }
+        })
+        .catch(() => {
+          if (seq === requestSeq.current) setError(t('Failed to list remote directory.'));
+        })
+        .finally(() => {
+          if (seq === requestSeq.current) setLoading(false);
+        });
+    },
+    [connectionId, t]
+  );
+
+  // 仅挂载/切换连接时以当前输入为起点；后续导航由 load 驱动，不跟随输入框变化
+  const initialRef = React.useRef(initialPath);
+  React.useEffect(() => {
+    const initial = initialRef.current;
+    load(initial?.startsWith('/') ? initial : undefined);
+  }, [load]);
+
+  const parent = path && path !== '/' ? path.replace(/\/[^/]+$/, '') || '/' : null;
+
+  return (
+    <div className="space-y-1.5 rounded-md border bg-muted/30 p-2">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">
+          {path ?? '…'}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          disabled={!parent || loading}
+          onClick={() => parent && load(parent)}
+        >
+          {t('Up')}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={onClose}
+        >
+          {t('Close')}
+        </Button>
+      </div>
+      <div className="max-h-40 space-y-0.5 overflow-y-auto">
+        {error ? (
+          <p className="px-1 py-2 text-destructive text-xs">{error}</p>
+        ) : loading && dirs.length === 0 ? (
+          <p className="px-1 py-2 text-muted-foreground text-xs">{t('Loading...')}</p>
+        ) : dirs.length === 0 ? (
+          <p className="px-1 py-2 text-muted-foreground text-xs">{t('No subdirectories')}</p>
+        ) : (
+          dirs.map((dir) => (
+            <button
+              key={dir}
+              type="button"
+              className="block w-full truncate rounded px-1.5 py-1 text-left font-mono text-xs hover:bg-muted"
+              disabled={loading}
+              onClick={() => path && load(path === '/' ? `/${dir}` : `${path}/${dir}`)}
+            >
+              {dir}/
+            </button>
+          ))
+        )}
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 w-full text-xs"
+        disabled={!path || loading}
+        onClick={() => path && onSelect(path)}
+      >
+        {t('Use this directory')}
+      </Button>
+    </div>
+  );
+}
+
 interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,6 +156,7 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
   const [connections, setConnections] = React.useState<
     Awaited<ReturnType<typeof window.electronAPI.sshConnections.list>>
   >([]);
+  const [browserOpen, setBrowserOpen] = React.useState(false);
   const [recent, setRecent] = React.useState<RecentProject[]>([]);
 
   React.useEffect(() => {
@@ -49,6 +165,7 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
     setPathValue('');
     setSshConnectionId('');
     setSshPath('');
+    setBrowserOpen(false);
     window.electronAPI.sshConnections
       .list()
       .then(setConnections)
@@ -143,15 +260,37 @@ export function AddProjectDialog({ open, onOpenChange, onAdd }: AddProjectDialog
                 </Field>
                 <Field className="w-full">
                   <FieldLabel>{t('Remote directory')}</FieldLabel>
-                  <Input
-                    value={sshPath}
-                    onChange={(event) => setSshPath(event.target.value)}
-                    placeholder="/home/user/project"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                  />
+                  <div className="flex w-full gap-2">
+                    <Input
+                      value={sshPath}
+                      onChange={(event) => setSshPath(event.target.value)}
+                      placeholder="/home/user/project"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      className="min-w-0 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!sshConnectionId}
+                      onClick={() => setBrowserOpen((open) => !open)}
+                    >
+                      {t('Browse')}
+                    </Button>
+                  </div>
                 </Field>
+                {browserOpen && sshConnectionId && (
+                  <RemoteDirBrowser
+                    connectionId={sshConnectionId}
+                    initialPath={sshPath.trim() || undefined}
+                    onSelect={(selected) => {
+                      setSshPath(selected);
+                      setBrowserOpen(false);
+                    }}
+                    onClose={() => setBrowserOpen(false)}
+                  />
+                )}
                 <p className="text-xs text-muted-foreground">
                   {t('Tools run on the remote host; chat history stays local.')}
                 </p>

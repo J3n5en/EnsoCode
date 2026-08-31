@@ -360,6 +360,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_DELETE, id),
     test: (id: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_TEST, id),
+    listDirs: (
+      id: string,
+      path?: string
+    ): Promise<{ ok: true; path: string; dirs: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_LIST_DIRS, id, path),
   },
   sourceAuthority: {
     read: (): Promise<SourceAuthorityProjection> =>

@@ -430,6 +430,10 @@ export const zhTranslations: Record<string, string> = {
   'SSH host': 'SSH 主机',
   'user@host or an alias from ~/.ssh/config': 'user@host 或 ~/.ssh/config 里的别名',
   'Remote directory': '远端目录',
+  Up: '上级',
+  'Use this directory': '选择此目录',
+  'No subdirectories': '没有子目录',
+  'Failed to list remote directory.': '远程目录列取失败。',
   'Requires key-based SSH access. Tools run on the remote host; chat history stays local.':
     '需要免密钥 SSH 访问。工具在远端主机执行,聊天记录保存在本地。',
   'Tools run on the remote host; chat history stays local.':

@@ -2,7 +2,12 @@ import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { buildRemoteCommand, buildSshExecArgs, type SshExecArgsOptions } from '@shared/ssh';
+import {
+  buildRemoteCommand,
+  buildSshExecArgs,
+  type SshExecArgsOptions,
+  shellQuote,
+} from '@shared/ssh';
 
 const CONNECT_TIMEOUT_SECONDS = 10;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -89,6 +94,64 @@ export function sshProbeDirectory(
     options,
     '远程路径不存在或不是目录。'
   );
+}
+
+/** 列远程子目录脚本：首行 pwd 解析真实绝对路径（支持 ~ 起点），隐藏目录不列 */
+export function buildSshListDirsScript(path?: string): string {
+  const target = path ? shellQuote(path) : '~';
+  return `cd ${target} && pwd && find . -mindepth 1 -maxdepth 1 -type d ! -name '.*'`;
+}
+
+/** 解析列目录输出；首行非绝对路径视为异常返回 null */
+export function parseSshListDirsOutput(stdout: string): { path: string; dirs: string[] } | null {
+  const lines = stdout.split('\n');
+  const path = lines[0]?.trim();
+  if (!path?.startsWith('/')) return null;
+  const dirs = lines
+    .slice(1)
+    .filter((line) => line.startsWith('./'))
+    .map((line) => line.slice(2))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return { path, dirs };
+}
+
+export function sshListRemoteDirs(
+  host: string,
+  path: string | undefined,
+  options: SshExecArgsOptions & { password?: string } = {}
+): Promise<{ ok: true; path: string; dirs: string[] } | { ok: false; error: string }> {
+  const args = buildSshExecArgs(host, buildRemoteCommand(buildSshListDirsScript(path)), {
+    connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+    ...options,
+  });
+  return new Promise((resolve) => {
+    execFile(
+      'ssh',
+      args,
+      { timeout: PROBE_TIMEOUT_MS, env: probeEnv(options.password) ?? process.env },
+      (error, stdout, stderr) => {
+        if (error) {
+          if ((error as { killed?: boolean }).killed) {
+            return resolve({ ok: false, error: '连接远程主机超时。' });
+          }
+          const code =
+            typeof (error as { code?: unknown }).code === 'number'
+              ? ((error as { code?: number }).code as number)
+              : 255;
+          return resolve({
+            ok: false,
+            error:
+              code === 255
+                ? classifySshProbeFailure(code, stderr ?? '', options.auth)
+                : '远程路径不存在或不是目录。',
+          });
+        }
+        const parsed = parseSshListDirsOutput(stdout ?? '');
+        resolve(parsed ? { ok: true, ...parsed } : { ok: false, error: '远程命令输出异常。' });
+      }
+    );
+  });
 }
 
 export function sshProbeLogin(

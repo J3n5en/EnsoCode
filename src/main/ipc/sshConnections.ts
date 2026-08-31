@@ -2,7 +2,7 @@ import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
 import { getSshConnectionStore, type SshConnectionUpsert } from '../services/sshConnectionStore';
-import { sshProbeLogin } from '../services/sshProbe';
+import { sshListRemoteDirs, sshProbeLogin } from '../services/sshProbe';
 import { isMainWebContents } from '../windows/MainWindow';
 import { getSourceAuthorityRegistry } from './agent';
 
@@ -49,6 +49,25 @@ export function registerSshConnectionHandlers(): void {
     }
     return getSshConnectionStore().delete(id);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SSH_CONNECTIONS_LIST_DIRS,
+    async (event, id: unknown, path: unknown) => {
+      if (!isMainWebContents(event.sender.id) || typeof id !== 'string') {
+        return { ok: false, error: 'Invalid request.' };
+      }
+      if (path !== undefined && typeof path !== 'string') {
+        return { ok: false, error: 'Invalid request.' };
+      }
+      const secret = getSshConnectionStore().getSecret(id);
+      if (!secret) return { ok: false, error: '连接不存在。' };
+      return sshListRemoteDirs(resolveSshTarget(secret), path || undefined, {
+        auth: secret.auth,
+        port: secret.port,
+        password: secret.password,
+      });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.SSH_CONNECTIONS_TEST, async (event, id: unknown) => {
     if (!isMainWebContents(event.sender.id) || typeof id !== 'string') {

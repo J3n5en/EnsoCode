@@ -276,6 +276,9 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   SSH_CONNECTIONS_DELETE: surfaces('projects.ssh-connections.remove'),
   SSH_CONNECTIONS_TEST: surfaces('projects.ssh-connections.test'),
+  SSH_CONNECTIONS_LIST_DIRS: excluded(
+    'Remote directory browsing helper for the add-project picker.'
+  ),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {
