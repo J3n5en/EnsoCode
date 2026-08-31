@@ -27,6 +27,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
+import { fetchAccountUsage, USAGE_CACHE_TTL_MS, usageCache } from '@/hooks/useAccountUsage';
 import { type TFunction, useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -134,11 +135,7 @@ const SEGMENT_ICONS: Record<Exclude<StatusLineSegmentId, 'approval'>, LucideIcon
 /** 状态栏对「资源即将耗尽」统一用的警戒阈值：占用/额度达到或超过此百分比即判定紧张，标红提示 */
 const CRITICAL_PERCENT = 90;
 
-/** 订阅额度查询的节流缓存：同一账号 60s 内命中缓存，不重复打厂商额度端点。
- *  用 Map 而非 Record —— accountKey 集合是运行时动态的订阅账号（用户可随时增删登录），
- *  不是编译期已知的静态枚举，属于 Map 的运行时插入/删除场景。 */
-const usageCache = new Map<string, { data: OauthAccountUsage; fetchedAt: number }>();
-const USAGE_CACHE_TTL_MS = 60_000;
+// 订阅额度的缓存/去重已提取到 hooks/useAccountUsage，与 ModelPicker/ProvidersSettings 共享同一份缓存
 
 /** 最近一条带非零 usage 的 assistant 消息的整段 prompt+输出 ≈ 当前上下文水位。
  *  流式中的消息 usage 是空对象（投影成全 0），须跳过，否则会话进行中会显示假的 0% 占用。 */
@@ -243,25 +240,6 @@ function ContextRing({ percent, critical }: { percent: number; critical: boolean
       />
     </svg>
   );
-}
-
-/** 同一账号并发多次不重复发起网络请求：共享同一个进行中的 promise。 */
-const usageInFlight = new Map<string, Promise<OauthAccountUsage>>();
-
-function fetchAccountUsage(accountKey: string): Promise<OauthAccountUsage> {
-  const inFlight = usageInFlight.get(accountKey);
-  if (inFlight) return inFlight;
-  const promise = window.electronAPI.providers
-    .oauthAccountUsage(accountKey)
-    .then((result) => {
-      usageCache.set(accountKey, { data: result, fetchedAt: Date.now() });
-      return result;
-    })
-    .finally(() => {
-      usageInFlight.delete(accountKey);
-    });
-  usageInFlight.set(accountKey, promise);
-  return promise;
 }
 
 /** 订阅额度：按 auth accountKey 拉取，模块级缓存 + in-flight 去重节流，⛔ 不每次 render 都发 IPC。

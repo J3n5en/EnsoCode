@@ -1,5 +1,5 @@
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
-import type { ModelProvider, OauthAccountUsage, OauthProviderInfo } from '@shared/types';
+import type { ModelProvider, OauthProviderInfo } from '@shared/types';
 import {
   BadgeCheck,
   HardDriveDownload,
@@ -16,6 +16,7 @@ import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialB
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -28,18 +29,9 @@ import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
 
-/** 订阅行额度：每次打开设置页按账号拉一次，复用向导里的展示块；拉取失败静默隐藏 */
+/** 订阅行额度：按账号拉取（60s 共享缓存），复用向导里的展示块；拉取失败静默隐藏 */
 function SubscriptionUsage({ accountKey }: { accountKey: string }) {
-  const [info, setInfo] = React.useState<OauthAccountUsage | undefined>();
-  React.useEffect(() => {
-    let cancelled = false;
-    void window.electronAPI.providers.oauthAccountUsage(accountKey).then((result) => {
-      if (!cancelled) setInfo(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [accountKey]);
+  const info = useCachedAccountUsage(accountKey);
   if (!info || info.error) return null;
   return <AccountUsageBlock info={info} />;
 }

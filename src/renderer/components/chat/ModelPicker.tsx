@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/menu';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useModelMeta } from '@/stores/modelMeta';
@@ -318,6 +319,43 @@ function ProviderSubmenuList({
         </p>
       )}
     </>
+  );
+}
+
+/** 订阅条目子菜单顶部的额度块：子菜单展开时才拉取（60s 共享缓存）；无数据/出错静默隐藏 */
+function SubmenuUsage({ accountKey }: { accountKey: string }) {
+  const { t } = useI18n();
+  const info = useCachedAccountUsage(accountKey);
+  if (!info || info.error || info.windows.length === 0) return null;
+  return (
+    <div className="-mx-1 -mt-1 mb-1 space-y-1 border-b px-3 py-2">
+      {info.windows.map((windowInfo) => (
+        <div key={windowInfo.label} className="flex items-center gap-2 text-[10px]">
+          <span className="w-8 shrink-0 truncate text-muted-foreground">{windowInfo.label}</span>
+          <div className="h-1 min-w-12 flex-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary/70"
+              style={{ width: `${Math.max(0, Math.min(100, windowInfo.usedPercent))}%` }}
+            />
+          </div>
+          <span className="w-8 shrink-0 text-right tabular-nums text-muted-foreground">
+            {Math.round(windowInfo.usedPercent)}%
+          </span>
+          {windowInfo.resetsAt !== undefined && (
+            <span className="shrink-0 text-muted-foreground/60">
+              {t('Resets {{time}}', {
+                time: new Date(windowInfo.resetsAt).toLocaleString([], {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+              })}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -647,6 +685,9 @@ export function ModelPicker({
                           </span>
                         </MenuSubTrigger>
                         <MenuSubPopup data-model-picker="submenu" className="w-72">
+                          {provider.oauthAccountKey && (
+                            <SubmenuUsage accountKey={provider.oauthAccountKey} />
+                          )}
                           <ProviderSubmenuList
                             provider={provider}
                             meta={metaByProvider[provider.id]}
