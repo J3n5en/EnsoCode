@@ -63,6 +63,7 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
+import { resolveChildReasoning } from './childReasoning';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -942,9 +943,15 @@ export class SessionSupervisor {
       }) => {
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
         const base = resolveBaseModel(runtime, selectedModel);
+        // 条目级推理覆盖（subagent-models）赢过父会话；缺省跟随父
+        const childReasoning = resolveChildReasoning(
+          selectedModel,
+          reasoningEnabled,
+          thinkingLevel
+        );
         const subModel = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
-          reasoningEnabled,
+          childReasoning.enabled,
           selectedModel.modelId
         );
         const isLockedEnso = resolved?.tools === 'enso-locked';
@@ -1040,7 +1047,7 @@ export class SessionSupervisor {
           agentDir: this.options.agentDir,
           modelRuntime: runtime,
           model: subModel,
-          thinkingLevel: reasoningEnabled ? (thinkingLevel ?? 'medium') : 'off',
+          thinkingLevel: childReasoning.level,
           noTools: 'builtin',
           customTools: subTools,
           resourceLoader: subLoader,

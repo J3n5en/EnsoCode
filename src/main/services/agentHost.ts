@@ -634,7 +634,12 @@ function configuredSubagentModels(
     if (resolved.ok) {
       options.push({
         name: ref.name,
-        config: resolved.selection.config,
+        // 条目级推理覆盖赢过模型行覆盖；缺省保留行级/跟随语义
+        config: {
+          ...resolved.selection.config,
+          ...(ref.reasoning ? { reasoning: ref.reasoning } : {}),
+          ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}),
+        },
         ...(ref.description ? { description: ref.description } : {}),
       });
     }

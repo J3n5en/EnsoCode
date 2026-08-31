@@ -1,3 +1,5 @@
+import type { ModelReasoningOverride, ModelThinkingLevelOverride } from './llm';
+
 /** 技能与 MCP 服务器：均以引用方式登记，内容留在源应用目录 */
 
 export interface SkillEntry {
@@ -100,6 +102,10 @@ export interface SubagentModelEntry {
   providerId: string;
   modelId: string;
   description: string;
+  /** 条目级推理覆盖；缺省 = 跟随父会话（不存 'follow'） */
+  reasoning?: ModelReasoningOverride;
+  /** 推理开启时的思考档位覆盖；缺省 = 跟随父会话 */
+  thinkingLevel?: ModelThinkingLevelOverride;
 }
 
 /** 全局指令 / 记忆文件：CLAUDE.md、AGENTS.md、GEMINI.md、SOUL.md 等

@@ -1,9 +1,17 @@
-import type { ModelProvider } from '@shared/types';
+import type { ModelProvider, ModelThinkingLevelOverride, SubagentModelEntry } from '@shared/types';
+import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
 import { Plus, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
@@ -14,6 +22,90 @@ import { useSettingsStore } from '@/stores/settings';
 
 const isModelEnabled = (provider: ModelProvider, modelId: string): boolean =>
   provider.models.some((model) => model.id === modelId && model.enabled !== false);
+
+const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
+  low: 'Low',
+  medium: 'Med',
+  high: 'High',
+  max: 'Max',
+};
+
+const isThinkingLevelOverride = (value: string): value is ModelThinkingLevelOverride =>
+  (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value);
+
+/** 推理三态（跟随会话/开/关）+ 开启时的档位，内联在条目行里 */
+function ReasoningControls({
+  entry,
+  onPatch,
+  t,
+}: {
+  entry: SubagentModelEntry;
+  onPatch: (updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <>
+      <Select
+        items={[
+          { value: 'follow', label: t('Follow conversation') },
+          { value: 'on', label: t('On') },
+          { value: 'off', label: t('Off') },
+        ]}
+        value={entry.reasoning ?? 'follow'}
+        onValueChange={(value) => {
+          const reasoning = value === 'on' || value === 'off' ? value : undefined;
+          onPatch({ reasoning, ...(reasoning === 'on' ? {} : { thinkingLevel: undefined }) });
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          data-slot="subagent-model-reasoning"
+          className="h-7 min-h-7 shrink-0 text-xs"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
+          <SelectItem value="on">{t('On')}</SelectItem>
+          <SelectItem value="off">{t('Off')}</SelectItem>
+        </SelectPopup>
+      </Select>
+      {entry.reasoning === 'on' && (
+        <Select
+          items={[
+            { value: 'follow', label: t('Follow conversation') },
+            ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
+              value: level,
+              label: t(LEVEL_LABEL_KEYS[level]),
+            })),
+          ]}
+          value={entry.thinkingLevel ?? 'follow'}
+          onValueChange={(value) => {
+            onPatch({
+              thinkingLevel: value && isThinkingLevelOverride(value) ? value : undefined,
+            });
+          }}
+        >
+          <SelectTrigger
+            size="sm"
+            data-slot="subagent-model-thinking-level"
+            className="h-7 min-h-7 shrink-0 text-xs"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
+            {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
+              <SelectItem key={level} value={level}>
+                {t(LEVEL_LABEL_KEYS[level])}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      )}
+    </>
+  );
+}
 
 /**
  * 「允许子代理指定模型」：默认模型下方的集中配置区。
@@ -84,6 +176,11 @@ export function SubagentModelsSettings() {
                   onThinkingChange={() => undefined}
                 />
               </div>
+              <ReasoningControls
+                entry={entry}
+                onPatch={(updates) => updateEntry(entry.id, updates)}
+                t={t}
+              />
               <Input
                 value={entry.description}
                 placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
