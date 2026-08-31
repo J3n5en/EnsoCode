@@ -32,6 +32,13 @@ const texts = (): Record<keyof (typeof TEXTS)['zh'], string> => {
 const mainWindowFocused = (): boolean =>
   BrowserWindow.getAllWindows().some((win) => win.isFocused());
 
+/** renderer 上报的「当前正在查看的会话」（tab 生效时为 tab 的 session id） */
+let viewedSessionId: string | null = null;
+
+export function setViewedSession(sessionId: string | null): void {
+  viewedSessionId = sessionId;
+}
+
 /** 点击通知：聚焦主窗口并让 renderer 切到对应会话 */
 function focusSession(sessionId: string): void {
   const win = BrowserWindow.getAllWindows()[0];
@@ -58,11 +65,13 @@ function notify(sessionId: string, title: string, body: string): void {
 }
 
 /**
- * 后台通知：仅主窗口未聚焦时,对待审批/轮完成/会话失败弹系统通知。
+ * 后台通知：对待审批/轮完成/会话失败弹系统通知。
+ * 仅当「主窗口聚焦且用户正看着事件所属会话」时抑制——看别的会话/设置页照弹。
  * 挂在 main 的 agent 事件广播流上,与 renderer 转发互不影响。
  */
 export function maybeNotify(event: RendererAgentEvent): void {
-  if (mainWindowFocused()) return;
+  const sessionId = (event as { identity?: { sessionId?: string } }).identity?.sessionId;
+  if (mainWindowFocused() && sessionId !== undefined && sessionId === viewedSessionId) return;
   const t = texts();
   switch (event.type) {
     case 'ask-request':

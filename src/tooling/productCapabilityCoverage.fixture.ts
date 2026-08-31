@@ -211,6 +211,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_APPROVAL_RESPOND: surfaces('conversations.approval.respond'),
   AGENT_SET_APPROVAL_MODE: surfaces('conversations.set-approval-mode'),
   NOTIFICATION_FOCUS_SESSION: surfaces('window.focus-conversation-notification'),
+  NOTIFICATION_ACTIVE_SESSION: excluded(
+    'Renderer reports the currently viewed conversation id so Main can suppress redundant system notifications; no execution rights.'
+  ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
   AGENT_REWIND: surfaces('conversations.rewind', 'conversations.rewind-files'),
   AGENT_DISMISS_COWORKER: surfaces('team.dismiss-coworker'),

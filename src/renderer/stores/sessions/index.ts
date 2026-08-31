@@ -1876,3 +1876,14 @@ export const useSessionsStore = create<SessionsState>()(
     }
   )
 );
+
+// 上报「当前正在查看的会话」给 main：窗口聚焦时,只有正被查看的会话才抑制系统通知。
+// tab 生效时以 tab（coworker/子会话）为准,与 sendActive 等处的解析口径一致。
+let lastReportedViewedId: string | null = null;
+useSessionsStore.subscribe((state) => {
+  const activeTab = state.activeId ? state.conversations[state.activeId]?.activeTabId : undefined;
+  const viewed = activeTab && state.conversations[activeTab] ? activeTab : state.activeId;
+  if (viewed === lastReportedViewedId) return;
+  lastReportedViewedId = viewed;
+  window.electronAPI.agent.setViewedSession?.(viewed);
+});

@@ -28,6 +28,7 @@ vi.mock('electron', () => ({
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       mocks.handlers.set(channel, handler);
     }),
+    on: vi.fn(),
   },
 }));
 

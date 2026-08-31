@@ -58,7 +58,7 @@ import {
   stopBackgroundTask,
 } from '../services/agentHost';
 import { searchFiles } from '../services/fileSearch';
-import { maybeNotify } from '../services/notifications';
+import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
@@ -709,6 +709,12 @@ export function registerAgentHandlers(): void {
       return rewindSession(identity, userIndexFromEnd, restoreFiles as boolean | undefined);
     }
   );
+
+  // 系统通知抑制依据：renderer 上报当前正在查看的会话（null = 没在看任何会话）
+  ipcMain.on(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, (event, sessionId: unknown) => {
+    if (!isMainWebContents(event.sender.id)) return;
+    setViewedSession(isNonEmptyString(sessionId) ? sessionId : null);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_TASK_STOP,

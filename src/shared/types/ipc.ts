@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   AGENT_APPROVAL_RESPOND: 'agent:approval-respond',
   AGENT_SET_APPROVAL_MODE: 'agent:set-approval-mode',
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
+  /** renderer → main：上报当前正在查看的会话，供系统通知抑制判断 */
+  NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
