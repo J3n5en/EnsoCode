@@ -25,6 +25,13 @@ export function fetchAccountUsage(accountKey: string): Promise<OauthAccountUsage
   return promise;
 }
 
+/** 预热：缓存未过期就不发请求；失败静默（消费方自会隐藏无数据的展示） */
+export function prefetchAccountUsage(accountKey: string): void {
+  const cached = usageCache.get(accountKey);
+  if (cached && Date.now() - cached.fetchedAt < USAGE_CACHE_TTL_MS) return;
+  void fetchAccountUsage(accountKey).catch(() => {});
+}
+
 /** 简版订阅额度 hook：挂载/换账号时缓存过期才拉取；不做 TTL 自动刷新（那是 StatsLine
  *  带 1s tick 的 useOauthAccountUsage 的事）。返回值与请求它的 accountKey 绑定，
  *  账号切换时不会短暂显示上一个账号的旧数据。 */

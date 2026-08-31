@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/menu';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
-import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
+import { prefetchAccountUsage, useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useModelMeta } from '@/stores/modelMeta';
@@ -401,17 +401,22 @@ export function ModelPicker({
 
   const groups = useMemo(() => groupProviders(providers, oauthInfos), [providers, oauthInfos]);
 
-  // 弹层打开时才刷新订阅账号展示名（登录/登出可能已发生），关闭时不必轮询
+  // 弹层打开时才刷新订阅账号展示名（登录/登出可能已发生），关闭时不必轮询。
+  // 同时预热所有订阅账号的额度：额度探测要打厂商端点（可能秒级延迟），
+  // 若等到子菜单展开才拉，hover 停留期间往往还没返回；预热后命中 60s 共享缓存。
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void window.electronAPI.providers.listOauth().then((infos) => {
       if (!cancelled) setOauthInfos(infos);
     });
+    for (const provider of providers) {
+      if (provider.oauthAccountKey) prefetchAccountUsage(provider.oauthAccountKey);
+    }
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, providers]);
 
   // 打开时只清搜索词。搜索框 tabIndex=-1，避免根菜单 initialFocus 落到第一个可聚焦的
   // input 上；级联态焦点必须留在 Menu item，Esc 才能逐级退。点进搜索框 / 有关键词才是
