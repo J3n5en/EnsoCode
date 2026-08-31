@@ -62,6 +62,7 @@ import {
   withTaskReminders,
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
+import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -811,14 +812,20 @@ export class SessionSupervisor {
         }
       }
     );
-    const checkpoints = new CheckpointManager(cwd, sessionId, () => {
-      const managed = managedRef ?? this.sessions.get(sessionId);
-      const last = managed?.session.sessionManager
-        .getBranch()
-        .filter((entry) => entry.type === 'message' && entry.message.role === 'user')
-        .at(-1);
-      return last ? { entryId: last.id, entryTimestamp: new Date(last.timestamp).getTime() } : {};
-    });
+    const checkpoints = new CheckpointManager(
+      cwd,
+      sessionId,
+      () => {
+        const managed = managedRef ?? this.sessions.get(sessionId);
+        const last = managed?.session.sessionManager
+          .getBranch()
+          .filter((entry) => entry.type === 'message' && entry.message.role === 'user')
+          .at(-1);
+        return last ? { entryId: last.id, entryTimestamp: new Date(last.timestamp).getTime() } : {};
+      },
+      // 远程会话:快照直接打在远端 repo(非 git 目录仍然静默降级)
+      sshExecutor ? createRemoteCheckpointHost(sshExecutor) : undefined
+    );
     // 工具注入：noTools:'builtin' 下 read 也需重注册（免审）；bash 叠 background 能力
     // 后包审批门（审批先问，批准后分流后台），edit 叠宽容版，MCP 同门，todo/task_* 免审。
     // 最外层统一包 withTaskReminders：后台任务完成提醒搭任意工具结果送达模型
