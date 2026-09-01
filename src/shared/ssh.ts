@@ -57,6 +57,20 @@ export function buildSshShellCommand(
   return `ssh ${args.map(shellQuote).join(' ')}`;
 }
 
+/** 交互终端远端命令:cd 到项目目录后 exec 登录壳 */
+export function buildSshPtyRemoteCommand(cwd?: string): string {
+  const shell = 'exec "$' + '{SHELL:-/bin/bash}" -l';
+  return cwd ? `cd ${shellQuote(cwd)} && ${shell}` : shell;
+}
+
+/** 交互 pty:`ssh -tt <opts> -- host 'cd ... && exec $SHELL -l'` */
+export function buildSshPtyArgs(
+  host: string,
+  options: SshExecArgsOptions & { cwd?: string } = {}
+): string[] {
+  return ['-tt', ...buildSshExecArgs(host, buildSshPtyRemoteCommand(options.cwd), options)];
+}
+
 /** 构建 `ssh <opts> -- <host> <remoteCommand>` 的 argv */
 export function buildSshExecArgs(
   host: string,

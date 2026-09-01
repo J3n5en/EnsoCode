@@ -39,10 +39,29 @@ export function pickSessionCwd(input: {
   return input.home;
 }
 
+export interface TerminalSpawnSpec {
+  file: string;
+  args: string[];
+  cwd: string;
+  env?: Record<string, string>;
+}
+
+export function localShellSpec(cwd: string): TerminalSpawnSpec {
+  return {
+    file: defaultShell(),
+    args: [],
+    cwd: isDirectory(cwd) ? cwd : os.homedir(),
+    env: { ...process.env, TERM: 'xterm-256color', TERM_PROGRAM: 'EnsoCode' } as Record<
+      string,
+      string
+    >,
+  };
+}
+
 export function createTerminal(
   request: TerminalCreateRequest,
   sender: WebContents,
-  cwd: string
+  spec: TerminalSpawnSpec
 ): TerminalCreateResult {
   const existing = terminals.get(request.termId);
   if (existing) {
@@ -60,15 +79,12 @@ export function createTerminal(
     return { ok: true };
   }
   try {
-    const pty = spawn(defaultShell(), [], {
+    const pty = spawn(spec.file, spec.args, {
       name: 'xterm-256color',
-      cwd: isDirectory(cwd) ? cwd : os.homedir(),
+      cwd: spec.cwd,
       cols: request.cols ?? 80,
       rows: request.rows ?? 24,
-      env: { ...process.env, TERM: 'xterm-256color', TERM_PROGRAM: 'EnsoCode' } as Record<
-        string,
-        string
-      >,
+      env: spec.env,
     });
     const entry: TerminalEntry = { pty, sender };
     pty.onData((data) => {

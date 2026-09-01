@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRemoteCommand,
   buildSshExecArgs,
+  buildSshPtyArgs,
   buildSshShellCommand,
   resolveSshTarget,
   shellQuote,
@@ -54,23 +55,39 @@ describe('buildSshExecArgs', () => {
     expect(args.join(' ')).not.toContain('ControlMaster');
   });
 
-  it('密码认证:不加 BatchMode,限制只试密码,可选 -p',
-    () => {
-      const args = buildSshExecArgs('u@h', 'true', { auth: 'password', port: 2222 });
-      const joined = args.join(' ');
-      expect(joined).not.toContain('BatchMode');
-      expect(joined).toContain('PreferredAuthentications=password');
-      expect(args).toContain('-p');
-      expect(args).toContain('2222');
-      expect(args[args.length - 2]).toBe('u@h');
-    }
-  );
+  it('密码认证:不加 BatchMode,限制只试密码,可选 -p', () => {
+    const args = buildSshExecArgs('u@h', 'true', { auth: 'password', port: 2222 });
+    const joined = args.join(' ');
+    expect(joined).not.toContain('BatchMode');
+    expect(joined).toContain('PreferredAuthentications=password');
+    expect(args).toContain('-p');
+    expect(args).toContain('2222');
+    expect(args[args.length - 2]).toBe('u@h');
+  });
 
   it('端口 22 或未设不传 -p;key 默认仍 BatchMode', () => {
-    expect(buildSshExecArgs('h', 'true', { auth: 'key', port: 22 }).includes('-p')).toBe(
-      false
-    );
+    expect(buildSshExecArgs('h', 'true', { auth: 'key', port: 22 }).includes('-p')).toBe(false);
     expect(buildSshExecArgs('h', 'true', {}).join(' ')).toContain('BatchMode=yes');
+  });
+});
+
+describe('buildSshPtyArgs', () => {
+  it('强制 TTY,远端 cd 到项目目录后 exec 登录壳', () => {
+    const args = buildSshPtyArgs('user@box', { cwd: '/opt/bot2api', controlPath: '/tmp/cm-%C' });
+    expect(args[0]).toBe('-tt');
+    expect(args.join(' ')).toContain('ControlMaster=auto');
+    expect(args.at(-2)).toBe('user@box');
+    expect(args.at(-1)).toContain("cd '/opt/bot2api'");
+    expect(args.at(-1)).toContain('exec');
+    expect(args.at(-1)).toContain('SHELL');
+  });
+
+  it('无 cwd 时仍 exec 登录壳,密码认证不加 BatchMode', () => {
+    const args = buildSshPtyArgs('h', { auth: 'password' });
+    expect(args[0]).toBe('-tt');
+    expect(args.join(' ')).not.toContain('BatchMode');
+    expect(args.at(-1)).toContain('exec');
+    expect(args.at(-1)).not.toContain('cd ');
   });
 });
 
