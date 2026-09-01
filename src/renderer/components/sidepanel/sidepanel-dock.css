@@ -8,11 +8,20 @@
 .enso-side-dock .dv-tabs-and-actions-container {
   background: transparent;
   border-bottom: 1px solid var(--border);
+  height: auto;
   min-height: 0;
+  align-items: center;
   padding: 0.25rem 0.5rem;
 }
 
+.enso-side-dock .dv-tabs-container {
+  height: auto;
+  align-items: center;
+}
+
 .enso-side-dock .dv-tab {
+  display: flex;
+  align-items: center;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
