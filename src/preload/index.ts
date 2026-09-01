@@ -62,6 +62,12 @@ import type {
   ParentSourceBindingResult,
 } from '@shared/types/mentions';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
+import type {
+  TerminalCreateRequest,
+  TerminalCreateResult,
+  TerminalDataEvent,
+  TerminalExitEvent,
+} from '@shared/types/sidePanel';
 import type { UpdateStatus } from '@shared/types/updater';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
@@ -499,6 +505,26 @@ const electronAPI = {
       const listener = (_: unknown, fullscreen: boolean) => callback(fullscreen);
       ipcRenderer.on(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
+    },
+  },
+  terminal: {
+    create: (request: TerminalCreateRequest): Promise<TerminalCreateResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_CREATE, request),
+    write: (termId: string, data: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_WRITE, termId, data),
+    resize: (termId: string, cols: number, rows: number): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESIZE, termId, cols, rows),
+    dispose: (termId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_DISPOSE, termId),
+    onData: (callback: (event: TerminalDataEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: TerminalDataEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.TERMINAL_DATA, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_DATA, listener);
+    },
+    onExit: (callback: (event: TerminalExitEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: TerminalExitEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.TERMINAL_EXIT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_EXIT, listener);
     },
   },
 };

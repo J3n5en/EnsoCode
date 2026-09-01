@@ -3,6 +3,7 @@ import type { FontWeight } from '@/stores/settings';
 
 export type SettingsCategory =
   | 'general'
+  | 'shortcuts'
   | 'appearance'
   | 'providers'
   | 'skills'

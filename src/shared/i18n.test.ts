@@ -49,10 +49,13 @@ const MAPPED_I18N_KEYS = [
   'Max tokens',
   // GeneralSettings.ACTION_LABEL_KEYS
   'Toggle sidebar',
+  'Toggle side panel',
   'Open settings',
   'New conversation',
   'Next coworker tab',
   'Previous coworker tab',
+  'New terminal tab',
+  'Close terminal tab',
 ] as const;
 
 const MODEL_CENTER_ENSO_I18N_KEYS = [

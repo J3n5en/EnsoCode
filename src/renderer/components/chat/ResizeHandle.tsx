@@ -3,10 +3,12 @@ import { cn } from '@/lib/utils';
 
 interface ResizeHandleProps {
   onResize: (deltaX: number) => void;
+  /** 拖拽开始/结束通知(消费方可借此暂停宽度动画,避免 spring 追赶抖动) */
+  onResizingChange?: (resizing: boolean) => void;
 }
 
-/** 侧边栏右缘的拖拽手柄（参考 EnsoAI ResizeHandle，按 px 增量回调） */
-export function ResizeHandle({ onResize }: ResizeHandleProps) {
+/** 侧边栏缘的拖拽手柄:视觉 1px,命中区左右各扩 4px */
+export function ResizeHandle({ onResize, onResizingChange }: ResizeHandleProps) {
   const [resizing, setResizing] = useState(false);
   const lastX = useRef(0);
 
@@ -14,6 +16,7 @@ export function ResizeHandle({ onResize }: ResizeHandleProps) {
     (e: React.MouseEvent) => {
       e.preventDefault();
       setResizing(true);
+      onResizingChange?.(true);
       lastX.current = e.clientX;
       const handleMove = (ev: MouseEvent) => {
         onResize(ev.clientX - lastX.current);
@@ -21,22 +24,26 @@ export function ResizeHandle({ onResize }: ResizeHandleProps) {
       };
       const handleUp = () => {
         setResizing(false);
+        onResizingChange?.(false);
         document.removeEventListener('mousemove', handleMove);
         document.removeEventListener('mouseup', handleUp);
       };
       document.addEventListener('mousemove', handleMove);
       document.addEventListener('mouseup', handleUp);
     },
-    [onResize]
+    [onResize, onResizingChange]
   );
 
   return (
-    <div
-      onMouseDown={handleMouseDown}
-      className={cn(
-        'w-px shrink-0 cursor-col-resize bg-border transition-colors hover:bg-ring',
-        resizing && 'bg-ring'
-      )}
-    />
+    <div className="relative w-px shrink-0 bg-border">
+      <div
+        onMouseDown={handleMouseDown}
+        className={cn(
+          '-left-1 -right-1 absolute inset-y-0 z-10 cursor-col-resize',
+          'after:absolute after:inset-y-0 after:left-1 after:w-px after:transition-colors hover:after:bg-ring',
+          resizing && 'after:bg-ring'
+        )}
+      />
+    </div>
   );
 }

@@ -1,0 +1,53 @@
+/* 压掉 dockview 默认 VS 风 tab 条,只留我们自己的 chip */
+.enso-side-dock,
+.enso-side-dock .dv-dockview,
+.enso-side-dock .dv-groupview {
+  background: transparent;
+}
+
+.enso-side-dock .dv-tabs-and-actions-container {
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  height: auto;
+  min-height: 0;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+}
+
+.enso-side-dock .dv-tabs-container {
+  height: auto;
+  align-items: center;
+}
+
+.enso-side-dock .dv-tab {
+  display: flex;
+  align-items: center;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 2px 0 0 !important;
+  padding: 0 !important;
+  height: auto !important;
+}
+
+.enso-side-dock .dv-default-tab,
+.enso-side-dock .dv-default-tab-action {
+  display: none;
+}
+
+.enso-side-dock .dv-separator {
+  background: var(--border);
+}
+
+/* 拖拽幽灵会 portal 到 body,不在 .enso-side-dock 内;去掉默认白底描边框 */
+.dv-tab-ghost-drag {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.dv-tab-ghost-drag::after {
+  content: none !important;
+  outline: none !important;
+}
+.dv-tab.dv-tab-dragging {
+  background: transparent !important;
+}
