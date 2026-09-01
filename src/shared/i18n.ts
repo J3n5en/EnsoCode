@@ -58,6 +58,8 @@ export const zhTranslations: Record<string, string> = {
   'Previous match': '上一个',
   'Next match': '下一个',
   'Toggle side panel': '折叠/展开右侧面板',
+  'New terminal tab': '新建终端标签',
+  'Close terminal tab': '关闭终端标签',
   'Collapse side panel': '折叠右侧面板',
   'Select a conversation to use the side panel.': '选择一个会话后使用右侧面板。',
   'No tabs yet. Create one to get started.': '还没有标签页，新建一个开始使用。',

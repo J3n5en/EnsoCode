@@ -1,6 +1,7 @@
 import {
   Bot,
   FileText,
+  Keyboard,
   Layers,
   Palette,
   Plug,
@@ -20,6 +21,7 @@ import { BuiltinToolsSettings } from './BuiltinToolsSettings';
 import type { SettingsCategory } from './constants';
 import { GeneralSettings } from './GeneralSettings';
 import { InstructionsSettings } from './InstructionsSettings';
+import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { PhoneSettings } from './PhoneSettings';
 import { PresetsSettings } from './PresetsSettings';
@@ -33,6 +35,7 @@ export function SettingsContent() {
 
   const categories: Array<{ id: SettingsCategory; icon: React.ElementType; label: string }> = [
     { id: 'general', icon: Settings, label: t('General') },
+    { id: 'shortcuts', icon: Keyboard, label: t('Shortcuts') },
     { id: 'appearance', icon: Palette, label: t('Appearance') },
     { id: 'providers', icon: Server, label: t('Model Providers') },
     { id: 'presets', icon: Layers, label: t('Presets') },
@@ -70,6 +73,7 @@ export function SettingsContent() {
       {/* Right: Settings Panel */}
       <div className="flex-1 min-w-0 overflow-y-auto p-6">
         {activeCategory === 'general' && <GeneralSettings />}
+        {activeCategory === 'shortcuts' && <KeybindingsSettings />}
         {activeCategory === 'appearance' && <AppearanceSettings />}
         {activeCategory === 'providers' && <ProvidersSettings />}
         {activeCategory === 'skills' && <SkillsSettings />}

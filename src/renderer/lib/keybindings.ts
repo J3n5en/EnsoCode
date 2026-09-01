@@ -3,22 +3,39 @@
 
 export const KEYBINDING_ACTIONS = [
   'toggle-sidebar',
+  'toggle-side-panel',
   'open-settings',
   'new-conversation',
   'next-tab',
   'prev-tab',
+  'new-side-tab',
+  'close-side-tab',
 ] as const;
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
+
+export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
+  'toggle-sidebar': 'Toggle sidebar',
+  'toggle-side-panel': 'Toggle side panel',
+  'open-settings': 'Open settings',
+  'new-conversation': 'New conversation',
+  'next-tab': 'Next coworker tab',
+  'prev-tab': 'Previous coworker tab',
+  'new-side-tab': 'New terminal tab',
+  'close-side-tab': 'Close terminal tab',
+};
 
 export const IS_MAC = navigator.platform.startsWith('Mac');
 
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'mod+b',
+  'toggle-side-panel': 'mod+j',
   'open-settings': 'mod+,',
   'new-conversation': 'mod+n',
   // Ctrl+Tab 循环 coworker 标签(浏览器惯例);非 mac 上 Ctrl 即 mod
   'next-tab': IS_MAC ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': IS_MAC ? 'ctrl+shift+tab' : 'mod+shift+tab',
+  'new-side-tab': 'mod+t',
+  'close-side-tab': 'mod+w',
 };
 
 /** 合并用户覆盖与默认(store 只存覆盖项,默认可随版本演进) */

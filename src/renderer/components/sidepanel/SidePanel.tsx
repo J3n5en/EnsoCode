@@ -13,6 +13,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { springStandard } from '@/lib/motion';
+import { bindSidePanelDock } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -194,6 +195,7 @@ function ConversationDock({
   const isDark = useIsDark();
 
   const onReady = (event: DockviewReadyEvent) => {
+    bindSidePanelDock(conversationId, event.api);
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__dockviewApi = event.api;
     }

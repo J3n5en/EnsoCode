@@ -22,6 +22,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useSessionsStore } from '@/stores/sessions';
@@ -128,6 +129,15 @@ export default function App() {
       } else if (pressed === bindings['prev-tab']) {
         e.preventDefault();
         cycleTab(-1);
+      } else if (pressed === bindings['toggle-side-panel']) {
+        e.preventDefault();
+        useSidePanelStore.getState().toggleOpen();
+      } else if (pressed === bindings['new-side-tab']) {
+        e.preventDefault();
+        addSidePanelTerminal();
+      } else if (pressed === bindings['close-side-tab']) {
+        e.preventDefault();
+        closeActiveSidePanelTab();
       }
     };
     window.addEventListener('keydown', onKeyDown);
