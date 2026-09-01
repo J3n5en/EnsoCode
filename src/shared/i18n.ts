@@ -52,7 +52,6 @@ export const zhTranslations: Record<string, string> = {
   'New tab': '新建标签页',
   Soon: '即将支持',
   'Toggle side panel': '折叠/展开右侧面板',
-  'Expand side panel': '展开右侧面板',
   'Collapse side panel': '折叠右侧面板',
   'Select a conversation to use the side panel.': '选择一个会话后使用右侧面板。',
   'No tabs yet. Create one to get started.': '还没有标签页，新建一个开始使用。',
