@@ -16,6 +16,7 @@ import {
   ArchiveRestore,
   ChevronRight,
   Eraser,
+  FileText,
   FolderGit2,
   FolderPlus,
   GitBranch,
@@ -38,6 +39,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
+import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
+import { matchesQuery } from '@/components/chat/chatSearch';
 import { insertComposerMention } from '@/components/chat/composerMentionBridge';
 import {
   chatDragId,
@@ -47,8 +50,6 @@ import {
   projectDragId,
   routeDrop,
 } from '@/components/chat/dragDrop';
-import { matchesQuery } from '@/components/chat/chatSearch';
-import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import {
   ContextMenu,
@@ -637,24 +638,25 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                                   </DraggableChat>
                                 </motion.div>
                               ))}
-                              {!searching && projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setExpandedProjects((prev) => ({
-                                      ...prev,
-                                      [project.id]: !prev[project.id],
-                                    }))
-                                  }
-                                  className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                                >
-                                  {expandedProjects[project.id]
-                                    ? t('Collapse')
-                                    : t('Show {{n}} more', {
-                                        n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
-                                      })}
-                                </button>
-                              )}
+                              {!searching &&
+                                projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedProjects((prev) => ({
+                                        ...prev,
+                                        [project.id]: !prev[project.id],
+                                      }))
+                                    }
+                                    className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                                  >
+                                    {expandedProjects[project.id]
+                                      ? t('Collapse')
+                                      : t('Show {{n}} more', {
+                                          n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
+                                        })}
+                                  </button>
+                                )}
                               {visibleConversations.length === 0 && (
                                 <p className="py-1.5 pl-9 text-xs text-muted-foreground">
                                   {t('No conversations yet')}
@@ -921,17 +923,23 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       {createPortal(
         <DragOverlay dropAnimation={null}>
           {/* 只认侧栏自己的 payload:同一 DndContext 里其它区域(如右侧面板 tab)的拖拽不在这里预览 */}
-          {(dragPayload?.type === 'project' || dragPayload?.type === 'chat') && (
+          {(dragPayload?.type === 'project' ||
+            dragPayload?.type === 'chat' ||
+            dragPayload?.type === 'workspace-file') && (
             <div className="flex w-56 items-center gap-2 rounded-lg border bg-background/95 px-3 py-1.5 text-sm shadow-md">
               {dragPayload.type === 'project' ? (
                 <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : dragPayload.type === 'workspace-file' ? (
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : (
                 <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="min-w-0 flex-1 truncate">
                 {dragPayload.type === 'project'
                   ? dragPayload.name
-                  : dragPayload.title.split('\n')[0].trim() || t('New conversation')}
+                  : dragPayload.type === 'workspace-file'
+                    ? dragPayload.name
+                    : dragPayload.title.split('\n')[0].trim() || t('New conversation')}
               </span>
             </div>
           )}

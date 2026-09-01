@@ -2,6 +2,7 @@ export * from './agent';
 export * from './assetScan';
 export * from './assets';
 export * from './builtinTools';
+export * from './filesWorkspace';
 export * from './gitDiff';
 export * from './ipc';
 export * from './llm';

@@ -3,6 +3,14 @@ import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
 
 const docks = new Map<string, DockviewApi>();
+const filesTabClosers = new Map<string, () => boolean>();
+
+export function registerFilesTabCloser(conversationId: string, close: () => boolean): () => void {
+  filesTabClosers.set(conversationId, close);
+  return () => {
+    if (filesTabClosers.get(conversationId) === close) filesTabClosers.delete(conversationId);
+  };
+}
 
 export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
   docks.set(conversationId, api);
@@ -48,6 +56,29 @@ export function addSidePanelChanges(opts?: { title?: string }): void {
   });
 }
 
+export function addSidePanelFiles(opts?: { title?: string }): void {
+  const active = activeDock();
+  if (!active) return;
+  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  const existing = active.api.getPanel('files');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  active.api.addPanel({
+    id: 'files',
+    component: 'files',
+    title: opts?.title ?? 'Files',
+    params: { conversationId: active.conversationId, projectId: active.projectId },
+  });
+}
+
 export function closeActiveSidePanelTab(): void {
-  activeDock()?.api.activePanel?.api.close();
+  const active = activeDock();
+  if (!active) return;
+  if (active.api.activePanel?.id === 'files') {
+    const closeFile = filesTabClosers.get(active.conversationId);
+    if (closeFile?.()) return;
+  }
+  active.api.activePanel?.api.close();
 }

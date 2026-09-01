@@ -12,6 +12,11 @@ import type {
 import type {
   CollectedAsset,
   CollectedProvider,
+  FilesListResult,
+  FilesReadRelResult,
+  FilesWatchEvent,
+  FilesWatchResult,
+  FilesWriteResult,
   GitDiffResult,
   ListModelsResult,
   LocalAssetScanResult,
@@ -181,6 +186,40 @@ const electronAPI = {
   git: {
     diffHead: (request: { conversationId: string; projectId: string }): Promise<GitDiffResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_DIFF_HEAD, request),
+  },
+
+  workspaceFiles: {
+    listDir: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+    }): Promise<FilesListResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_LIST_DIR, request),
+    read: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesReadRelResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_REL, request),
+    write: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+      content: string;
+    }): Promise<FilesWriteResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_WRITE, request),
+    watchStart: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesWatchResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_WATCH_START, request),
+    watchStop: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesWatchResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_WATCH_STOP, request),
+    onChange: (callback: (event: FilesWatchEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: FilesWatchEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.FILES_WATCH_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.FILES_WATCH_EVENT, listener);
+    },
   },
 
   files: {

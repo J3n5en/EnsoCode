@@ -84,12 +84,13 @@ export function readFileMentionSnapshot(
   mention: FileMentionCandidate,
   io: FileMentionIo = defaultIo
 ): FileMentionSnapshot {
-  if (!mention.relativePath || path.isAbsolute(mention.relativePath)) {
+  const relativePath = mention.relativePath.replace(/#L\d+(?:-L\d+)?$/, '');
+  if (!relativePath || path.isAbsolute(relativePath)) {
     throw new Error('File mention path must be relative');
   }
 
   const root = io.realpath(cwd);
-  const requested = path.resolve(root, mention.relativePath);
+  const requested = path.resolve(root, relativePath);
   if (!isContained(root, requested)) throw new Error('File mention escapes the project root');
 
   const resolved = io.realpath(requested);

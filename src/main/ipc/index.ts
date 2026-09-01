@@ -3,6 +3,7 @@ import { registerAgentHandlers } from './agent';
 import { registerAssetHandlers } from './assets';
 import { registerCapabilityHandlers } from './capabilities';
 import { registerFileHandlers } from './files';
+import { registerFilesWorkspaceHandlers } from './filesWorkspace';
 import { registerGitHandlers } from './git';
 import { registerPairHandlers } from './pair';
 import { registerProjectHandlers } from './projects';
@@ -25,6 +26,7 @@ export function registerIpcHandlers(): void {
   registerProjectHandlers();
   registerSshConnectionHandlers();
   registerFileHandlers();
+  registerFilesWorkspaceHandlers();
   registerGitHandlers();
   registerPairHandlers();
   registerWorktreeHandlers();

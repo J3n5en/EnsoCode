@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { ChangesView } from './ChangesView';
+import { FilesView } from './FilesView';
 import { TerminalView } from './TerminalView';
 import 'dockview-react/dist/styles/dockview.css';
 import './sidepanel-dock.css';
@@ -83,6 +84,31 @@ function ChangesPanel(props: IDockviewPanelProps<{ conversationId?: string; proj
   return <ChangesView conversationId={conversationId} projectId={projectId} />;
 }
 
+function addFilesPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const existing = api.getPanel('files');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({
+    id: 'files',
+    component: 'files',
+    title: label,
+    params: { conversationId, projectId },
+  });
+}
+
+function FilesPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
+  const { conversationId, projectId } = props.params;
+  if (!conversationId || !projectId) return null;
+  return <FilesView conversationId={conversationId} projectId={projectId} />;
+}
+
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
 function SidePanelTab(props: IDockviewPanelHeaderProps) {
   const [active, setActive] = useState(props.api.isActive);
@@ -104,6 +130,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
     >
       {props.api.id === 'changes' ? (
         <GitCompare className="h-3 w-3 shrink-0" />
+      ) : props.api.id === 'files' ? (
+        <FolderOpen className="h-3 w-3 shrink-0" />
       ) : (
         <SquareTerminal className="h-3 w-3 shrink-0" />
       )}
@@ -126,10 +154,12 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
 function NewTabMenu({
   onNewTerminal,
   onNewChanges,
+  onNewFiles,
   compact,
 }: {
   onNewTerminal: () => void;
   onNewChanges: () => void;
+  onNewFiles: () => void;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -156,15 +186,13 @@ function NewTabMenu({
           <GitCompare className="h-4 w-4" />
           {t('Changes')}
         </MenuItem>
-        {/* 预留:浏览器 / 文件,后续实现 */}
+        <MenuItem onClick={onNewFiles}>
+          <FolderOpen className="h-4 w-4" />
+          {t('Files')}
+        </MenuItem>
         <MenuItem disabled>
           <Globe className="h-4 w-4" />
           {t('Browser')}
-          <span className="ml-auto text-[10px] text-muted-foreground">{t('Soon')}</span>
-        </MenuItem>
-        <MenuItem disabled>
-          <FolderOpen className="h-4 w-4" />
-          {t('Files')}
           <span className="ml-auto text-[10px] text-muted-foreground">{t('Soon')}</span>
         </MenuItem>
       </MenuPopup>
@@ -188,6 +216,7 @@ function Watermark(props: IWatermarkPanelProps) {
         onNewChanges={() =>
           addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
         }
+        onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
       />
     </div>
   );
@@ -213,12 +242,13 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
         onNewChanges={() =>
           addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
         }
+        onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
       />
     </div>
   );
 }
 
-const DOCK_COMPONENTS = { terminal: TerminalPanel, changes: ChangesPanel };
+const DOCK_COMPONENTS = { terminal: TerminalPanel, changes: ChangesPanel, files: FilesPanel };
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
 function useIsDark(): boolean {
@@ -260,7 +290,7 @@ function ConversationDock({
     });
     // 只有用户关 tab 才回收;dock 本身不随切会话卸载
     event.api.onDidRemovePanel((panel) => {
-      if (panel.id === 'changes') return;
+      if (panel.id === 'changes' || panel.id === 'files') return;
       releaseTerminal(panel.id);
       void window.electronAPI.terminal.dispose(panel.id);
     });

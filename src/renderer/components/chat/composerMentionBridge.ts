@@ -9,6 +9,7 @@ import type { ChatMentionCandidate, FileMentionCandidate } from '@shared/types/m
 type InsertFn = (candidate: FileMentionCandidate | ChatMentionCandidate) => void;
 
 let current: InsertFn | null = null;
+let insertText: ((text: string) => void) | null = null;
 let focusComposer: (() => void) | null = null;
 
 export function registerComposerInsert(fn: InsertFn): () => void {
@@ -25,6 +26,13 @@ export function registerComposerFocus(fn: () => void): () => void {
   };
 }
 
+export function registerComposerInsertText(fn: (text: string) => void): () => void {
+  insertText = fn;
+  return () => {
+    if (insertText === fn) insertText = null;
+  };
+}
+
 export function requestFocusComposer(): boolean {
   if (!focusComposer) return false;
   focusComposer();
@@ -36,5 +44,11 @@ export function insertComposerMention(
 ): boolean {
   if (!current) return false;
   current(candidate);
+  return true;
+}
+
+export function insertComposerText(text: string): boolean {
+  if (!insertText) return false;
+  insertText(text);
   return true;
 }

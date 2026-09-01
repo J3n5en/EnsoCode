@@ -180,7 +180,12 @@ export function splitInlineMentions(text: string): MentionSegment[] {
 
 /** 内联文件 token：带扩展名才算（@src/main.ts、@.DS_Store、@.gitignore），
  * 避免误伤 @types/node 这类 npm scope（无点） */
-const INLINE_FILE_TOKEN = /^[\w./-]*\.[\w-]{1,16}$/;
+const INLINE_FILE_TOKEN = /^[\w./-]*\.[\w-]{1,16}(?:#L\d+(?:-L\d+)?)?$/;
+const FILE_LINE_REF = /#L\d+(?:-L\d+)?$/;
+
+export function stripFileLineRef(path: string): string {
+  return path.replace(FILE_LINE_REF, '');
+}
 
 /**
  * 把文本拆成普通段与内联 @文件 段，供发出的气泡原位渲染成 tag（Cursor 式）。
@@ -263,7 +268,7 @@ export function createEditorPayload(input: {
             kind: 'file' as const,
             id: segment.path,
             label: segment.path.split('/').at(-1) || segment.path,
-            relativePath: segment.path,
+            relativePath: stripFileLineRef(segment.path),
           }
         : {
             kind: 'chat' as const,

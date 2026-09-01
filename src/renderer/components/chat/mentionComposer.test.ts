@@ -405,6 +405,11 @@ describe('typed multi-entity mentions', () => {
     ]);
     // 纯文本原样
     expect(splitInlineFileTokens('hello')).toEqual([{ type: 'text', text: 'hello' }]);
+    expect(splitInlineFileTokens('see @SAND_BOX_REMOTE.md#L6-L11 please')).toEqual([
+      { type: 'text', text: 'see ' },
+      { type: 'file', path: 'SAND_BOX_REMOTE.md#L6-L11' },
+      { type: 'text', text: ' please' },
+    ]);
   });
 
   it('round-trips editor segments through wire text: files and chats keep inline positions', () => {

@@ -23,7 +23,8 @@ export type DragPayload =
       title: string;
       sessionFile?: string;
       pinned: boolean;
-    };
+    }
+  | { type: 'workspace-file'; relativePath: string; name: string };
 
 export type DropAction =
   | { kind: 'reorder-projects'; activeId: string; overId: string }
@@ -56,6 +57,13 @@ export function routeDrop(
       const targetId = overId.slice(PROJECT_PREFIX.length);
       if (targetId === active.projectId) return null;
       return { kind: 'reorder-projects', activeId: active.projectId, overId: targetId };
+    }
+    return null;
+  }
+
+  if (active.type === 'workspace-file') {
+    if (overId === COMPOSER_DROP_ID) {
+      return { kind: 'insert-file-mention', path: active.relativePath, label: active.name };
     }
     return null;
   }

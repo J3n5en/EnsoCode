@@ -125,6 +125,12 @@ export const IPC_CHANNELS = {
   FILES_READ: 'files:read',
   // 目录媒体文件枚举（背景图文件夹随机模式）
   FILES_LIST_MEDIA: 'files:list-media',
+  FILES_LIST_DIR: 'files:list-dir',
+  FILES_READ_REL: 'files:read-rel',
+  FILES_WRITE: 'files:write',
+  FILES_WATCH_START: 'files:watch-start',
+  FILES_WATCH_STOP: 'files:watch-stop',
+  FILES_WATCH_EVENT: 'files:watch-event',
 
   GIT_DIFF_HEAD: 'git:diff-head',
 

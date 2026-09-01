@@ -32,6 +32,8 @@ export interface MentionEditorHandle {
   consumeToken(prefix: '@' | '/'): void;
   /** 在光标处插入文件卡片(拖拽文件用,无 token 语义) */
   insertFileChip(path: string): void;
+  /** 在光标处插入纯文本 */
+  insertText(text: string): void;
   /** 活动 @ token 首字符的视口矩形，给 mention 弹窗锚点用 */
   getMentionAnchorRect(): DOMRect | null;
 }
@@ -166,6 +168,65 @@ function normalizedCaretRange(root: HTMLElement, selection: Selection): Range | 
   range.setStart(target.node, target.offset);
   range.collapse(true);
   return range;
+}
+
+function isMentionChip(node: Node | null | undefined): node is HTMLElement {
+  return node instanceof HTMLElement && Boolean(node.dataset.mentionKind);
+}
+
+function isIgnorableText(node: Node | null | undefined): node is Text {
+  return node instanceof Text && !/[^\s\u00a0]/.test(node.textContent ?? '');
+}
+
+function chipBesideCaret(root: HTMLElement, side: 'before' | 'after'): HTMLElement | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null;
+  const { anchorNode, anchorOffset } = selection;
+  if (!anchorNode || !root.contains(anchorNode)) return null;
+
+  if (anchorNode.nodeType === Node.TEXT_NODE) {
+    const text = anchorNode.textContent ?? '';
+    if (side === 'before') {
+      if (/[^\s\u00a0]/.test(text.slice(0, anchorOffset))) return null;
+      let current: Node | null = anchorNode.previousSibling;
+      while (isIgnorableText(current)) current = current.previousSibling;
+      return isMentionChip(current) ? current : null;
+    }
+    if (/[^\s\u00a0]/.test(text.slice(anchorOffset))) return null;
+    let current: Node | null = anchorNode.nextSibling;
+    while (isIgnorableText(current)) current = current.nextSibling;
+    return isMentionChip(current) ? current : null;
+  }
+
+  const children = anchorNode.childNodes;
+  if (side === 'before') {
+    let index = anchorOffset - 1;
+    while (index >= 0 && isIgnorableText(children[index])) index -= 1;
+    const node = index >= 0 ? children[index] : null;
+    return isMentionChip(node) ? node : null;
+  }
+  let index = anchorOffset;
+  while (index < children.length && isIgnorableText(children[index])) index += 1;
+  const node = children[index];
+  return isMentionChip(node) ? node : null;
+}
+
+function removeMentionChip(chip: HTMLElement, root: HTMLElement): void {
+  const next = chip.nextSibling;
+  if (isIgnorableText(next)) next.remove();
+  const prev = chip.previousSibling;
+  chip.remove();
+  if (prev) {
+    placeCaretAfter(prev);
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.setStart(root, 0);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function placeCaretAfter(node: Node): void {
@@ -360,6 +421,9 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         insertFileChip: (path) => {
           insertNodeAtCaret(() => buildChip({ type: 'file', path }), false);
         },
+        insertText: (text) => {
+          insertNodeAtCaret(() => document.createTextNode(text), false);
+        },
         getMentionAnchorRect: () => {
           const token = activeTokenRange('@');
           if (!token) return null;
@@ -383,6 +447,21 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         {...ariaProps}
         onInput={emitState}
         onKeyDown={(event) => {
+          if (
+            !event.nativeEvent.isComposing &&
+            (event.key === 'Backspace' || event.key === 'Delete')
+          ) {
+            const root = rootRef.current;
+            const chip =
+              root &&
+              chipBesideCaret(root, event.key === 'Backspace' ? 'before' : 'after');
+            if (chip && root) {
+              event.preventDefault();
+              removeMentionChip(chip, root);
+              emitState();
+              return;
+            }
+          }
           // Shift+Enter 不拦截：浏览器原生 insertLineBreak 会处理末尾双 <br> 占位等
           // 边界（手工插 \n/<br> 后尾部光标会被折回，后续输入位置错乱）；
           // 序列化端 walkSegments 已把 <br>/块元素降级为 '\n'

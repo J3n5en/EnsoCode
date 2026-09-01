@@ -12,6 +12,14 @@ export function installElectronApiShim(): void {
       git: {
         diffHead: async () => ({ ok: false as const, error: 'unavailable' as const }),
       },
+      workspaceFiles: {
+        listDir: async () => ({ ok: false as const, error: 'unavailable' }),
+        read: async () => ({ ok: false as const, error: 'unavailable' }),
+        write: async () => ({ ok: false as const, error: 'unavailable' }),
+        watchStart: async () => ({ ok: false as const, error: 'unavailable' }),
+        watchStop: async () => ({ ok: false as const, error: 'unavailable' }),
+        onChange: () => () => undefined,
+      },
       files: {
         // 必须返回 null：桌面端契约是 Promise<string | null>，失败即 null。
         // 早先返回 { ok, content } 这种对象，调用方的 `content != null` 判断会通过，

@@ -13,14 +13,18 @@ import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { registerComposerFocus, registerComposerInsert } from './composerMentionBridge';
+import {
+  registerComposerFocus,
+  registerComposerInsert,
+  registerComposerInsertText,
+} from './composerMentionBridge';
 import { COMPOSER_DROP_ID } from './dragDrop';
 import { MentionChip } from './MentionChip';
 import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
 import { MentionPicker } from './MentionPicker';
+import { requestOpenChatModelPicker } from './ModelPicker';
 import type { ComposerPayload, MentionSegment } from './mentionComposer';
 import { createEditorPayload, mentionPopupLayout, resolvePopupKeyAction } from './mentionComposer';
-import { requestOpenChatModelPicker } from './ModelPicker';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface ComposerProps {
@@ -93,9 +97,11 @@ export function Composer({
     const unsubInsert = registerComposerInsert((candidate) =>
       editorRef.current?.insertMention(candidate)
     );
+    const unsubText = registerComposerInsertText((text) => editorRef.current?.insertText(text));
     const unsubFocus = registerComposerFocus(() => editorRef.current?.focus());
     return () => {
       unsubInsert();
+      unsubText();
       unsubFocus();
     };
   }, []);
@@ -358,7 +364,10 @@ export function Composer({
     }
     if (isComposing) return;
     const pressed = eventToBinding(event);
-    if (pressed && pressed === effectiveKeybindings(useSettingsStore.getState().keybindings)['switch-model']) {
+    if (
+      pressed &&
+      pressed === effectiveKeybindings(useSettingsStore.getState().keybindings)['switch-model']
+    ) {
       event.preventDefault();
       requestOpenChatModelPicker();
       return;

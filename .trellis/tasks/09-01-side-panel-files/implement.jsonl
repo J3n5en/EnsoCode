@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "listDir/write/watch IPC 三点式"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "路径只收 conversationId 推导 cwd"}
+{"file": ".trellis/spec/testing.md", "reason": "resolveUnderCwd 与 watch refcount TDD"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "dock Files + i18n + dnd"}

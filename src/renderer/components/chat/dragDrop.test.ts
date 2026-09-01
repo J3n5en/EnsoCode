@@ -113,6 +113,28 @@ describe('routeDrop: Pinned 组内排序', () => {
   });
 });
 
+describe('routeDrop: 工作区文件', () => {
+  const file: DragPayload = {
+    type: 'workspace-file',
+    relativePath: 'src/a.ts',
+    name: 'a.ts',
+  };
+
+  it('拖到 Composer → file mention',
+    () => {
+      expect(routeDrop(file, COMPOSER_DROP_ID, undefined)).toEqual({
+        kind: 'insert-file-mention',
+        path: 'src/a.ts',
+        label: 'a.ts',
+      });
+    }
+  );
+
+  it('拖到项目行 → 不动', () => {
+    expect(routeDrop(file, 'project:p1', undefined)).toBeNull();
+  });
+});
+
 describe('routeDrop: 无落点', () => {
   it('overId 为 null → 不动', () => {
     expect(routeDrop(chat, null, undefined)).toBeNull();

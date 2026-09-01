@@ -1,0 +1,28 @@
+{
+  "id": "side-panel-files",
+  "name": "side-panel-files",
+  "title": "右侧 Files 面板：树 + 高亮编辑 + 实时刷新",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "J3n5en",
+  "assignee": "J3n5en",
+  "createdAt": "2026-09-01",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "右侧 Files：树+pierre编辑+打开文件watch+拖/右键进对话"
+  }
+}
