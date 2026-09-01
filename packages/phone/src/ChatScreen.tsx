@@ -22,6 +22,8 @@ interface Props {
   sessionId: string | null;
   title: string;
   projectName: string;
+  /** 工具执行目录：项目内绝对路径在时间线里收成相对路径 */
+  cwd?: string;
   view: SessionView | null;
   connState: ConnState;
   stateLabel: string;
@@ -72,7 +74,10 @@ export function ChatScreen(props: Props) {
       : null
   );
 
-  const timeline = useMemo(() => buildTimeline(messages, running), [messages, running]);
+  const timeline = useMemo(
+    () => buildTimeline(messages, running, [], props.cwd),
+    [messages, running, props.cwd]
+  );
 
   /*
    * 上滑分页的滚动锚定：iOS Safari 不支持 overflow-anchor，旧页插到顶部后

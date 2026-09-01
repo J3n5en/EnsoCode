@@ -28,13 +28,20 @@ function buildPayload(): PairCatalogPayload {
   // 与桌面侧栏一致的项目手动顺序（拖拽偏好存 localStorage，不进 settings store）
   const orderedProjects = applyProjectOrder(settings.projects, readSidebarOrder(PROJECT_ORDER_KEY));
   const projectName = new Map(settings.projects.map((p) => [p.id, p.name]));
+  const projectPath = new Map(settings.projects.map((p) => [p.id, p.path]));
 
   type Conversation = NonNullable<(typeof sessions.conversations)[string]>;
+  // 子会话跟随父会话的 worktree（与桌面 ChatView 的 toolCwd 同源）
+  const toolCwd = (c: Conversation): string | undefined => {
+    const owner = (c.parentId ? sessions.conversations[c.parentId] : undefined) ?? c;
+    return owner.worktree?.path ?? projectPath.get(c.projectId);
+  };
   const toEntry = (c: Conversation) => ({
     id: c.id,
     title: c.parentId ? c.coworkerName || c.title : c.title,
     projectName: projectName.get(c.projectId) ?? '',
     projectId: c.projectId,
+    ...(toolCwd(c) ? { cwd: toolCwd(c) } : {}),
     status: c.spawning ? 'running' : c.status,
     updatedAt: c.messages.at(-1)?.timestamp ?? c.createdAt,
     ...(c.parentId ? { parentId: c.parentId } : {}),

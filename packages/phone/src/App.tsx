@@ -367,6 +367,7 @@ export function App() {
         sessionId={activeId}
         title={entry?.title || (activeId ? '会话' : 'EnsoCode')}
         projectName={entry?.projectName ?? ''}
+        cwd={entry?.cwd}
         view={view}
         connState={state}
         stateLabel={STATE_LABEL[state]}

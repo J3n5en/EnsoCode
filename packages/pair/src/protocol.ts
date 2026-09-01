@@ -101,6 +101,8 @@ export interface CatalogEntry {
   title: string;
   projectName: string;
   projectId: string;
+  /** 工具实际执行目录（worktree 优先，回落项目路径）：手机把项目内绝对路径收成相对路径 */
+  cwd?: string;
   status: string;
   /** 完成后未查看：桌面绿点、手机灰点 */
   unread?: boolean;
