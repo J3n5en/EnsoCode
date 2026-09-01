@@ -172,12 +172,8 @@ export default function App() {
           />
           {!collapsed && <ResizeHandle onResize={handleResize} />}
           <ChatView />
-          {sideOpen && (
-            <>
-              <ResizeHandle onResize={handleSideResize} />
-              <SidePanel width={sideWidth} />
-            </>
-          )}
+          {sideOpen && <ResizeHandle onResize={handleSideResize} />}
+          <SidePanel width={sideWidth} />
         </DndContext>
       </div>
       {!onboarded && <Onboarding />}

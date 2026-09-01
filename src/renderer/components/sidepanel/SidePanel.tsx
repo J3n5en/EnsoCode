@@ -2,9 +2,19 @@ import { useDndMonitor } from '@dnd-kit/core';
 import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { SidePanelTab, SidePanelTabKind } from '@shared/types/sidePanel';
-import { FolderOpen, Globe, Plus, SquareTerminal, X } from 'lucide-react';
+import { motion } from 'framer-motion';
+import {
+  FolderOpen,
+  Globe,
+  PanelRight,
+  PanelRightClose,
+  Plus,
+  SquareTerminal,
+  X,
+} from 'lucide-react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
+import { springStandard } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -13,6 +23,9 @@ import { TerminalView } from './TerminalView';
 
 const EMPTY_TABS: SidePanelTab[] = [];
 const TAB_PREFIX = 'sptab:';
+
+const ICON_BUTTON_CLASS =
+  'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
 const tabDragId = (tabId: string): string => `${TAB_PREFIX}${tabId}`;
 
 interface TabDragPayload {
@@ -116,6 +129,8 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
 
 export function SidePanel({ width }: { width: number }) {
   const { t } = useI18n();
+  const open = useSidePanelStore((s) => s.open);
+  const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const projects = useSettingsStore((s) => s.projects);
   // 选择器必须返回稳定引用:兼容 undefined 后在外层回落常量空数组,否则 useSyncExternalStore 死循环
@@ -156,48 +171,79 @@ export function SidePanel({ width }: { width: number }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
   return (
-    <div className="flex h-full shrink-0 flex-col border-l bg-background/60" style={{ width }}>
-      {conversation && tabs.length > 0 && (
-        <div className="flex items-center gap-1 border-b px-2 py-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            <SortableContext
-              items={tabs.map((tab) => tabDragId(tab.id))}
-              strategy={horizontalListSortingStrategy}
-            >
-              {tabs.map((tab) => (
-                <SortableTabChip
-                  key={tab.id}
-                  tab={tab}
-                  conversationId={conversation.id}
-                  active={tab.id === activeTabId}
-                  onSelect={() => selectTab(conversation.id, tab.id)}
-                  onClose={() => closeTab(conversation.id, tab.id)}
-                />
-              ))}
-            </SortableContext>
-          </div>
-          <NewTabMenu compact onNewTerminal={handleNewTerminal} />
+    <motion.aside
+      initial={false}
+      animate={{ width: open ? width : 48 }}
+      transition={springStandard}
+      className="flex shrink-0 flex-col overflow-hidden border-l bg-background/60"
+    >
+      {/* 折叠态:48px 窄条,与左侧栏同款 */}
+      {!open && (
+        <div className="flex w-12 flex-1 flex-col items-center gap-1 py-2">
+          <button
+            type="button"
+            onClick={toggleOpen}
+            className={ICON_BUTTON_CLASS}
+            title={t('Expand side panel')}
+          >
+            <PanelRight className="h-4 w-4" />
+          </button>
         </div>
       )}
 
-      <div className="min-h-0 flex-1">
-        {!conversation ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            {t('Select a conversation to use the side panel.')}
+      <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
+        <div className="flex items-center gap-1 border-b px-2 py-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {conversation && tabs.length > 0 && (
+              <SortableContext
+                items={tabs.map((tab) => tabDragId(tab.id))}
+                strategy={horizontalListSortingStrategy}
+              >
+                {tabs.map((tab) => (
+                  <SortableTabChip
+                    key={tab.id}
+                    tab={tab}
+                    conversationId={conversation.id}
+                    active={tab.id === activeTabId}
+                    onSelect={() => selectTab(conversation.id, tab.id)}
+                    onClose={() => closeTab(conversation.id, tab.id)}
+                  />
+                ))}
+              </SortableContext>
+            )}
           </div>
-        ) : tabs.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              {t('No tabs yet. Create one to get started.')}
-            </p>
-            <NewTabMenu onNewTerminal={handleNewTerminal} />
-          </div>
-        ) : (
-          activeTab?.kind === 'terminal' && (
-            <TerminalView key={activeTab.id} termId={activeTab.id} cwd={cwd} />
-          )
-        )}
+          {conversation && tabs.length > 0 && (
+            <NewTabMenu compact onNewTerminal={handleNewTerminal} />
+          )}
+          <button
+            type="button"
+            onClick={toggleOpen}
+            className={ICON_BUTTON_CLASS}
+            title={t('Collapse side panel')}
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1">
+          {!conversation ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              {t('Select a conversation to use the side panel.')}
+            </div>
+          ) : tabs.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                {t('No tabs yet. Create one to get started.')}
+              </p>
+              <NewTabMenu onNewTerminal={handleNewTerminal} />
+            </div>
+          ) : (
+            activeTab?.kind === 'terminal' && (
+              <TerminalView key={activeTab.id} termId={activeTab.id} cwd={cwd} />
+            )
+          )}
+        </div>
       </div>
-    </div>
+    </motion.aside>
   );
 }
