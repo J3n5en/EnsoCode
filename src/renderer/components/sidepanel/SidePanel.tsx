@@ -2,12 +2,13 @@ import type {
   DockviewApi,
   DockviewReadyEvent,
   IDockviewHeaderActionsProps,
+  IDockviewPanelHeaderProps,
   IDockviewPanelProps,
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Globe, PanelRightClose, Plus, SquareTerminal } from 'lucide-react';
+import { FolderOpen, Globe, PanelRightClose, Plus, SquareTerminal, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
@@ -19,6 +20,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { TerminalView } from './TerminalView';
 import 'dockview-react/dist/styles/dockview.css';
+import './sidepanel-dock.css';
 
 const ICON_BUTTON_CLASS =
   'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
@@ -44,6 +46,42 @@ function TerminalPanel(props: IDockviewPanelProps<{ cwd?: string }>) {
   return <TerminalView termId={props.api.id} cwd={props.params.cwd} />;
 }
 
+/** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
+function SidePanelTab(props: IDockviewPanelHeaderProps) {
+  const [active, setActive] = useState(props.api.isActive);
+  const [title, setTitle] = useState(props.api.title ?? '');
+  useEffect(() => {
+    const a = props.api.onDidActiveChange(() => setActive(props.api.isActive));
+    const t = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ''));
+    return () => {
+      a.dispose();
+      t.dispose();
+    };
+  }, [props.api]);
+  return (
+    <div
+      className={cn(
+        'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
+      )}
+    >
+      <SquareTerminal className="h-3 w-3 shrink-0" />
+      <span className="max-w-32 truncate">{title}</span>
+      <button
+        type="button"
+        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/tab:opacity-100"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          props.api.close();
+        }}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; compact?: boolean }) {
   const { t } = useI18n();
   return (
@@ -51,7 +89,9 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
       <MenuTrigger
         className={cn(
           'flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground',
-          compact ? 'h-7 w-7' : 'h-8 gap-1.5 border border-dashed px-3 text-sm hover:border-solid'
+          compact
+            ? 'h-6 w-6 rounded p-1 hover:bg-muted'
+            : 'h-8 gap-1.5 border border-dashed px-3 text-sm hover:border-solid'
         )}
         aria-label={t('New tab')}
       >
@@ -98,7 +138,7 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
   const { t } = useI18n();
   const { cwd } = useContext(PanelContext);
   return (
-    <div className="flex h-full items-center pr-1">
+    <div className="flex h-full items-center">
       <NewTabMenu
         compact
         onNewTerminal={() => {
@@ -157,13 +197,16 @@ function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd
 
   return (
     <PanelContext.Provider value={{ cwd }}>
-      <DockviewReact
-        components={DOCK_COMPONENTS}
-        watermarkComponent={Watermark}
-        rightHeaderActionsComponent={GroupRightActions}
-        theme={isDark ? themeDark : themeLight}
-        onReady={onReady}
-      />
+      <div className="enso-side-dock h-full">
+        <DockviewReact
+          components={DOCK_COMPONENTS}
+          defaultTabComponent={SidePanelTab}
+          watermarkComponent={Watermark}
+          rightHeaderActionsComponent={GroupRightActions}
+          theme={isDark ? themeDark : themeLight}
+          onReady={onReady}
+        />
+      </div>
     </PanelContext.Provider>
   );
 }
