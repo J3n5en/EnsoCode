@@ -36,7 +36,21 @@ export function createTerminal(
   request: TerminalCreateRequest,
   sender: WebContents
 ): TerminalCreateResult {
-  if (terminals.has(request.termId)) return { ok: true };
+  const existing = terminals.get(request.termId);
+  if (existing) {
+    // renderer 重载后 xterm buffer 已空但 pty 还活着:重绑 sender 并拖动 resize
+    // 触发 SIGWINCH,让 shell 重绘 prompt,避免看起来像死终端
+    existing.sender = sender;
+    const cols = request.cols ?? existing.pty.cols;
+    const rows = request.rows ?? existing.pty.rows;
+    try {
+      existing.pty.resize(Math.max(1, cols - 1), rows);
+      existing.pty.resize(cols, rows);
+    } catch {
+      // pty 已退出
+    }
+    return { ok: true };
+  }
   try {
     const pty = spawn(defaultShell(), [], {
       name: 'xterm-256color',
@@ -45,18 +59,19 @@ export function createTerminal(
       rows: request.rows ?? 24,
       env: { ...process.env, TERM_PROGRAM: 'EnsoCode' } as Record<string, string>,
     });
+    const entry: TerminalEntry = { pty, sender };
     pty.onData((data) => {
-      if (!sender.isDestroyed())
-        sender.send(IPC_CHANNELS.TERMINAL_DATA, { termId: request.termId, data });
+      if (!entry.sender.isDestroyed())
+        entry.sender.send(IPC_CHANNELS.TERMINAL_DATA, { termId: request.termId, data });
     });
     pty.onExit(({ exitCode }) => {
       terminals.delete(request.termId);
-      if (!sender.isDestroyed())
-        sender.send(IPC_CHANNELS.TERMINAL_EXIT, { termId: request.termId, exitCode });
+      if (!entry.sender.isDestroyed())
+        entry.sender.send(IPC_CHANNELS.TERMINAL_EXIT, { termId: request.termId, exitCode });
     });
     // 窗口销毁时回收 pty,避免孤儿 shell
     sender.once('destroyed', () => disposeTerminal(request.termId));
-    terminals.set(request.termId, { pty, sender });
+    terminals.set(request.termId, entry);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
