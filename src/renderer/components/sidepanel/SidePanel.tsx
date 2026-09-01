@@ -8,7 +8,7 @@ import type {
 } from 'dockview-react';
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Globe, PanelRightClose, Plus, SquareTerminal, X } from 'lucide-react';
+import { FolderOpen, Globe, Plus, SquareTerminal, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
@@ -21,9 +21,6 @@ import { useSidePanelStore } from '@/stores/sidePanel';
 import { TerminalView } from './TerminalView';
 import 'dockview-react/dist/styles/dockview.css';
 import './sidepanel-dock.css';
-
-const ICON_BUTTON_CLASS =
-  'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
 
 /** dockview 的 part 组件在独立渲染树中,cwd 等上下文经 context 注入 */
 const PanelContext = createContext<{ cwd?: string }>({});
@@ -214,7 +211,6 @@ function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd
 export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
-  const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);
   const projects = useSettingsStore((s) => s.projects);
@@ -233,16 +229,6 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
       className={cn('flex shrink-0 flex-col overflow-hidden bg-background/60', open && 'border-l')}
     >
       <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
-        <div className="flex items-center justify-end gap-1 border-b px-2 py-1">
-          <button
-            type="button"
-            onClick={toggleOpen}
-            className={ICON_BUTTON_CLASS}
-            title={t('Collapse side panel')}
-          >
-            <PanelRightClose className="h-4 w-4" />
-          </button>
-        </div>
         {visibleIds.length > 0 ? (
           <div className="relative min-h-0 flex-1">
             {visibleIds.map((id) => {
