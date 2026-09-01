@@ -43,8 +43,9 @@
 ## 动手前
 
 1. 读目标层的 `index.md`，按其中的 Pre-Development Checklist 逐项确认。
-2. 涉及主进程与渲染层之间的数据传递，先读 [guides/cross-layer-thinking-guide.md](guides/cross-layer-thinking-guide.md)。
-3. 提交前跑：
+2. 非平凡改动再读 [guides/pre-implementation-checklist.md](guides/pre-implementation-checklist.md)（含 TDD 角色分离：大改强烈推荐 coworker，不是必须）。
+3. 涉及主进程与渲染层之间的数据传递，先读 [guides/cross-layer-thinking-guide.md](guides/cross-layer-thinking-guide.md)。
+4. 提交前跑：
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test
