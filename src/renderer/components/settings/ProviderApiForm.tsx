@@ -9,7 +9,6 @@ import {
   ListPlus,
   Loader2,
   Plus,
-  Search,
   Zap,
 } from 'lucide-react';
 import * as React from 'react';
@@ -28,6 +27,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
+import { ListFilterBar, useVisibleSelection } from './ListFilterBar';
 import { ProviderModelRow } from './ProviderModelRow';
 
 export interface ProviderApiFormValue {
@@ -92,7 +92,16 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
     const keyword = filter.trim().toLowerCase();
     return keyword ? models.filter((model) => model.id.toLowerCase().includes(keyword)) : models;
   }, [filter, models]);
+  const visibleIds = visibleModels.map((model) => model.id);
+  const selection = useVisibleSelection(visibleIds);
   const enabledCount = models.filter(isEnabled).length;
+
+  const setSelectedEnabled = (enabled: boolean) => {
+    const ids = new Set(selection.selectedIds);
+    setModels((current) =>
+      current.map((model) => (ids.has(model.id) ? { ...model, enabled } : model))
+    );
+  };
 
   const apiConfig = { api, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() };
 
@@ -227,51 +236,18 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
 
           {models.length > 0 && (
             <>
-              <div className="flex w-full items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={filter}
-                    onChange={(event) => setFilter(event.target.value)}
-                    placeholder={t('Filter models...')}
-                    className="h-8 text-xs [&_input]:pl-8"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 px-2 text-xs"
-                  disabled={visibleModels.length === 0}
-                  onClick={() => {
-                    const ids = new Set(visibleModels.map((model) => model.id));
-                    setModels((current) =>
-                      current.map((model) =>
-                        ids.has(model.id) ? { ...model, enabled: true } : model
-                      )
-                    );
-                  }}
-                >
-                  {t('Enable all')}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 px-2 text-xs"
-                  disabled={visibleModels.length === 0}
-                  onClick={() => {
-                    const ids = new Set(visibleModels.map((model) => model.id));
-                    setModels((current) =>
-                      current.map((model) =>
-                        ids.has(model.id) ? { ...model, enabled: false } : model
-                      )
-                    );
-                  }}
-                >
-                  {t('Disable all')}
-                </Button>
-              </div>
+              <ListFilterBar
+                query={filter}
+                onQueryChange={setFilter}
+                placeholder={t('Filter models...')}
+                allSelected={selection.allSelected}
+                someSelected={selection.someSelected}
+                onToggleSelectAll={selection.toggleAll}
+                onEnable={() => setSelectedEnabled(true)}
+                onDisable={() => setSelectedEnabled(false)}
+                selectDisabled={visibleModels.length === 0}
+                actionDisabled={selection.selectedIds.length === 0}
+              />
 
               <div className="max-h-72 w-full space-y-0.5 overflow-y-auto rounded-md border p-1">
                 {visibleModels.map((model) => (
@@ -301,6 +277,8 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
                         current.map((entry) => (entry.id === model.id ? next : entry))
                       )
                     }
+                    selected={selection.isSelected(model.id)}
+                    onSelectedChange={(checked) => selection.toggleOne(model.id, checked)}
                   />
                 ))}
                 {visibleModels.length === 0 && (

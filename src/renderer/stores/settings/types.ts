@@ -211,12 +211,16 @@ export interface SettingsState {
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;
   updateSkill: (id: string, updates: Partial<Omit<SkillEntry, 'id'>>) => void;
+  /** 一次写入筛选结果的 enabled，避免逐条 persist */
+  setSkillsEnabled: (ids: string[], enabled: boolean) => void;
   removeSkill: (id: string) => void;
 
   // MCP actions
   /** 按启动命令或 URL 去重，返回实际新增数量 */
   addMcpServers: (servers: McpServerEntry[]) => number;
   updateMcpServer: (id: string, updates: Partial<Omit<McpServerEntry, 'id'>>) => void;
+  /** 一次写入筛选结果的 enabled，避免逐条 persist */
+  setMcpServersEnabled: (ids: string[], enabled: boolean) => void;
   removeMcpServer: (id: string) => void;
 
   // Instruction file actions

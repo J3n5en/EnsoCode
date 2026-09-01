@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
-import { DetailRows, PickList } from './PresetsSettings';
+import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
 
 export function AgentTypesSettings() {
   const { t } = useI18n();
@@ -306,6 +306,10 @@ export function AgentTypeEditDialog({
             getSource={(s) => s.source}
             isChecked={(s) => skillIds.includes(s.id)}
             onToggle={(s) => setSkillIds((list) => toggleId(list, s.id))}
+            onSetFiltered={(ids, selected) =>
+              setSkillIds((list) => setFilteredIds(list, ids, selected))
+            }
+            placeholder={t('Filter skills...')}
             renderDetail={(s) => (
               <DetailRows
                 rows={[
@@ -324,6 +328,10 @@ export function AgentTypeEditDialog({
             getSource={(m) => m.source}
             isChecked={(m) => mcpServerIds.includes(m.id)}
             onToggle={(m) => setMcpServerIds((list) => toggleId(list, m.id))}
+            onSetFiltered={(ids, selected) =>
+              setMcpServerIds((list) => setFilteredIds(list, ids, selected))
+            }
+            placeholder={t('Filter MCP servers...')}
             renderDetail={(m) => (
               <DetailRows
                 rows={[

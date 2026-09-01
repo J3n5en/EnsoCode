@@ -11,6 +11,7 @@ import { ChevronDown, Trash2 } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -55,6 +56,8 @@ interface ProviderModelRowProps {
   onToggleEnabled: () => void;
   onRemove: () => void;
   onChange: (next: ModelEntry) => void;
+  selected?: boolean;
+  onSelectedChange?: (checked: boolean) => void;
 }
 
 export function ProviderModelRow({
@@ -66,6 +69,8 @@ export function ProviderModelRow({
   onToggleEnabled,
   onRemove,
   onChange,
+  selected,
+  onSelectedChange,
 }: ProviderModelRowProps) {
   const { t } = useI18n();
   const badge = modelRowBadge(model, catalogMeta);
@@ -85,6 +90,9 @@ export function ProviderModelRow({
       className="rounded-md"
     >
       <div className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/50">
+        {onSelectedChange != null && (
+          <Checkbox checked={selected} onCheckedChange={onSelectedChange} />
+        )}
         <Switch checked={isEnabled(model)} onCheckedChange={onToggleEnabled} />
         {canOverride ? (
           <button

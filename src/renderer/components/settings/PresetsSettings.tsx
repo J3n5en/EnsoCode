@@ -16,6 +16,7 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { ListFilterBar, matchesFilter } from './ListFilterBar';
 
 export function PresetsSettings() {
   const { t } = useI18n();
@@ -155,6 +156,10 @@ export function PresetEditDialog({
             getSource={(s) => s.source}
             isChecked={(s) => skillIds.includes(s.id)}
             onToggle={(s) => setSkillIds((list) => toggle(list, s.id))}
+            onSetFiltered={(ids, selected) =>
+              setSkillIds((list) => setFilteredIds(list, ids, selected))
+            }
+            placeholder={t('Filter skills...')}
             renderDetail={(s) => (
               <DetailRows
                 rows={[
@@ -174,6 +179,10 @@ export function PresetEditDialog({
             getSource={(m) => m.source}
             isChecked={(m) => mcpServerIds.includes(m.id)}
             onToggle={(m) => setMcpServerIds((list) => toggle(list, m.id))}
+            onSetFiltered={(ids, selected) =>
+              setMcpServerIds((list) => setFilteredIds(list, ids, selected))
+            }
+            placeholder={t('Filter MCP servers...')}
             renderDetail={(m) => (
               <DetailRows
                 rows={[
@@ -218,6 +227,17 @@ export function PresetEditDialog({
   );
 }
 
+export function setFilteredIds(current: string[], filteredIds: string[], selected: boolean): string[] {
+  if (filteredIds.length === 0) return current;
+  const vis = new Set(filteredIds);
+  if (selected) {
+    const extra = filteredIds.filter((id) => !current.includes(id));
+    return extra.length === 0 ? current : [...current, ...extra];
+  }
+  const next = current.filter((id) => !vis.has(id));
+  return next.length === current.length ? current : next;
+}
+
 /** 带搜索的可勾选列表：每项 checkbox + 名字 + 来源角标 + 眼睛（居中 detail 弹窗） */
 export function PickList<T extends { id: string }>({
   title,
@@ -227,6 +247,8 @@ export function PickList<T extends { id: string }>({
   getSource,
   isChecked,
   onToggle,
+  onSetFiltered,
+  placeholder,
   renderDetail,
   leading,
 }: {
@@ -237,15 +259,19 @@ export function PickList<T extends { id: string }>({
   getSource?: (item: T) => string;
   isChecked: (item: T) => boolean;
   onToggle: (item: T) => void;
+  onSetFiltered?: (ids: string[], selected: boolean) => void;
+  placeholder?: string;
   renderDetail: (item: T) => React.ReactNode;
   leading?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const [detail, setDetail] = React.useState<T | null>(null);
-  const filtered = query
-    ? items.filter((item) => getName(item).toLowerCase().includes(query.toLowerCase()))
-    : items;
+  const filtered = items.filter((item) => matchesFilter(query, [getName(item), getSource?.(item)]));
+  const filteredIds = filtered.map((item) => item.id);
+  const selectedCount = filtered.filter(isChecked).length;
+  const allSelected = filtered.length > 0 && selectedCount === filtered.length;
+  const someSelected = selectedCount > 0 && !allSelected;
 
   return (
     <div>
@@ -255,14 +281,23 @@ export function PickList<T extends { id: string }>({
       <div className="rounded-md border">
         {items.length > 0 && (
           <div className="border-b p-1.5">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('Search')}
-              className="h-7 text-xs"
+            <ListFilterBar
+              query={query}
+              onQueryChange={setQuery}
+              placeholder={placeholder ?? t('Search')}
+              allSelected={allSelected}
+              someSelected={someSelected}
+              onToggleSelectAll={
+                onSetFiltered ? (selected) => onSetFiltered(filteredIds, selected) : undefined
+              }
+              onEnable={onSetFiltered ? () => onSetFiltered(filteredIds, true) : undefined}
+              onDisable={onSetFiltered ? () => onSetFiltered(filteredIds, false) : undefined}
+              selectDisabled={filtered.length === 0}
+              actionDisabled={filtered.length === 0}
             />
           </div>
         )}
+
         <div className="max-h-40 overflow-y-auto p-1.5">
           {leading}
           {items.length === 0 && <Empty text={emptyText} />}

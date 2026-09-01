@@ -339,6 +339,14 @@ export const useSettingsStore = create<SettingsState>()(
           skills: state.skills.map((s) => (s.id === id ? { ...s, ...updates } : s)),
         })),
 
+      setSkillsEnabled: (ids, enabled) => {
+        if (ids.length === 0) return;
+        const idSet = new Set(ids);
+        set((state) => ({
+          skills: state.skills.map((s) => (idSet.has(s.id) ? { ...s, enabled } : s)),
+        }));
+      },
+
       removeSkill: (id) => set((state) => ({ skills: state.skills.filter((s) => s.id !== id) })),
 
       // 按启动命令或 URL 去重
@@ -364,6 +372,14 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({
           mcpServers: state.mcpServers.map((s) => (s.id === id ? { ...s, ...updates } : s)),
         })),
+
+      setMcpServersEnabled: (ids, enabled) => {
+        if (ids.length === 0) return;
+        const idSet = new Set(ids);
+        set((state) => ({
+          mcpServers: state.mcpServers.map((s) => (idSet.has(s.id) ? { ...s, enabled } : s)),
+        }));
+      },
 
       removeMcpServer: (id) =>
         set((state) => ({ mcpServers: state.mcpServers.filter((s) => s.id !== id) })),
