@@ -129,8 +129,9 @@ function SplitDropZone() {
     <div
       ref={setNodeRef}
       className={cn(
-        'absolute inset-x-1 top-1/2 bottom-1 z-10 rounded-md border-2 border-transparent transition-colors',
-        isOver && 'border-primary/40 bg-primary/15'
+        // 拖拽中即显示虚线提示区,悬停时加强;用蓝色而非 primary:深色终端背景上 primary 几乎不可见
+        'absolute inset-x-1 top-1/2 bottom-1 z-10 rounded-md border-2 border-dashed border-blue-400/60 bg-blue-400/10 transition-colors',
+        isOver && 'border-solid border-blue-400 bg-blue-400/25'
       )}
     />
   );
@@ -181,7 +182,7 @@ function PaneGroup({
         ref={strip.setNodeRef}
         className={cn(
           'flex items-center gap-1 border-b px-2 py-1.5 transition-colors',
-          strip.isOver && 'bg-primary/10'
+          strip.isOver && 'bg-blue-400/20'
         )}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
