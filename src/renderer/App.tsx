@@ -62,7 +62,8 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDE_WIDTH_KEY, String(sideWidth));
   }, [sideWidth]);
-  // 右侧面板:手柄在面板左缘,向左拖加宽
+  // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
+  const [sideResizing, setSideResizing] = useState(false);
   const handleSideResize = useCallback((deltaX: number) => {
     setSideWidth((w) => Math.min(SIDE_MAX_WIDTH, Math.max(SIDE_MIN_WIDTH, w - deltaX)));
   }, []);
@@ -172,8 +173,10 @@ export default function App() {
           />
           {!collapsed && <ResizeHandle onResize={handleResize} />}
           <ChatView />
-          {sideOpen && <ResizeHandle onResize={handleSideResize} />}
-          <SidePanel width={sideWidth} />
+          {sideOpen && (
+            <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
+          )}
+          <SidePanel width={sideWidth} resizing={sideResizing} />
         </DndContext>
       </div>
       {!onboarded && <Onboarding />}

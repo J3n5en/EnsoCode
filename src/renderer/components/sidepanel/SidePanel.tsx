@@ -119,7 +119,7 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
   );
 }
 
-export function SidePanel({ width }: { width: number }) {
+export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
   const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
@@ -166,7 +166,7 @@ export function SidePanel({ width }: { width: number }) {
     <motion.aside
       initial={false}
       animate={{ width: open ? width : 0 }}
-      transition={springStandard}
+      transition={resizing ? { duration: 0 } : springStandard}
       className={cn('flex shrink-0 flex-col overflow-hidden bg-background/60', open && 'border-l')}
     >
       <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
