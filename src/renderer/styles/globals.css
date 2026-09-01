@@ -184,12 +184,16 @@
     -webkit-user-select: none;
   }
 
-  /* Allow selection in input fields */
+  /* Allow selection in input fields.
+     diffs-container：@pierre/diffs 的内容在 shadow DOM 里，选择器进不去，
+     但 user-select 是继承属性——上面的 * 会经宿主继承进去让代码不可选。
+     给宿主设回 text，shadow 内的行自然继承。 */
   input,
   textarea,
   [contenteditable="true"],
   .select-text,
-  .select-text * {
+  .select-text *,
+  diffs-container {
     user-select: text;
     -webkit-user-select: text;
   }
