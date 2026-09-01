@@ -1,6 +1,6 @@
 /**
- * xterm 实例注册表:实例与其 DOM 容器脱离 React 生命周期存活,
- * 切会话/切 tab 只是把容器重新挂进视图,buffer 不丢。pty 生命周期在 main 侧。
+ * xterm 实例常驻:只 open 一次,切 tab/切会话只把 host 从 DOM 摘挂(Cursor/VS Code 同款)。
+ * 关 tab 才 dispose。pty 在 main 侧,与此独立。
  */
 
 import { FitAddon } from '@xterm/addon-fit';
@@ -18,7 +18,8 @@ export interface TerminalOptions {
 export interface TerminalInstance {
   term: Terminal;
   fit: FitAddon;
-  container: HTMLDivElement;
+  host: HTMLDivElement;
+  opened: boolean;
 }
 
 const registry = new Map<string, TerminalInstance>();
@@ -35,7 +36,6 @@ function ensureListeners(): void {
   });
 }
 
-/** 取或建 xterm 实例;首建时同步在 main 侧建 pty */
 export function acquireTerminal(termId: string, options: TerminalOptions): TerminalInstance {
   ensureListeners();
   const existing = registry.get(termId);
@@ -51,23 +51,34 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-
-  const container = document.createElement('div');
-  container.style.width = '100%';
-  container.style.height = '100%';
-  term.open(container);
-
+  const host = document.createElement('div');
+  host.dataset.termId = termId;
+  host.style.width = '100%';
+  host.style.height = '100%';
   term.onData((data) => void window.electronAPI.terminal.write(termId, data));
-
-  const instance: TerminalInstance = { term, fit, container };
+  const instance: TerminalInstance = { term, fit, host, opened: false };
   registry.set(termId, instance);
-  void window.electronAPI.terminal.create({
-    termId,
-    cwd: options.cwd,
-    cols: term.cols,
-    rows: term.rows,
-  });
   return instance;
+}
+
+/** 挂到可见容器;首次且有尺寸才 open */
+export function attachTerminal(
+  termId: string,
+  wrapper: HTMLElement,
+  options: TerminalOptions
+): TerminalInstance {
+  const instance = acquireTerminal(termId, options);
+  if (instance.host.parentElement !== wrapper) wrapper.appendChild(instance.host);
+  if (!instance.opened && wrapper.isConnected && wrapper.clientWidth > 0) {
+    instance.term.open(instance.host);
+    instance.opened = true;
+  }
+  return instance;
+}
+
+/** 仅摘 DOM,不 dispose */
+export function detachTerminal(termId: string): void {
+  registry.get(termId)?.host.remove();
 }
 
 export function updateTerminalAppearance(
@@ -82,11 +93,11 @@ export function updateTerminalAppearance(
   }
 }
 
-/** 关 tab 时调用:销毁 xterm 实例(main 侧 pty 由 store 另行 dispose) */
+/** 关 tab:销毁 xterm(pty 由调用方 dispose) */
 export function releaseTerminal(termId: string): void {
   const instance = registry.get(termId);
   if (!instance) return;
   registry.delete(termId);
   instance.term.dispose();
-  instance.container.remove();
+  instance.host.remove();
 }

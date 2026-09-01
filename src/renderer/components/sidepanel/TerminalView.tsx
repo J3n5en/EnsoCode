@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
-import { acquireTerminal, updateTerminalAppearance } from '@/lib/terminalRegistry';
+import { attachTerminal, detachTerminal, updateTerminalAppearance } from '@/lib/terminalRegistry';
 import { useSettingsStore } from '@/stores/settings';
 
 interface TerminalViewProps {
@@ -8,10 +8,9 @@ interface TerminalViewProps {
   cwd?: string;
 }
 
-/** 把注册表里的 xterm 容器挂进视图;实例跨 tab/会话切换存活 */
+/** 把 registry 里的 xterm host 挂进视图;切走只 detach,实例与 pty 都保留 */
 export function TerminalView({ termId, cwd }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  // cwd 只在 pty 首建时生效,用 ref 隔离出依赖列表
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
@@ -21,29 +20,50 @@ export function TerminalView({ termId, cwd }: TerminalViewProps) {
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    // 外观取当前快照即可:后续变化由下方 effect 广播,不让它们重建 pty 挂载
-    const settings = useSettingsStore.getState();
-    const instance = acquireTerminal(termId, {
-      cwd: cwdRef.current,
-      theme: getXtermTheme(settings.terminalTheme),
-      fontFamily: settings.terminalFontFamily,
-      fontSize: settings.terminalFontSize,
-    });
-    wrapper.appendChild(instance.container);
+    let cancelled = false;
+    let raf = 0;
+    let observer: ResizeObserver | undefined;
 
-    const doFit = () => {
-      if (!wrapper.isConnected || wrapper.clientWidth === 0) return;
-      instance.fit.fit();
-      void window.electronAPI.terminal.resize(termId, instance.term.cols, instance.term.rows);
+    const tryAttach = () => {
+      if (cancelled) return;
+      if (!wrapper.isConnected || wrapper.clientWidth === 0) {
+        raf = requestAnimationFrame(tryAttach);
+        return;
+      }
+      const settings = useSettingsStore.getState();
+      const instance = attachTerminal(termId, wrapper, {
+        cwd: cwdRef.current,
+        theme: getXtermTheme(settings.terminalTheme),
+        fontFamily: settings.terminalFontFamily,
+        fontSize: settings.terminalFontSize,
+      });
+      if (!instance.opened) {
+        raf = requestAnimationFrame(tryAttach);
+        return;
+      }
+      const doFit = () => {
+        if (!wrapper.isConnected || wrapper.clientWidth === 0) return;
+        instance.fit.fit();
+        void window.electronAPI.terminal.resize(termId, instance.term.cols, instance.term.rows);
+      };
+      doFit();
+      void window.electronAPI.terminal.create({
+        termId,
+        cwd: cwdRef.current,
+        cols: instance.term.cols,
+        rows: instance.term.rows,
+      });
+      instance.term.focus();
+      observer = new ResizeObserver(doFit);
+      observer.observe(wrapper);
     };
-    doFit();
-    instance.term.focus();
-    const observer = new ResizeObserver(doFit);
-    observer.observe(wrapper);
+    tryAttach();
+
     return () => {
-      observer.disconnect();
-      // 容器留在注册表,unmount 只是摘下来
-      instance.container.remove();
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+      detachTerminal(termId);
     };
   }, [termId]);
 
@@ -51,7 +71,6 @@ export function TerminalView({ termId, cwd }: TerminalViewProps) {
     updateTerminalAppearance(getXtermTheme(terminalTheme), fontFamily, fontSize);
   }, [terminalTheme, fontFamily, fontSize]);
 
-  // padding 区域与终端同色,避免主题深色背景外露出面板底色白边
   return (
     <div
       ref={wrapperRef}

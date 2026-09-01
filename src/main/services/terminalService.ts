@@ -38,16 +38,16 @@ export function createTerminal(
 ): TerminalCreateResult {
   const existing = terminals.get(request.termId);
   if (existing) {
-    // renderer 重载后 xterm buffer 已空但 pty 还活着:重绑 sender 并拖动 resize
-    // 触发 SIGWINCH,让 shell 重绘 prompt,避免看起来像死终端
     existing.sender = sender;
+    // 已有 pty 不抖动 resize:SIGWINCH 会让 shell 重绘,看起来像「历史丢了只剩新 prompt」
     const cols = request.cols ?? existing.pty.cols;
     const rows = request.rows ?? existing.pty.rows;
-    try {
-      existing.pty.resize(Math.max(1, cols - 1), rows);
-      existing.pty.resize(cols, rows);
-    } catch {
-      // pty 已退出
+    if (cols !== existing.pty.cols || rows !== existing.pty.rows) {
+      try {
+        existing.pty.resize(cols, rows);
+      } catch {
+        // pty 已退出
+      }
     }
     return { ok: true };
   }

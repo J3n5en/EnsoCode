@@ -8,10 +8,11 @@ import type {
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
 import { FolderOpen, Globe, PanelRightClose, Plus, SquareTerminal } from 'lucide-react';
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { springStandard } from '@/lib/motion';
+import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -129,22 +130,10 @@ function useIsDark(): boolean {
   return isDark;
 }
 
-/** 后置兄弟:卸载顺序为后子先清,保证在 DockviewReact dispose 之前取消布局订阅 */
-function DockUnmountGuard({ onUnmount }: { onUnmount: () => void }) {
-  const fn = useRef(onUnmount);
-  fn.current = onUnmount;
-  useEffect(() => () => fn.current(), []);
-  return null;
-}
-
 function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd?: string }) {
   const isDark = useIsDark();
-  const aliveRef = useRef(true);
-  const subRef = useRef<{ dispose: () => void } | null>(null);
 
   const onReady = (event: DockviewReadyEvent) => {
-    aliveRef.current = true;
-    // dev-only:e2e/调试可经 CDP 直达 dockview api
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__dockviewApi = event.api;
     }
@@ -153,34 +142,28 @@ function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd
       try {
         event.api.fromJSON(saved);
       } catch {
-        // 布局数据与当前版本不兼容:放弃恢复,从空态开始
+        // 布局与当前版本不兼容:从空态开始
       }
     }
-    subRef.current = event.api.onDidLayoutChange(() => {
-      // 切会话卸载会 dispose 全部 panel:绝不能当成关 tab 去杀 pty/快照
-      if (!aliveRef.current) return;
+    event.api.onDidLayoutChange(() => {
       useSidePanelStore.getState().saveLayout(conversationId, event.api.toJSON());
+    });
+    // 只有用户关 tab 才回收;dock 本身不随切会话卸载
+    event.api.onDidRemovePanel((panel) => {
+      releaseTerminal(panel.id);
+      void window.electronAPI.terminal.dispose(panel.id);
     });
   };
 
   return (
     <PanelContext.Provider value={{ cwd }}>
-      <div className="h-full">
-        <DockviewReact
-          components={DOCK_COMPONENTS}
-          watermarkComponent={Watermark}
-          rightHeaderActionsComponent={GroupRightActions}
-          theme={isDark ? themeDark : themeLight}
-          onReady={onReady}
-        />
-        <DockUnmountGuard
-          onUnmount={() => {
-            aliveRef.current = false;
-            subRef.current?.dispose();
-            subRef.current = null;
-          }}
-        />
-      </div>
+      <DockviewReact
+        components={DOCK_COMPONENTS}
+        watermarkComponent={Watermark}
+        rightHeaderActionsComponent={GroupRightActions}
+        theme={isDark ? themeDark : themeLight}
+        onReady={onReady}
+      />
     </PanelContext.Provider>
   );
 }
@@ -190,11 +173,14 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const open = useSidePanelStore((s) => s.open);
   const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
+  const conversations = useSessionsStore((s) => s.conversations);
   const projects = useSettingsStore((s) => s.projects);
-
-  // 终端 cwd:worktree 目录优先,否则项目目录
-  const cwd =
-    conversation?.worktree?.path ?? projects.find((p) => p.id === conversation?.projectId)?.path;
+  const [mountedIds, setMountedIds] = useState<string[]>([]);
+  const activeId = conversation?.id;
+  if (activeId && !mountedIds.includes(activeId)) {
+    setMountedIds((ids) => (ids.includes(activeId) ? ids : [...ids, activeId]));
+  }
+  const visibleIds = mountedIds.filter((id) => conversations[id]);
 
   return (
     <motion.aside
@@ -214,9 +200,18 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
             <PanelRightClose className="h-4 w-4" />
           </button>
         </div>
-        {conversation ? (
-          <div className="min-h-0 flex-1">
-            <ConversationDock key={conversation.id} conversationId={conversation.id} cwd={cwd} />
+        {visibleIds.length > 0 ? (
+          <div className="relative min-h-0 flex-1">
+            {visibleIds.map((id) => {
+              const conv = conversations[id];
+              const cwd =
+                conv.worktree?.path ?? projects.find((p) => p.id === conv.projectId)?.path;
+              return (
+                <div key={id} className={cn('absolute inset-0', id !== activeId && 'hidden')}>
+                  <ConversationDock conversationId={id} cwd={cwd} />
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
