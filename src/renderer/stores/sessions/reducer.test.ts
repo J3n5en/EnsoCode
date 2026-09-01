@@ -256,6 +256,33 @@ describe('applyAgentEvent', () => {
     expect(rewrite.messages[0].content).toEqual([{ type: 'text', text: 'first!' }]);
   });
 
+  it('consumes /skill: optimistic echo when upsert lands as expanded skill XML', () => {
+    const rest = '看看是不是利用 diffs，能够简单地添加一个侧边栏类型';
+    const expanded =
+      '<skill name="diffs" location="/tmp/diffs/SKILL.md">\n# diffs\n\nUse diffs.\n</skill>\n\n' +
+      rest;
+    const withEcho = {
+      ...base,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: `/skill:diffs ${rest}` }],
+          optimistic: true as const,
+        },
+      ],
+    };
+    const delivered = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: expanded }] },
+    });
+    expect(delivered.messages).toHaveLength(1);
+    expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
+    expect(delivered.messages[0].content).toEqual([{ type: 'text', text: expanded }]);
+  });
+
   it('restored generation replaces the projection and rejects stale generation events', () => {
     const g1 = applyAgentEvent(base, 's1', status(5, 'running', 'g1'));
     const snapshot: SessionSnapshot = {

@@ -26,6 +26,18 @@ function textOf(message: ProjectedMessage): string {
     .trim();
 }
 
+const SKILL_SLASH = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/;
+const SKILL_BLOCK =
+  /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
+
+function sameUserText(optimistic: string, delivered: string): boolean {
+  if (optimistic === delivered) return true;
+  const slash = SKILL_SLASH.exec(optimistic);
+  const block = SKILL_BLOCK.exec(delivered);
+  if (!slash || !block) return false;
+  return slash[1] === block[1] && (slash[2] ?? '').trim() === (block[4] ?? '').trim();
+}
+
 export interface SessionProjection {
   generation?: string;
   status: NodeStatus;
@@ -237,7 +249,7 @@ export function applyAgentEvent(
       if (event.message.role === 'user' && tail.length > 0) {
         const deliveredText = textOf(event.message);
         const matched = tail.findIndex(
-          (message) => message.role === 'user' && textOf(message) === deliveredText
+          (message) => message.role === 'user' && sameUserText(textOf(message), deliveredText)
         );
         if (matched !== -1) tail = tail.toSpliced(matched, 1);
       }
