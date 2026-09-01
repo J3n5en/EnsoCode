@@ -46,6 +46,7 @@ import {
   respondApproval,
   respondAsk,
   resumeCoworkerSession,
+  retrySession,
   rewindSession,
   setAgentEventListener,
   setSessionApprovalMode,
@@ -547,6 +548,13 @@ export function registerAgentHandlers(): void {
         : { ok: false, error: 'invalid abort-retry or stale session generation' };
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_RETRY, (_event, sessionId: unknown): AgentActionResult => {
+    const identity = exactIdentity(sessionId);
+    return identity
+      ? retrySession(identity)
+      : { ok: false, error: 'invalid retry or stale session generation' };
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_RELEASE,

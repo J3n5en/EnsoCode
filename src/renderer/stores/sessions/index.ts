@@ -218,6 +218,8 @@ interface SessionsState {
   /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  /** 终态失败后不新增 user 消息，从当前上下文续跑 */
+  retry(conversationId: string): void;
   /** ChatInput 消费预填文本后清除 */
   clearDraft(conversationId: string): void;
   /** 设定会话目标并立即开跑 */
@@ -1756,6 +1758,18 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           if (!conversation?.started || conversation.status !== 'idle') return;
           void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
+        },
+
+        retry(conversationId) {
+          const conversation = get().conversations[conversationId];
+          if (
+            !conversation?.started ||
+            conversation.spawning ||
+            conversation.status === 'running'
+          ) {
+            return;
+          }
+          void window.electronAPI.agent.retry(conversationId);
         },
 
         clearDraft(conversationId) {

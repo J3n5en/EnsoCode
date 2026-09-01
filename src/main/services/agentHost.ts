@@ -521,6 +521,11 @@ export function abortRetrySession(identity: SessionIdentity): { ok: boolean; err
   return sendAgentCommand({ type: 'abort-retry', identity });
 }
 
+/** 终态失败后手动续跑：不新增 user 消息，从当前上下文 continue */
+export function retrySession(identity: SessionIdentity): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'retry', identity });
+}
+
 export function respondApproval(
   identity: SessionIdentity,
   requestId: string,

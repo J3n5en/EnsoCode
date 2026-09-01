@@ -544,6 +544,22 @@ export class SessionSupervisor {
       case 'abort-retry':
         this.must(command.identity).session.abortRetry();
         return;
+      case 'retry': {
+        const managed = this.must(command.identity);
+        if (managed.session.isStreaming || managed.status === 'running') return;
+        const agent = managed.session.agent;
+        const messages = agent.state.messages;
+        if (messages.at(-1)?.role === 'assistant') {
+          // 与 pi _prepareRetry 相同：错误 assistant 留在 session 历史，从模型上下文摘掉再 continue
+          agent.state.messages = messages.slice(0, -1);
+        }
+        if (agent.state.messages.at(-1)?.role === 'assistant') return;
+        managed.currentTurnId = randomUUID();
+        void agent.continue().catch((error) => {
+          this.failTurn(managed, toErrorMessage(error));
+        });
+        return;
+      }
       case 'set-thinking':
         this.must(command.identity).session.setThinkingLevel(command.level);
         return;

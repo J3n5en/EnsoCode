@@ -13,6 +13,7 @@ import {
   History,
   ListTodo,
   LoaderCircle,
+  RefreshCw,
   Sparkles,
   Target,
   TerminalSquare,
@@ -409,10 +410,11 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       return <ToolGroupRow item={item} onToggle={onToggleGroup} />;
     case 'error':
       return (
-        <p className="flex items-start gap-1.5 text-sm text-destructive whitespace-pre-wrap">
+        <div className="flex items-start gap-2 text-sm text-destructive">
           <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {item.text}
-        </p>
+          <p className="min-w-0 flex-1 whitespace-pre-wrap">{item.text}</p>
+          <RetryTurnButton />
+        </div>
       );
     case 'task-note':
       return <TaskNoteRow item={item} />;
@@ -525,6 +527,33 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
   const active = state.activeId ? state.conversations[state.activeId] : null;
   if (!active) return null;
   return active.activeTabId ? (state.conversations[active.activeTabId] ?? active) : active;
+}
+
+/** 终态错误后续跑：已 spawn 且非 running 才显示（手机 stub started=false 自动隐藏） */
+function RetryTurnButton() {
+  const { t } = useI18n();
+  const canRetry = useSessionsStore((state) => {
+    const conversation = displayedConversation(state);
+    return Boolean(
+      conversation?.started && !conversation.spawning && conversation.status !== 'running'
+    );
+  });
+  if (!canRetry) return null;
+  return (
+    <button
+      type="button"
+      title={t('Retry')}
+      onClick={() => {
+        const conversation = displayedConversation(useSessionsStore.getState());
+        if (!conversation) return;
+        useSessionsStore.getState().retry(conversation.id);
+      }}
+      className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+    >
+      <RefreshCw className="h-3 w-3" />
+      {t('Retry')}
+    </button>
+  );
 }
 
 /** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选,选后再确认 */

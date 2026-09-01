@@ -52,6 +52,7 @@ export const IPC_CHANNELS = {
   AGENT_STEER: 'agent:steer',
   AGENT_ABORT: 'agent:abort',
   AGENT_ABORT_RETRY: 'agent:abort-retry',
+  AGENT_RETRY: 'agent:retry',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */

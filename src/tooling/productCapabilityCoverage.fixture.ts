@@ -200,6 +200,7 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_STEER: surfaces('conversations.queue.send-now'),
   AGENT_ABORT: surfaces('conversations.abort'),
   AGENT_ABORT_RETRY: surfaces('conversations.abort'),
+  AGENT_RETRY: surfaces('conversations.retry-turn'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
   AGENT_CHILD_HISTORY_READ: excluded(

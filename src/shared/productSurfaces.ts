@@ -397,6 +397,11 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'action',
     label: 'Release live session for workspace migration',
   },
+  'conversations.retry-turn': {
+    domain: 'conversations',
+    kind: 'action',
+    label: 'Retry failed turn',
+  },
   'conversations.rewind': { domain: 'conversations', kind: 'action', label: 'Rewind conversation' },
   'conversations.rewind-files': {
     domain: 'conversations',

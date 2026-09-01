@@ -32,6 +32,7 @@ interface SessionsSlice {
   activeId: string | null;
   conversations: Record<string, Conversation>;
   rewind(sessionId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  retry(sessionId: string): void;
 }
 
 const state: SessionsSlice = {
@@ -39,6 +40,7 @@ const state: SessionsSlice = {
   conversations: {},
   // 手机端不支持回退（RewindButton 因 started=false 已不渲染，这里只为类型完整）
   rewind: () => {},
+  retry: () => {},
 };
 
 /** 由 ChatScreen 在渲染前同步当前会话，供复用组件内部读取 */

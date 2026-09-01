@@ -946,6 +946,13 @@ export const CAPABILITY_CATALOG = {
     reason: 'Session release interrupts the running agent and is user-initiated only.',
     suggestedAction: 'Use Move to worktree from the session context menu.',
   }),
+  'conversations.retry-turn': unavailable('conversations.retry-turn', {
+    description: 'Retry a failed origin coding-agent turn without sending a new user message.',
+    risk: 'reversible',
+    targetContext: 'origin-conversation',
+    reason: 'Coding-agent lifecycle controls are not exposed through the Enso gateway.',
+    suggestedAction: 'Use Retry on the failed turn in the source conversation.',
+  }),
   'conversations.rewind': unavailable('conversations.rewind', {
     description: 'Rewind origin conversation history without restoring files.',
     risk: 'dangerous',
