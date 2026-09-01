@@ -13,7 +13,6 @@ import { tabTitleFromTerminal } from '@/lib/terminalTitle';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalOptions {
-  cwd?: string;
   theme?: ITheme;
   fontFamily: string;
   fontSize: number;

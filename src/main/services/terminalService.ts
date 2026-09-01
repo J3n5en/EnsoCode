@@ -26,15 +26,23 @@ function defaultShell(): string {
   return process.env.SHELL || '/bin/zsh';
 }
 
-/** 目录存在校验后回落 home:cwd 只决定工作目录,不涉及文件读取 */
-export function resolveCwd(cwd: string | undefined): string {
-  if (cwd && isDirectory(cwd)) return cwd;
-  return os.homedir();
+/** 与 agent spawn 同一口径:有隔离 worktree 用它,否则本地项目根,都没有才 home */
+export function pickSessionCwd(input: {
+  worktreePath?: string;
+  projectPath?: string;
+  ssh?: boolean;
+  home: string;
+  exists: (dir: string) => boolean;
+}): string {
+  if (input.worktreePath && input.exists(input.worktreePath)) return input.worktreePath;
+  if (!input.ssh && input.projectPath && input.exists(input.projectPath)) return input.projectPath;
+  return input.home;
 }
 
 export function createTerminal(
   request: TerminalCreateRequest,
-  sender: WebContents
+  sender: WebContents,
+  cwd: string
 ): TerminalCreateResult {
   const existing = terminals.get(request.termId);
   if (existing) {
@@ -54,10 +62,13 @@ export function createTerminal(
   try {
     const pty = spawn(defaultShell(), [], {
       name: 'xterm-256color',
-      cwd: resolveCwd(request.cwd),
+      cwd: isDirectory(cwd) ? cwd : os.homedir(),
       cols: request.cols ?? 80,
       rows: request.rows ?? 24,
-      env: { ...process.env, TERM: 'xterm-256color', TERM_PROGRAM: 'EnsoCode' } as Record<string, string>,
+      env: { ...process.env, TERM: 'xterm-256color', TERM_PROGRAM: 'EnsoCode' } as Record<
+        string,
+        string
+      >,
     });
     const entry: TerminalEntry = { pty, sender };
     pty.onData((data) => {

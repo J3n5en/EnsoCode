@@ -10,7 +10,9 @@ export interface SidePanelTab {
 
 export interface TerminalCreateRequest {
   termId: string;
-  cwd?: string;
+  /** 会话 id:main 用它查 worktree,不信 renderer 传的路径 */
+  conversationId?: string;
+  projectId?: string;
   cols?: number;
   rows?: number;
 }

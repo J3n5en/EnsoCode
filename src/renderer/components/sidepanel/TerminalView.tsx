@@ -12,15 +12,18 @@ import { TerminalSearchBar } from './TerminalSearchBar';
 
 interface TerminalViewProps {
   termId: string;
-  cwd?: string;
+  conversationId?: string;
+  projectId?: string;
   onTitle?: (title: string) => void;
 }
 
 /** 把 registry 里的 xterm host 挂进视图;切走只 detach,实例与 pty 都保留 */
-export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
+export function TerminalView({ termId, conversationId, projectId, onTitle }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const cwdRef = useRef(cwd);
-  cwdRef.current = cwd;
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   const onTitleRef = useRef(onTitle);
   onTitleRef.current = onTitle;
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
@@ -43,7 +46,6 @@ export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
       }
       const settings = useSettingsStore.getState();
       const instance = attachTerminal(termId, wrapper, {
-        cwd: cwdRef.current,
         theme: getXtermTheme(settings.terminalTheme),
         fontFamily: settings.terminalFontFamily,
         fontSize: settings.terminalFontSize,
@@ -61,7 +63,8 @@ export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
       doFit();
       void window.electronAPI.terminal.create({
         termId,
-        cwd: cwdRef.current,
+        conversationId: conversationIdRef.current,
+        projectId: projectIdRef.current,
         cols: instance.term.cols,
         rows: instance.term.rows,
       });

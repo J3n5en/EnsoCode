@@ -16,34 +16,41 @@ import { springStandard } from '@/lib/motion';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { TerminalView } from './TerminalView';
 import 'dockview-react/dist/styles/dockview.css';
 import './sidepanel-dock.css';
 
 /** dockview 的 part 组件在独立渲染树中,cwd 等上下文经 context 注入 */
-const PanelContext = createContext<{ cwd?: string }>({});
+const PanelContext = createContext<{ conversationId?: string; projectId?: string }>({});
 
 function nextTerminalTitle(api: DockviewApi, label: string): string {
   const count = api.panels.length;
   return count === 0 ? label : `${label} ${count + 1}`;
 }
 
-function addTerminalPanel(api: DockviewApi, cwd: string | undefined, label: string): void {
+function addTerminalPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
   api.addPanel({
     id: crypto.randomUUID(),
     component: 'terminal',
     title: nextTerminalTitle(api, label),
-    params: { cwd },
+    params: { conversationId, projectId },
   });
 }
 
-function TerminalPanel(props: IDockviewPanelProps<{ cwd?: string }>) {
+function TerminalPanel(
+  props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>
+) {
   return (
     <TerminalView
       termId={props.api.id}
-      cwd={props.params.cwd}
+      conversationId={props.params.conversationId}
+      projectId={props.params.projectId}
       onTitle={(title) => props.api.setTitle(title)}
     />
   );
@@ -125,13 +132,17 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
 /** 空态水印:无任何 tab 时的新建入口 */
 function Watermark(props: IWatermarkPanelProps) {
   const { t } = useI18n();
-  const { cwd } = useContext(PanelContext);
+  const { conversationId, projectId } = useContext(PanelContext);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="text-sm text-muted-foreground">
         {t('No tabs yet. Create one to get started.')}
       </p>
-      <NewTabMenu onNewTerminal={() => addTerminalPanel(props.containerApi, cwd, t('Terminal'))} />
+      <NewTabMenu
+        onNewTerminal={() =>
+          addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
+        }
+      />
     </div>
   );
 }
@@ -139,7 +150,7 @@ function Watermark(props: IWatermarkPanelProps) {
 /** 每个分组 tab 条右侧的 + 按钮:新 tab 落在该组 */
 function GroupRightActions(props: IDockviewHeaderActionsProps) {
   const { t } = useI18n();
-  const { cwd } = useContext(PanelContext);
+  const { conversationId, projectId } = useContext(PanelContext);
   return (
     <div className="flex h-full items-center">
       <NewTabMenu
@@ -149,7 +160,7 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
             id: crypto.randomUUID(),
             component: 'terminal',
             title: nextTerminalTitle(props.containerApi, t('Terminal')),
-            params: { cwd },
+            params: { conversationId, projectId },
             position: { referenceGroup: props.group },
           });
         }}
@@ -173,7 +184,13 @@ function useIsDark(): boolean {
   return isDark;
 }
 
-function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd?: string }) {
+function ConversationDock({
+  conversationId,
+  projectId,
+}: {
+  conversationId: string;
+  projectId: string;
+}) {
   const isDark = useIsDark();
 
   const onReady = (event: DockviewReadyEvent) => {
@@ -199,7 +216,7 @@ function ConversationDock({ conversationId, cwd }: { conversationId: string; cwd
   };
 
   return (
-    <PanelContext.Provider value={{ cwd }}>
+    <PanelContext.Provider value={{ conversationId, projectId }}>
       <div className="enso-side-dock h-full">
         <DockviewReact
           components={DOCK_COMPONENTS}
@@ -219,7 +236,6 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const open = useSidePanelStore((s) => s.open);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);
-  const projects = useSettingsStore((s) => s.projects);
   const [mountedIds, setMountedIds] = useState<string[]>([]);
   const activeId = conversation?.id;
   if (activeId && !mountedIds.includes(activeId)) {
@@ -239,11 +255,9 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
           <div className="relative min-h-0 flex-1">
             {visibleIds.map((id) => {
               const conv = conversations[id];
-              const cwd =
-                conv.worktree?.path ?? projects.find((p) => p.id === conv.projectId)?.path;
               return (
                 <div key={id} className={cn('absolute inset-0', id !== activeId && 'hidden')}>
-                  <ConversationDock conversationId={id} cwd={cwd} />
+                  <ConversationDock conversationId={id} projectId={conv.projectId} />
                 </div>
               );
             })}
