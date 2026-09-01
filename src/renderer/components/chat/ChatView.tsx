@@ -347,6 +347,7 @@ export function ChatView() {
                       }
                     />
                     <ModelPicker
+                      listenHotkey
                       providers={enabledProviders}
                       providerId={provider?.id ?? ''}
                       modelId={effectiveModelId}

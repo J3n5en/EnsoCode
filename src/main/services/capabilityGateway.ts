@@ -602,6 +602,8 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'toggle-sidebar': 'mod+b',
   'toggle-side-panel': 'mod+j',
   'open-settings': 'mod+,',
+  'switch-model': 'mod+.',
+  'focus-composer': 'mod+l',
   'new-conversation': 'mod+n',
   'next-tab': process.platform === 'darwin' ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': process.platform === 'darwin' ? 'ctrl+shift+tab' : 'mod+shift+tab',

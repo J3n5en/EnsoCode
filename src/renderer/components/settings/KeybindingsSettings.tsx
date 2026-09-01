@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Kbd } from '@/components/ui/kbd';
 import { useI18n } from '@/i18n';
 import {
+  ACTION_HINT_KEYS,
   ACTION_LABEL_KEYS,
   DEFAULT_KEYBINDINGS,
   effectiveKeybindings,
@@ -70,7 +71,12 @@ function KeybindingsSection() {
         const isCustom = keybindings[action] !== undefined;
         return (
           <div key={action} className="flex items-center gap-3 px-3 py-2">
-            <span className="min-w-0 flex-1 text-sm">{t(ACTION_LABEL_KEYS[action])}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm">{t(ACTION_LABEL_KEYS[action])}</p>
+              {ACTION_HINT_KEYS[action] && (
+                <p className="text-muted-foreground text-xs">{t(ACTION_HINT_KEYS[action])}</p>
+              )}
+            </div>
             {isCapturing && conflictWith && (
               <span className="text-xs text-destructive">
                 {t('Already used by "{{label}}"', { label: t(ACTION_LABEL_KEYS[conflictWith]) })}

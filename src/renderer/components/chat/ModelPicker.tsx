@@ -26,6 +26,12 @@ import { useModelMeta } from '@/stores/modelMeta';
 import { formatTokens } from '@/stores/sessions/stats';
 import { interceptRootCascadeEscape, markSubmenuOpen } from './modelPickerCascadeEsc';
 
+export const OPEN_CHAT_MODEL_PICKER_EVENT = 'enso:open-chat-model-picker';
+
+export function requestOpenChatModelPicker() {
+  window.dispatchEvent(new Event(OPEN_CHAT_MODEL_PICKER_EVENT));
+}
+
 /** 档位显示文案的 t() key（不是已翻译文本）；沿用既有英文短词，字典里已配好中文译文 */
 const LEVEL_LABEL_KEYS: Record<ThinkingLevel, string> = {
   low: 'Low',
@@ -87,6 +93,8 @@ interface ModelPickerProps {
   thinkingLevel: ThinkingLevel;
   /** 子代理模型清单等场景只复用 provider/account/model 级联，不展示 reasoning/thinking。 */
   showReasoningControls?: boolean;
+  /** 仅会话工具行：响应全局「切换模型」快捷键并聚焦搜索框 */
+  listenHotkey?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -378,6 +386,7 @@ export function ModelPicker({
   reasoningEnabled,
   thinkingLevel,
   showReasoningControls = true,
+  listenHotkey = false,
   onSelect,
   onReasoningChange,
   onThinkingChange,
@@ -387,6 +396,10 @@ export function ModelPicker({
   const [keyword, setKeyword] = useState('');
   const openSubmenuIdsRef = useRef(new Set<string>());
   const searchFocusedRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingSearchFocusRef = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
   const [hoverLockedIds, setHoverLockedIds] = useState<ReadonlySet<string>>(new Set());
   const [oauthInfos, setOauthInfos] = useState<OauthProviderInfo[]>([]);
   const [metaByProvider, setMetaByProvider] = useState<Record<string, Record<string, ModelMeta>>>(
@@ -420,14 +433,43 @@ export function ModelPicker({
 
   // 打开时只清搜索词。搜索框 tabIndex=-1，避免根菜单 initialFocus 落到第一个可聚焦的
   // input 上；级联态焦点必须留在 Menu item，Esc 才能逐级退。点进搜索框 / 有关键词才是
-  // 搜索模式，那时没有级联，Esc 一次关整棵。
+  // 搜索模式，那时没有级联，Esc 一次关整棵。快捷键打开则主动聚焦搜索框。
   useEffect(() => {
     if (!open) return;
     setKeyword('');
-    searchFocusedRef.current = false;
     openSubmenuIdsRef.current.clear();
     setHoverLockedIds(new Set());
+    const focusSearch = pendingSearchFocusRef.current;
+    pendingSearchFocusRef.current = false;
+    searchFocusedRef.current = focusSearch;
+    if (!focusSearch) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchFocusedRef.current = true;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [open]);
+
+  useEffect(() => {
+    if (!listenHotkey) return;
+    const onHotkey = () => {
+      if (openRef.current) {
+        searchInputRef.current?.focus();
+        searchFocusedRef.current = true;
+        return;
+      }
+      pendingSearchFocusRef.current = true;
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_CHAT_MODEL_PICKER_EVENT, onHotkey);
+    return () => window.removeEventListener(OPEN_CHAT_MODEL_PICKER_EVENT, onHotkey);
+  }, [listenHotkey]);
 
   const oauthAccountsByKey = useMemo(() => {
     const table: Record<string, { email?: string; plan?: string }> = {};
@@ -592,6 +634,7 @@ export function ModelPicker({
 
         <div className="-mx-1 -mt-1 mb-1 border-b p-2">
           <input
+            ref={searchInputRef}
             data-model-picker="search"
             tabIndex={-1}
             value={keyword}

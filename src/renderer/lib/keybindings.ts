@@ -5,6 +5,8 @@ export const KEYBINDING_ACTIONS = [
   'toggle-sidebar',
   'toggle-side-panel',
   'open-settings',
+  'switch-model',
+  'focus-composer',
   'new-conversation',
   'next-tab',
   'prev-tab',
@@ -17,11 +19,18 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'Toggle sidebar',
   'toggle-side-panel': 'Toggle side panel',
   'open-settings': 'Open settings',
+  'switch-model': 'Switch model',
+  'focus-composer': 'Focus chat input',
   'new-conversation': 'New conversation',
   'next-tab': 'Next coworker tab',
   'prev-tab': 'Previous coworker tab',
   'new-side-tab': 'New terminal tab',
   'close-side-tab': 'Close terminal tab',
+};
+
+/** 仅部分动作需要补充生效范围，没有就不渲染 */
+export const ACTION_HINT_KEYS: Partial<Record<KeybindingAction, string>> = {
+  'switch-model': 'Only when the chat input is focused',
 };
 
 export const IS_MAC = navigator.platform.startsWith('Mac');
@@ -30,6 +39,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'mod+b',
   'toggle-side-panel': 'mod+j',
   'open-settings': 'mod+,',
+  'switch-model': 'mod+.',
+  'focus-composer': 'mod+l',
   'new-conversation': 'mod+n',
   // Ctrl+Tab 循环 coworker 标签(浏览器惯例);非 mac 上 Ctrl 即 mod
   'next-tab': IS_MAC ? 'ctrl+tab' : 'mod+tab',

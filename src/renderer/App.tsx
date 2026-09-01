@@ -22,6 +22,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
@@ -138,6 +139,9 @@ export default function App() {
       } else if (pressed === bindings['close-side-tab']) {
         e.preventDefault();
         closeActiveSidePanelTab();
+      } else if (pressed === bindings['focus-composer']) {
+        e.preventDefault();
+        requestFocusComposer();
       }
     };
     window.addEventListener('keydown', onKeyDown);

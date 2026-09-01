@@ -10,14 +10,17 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Button } from '@/components/ui/button';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
+import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
-import { registerComposerInsert } from './composerMentionBridge';
+import { useSettingsStore } from '@/stores/settings';
+import { registerComposerFocus, registerComposerInsert } from './composerMentionBridge';
 import { COMPOSER_DROP_ID } from './dragDrop';
 import { MentionChip } from './MentionChip';
 import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
 import { MentionPicker } from './MentionPicker';
 import type { ComposerPayload, MentionSegment } from './mentionComposer';
 import { createEditorPayload, mentionPopupLayout, resolvePopupKeyAction } from './mentionComposer';
+import { requestOpenChatModelPicker } from './ModelPicker';
 import { SlashChip, splitSlashCommand } from './SlashChip';
 
 interface ComposerProps {
@@ -86,10 +89,16 @@ export function Composer({
   // 侧栏拖入(dnd-kit):会话/项目行落到输入区插 mention chip。
   // 与 OS 文件拖入(HTML5 dnd)互不干扰:两套事件体系独立。
   const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({ id: COMPOSER_DROP_ID });
-  useEffect(
-    () => registerComposerInsert((candidate) => editorRef.current?.insertMention(candidate)),
-    []
-  );
+  useEffect(() => {
+    const unsubInsert = registerComposerInsert((candidate) =>
+      editorRef.current?.insertMention(candidate)
+    );
+    const unsubFocus = registerComposerFocus(() => editorRef.current?.focus());
+    return () => {
+      unsubInsert();
+      unsubFocus();
+    };
+  }, []);
   const editorRef = useRef<MentionEditorHandle>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
@@ -348,6 +357,12 @@ export function Composer({
       }
     }
     if (isComposing) return;
+    const pressed = eventToBinding(event);
+    if (pressed && pressed === effectiveKeybindings(useSettingsStore.getState().keybindings)['switch-model']) {
+      event.preventDefault();
+      requestOpenChatModelPicker();
+      return;
+    }
     if (event.key === 'Backspace' && slash && content.length === 0 && !editorHasMentions) {
       event.preventDefault();
       setSlash(null);
