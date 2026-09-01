@@ -7,6 +7,7 @@ export const KEYBINDING_ACTIONS = [
   'open-settings',
   'switch-model',
   'focus-composer',
+  'find-in-chat',
   'new-conversation',
   'next-tab',
   'prev-tab',
@@ -21,6 +22,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'open-settings': 'Open settings',
   'switch-model': 'Switch model',
   'focus-composer': 'Focus chat input',
+  'find-in-chat': 'Find in conversation',
   'new-conversation': 'New conversation',
   'next-tab': 'Next coworker tab',
   'prev-tab': 'Previous coworker tab',
@@ -41,6 +43,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'open-settings': 'mod+,',
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',
+  'find-in-chat': 'mod+f',
   'new-conversation': 'mod+n',
   // Ctrl+Tab 循环 coworker 标签(浏览器惯例);非 mac 上 Ctrl 即 mod
   'next-tab': IS_MAC ? 'ctrl+tab' : 'mod+tab',

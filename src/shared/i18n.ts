@@ -32,6 +32,9 @@ export const zhTranslations: Record<string, string> = {
   'Open settings': '打开设置',
   'Switch model': '切换模型',
   'Focus chat input': '聚焦输入框',
+  'Find in conversation': '在对话中查找',
+  'Search conversations...': '搜索会话...',
+  'Search messages...': '搜索消息...',
   'Only when the chat input is focused': '仅在输入框聚焦时生效',
   'Next coworker tab': '下一个 coworker 标签',
   'Previous coworker tab': '上一个 coworker 标签',
@@ -574,6 +577,7 @@ export const zhTranslations: Record<string, string> = {
   'Drop here to pin': '拖到此处置顶',
   Pin: '置顶',
   Unpin: '取消置顶',
+  Rename: '重命名',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',

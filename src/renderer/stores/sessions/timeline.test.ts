@@ -442,3 +442,58 @@ describe('streaming 判定(最后一个有内容的 part)', () => {
     ]);
   });
 });
+
+describe('工具路径摘要相对化', () => {
+  const cwd = '/Users/j3n5en/project/enso-code';
+  const tool = (args: Record<string, unknown>, root?: string) =>
+    buildTimeline(
+      [{ role: 'assistant', content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: args }] }],
+      false,
+      [],
+      root
+    )[0];
+
+  it('项目内绝对路径显示相对路径', () => {
+    expect(
+      tool({ path: `${cwd}/src/renderer/components/chat/Markdown.tsx` }, cwd)
+    ).toMatchObject({ summary: 'src/renderer/components/chat/Markdown.tsx' });
+  });
+
+  it('file_path 同样相对化', () => {
+    expect(tool({ file_path: `${cwd}/a.ts` }, cwd)).toMatchObject({ summary: 'a.ts' });
+  });
+
+  it('项目外路径保持绝对', () => {
+    expect(tool({ path: '/tmp/foo.ts' }, cwd)).toMatchObject({ summary: '/tmp/foo.ts' });
+  });
+
+  it('未传 cwd 保持原样', () => {
+    expect(tool({ path: `${cwd}/a.ts` })).toMatchObject({ summary: `${cwd}/a.ts` });
+  });
+
+  it('前缀碰巧相同的目录不误切', () => {
+    expect(tool({ path: `${cwd}-bak/a.ts` }, cwd)).toMatchObject({
+      summary: `${cwd}-bak/a.ts`,
+    });
+  });
+
+  it('cwd 本身显示为 .', () => {
+    expect(tool({ path: cwd }, cwd)).toMatchObject({ summary: '.' });
+  });
+
+  it('command 不受影响', () => {
+    expect(
+      buildTimeline(
+        [
+          {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'pnpm test' } }],
+          },
+        ],
+        false,
+        [],
+        cwd
+      )[0]
+    ).toMatchObject({ summary: 'pnpm test' });
+  });
+});

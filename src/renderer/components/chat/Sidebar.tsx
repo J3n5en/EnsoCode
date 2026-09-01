@@ -25,8 +25,10 @@ import {
   MessageSquarePlus,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
   Pin,
   PinOff,
+  Search,
   Settings,
   Sparkles,
   Trash2,
@@ -45,6 +47,8 @@ import {
   projectDragId,
   routeDrop,
 } from '@/components/chat/dragDrop';
+import { matchesQuery } from '@/components/chat/chatSearch';
+import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import {
   ContextMenu,
@@ -53,6 +57,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { Input } from '@/components/ui/input';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
@@ -242,6 +247,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
   };
   // 展开显示全部会话的项目(会话级状态,重启回到折叠)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [listQuery, setListQuery] = useState('');
 
   const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds);
   const archivedIds = archivedConversationIds(order, conversations);
@@ -250,6 +256,15 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     conversations,
     orderedProjects.map((project) => project.id)
   );
+  const searching = listQuery.trim().length > 0;
+  const convMatches = (id: string) =>
+    matchesQuery(listQuery, [conversations[id]?.title || t('New conversation')]);
+  const visiblePinnedIds = searching ? pinnedIds.filter(convMatches) : pinnedIds;
+  const visibleArchivedGroups = searching
+    ? archivedGroups
+        .map((group) => ({ ...group, ids: group.ids.filter(convMatches) }))
+        .filter((group) => group.ids.length > 0)
+    : archivedGroups;
   // 底部「已归档」栏目的折叠态(缺省收起,重启回到收起)
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archiveCleanupOpen, setArchiveCleanupOpen] = useState<string | null>(null);
@@ -395,6 +410,17 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             <FolderPlus className="h-4 w-4" />
           </button>
         </div>
+        <div className="shrink-0 border-b px-2 py-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={listQuery}
+              onChange={(e) => setListQuery(e.target.value)}
+              placeholder={t('Search conversations...')}
+              className="h-8 text-xs [&_input]:pl-8"
+            />
+          </div>
+        </div>
 
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
           {projects.length === 0 && (
@@ -415,7 +441,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               </div>
             </PinnedDropZone>
           )}
-          {pinnedIds.length > 0 && (
+          {visiblePinnedIds.length > 0 && (
             <PinnedDropZone data-slot="pinned-section">
               <div className="flex items-center gap-1.5 px-2 py-2">
                 <Pin className="h-3.5 w-3.5 text-muted-foreground" />
@@ -423,10 +449,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
               </div>
               <div className="flex flex-col gap-y-0.5">
                 <SortableContext
-                  items={pinnedIds.map((id) => pinnedChatDragId(id))}
+                  items={visiblePinnedIds.map((id) => pinnedChatDragId(id))}
                   strategy={verticalListSortingStrategy}
                 >
-                  {pinnedIds.map((id) => (
+                  {visiblePinnedIds.map((id) => (
                     <SortablePinnedChat key={id} id={id} conversation={conversations[id]}>
                       <ConversationRow
                         id={id}
@@ -486,7 +512,13 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           >
             {orderedProjects.map((project) => {
               const projectConversations = projectConversationIds(order, conversations, project.id);
-              const folded = collapsedProjects[project.id] === true;
+              const projectHit = matchesQuery(listQuery, [project.name, project.path]);
+              const visibleConversations =
+                !searching || projectHit
+                  ? projectConversations
+                  : projectConversations.filter(convMatches);
+              if (searching && visibleConversations.length === 0) return null;
+              const folded = searching ? false : collapsedProjects[project.id] === true;
               return (
                 <SortableProject key={project.id} project={project}>
                   {(drag) => (
@@ -569,9 +601,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                             className="overflow-hidden"
                           >
                             <div className="mt-0.5 flex flex-col gap-y-0.5">
-                              {(expandedProjects[project.id]
-                                ? projectConversations
-                                : projectConversations.slice(0, COLLAPSED_SESSION_LIMIT)
+                              {(searching || expandedProjects[project.id]
+                                ? visibleConversations
+                                : visibleConversations.slice(0, COLLAPSED_SESSION_LIMIT)
                               ).map((id) => (
                                 <motion.div key={id} layout="position" transition={springStandard}>
                                   <DraggableChat id={id} conversation={conversations[id]}>
@@ -605,7 +637,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                                   </DraggableChat>
                                 </motion.div>
                               ))}
-                              {projectConversations.length > COLLAPSED_SESSION_LIMIT && (
+                              {!searching && projectConversations.length > COLLAPSED_SESSION_LIMIT && (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -623,7 +655,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                                       })}
                                 </button>
                               )}
-                              {projectConversations.length === 0 && (
+                              {visibleConversations.length === 0 && (
                                 <p className="py-1.5 pl-9 text-xs text-muted-foreground">
                                   {t('No conversations yet')}
                                 </p>
@@ -640,11 +672,11 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           </SortableContext>
         </div>
 
-        {archivedIds.length > 0 && (
+        {(searching ? visibleArchivedGroups.length > 0 : archivedIds.length > 0) && (
           <div data-slot="archived-section" className="shrink-0 border-t p-2">
             {/* 列表在折叠头上方：固定底部向上展开 */}
             <AnimatePresence initial={false}>
-              {archivedOpen && (
+              {(searching || archivedOpen) && (
                 <motion.div
                   initial="initial"
                   animate="animate"
@@ -654,7 +686,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                   className="overflow-hidden"
                 >
                   <div className="mb-0.5 flex max-h-72 flex-col gap-y-1.5 overflow-y-auto">
-                    {archivedGroups.map((group) => {
+                    {visibleArchivedGroups.map((group) => {
                       const projectName =
                         projects.find((project) => project.id === group.projectId)?.name ??
                         t('Other');
@@ -1133,9 +1165,11 @@ function ConversationRow({
   onRemove,
 }: ConversationRowProps) {
   const { t } = useI18n();
+  const [renaming, setRenaming] = useState(false);
   const pinned = conversation.pinned === true;
   const archived = conversation.archived === true;
   const PinIcon = pinned ? PinOff : Pin;
+  const displayTitle = conversation.title || t('New conversation');
   const row = (
     <div
       data-slot="conversation-row"
@@ -1144,9 +1178,16 @@ function ConversationRow({
         'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-4 text-sm transition-colors',
         active ? 'bg-muted' : 'hover:bg-muted/50'
       )}
-      onClick={() => onSelect(id)}
+      onClick={() => {
+        if (!renaming) onSelect(id);
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setRenaming(true);
+      }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') onSelect(id);
+        if (e.key === 'Enter' && !renaming) onSelect(id);
       }}
       role="button"
       tabIndex={0}
@@ -1154,57 +1195,72 @@ function ConversationRow({
     >
       <ConversationDot conversation={conversation} />
       {isolated && <WorktreeBadge status={worktreeStatus} />}
-      <span className="min-w-0 flex-1 truncate">
-        {conversation.title || t('New conversation')}
-        {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
-      </span>
-      <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
-        {formatRelativeTime(
-          conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
-          locale,
-          nowTick
-        )}
-      </span>
-      {!archived && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin(id);
+      {renaming ? (
+        <ConversationTitleEdit
+          title={displayTitle}
+          onCommit={(title) => {
+            useSessionsStore.getState().renameConversation(id, title);
+            setRenaming(false);
           }}
-          className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
-          title={pinned ? t('Unpin') : t('Pin')}
-        >
-          <PinIcon className="h-3.5 w-3.5" />
-        </button>
+          onCancel={() => setRenaming(false)}
+        />
+      ) : (
+        <span className="min-w-0 flex-1 truncate">
+          {displayTitle}
+          {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
+        </span>
       )}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleArchive(id);
-        }}
-        className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
-        title={archived ? t('Unarchive') : t('Archive')}
-      >
-        {archived ? (
-          <ArchiveRestore className="h-3.5 w-3.5" />
-        ) : (
-          <Archive className="h-3.5 w-3.5" />
-        )}
-      </button>
-      {archived && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(id);
-          }}
-          className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
-          title={t('Delete')}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+      {!renaming && (
+        <>
+          <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+            {formatRelativeTime(
+              conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
+              locale,
+              nowTick
+            )}
+          </span>
+          {!archived && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin(id);
+              }}
+              className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
+              title={pinned ? t('Unpin') : t('Pin')}
+            >
+              <PinIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleArchive(id);
+            }}
+            className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
+            title={archived ? t('Unarchive') : t('Archive')}
+          >
+            {archived ? (
+              <ArchiveRestore className="h-3.5 w-3.5" />
+            ) : (
+              <Archive className="h-3.5 w-3.5" />
+            )}
+          </button>
+          {archived && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove(id);
+              }}
+              className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
+              title={t('Delete')}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -1212,6 +1268,10 @@ function ConversationRow({
     <ContextMenu>
       <ContextMenuTrigger render={row as React.ReactElement<Record<string, unknown>>} />
       <ContextMenuPopup className="min-w-36">
+        <ContextMenuItem onClick={() => setRenaming(true)}>
+          <Pencil />
+          {t('Rename')}
+        </ContextMenuItem>
         {!archived && (
           <ContextMenuItem onClick={() => onTogglePin(id)}>
             <PinIcon />

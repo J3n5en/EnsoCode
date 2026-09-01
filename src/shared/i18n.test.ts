@@ -53,6 +53,7 @@ const MAPPED_I18N_KEYS = [
   'Open settings',
   'Switch model',
   'Focus chat input',
+  'Find in conversation',
   'Only when the chat input is focused',
   'New conversation',
   'Next coworker tab',

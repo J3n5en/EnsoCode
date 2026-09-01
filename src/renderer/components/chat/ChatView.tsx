@@ -1,10 +1,11 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { resolveChatModel } from '@shared/defaultModel';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
+import { eventToBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import {
   oauthCredentialContext,
@@ -15,6 +16,8 @@ import {
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline, terminalErrorText } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { ChatFindBar, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
+import { timelineSearchHits } from './chatSearch';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
@@ -172,12 +175,26 @@ export function ChatView() {
   }, [t, skills, projectSkills, conversation]);
 
   const timelineRef = useRef<MessageTimelineHandle>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findIndex, setFindIndex] = useState(0);
 
   const running = conversation?.status === 'running';
   const busy = running || conversation?.spawning === true;
+  const toolCwd = parent?.worktree?.path ?? project?.path;
   const timeline = useMemo(
-    () => buildTimeline(conversation?.messages ?? [], running, conversation?.customEntries ?? []),
-    [conversation?.customEntries, conversation?.messages, running]
+    () =>
+      buildTimeline(
+        conversation?.messages ?? [],
+        running,
+        conversation?.customEntries ?? [],
+        toolCwd
+      ),
+    [conversation?.customEntries, conversation?.messages, running, toolCwd]
+  );
+  const findHits = useMemo(
+    () => (findOpen ? timelineSearchHits(timeline, findQuery) : []),
+    [findOpen, findQuery, timeline]
   );
   const capabilityApprovals = useMemo(
     () =>
@@ -199,6 +216,55 @@ export function ChatView() {
       void useSessionsStore.getState().resumeConversation(parent.id);
     }
   }, [modelResolution, parent]);
+
+  useEffect(() => {
+    const open = () => {
+      setFindOpen(true);
+    };
+    window.addEventListener(OPEN_CHAT_FIND_EVENT, open);
+    return () => window.removeEventListener(OPEN_CHAT_FIND_EVENT, open);
+  }, []);
+
+  useEffect(() => {
+    setFindIndex(0);
+    setFindQuery('');
+    setFindOpen(false);
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    if (!findOpen || findHits.length === 0) return;
+    const i = Math.min(findIndex, findHits.length - 1);
+    timelineRef.current?.scrollToKey(findHits[i].key);
+  }, [findOpen, findIndex, findHits]);
+
+  const stepFind = useCallback(
+    (dir: 1 | -1) => {
+      if (findHits.length === 0) return;
+      setFindIndex((i) => (i + dir + findHits.length) % findHits.length);
+    },
+    [findHits.length]
+  );
+
+  useEffect(() => {
+    if (!findOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setFindOpen(false);
+        return;
+      }
+      const pressed = eventToBinding(e);
+      if (pressed === 'mod+g') {
+        e.preventDefault();
+        stepFind(1);
+      } else if (pressed === 'mod+shift+g') {
+        e.preventDefault();
+        stepFind(-1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [findOpen, stepFind]);
 
   if (!conversation) {
     return (
@@ -235,6 +301,23 @@ export function ChatView() {
         />
       )}
 
+      {findOpen && (
+        <ChatFindBar
+          query={findQuery}
+          onQueryChange={(value) => {
+            setFindQuery(value);
+            setFindIndex(0);
+          }}
+          current={findHits.length === 0 ? 0 : Math.min(findIndex, findHits.length - 1) + 1}
+          total={findHits.length}
+          onPrev={() => stepFind(-1)}
+          onNext={() => stepFind(1)}
+          onClose={() => {
+            setFindOpen(false);
+            setFindQuery('');
+          }}
+        />
+      )}
       {/* key 换会话强制重挂：Virtuoso 的 initialTopMostItemIndex 只在挂载时生效，天然实现切会话回底 */}
       <MessageTimeline
         key={conversation.id}
@@ -246,6 +329,8 @@ export function ChatView() {
         lastOutputAt={conversation.lastOutputAt}
         error={terminalErrorText(conversation.messages, conversation.error)}
         emptyTitle={project?.name ?? 'EnsoCode'}
+        searchQuery={findOpen ? findQuery : ''}
+        activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
       />
 
       <div className="@container pt-1">

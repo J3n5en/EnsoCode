@@ -22,6 +22,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
 import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
@@ -142,6 +143,9 @@ export default function App() {
       } else if (pressed === bindings['focus-composer']) {
         e.preventDefault();
         requestFocusComposer();
+      } else if (pressed === bindings['find-in-chat']) {
+        e.preventDefault();
+        requestOpenChatFind();
       }
     };
     window.addEventListener('keydown', onKeyDown);

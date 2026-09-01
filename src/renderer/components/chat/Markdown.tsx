@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { highlightNode } from './highlightQuery';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { MermaidRenderer } from './MermaidRenderer';
@@ -67,14 +68,28 @@ const FILE_PATH_RE =
   /^(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$|^[\w.-]+\.\w{1,8}:\d+(?:-\d+)?$/;
 
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
-export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export function Markdown({
+  text,
+  streaming = false,
+  searchQuery = '',
+  activeNth = -1,
+}: {
+  text: string;
+  streaming?: boolean;
+  searchQuery?: string;
+  activeNth?: number;
+}) {
   const { t } = useI18n();
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkGithubAlerts]}
       components={{
         p: ({ children }) => (
-          <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>
+          <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">
+            {searchQuery.trim()
+              ? highlightNode(children, searchQuery, activeNth, { n: 0 })
+              : children}
+          </p>
         ),
         a: ({ children, href }) => (
           <a

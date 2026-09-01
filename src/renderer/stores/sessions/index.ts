@@ -169,6 +169,8 @@ interface SessionsState {
   removeConversation(id: string): void;
   /** 切换会话置顶 */
   togglePinConversation(id: string): void;
+  /** 手动改会话标题（侧栏 / tab 双击或右键） */
+  renameConversation(id: string, title: string): void;
   /** 切换会话归档(归档时同时清置顶) */
   toggleArchiveConversation(id: string): void;
   dispatchAgent(
@@ -1117,6 +1119,16 @@ export const useSessionsStore = create<SessionsState>()(
             const conversation = state.conversations[id];
             if (!conversation) return state;
             return patch(state, id, { pinned: conversation.pinned === true ? undefined : true });
+          });
+        },
+
+        renameConversation(id, title) {
+          const next = title.trim().slice(0, 80);
+          if (!next) return;
+          set((state) => {
+            const conversation = state.conversations[id];
+            if (!conversation || conversation.title === next) return state;
+            return patch(state, id, { title: next });
           });
         },
 

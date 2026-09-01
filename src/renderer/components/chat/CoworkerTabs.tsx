@@ -1,7 +1,14 @@
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
-import { Bot, Plus, X } from 'lucide-react';
+import { Bot, Pencil, Plus, X } from 'lucide-react';
 import * as React from 'react';
+import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuPopup,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -46,13 +53,12 @@ export function CoworkerTabs({
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        <button
-          type="button"
+        <RenameableTab
+          id={parent.id}
+          label={parent.title || t('New conversation')}
           className={tabClass(displayedId === parent.id)}
-          onClick={() => useSessionsStore.getState().selectTab(parent.id, undefined)}
-        >
-          <span className="max-w-48 truncate">{parent.title || t('New conversation')}</span>
-        </button>
+          onSelect={() => useSessionsStore.getState().selectTab(parent.id, undefined)}
+        />
         {coworkers.map((coworker) => {
           const needsAttention =
             (coworker.pendingApprovals ?? []).length > 0 ||
@@ -60,33 +66,36 @@ export function CoworkerTabs({
             (coworker.pendingCapabilityAsks ?? []).length > 0;
           return (
             <div key={coworker.id} className="group/tab relative shrink-0">
-              <button
-                type="button"
+              <RenameableTab
+                id={coworker.id}
+                label={
+                  coworker.title ||
+                  coworker.child?.agentInstanceName ||
+                  coworker.coworkerName ||
+                  coworker.id
+                }
                 className={cn(
                   tabClass(displayedId === coworker.id),
                   'group-hover/tab:pr-6',
-                  // hover 在解雇按钮(兄弟节点)上时 tab 本体也保持高亮
                   displayedId !== coworker.id && 'group-hover/tab:bg-muted/50'
                 )}
-                onClick={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
-              >
-                <Bot className="h-3 w-3 shrink-0" />
-                <span className="max-w-32 truncate">
-                  {coworker.child?.agentInstanceName ?? coworker.coworkerName ?? coworker.title}
-                </span>
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 shrink-0 rounded-full',
-                    needsAttention
-                      ? 'bg-destructive animate-pulse'
-                      : coworker.status === 'running' || coworker.spawning
-                        ? 'animate-pulse bg-blue-500'
-                        : coworker.status === 'failed'
-                          ? 'bg-destructive'
-                          : 'bg-muted-foreground/30'
-                  )}
-                />
-              </button>
+                leading={<Bot className="h-3 w-3 shrink-0" />}
+                trailing={
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 shrink-0 rounded-full',
+                      needsAttention
+                        ? 'bg-destructive animate-pulse'
+                        : coworker.status === 'running' || coworker.spawning
+                          ? 'animate-pulse bg-blue-500'
+                          : coworker.status === 'failed'
+                            ? 'bg-destructive'
+                            : 'bg-muted-foreground/30'
+                    )}
+                  />
+                }
+                onSelect={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
+              />
               {/* 关闭钉在 tab 内右端(hover 现身,button 让出留白),避免游离在 tab 外 */}
               <button
                 type="button"
@@ -116,6 +125,66 @@ export function CoworkerTabs({
       {trailing}
       {hiring && <HireCoworkerDialog parentId={parent.id} onClose={() => setHiring(false)} />}
     </div>
+  );
+}
+
+function RenameableTab({
+  id,
+  label,
+  className,
+  leading,
+  trailing,
+  onSelect,
+}: {
+  id: string;
+  label: string;
+  className: string;
+  leading?: React.ReactNode;
+  trailing?: React.ReactNode;
+  onSelect: () => void;
+}) {
+  const { t } = useI18n();
+  const [renaming, setRenaming] = React.useState(false);
+  const tab = (
+    <button
+      type="button"
+      className={className}
+      onClick={() => {
+        if (!renaming) onSelect();
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setRenaming(true);
+      }}
+    >
+      {leading}
+      {renaming ? (
+        <ConversationTitleEdit
+          title={label}
+          className="max-w-48 text-xs"
+          onCommit={(title) => {
+            useSessionsStore.getState().renameConversation(id, title);
+            setRenaming(false);
+          }}
+          onCancel={() => setRenaming(false)}
+        />
+      ) : (
+        <span className="max-w-48 truncate">{label}</span>
+      )}
+      {trailing}
+    </button>
+  );
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={tab as React.ReactElement<Record<string, unknown>>} />
+      <ContextMenuPopup className="min-w-36">
+        <ContextMenuItem onClick={() => setRenaming(true)}>
+          <Pencil />
+          {t('Rename')}
+        </ContextMenuItem>
+      </ContextMenuPopup>
+    </ContextMenu>
   );
 }
 

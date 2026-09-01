@@ -14,6 +14,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
+import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
 import { TimelineRow } from './TimelineRow';
 
@@ -33,6 +34,8 @@ export interface MessageTimelineHandle {
   isAtBottom(): boolean;
   /** 非虚拟化模式的滚动容器（手机端分页需要读写 scrollTop 补偿锚点）；虚拟化下为 null */
   getScroller(): HTMLElement | null;
+  /** 滚到指定时间线行（会话内搜索） */
+  scrollToKey(key: string): void;
 }
 
 interface MessageTimelineProps {
@@ -60,6 +63,8 @@ interface MessageTimelineProps {
    * 手机端用于上滑加载更早的历史分页。
    */
   onStartReached?: () => void;
+  searchQuery?: string;
+  activeHit?: { key: string; nth: number } | null;
 }
 
 /**
@@ -77,6 +82,8 @@ export function MessageTimeline({
   emptyTitle,
   virtualize = true,
   onStartReached,
+  searchQuery = '',
+  activeHit = null,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -216,22 +223,47 @@ export function MessageTimeline({
     [pinToBottom, scrollToBottom]
   );
   useEffect(() => () => observerRef.current?.disconnect(), []);
+  const jumpTo = (key: string) => {
+    if (!virtualize) {
+      scrollerRef.current
+        ?.querySelector(`[data-nav-key="${CSS.escape(key)}"]`)
+        ?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const index = folded.findIndex(
+      (item) => item.key === key || (item.kind === 'tool-group' && groupContainsKey(item, key))
+    );
+    if (index >= 0) {
+      virtuosoRef.current?.scrollToIndex({ index, align: 'center' });
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     scrollToBottom,
     pinToBottom,
     isAtBottom: () => atBottomRef.current,
     getScroller: () => (virtualize ? null : scrollerRef.current),
+    scrollToKey: jumpTo,
   }));
 
   // 顶部触发锁存：进入顶部区域只触发一次，滚离后解锁（避免加载期间连环触发）
   const startReachedLatch = useRef(false);
 
   // 两条渲染路径（虚拟化 / 全量）共用，保证外观完全一致
+  const searchHighlight = useMemo(
+    () => ({
+      query: searchQuery,
+      activeKey: activeHit?.key ?? '',
+      activeNth: activeHit?.nth ?? -1,
+    }),
+    [searchQuery, activeHit?.key, activeHit?.nth]
+  );
+
   const renderRow = (item: TimelineItem) => (
     <div
       key={item.key}
+      data-nav-key={item.key}
       className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
-      {...(item.kind === 'user' ? { 'data-nav-key': item.key } : {})}
     >
       <RowErrorBoundary itemKey={item.key}>
         <TimelineRow item={item} onToggleGroup={toggleGroup} />
@@ -252,20 +284,8 @@ export function MessageTimeline({
     </div>
   );
 
-  const jumpTo = (key: string) => {
-    if (!virtualize) {
-      scrollerRef.current
-        ?.querySelector(`[data-nav-key="${CSS.escape(key)}"]`)
-        ?.scrollIntoView({ block: 'start' });
-      return;
-    }
-    const index = folded.findIndex((item) => item.key === key);
-    if (index >= 0) {
-      virtuosoRef.current?.scrollToIndex({ index, align: 'start' });
-    }
-  };
-
   return (
+    <ChatSearchHighlightContext.Provider value={searchHighlight}>
     <div className="@container relative min-h-0 flex-1">
       <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
       {items.length === 0 && !busy ? (
@@ -354,6 +374,17 @@ export function MessageTimeline({
         </button>
       )}
     </div>
+    </ChatSearchHighlightContext.Provider>
+  );
+}
+
+function groupContainsKey(
+  group: Extract<TimelineItem, { kind: 'tool-group' }>,
+  key: string
+): boolean {
+  return group.children.some(
+    (child) =>
+      child.key === key || (child.kind === 'tool-group' && groupContainsKey(child, key))
   );
 }
 

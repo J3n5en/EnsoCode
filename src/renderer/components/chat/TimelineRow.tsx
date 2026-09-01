@@ -35,6 +35,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { ConfirmDialog } from './ConfirmDialog';
+import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { EditDiff } from './EditDiff';
 import { Markdown } from './Markdown';
 import { mentionChipClass } from './MentionChip';
@@ -227,8 +228,17 @@ function InlineMentionCard({
 }
 
 /** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
-function InlineMentionText({ text }: { text: string }) {
+function InlineMentionText({
+  text,
+  searchQuery = '',
+  activeNth = -1,
+}: {
+  text: string;
+  searchQuery?: string;
+  activeNth?: number;
+}) {
   const segments = splitInlineMentions(text);
+  const counter = { n: 0 };
   return (
     <span className="whitespace-pre-wrap">
       {segments.map((segment, index) =>
@@ -250,7 +260,11 @@ function InlineMentionText({ text }: { text: string }) {
           />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-          <span key={index}>{segment.text}</span>
+          <span key={index}>
+            {searchQuery.trim()
+              ? renderHighlighted(segment.text, searchQuery, activeNth, counter)
+              : segment.text}
+          </span>
         )
       )}
     </span>
@@ -288,7 +302,15 @@ function MentionRefChips({
 }
 
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
-function UserText({ text }: { text: string }) {
+function UserText({
+  text,
+  searchQuery = '',
+  activeNth = -1,
+}: {
+  text: string;
+  searchQuery?: string;
+  activeNth?: number;
+}) {
   const { t } = useI18n();
   const refs = splitMentionRefs(text);
   const hasRefs = refs.files.length > 0 || refs.chats.length > 0;
@@ -301,12 +323,16 @@ function UserText({ text }: { text: string }) {
             <SlashChip name={parsed.slash} />
             {parsed.rest.trim() ? (
               <span className="ml-1.5 align-middle">
-                <InlineMentionText text={parsed.rest.trim()} />
+                <InlineMentionText
+                  text={parsed.rest.trim()}
+                  searchQuery={searchQuery}
+                  activeNth={activeNth}
+                />
               </span>
             ) : null}
           </>
         ) : (
-          <InlineMentionText text={refs.body} />
+          <InlineMentionText text={refs.body} searchQuery={searchQuery} activeNth={activeNth} />
         )}
         <MentionRefChips files={refs.files} chats={refs.chats} />
       </div>
@@ -322,7 +348,7 @@ function UserText({ text }: { text: string }) {
         <WorkspaceMigratedBanner note={migrated[1]} />
         {remainder && (
           <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm whitespace-pre-wrap">
-            <InlineMentionText text={remainder} />
+            <InlineMentionText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />
           </div>
         )}
       </div>
@@ -366,12 +392,22 @@ function UserText({ text }: { text: string }) {
           <span className="font-semibold">{t('Role')}</span> · {role[1]}
         </div>
       )}
-      {fromMain ? <Markdown text={body} /> : <InlineMentionText text={body} />}
+      {fromMain ? (
+        <Markdown text={body} searchQuery={searchQuery} activeNth={activeNth} />
+      ) : (
+        <InlineMentionText text={body} searchQuery={searchQuery} activeNth={activeNth} />
+      )}
     </div>
   );
 }
 
-export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
+export const TimelineRow = memo(function TimelineRow({
+  item,
+  onToggleGroup,
+}: TimelineRowProps) {
+  const search = useChatSearchHighlight();
+  const searchQuery = search.query;
+  const activeNth = search.activeKey === item.key ? search.activeNth : -1;
   switch (item.kind) {
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
@@ -387,13 +423,15 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
               className="max-h-48 max-w-full rounded-lg border object-contain"
             />
           ))}
-          {item.text && <UserText text={item.text} />}
+          {item.text && (
+            <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
+          )}
           <RewindButton messageIndex={Number(item.key)} />
         </div>
       );
     }
     case 'text':
-      return <TextRow item={item} />;
+      return <TextRow item={item} searchQuery={searchQuery} activeNth={activeNth} />;
     case 'thinking':
       return (
         <ThinkingRow
@@ -649,10 +687,23 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
 }
 
 /** assistant 正文：markdown + hover 操作条（复制 / 时间 / 该轮耗时·TTFT·tok/s） */
-function TextRow({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
+function TextRow({
+  item,
+  searchQuery = '',
+  activeNth = -1,
+}: {
+  item: Extract<TimelineItem, { kind: 'text' }>;
+  searchQuery?: string;
+  activeNth?: number;
+}) {
   return (
     <div className="group text-sm">
-      <Markdown text={item.text} streaming={item.streaming} />
+      <Markdown
+        text={item.text}
+        streaming={item.streaming}
+        searchQuery={searchQuery}
+        activeNth={activeNth}
+      />
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <CopyButton text={item.text} />

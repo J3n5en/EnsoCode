@@ -85,12 +85,29 @@ const SUMMARY_KEYS = [
   'reason',
 ];
 
-function summarizeArgs(args: unknown): string {
+const PATH_SUMMARY_KEYS = new Set(['path', 'file_path']);
+
+/** 项目内绝对路径收成相对路径；前缀碰巧相同的目录不误切 */
+export function toProjectRelativePath(value: string, cwd?: string): string {
+  if (!cwd) return value;
+  const root = cwd.replace(/[/\\]+$/, '');
+  if (!root) return value;
+  if (value === root) return '.';
+  const prefix = root.endsWith('/') || root.endsWith('\\') ? root : `${root}/`;
+  if (value.startsWith(prefix)) return value.slice(prefix.length);
+  const winPrefix = `${root}\\`;
+  if (value.startsWith(winPrefix)) return value.slice(winPrefix.length).replace(/\\/g, '/');
+  return value;
+}
+
+function summarizeArgs(args: unknown, cwd?: string): string {
   if (!args || typeof args !== 'object') return '';
   const record = args as Record<string, unknown>;
   for (const key of SUMMARY_KEYS) {
     const value = record[key];
-    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'string' && value) {
+      return PATH_SUMMARY_KEYS.has(key) ? toProjectRelativePath(value, cwd) : value;
+    }
   }
   const json = JSON.stringify(record);
   return json === '{}' ? '' : json.slice(0, 80);
@@ -160,7 +177,11 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
  * - assistant 的 text/thinking 各自成块，未完结（isLast 且会话 running）的块标 streaming
  * 纯函数，输入不被修改。
  */
-function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): TimelineItem[] {
+function buildMessageTimeline(
+  messages: ProjectedMessage[],
+  running: boolean,
+  cwd?: string
+): TimelineItem[] {
   const results = new Map<
     string,
     {
@@ -264,7 +285,7 @@ function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): T
             kind: 'tool',
             key,
             name: part.name,
-            summary: summarizeArgs(part.arguments),
+            summary: summarizeArgs(part.arguments, cwd),
             output: result ? result.output : null,
             state: result
               ? result.isError
@@ -329,9 +350,10 @@ const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage
 export function buildTimeline(
   messages: ProjectedMessage[],
   running: boolean,
-  customEntries: readonly AgentSessionCustomEntry[] = []
+  customEntries: readonly AgentSessionCustomEntry[] = [],
+  cwd?: string
 ): TimelineItem[] {
-  const messageItems = buildMessageTimeline(messages, running);
+  const messageItems = buildMessageTimeline(messages, running, cwd);
   if (customEntries.length === 0) return messageItems;
   return [
     ...messageItems.map((item, order) => ({
