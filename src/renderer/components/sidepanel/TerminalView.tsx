@@ -51,5 +51,12 @@ export function TerminalView({ termId, cwd }: TerminalViewProps) {
     updateTerminalAppearance(getXtermTheme(terminalTheme), fontFamily, fontSize);
   }, [terminalTheme, fontFamily, fontSize]);
 
-  return <div ref={wrapperRef} className="h-full w-full overflow-hidden p-2" />;
+  // padding 区域与终端同色,避免主题深色背景外露出面板底色白边
+  return (
+    <div
+      ref={wrapperRef}
+      className="h-full w-full overflow-hidden p-2"
+      style={{ backgroundColor: getXtermTheme(terminalTheme)?.background }}
+    />
+  );
 }
