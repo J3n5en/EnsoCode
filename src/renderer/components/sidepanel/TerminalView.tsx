@@ -1,7 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
-import { attachTerminal, detachTerminal, updateTerminalAppearance } from '@/lib/terminalRegistry';
+import {
+  attachTerminal,
+  clearTerminalSearch,
+  detachTerminal,
+  findInTerminal,
+  updateTerminalAppearance,
+} from '@/lib/terminalRegistry';
 import { useSettingsStore } from '@/stores/settings';
+import { TerminalSearchBar } from './TerminalSearchBar';
 
 interface TerminalViewProps {
   termId: string;
@@ -19,6 +26,7 @@ export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -63,10 +71,20 @@ export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
     };
     tryAttach();
 
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        e.stopPropagation();
+        setSearchOpen(true);
+      }
+    };
+    wrapper.addEventListener('keydown', onKey, true);
+
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
       observer?.disconnect();
+      wrapper.removeEventListener('keydown', onKey, true);
       detachTerminal(termId);
     };
   }, [termId]);
@@ -75,11 +93,34 @@ export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
     updateTerminalAppearance(getXtermTheme(terminalTheme), fontFamily, fontSize);
   }, [terminalTheme, fontFamily, fontSize]);
 
+  const findNext = useCallback(
+    (query: string, options?: Parameters<typeof findInTerminal>[3]) =>
+      findInTerminal(termId, query, 'next', options),
+    [termId]
+  );
+  const findPrev = useCallback(
+    (query: string, options?: Parameters<typeof findInTerminal>[3]) =>
+      findInTerminal(termId, query, 'prev', options),
+    [termId]
+  );
+  const clearSearch = useCallback(() => clearTerminalSearch(termId), [termId]);
+
+  const theme = getXtermTheme(terminalTheme);
+
   return (
     <div
       ref={wrapperRef}
-      className="h-full w-full overflow-hidden p-2"
-      style={{ backgroundColor: getXtermTheme(terminalTheme)?.background }}
-    />
+      className="relative h-full w-full overflow-hidden p-2"
+      style={{ backgroundColor: theme?.background }}
+    >
+      <TerminalSearchBar
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onFindNext={findNext}
+        onFindPrevious={findPrev}
+        onClear={clearSearch}
+        theme={theme}
+      />
+    </div>
   );
 }

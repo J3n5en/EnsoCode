@@ -4,6 +4,9 @@
  */
 
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import { tabTitleFromTerminal } from '@/lib/terminalTitle';
@@ -16,9 +19,16 @@ export interface TerminalOptions {
   fontSize: number;
 }
 
+export interface TerminalSearchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+}
+
 export interface TerminalInstance {
   term: Terminal;
   fit: FitAddon;
+  search: SearchAddon;
   host: HTMLDivElement;
   opened: boolean;
   onTitle?: (title: string) => void;
@@ -52,13 +62,23 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
     scrollback: 5000,
   });
   const fit = new FitAddon();
+  const search = new SearchAddon();
   term.loadAddon(fit);
+  term.loadAddon(search);
+  term.loadAddon(
+    new WebLinksAddon((_ev, uri) => {
+      window.open(uri, '_blank');
+    })
+  );
+  const unicode11 = new Unicode11Addon();
+  term.loadAddon(unicode11);
+  term.unicode.activeVersion = '11';
   const host = document.createElement('div');
   host.dataset.termId = termId;
   host.style.width = '100%';
   host.style.height = '100%';
   term.onData((data) => void window.electronAPI.terminal.write(termId, data));
-  const instance: TerminalInstance = { term, fit, host, opened: false };
+  const instance: TerminalInstance = { term, fit, search, host, opened: false };
   term.onTitleChange((title) => {
     const next = tabTitleFromTerminal(title);
     if (next) instance.onTitle?.(next);
@@ -108,6 +128,23 @@ export function updateTerminalAppearance(
     term.options.fontFamily = fontFamily;
     term.options.fontSize = fontSize;
   }
+}
+
+export function findInTerminal(
+  termId: string,
+  query: string,
+  direction: 'next' | 'prev',
+  options?: TerminalSearchOptions
+): boolean {
+  const search = registry.get(termId)?.search;
+  if (!search || !query) return false;
+  return direction === 'next'
+    ? search.findNext(query, options)
+    : search.findPrevious(query, options);
+}
+
+export function clearTerminalSearch(termId: string): void {
+  registry.get(termId)?.search.clearDecorations();
 }
 
 /** 关 tab:销毁 xterm(pty 由调用方 dispose) */
