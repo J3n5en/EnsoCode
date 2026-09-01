@@ -29,3 +29,16 @@
 .enso-side-dock .dv-separator {
   background: var(--border);
 }
+
+/* 拖拽幽灵会 portal 到 body,不在 .enso-side-dock 内;去掉默认白底描边框 */
+.dv-tab-ghost-drag {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.dv-tab-ghost-drag::after {
+  content: none !important;
+  outline: none !important;
+}
+.dv-tab.dv-tab-dragging {
+  background: transparent !important;
+}
