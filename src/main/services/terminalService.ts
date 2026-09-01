@@ -1,5 +1,6 @@
-import { statSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import type { TerminalCreateRequest, TerminalCreateResult } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import type { WebContents } from 'electron';
@@ -24,6 +25,42 @@ function isDirectory(dir: string): boolean {
 function defaultShell(): string {
   if (process.platform === 'win32') return process.env.COMSPEC || 'cmd.exe';
   return process.env.SHELL || '/bin/zsh';
+}
+
+let zshTitleDir: string | undefined;
+
+/** 一次性 ZDOTDIR:source 用户 zshrc 后再挂 precmd 报目录末段 */
+function zshTitleInjectDir(): string {
+  if (zshTitleDir) return zshTitleDir;
+  zshTitleDir = path.join(os.tmpdir(), 'enso-zsh-title');
+  mkdirSync(zshTitleDir, { recursive: true });
+  writeFileSync(
+    path.join(zshTitleDir, '.zshrc'),
+    [
+      '[[ -n "$ENSO_USER_ZDOTDIR" && -f "$ENSO_USER_ZDOTDIR/.zshrc" ]] && source "$ENSO_USER_ZDOTDIR/.zshrc"',
+      '[[ -z "$ENSO_USER_ZDOTDIR" && -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc"',
+      'precmd_enso_title() { printf "\\033]0;%s\\007" "${' + 'PWD##*/}"; }',
+      'autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd precmd_enso_title',
+      '',
+    ].join('\n')
+  );
+  return zshTitleDir;
+}
+
+function titleEnv(shell: string): Record<string, string> {
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    TERM: 'xterm-256color',
+    TERM_PROGRAM: 'EnsoCode',
+  };
+  if (shell.endsWith('zsh')) {
+    env.ENSO_USER_ZDOTDIR = env.ZDOTDIR ?? '';
+    env.ZDOTDIR = zshTitleInjectDir();
+  } else {
+    const prev = env.PROMPT_COMMAND ?? '';
+    env.PROMPT_COMMAND = `printf '\\033]0;%s\\007' "\${PWD##*/}"${prev ? `;${prev}` : ''}`;
+  }
+  return env;
 }
 
 /** 目录存在校验后回落 home:cwd 只决定工作目录,不涉及文件读取 */
@@ -52,12 +89,14 @@ export function createTerminal(
     return { ok: true };
   }
   try {
-    const pty = spawn(defaultShell(), [], {
+    const shell = defaultShell();
+    const env = titleEnv(shell);
+    const pty = spawn(shell, [], {
       name: 'xterm-256color',
       cwd: resolveCwd(request.cwd),
       cols: request.cols ?? 80,
       rows: request.rows ?? 24,
-      env: { ...process.env, TERM_PROGRAM: 'EnsoCode' } as Record<string, string>,
+      env,
     });
     const entry: TerminalEntry = { pty, sender };
     pty.onData((data) => {

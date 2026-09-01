@@ -6,13 +6,16 @@ import { useSettingsStore } from '@/stores/settings';
 interface TerminalViewProps {
   termId: string;
   cwd?: string;
+  onTitle?: (title: string) => void;
 }
 
 /** 把 registry 里的 xterm host 挂进视图;切走只 detach,实例与 pty 都保留 */
-export function TerminalView({ termId, cwd }: TerminalViewProps) {
+export function TerminalView({ termId, cwd, onTitle }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
+  const onTitleRef = useRef(onTitle);
+  onTitleRef.current = onTitle;
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
@@ -41,6 +44,7 @@ export function TerminalView({ termId, cwd }: TerminalViewProps) {
         raf = requestAnimationFrame(tryAttach);
         return;
       }
+      instance.onTitle = (title) => onTitleRef.current?.(title);
       const doFit = () => {
         if (!wrapper.isConnected || wrapper.clientWidth === 0) return;
         instance.fit.fit();

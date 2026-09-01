@@ -6,6 +6,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
+import { tabTitleFromTerminal } from '@/lib/terminalTitle';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalOptions {
@@ -20,6 +21,7 @@ export interface TerminalInstance {
   fit: FitAddon;
   host: HTMLDivElement;
   opened: boolean;
+  onTitle?: (title: string) => void;
 }
 
 const registry = new Map<string, TerminalInstance>();
@@ -57,6 +59,21 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
   host.style.height = '100%';
   term.onData((data) => void window.electronAPI.terminal.write(termId, data));
   const instance: TerminalInstance = { term, fit, host, opened: false };
+  term.onTitleChange((title) => {
+    const next = tabTitleFromTerminal(title);
+    if (next) instance.onTitle?.(next);
+  });
+  // OSC 7: file://host/path,macOS Terminal / 部分 zsh 用来报 cwd
+  term.parser.registerOscHandler(7, (data) => {
+    try {
+      const path = decodeURIComponent(data).replace(/^file:\/\/[^/]*/, '');
+      const next = tabTitleFromTerminal(path);
+      if (next) instance.onTitle?.(next);
+    } catch {
+      // 坏 OSC 忽略
+    }
+    return false;
+  });
   registry.set(termId, instance);
   return instance;
 }

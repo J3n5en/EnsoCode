@@ -40,7 +40,13 @@ function addTerminalPanel(api: DockviewApi, cwd: string | undefined, label: stri
 }
 
 function TerminalPanel(props: IDockviewPanelProps<{ cwd?: string }>) {
-  return <TerminalView termId={props.api.id} cwd={props.params.cwd} />;
+  return (
+    <TerminalView
+      termId={props.api.id}
+      cwd={props.params.cwd}
+      onTitle={(title) => props.api.setTitle(title)}
+    />
+  );
 }
 
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
