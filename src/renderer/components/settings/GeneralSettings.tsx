@@ -40,7 +40,28 @@ export function GeneralSettings() {
         </Select>
       </div>
 
+      <SidePanelSection />
       <UpdateSection />
+    </div>
+  );
+}
+
+function SidePanelSection() {
+  const { t } = useI18n();
+  const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
+  const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm">{t('Open Changes when files are edited')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t('Automatically show the side panel Changes tab after the agent edits a file')}
+        </p>
+      </div>
+      <Switch
+        checked={openChangesOnFileEdit}
+        onCheckedChange={(checked) => setOpenChangesOnFileEdit(checked === true)}
+      />
     </div>
   );
 }

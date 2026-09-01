@@ -101,6 +101,7 @@ const initialState = {
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   autoUpdate: true,
+  openChangesOnFileEdit: true,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
   backgroundImagePath: '',
@@ -197,6 +198,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
+      setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
       setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),

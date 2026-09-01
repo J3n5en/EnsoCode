@@ -10,6 +10,7 @@ import {
   Copy,
   FileText,
   GitBranch,
+  GitCompare,
   History,
   ListTodo,
   LoaderCircle,
@@ -30,13 +31,14 @@ import {
 } from '@/components/ui/dialog';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
+import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { ConfirmDialog } from './ConfirmDialog';
-import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { EditDiff } from './EditDiff';
+import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { Markdown } from './Markdown';
 import { mentionChipClass } from './MentionChip';
 import { splitInlineMentions, splitMentionRefs } from './mentionComposer';
@@ -401,10 +403,7 @@ function UserText({
   );
 }
 
-export const TimelineRow = memo(function TimelineRow({
-  item,
-  onToggleGroup,
-}: TimelineRowProps) {
+export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
   const activeNth = search.activeKey === item.key ? search.activeNth : -1;
@@ -891,6 +890,7 @@ function ToolGroupRow({
 
 /** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
+  const { t } = useI18n();
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
   const hasWrite = Boolean(item.writeContent);
   const expandable = hasDiff || hasWrite || Boolean(item.output);
@@ -909,54 +909,66 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
 
   return (
     <div className="rounded-lg border border-border/60 bg-muted/30">
-      <button
-        type="button"
-        disabled={!expandable}
-        onClick={() => setExpanded((v) => !v)}
-        className={cn(
-          'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs',
-          expandable && 'cursor-pointer hover:bg-muted/50'
-        )}
-      >
-        <ToolStateIcon state={item.state} />
-        <span className="shrink-0 font-medium">{item.name}</span>
-        {item.summary && (
-          <>
-            <span className="text-muted-foreground/50">·</span>
-            <span
+      <div className="flex items-center">
+        <button
+          type="button"
+          disabled={!expandable}
+          onClick={() => setExpanded((v) => !v)}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs',
+            expandable && 'cursor-pointer hover:bg-muted/50'
+          )}
+        >
+          <ToolStateIcon state={item.state} />
+          <span className="shrink-0 font-medium">{item.name}</span>
+          {item.summary && (
+            <>
+              <span className="text-muted-foreground/50">·</span>
+              <span
+                className={cn(
+                  'min-w-0 flex-1 truncate font-mono',
+                  item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                )}
+              >
+                {item.state === 'error' && item.output ? firstLine(item.output) : item.summary}
+              </span>
+            </>
+          )}
+          {item.state === 'running' ? (
+            <RunningElapsed itemKey={item.key} />
+          ) : (
+            (item.agentMeta || item.durationMs !== null) && (
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
+                {[
+                  item.agentMeta?.modelId,
+                  item.agentMeta?.outputTokens ? `${item.agentMeta.outputTokens} tok` : null,
+                  item.durationMs !== null ? formatDuration(item.durationMs) : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            )
+          )}
+          {expandable && (
+            <ChevronRight
               className={cn(
-                'min-w-0 flex-1 truncate font-mono',
-                item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                'h-3 w-3 shrink-0 text-muted-foreground transition-transform',
+                expanded && 'rotate-90'
               )}
-            >
-              {item.state === 'error' && item.output ? firstLine(item.output) : item.summary}
-            </span>
-          </>
+            />
+          )}
+        </button>
+        {(hasDiff || hasWrite) && item.state === 'ok' && (
+          <button
+            type="button"
+            title={t('Open in side panel')}
+            className="mr-2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={() => addSidePanelChanges()}
+          >
+            <GitCompare className="h-3 w-3" />
+          </button>
         )}
-        {item.state === 'running' ? (
-          <RunningElapsed itemKey={item.key} />
-        ) : (
-          (item.agentMeta || item.durationMs !== null) && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
-              {[
-                item.agentMeta?.modelId,
-                item.agentMeta?.outputTokens ? `${item.agentMeta.outputTokens} tok` : null,
-                item.durationMs !== null ? formatDuration(item.durationMs) : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
-          )
-        )}
-        {expandable && (
-          <ChevronRight
-            className={cn(
-              'h-3 w-3 shrink-0 text-muted-foreground transition-transform',
-              expanded && 'rotate-90'
-            )}
-          />
-        )}
-      </button>
+      </div>
       {expanded && hasDiff && item.edits && (
         <div className="max-h-96 overflow-auto">
           <EditDiff path={item.summary} blocks={item.edits} />

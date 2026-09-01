@@ -4,6 +4,7 @@ import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
+import { useOpenChangesOnEdit } from '@/hooks/useOpenChangesOnEdit';
 import { useI18n } from '@/i18n';
 import { eventToBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
@@ -16,13 +17,13 @@ import {
 import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline, terminalErrorText } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
-import { ChatFindBar, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
-import { timelineSearchHits } from './chatSearch';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
+import { ChatFindBar, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { Composer } from './Composer';
 import { CoworkerTabs } from './CoworkerTabs';
+import { timelineSearchHits } from './chatSearch';
 import { routeComposerPayload } from './composerRouting';
 import { GoalBar } from './GoalBar';
 import { MessageQueue } from './MessageQueue';
@@ -192,6 +193,7 @@ export function ChatView() {
       ),
     [conversation?.customEntries, conversation?.messages, running, toolCwd]
   );
+  useOpenChangesOnEdit(timeline, conversation?.id);
   const findHits = useMemo(
     () => (findOpen ? timelineSearchHits(timeline, findQuery) : []),
     [findOpen, findQuery, timeline]

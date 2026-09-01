@@ -2,6 +2,7 @@ import { parseDiffFromFile } from '@pierre/diffs';
 import { FileDiff } from '@pierre/diffs/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { reconstructOld } from '@/lib/sessionChanges';
 import type { EditBlock } from '@/stores/sessions/timeline';
 import { CODE_THEME, ensureHighlighter } from './codeHighlighter';
 
@@ -16,21 +17,6 @@ const DIFF_OPTIONS = {
   // 聊天窄栏内长行必须换行:默认横向溢出会冲出卡片,且行尾的改动完全不可见
   overflow: 'wrap',
 } as const;
-
-/**
- * 从当前文件内容反向套用 edits 还原编辑前内容。
- * 逆序 undo（newText→oldText）；任一块在当前内容里找不到就放弃（可能被后续编辑改动过）。
- */
-function reconstructOld(current: string, blocks: EditBlock[]): string | null {
-  let text = current;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const { oldText, newText } = blocks[i];
-    const idx = text.indexOf(newText);
-    if (idx === -1) return null;
-    text = text.slice(0, idx) + oldText + text.slice(idx + newText.length);
-  }
-  return text;
-}
 
 type Loaded =
   | { kind: 'loading' }

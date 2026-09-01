@@ -93,6 +93,9 @@ export interface SettingsState {
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
+  /** agent 新完成文件改动时打开右侧 Changes；缺省 true */
+  openChangesOnFileEdit: boolean;
+
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
   /** 背景图总开关；缺省 false */
   backgroundImageEnabled: boolean;
@@ -174,6 +177,7 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
+  setOpenChangesOnFileEdit: (value: boolean) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
   setBackgroundImageEnabled: (value: boolean) => void;

@@ -31,6 +31,23 @@ export function addSidePanelTerminal(): void {
   });
 }
 
+export function addSidePanelChanges(opts?: { title?: string }): void {
+  const active = activeDock();
+  if (!active) return;
+  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  const existing = active.api.getPanel('changes');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  active.api.addPanel({
+    id: 'changes',
+    component: 'changes',
+    title: opts?.title ?? 'Changes',
+    params: { conversationId: active.conversationId, projectId: active.projectId },
+  });
+}
+
 export function closeActiveSidePanelTab(): void {
   activeDock()?.api.activePanel?.api.close();
 }

@@ -1,6 +1,6 @@
 /** 右侧多类型 Tab 面板的共享类型（本期只实现 terminal，其余 kind 预留） */
 
-export type SidePanelTabKind = 'terminal' | 'browser' | 'file';
+export type SidePanelTabKind = 'terminal' | 'browser' | 'file' | 'changes';
 
 export interface SidePanelTab {
   id: string;

@@ -12,6 +12,7 @@ import type {
 import type {
   CollectedAsset,
   CollectedProvider,
+  GitDiffResult,
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
@@ -175,6 +176,11 @@ const electronAPI = {
   projects: {
     /** 从本机编辑器 / 编程应用读取最近打开的目录 */
     getRecent: (): Promise<RecentProject[]> => ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_RECENT),
+  },
+
+  git: {
+    diffHead: (request: { conversationId: string; projectId: string }): Promise<GitDiffResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_DIFF_HEAD, request),
   },
 
   files: {

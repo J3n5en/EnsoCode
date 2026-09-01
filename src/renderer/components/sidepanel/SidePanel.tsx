@@ -8,7 +8,7 @@ import type {
 } from 'dockview-react';
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Globe, Plus, SquareTerminal, X } from 'lucide-react';
+import { FolderOpen, GitCompare, Globe, Plus, SquareTerminal, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
@@ -18,6 +18,7 @@ import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { ChangesView } from './ChangesView';
 import { TerminalView } from './TerminalView';
 import 'dockview-react/dist/styles/dockview.css';
 import './sidepanel-dock.css';
@@ -44,6 +45,25 @@ function addTerminalPanel(
   });
 }
 
+function addChangesPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const existing = api.getPanel('changes');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({
+    id: 'changes',
+    component: 'changes',
+    title: label,
+    params: { conversationId, projectId },
+  });
+}
+
 function TerminalPanel(
   props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>
 ) {
@@ -55,6 +75,12 @@ function TerminalPanel(
       onTitle={(title) => props.api.setTitle(title)}
     />
   );
+}
+
+function ChangesPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
+  const { conversationId, projectId } = props.params;
+  if (!conversationId || !projectId) return null;
+  return <ChangesView conversationId={conversationId} projectId={projectId} />;
 }
 
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
@@ -76,7 +102,11 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
         active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
       )}
     >
-      <SquareTerminal className="h-3 w-3 shrink-0" />
+      {props.api.id === 'changes' ? (
+        <GitCompare className="h-3 w-3 shrink-0" />
+      ) : (
+        <SquareTerminal className="h-3 w-3 shrink-0" />
+      )}
       <span className="max-w-32 truncate">{title}</span>
       <button
         type="button"
@@ -93,7 +123,15 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
-function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; compact?: boolean }) {
+function NewTabMenu({
+  onNewTerminal,
+  onNewChanges,
+  compact,
+}: {
+  onNewTerminal: () => void;
+  onNewChanges: () => void;
+  compact?: boolean;
+}) {
   const { t } = useI18n();
   return (
     <Menu>
@@ -113,6 +151,10 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
         <MenuItem onClick={onNewTerminal}>
           <SquareTerminal className="h-4 w-4" />
           {t('Terminal')}
+        </MenuItem>
+        <MenuItem onClick={onNewChanges}>
+          <GitCompare className="h-4 w-4" />
+          {t('Changes')}
         </MenuItem>
         {/* 预留:浏览器 / 文件,后续实现 */}
         <MenuItem disabled>
@@ -143,6 +185,9 @@ function Watermark(props: IWatermarkPanelProps) {
         onNewTerminal={() =>
           addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
         }
+        onNewChanges={() =>
+          addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
+        }
       />
     </div>
   );
@@ -165,12 +210,15 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
             position: { referenceGroup: props.group },
           });
         }}
+        onNewChanges={() =>
+          addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
+        }
       />
     </div>
   );
 }
 
-const DOCK_COMPONENTS = { terminal: TerminalPanel };
+const DOCK_COMPONENTS = { terminal: TerminalPanel, changes: ChangesPanel };
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
 function useIsDark(): boolean {
@@ -212,6 +260,7 @@ function ConversationDock({
     });
     // 只有用户关 tab 才回收;dock 本身不随切会话卸载
     event.api.onDidRemovePanel((panel) => {
+      if (panel.id === 'changes') return;
       releaseTerminal(panel.id);
       void window.electronAPI.terminal.dispose(panel.id);
     });

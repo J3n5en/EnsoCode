@@ -9,6 +9,9 @@ export function installElectronApiShim(): void {
   if ((window as { electronAPI?: unknown }).electronAPI) return;
   Object.defineProperty(window, 'electronAPI', {
     value: {
+      git: {
+        diffHead: async () => ({ ok: false as const, error: 'unavailable' as const }),
+      },
       files: {
         // 必须返回 null：桌面端契约是 Promise<string | null>，失败即 null。
         // 早先返回 { ok, content } 这种对象，调用方的 `content != null` 判断会通过，

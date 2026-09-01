@@ -126,6 +126,8 @@ export const IPC_CHANNELS = {
   // 目录媒体文件枚举（背景图文件夹随机模式）
   FILES_LIST_MEDIA: 'files:list-media',
 
+  GIT_DIFF_HEAD: 'git:diff-head',
+
   // External session import
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',
   SESSIONS_READ_EXTERNAL: 'sessions:read-external',
