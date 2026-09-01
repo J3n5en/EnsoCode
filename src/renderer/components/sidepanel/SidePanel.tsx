@@ -11,6 +11,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { TerminalView } from './TerminalView';
 
+const EMPTY_TABS: SidePanelTab[] = [];
 const TAB_PREFIX = 'sptab:';
 const tabDragId = (tabId: string): string => `${TAB_PREFIX}${tabId}`;
 
@@ -39,6 +40,7 @@ function SortableTabChip({
   onSelect: () => void;
   onClose: () => void;
 }) {
+  // 选中用 onClick:拖拽未超 6px 阈值时照常触发;onPointerDown 会被展开在后的 dnd listeners 覆盖
   const Icon = TAB_ICONS[tab.kind];
   const payload: TabDragPayload = { type: 'side-panel-tab', conversationId, tabId: tab.id };
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -56,7 +58,10 @@ function SortableTabChip({
           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
         isDragging && 'opacity-50'
       )}
-      onPointerDown={onSelect}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onSelect();
+      }}
       {...attributes}
       {...listeners}
     >
@@ -113,7 +118,9 @@ export function SidePanel({ width }: { width: number }) {
   const { t } = useI18n();
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const projects = useSettingsStore((s) => s.projects);
-  const tabs = useSidePanelStore((s) => (conversation ? (s.tabs[conversation.id] ?? []) : []));
+  // 选择器必须返回稳定引用:兼容 undefined 后在外层回落常量空数组,否则 useSyncExternalStore 死循环
+  const tabs =
+    useSidePanelStore((s) => (conversation ? s.tabs[conversation.id] : undefined)) ?? EMPTY_TABS;
   const activeTabId = useSidePanelStore((s) =>
     conversation ? s.active[conversation.id] : undefined
   );

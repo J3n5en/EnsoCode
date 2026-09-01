@@ -888,7 +888,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
       {/* 拖拽预览:侧栏 overflow-hidden 会裁切,portal 到 body */}
       {createPortal(
         <DragOverlay dropAnimation={null}>
-          {dragPayload && (
+          {/* 只认侧栏自己的 payload:同一 DndContext 里其它区域(如右侧面板 tab)的拖拽不在这里预览 */}
+          {(dragPayload?.type === 'project' || dragPayload?.type === 'chat') && (
             <div className="flex w-56 items-center gap-2 rounded-lg border bg-background/95 px-3 py-1.5 text-sm shadow-md">
               {dragPayload.type === 'project' ? (
                 <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
