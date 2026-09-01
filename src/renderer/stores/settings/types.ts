@@ -15,6 +15,7 @@ import type {
   SkillEntry,
   SubagentModelEntry,
 } from '@shared/types';
+import type { ThinkingLevel } from '@shared/types/agent';
 import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
 
 export type DefaultModelRevalidation =
@@ -129,6 +130,10 @@ export interface SettingsState {
   providers: ModelProvider[];
   /** 尚未自选模型的新会话与 Enso 共用的全局默认；只保存 provider entry id + model id */
   defaultModel: DefaultModelRef | null;
+  /** 新会话默认是否开启推理；缺省 true */
+  defaultReasoningEnabled: boolean;
+  /** 新会话默认思考深度；缺省 medium */
+  defaultThinkingLevel: ThinkingLevel;
 
   // Skills / MCP servers（按引用登记，内容留在源应用目录）
   skills: SkillEntry[];
@@ -200,6 +205,8 @@ export interface SettingsState {
   setDefaultModel: (defaultModel: DefaultModelRef | null) => void;
   /** 用当前 OAuth 真凭证快照重校验；非 ready/stale 时绝不写回 */
   revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => DefaultModelRevalidation;
+  setDefaultReasoningEnabled: (value: boolean) => void;
+  setDefaultThinkingLevel: (level: ThinkingLevel) => void;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;

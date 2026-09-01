@@ -18,6 +18,8 @@ const providers: ModelProvider[] = [
 
 const harness = vi.hoisted(() => ({
   setDefaultModel: vi.fn(),
+  setDefaultReasoningEnabled: vi.fn(),
+  setDefaultThinkingLevel: vi.fn(),
   pickerProps: null as Record<string, unknown> | null,
 }));
 
@@ -33,6 +35,10 @@ vi.mock('@/stores/settings', () => ({
       providers,
       defaultModel: { providerId: 'api', modelId: 'model' },
       setDefaultModel: harness.setDefaultModel,
+      defaultReasoningEnabled: true,
+      defaultThinkingLevel: 'high',
+      setDefaultReasoningEnabled: harness.setDefaultReasoningEnabled,
+      setDefaultThinkingLevel: harness.setDefaultThinkingLevel,
     }),
   useDefaultModelRevalidationStore: (selector: (state: { latest: null }) => unknown) =>
     selector({ latest: null }),
@@ -67,10 +73,13 @@ vi.mock('@/components/chat/ModelPicker', () => ({
 }));
 
 describe('DefaultModelPicker', () => {
-  it('reuses ModelPicker without session controls and writes only provider/model selection', () => {
+  it('reuses ModelPicker with reasoning controls and writes selection + reasoning defaults', () => {
     const html = renderToStaticMarkup(createElement(DefaultModelPicker));
     expect(html).toContain('data-default-picker="true"');
-    expect(html).toContain('data-reasoning-controls="false"');
+    expect(html).toContain('data-reasoning-controls="undefined"');
+
+    expect(harness.pickerProps?.reasoningEnabled).toBe(true);
+    expect(harness.pickerProps?.thinkingLevel).toBe('high');
 
     const onSelect = harness.pickerProps?.onSelect;
     expect(onSelect).toBeTypeOf('function');
@@ -79,5 +88,13 @@ describe('DefaultModelPicker', () => {
       providerId: 'api',
       modelId: 'next-model',
     });
+
+    const onReasoningChange = harness.pickerProps?.onReasoningChange;
+    if (typeof onReasoningChange === 'function') onReasoningChange(false);
+    expect(harness.setDefaultReasoningEnabled).toHaveBeenCalledWith(false);
+
+    const onThinkingChange = harness.pickerProps?.onThinkingChange;
+    if (typeof onThinkingChange === 'function') onThinkingChange('max');
+    expect(harness.setDefaultThinkingLevel).toHaveBeenCalledWith('max');
   });
 });

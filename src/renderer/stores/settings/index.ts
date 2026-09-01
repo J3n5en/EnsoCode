@@ -118,6 +118,8 @@ const initialState = {
   backgroundRefreshNonce: 0,
   providers: [] as import('@shared/types').ModelProvider[],
   defaultModel: null,
+  defaultReasoningEnabled: true,
+  defaultThinkingLevel: 'medium' as import('@shared/types/agent').ThinkingLevel,
   skills: [] as import('@shared/types').SkillEntry[],
   mcpServers: [] as import('@shared/types').McpServerEntry[],
   instructions: [] as import('@shared/types').InstructionEntry[],
@@ -265,6 +267,9 @@ export const useSettingsStore = create<SettingsState>()(
         useDefaultModelRevalidationStore.setState({ latest: null });
         set({ defaultModel });
       },
+
+      setDefaultReasoningEnabled: (defaultReasoningEnabled) => set({ defaultReasoningEnabled }),
+      setDefaultThinkingLevel: (defaultThinkingLevel) => set({ defaultThinkingLevel }),
 
       revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {
         const defaultModel = get().defaultModel;

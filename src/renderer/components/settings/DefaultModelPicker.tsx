@@ -22,6 +22,10 @@ export function DefaultModelPicker() {
   const providers = useSettingsStore((state) => state.providers);
   const defaultModel = useSettingsStore((state) => state.defaultModel);
   const setDefaultModel = useSettingsStore((state) => state.setDefaultModel);
+  const defaultReasoningEnabled = useSettingsStore((state) => state.defaultReasoningEnabled);
+  const defaultThinkingLevel = useSettingsStore((state) => state.defaultThinkingLevel);
+  const setDefaultReasoningEnabled = useSettingsStore((state) => state.setDefaultReasoningEnabled);
+  const setDefaultThinkingLevel = useSettingsStore((state) => state.setDefaultThinkingLevel);
   const snapshot = useOauthCredentialStore((state) => state.snapshot);
   const revalidation = useDefaultModelRevalidationStore((state) => state.latest);
   const candidates = useMemo(
@@ -68,12 +72,11 @@ export function DefaultModelPicker() {
             providers={candidates}
             providerId={selectedProvider?.id ?? ''}
             modelId={selectedModel?.id ?? ''}
-            reasoningEnabled={false}
-            thinkingLevel="medium"
-            showReasoningControls={false}
+            reasoningEnabled={defaultReasoningEnabled}
+            thinkingLevel={defaultThinkingLevel}
             onSelect={(providerId, modelId) => setDefaultModel({ providerId, modelId })}
-            onReasoningChange={() => undefined}
-            onThinkingChange={() => undefined}
+            onReasoningChange={setDefaultReasoningEnabled}
+            onThinkingChange={setDefaultThinkingLevel}
           />
         )}
       </div>

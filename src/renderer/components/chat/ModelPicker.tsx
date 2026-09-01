@@ -85,7 +85,7 @@ interface ModelPickerProps {
   modelId: string;
   reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
-  /** 设置页只复用 provider/account/model 级联，不展示会话级 reasoning/thinking。 */
+  /** 子代理模型清单等场景只复用 provider/account/model 级联，不展示 reasoning/thinking。 */
   showReasoningControls?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;

@@ -36,6 +36,8 @@ export const SETTINGS_DATA_COVERAGE = {
   autoUpdate: surfaces('general.automatic-updates'),
   providers: surfaces('providers.list'),
   defaultModel: surfaces('providers.default-model'),
+  defaultReasoningEnabled: surfaces('providers.default-model'),
+  defaultThinkingLevel: surfaces('providers.default-model'),
   skills: surfaces('skills.list'),
   mcpServers: surfaces('mcp.list'),
   instructions: surfaces('instructions.list'),
@@ -82,6 +84,8 @@ export const SETTINGS_ACTION_COVERAGE = {
   setStatusLineSegments: surfaces('appearance.status-line-segments'),
   toggleStatusLineSegment: surfaces('appearance.status-line-segments'),
   setDefaultModel: surfaces('providers.default-model'),
+  setDefaultReasoningEnabled: surfaces('providers.default-model'),
+  setDefaultThinkingLevel: surfaces('providers.default-model'),
   revalidateDefaultModel: surfaces('providers.default-model'),
   addProviders: surfaces('providers.add', 'providers.import-local'),
   updateProvider: surfaces(
