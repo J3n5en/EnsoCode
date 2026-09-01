@@ -40,9 +40,13 @@ export function startCursorH2Bridge(): CursorH2Proc {
     } catch {
       // already closed
     }
+    if (!stdin.writableEnded) stdin.end();
     if (!stdout.writableEnded) stdout.end();
     if (!stderr.writableEnded) stderr.end();
-    queueMicrotask(() => proc.emit('exit', code));
+    queueMicrotask(() => {
+      proc.emit('exit', code);
+      proc.emit('close', code);
+    });
   };
 
   proc.kill = () => {

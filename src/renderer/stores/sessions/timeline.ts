@@ -272,7 +272,9 @@ function buildMessageTimeline(messages: ProjectedMessage[], running: boolean): T
                 : 'ok'
               : running && messageIndex === lastTurnIndex
                 ? 'running'
-                : 'ok',
+                : running
+                  ? 'ok'
+                  : 'error',
             edits: extractEdits(part.name, part.arguments),
             writeContent: extractWriteContent(part.name, part.arguments),
             todos: result?.todos ?? null,

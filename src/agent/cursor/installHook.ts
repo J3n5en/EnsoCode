@@ -36,6 +36,24 @@ export function installPiCursorExecHook(): void {
 
 let spawnWrapped = false;
 
+function spawnArgBasename(arg: string): string {
+  const trimmed = arg.replace(/\\/g, '/');
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1);
+}
+
+/** 只认真正的桥脚本名，bash -c 里提到这个词不算。 */
+export function isCursorH2BridgeSpawn(
+  command: string,
+  args?: readonly string[] | SpawnOptions
+): boolean {
+  const argv = [command, ...(Array.isArray(args) ? args : [])];
+  return argv.some((arg) => {
+    if (typeof arg !== 'string') return false;
+    const name = spawnArgBasename(arg);
+    return name === 'h2-bridge' || name === 'h2-bridge.mjs' || name === 'h2-bridge.js';
+  });
+}
+
 function wrapSpawnWithInProcessH2(): void {
   if (spawnWrapped) return;
   spawnWrapped = true;
@@ -48,8 +66,7 @@ function wrapSpawnWithInProcessH2(): void {
     args?: readonly string[] | SpawnOptions,
     options?: SpawnOptions
   ) => {
-    const argv = Array.isArray(args) ? args : [];
-    if (argv.some((arg) => typeof arg === 'string' && arg.includes('h2-bridge'))) {
+    if (isCursorH2BridgeSpawn(command, args)) {
       return startCursorH2Bridge() as unknown as ReturnType<typeof original>;
     }
     if (Array.isArray(args)) return original(command, args as string[], options ?? {});

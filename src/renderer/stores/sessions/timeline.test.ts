@@ -51,6 +51,21 @@ describe('buildTimeline', () => {
     expect(timeline[0]).toMatchObject({ kind: 'tool', state: 'running', summary: 'pnpm test' });
   });
 
+  it('无结果的 toolCall 在会话 idle 时标为 error（中断残留，不再 loading）', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'pnpm test' } },
+          ],
+        },
+      ],
+      false
+    );
+    expect(timeline[0]).toMatchObject({ kind: 'tool', state: 'error', output: null });
+  });
+
   it('历史轮次里缺结果的 toolCall（abort 残留/同步未齐）不标 running，即使会话正在运行', () => {
     const timeline = buildTimeline(
       [
