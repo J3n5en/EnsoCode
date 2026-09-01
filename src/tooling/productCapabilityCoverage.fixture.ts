@@ -279,6 +279,12 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_STATUS: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_SESSION_CONFIG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  TERMINAL_CREATE: excluded('Side panel terminal pty transport; renderer UI only.'),
+  TERMINAL_WRITE: excluded('Side panel terminal pty transport; renderer UI only.'),
+  TERMINAL_RESIZE: excluded('Side panel terminal pty transport; renderer UI only.'),
+  TERMINAL_DISPOSE: excluded('Side panel terminal pty transport; renderer UI only.'),
+  TERMINAL_DATA: excluded('Side panel terminal pty transport; renderer UI only.'),
+  TERMINAL_EXIT: excluded('Side panel terminal pty transport; renderer UI only.'),
   SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
   SSH_CONNECTIONS_UPSERT: surfaces(
     'projects.ssh-connections.add',

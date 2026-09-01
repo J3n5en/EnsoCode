@@ -131,6 +131,16 @@ export const IPC_CHANNELS = {
   SESSIONS_READ_EXTERNAL: 'sessions:read-external',
   SESSIONS_IMPORT_EXTERNAL: 'sessions:import-external',
 
+  // 右侧面板终端(node-pty)
+  TERMINAL_CREATE: 'terminal:create',
+  TERMINAL_WRITE: 'terminal:write',
+  TERMINAL_RESIZE: 'terminal:resize',
+  TERMINAL_DISPOSE: 'terminal:dispose',
+  /** main → renderer:pty 输出 */
+  TERMINAL_DATA: 'terminal:data',
+  /** main → renderer:pty 退出 */
+  TERMINAL_EXIT: 'terminal:exit',
+
   // Auto updater
   UPDATER_CHECK: 'updater:check',
   UPDATER_DOWNLOAD_UPDATE: 'updater:downloadUpdate',

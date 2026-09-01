@@ -14,4 +14,5 @@ export type * from './pair';
 export * from './project';
 export * from './providerApi';
 export * from './providerScan';
+export * from './sidePanel';
 export * from './ssh';
