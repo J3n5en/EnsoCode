@@ -1,4 +1,4 @@
-import { useDndMonitor } from '@dnd-kit/core';
+import { useDndContext, useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { SidePanelTab, SidePanelTabKind } from '@shared/types/sidePanel';
@@ -11,14 +11,17 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import type { SidePanelGroup } from '@/stores/sidePanel/reducer';
 import { TerminalView } from './TerminalView';
 
 const EMPTY_TABS: SidePanelTab[] = [];
 const TAB_PREFIX = 'sptab:';
+const STRIP_PREFIX = 'sp-strip:';
+const SPLIT_ZONE_ID = 'sp-zone:split';
+const tabDragId = (tabId: string): string => `${TAB_PREFIX}${tabId}`;
 
 const ICON_BUTTON_CLASS =
   'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground';
-const tabDragId = (tabId: string): string => `${TAB_PREFIX}${tabId}`;
 
 interface TabDragPayload {
   type: 'side-panel-tab';
@@ -119,6 +122,98 @@ function NewTabMenu({ onNewTerminal, compact }: { onNewTerminal: () => void; com
   );
 }
 
+/** 未分屏时的下半分屏落点:仅当拖拽中的是本面板 tab 且主组不止一个 tab 时出现 */
+function SplitDropZone() {
+  const { isOver, setNodeRef } = useDroppable({ id: SPLIT_ZONE_ID });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'absolute inset-x-1 top-1/2 bottom-1 z-10 rounded-md border-2 border-transparent transition-colors',
+        isOver && 'border-primary/40 bg-primary/15'
+      )}
+    />
+  );
+}
+
+/** 一个分组:tab 条 + 内容区;tab 条本身是落点(拖入该组末尾) */
+function PaneGroup({
+  conversationId,
+  group,
+  tabs,
+  activeTabId,
+  cwd,
+  headerExtra,
+  dropHint,
+}: {
+  conversationId: string;
+  group: SidePanelGroup;
+  tabs: SidePanelTab[];
+  activeTabId: string | undefined;
+  cwd?: string;
+  headerExtra?: React.ReactNode;
+  dropHint?: React.ReactNode;
+}) {
+  const selectTab = useSidePanelStore((s) => s.selectTab);
+  const closeTab = useSidePanelStore((s) => s.closeTab);
+  const addTab = useSidePanelStore((s) => s.addTab);
+  const { t } = useI18n();
+  const strip = useDroppable({ id: `${STRIP_PREFIX}${group}` });
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+
+  const handleNewTerminal = () => {
+    const state = useSidePanelStore.getState();
+    const count = [
+      ...(state.tabs[conversationId] ?? []),
+      ...(state.splitTabs[conversationId] ?? []),
+    ].filter((tab) => tab.kind === 'terminal').length;
+    addTab(
+      conversationId,
+      'terminal',
+      count === 0 ? t('Terminal') : `${t('Terminal')} ${count + 1}`,
+      group
+    );
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={strip.setNodeRef}
+        className={cn(
+          'flex items-center gap-1 border-b px-2 py-1.5 transition-colors',
+          strip.isOver && 'bg-primary/10'
+        )}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <SortableContext
+            items={tabs.map((tab) => tabDragId(tab.id))}
+            strategy={horizontalListSortingStrategy}
+          >
+            {tabs.map((tab) => (
+              <SortableTabChip
+                key={tab.id}
+                tab={tab}
+                conversationId={conversationId}
+                active={tab.id === activeTabId}
+                onSelect={() => selectTab(conversationId, tab.id)}
+                onClose={() => closeTab(conversationId, tab.id)}
+              />
+            ))}
+          </SortableContext>
+        </div>
+        <NewTabMenu compact onNewTerminal={handleNewTerminal} />
+        {headerExtra}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {activeTab?.kind === 'terminal' && (
+          <TerminalView key={activeTab.id} termId={activeTab.id} cwd={cwd} />
+        )}
+        {dropHint}
+      </div>
+    </div>
+  );
+}
+
 export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
@@ -128,31 +223,52 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   // 选择器必须返回稳定引用:兼容 undefined 后在外层回落常量空数组,否则 useSyncExternalStore 死循环
   const tabs =
     useSidePanelStore((s) => (conversation ? s.tabs[conversation.id] : undefined)) ?? EMPTY_TABS;
+  const splitTabs =
+    useSidePanelStore((s) => (conversation ? s.splitTabs[conversation.id] : undefined)) ??
+    EMPTY_TABS;
   const activeTabId = useSidePanelStore((s) =>
     conversation ? s.active[conversation.id] : undefined
   );
+  const splitActiveTabId = useSidePanelStore((s) =>
+    conversation ? s.splitActive[conversation.id] : undefined
+  );
   const addTab = useSidePanelStore((s) => s.addTab);
-  const closeTab = useSidePanelStore((s) => s.closeTab);
-  const selectTab = useSidePanelStore((s) => s.selectTab);
   const moveTab = useSidePanelStore((s) => s.moveTab);
+  const moveTabToGroup = useSidePanelStore((s) => s.moveTabToGroup);
 
   // 终端 cwd:worktree 目录优先,否则项目目录
   const cwd =
     conversation?.worktree?.path ?? projects.find((p) => p.id === conversation?.projectId)?.path;
+
+  const isSplit = splitTabs.length > 0;
+
+  // 拖拽中的本面板 tab(用于显示分屏落点)
+  const { active: dndActive } = useDndContext();
+  const draggingTab =
+    (dndActive?.data.current as TabDragPayload | undefined)?.type === 'side-panel-tab';
 
   useDndMonitor({
     onDragEnd: (event) => {
       const payload = event.active.data.current as TabDragPayload | undefined;
       if (payload?.type !== 'side-panel-tab' || !event.over) return;
       const overId = String(event.over.id);
-      if (!overId.startsWith(TAB_PREFIX)) return;
-      moveTab(payload.conversationId, payload.tabId, overId.slice(TAB_PREFIX.length));
+      if (overId.startsWith(TAB_PREFIX)) {
+        moveTab(payload.conversationId, payload.tabId, overId.slice(TAB_PREFIX.length));
+      } else if (overId === SPLIT_ZONE_ID) {
+        moveTabToGroup(payload.conversationId, payload.tabId, 'split');
+      } else if (overId.startsWith(STRIP_PREFIX)) {
+        moveTabToGroup(
+          payload.conversationId,
+          payload.tabId,
+          overId.slice(STRIP_PREFIX.length) as SidePanelGroup
+        );
+      }
     },
   });
 
   const handleNewTerminal = () => {
     if (!conversation) return;
-    const count = tabs.filter((tab) => tab.kind === 'terminal').length;
+    const count = [...tabs, ...splitTabs].filter((tab) => tab.kind === 'terminal').length;
     addTab(
       conversation.id,
       'terminal',
@@ -160,7 +276,16 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
     );
   };
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const collapseButton = (
+    <button
+      type="button"
+      onClick={toggleOpen}
+      className={ICON_BUTTON_CLASS}
+      title={t('Collapse side panel')}
+    >
+      <PanelRightClose className="h-4 w-4" />
+    </button>
+  );
 
   return (
     <motion.aside
@@ -170,57 +295,49 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
       className={cn('flex shrink-0 flex-col overflow-hidden bg-background/60', open && 'border-l')}
     >
       <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
-        <div className="flex items-center gap-1 border-b px-2 py-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {conversation && tabs.length > 0 && (
-              <SortableContext
-                items={tabs.map((tab) => tabDragId(tab.id))}
-                strategy={horizontalListSortingStrategy}
-              >
-                {tabs.map((tab) => (
-                  <SortableTabChip
-                    key={tab.id}
-                    tab={tab}
-                    conversationId={conversation.id}
-                    active={tab.id === activeTabId}
-                    onSelect={() => selectTab(conversation.id, tab.id)}
-                    onClose={() => closeTab(conversation.id, tab.id)}
-                  />
-                ))}
-              </SortableContext>
-            )}
-          </div>
-          {conversation && tabs.length > 0 && (
-            <NewTabMenu compact onNewTerminal={handleNewTerminal} />
-          )}
-          <button
-            type="button"
-            onClick={toggleOpen}
-            className={ICON_BUTTON_CLASS}
-            title={t('Collapse side panel')}
-          >
-            <PanelRightClose className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1">
-          {!conversation ? (
-            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        {!conversation ? (
+          <>
+            <div className="flex items-center justify-end gap-1 border-b px-2 py-1.5">
+              {collapseButton}
+            </div>
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
               {t('Select a conversation to use the side panel.')}
             </div>
-          ) : tabs.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+          </>
+        ) : tabs.length === 0 && !isSplit ? (
+          <>
+            <div className="flex items-center justify-end gap-1 border-b px-2 py-1.5">
+              {collapseButton}
+            </div>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-sm text-muted-foreground">
                 {t('No tabs yet. Create one to get started.')}
               </p>
               <NewTabMenu onNewTerminal={handleNewTerminal} />
             </div>
-          ) : (
-            activeTab?.kind === 'terminal' && (
-              <TerminalView key={activeTab.id} termId={activeTab.id} cwd={cwd} />
-            )
-          )}
-        </div>
+          </>
+        ) : (
+          <>
+            <PaneGroup
+              conversationId={conversation.id}
+              group="main"
+              tabs={tabs}
+              activeTabId={activeTabId}
+              cwd={cwd}
+              headerExtra={collapseButton}
+              dropHint={!isSplit && draggingTab && tabs.length > 1 ? <SplitDropZone /> : undefined}
+            />
+            {isSplit && (
+              <PaneGroup
+                conversationId={conversation.id}
+                group="split"
+                tabs={splitTabs}
+                activeTabId={splitActiveTabId}
+                cwd={cwd}
+              />
+            )}
+          </>
+        )}
       </div>
     </motion.aside>
   );
