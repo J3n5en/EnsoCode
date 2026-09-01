@@ -9,7 +9,7 @@ import {
 } from '@dnd-kit/core';
 import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
-import { SummonEnsoButton, TitleBar } from '@/components/app/TitleBar';
+import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import { ChatView } from '@/components/chat/ChatView';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
@@ -121,7 +121,7 @@ export default function App() {
       <ToastProvider />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
-      <TitleBar title="EnsoCode" actions={<SummonEnsoButton label={false} />} />
+      <TitleBar title="EnsoCode" />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         <DndContext sensors={dndSensors} collisionDetection={dndCollision}>

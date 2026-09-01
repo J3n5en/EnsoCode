@@ -7,6 +7,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -27,6 +28,7 @@ import {
   Pin,
   PinOff,
   Settings,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
@@ -360,6 +362,16 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
             title={t('Expand sidebar')}
           >
             <PanelLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
+            }}
+            className={ICON_BUTTON_CLASS}
+            title={t('Ask Enso')}
+          >
+            <Sparkles className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -764,14 +776,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => window.electronAPI.window.openSettings()}
-            className={ICON_BUTTON_CLASS}
-            title={t('Settings')}
-          >
-            <Settings className="h-4 w-4" />
-          </button>
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={() => {
+                void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
+              }}
+              className={ICON_BUTTON_CLASS}
+              title={t('Ask Enso')}
+            >
+              <Sparkles className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => window.electronAPI.window.openSettings()}
+              className={ICON_BUTTON_CLASS}
+              title={t('Settings')}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
