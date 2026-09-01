@@ -48,6 +48,12 @@ export const zhTranslations: Record<string, string> = {
   'Sync terminal theme': '同步终端主题',
   System: '系统',
   Terminal: '终端',
+  Browser: '浏览器',
+  'New tab': '新建标签页',
+  Soon: '即将支持',
+  'Toggle side panel': '折叠/展开右侧面板',
+  'Select a conversation to use the side panel.': '选择一个会话后使用右侧面板。',
+  'No tabs yet. Create one to get started.': '还没有标签页，新建一个开始使用。',
   'Terminal appearance': '终端外观',
   'Theme mode': '主题模式',
   // Background image
