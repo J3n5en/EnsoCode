@@ -3,6 +3,7 @@ import type { DockviewPanelApi } from 'dockview-react';
 import { ArrowLeft, ArrowRight, Globe, Hand, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { clipGuestRect, collectFloatingRects } from '@/lib/guestViewOcclusion';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -61,6 +62,11 @@ export function BrowserView({
   }, [state.url, editing]);
 
   useEffect(() => {
+    const title = state.title.trim() || t('Browser');
+    panelApi.setTitle(title);
+  }, [panelApi, state.title, t]);
+
+  useEffect(() => {
     let raf = 0;
     let disposed = false;
     const tick = () => {
@@ -77,12 +83,24 @@ export function BrowserView({
       ) {
         const box = el.getBoundingClientRect();
         if (box.width >= 1 && box.height >= 1 && el.isConnected) {
-          rect = {
+          const next = {
             x: Math.round(box.left),
             y: Math.round(box.top),
             width: Math.round(box.width),
             height: Math.round(box.height),
           };
+          const clipped = clipGuestRect(next, collectFloatingRects(), {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          });
+          rect = clipped
+            ? {
+                x: Math.round(clipped.x),
+                y: Math.round(clipped.y),
+                width: Math.round(clipped.width),
+                height: Math.round(clipped.height),
+              }
+            : null;
         }
       }
       if (lastSent.current === undefined || !sameRect(lastSent.current, rect)) {

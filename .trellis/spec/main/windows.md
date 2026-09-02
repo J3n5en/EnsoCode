@@ -81,3 +81,4 @@ Tailwind 的 `h-11` 会算成 38.5px 而不是 44px，与 `trafficLightPosition:
 - **首次 `dom-ready` 之前 `debugger.attach` 会让 Main 段错误**（SIGSEGV）。`Tab.ready`
   门住所有 CDP 调用。
 - 渲染层 CDP 截图只拍 renderer webContents，看不到兄弟 view；验叠层要 `screencapture`。
+- **HTML 弹层盖不过 guest view**：不能整页 `setVisible(false)`（白屏）。BrowserView 按 popup 矩形从 guest bounds 上裁一条，全屏 backdrop 忽略。新弹层打 `data-enso-float` 或 `data-slot=*-popup|*-positioner`。

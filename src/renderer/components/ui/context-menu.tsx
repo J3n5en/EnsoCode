@@ -14,7 +14,7 @@ function ContextMenuTrigger(props: ContextMenuPrimitive.Trigger.Props) {
 function ContextMenuPopup({ children, className, ...props }: ContextMenuPrimitive.Popup.Props) {
   return (
     <ContextMenuPrimitive.Portal>
-      <ContextMenuPrimitive.Backdrop className="fixed inset-0 z-40" />
+      <ContextMenuPrimitive.Backdrop className="fixed inset-0 z-40" data-enso-float="" />
       <ContextMenuPrimitive.Positioner className="z-50" data-slot="context-menu-positioner">
         <ContextMenuPrimitive.Popup
           className={cn(MENU_POPUP_CLASS, className)}

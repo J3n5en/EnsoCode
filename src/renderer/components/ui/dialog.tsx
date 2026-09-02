@@ -34,6 +34,7 @@ function DialogBackdrop({ className, ...props }: DialogPrimitive.Backdrop.Props)
         className
       )}
       data-slot="dialog-backdrop"
+      data-enso-float=""
       {...props}
     />
   );

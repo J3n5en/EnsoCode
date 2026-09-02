@@ -41,7 +41,7 @@ function MenuPopup({
 }) {
   return (
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Backdrop className="fixed inset-0 z-40" />
+      <MenuPrimitive.Backdrop className="fixed inset-0 z-40" data-enso-float="" />
       <MenuPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
