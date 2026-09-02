@@ -1,4 +1,5 @@
 import { type CatalogEntry, type ProjectEntry, sshProjectLabel } from '@enso/pair';
+import { orderPinned, orderProjectSessions, sortByActivity } from '@shared/pair/drawerOrder';
 import {
   Archive,
   Bell,
@@ -19,7 +20,6 @@ import { Switch } from '@/components/ui/switch';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { StoredDevice } from './deviceList';
-import { orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
 import type { PushFailureReason } from './push';
 import {
   getThemePreference,

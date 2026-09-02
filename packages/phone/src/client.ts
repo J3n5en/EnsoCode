@@ -13,16 +13,14 @@ import {
   sealFrame,
   toWebSocketUrl,
 } from '@enso/pair';
-import type {
-  ApprovalRequestInfo,
-  AskRequestInfo,
-  BackgroundTaskInfo,
-  ProjectedMessage,
-  SessionSnapshot,
-  SubagentInfo,
-} from '@shared/types/agent';
-import { loadCursors, saveCursor } from './storage';
-import { setTerminalAppearance } from './stubs/settings-store';
+import {
+  applyGuestEvent,
+  applyGuestHistory,
+  applyGuestSnapshot,
+  emptyGuestView,
+  type GuestSessionView,
+  markAllFailed,
+} from '@shared/pair/guestProjection';
 import {
   applyCatalog,
   applySnapshot,
@@ -30,8 +28,9 @@ import {
   initialSync,
   type SyncState,
   type SyncTracking,
-} from './syncProjection';
-import { applyRetryEvent, applyTaskEvent, type RetryInfo } from './taskProjection';
+} from '@shared/pair/syncProjection';
+import { loadCursors, saveCursor } from './storage';
+import { setTerminalAppearance } from './stubs/settings-store';
 import { setHostTheme } from './theme';
 
 /**
@@ -41,18 +40,8 @@ import { setHostTheme } from './theme';
 
 export type ConnState = 'connecting' | 'online' | 'host-offline' | 'unauthorized' | 'offline';
 
-export interface SessionView {
-  /** key = 消息 index，与桌面同为按 index 幂等写入 */
-  messages: Map<number, ProjectedMessage>;
-  status: string;
-  approvals: ApprovalRequestInfo[];
-  asks: AskRequestInfo[];
-  /** 后台任务 / subagent 状态（TaskBar 胶囊用，与桌面同源事件投影） */
-  tasks: BackgroundTaskInfo[];
-  subagents: SubagentInfo[];
-  /** 自动重试中（非终态）：与桌面 SessionProjection.retry 同规则 */
-  retry?: RetryInfo;
-}
+/** 与桌面远程节点视图共用一份投影结构 */
+export type SessionView = GuestSessionView;
 
 export interface ClientEvents {
   onState(state: ConnState): void;
@@ -237,127 +226,52 @@ export class PairClient {
         // 上滑分页应答：只并入消息，不动 status/审批（那些以尾窗快照为准）
         this.historyPending.delete(payload.sessionId);
         const view = this.sessions.get(payload.sessionId);
-        if (!view || payload.messages.length === 0) break;
-        const messages = new Map(view.messages);
-        for (const [i, message] of payload.messages.entries()) {
-          messages.set(payload.baseIndex + i, message as ProjectedMessage);
-        }
-        const next = { ...view, messages };
+        if (!view) break;
+        const next = applyGuestHistory(view, payload);
+        if (next === view) break;
         this.sessions.set(payload.sessionId, next);
-        this.events.onSession(payload.sessionId, { ...next, messages: new Map(messages) });
+        this.events.onSession(payload.sessionId, { ...next, messages: new Map(next.messages) });
         break;
       }
     }
   }
 
-  /** 把 agent 事件投影进本地会话视图（与桌面同为 index 幂等写入） */
+  /** 把 agent 事件投影进本地会话视图（纯函数在 @shared/pair/guestProjection，这里只管游标与回调） */
   private applyAgentEvent(event: Record<string, unknown>): void {
     const sessionId = event.sessionId as string | undefined;
     const type = event.type as string;
 
     if (type === 'worker-exited') {
+      this.sessions = markAllFailed(this.sessions);
       for (const [id, view] of this.sessions) {
-        view.status = 'failed';
         this.events.onSession(id, { ...view, messages: new Map(view.messages) });
       }
       return;
     }
-    // 尾窗快照：批事件，按 baseIndex 偏移合并进已有投影。
-    // 不能整张 Map 替换——用户可能已上滑加载了更早的分页，替换会把它们抹掉。
     if (type === 'snapshot') {
-      // 与下方合并逻辑同规则：扁平 sessionId 优先，identity 兑底防旧桌面版
+      // 与投影同规则：扁平 sessionId 优先，identity 兑底防旧桌面版
       const snapshotIds = (
         (event.sessions ?? []) as { sessionId?: string; identity?: { sessionId?: string } }[]
       )
         .map((s) => s.sessionId ?? s.identity?.sessionId)
         .filter((id): id is string => typeof id === 'string');
       this.setSync(applySnapshot(this.sync, this.subscribedId, snapshotIds));
-      for (const snap of (event.sessions ?? []) as (SessionSnapshot & {
-        sessionId?: string;
-        identity?: { sessionId?: string };
-      })[]) {
-        // host 归一化后有扁平 sessionId；identity 兜底防旧桌面版
-        const id = snap.sessionId ?? snap.identity?.sessionId;
-        if (!id) continue;
-        const base = snap.baseIndex ?? 0;
-        const existing = this.sessions.get(id)?.messages;
-        const prevMax = existing?.size ? Math.max(...existing.keys()) : -1;
-        // 离线太久、尾窗与已有内容接不上：丢弃旧段保持时间线连续，上滑可重新拉回
-        const messages =
-          existing && base <= prevMax + 1 ? new Map(existing) : new Map<number, ProjectedMessage>();
-        for (const [i, message] of (snap.messages ?? []).entries()) {
-          messages.set(base + i, message);
-          saveCursor(this.device.pairId, id, base + i);
-        }
-        const view: SessionView = {
-          messages,
-          status: snap.status ?? 'idle',
-          approvals: snap.pendingApprovals ?? [],
-          asks: snap.pendingAsks ?? [],
-          tasks: snap.backgroundTasks ?? [],
-          subagents: snap.subagents ?? [],
-        };
+      for (const { id, view, lastIndex } of applyGuestSnapshot(
+        this.sessions,
+        event as { sessions?: unknown[] }
+      )) {
+        if (lastIndex !== undefined) saveCursor(this.device.pairId, id, lastIndex);
         this.sessions.set(id, view);
-        this.events.onSession(id, { ...view, messages: new Map(messages) });
+        this.events.onSession(id, { ...view, messages: new Map(view.messages) });
       }
       return;
     }
     if (!sessionId) return;
-    const view = this.sessions.get(sessionId) ?? {
-      messages: new Map<number, ProjectedMessage>(),
-      status: 'idle',
-      approvals: [],
-      asks: [],
-      tasks: [],
-      subagents: [],
-    };
-
-    // 自动重试横幅：turn-retry 设置，status/turn-* 清除（与桌面 reducer 同规则）
-    view.retry = applyRetryEvent(view.retry, event);
-
-    // 后台任务 / subagent 事件：纯函数投影，命中则直接推视图
-    const taskNext = applyTaskEvent({ tasks: view.tasks, subagents: view.subagents }, event);
-    if (taskNext) {
-      const next = { ...view, ...taskNext };
-      this.sessions.set(sessionId, next);
-      this.events.onSession(sessionId, { ...next, messages: new Map(next.messages) });
-      return;
-    }
-
-    switch (type) {
-      case 'message-upsert': {
-        const index = event.index as number;
-        view.messages.set(index, event.message as ProjectedMessage);
-        saveCursor(this.device.pairId, sessionId, index);
-        break;
-      }
-      case 'status':
-        view.status = event.status as string;
-        break;
-      case 'turn-completed':
-        view.status = 'idle';
-        break;
-      case 'turn-failed':
-        view.status = 'failed';
-        break;
-      case 'approval-request': {
-        // worker 新格式载荷嵌在 request 里；旧格式平铺在事件上，两者都兼容
-        const approval = (event.request ?? event) as unknown as ApprovalRequestInfo;
-        view.approvals = [...view.approvals, approval];
-        break;
-      }
-      case 'approval-resolved':
-        view.approvals = view.approvals.filter((a) => a.requestId !== event.requestId);
-        break;
-      case 'ask-request': {
-        const ask = (event.ask ?? event) as unknown as AskRequestInfo;
-        view.asks = [...view.asks, ask];
-        break;
-      }
-      case 'ask-resolved':
-        view.asks = view.asks.filter((a) => a.requestId !== event.requestId);
-        break;
-    }
+    const { view, lastIndex } = applyGuestEvent(
+      this.sessions.get(sessionId) ?? emptyGuestView(),
+      event
+    );
+    if (lastIndex !== undefined) saveCursor(this.device.pairId, sessionId, lastIndex);
     this.sessions.set(sessionId, view);
     this.events.onSession(sessionId, { ...view, messages: new Map(view.messages) });
   }
