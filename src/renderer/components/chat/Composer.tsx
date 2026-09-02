@@ -25,6 +25,7 @@ import { useSettingsStore } from '@/stores/settings';
 import {
   registerComposerFocus,
   registerComposerInsert,
+  registerComposerInsertImage,
   registerComposerInsertText,
   registerComposerInsertUiElement,
 } from './composerMentionBridge';
@@ -104,6 +105,7 @@ export function Composer({
   // 与 OS 文件拖入(HTML5 dnd)互不干扰:两套事件体系独立。
   const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({ id: COMPOSER_DROP_ID });
   const [preview, setPreview] = useState<UiElementMentionCandidate | null>(null);
+  const [imagePreview, setImagePreview] = useState<AttachedImage | null>(null);
   const boundIds = useRef(new Set<string>());
   useEffect(() => {
     const unsubInsert = registerComposerInsert((candidate) =>
@@ -118,11 +120,16 @@ export function Composer({
       editorRef.current?.insertMention(candidate);
       editorRef.current?.focus();
     });
+    const unsubImage = registerComposerInsertImage((image) => {
+      setImages((current) => [...current, { data: image.data, mimeType: image.mimeType }]);
+      editorRef.current?.focus();
+    });
     return () => {
       unsubInsert();
       unsubText();
       unsubFocus();
       unsubUi();
+      unsubImage();
     };
   }, []);
   const editorRef = useRef<MentionEditorHandle>(null);
@@ -512,11 +519,18 @@ export function Composer({
               .map((image, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: attachments have no stable id.
                 <div key={index} className="group relative">
-                  <img
-                    src={`data:${image.mimeType};base64,${image.data}`}
-                    alt=""
-                    className="h-16 w-16 rounded-md border object-cover"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setImagePreview(image)}
+                    className="block rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    aria-label={t('Preview')}
+                  >
+                    <img
+                      src={`data:${image.mimeType};base64,${image.data}`}
+                      alt=""
+                      className="h-16 w-16 rounded-md border object-cover"
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() =>
@@ -653,6 +667,22 @@ export function Composer({
                   ) : null;
                 })()}
               </>
+            )}
+          </DialogPanel>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={imagePreview !== null} onOpenChange={(open) => !open && setImagePreview(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t('Preview')}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            {imagePreview && (
+              <img
+                src={`data:${imagePreview.mimeType};base64,${imagePreview.data}`}
+                alt=""
+                className="max-h-[80vh] w-full rounded-md object-contain"
+              />
             )}
           </DialogPanel>
         </DialogContent>

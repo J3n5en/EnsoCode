@@ -19,6 +19,7 @@ let focusComposer: (() => void) | null = null;
 let insertUiElement:
   | ((candidate: UiElementMentionCandidate, image?: AttachedImage) => void)
   | null = null;
+let insertImage: ((image: AttachedImage) => void) | null = null;
 
 export function registerComposerInsert(fn: InsertFn): () => void {
   current = fn;
@@ -76,5 +77,18 @@ export function insertUiElementMention(
 ): boolean {
   if (!insertUiElement) return false;
   insertUiElement(candidate, image);
+  return true;
+}
+
+export function registerComposerInsertImage(fn: (image: AttachedImage) => void): () => void {
+  insertImage = fn;
+  return () => {
+    if (insertImage === fn) insertImage = null;
+  };
+}
+
+export function insertComposerImage(image: AttachedImage): boolean {
+  if (!insertImage) return false;
+  insertImage(image);
   return true;
 }

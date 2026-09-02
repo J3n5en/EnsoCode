@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAllowedCdpMethod } from '@shared/browser/cdpPolicy';
-import { sanitizeUiElementPayload } from '@shared/browser/designMode';
+import { parseDesignBinding, sanitizeUiElementPayload } from '@shared/browser/designMode';
 import { assertDevtoolsIdle } from '@shared/browser/devtools';
 import { pickFaviconUrl } from '@shared/browser/favicon';
 import {
   DESIGN_MODE_BINDING,
+  PAGE_DESIGN_MODE_COMPOSE_SCRIPT,
   PAGE_DESIGN_MODE_DISABLE_SCRIPT,
   PAGE_DESIGN_MODE_ENABLE_SCRIPT,
   PAGE_DESIGN_MODE_HIDE_SCRIPT,
@@ -15,6 +16,7 @@ import {
   pageBoundingBoxScript,
   pageClickScript,
   pageClickXyScript,
+  pageDesignModeShowFrozenScript,
   pageDragScript,
   pageHighlightScript,
   pagePressKeyScript,
@@ -478,7 +480,7 @@ export class BrowserHost {
   }
 
   private async ensureDesignBinding(tab: Tab): Promise<void> {
-    if (tab.designBinding) return;
+    if (tab.designBinding && tab.view.webContents.debugger.isAttached()) return;
     const contents = tab.view.webContents;
     if (contents.isDestroyed() || !tab.ready) return;
     const dbg = contents.debugger;
@@ -508,14 +510,41 @@ export class BrowserHost {
     } catch {
       return;
     }
-    if (!isRecord(parsed)) return;
-    if (parsed.type === 'cancelled') {
+    const msg = parseDesignBinding(parsed);
+    if (!msg) return;
+    if (msg.type === 'cancelled') {
       await this.setDesignMode(tab.id, false);
       this.emitDesign({ type: 'cancelled', conversationId: tab.ownerSessionId, tabId: tab.id });
       return;
     }
-    if (parsed.type !== 'picked') return;
-    const payload = sanitizeUiElementPayload(parsed.payload);
+    if (msg.type === 'freeze-request') {
+      await this.runGuest(tab, PAGE_DESIGN_MODE_HIDE_SCRIPT);
+      try {
+        const shot = await this.screenshot(tab);
+        await this.runGuest(tab, pageDesignModeShowFrozenScript(shot.data));
+      } catch {
+        await this.runGuest(tab, pageDesignModeShowFrozenScript(''));
+      }
+      return;
+    }
+    if (msg.type === 'annotated') {
+      const seq = ++tab.pickSeq;
+      const composed = await this.runGuest(tab, PAGE_DESIGN_MODE_COMPOSE_SCRIPT);
+      if (seq !== tab.pickSeq) return;
+      const data = typeof composed === 'string' ? composed : '';
+      if (!data) return;
+      await this.setDesignMode(tab.id, false);
+      this.emitDesign({
+        type: 'annotated',
+        conversationId: tab.ownerSessionId,
+        tabId: tab.id,
+        payload: { label: 'annotation', path: 'scribble', text: '' },
+        image: { data, mimeType: 'image/png' },
+      });
+      return;
+    }
+    if (msg.type !== 'picked') return;
+    const payload = sanitizeUiElementPayload(msg.payload);
     if (!payload) return;
     const seq = ++tab.pickSeq;
     await this.runGuest(tab, PAGE_DESIGN_MODE_HIDE_SCRIPT);

@@ -70,6 +70,7 @@ export const zhTranslations: Record<string, string> = {
   'Toggle Design Mode': '开关圈选模式',
   'Selected UI element': '圈选的界面元素',
   'No Composer for this selection': '没有可接收圈选的输入框',
+  'Add to conversation': '添加到对话',
   'Browser data': '浏览器数据',
   'Cookies and site storage of the built-in browser, separate from the app itself.':
     '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',

@@ -1,12 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
+  boundsCenter,
+  cssToImageRect,
+  DESIGN_SCRIBBLE_CROP_MIN,
+  DESIGN_SCRIBBLE_CROP_PAD,
+  DESIGN_SCRIBBLE_HOLD_MS,
+  DESIGN_SCRIBBLE_MOVE_PX,
+  expandScribbleCrop,
+  formatHoverTag,
   formatUiElementRefLine,
+  parseDesignBinding,
   parseUiElementRefLine,
+  resizeScribbleCrop,
+  sanitizeScribblePoints,
   sanitizeUiElementPayload,
+  scribbleBounds,
+  scribbleGesture,
   unbindImages,
 } from './designMode';
 
-const sample = { label: 'Button SubmitForm', path: 'main > form > button:nth-of-type(2)', text: 'Submit' };
+const sample = {
+  label: 'Button SubmitForm',
+  path: 'main > form > button:nth-of-type(2)',
+  text: 'Submit',
+};
 const wire = (label: string, path: string, text: string) =>
   `[Selected UI element "${label}" — path: ${path}; text: ${text}]`;
 
@@ -119,7 +136,11 @@ describe('unbindImages', () => {
 
   it('只移除命中 id 的图，无 id 的图保留，不改原数组', () => {
     const out = unbindImages(images, ['img-2']);
-    expect(out).toEqual([{ id: 'img-1', data: 'a' }, { data: 'no-id' }, { id: 'img-3', data: 'c' }]);
+    expect(out).toEqual([
+      { id: 'img-1', data: 'a' },
+      { data: 'no-id' },
+      { id: 'img-3', data: 'c' },
+    ]);
     expect(images).toHaveLength(4);
   });
 
@@ -130,5 +151,139 @@ describe('unbindImages', () => {
     ]);
     expect(unbindImages(images, [])).toEqual(images);
     expect(unbindImages(images, ['missing'])).toEqual(images);
+  });
+});
+
+describe('formatHoverTag', () => {
+  it('joins tag.class and truncates with ellipsis', () => {
+    expect(formatHoverTag('div', '')).toBe('div');
+    expect(formatHoverTag('BUTTON', 'acUsEb lGdWHf')).toBe('button.acUsEb.lGdWHf');
+    expect(formatHoverTag('div', 'a b c d e f g h i j k', 18)).toBe('div.a.b.c.d.e.f...');
+  });
+});
+
+describe('scribbleGesture', () => {
+  it('enters annotate on >5px move; hold is not required', () => {
+    expect(DESIGN_SCRIBBLE_HOLD_MS).toBe(300);
+    expect(DESIGN_SCRIBBLE_MOVE_PX).toBe(5);
+    expect(scribbleGesture(0, 5)).toBe('click');
+    expect(scribbleGesture(0, 5.1)).toBe('annotate');
+    expect(scribbleGesture(400, 4.9)).toBe('click');
+    expect(scribbleGesture(50, 20)).toBe('annotate');
+  });
+});
+
+describe('scribbleBounds / boundsCenter', () => {
+  it('computes axis-aligned box and center', () => {
+    expect(scribbleBounds([])).toBeNull();
+    expect(
+      scribbleBounds([
+        { x: 10, y: 20 },
+        { x: 40, y: 10 },
+        { x: 12, y: 50 },
+      ])
+    ).toEqual({ left: 10, top: 10, right: 40, bottom: 50, width: 30, height: 40 });
+    expect(
+      boundsCenter({ left: 10, top: 10, right: 40, bottom: 50, width: 30, height: 40 })
+    ).toEqual({
+      x: 25,
+      y: 30,
+    });
+  });
+});
+
+describe('expandScribbleCrop', () => {
+  const view = { width: 1000, height: 800 };
+
+  it('pads 48px and grows short edges to 120, then clamps to viewport', () => {
+    expect(DESIGN_SCRIBBLE_CROP_PAD).toBe(48);
+    expect(DESIGN_SCRIBBLE_CROP_MIN).toBe(120);
+    expect(
+      expandScribbleCrop(
+        { left: 200, top: 200, right: 260, bottom: 220, width: 60, height: 20 },
+        view
+      )
+    ).toEqual({ x: 152, y: 150, width: 156, height: 120 });
+    expect(
+      expandScribbleCrop({ left: 2, top: 2, right: 10, bottom: 8, width: 8, height: 6 }, view)
+    ).toEqual({ x: 0, y: 0, width: 66, height: 65 });
+  });
+});
+
+describe('resizeScribbleCrop', () => {
+  const view = { width: 400, height: 300 };
+  const box = { x: 100, y: 80, width: 120, height: 90 };
+
+  it('moves and resizes from handles, then clamps to viewport and min size', () => {
+    expect(resizeScribbleCrop(box, 'move', 20, -10, view)).toEqual({
+      x: 120,
+      y: 70,
+      width: 120,
+      height: 90,
+    });
+    expect(resizeScribbleCrop(box, 'se', 30, 20, view)).toEqual({
+      x: 100,
+      y: 80,
+      width: 150,
+      height: 110,
+    });
+    expect(resizeScribbleCrop(box, 'nw', 200, 200, view).width).toBeGreaterThanOrEqual(48);
+    expect(
+      resizeScribbleCrop({ x: 360, y: 10, width: 80, height: 80 }, 'move', 80, -20, view)
+    ).toEqual({
+      x: 320,
+      y: 0,
+      width: 80,
+      height: 80,
+    });
+  });
+});
+
+describe('cssToImageRect', () => {
+  it('maps CSS crop onto device-pixel screenshot', () => {
+    expect(
+      cssToImageRect(
+        { x: 100, y: 50, width: 200, height: 80 },
+        { width: 800, height: 600 },
+        { width: 1600, height: 1200 }
+      )
+    ).toEqual({ x: 200, y: 100, width: 400, height: 160 });
+  });
+});
+
+describe('sanitizeScribblePoints', () => {
+  it('drops invalid / extra points; rejects empty or single point', () => {
+    expect(sanitizeScribblePoints(null)).toEqual([]);
+    expect(sanitizeScribblePoints([{ x: 1, y: 2 }])).toEqual([]);
+    expect(
+      sanitizeScribblePoints([{ x: 1, y: 2 }, { x: Number.NaN, y: 3 }, { x: 4, y: 5 }, 'nope'])
+    ).toEqual([
+      { x: 1, y: 2 },
+      { x: 4, y: 5 },
+    ]);
+  });
+});
+
+describe('parseDesignBinding', () => {
+  it('accepts picked / annotated / freeze-request / cancelled and drops unknown', () => {
+    expect(parseDesignBinding({ type: 'cancelled' })).toEqual({ type: 'cancelled' });
+    expect(parseDesignBinding({ type: 'freeze-request' })).toEqual({ type: 'freeze-request' });
+    expect(
+      parseDesignBinding({
+        type: 'annotated',
+        points: [
+          { x: 1, y: 2 },
+          { x: 3, y: 4 },
+        ],
+      })
+    ).toEqual({
+      type: 'annotated',
+      points: [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ],
+    });
+    expect(parseDesignBinding({ type: 'hover' })).toBeNull();
+    expect(parseDesignBinding('x')).toBeNull();
   });
 });

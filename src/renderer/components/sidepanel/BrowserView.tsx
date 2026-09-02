@@ -1,8 +1,12 @@
 import type { BrowserTabState } from '@shared/types/browser';
 import type { DockviewPanelApi } from 'dockview-react';
-import { ArrowLeft, ArrowRight, Bug, Globe, Hand, PenLine, RotateCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BoxSelect, Bug, Globe, Hand, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { insertUiElementMention } from '@/components/chat/composerMentionBridge';
+import {
+  insertComposerImage,
+  insertUiElementMention,
+  requestFocusComposer,
+} from '@/components/chat/composerMentionBridge';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -92,23 +96,28 @@ export function BrowserView({
     return window.electronAPI.browser.onDesignMode((event) => {
       if (event.tabId !== tabId) return;
       if (event.type === 'cancelled') return;
-      const id =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `ui-${Date.now()}`;
-      const imageId = `img-${id}`;
-      const inserted = insertUiElementMention(
-        {
-          kind: 'ui-element',
-          id,
-          label: event.payload.label || event.payload.tag || 'element',
-          path: event.payload.path || event.payload.tag || 'element',
-          text: event.payload.text || event.payload.label || event.payload.tag || 'element',
-          imageId,
-        },
-        event.image
-      );
+      let inserted = false;
+      if (event.type === 'annotated') {
+        inserted = event.image ? insertComposerImage(event.image) : false;
+      } else {
+        const id =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `ui-${Date.now()}`;
+        inserted = insertUiElementMention(
+          {
+            kind: 'ui-element',
+            id,
+            label: event.payload.label || event.payload.tag || 'element',
+            path: event.payload.path || event.payload.tag || 'element',
+            text: event.payload.text || event.payload.label || event.payload.tag || 'element',
+            imageId: `img-${id}`,
+          },
+          event.image
+        );
+      }
       if (!inserted) addToast({ type: 'warning', title: t('No Composer for this selection') });
+      else requestFocusComposer();
     });
   }, [tabId, t]);
 
@@ -286,7 +295,7 @@ export function BrowserView({
           aria-label={t('Toggle Design Mode')}
           aria-pressed={state.designMode}
         >
-          <PenLine className="h-3.5 w-3.5" />
+          <BoxSelect className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
