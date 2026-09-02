@@ -28,9 +28,11 @@ import { Z_INDEX } from '@/lib/z-index';
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
 
 const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
+  minimal: 'Min',
   low: 'Low',
   medium: 'Med',
   high: 'High',
+  xhigh: 'Extra',
   max: 'Max',
 };
 

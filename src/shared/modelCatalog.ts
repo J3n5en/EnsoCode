@@ -38,7 +38,7 @@ export interface ResolvedCustomModelCapabilities {
   source: CustomModelFieldSources;
 }
 
-const OPTIMISTIC_THINKING_LEVEL_MAP = { max: 'max' } as const;
+const OPTIMISTIC_THINKING_LEVEL_MAP = { xhigh: 'xhigh', max: 'max' } as const;
 
 /** 精确 model id 查找。OAuth meta 与自定义 spawn 共用；禁止前缀 / 品牌猜测。 */
 export function findCatalogModelById<T extends { id: string }>(
@@ -91,18 +91,19 @@ export function pickModelCapabilityOverrides(
 
 /**
  * 行覆盖把「最高支持档」写成 thinkingLevelMap：
- * max 显式声明；更低档用 null 剔除更高项目档（max 未声明本身就不支持）。
+ * xhigh/max 显式声明；更低档用 null 剔除更高项目档（未声明的 xhigh/max 本身就不支持）。
  */
 export function thinkingLevelMapForCap(
   level: ThinkingLevel
 ): Record<string, string | null> | undefined {
-  if (level === 'max') return { max: 'max' };
+  if (level === 'max') return { xhigh: 'xhigh', max: 'max' };
+  if (level === 'xhigh') return { xhigh: 'xhigh' };
   if (level === 'high') return undefined;
   const map: Record<string, string | null> = {};
   const start = THINKING_LEVELS.indexOf(level) + 1;
   for (let i = start; i < THINKING_LEVELS.length; i++) {
     const higher = THINKING_LEVELS[i];
-    if (higher && higher !== 'max') map[higher] = null;
+    if (higher && higher !== 'max' && higher !== 'xhigh') map[higher] = null;
   }
   return Object.keys(map).length > 0 ? map : undefined;
 }

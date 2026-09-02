@@ -154,7 +154,10 @@ const SUBAGENT_MODEL_FIELDS = {
   modelId: { type: 'string', minLength: 1 },
   description: { type: 'string' },
   reasoning: { type: 'string', enum: ['on', 'off', 'follow'] },
-  thinkingLevel: { type: 'string', enum: ['low', 'medium', 'high', 'max', 'follow'] },
+  thinkingLevel: {
+    type: 'string',
+    enum: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'follow'],
+  },
 } as const satisfies Readonly<Record<string, JsonSchema>>;
 
 const SUBAGENT_MODEL_ADD_INPUT_SCHEMA = {

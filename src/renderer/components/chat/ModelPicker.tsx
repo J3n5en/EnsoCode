@@ -34,9 +34,11 @@ export function requestOpenChatModelPicker() {
 
 /** 档位显示文案的 t() key（不是已翻译文本）；沿用既有英文短词，字典里已配好中文译文 */
 const LEVEL_LABEL_KEYS: Record<ThinkingLevel, string> = {
+  minimal: 'Min',
   low: 'Low',
   medium: 'Med',
   high: 'High',
+  xhigh: 'Extra',
   max: 'Max',
 };
 
@@ -627,7 +629,7 @@ export function ModelPicker({
         )}
         <ChevronDown className="h-3 w-3 shrink-0" />
       </MenuTrigger>
-      <MenuPopup data-model-picker="root" side="top" align="start" className="w-96">
+      <MenuPopup data-model-picker="root" side="top" align="start" className="w-80">
         {providers.map((provider) => (
           <ModelMetaBridge key={provider.id} provider={provider} onData={handleMetaData} />
         ))}
@@ -792,7 +794,7 @@ export function ModelPicker({
                     onThinkingChange(clampProjectThinkingLevel(target, supportedLevels));
                   }}
                 />
-                <div className="mt-1.5 flex justify-between">
+                <div className="mt-1 flex justify-between gap-0">
                   {THINKING_LEVELS.map((entry, index) => {
                     const disabled =
                       supportedLevels !== undefined && !supportedLevels.includes(entry);
@@ -804,7 +806,7 @@ export function ModelPicker({
                         disabled={disabled}
                         onClick={disabled ? undefined : () => onThinkingChange(entry)}
                         className={cn(
-                          'flex w-8 flex-col items-center gap-0.5',
+                          'flex min-w-0 flex-1 flex-col items-center gap-0',
                           index === 0 && 'items-start',
                           index === THINKING_LEVELS.length - 1 && 'items-end',
                           disabled && 'cursor-not-allowed'

@@ -19,8 +19,8 @@ export interface ModelMeta {
   /** 缺失 = 未知（不禁用推理开关）；false = 明确不支持（禁用开关并注明原因） */
   reasoning?: boolean;
   /**
-   * 支持的思考档，值域是本项目的 THINKING_LEVELS（不含 pi 的 off/minimal/xhigh）。
-   * 缺失 = 未知（四档全放开）；[] = 明确不支持任何档（等价 reasoning: false）。
+   * 支持的思考档，值域是本项目的 THINKING_LEVELS（不含 pi 的 off，off 由 reasoning 开关表达）。
+   * 缺失 = 未知（全档放开）；[] = 明确不支持任何档（等价 reasoning: false）。
    * ⚠️「缺失」与「空数组」语义不同，序列化/反序列化都不许把 undefined 归一成 []。
    */
   thinkingLevels?: ThinkingLevel[];

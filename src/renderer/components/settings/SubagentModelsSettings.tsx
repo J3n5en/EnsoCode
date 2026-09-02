@@ -24,9 +24,11 @@ const isModelEnabled = (provider: ModelProvider, modelId: string): boolean =>
   provider.models.some((model) => model.id === modelId && model.enabled !== false);
 
 const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
+  minimal: 'Min',
   low: 'Low',
   medium: 'Med',
   high: 'High',
+  xhigh: 'Extra',
   max: 'Max',
 };
 

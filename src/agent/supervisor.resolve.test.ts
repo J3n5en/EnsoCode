@@ -71,7 +71,7 @@ describe('resolveBaseModel apiKey', () => {
       settingsProviderId: 'settings-provider',
     });
     expect(model.reasoning).toBe(true);
-    expect(model.thinkingLevelMap).toEqual({ max: 'max' });
+    expect(model.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
     expect(model.contextWindow).toBe(128_000);
     expect(model.maxTokens).toBe(32_000);
   });

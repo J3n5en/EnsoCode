@@ -45,9 +45,11 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
 
 // 与 SessionConfigSheet 同一套档位文案，保持两处选择器观感一致
 const LEVEL_LABELS: Record<ThinkingLevel, string> = {
+  minimal: '极低',
   low: '低',
   medium: '中',
   high: '高',
+  xhigh: '极高',
   max: '最高',
 };
 

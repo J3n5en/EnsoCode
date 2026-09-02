@@ -1,4 +1,9 @@
-import { type ApprovalMode, type ProjectEntry, type ProviderEntry, pairProjectListLabel } from '@enso/pair';
+import {
+  type ApprovalMode,
+  type ProjectEntry,
+  type ProviderEntry,
+  pairProjectListLabel,
+} from '@enso/pair';
 import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +16,13 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
@@ -39,10 +50,23 @@ const APPROVAL_KEYS: Record<ApprovalMode, string> = {
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
 };
-const LEVEL_KEYS: Record<ThinkingLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
+const LEVEL_KEYS: Record<ThinkingLevel, string> = {
+  minimal: 'Min',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra High',
+  max: 'Max',
+};
 
 /** 在远程节点上新建会话：只能选对方已添加的项目（cwd 由对方 main 反查）与对方已启用的模型 */
-export function NewRemoteSessionDialog({ open, onOpenChange, projects, providers, onCreate }: Props) {
+export function NewRemoteSessionDialog({
+  open,
+  onOpenChange,
+  projects,
+  providers,
+  onCreate,
+}: Props) {
   const { t } = useI18n();
   // 目录异步到达：记录用户显式选过的值，取值时对当前列表校验回落
   const [pickedProject, setPickedProject] = useState<string | null>(null);

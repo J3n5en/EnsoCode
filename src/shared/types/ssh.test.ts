@@ -27,7 +27,9 @@ describe('parseSshConnection', () => {
   });
 
   it('脏输入拒绝:缺字段、非法 auth、带 password 明文、坏 uuid', () => {
-    expect(parseSshConnection({ name: 'x', host: 'h', auth: 'key', hasPassword: false })).toBeNull();
+    expect(
+      parseSshConnection({ name: 'x', host: 'h', auth: 'key', hasPassword: false })
+    ).toBeNull();
     expect(
       parseSshConnection({ id, name: 'x', host: 'h', auth: 'token', hasPassword: false })
     ).toBeNull();

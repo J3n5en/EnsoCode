@@ -67,7 +67,7 @@ describe('resolveCustomModelCapabilities', () => {
     const resolved = resolveCustomModelCapabilities(sonnetCatalog, {});
     expect(resolved.reasoning).toBe(true);
     expect(resolved.thinkingLevelMap).toEqual({ max: 'max' });
-    expect(resolved.thinkingLevels).toEqual(['low', 'medium', 'high', 'max']);
+    expect(resolved.thinkingLevels).toEqual(['minimal', 'low', 'medium', 'high', 'max']);
     expect(resolved.contextWindow).toBe(200_000);
     expect(resolved.maxTokens).toBe(64_000);
     expect(resolved.source).toEqual({
@@ -90,8 +90,8 @@ describe('resolveCustomModelCapabilities', () => {
   it('catalog 未命中保持今日乐观默认，窗口不填假数字', () => {
     const resolved = resolveCustomModelCapabilities(undefined, {});
     expect(resolved.reasoning).toBe(true);
-    expect(resolved.thinkingLevelMap).toEqual({ max: 'max' });
-    expect(resolved.thinkingLevels).toEqual(['low', 'medium', 'high', 'max']);
+    expect(resolved.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
+    expect(resolved.thinkingLevels).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     expect(resolved.contextWindow).toBeUndefined();
     expect(resolved.maxTokens).toBeUndefined();
     expect(resolved.source).toEqual({
@@ -126,7 +126,7 @@ describe('resolveCustomModelCapabilities', () => {
     const resolved = resolveCustomModelCapabilities(sonnetCatalog, { thinkingLevel: 'high' });
     expect(resolved.reasoning).toBe(true);
     expect(resolved.thinkingLevelMap).toBeUndefined();
-    expect(resolved.thinkingLevels).toEqual(['low', 'medium', 'high']);
+    expect(resolved.thinkingLevels).toEqual(['minimal', 'low', 'medium', 'high']);
     expect(resolved.source.reasoning).toBe('catalog');
     expect(resolved.source.thinkingLevel).toBe('override');
     expect(resolved.source.contextWindow).toBe('catalog');
@@ -148,24 +148,26 @@ describe('resolveCustomModelCapabilities', () => {
     });
     expect(followDefault.reasoning).toBe(true);
     expect(followDefault.source.reasoning).toBe('override');
-    expect(followDefault.thinkingLevelMap).toEqual({ max: 'max' });
+    expect(followDefault.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
     expect(followDefault.source.thinkingLevel).toBe('default');
   });
 
   it('reasoning:on 覆盖在 catalog 未命中时仍用乐观档', () => {
     const resolved = resolveCustomModelCapabilities(undefined, { reasoning: 'on' });
     expect(resolved.reasoning).toBe(true);
-    expect(resolved.thinkingLevelMap).toEqual({ max: 'max' });
+    expect(resolved.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
     expect(resolved.source.thinkingLevel).toBe('default');
   });
 });
 
 describe('thinkingLevelMapForCap', () => {
   it('max 显式声明，high 不声明 max，更低档剔除更高项目档', () => {
-    expect(thinkingLevelMapForCap('max')).toEqual({ max: 'max' });
+    expect(thinkingLevelMapForCap('max')).toEqual({ xhigh: 'xhigh', max: 'max' });
+    expect(thinkingLevelMapForCap('xhigh')).toEqual({ xhigh: 'xhigh' });
     expect(thinkingLevelMapForCap('high')).toBeUndefined();
     expect(thinkingLevelMapForCap('medium')).toEqual({ high: null });
     expect(thinkingLevelMapForCap('low')).toEqual({ medium: null, high: null });
+    expect(thinkingLevelMapForCap('minimal')).toEqual({ low: null, medium: null, high: null });
   });
 });
 
@@ -197,7 +199,7 @@ describe('resolveCustomModelView', () => {
       source: 'unknown',
     });
     expect(view.source.reasoning).toBe('default');
-    expect(view.thinkingLevelMap).toEqual({ max: 'max' });
+    expect(view.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
   });
 });
 

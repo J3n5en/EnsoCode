@@ -89,16 +89,20 @@ export const SEGMENT_LABEL_KEYS: Record<StatusLineSegmentId, string> = {
 };
 
 const THINKING_LEVEL_SHORT_KEYS: Record<ThinkingLevel, string> = {
+  minimal: 'Min',
   low: 'Low',
   medium: 'Med',
   high: 'High',
+  xhigh: 'Extra',
   max: 'Max',
 };
 
 const THINKING_LEVEL_FULL_KEYS: Record<ThinkingLevel, string> = {
+  minimal: 'Min',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
+  xhigh: 'Extra High',
   max: 'Max',
 };
 

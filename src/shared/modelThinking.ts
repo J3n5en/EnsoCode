@@ -15,7 +15,7 @@
  */
 import { THINKING_LEVELS, type ThinkingLevel } from './types/agent';
 
-/** pi 的完整档位序（含我们不暴露的 off/minimal/xhigh），钳位方向依赖这个顺序 */
+/** pi 的完整档位序（含我们不暴露的 off），钳位方向依赖这个顺序 */
 const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 type PiThinkingLevel = (typeof PI_LEVELS)[number];
@@ -35,7 +35,7 @@ function supportedPiLevels(model: ThinkingCapableModel): PiThinkingLevel[] {
   });
 }
 
-/** 从 pi 模型对象算出本项目四档里哪些可用（`reasoning:false` → `[]`） */
+/** 从 pi 模型对象算出本项目档位里哪些可用（`reasoning:false` → `[]`） */
 export function supportedProjectThinkingLevels(model: ThinkingCapableModel): ThinkingLevel[] {
   if (!model.reasoning) return [];
   const supported = supportedPiLevels(model);

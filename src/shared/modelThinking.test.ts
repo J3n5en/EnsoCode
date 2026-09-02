@@ -9,26 +9,40 @@ describe('supportedProjectThinkingLevels', () => {
     ).toEqual([]);
   });
 
-  it('无 thinkingLevelMap 时只有默认三档（max 未显式声明）', () => {
-    expect(supportedProjectThinkingLevels({ reasoning: true })).toEqual(['low', 'medium', 'high']);
+  it('无 thinkingLevelMap 时只有默认档（xhigh/max 未显式声明）', () => {
+    expect(supportedProjectThinkingLevels({ reasoning: true })).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
   });
 
-  it('thinkingLevelMap 声明 max 后四档全开', () => {
+  it('thinkingLevelMap 声明 max 后仍不含未声明的 xhigh', () => {
     expect(
       supportedProjectThinkingLevels({ reasoning: true, thinkingLevelMap: { max: 'max' } })
-    ).toEqual(['low', 'medium', 'high', 'max']);
+    ).toEqual(['minimal', 'low', 'medium', 'high', 'max']);
   });
 
-  it('thinkingLevelMap 里 null 明确剔除该档，max 仍需显式声明', () => {
+  it('thinkingLevelMap 同时声明 xhigh/max 后六档全开', () => {
+    expect(
+      supportedProjectThinkingLevels({
+        reasoning: true,
+        thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+      })
+    ).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('thinkingLevelMap 里 null 明确剔除该档，xhigh/max 仍需显式声明', () => {
     expect(
       supportedProjectThinkingLevels({ reasoning: true, thinkingLevelMap: { medium: null } })
-    ).toEqual(['low', 'high']);
+    ).toEqual(['minimal', 'low', 'high']);
     expect(
       supportedProjectThinkingLevels({
         reasoning: true,
         thinkingLevelMap: { medium: null, max: 'max' },
       })
-    ).toEqual(['low', 'high', 'max']);
+    ).toEqual(['minimal', 'low', 'high', 'max']);
   });
 });
 

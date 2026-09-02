@@ -28,9 +28,11 @@ interface Props {
 }
 
 const LEVEL_LABELS: Record<ThinkingLevel, string> = {
+  minimal: '极低',
   low: '低',
   medium: '中',
   high: '高',
+  xhigh: '极高',
   max: '最高',
 };
 

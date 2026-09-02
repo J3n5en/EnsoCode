@@ -6,12 +6,15 @@ import { BUILTIN_TOOLS } from './types/builtinTools';
 /** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
 const MAPPED_I18N_KEYS = [
   // ModelPicker.LEVEL_LABEL_KEYS + StatsLine.THINKING_LEVEL_SHORT_KEYS
+  'Min',
   'Low',
   'Med',
   'High',
+  'Extra',
   'Max',
-  // StatsLine.THINKING_LEVEL_FULL_KEYS（medium 档用 'Medium'，不是 'Med'）
+  // StatsLine.THINKING_LEVEL_FULL_KEYS（medium 档用 'Medium'，xhigh 用 'Extra High'）
   'Medium',
+  'Extra High',
   // StatsLine.SEGMENT_LABEL_KEYS
   'Model',
   'Approval mode',

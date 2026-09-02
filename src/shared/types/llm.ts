@@ -17,7 +17,14 @@ export type ModelReasoningOverride = (typeof MODEL_REASONING_OVERRIDES)[number];
  * 行级最高思考档覆盖，值域与 `THINKING_LEVELS` 对齐。
  * 写在 llm 以免 `types/agent` ↔ `types/llm` 循环依赖。
  */
-export const MODEL_THINKING_LEVEL_OVERRIDES = ['low', 'medium', 'high', 'max'] as const;
+export const MODEL_THINKING_LEVEL_OVERRIDES = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
 export type ModelThinkingLevelOverride = (typeof MODEL_THINKING_LEVEL_OVERRIDES)[number];
 
 /** 自定义模型行的可选能力覆盖。缺省字段 = 跟随上一层，不在数据层填假数字。 */
