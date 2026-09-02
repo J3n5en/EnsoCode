@@ -1,4 +1,4 @@
-import { Check, Pencil, Send, X } from 'lucide-react';
+import { Check, Pencil, Send, SquareX, X } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/i18n';
 import type { QueuedMessage } from '@/stores/sessions';
@@ -83,6 +83,18 @@ export function MessageQueue({
                 className="rounded p-0.5 text-muted-foreground hover:text-foreground"
               >
                 <Send className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                title={t('Interrupt and send now')}
+                onClick={() =>
+                  void useSessionsStore
+                    .getState()
+                    .interruptAndSendQueued(conversationId, message.id)
+                }
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+              >
+                <SquareX className="h-3 w-3" />
               </button>
               <button
                 type="button"

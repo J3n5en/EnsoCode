@@ -567,6 +567,7 @@ export const zhTranslations: Record<string, string> = {
   Queued: '排队',
   Edit: '编辑',
   'Send now': '立即发送',
+  'Interrupt and send now': '打断并立即发送',
   Remove: '移除',
   'Agent types': '子代理类型',
   'Built-in tools': '内置工具',

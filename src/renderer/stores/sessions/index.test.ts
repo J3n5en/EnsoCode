@@ -100,6 +100,7 @@ const dismissCoworker = vi.fn(
   })
 );
 const hireCoworker = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
+const agentAbort = vi.fn(async (_id: string) => ({ ok: true }));
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -137,7 +138,8 @@ vi.stubGlobal('window', {
       spawn: vi.fn(async () => ({ ok: true })),
       dismissCoworker,
       hireCoworker,
-      abort: vi.fn(async () => ({ ok: true })),
+      abort: agentAbort,
+      steer: vi.fn(async () => ({ ok: true })),
     },
     agentDispatch: {
       bindSource,
@@ -950,6 +952,43 @@ describe('typed Agent child projection', () => {
         expect.objectContaining({ conversationId: phoneSessionId })
       );
     });
+  });
+
+  it('interruptAndSendQueued aborts the running turn, then prompts once the turn settles', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'running' as const,
+          queuedMessages: [{ id: 'q1', text: 'urgent' }],
+        },
+      },
+    }));
+    agentAbort.mockClear();
+    agentPrompt.mockClear();
+
+    const pending = sessionsModule.useSessionsStore
+      .getState()
+      .interruptAndSendQueued('parent', 'q1');
+
+    await vi.waitFor(() => expect(agentAbort).toHaveBeenCalledWith('parent'));
+    // 轮次未收束前不投递，避免打在还在跑的轮上
+    expect(agentPrompt).not.toHaveBeenCalled();
+
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, status: 'idle' as const },
+      },
+    }));
+    await pending;
+
+    expect(agentPrompt).toHaveBeenCalledWith('parent', 'urgent', undefined);
+    expect(
+      sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages
+    ).toHaveLength(0);
   });
 
   it('summon only pre-fills the parent composer and never dispatches', () => {

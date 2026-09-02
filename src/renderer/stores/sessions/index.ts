@@ -219,6 +219,8 @@ interface SessionsState {
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
   sendQueuedNow(conversationId: string, messageId: string): void;
+  /** 打断当前轮并立即发送队列中某条(中断收束后以新一轮 prompt 投递) */
+  interruptAndSendQueued(conversationId: string, messageId: string): Promise<void>;
   /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
@@ -1843,6 +1845,61 @@ export const useSessionsStore = create<SessionsState>()(
           } else {
             void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
           }
+        },
+
+        async interruptAndSendQueued(conversationId, messageId) {
+          const conversation = get().conversations[conversationId];
+          const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
+          if (!conversation?.started || !item) return;
+          if (conversation.status !== 'running') {
+            get().sendQueuedNow(conversationId, messageId);
+            return;
+          }
+          // 用户接管：中断本轮不自动续跑，活动目标一并暂停（与 abort 一致）
+          const goal = conversation.goal;
+          set((state) =>
+            patch(state, conversationId, {
+              abortRequested: true,
+              ...(goal?.status === 'active'
+                ? { goal: { ...goal, status: 'paused' as const, note: 'stopped by user' } }
+                : {}),
+            })
+          );
+          await window.electronAPI.agent.abort(conversationId);
+          // 中断的轮次走 abortRequested 收口，不触发 flushQueue，需自行等到收束再投递
+          await new Promise<void>((resolve) => {
+            if (get().conversations[conversationId]?.status !== 'running') return resolve();
+            const done = () => {
+              clearTimeout(timer);
+              unsubscribe();
+              resolve();
+            };
+            const unsubscribe = useSessionsStore.subscribe((state) => {
+              if (state.conversations[conversationId]?.status !== 'running') done();
+            });
+            const timer = setTimeout(done, 10_000);
+          });
+          if (!get().conversations[conversationId]?.started) return;
+          set((state) =>
+            patch(state, conversationId, {
+              queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
+                (message) => message.id !== messageId
+              ),
+              messages: [
+                ...state.conversations[conversationId].messages,
+                {
+                  role: 'user',
+                  content: [
+                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+                  ],
+                  timestamp: Date.now(),
+                  optimistic: true,
+                },
+              ],
+            })
+          );
+          void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
         },
 
         async hireCoworker(parentId, name, agentType) {
