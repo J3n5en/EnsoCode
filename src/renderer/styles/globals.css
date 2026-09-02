@@ -245,10 +245,10 @@ html.bg-image-enabled {
   --color-popover: oklch(from var(--popover) l c h / var(--bg-popover-alpha, 0.92));
 }
 
-/* body 铺实心底色：contain/center 模式下图片盖不满的区域露主题色而不是白底 */
-html.bg-image-enabled body {
-  background-color: var(--background);
-}
+/*
+ * 实心底色由壁纸层自身铺（见 BackgroundLayer 的 backgroundColor），不能铺在 body 上：
+ * body 必须保持透明（enso-main-shell），否则侧栏 Browser 的挖孔透不出垫底 guest view。
+ */
 
 /**
  * 代码块跟随透明：shiki 输出的 pre 自带主题实心底色（行内 style + 上方

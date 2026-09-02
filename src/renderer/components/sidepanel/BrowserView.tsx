@@ -162,6 +162,11 @@ export function BrowserView({
         !sameRect(lastSent.current, rect) ||
         covered !== lastCovered.current
       ) {
+        // 壁纸挖孔跟随 guest 可见性：只在 null↔rect 边沿翻计数（rect 移动/covered 变化不算）
+        const wasVisible = lastSent.current != null;
+        const nowVisible = rect != null;
+        if (!wasVisible && nowVisible) useSidePanelStore.getState().addBrowserGuest();
+        else if (wasVisible && !nowVisible) useSidePanelStore.getState().removeBrowserGuest();
         lastSent.current = rect;
         lastCovered.current = covered;
         void window.electronAPI.browser
@@ -188,6 +193,7 @@ export function BrowserView({
       disposed = true;
       cancelAnimationFrame(raf);
       if (lastSent.current !== null) {
+        if (lastSent.current !== undefined) useSidePanelStore.getState().removeBrowserGuest();
         lastSent.current = null;
         void window.electronAPI.browser.setViewport(tabId, conversationId, null);
       }

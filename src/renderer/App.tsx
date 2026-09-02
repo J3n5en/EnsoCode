@@ -57,6 +57,8 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1');
   const { t } = useI18n();
   const sideOpen = useSidePanelStore((s) => s.open);
+  // 壁纸只在浏览器 guest 可见时才让出右栏（挖孔给垫底原生 view），平时铺满全窗
+  const browserHole = useSidePanelStore((s) => s.browserGuests > 0);
   const toggleSidePanel = useSidePanelStore((s) => s.toggleOpen);
   const [sideWidth, setSideWidth] = useState(() => {
     const saved = Number(localStorage.getItem(SIDE_WIDTH_KEY));
@@ -188,7 +190,9 @@ export default function App() {
   return (
     <div
       className="relative isolate flex h-screen flex-col"
-      style={{ ['--enso-side-panel-width' as string]: `${sideOpen ? sideWidth : 0}px` }}
+      style={{
+        ['--enso-side-panel-width' as string]: `${sideOpen && browserHole ? sideWidth : 0}px`,
+      }}
     >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />

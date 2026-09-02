@@ -177,7 +177,12 @@ function BackgroundMedia({ state }: { state: MediaState }) {
       aria-hidden
       data-slot="background-layer"
       className="pointer-events-none absolute inset-y-0 left-0 -z-10 overflow-hidden"
-      style={{ right: 'var(--enso-side-panel-width, 0px)' }}
+      style={{
+        right: 'var(--enso-side-panel-width, 0px)',
+        // 实心底：contain/center 盖不满的区域露主题色；用原始令牌（--background），
+        // 不能用会被重映射成半透明的 --color-background；body 必须保持透明给浏览器挖孔
+        backgroundColor: 'var(--background)',
+      }}
     >
       {video ? (
         <video
