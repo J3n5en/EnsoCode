@@ -37,6 +37,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { ConfirmDialog } from './ConfirmDialog';
+import { useChatHost } from './chatHost';
 import { EditDiff } from './EditDiff';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { Markdown } from './Markdown';
@@ -575,7 +576,10 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
 /** 终态错误后续跑：已 spawn 且非 running 才显示（手机 stub started=false 自动隐藏） */
 function RetryTurnButton() {
   const { t } = useI18n();
+  const host = useChatHost();
   const canRetry = useSessionsStore((state) => {
+    // 远程节点视图：协议无 retry，宿主显式关闭
+    if (host && !host.canRetry) return false;
     const conversation = displayedConversation(state);
     return Boolean(
       conversation?.started && !conversation.spawning && conversation.status !== 'running'
@@ -605,7 +609,9 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   const [open, setOpen] = useState(false);
   /** 待确认的回退(值 = restoreFiles);null = 无 */
   const [pendingRestoreFiles, setPendingRestoreFiles] = useState<boolean | null>(null);
+  const host = useChatHost();
   const canRewind = useSessionsStore((state) => {
+    if (host && !host.canRewind) return false;
     const conversation = displayedConversation(state);
     return Boolean(
       conversation?.started && !conversation.spawning && conversation.status === 'idle'
@@ -1092,7 +1098,10 @@ function TodoRow({ todos }: { todos: TodoItem[] }) {
 const elapsedStartByKey = new Map<string, number>();
 
 function RunningElapsed({ itemKey, since }: { itemKey: string; since?: number }) {
-  const sessionId = useSessionsStore((state) => displayedConversation(state)?.id ?? '');
+  const host = useChatHost();
+  const localSessionId = useSessionsStore((state) => displayedConversation(state)?.id ?? '');
+  // 远程节点视图的计时 key 用远程会话 id，不能落到本机 active 会话上
+  const sessionId = host ? (host.sessionId ?? '') : localSessionId;
   const startRef = useRef<number | null>(null);
   if (startRef.current === null) {
     const cacheKey = `${sessionId}:${itemKey}`;
