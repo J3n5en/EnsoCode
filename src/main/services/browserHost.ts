@@ -326,16 +326,61 @@ export class BrowserHost {
         await this.destroyTab(tab);
         return { closed: tab.id };
       }
-      case 'tabs': {
-        const tab = this.tabFor(sessionId);
-        return tab ? [this.state(sessionId)] : [];
-      }
+      case 'tabs':
+        return this.handleTabs(
+          sessionId,
+          isRecord(params) && typeof params.action === 'string' ? params.action : 'list',
+          isRecord(params) && typeof params.index === 'number' ? params.index : undefined
+        );
       case 'lock': {
         const locked = !(isRecord(params) && params.release === true);
         await this.setLocked(sessionId, locked);
         return { locked };
       }
     }
+  }
+
+  private tabsForSession(sessionId: string): Tab[] {
+    return [...this.tabs.values()]
+      .filter((tab) => tab.ownerSessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  private async handleTabs(sessionId: string, action: string, index?: number): Promise<unknown> {
+    const list = () => {
+      const current = this.currentBySession.get(sessionId);
+      return this.tabsForSession(sessionId).map((tab, tabIndex) => ({
+        index: tabIndex,
+        ...this.stateOf(tab),
+        active: tab.id === current,
+      }));
+    };
+    if (action === 'new') {
+      const tab = this.createTab(sessionId);
+      this.userTabs.add(tab.id);
+      this.requestReveal(sessionId, tab.id);
+      return { opened: tab.id, tabs: list() };
+    }
+    if (action === 'select') {
+      if (index === undefined || !Number.isInteger(index)) {
+        throw new Error('index is required for select');
+      }
+      const tab = this.tabsForSession(sessionId)[index];
+      if (!tab) throw new Error(`No browser tab at index ${index}`);
+      this.currentBySession.set(sessionId, tab.id);
+      this.requestReveal(sessionId, tab.id);
+      return { selected: tab.id, tabs: list() };
+    }
+    if (action === 'close') {
+      const tabs = this.tabsForSession(sessionId);
+      const tab = index === undefined ? this.tabFor(sessionId) : tabs[index];
+      if (!tab) throw new Error('No browser tab to close');
+      this.userTabs.delete(tab.id);
+      this.forgetTab(tab.id);
+      await this.destroyTab(tab);
+      return { closed: tab.id, tabs: list() };
+    }
+    return { tabs: list() };
   }
 
   async navigate(sessionId: string, raw: string): Promise<PageInfo> {

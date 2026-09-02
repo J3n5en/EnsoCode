@@ -43,7 +43,7 @@ describe('BrowserInvoker', () => {
 });
 
 describe('createBrowserTools', () => {
-  it('注册第一刀五个工具，click/type 缺 ref 直接抛错不发请求', async () => {
+  it('注册内置浏览器工具，click/type 缺 ref 直接抛错不发请求', async () => {
     const emit = vi.fn();
     const tools = createBrowserTools(new BrowserInvoker(identity, emit));
     expect(tools.map((tool) => tool.name)).toEqual([
@@ -72,6 +72,30 @@ describe('createBrowserTools', () => {
     invoker.resolve({ requestId, ok: true, result: { data: 'AAAA', mimeType: 'image/png' } });
     const out = await pending;
     expect(out.content[0]).toEqual({ type: 'image', data: 'AAAA', mimeType: 'image/png' });
+  });
+
+  it('browser_tabs 把 action/index 传给 invoke', async () => {
+    const emit = vi.fn();
+    const invoker = new BrowserInvoker(identity, emit);
+    const tools = createBrowserTools(invoker);
+    const tabs = tools.find((tool) => tool.name === 'browser_tabs')!;
+    const pending = tabs.execute(
+      'c1',
+      { action: 'select', index: 1 },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      op: 'tabs',
+      params: { action: 'select', index: 1 },
+    });
+    invoker.resolve({
+      requestId: emit.mock.calls[0]?.[0]?.requestId as string,
+      ok: true,
+      result: { tabs: [] },
+    });
+    await pending;
   });
 });
 

@@ -192,9 +192,30 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
     define(
       'browser_tabs',
       'Browser tabs',
-      'List the browser tab owned by this conversation (url, title, locked state). Empty when no page is open.',
-      schema({}),
-      (_params, signal) => invoker.invoke('tabs', {}, signal)
+      'List, create, close, or select a browser tab in this conversation. Use action=list to see index/url/title; new to open a blank tab; select/close with index (0-based). Navigate after new/select.',
+      schema({
+        action: {
+          type: 'string',
+          enum: ['list', 'new', 'close', 'select'],
+          description: 'Operation to perform (default list)',
+        },
+        index: {
+          type: 'number',
+          description: 'Tab index. Required for select. Optional for close (defaults to current).',
+        },
+      }),
+      (params, signal) => {
+        const action =
+          params.action === 'new' || params.action === 'close' || params.action === 'select'
+            ? params.action
+            : 'list';
+        const index = typeof params.index === 'number' ? params.index : undefined;
+        return invoker.invoke(
+          'tabs',
+          { action, ...(index !== undefined ? { index } : {}) },
+          signal
+        );
+      }
     ),
     define(
       'browser_lock',
