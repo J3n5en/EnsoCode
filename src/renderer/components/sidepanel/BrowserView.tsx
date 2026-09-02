@@ -51,6 +51,8 @@ export function BrowserView({
   const hostRef = useRef<HTMLDivElement>(null);
   const lastSent = useRef<Rect | null | undefined>(undefined);
   const lastCovered = useRef(false);
+  const lockedRef = useRef(false);
+  lockedRef.current = state.locked;
   const tabId = panelApi.id;
 
   useEffect(() => {
@@ -94,7 +96,9 @@ export function BrowserView({
           };
         }
       }
-      const covered = rect !== null && isCoveredBy(rect, overlayBoxes(document, root));
+      // 锁定时 guest 也沉到 workbench 下：renderer 才能在洞上接 hover，画遮罩和「接管」
+      const covered =
+        rect !== null && (lockedRef.current || isCoveredBy(rect, overlayBoxes(document, root)));
       if (
         lastSent.current === undefined ||
         !sameRect(lastSent.current, rect) ||
@@ -137,7 +141,7 @@ export function BrowserView({
         <button
           type="button"
           className={iconButton}
-          disabled={!state.canGoBack}
+          disabled={state.locked || !state.canGoBack}
           onClick={() => void window.electronAPI.browser.goBack(tabId)}
           aria-label={t('Back')}
         >
@@ -146,7 +150,7 @@ export function BrowserView({
         <button
           type="button"
           className={iconButton}
-          disabled={!state.canGoForward}
+          disabled={state.locked || !state.canGoForward}
           onClick={() => void window.electronAPI.browser.goForward(tabId)}
           aria-label={t('Forward')}
         >
@@ -155,7 +159,7 @@ export function BrowserView({
         <button
           type="button"
           className={iconButton}
-          disabled={!state.tabId}
+          disabled={state.locked || !state.tabId}
           onClick={() => void window.electronAPI.browser.reload(tabId)}
           aria-label={t('Reload')}
         >
@@ -179,19 +183,10 @@ export function BrowserView({
             onBlur={() => setEditing(false)}
             placeholder={t('Enter a URL')}
             spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+            disabled={state.locked}
+            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
         </form>
-        {state.locked && (
-          <button
-            type="button"
-            className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 transition-colors hover:bg-amber-500/25 dark:text-amber-400"
-            onClick={() => void window.electronAPI.browser.setLocked(conversationId, false)}
-          >
-            <Hand className="h-3 w-3" />
-            {t('Take control')}
-          </button>
-        )}
       </div>
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
@@ -207,6 +202,19 @@ export function BrowserView({
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
             <Globe className="h-6 w-6 opacity-40" />
             <p>{t('Enter a URL above, or let the agent open a page with browser_navigate.')}</p>
+          </div>
+        )}
+        {state.locked && (
+          <div className="group absolute inset-0 z-10 flex cursor-default items-center justify-center">
+            <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40" />
+            <button
+              type="button"
+              className="relative flex items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-sm shadow-lg opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
+              onClick={() => void window.electronAPI.browser.setLocked(conversationId, false)}
+            >
+              <Hand className="h-3.5 w-3.5" />
+              {t('Take control')}
+            </button>
           </div>
         )}
       </div>
