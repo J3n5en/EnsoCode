@@ -146,8 +146,12 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   const pane = (
     <div
       ref={wrapperRef}
+      data-slot="terminal-pane"
       className="relative h-full w-full overflow-hidden p-2"
-      style={{ backgroundColor: theme?.background }}
+      style={{
+        backgroundColor: theme?.background,
+        ['--terminal-bg' as string]: theme?.background,
+      }}
       onContextMenu={snapshotSelection}
     >
       <TerminalSearchBar

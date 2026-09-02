@@ -13,9 +13,11 @@ export function TerminalOutput({ command, output }: { command: string; output: s
 
   return (
     <div
+      data-slot="terminal-pane"
       className="px-3 py-2 text-xs leading-relaxed"
       style={{
         backgroundColor: theme.background,
+        ['--terminal-bg' as string]: theme.background,
         color: theme.foreground,
         fontFamily,
       }}

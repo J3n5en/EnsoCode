@@ -57,6 +57,8 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
     fontFamily: options.fontFamily,
     fontSize: options.fontSize,
     theme: options.theme,
+    // 背景图模式下 wrapper 半透明，xterm 自身不得再刷不透明底色
+    allowTransparency: true,
     allowProposedApi: true,
     scrollback: 5000,
   });

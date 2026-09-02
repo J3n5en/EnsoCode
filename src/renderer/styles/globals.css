@@ -271,6 +271,18 @@ html.bg-image-enabled diffs-container {
   background-color: oklch(from var(--background) l c h / var(--bg-code-alpha, 0.45));
 }
 
+/**
+ * 右侧面板的终端：xterm 容器与 wrapper 都内联刷主题底色，与代码块同档透出背景。
+ * 保留终端主题自己的色相（用 --terminal-bg 而非 --background），只叠 alpha。
+ */
+html.bg-image-enabled [data-slot='terminal-pane'] {
+  background-color: oklch(from var(--terminal-bg, var(--background)) l c h / var(--bg-code-alpha, 0.45)) !important;
+}
+html.bg-image-enabled [data-slot='terminal-pane'] .xterm,
+html.bg-image-enabled [data-slot='terminal-pane'] .xterm-viewport,
+html.bg-image-enabled [data-slot='terminal-pane'] .xterm-screen {
+  background-color: transparent !important;
+}
 /* 底部输入框：独立可调的不透明度（useBackgroundImage 写入 --bg-composer-alpha） */
 html.bg-image-enabled [data-slot='composer'] {
   background-color: oklch(from var(--background) l c h / var(--bg-composer-alpha, 0.6));
