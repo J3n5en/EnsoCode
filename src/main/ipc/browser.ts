@@ -11,33 +11,40 @@ const CLEAR_KINDS = new Set(['cookies', 'cache', 'all']);
 export function registerBrowserHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.BROWSER_SET_VIEWPORT,
-    (_event, conversationId: unknown, raw: unknown) => {
-      if (!isId(conversationId)) return browserHost.state('');
-      browserHost.setViewport(conversationId, raw === null ? null : parseBrowserViewport(raw));
-      return browserHost.state(conversationId);
+    (_event, tabId: unknown, conversationId: unknown, raw: unknown) => {
+      if (!isId(tabId) || !isId(conversationId)) return browserHost.state('');
+      return browserHost.setViewport(
+        tabId,
+        conversationId,
+        raw === null ? null : parseBrowserViewport(raw)
+      );
     }
   );
   ipcMain.handle(
     IPC_CHANNELS.BROWSER_NAVIGATE,
-    async (_event, conversationId: unknown, url: unknown) => {
-      if (!isId(conversationId) || typeof url !== 'string')
+    async (_event, tabId: unknown, conversationId: unknown, url: unknown) => {
+      if (!isId(tabId) || !isId(conversationId) || typeof url !== 'string') {
         return { ok: false, error: 'Invalid request' };
+      }
       try {
-        await browserHost.userNavigate(conversationId, url);
+        await browserHost.userNavigate(tabId, conversationId, url);
         return { ok: true };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
   );
-  ipcMain.handle(IPC_CHANNELS.BROWSER_GO_BACK, (_event, conversationId: unknown) => {
-    if (isId(conversationId)) browserHost.goBack(conversationId);
+  ipcMain.handle(IPC_CHANNELS.BROWSER_GO_BACK, (_event, tabId: unknown) => {
+    if (isId(tabId)) browserHost.goBack(tabId);
   });
-  ipcMain.handle(IPC_CHANNELS.BROWSER_GO_FORWARD, (_event, conversationId: unknown) => {
-    if (isId(conversationId)) browserHost.goForward(conversationId);
+  ipcMain.handle(IPC_CHANNELS.BROWSER_GO_FORWARD, (_event, tabId: unknown) => {
+    if (isId(tabId)) browserHost.goForward(tabId);
   });
-  ipcMain.handle(IPC_CHANNELS.BROWSER_RELOAD, (_event, conversationId: unknown) => {
-    if (isId(conversationId)) browserHost.reload(conversationId);
+  ipcMain.handle(IPC_CHANNELS.BROWSER_RELOAD, (_event, tabId: unknown) => {
+    if (isId(tabId)) browserHost.reload(tabId);
+  });
+  ipcMain.handle(IPC_CHANNELS.BROWSER_CLOSE_TAB, async (_event, tabId: unknown) => {
+    if (isId(tabId)) await browserHost.closeTab(tabId);
   });
   ipcMain.handle(IPC_CHANNELS.BROWSER_CLEAR_DATA, async (_event, kind: unknown) => {
     if (typeof kind !== 'string' || !CLEAR_KINDS.has(kind)) throw new Error('Invalid clear kind');
@@ -51,10 +58,10 @@ export function registerBrowserHandlers(): void {
       await browserHost.setLocked(conversationId, locked);
     }
   );
-  browserHost.onState((conversationId, state) => {
-    sendToAllWindows(IPC_CHANNELS.BROWSER_STATE, { conversationId, state });
+  browserHost.onState((conversationId, tabId, state) => {
+    sendToAllWindows(IPC_CHANNELS.BROWSER_STATE, { conversationId, tabId, state });
   });
-  browserHost.onReveal((conversationId) => {
-    sendToAllWindows(IPC_CHANNELS.BROWSER_REVEAL, conversationId);
+  browserHost.onReveal((conversationId, tabId) => {
+    sendToAllWindows(IPC_CHANNELS.BROWSER_REVEAL, { conversationId, tabId });
   });
 }

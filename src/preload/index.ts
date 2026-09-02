@@ -620,33 +620,45 @@ const electronAPI = {
   browser: {
     /** 面板可见时报矩形（CSS px）；不可见传 null */
     setViewport: (
+      tabId: string,
       conversationId: string,
       viewport: { x: number; y: number; width: number; height: number } | null
     ): Promise<BrowserTabState> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_VIEWPORT, conversationId, viewport),
-    navigate: (conversationId: string, url: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_NAVIGATE, conversationId, url),
-    goBack: (conversationId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_BACK, conversationId),
-    goForward: (conversationId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_FORWARD, conversationId),
-    reload: (conversationId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RELOAD, conversationId),
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_VIEWPORT, tabId, conversationId, viewport),
+    navigate: (
+      tabId: string,
+      conversationId: string,
+      url: string
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_NAVIGATE, tabId, conversationId, url),
+    goBack: (tabId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_BACK, tabId),
+    goForward: (tabId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_FORWARD, tabId),
+    reload: (tabId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RELOAD, tabId),
+    closeTab: (tabId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLOSE_TAB, tabId),
     clearData: (kind: BrowserClearKind): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLEAR_DATA, kind),
     setLocked: (conversationId: string, locked: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_LOCKED, conversationId, locked),
     onState: (
-      callback: (event: { conversationId: string; state: BrowserTabState }) => void
+      callback: (event: { conversationId: string; tabId: string; state: BrowserTabState }) => void
     ): (() => void) => {
-      const listener = (_: unknown, event: { conversationId: string; state: BrowserTabState }) =>
-        callback(event);
+      const listener = (
+        _: unknown,
+        event: { conversationId: string; tabId: string; state: BrowserTabState }
+      ) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.BROWSER_STATE, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
     restoreTabs: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RESTORE_TABS),
-    onReveal: (callback: (conversationId: string) => void): (() => void) => {
-      const listener = (_: unknown, conversationId: string) => callback(conversationId);
+    onReveal: (
+      callback: (event: { conversationId: string; tabId: string }) => void
+    ): (() => void) => {
+      const listener = (_: unknown, event: { conversationId: string; tabId: string }) =>
+        callback(event);
       ipcRenderer.on(IPC_CHANNELS.BROWSER_REVEAL, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_REVEAL, listener);
     },

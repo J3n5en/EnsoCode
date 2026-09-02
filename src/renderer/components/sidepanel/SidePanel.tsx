@@ -114,15 +114,17 @@ function addBrowserPanel(
   api: DockviewApi,
   conversationId: string | undefined,
   projectId: string | undefined,
-  label: string
+  label: string,
+  tabId?: string
 ): void {
-  const existing = api.getPanel('browser');
+  const id = tabId ?? `browser:${crypto.randomUUID()}`;
+  const existing = api.getPanel(id);
   if (existing) {
     existing.focus();
     return;
   }
   api.addPanel({
-    id: 'browser',
+    id,
     component: 'browser',
     title: label,
     params: { conversationId, projectId },
@@ -158,7 +160,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
         <GitCompare className="h-3 w-3 shrink-0" />
       ) : props.api.id === 'files' ? (
         <FolderOpen className="h-3 w-3 shrink-0" />
-      ) : props.api.id === 'browser' ? (
+      ) : props.api.id === 'browser' || props.api.id.startsWith('browser:') ? (
         <Globe className="h-3 w-3 shrink-0" />
       ) : (
         <SquareTerminal className="h-3 w-3 shrink-0" />
@@ -330,7 +332,11 @@ function ConversationDock({
     });
     // 只有用户关 tab 才回收;dock 本身不随切会话卸载
     event.api.onDidRemovePanel((panel) => {
-      if (panel.id === 'changes' || panel.id === 'files' || panel.id === 'browser') return;
+      if (panel.id === 'changes' || panel.id === 'files') return;
+      if (panel.id === 'browser' || panel.id.startsWith('browser:')) {
+        void window.electronAPI.browser.closeTab(panel.id);
+        return;
+      }
       releaseTerminal(panel.id);
       void window.electronAPI.terminal.dispose(panel.id);
     });
@@ -356,8 +362,11 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
   useEffect(() => {
-    const stop = window.electronAPI.browser.onReveal((conversationId) => {
-      addSidePanelBrowser({ conversationId });
+    const stop = window.electronAPI.browser.onReveal((event) => {
+      addSidePanelBrowser({
+        conversationId: event.conversationId,
+        tabId: event.tabId,
+      });
     });
     void window.electronAPI.browser.restoreTabs();
     return stop;

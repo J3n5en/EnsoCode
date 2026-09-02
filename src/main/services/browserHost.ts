@@ -97,10 +97,12 @@ export class BrowserHost {
   private guestSession?: Session;
   private hostWindow: () => BrowserWindow | null = () => null;
 
-  /** 渲染层当前展示的会话与面板矩形；null = 面板不可见，全部 tab 压底无头 */
-  private shown: { sessionId: string; viewport: BrowserViewport } | null = null;
-  private readonly stateListeners = new Set<(sessionId: string, state: BrowserTabState) => void>();
-  private readonly revealListeners = new Set<(sessionId: string) => void>();
+  /** 渲染层当前展示的 dock tab 与面板矩形 */
+  private shown: { tabId: string; sessionId: string; viewport: BrowserViewport } | null = null;
+  private readonly stateListeners = new Set<
+    (sessionId: string, tabId: string, state: BrowserTabState) => void
+  >();
+  private readonly revealListeners = new Set<(sessionId: string, tabId: string) => void>();
   /** renderer 还没报矩形前先不关 tab，避免回合结束跑赢面板挂载 */
   private readonly pendingReveal = new Set<string>();
   /** 用户见过的 tab：切走 Terminal / 重启后仍恢复 */
@@ -114,25 +116,33 @@ export class BrowserHost {
     this.hostWindow = provider;
   }
 
-  onState(listener: (sessionId: string, state: BrowserTabState) => void): () => void {
+  onState(
+    listener: (sessionId: string, tabId: string, state: BrowserTabState) => void
+  ): () => void {
     this.stateListeners.add(listener);
     return () => this.stateListeners.delete(listener);
   }
 
-  onReveal(listener: (sessionId: string) => void): () => void {
+  onReveal(listener: (sessionId: string, tabId: string) => void): () => void {
     this.revealListeners.add(listener);
     return () => this.revealListeners.delete(listener);
   }
 
-  private requestReveal(sessionId: string): void {
+  private requestReveal(sessionId: string, tabId?: string): void {
+    const tab =
+      (tabId ? this.tabs.get(tabId) : this.tabFor(sessionId)) ?? this.createTab(sessionId);
     this.pendingReveal.add(sessionId);
-    this.userTabs.add(sessionId);
-    for (const listener of this.revealListeners) listener(sessionId);
+    this.userTabs.add(tab.id);
+    for (const listener of this.revealListeners) listener(sessionId, tab.id);
   }
 
-  state(sessionId: string): BrowserTabState {
-    const tab = this.tabFor(sessionId);
+  state(tabId: string): BrowserTabState {
+    const tab = this.tabs.get(tabId) ?? this.tabFor(tabId);
     if (!tab) return EMPTY_STATE;
+    return this.stateOf(tab);
+  }
+
+  private stateOf(tab: Tab): BrowserTabState {
     const contents = tab.view.webContents;
     return {
       tabId: tab.id,
@@ -145,23 +155,33 @@ export class BrowserHost {
     };
   }
 
-  private emitState(sessionId: string): void {
-    const state = this.state(sessionId);
-    if (this.userTabs.has(sessionId) && state.url.startsWith('http')) {
-      this.rememberTab(sessionId, { url: state.url, title: state.title, at: Date.now() });
+  private emitState(sessionId: string, tabId?: string): void {
+    const tab = (tabId ? this.tabs.get(tabId) : undefined) ?? this.tabFor(sessionId);
+    const state = tab ? this.stateOf(tab) : EMPTY_STATE;
+    if (tab && this.userTabs.has(tab.id) && state.url.startsWith('http')) {
+      this.rememberTab(tab.id, {
+        url: state.url,
+        title: state.title,
+        conversationId: tab.ownerSessionId,
+        at: Date.now(),
+      });
     }
-    for (const listener of this.stateListeners) listener(sessionId, state);
+    for (const listener of this.stateListeners) listener(sessionId, tab?.id ?? '', state);
   }
 
-  /** 渲染层：面板可见且矩形已知 → 该会话 tab 叠到矩形上；viewport 为 null → 隐藏 */
-  setViewport(sessionId: string, viewport: BrowserViewport | null): void {
-    this.shown = viewport ? { sessionId, viewport } : null;
+  /** 渲染层：某个 dock tab 可见时报矩形；null = 该 tab 隐藏 */
+  setViewport(tabId: string, sessionId: string, viewport: BrowserViewport | null): BrowserTabState {
     if (viewport) {
+      if (!this.tabs.has(tabId)) this.createTab(sessionId, tabId);
+      this.currentBySession.set(sessionId, tabId);
+      this.userTabs.add(tabId);
       this.pendingReveal.delete(sessionId);
-      this.userTabs.add(sessionId);
-      if (!this.tabFor(sessionId)) void this.restoreTab(sessionId);
+      this.shown = { tabId, sessionId, viewport };
+    } else if (this.shown?.tabId === tabId) {
+      this.shown = null;
     }
     this.layout();
+    return this.state(tabId);
   }
 
   private ensureWorkbenchOnTop(window: BrowserWindow): void {
@@ -177,7 +197,7 @@ export class BrowserHost {
     if (!window || window.isDestroyed()) return;
     const { contentView } = window;
     for (const tab of this.tabs.values()) {
-      const onTop = Boolean(this.shown && tab.ownerSessionId === this.shown.sessionId);
+      const onTop = Boolean(this.shown && tab.id === this.shown.tabId);
       if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
@@ -209,33 +229,53 @@ export class BrowserHost {
   }
 
   /** 面板地址栏 / 按钮 */
-  async userNavigate(sessionId: string, raw: string): Promise<void> {
-    await this.navigate(sessionId, raw);
+  async userNavigate(tabId: string, sessionId: string, raw: string): Promise<void> {
+    if (!this.tabs.has(tabId)) this.createTab(sessionId, tabId);
+    this.currentBySession.set(sessionId, tabId);
+    this.userTabs.add(tabId);
+    const url = assertAllowedUrl(raw);
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+    tab.lastSnapshot = undefined;
+    await Promise.race([
+      tab.view.webContents.loadURL(url.href),
+      sleep(NAVIGATE_TIMEOUT_MS).then(() => {
+        throw new Error(`Navigation to ${url.href} timed out`);
+      }),
+    ]);
   }
 
-  goBack(sessionId: string): void {
-    const tab = this.tabFor(sessionId);
+  goBack(tabId: string): void {
+    const tab = this.tabs.get(tabId);
     if (tab?.view.webContents.navigationHistory.canGoBack()) {
       tab.view.webContents.navigationHistory.goBack();
     }
   }
 
-  goForward(sessionId: string): void {
-    const tab = this.tabFor(sessionId);
+  goForward(tabId: string): void {
+    const tab = this.tabs.get(tabId);
     if (tab?.view.webContents.navigationHistory.canGoForward()) {
       tab.view.webContents.navigationHistory.goForward();
     }
   }
 
-  reload(sessionId: string): void {
-    this.tabFor(sessionId)?.view.webContents.reload();
+  reload(tabId: string): void {
+    this.tabs.get(tabId)?.view.webContents.reload();
+  }
+
+  async closeTab(tabId: string): Promise<void> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+    this.userTabs.delete(tabId);
+    this.forgetTab(tabId);
+    await this.destroyTab(tab);
   }
 
   async setLocked(sessionId: string, locked: boolean): Promise<void> {
     const tab = this.mustTab(sessionId);
     tab.locked = locked;
     await this.syncLockOverlay(tab);
-    this.emitState(sessionId);
+    this.emitState(sessionId, tab.id);
   }
 
   private async syncLockOverlay(tab: Tab): Promise<void> {
@@ -303,7 +343,7 @@ export class BrowserHost {
         throw new Error(`Navigation to ${url.href} timed out`);
       }),
     ]);
-    this.requestReveal(sessionId);
+    this.requestReveal(sessionId, tab.id);
     return this.pageInfo(contents);
   }
 
@@ -379,7 +419,7 @@ export class BrowserHost {
     return tab;
   }
 
-  private createTab(sessionId: string): Tab {
+  private createTab(sessionId: string, tabId?: string): Tab {
     this.evictIfNeeded();
     const view = new WebContentsView({
       webPreferences: {
@@ -390,7 +430,7 @@ export class BrowserHost {
         backgroundThrottling: false,
       },
     });
-    const id = `tab-${++this.counter}`;
+    const id = tabId ?? `browser:${++this.counter}-${Date.now().toString(36)}`;
     const tab: Tab = {
       id,
       view,
@@ -400,7 +440,7 @@ export class BrowserHost {
       ready: false,
     };
     const contents = view.webContents;
-    const push = () => this.emitState(sessionId);
+    const push = () => this.emitState(sessionId, id);
     contents.on('did-start-loading', push);
     contents.on('did-stop-loading', push);
     contents.on('did-navigate-in-page', push);
@@ -436,12 +476,12 @@ export class BrowserHost {
     contents.on('destroyed', () => {
       this.tabs.delete(id);
       if (this.currentBySession.get(sessionId) === id) this.currentBySession.delete(sessionId);
-      this.emitState(sessionId);
+      this.emitState(sessionId, id);
     });
     this.tabs.set(id, tab);
     this.currentBySession.set(sessionId, id);
     this.layout();
-    this.emitState(sessionId);
+    this.emitState(sessionId, id);
     return tab;
   }
 
@@ -454,7 +494,7 @@ export class BrowserHost {
   private evictIfNeeded(): void {
     if (this.tabs.size < MAX_HEADLESS_TABS) return;
     const oldest = [...this.tabs.values()]
-      .filter((tab) => !tab.locked && tab.ownerSessionId !== this.shown?.sessionId)
+      .filter((tab) => !tab.locked && tab.id !== this.shown?.tabId && !this.userTabs.has(tab.id))
       .sort((a, b) => a.createdAt - b.createdAt)[0];
     if (oldest) void this.destroyTab(oldest);
   }
@@ -468,7 +508,7 @@ export class BrowserHost {
       (tab.locked ||
         this.shown?.sessionId === sessionId ||
         this.pendingReveal.has(sessionId) ||
-        this.userTabs.has(sessionId))
+        (tab && this.userTabs.has(tab.id)))
     ) {
       return;
     }
@@ -480,13 +520,13 @@ export class BrowserHost {
     if (this.currentBySession.get(tab.ownerSessionId) === tab.id) {
       this.currentBySession.delete(tab.ownerSessionId);
     }
-    if (!this.disposing && !this.userTabs.has(tab.ownerSessionId)) {
-      this.forgetTab(tab.ownerSessionId);
+    if (!this.disposing && !this.userTabs.has(tab.id)) {
+      this.forgetTab(tab.id);
     }
     await this.flush();
     this.detach(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
-    this.emitState(tab.ownerSessionId);
+    this.emitState(tab.ownerSessionId, tab.id);
   }
 
   async flush(): Promise<void> {
@@ -545,26 +585,27 @@ export class BrowserHost {
     this.writePersisted();
   }
 
-  private async restoreTab(sessionId: string): Promise<void> {
+  private async restoreTab(tabId: string): Promise<void> {
     this.loadPersisted();
-    const saved = this.persisted[sessionId];
-    if (!saved || this.tabFor(sessionId)) return;
+    const saved = this.persisted[tabId];
+    if (!saved || this.tabs.has(tabId)) return;
     try {
       assertAllowedUrl(saved.url);
     } catch {
       return;
     }
-    const tab = this.createTab(sessionId);
-    this.userTabs.add(sessionId);
+    const sessionId = saved.conversationId ?? tabId;
+    const tab = this.createTab(sessionId, tabId);
+    this.userTabs.add(tab.id);
     await tab.view.webContents.loadURL(saved.url).catch(() => {});
   }
 
   async restorePersistedTabs(): Promise<void> {
     this.loadPersisted();
     const entries = Object.entries(this.persisted).sort((a, b) => (b[1].at ?? 0) - (a[1].at ?? 0));
-    for (const [sessionId] of entries.slice(0, MAX_HEADLESS_TABS)) {
-      await this.restoreTab(sessionId);
-      this.requestReveal(sessionId);
+    for (const [tabId, saved] of entries.slice(0, MAX_HEADLESS_TABS)) {
+      await this.restoreTab(tabId);
+      this.requestReveal(saved.conversationId ?? tabId, tabId);
     }
   }
 

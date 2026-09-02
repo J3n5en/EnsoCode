@@ -3,6 +3,7 @@ import { assertAllowedUrl } from './urlPolicy';
 export interface PersistedBrowserTab {
   url: string;
   title: string;
+  conversationId?: string;
   at?: number;
 }
 
@@ -20,9 +21,13 @@ export function parsePersistedBrowserTabs(raw: unknown): Record<string, Persiste
       continue;
     }
     const at = (value as { at?: unknown }).at;
+    const conversationId = (value as { conversationId?: unknown }).conversationId;
     out[sessionId] = {
       url,
       title: typeof title === 'string' ? title : '',
+      ...(typeof conversationId === 'string' && conversationId
+        ? { conversationId }
+        : { conversationId: sessionId }),
       ...(typeof at === 'number' && Number.isFinite(at) ? { at } : {}),
     };
   }

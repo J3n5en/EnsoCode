@@ -49,12 +49,13 @@ export function BrowserView({
   const [error, setError] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const lastSent = useRef<Rect | null | undefined>(undefined);
+  const tabId = panelApi.id;
 
   useEffect(() => {
     return window.electronAPI.browser.onState((event) => {
-      if (event.conversationId === conversationId) setState(event.state);
+      if (event.tabId === tabId) setState(event.state);
     });
-  }, [conversationId]);
+  }, [tabId]);
 
   useEffect(() => {
     if (!editing) setAddress(state.url);
@@ -92,7 +93,7 @@ export function BrowserView({
       }
       if (lastSent.current === undefined || !sameRect(lastSent.current, rect)) {
         lastSent.current = rect;
-        void window.electronAPI.browser.setViewport(conversationId, rect).then(setState);
+        void window.electronAPI.browser.setViewport(tabId, conversationId, rect).then(setState);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -103,16 +104,16 @@ export function BrowserView({
       // 卸载 / 关面板：隐藏 view，但不销毁 tab（页继续无头存活）
       if (lastSent.current !== null) {
         lastSent.current = null;
-        void window.electronAPI.browser.setViewport(conversationId, null);
+        void window.electronAPI.browser.setViewport(tabId, conversationId, null);
       }
     };
-  }, [conversationId, panelApi, sidebarOpen, isActiveConversation]);
+  }, [conversationId, tabId, panelApi, sidebarOpen, isActiveConversation]);
 
   const submit = async () => {
     setEditing(false);
     const target = address.trim();
     if (!target) return;
-    const result = await window.electronAPI.browser.navigate(conversationId, target);
+    const result = await window.electronAPI.browser.navigate(tabId, conversationId, target);
     setError(result.ok ? null : (result.error ?? t('Navigation failed')));
   };
 
@@ -126,7 +127,7 @@ export function BrowserView({
           type="button"
           className={iconButton}
           disabled={!state.canGoBack}
-          onClick={() => void window.electronAPI.browser.goBack(conversationId)}
+          onClick={() => void window.electronAPI.browser.goBack(tabId)}
           aria-label={t('Back')}
         >
           <ArrowLeft className="h-3.5 w-3.5" />
@@ -135,7 +136,7 @@ export function BrowserView({
           type="button"
           className={iconButton}
           disabled={!state.canGoForward}
-          onClick={() => void window.electronAPI.browser.goForward(conversationId)}
+          onClick={() => void window.electronAPI.browser.goForward(tabId)}
           aria-label={t('Forward')}
         >
           <ArrowRight className="h-3.5 w-3.5" />
@@ -144,7 +145,7 @@ export function BrowserView({
           type="button"
           className={iconButton}
           disabled={!state.tabId}
-          onClick={() => void window.electronAPI.browser.reload(conversationId)}
+          onClick={() => void window.electronAPI.browser.reload(tabId)}
           aria-label={t('Reload')}
         >
           <RotateCw className={cn('h-3.5 w-3.5', state.loading && 'animate-spin')} />
@@ -186,10 +187,7 @@ export function BrowserView({
       )}
       <div
         ref={hostRef}
-        className={cn(
-          'relative min-h-0 flex-1',
-          state.tabId ? 'bg-transparent' : 'bg-background'
-        )}
+        className={cn('relative min-h-0 flex-1', state.tabId ? 'bg-transparent' : 'bg-background')}
       >
         {!state.tabId && (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">

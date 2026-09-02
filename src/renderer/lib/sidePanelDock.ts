@@ -4,7 +4,7 @@ import { useSidePanelStore } from '@/stores/sidePanel';
 
 const docks = new Map<string, DockviewApi>();
 const filesTabClosers = new Map<string, () => boolean>();
-const pendingBrowserReveal = new Set<string>();
+const pendingBrowserReveal: { conversationId: string; tabId?: string }[] = [];
 
 export function registerFilesTabCloser(conversationId: string, close: () => boolean): () => void {
   filesTabClosers.set(conversationId, close);
@@ -15,7 +15,13 @@ export function registerFilesTabCloser(conversationId: string, close: () => bool
 
 export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
   docks.set(conversationId, api);
-  if (pendingBrowserReveal.has(conversationId)) addSidePanelBrowser({ conversationId });
+  const due = pendingBrowserReveal.filter((item) => item.conversationId === conversationId);
+  pendingBrowserReveal.splice(
+    0,
+    pendingBrowserReveal.length,
+    ...pendingBrowserReveal.filter((item) => item.conversationId !== conversationId)
+  );
+  for (const item of due) addSidePanelBrowser(item);
 }
 
 function activeDock(): { api: DockviewApi; conversationId: string; projectId: string } | null {
@@ -75,7 +81,11 @@ export function addSidePanelFiles(opts?: { title?: string }): void {
   });
 }
 
-export function addSidePanelBrowser(opts?: { title?: string; conversationId?: string }): void {
+export function addSidePanelBrowser(opts?: {
+  title?: string;
+  conversationId?: string;
+  tabId?: string;
+}): void {
   const sessions = useSessionsStore.getState();
   const conversationId = opts?.conversationId ?? sessions.activeId;
   if (!conversationId) return;
@@ -83,18 +93,18 @@ export function addSidePanelBrowser(opts?: { title?: string; conversationId?: st
   const api = docks.get(conversationId);
   if (!conversation) return;
   if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  const tabId = opts?.tabId ?? `browser:${crypto.randomUUID()}`;
   if (!api) {
-    pendingBrowserReveal.add(conversationId);
+    pendingBrowserReveal.push({ conversationId, tabId });
     return;
   }
-  pendingBrowserReveal.delete(conversationId);
-  const existing = api.getPanel('browser');
+  const existing = api.getPanel(tabId);
   if (existing) {
     existing.focus();
     return;
   }
   api.addPanel({
-    id: 'browser',
+    id: tabId,
     component: 'browser',
     title: opts?.title ?? 'Browser',
     params: { conversationId, projectId: conversation.projectId },
