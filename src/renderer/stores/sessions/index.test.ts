@@ -101,6 +101,7 @@ const dismissCoworker = vi.fn(
 );
 const hireCoworker = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
 const agentAbort = vi.fn(async (_id: string) => ({ ok: true }));
+const agentRelease = vi.fn(async (_id: string) => ({ ok: true }));
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -139,6 +140,7 @@ vi.stubGlobal('window', {
       dismissCoworker,
       hireCoworker,
       abort: agentAbort,
+      release: agentRelease,
       steer: vi.fn(async () => ({ ok: true })),
     },
     agentDispatch: {
@@ -158,7 +160,7 @@ vi.stubGlobal('window', {
       removeProject: vi.fn(),
       createConversation,
       selectConversation,
-      endConversation: vi.fn(),
+      endConversation: vi.fn(async () => ({ accepted: false })),
       removeConversation: vi.fn(),
       updateConversationSelection,
     },
@@ -989,6 +991,22 @@ describe('typed Agent child projection', () => {
     expect(
       sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages
     ).toHaveLength(0);
+  });
+
+  it('removeConversation releases a started idle parent so the worker drops it', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, started: true, status: 'idle' as const },
+      },
+    }));
+    agentRelease.mockClear();
+    agentAbort.mockClear();
+
+    sessionsModule.useSessionsStore.getState().removeConversation('parent');
+
+    expect(agentRelease).toHaveBeenCalledWith('parent');
+    expect(agentAbort).not.toHaveBeenCalled();
   });
 
   it('enqueueMessage queues for the given conversation without touching activeId', () => {

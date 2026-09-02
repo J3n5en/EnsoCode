@@ -1197,7 +1197,11 @@ export const useSessionsStore = create<SessionsState>()(
               void window.electronAPI.agent.dismissCoworker(id, coworkerId);
             }
           }
-          if (conversation.started && conversation.status === 'running') {
+          // release 内部会先 abort 再销毁 worker 侧会话树；只 abort 会让 ManagedSession
+          // 留在 supervisor 的 Map 里直到 app 退出（jsonl 全量上下文常驻）
+          if (conversation.started && !conversation.parentId) {
+            void window.electronAPI.agent.release(id);
+          } else if (conversation.started && conversation.status === 'running') {
             void window.electronAPI.agent.abort(id);
           }
           if (!conversation.parentId) {
