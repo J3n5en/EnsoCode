@@ -108,6 +108,15 @@ describe('electronStorage hydration write gate', () => {
     await settingsHydration;
   });
 
+  it('水合完成前的 removeItem 同样不得动磁盘', async () => {
+    readSettings.mockImplementation(() => new Promise(() => {}));
+    void electronStorage.getItem('enso-settings-remove');
+
+    await electronStorage.removeItem('enso-settings-remove');
+
+    expect(writeKey).not.toHaveBeenCalled();
+  });
+
   it('getItem 失败时不得开闸，避免空默认值落盘', async () => {
     readSettings.mockRejectedValue(new Error('ipc down'));
     await expect(electronStorage.getItem('enso-settings-fail')).rejects.toThrow('ipc down');

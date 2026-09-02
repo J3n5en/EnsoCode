@@ -100,3 +100,9 @@ store 里的一切都会被写进 `settings.json`。因此：
 store 末尾注册了 `settings.onChanged` → `persist.rehydrate()`。
 这意味着**任何窗口的写入都会让其它窗口重载整个 store**。
 写操作要幂等、要小、不要在 rehydrate 的副作用里再触发写入，否则会形成回环。
+
+独立设置窗是**另一个渲染进程**，不是主窗口里的一层 UI。它会重新跑一遍
+`initialState` + 异步 persist。任何发生在该窗口第一次 `settings:read` 成功前的
+`setState`（包括模块加载时的 source-authority 投影）都会走 persist 落盘。
+`electronStorage` 按 store 名挡住这次水合前写入；详见
+[../main/settings-persistence.md](../main/settings-persistence.md)。

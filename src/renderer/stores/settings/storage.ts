@@ -27,6 +27,7 @@ export const electronStorage = {
   },
 
   removeItem: async (name: string): Promise<void> => {
+    if (!hydratedNames.has(name)) return;
     await window.electronAPI.settings.writeKey(name, undefined);
   },
 };

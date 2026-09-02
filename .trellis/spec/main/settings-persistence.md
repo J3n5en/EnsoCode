@@ -95,6 +95,27 @@ useSettingsStore.setState({ projects: next });
 （见 `src/renderer/stores/settings/projectProjection.test.ts`）。
 只断言“值正确”是不够的 —— 死循环里值一直是对的。
 
+### Don't：水合完成前把 initialState 整包写回
+
+**现象**：打开独立设置窗后，主界面突然回到引导，模型 / 技能 / MCP 像被清空。
+关引导只把 `onboarded` 标回 true，不会把已经盖掉的配置救回来。
+
+**成因**：zustand persist 在异步 `getItem` 完成前就把 `setState` 接到 `setItem`。
+设置窗是另一个渲染进程，store 先以空默认值起来；模块加载时的
+`refreshProjectAuthorityProjection()` 等 `setState` 会把这份空状态经
+`SETTINGS_WRITE_KEY` 整包写成 `enso-settings`。主进程按键合并，但值本身
+已经是空 providers / skills / mcpServers。广播后主窗口 rehydrate 跟着被洗空。
+
+**规则**：`electronStorage.setItem` / `removeItem` 必须等**同一个 store 名**的第一次
+`getItem` 成功结算后再写。水合前的写入直接丢弃，不要排队 —— 队列里是空默认值，
+读回真实配置后再 flush 一样会覆盖。`getItem` 失败也不得开闸。
+闸门按 store 名独立，`enso-conversations` 不得被 `enso-settings` 的水合拖住。
+
+**回归测试**：`storage.test.ts`（闸门本身）+ `hydrationGuard.test.ts`（真实 store 端到端）。
+必须断言水合完成前 `writeKey` 一次都没有、且任何一次落盘都不带空默认值，
+而不是断言“最后磁盘里值看起来对”。持久化 fixture 的 `version` 要等于 `SETTINGS_VERSION`，
+否则测到的是 migrate 回写而不是闸门。
+
 ## 不适合放这里的数据
 
 - 窗口几何信息 → 独立状态文件，见 [windows.md](windows.md)

@@ -1,6 +1,7 @@
 import type { SourceAuthorityProjection } from '@shared/types';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type * as SettingsModule from './index';
+import { SETTINGS_VERSION } from './migrate';
 
 const writeKey = vi.fn(async () => undefined);
 let resolveRead: (value: Record<string, unknown> | null) => void = () => {};
@@ -38,46 +39,53 @@ vi.stubGlobal('window', {
 
 let settingsModule: typeof SettingsModule;
 
-const projection = {
-  projects: [{ projectId: 'p0', canonicalPath: '/tmp/alpha', state: 'active', version: 1 }],
-  conversations: [],
-} as unknown as SourceAuthorityProjection;
+const projection = (paths: string[]) =>
+  ({
+    projects: paths.map((path, i) => ({
+      projectId: `p${i}`,
+      canonicalPath: path,
+      state: 'active',
+      version: 1,
+    })),
+    conversations: [],
+  }) as unknown as SourceAuthorityProjection;
 
-const persisted = {
-  'enso-settings': {
-    version: 999,
-    state: { providers: [{ id: 'prov', name: 'P', baseUrl: 'https://x', apiKey: 'k' }] },
-  },
-};
+const providers = [{ id: 'prov', name: 'P', baseUrl: 'https://x', apiKey: 'k' }];
+const persisted = { 'enso-settings': { version: SETTINGS_VERSION, state: { providers } } };
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const writtenProviders = () =>
+  writeKey.mock.calls.map(
+    (call) =>
+      (call as unknown as [string, { state: SettingsModule.SettingsState }])[1].state.providers
+  );
 
 describe('settings persist hydration guard', () => {
   beforeAll(async () => {
     settingsModule = await import('./index');
   });
 
-  it('never writes default state to disk before the first hydration completes', async () => {
-    // 设置窗口刚起：settings.read 还没回，Main 的 source-authority 广播先到
-    projectionListener?.(projection);
+  it('drops every write that lands before persist has merged the first read', async () => {
+    // 设置窗刚起：settings.read 还没回，Main 的 source-authority 广播先到
+    projectionListener?.(projection(['/tmp/alpha']));
     await flush();
     expect(settingsModule.useSettingsStore.getState().projects).toHaveLength(1);
     expect(writeKey).not.toHaveBeenCalled();
 
+    // 回包已到但 getItem 还没结算、persist 还没 merge：同一 tick 内再来一条广播
     resolveRead(persisted);
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
     await flush();
-    expect(settingsModule.useSettingsStore.getState().providers).toHaveLength(1);
-    writeKey.mockClear();
+    expect(settingsModule.useSettingsStore.getState().providers).toEqual(providers);
+    // version 与当前一致，无 migrate 回写；水合后 onRehydrateStorage 的补写（老用户标 onboarded、
+    // 重投影）允许发生，但每一次落盘都必须带着磁盘上的真实 providers —— 空默认值一次都不能出现
+    expect(writeKey).toHaveBeenCalled();
+    expect(writtenProviders().every((p) => p.length === 1)).toBe(true);
 
-    // 水合完成后的写入必须放行，且携带磁盘上的真实配置
-    settingsModule.useSettingsStore.getState().setOnboarded(true);
+    const before = writeKey.mock.calls.length;
+    settingsModule.useSettingsStore.getState().setTheme('dark');
     await flush();
-    expect(writeKey).toHaveBeenCalledTimes(1);
-    const [, value] = writeKey.mock.calls[0] as unknown as [
-      string,
-      { state: SettingsModule.SettingsState },
-    ];
-    expect(value.state.providers).toHaveLength(1);
-    expect(value.state.onboarded).toBe(true);
+    expect(writeKey).toHaveBeenCalledTimes(before + 1);
+    expect(writtenProviders().at(-1)).toEqual(providers);
   });
 });
