@@ -392,6 +392,13 @@ export class SessionSupervisor {
               command.type === 'resume-coworker'
             ? command.parent
             : command.identity;
+    // abort 必须旁路串行门：它要打断的正是占着门的那一轮，排队等于永远等不到
+    if (command.type === 'abort') {
+      void this.execute(command).catch((error) => {
+        console.error('[abort] failed:', toErrorMessage(error));
+      });
+      return;
+    }
     void this.gate
       .run(identity.sessionId, () => this.execute(command))
       .catch((error) => {
@@ -701,7 +708,12 @@ export class SessionSupervisor {
         managed.ensoApp?.cancelAll('Enso capability invocation aborted');
         managed.browser?.cancelAll('Browser action aborted');
         managed.currentTurnId = undefined;
-        await managed.session.abort();
+        // 立即收口投影：不 await session.abort()（内部 waitForIdle 会一直等到工具/流
+        // 真正结束，工具不响应 signal 时永远等不到，UI 就卡在 running 上）。
+        // 中断信号发出即视为本轮终止，后续 agent_end 回流由 status 守卫幂等吸收。
+        managed.status = 'idle';
+        this.emitStatus(managed);
+        void managed.session.abort().catch(() => {});
         return;
       }
       case 'release-parent': {

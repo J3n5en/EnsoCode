@@ -130,6 +130,8 @@ export interface Conversation extends SessionProjection {
   pendingWorkspaceNote?: string;
   /** resume 时发现 worktree 丢失（驱动重建/回退选择 UI）；不持久化 */
   worktreeMissing?: boolean;
+  /** 用户点了停止：抑制这一轮收束触发的排队投递/目标续跑（否则停完立刻自己跑起来）。不持久化 */
+  abortRequested?: boolean;
   /** 工作区迁移进行中：挡住自动 resume。不能复用 spawning——它会被 worker 事件
    *  （含 release 触发的 parent-ended）清掉，守卫窗口期失效（CDP 实测）；不持久化 */
   workspaceMigrating?: boolean;
@@ -711,7 +713,13 @@ export const useSessionsStore = create<SessionsState>()(
               : {}),
           });
         });
-        if (event.type === 'turn-completed') {
+        if (event.type === 'turn-completed' || event.type === 'turn-failed') {
+          // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口
+          if (get().conversations[id]?.abortRequested) {
+            set((state) => patch(state, id, { abortRequested: false }));
+            return;
+          }
+          if (event.type !== 'turn-completed') return;
           flushQueue(id);
           continueGoal(id);
         }
@@ -1402,6 +1410,8 @@ export const useSessionsStore = create<SessionsState>()(
           // 万一错位由 agent_end 的全量 reconcile 兜底。
           set((state) =>
             patch(state, id, {
+              // 用户主动发新消息：上一次停止的抑制标记到此失效
+              abortRequested: false,
               messages: [
                 ...state.conversations[id].messages,
                 {
@@ -1633,9 +1643,19 @@ export const useSessionsStore = create<SessionsState>()(
           if (!activeId) return;
           const activeTab = get().conversations[activeId]?.activeTabId;
           const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
-          if (get().conversations[id]?.started) {
-            await window.electronAPI.agent.abort(id);
-          }
+          const conversation = get().conversations[id];
+          if (!conversation?.started) return;
+          // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复）
+          const goal = conversation.goal;
+          set((state) =>
+            patch(state, id, {
+              abortRequested: true,
+              ...(goal?.status === 'active'
+                ? { goal: { ...goal, status: 'paused' as const, note: 'stopped by user' } }
+                : {}),
+            })
+          );
+          await window.electronAPI.agent.abort(id);
         },
 
         setGoal(conversationId, text) {
@@ -1888,6 +1908,7 @@ export const useSessionsStore = create<SessionsState>()(
               // resume 时重新校验，不持久化陈旧的丢失/迁移标记
               worktreeMissing: undefined,
               workspaceMigrating: undefined,
+              abortRequested: undefined,
             },
           ])
         ),
