@@ -88,7 +88,7 @@ describe('节点凭据落盘', () => {
   });
 
   it('写入后读回；与 phone-pairing.bin 分文件', async () => {
-    const { loadNodes, saveNodes, upsertNode } = await store();
+    const { saveNodes, upsertNode } = await store();
     saveNodes(upsertNode([], cred('p1'), 'dev-box'));
     vi.resetModules();
     const fresh = await store();
