@@ -267,11 +267,18 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 
 **Date**: 2026-09-02
 **Task**: Browser Design Mode 圈选与涂鸦落地
+
+
+## Session 8: AI 会话标题总结：设置开关+独立模型+回退链
+
+**Date**: 2026-09-02
+**Task**: AI 会话标题总结：设置开关+独立模型+回退链
 **Branch**: `dev`
 
 ### Summary
 
 圈选落到主 Composer ui-element chip+绑定图；涂鸦冻帧可调裁切后只插无 id 附件图；修浮层遮挡/BoxSelect/冻帧丢 pointerup；Mermaid 改本地包并收紧 CSP。已归档 09-02-browser-design-mode 与 scribble。
+新增会话标题总结功能：设置页开关+独立模型选择（settings v3 迁移），首条用户消息后经 Main 解析模型（标题模型→全局默认→会话模型回退链）由 worker completeSimple 生成短标题，title-generated 事件回流写回（手动改名守卫、失败静默）。TDD 共 29 个新用例；CDP 真机端到端验证通过（t+6s 出 AI 标题）。顺带确认两个既有问题：pairHost typecheck 错误与本机 ~55 个环境性测试失败均先于本次改动存在。
 
 ### Git Commits
 
@@ -309,6 +316,8 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 | `8e8f135` | (see git log) |
 | `cb68a58` | (see git log) |
 | `8e5bdce` | (see git log) |
+| `f908812` | (see git log) |
+| `dfb30b8` | (see git log) |
 
 ### Status
 

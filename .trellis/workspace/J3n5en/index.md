@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-09-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~315 | Active |
+| `journal-1.md` | ~360 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-09-02 | AI 会话标题总结：设置开关+独立模型+回退链 | `f908812`, `dfb30b8` | `dev` |
 | 9 | 2026-09-02 | 归档已落地的侧栏与 SSH 任务 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
 | 8 | 2026-09-02 | Browser Design Mode 圈选与涂鸦落地 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
 | 7 | 2026-09-02 | 桌面端连接远程 EnsoCode 节点（guest 角色） | `62c8ec8`, `69ab297`, `4bed2e7`, `021b2b3`, `267e899`, `a0872ec`, `6d158cd`, `32122d0`, `f4416ae`, `b6154d8`, `39f14c2`, `3703464`, `d30ff91`, `cbc1884` | `dev` |
