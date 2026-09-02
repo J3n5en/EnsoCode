@@ -49,6 +49,10 @@ vi.mock('./services/pairHost', () => ({
   startPairHost: vi.fn(() => mocks.order.push('pair')),
   stopPairHost: vi.fn(),
 }));
+vi.mock('./services/pairGuest', () => ({
+  startPairGuest: vi.fn(),
+  stopPairGuest: vi.fn(),
+}));
 vi.mock('./services/agentHost', () => ({ startAgentWorker: mocks.startAgentWorker }));
 vi.mock('./services/updater/AutoUpdater', () => ({
   autoUpdaterService: { init: mocks.autoUpdaterInit },
