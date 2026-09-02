@@ -65,6 +65,7 @@ export const zhTranslations: Record<string, string> = {
   'Navigation failed': '导航失败',
   'Agent is browsing': 'Agent 正在操作',
   'Take control': '接管',
+  'Enso is in control': 'Enso 正在接管',
   'Browser data': '浏览器数据',
   'Cookies and site storage of the built-in browser, separate from the app itself.':
     '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',

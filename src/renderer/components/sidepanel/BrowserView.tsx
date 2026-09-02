@@ -187,6 +187,12 @@ export function BrowserView({
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
         </form>
+        {state.locked && (
+          <span className="flex shrink-0 items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+            <Hand className="h-3 w-3" />
+            {t('Enso is in control')}
+          </span>
+        )}
       </div>
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
