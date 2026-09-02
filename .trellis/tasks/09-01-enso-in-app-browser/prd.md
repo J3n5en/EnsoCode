@@ -21,9 +21,9 @@ guest 页不能当 React 子树，也不能用普通 iframe（session / 沙箱�
 
 - 不控制用户日常 Chrome / 不做商店扩展 / Native Messaging
 - 不接通用 Playwright MCP，不当 Computer Use
-- 不把任意 CDP（尤其 `Input.*`）交给模型
+- 不把任意 CDP（尤其 `Input.*` / Cookie / 导航 / 标签管理）交给模型；`browser_cdp` 只走白名单（Runtime/DOM/CSS/Profiler/Performance/Log/Network.enable 等调试面）
 - 不做编辑器中央区 Browser 编辑器、不做多窗口同步浏览
-- 第一刀不做 per-workspace 多罐、不做企业 origin allowlist、不做 `browser_cdp` / hover / drag / fill_form
+- 不做 per-workspace 多罐、不做企业 origin allowlist
 
 ## 需求
 
@@ -62,13 +62,16 @@ guest 页不能当 React 子树，也不能用普通 iframe（session / 沙箱�
 
 | 工具 | 作用 |
 |---|---|
-| `browser_navigate` | 开/复用 tab 并导航；默认后台 |
+| `browser_navigate` | 开/复用 tab 并导航（`newTab` 可开新 tab）；默认后台 |
 | `browser_snapshot` | 可访问树 + 稳定 `ref`（`e1`…） |
-| `browser_click` | 按上次 snapshot 的 `ref` 点 |
-| `browser_type` | 按 `ref` 输入（可清空后填） |
-| `browser_screenshot` | 视口截图（图回模型，不当定位） |
-| `browser_tabs` | 列 / 切 / 关 tab |
+| `browser_click` / `browser_mouse_click_xy` | 按 `ref` 点 / 按视口坐标点 |
+| `browser_type` / `browser_fill` | 按 `ref` 逐字输入（可 submit）/ 直接设值 |
+| `browser_press_key` / `browser_scroll` / `browser_select_option` / `browser_drag` | 键、滚、选、拖 |
+| `browser_highlight` / `browser_get_bounding_box` | 调试：高亮 / 取包围盒 |
+| `browser_screenshot` | 视口或单元素截图（图回模型，不当定位） |
+| `browser_tabs` | 列 / 新建 / 切 / 关 tab |
 | `browser_lock` | 锁当前 tab；用户可接管 |
+| `browser_cdp` | 白名单 CDP 调试通道（`cdpPolicy.ts`），与 Cursor 同款拒绝面 |
 
 无 Playwright 选择器。点/填只认本会话最近一次 snapshot 的 `ref`，过期则报错让模型重拍。
 
