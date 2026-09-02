@@ -75,6 +75,11 @@ describe('settings persist hydration guard', () => {
     // 回包已到但 getItem 还没结算、persist 还没 merge：同一 tick 内再来一条广播
     resolveRead(persisted);
     projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
+    // adapter 的 await read() 已结算、persist 的 parse → merge 还在后面几个 microtask：
+    // 这段时间内存仍是 initialState，setState 一样不得落盘
+    await Promise.resolve();
+    await Promise.resolve();
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta', '/tmp/gamma']));
     await flush();
     expect(settingsModule.useSettingsStore.getState().providers).toEqual(providers);
     // version 与当前一致，无 migrate 回写；水合后 onRehydrateStorage 的补写（老用户标 onboarded、

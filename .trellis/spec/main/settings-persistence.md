@@ -106,10 +106,13 @@ useSettingsStore.setState({ projects: next });
 `SETTINGS_WRITE_KEY` 整包写成 `enso-settings`。主进程按键合并，但值本身
 已经是空 providers / skills / mcpServers。广播后主窗口 rehydrate 跟着被洗空。
 
-**规则**：`electronStorage.setItem` / `removeItem` 必须等**同一个 store 名**的第一次
-`getItem` 成功结算后再写。水合前的写入直接丢弃，不要排队 —— 队列里是空默认值，
-读回真实配置后再 flush 一样会覆盖。`getItem` 失败也不得开闸。
+**规则**：`electronStorage.setItem` / `removeItem` 必须等**同一个 store 名**的闸门打开后再写。
+闸门不能在 `getItem` 返回时开 —— 从 read 回包到 persist merge 之间还有几个 microtask，
+内存仍是 initialState。正确的开闸点是该 store `onRehydrateStorage` 回调的首行
+（`openPersistWriteGate(name)`，`error` 有值时不开）：那是 merge 之后、回调自身补写之前。
+开闸前的写入直接丢弃，不要排队 —— 队列里是空默认值，读回真实配置后再 flush 一样会覆盖。
 闸门按 store 名独立，`enso-conversations` 不得被 `enso-settings` 的水合拖住。
+代价：紧随 `migrate` 的那次 persist 回写发生在开闸前会被丢弃，migrate 必须幂等。
 
 **回归测试**：`storage.test.ts`（闸门本身）+ `hydrationGuard.test.ts`（真实 store 端到端）。
 必须断言水合完成前 `writeKey` 一次都没有、且任何一次落盘都不带空默认值，

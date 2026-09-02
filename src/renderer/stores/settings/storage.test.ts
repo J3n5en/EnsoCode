@@ -12,7 +12,9 @@ vi.stubGlobal('window', {
   },
 });
 
-const { electronStorage } = await import('./storage');
+const { electronStorage, openPersistWriteGate } = await import('./storage');
+
+const payload = (state: Record<string, unknown>) => JSON.stringify({ state, version: 2 });
 
 describe('electronStorage hydration write gate', () => {
   beforeEach(() => {
@@ -20,111 +22,51 @@ describe('electronStorage hydration write gate', () => {
     readSettings = vi.fn<(...args: unknown[]) => Promise<unknown>>();
   });
 
-  it('水合完成前的 setItem 不得把空默认值写回 settings.json', async () => {
-    // 设置窗新进程会先以 initialState 跑起来；source-authority 投影等 setState
-    // 会触发 persist 落盘。若赶在 settings:read 返回前写入，会整包覆盖真实配置。
-    let resolveRead: (value: Record<string, unknown>) => void = () => {};
-    readSettings.mockImplementation(
-      () =>
-        new Promise<Record<string, unknown>>((resolve) => {
-          resolveRead = resolve;
-        })
-    );
+  it('getItem 返回不等于开闸：merge 前的 setItem / removeItem 一律丢弃', async () => {
+    // 设置窗新进程先以 initialState 跑起来；从 read 回包到 persist merge 之间还有几个
+    // microtask，此时的 setState 若落盘就会整包覆盖真实配置。开闸只能由 store 在 merge 后显式调用。
+    readSettings.mockResolvedValue({
+      'enso-settings-wipe': { state: { providers: [{ id: 'kept' }] }, version: 2 },
+    });
+    await electronStorage.getItem('enso-settings-wipe');
 
-    const hydration = electronStorage.getItem('enso-settings-wipe');
-    await electronStorage.setItem(
-      'enso-settings-wipe',
-      JSON.stringify({ state: { providers: [], onboarded: false }, version: 2 })
-    );
+    await electronStorage.setItem('enso-settings-wipe', payload({ providers: [] }));
+    await electronStorage.removeItem('enso-settings-wipe');
 
     expect(writeKey).not.toHaveBeenCalled();
-
-    resolveRead({
-      'enso-settings-wipe': { state: { providers: [{ id: 'kept' }], onboarded: true }, version: 2 },
-    });
-    await hydration;
   });
 
-  it('水合完成后再写入会走 writeKey', async () => {
-    readSettings.mockResolvedValue({
-      'enso-settings-after': { state: { theme: 'dark' }, version: 2 },
-    });
-    await electronStorage.getItem('enso-settings-after');
+  it('开闸后 setItem / removeItem 走 writeKey', async () => {
+    openPersistWriteGate('enso-settings-after');
 
-    await electronStorage.setItem(
-      'enso-settings-after',
-      JSON.stringify({ state: { theme: 'light' }, version: 2 })
-    );
+    await electronStorage.setItem('enso-settings-after', payload({ theme: 'light' }));
+    await electronStorage.removeItem('enso-settings-after');
 
-    expect(writeKey).toHaveBeenCalledWith('enso-settings-after', {
+    expect(writeKey).toHaveBeenNthCalledWith(1, 'enso-settings-after', {
       state: { theme: 'light' },
       version: 2,
     });
+    expect(writeKey).toHaveBeenNthCalledWith(2, 'enso-settings-after', undefined);
   });
 
-  it('读到空文件也视为已水合，允许首次落盘', async () => {
-    readSettings.mockResolvedValue(null);
-    await electronStorage.getItem('enso-settings-fresh');
+  it('不同 store 的闸门互不影响', async () => {
+    openPersistWriteGate('enso-conversations-ready');
 
-    await electronStorage.setItem(
-      'enso-settings-fresh',
-      JSON.stringify({ state: { onboarded: false }, version: 2 })
-    );
-
-    expect(writeKey).toHaveBeenCalledTimes(1);
-  });
-
-  it('不同 store 的水合闸门互不影响', async () => {
-    readSettings.mockResolvedValue({
-      'enso-conversations-ready': { state: { order: [] }, version: 1 },
-    });
-    await electronStorage.getItem('enso-conversations-ready');
-
-    let resolveSettings: (value: null) => void = () => {};
-    readSettings.mockImplementation(
-      () =>
-        new Promise<null>((resolve) => {
-          resolveSettings = resolve;
-        })
-    );
-    const settingsHydration = electronStorage.getItem('enso-settings-slow');
-
-    await electronStorage.setItem(
-      'enso-conversations-ready',
-      JSON.stringify({ state: { order: ['a'] }, version: 1 })
-    );
-    await electronStorage.setItem(
-      'enso-settings-slow',
-      JSON.stringify({ state: { providers: [] }, version: 2 })
-    );
+    await electronStorage.setItem('enso-conversations-ready', payload({ order: ['a'] }));
+    await electronStorage.setItem('enso-settings-slow', payload({ providers: [] }));
 
     expect(writeKey).toHaveBeenCalledTimes(1);
     expect(writeKey).toHaveBeenCalledWith('enso-conversations-ready', {
       state: { order: ['a'] },
-      version: 1,
+      version: 2,
     });
-
-    resolveSettings(null);
-    await settingsHydration;
   });
 
-  it('水合完成前的 removeItem 同样不得动磁盘', async () => {
-    readSettings.mockImplementation(() => new Promise(() => {}));
-    void electronStorage.getItem('enso-settings-remove');
-
-    await electronStorage.removeItem('enso-settings-remove');
-
-    expect(writeKey).not.toHaveBeenCalled();
-  });
-
-  it('getItem 失败时不得开闸，避免空默认值落盘', async () => {
+  it('getItem 失败会向上抛，不会顺手开闸', async () => {
     readSettings.mockRejectedValue(new Error('ipc down'));
     await expect(electronStorage.getItem('enso-settings-fail')).rejects.toThrow('ipc down');
 
-    await electronStorage.setItem(
-      'enso-settings-fail',
-      JSON.stringify({ state: { providers: [] }, version: 2 })
-    );
+    await electronStorage.setItem('enso-settings-fail', payload({ providers: [] }));
 
     expect(writeKey).not.toHaveBeenCalled();
   });

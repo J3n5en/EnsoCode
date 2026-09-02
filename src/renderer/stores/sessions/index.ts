@@ -42,7 +42,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
-import { electronStorage } from '@/stores/settings/storage';
+import { electronStorage, openPersistWriteGate } from '@/stores/settings/storage';
 import {
   evictColdMessages,
   isBulkyAgentEvent,
@@ -2022,7 +2022,8 @@ export const useSessionsStore = create<SessionsState>()(
         order: state.order,
         activeId: state.activeId,
       }),
-      onRehydrateStorage: () => () => {
+      onRehydrateStorage: () => (_state, error) => {
+        if (!error) openPersistWriteGate('enso-conversations');
         // 刷新时 worker 仍活着：只补当前正在看的会话正文。其它会话点开再 snapshot。
         const state = useSessionsStore.getState();
         const viewed = viewedFromState(state);

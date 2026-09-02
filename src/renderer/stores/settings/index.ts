@@ -20,7 +20,7 @@ import {
   useOauthCredentialStore,
 } from '@/stores/oauthCredentials';
 import { migrateSettings, SETTINGS_VERSION } from './migrate';
-import { electronStorage } from './storage';
+import { electronStorage, openPersistWriteGate } from './storage';
 import type {
   BackgroundSizeMode,
   BackgroundSourceType,
@@ -575,7 +575,9 @@ export const useSettingsStore = create<SettingsState>()(
       storage: createJSONStorage(() => electronStorage),
       version: SETTINGS_VERSION,
       migrate: (persisted, version) => migrateSettings(persisted, version) as SettingsState,
-      onRehydrateStorage: () => (state) => {
+      onRehydrateStorage: () => (state, error) => {
+        // merge 已完成：此后（含下面的补写）才允许落盘；读失败保持关闸
+        if (!error) openPersistWriteGate('enso-settings');
         const s = state ?? useSettingsStore.getState();
         applySettings(s);
         // 持久化数据可能被外部污染；非法值会让设置弹层渲染 undefined 图标而白屏

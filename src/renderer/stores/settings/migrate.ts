@@ -2,7 +2,9 @@
  * 持久化数据的版本迁移。
  *
  * 为什么用 zustand persist 的 `migrate` 而不是 `onRehydrateStorage`：
- * `migrate` 只在持久版本落后时跑一次，跑完 persist 会把结果写回磁盘，旧字段就此消失；
+ * `migrate` 只在持久版本落后时跑一次，结果随下一次落盘写回磁盘，旧字段就此消失
+ * （persist 紧随 migrate 的那次回写发生在水合闸门打开前，会被 storage.ts 丢弃；
+ * 因此 migrate 必须幂等，落盘前每次启动都会重跑一遍）；
  * `onRehydrateStorage` 每次 rehydrate（含多窗口同步广播）都会执行，且不触发回写，
  * 等于把一次性的形状迁移变成永久的读侧补丁。
  */
