@@ -456,7 +456,9 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
           if (!fullscreen) setCover(false);
         }}
         className={cn(
-          'flex min-h-0 flex-col overflow-hidden bg-background',
+          'flex min-h-0 flex-col overflow-hidden',
+          // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
+          open && !cover ? 'bg-transparent' : 'bg-background',
           cover ? 'absolute inset-y-0 right-0' : 'relative shrink-0',
           open && 'border-l'
         )}

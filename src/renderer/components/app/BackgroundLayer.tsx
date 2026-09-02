@@ -6,9 +6,12 @@ import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
 
 /**
- * 背景图层：绝对定位铺满主窗口最底层（z-index:-1 + pointer-events:none），
+ * 背景层：绝对定位铺满主窗口最底层（z-index:-1 + pointer-events:none），
  * 不拦截任何交互。前景面板的半透明由 useBackgroundImage() 负责。
- * 浏览器 guest 矩形用 clip-path 挖掉，让垫底的原生 view 透出，其余区域照常铺壁纸。
+ *
+ * 不管有没有开壁纸都常驻一层实心主题底色（body 必须保持透明），
+ * 浏览器 guest 矩形用 clip-path 挖掉——guest 沉到 workbench 之下时（锁定/被浮层压住）
+ * 才能透出来，其余区域照常铺底色/壁纸。
  *
  * - file 模式：本地路径经 local-image:// 协议加载
  * - folder 模式：files.listMedia 枚举目录后随机选一张；定时/手动刷新时重新随机
@@ -84,22 +87,43 @@ export function BackgroundLayer() {
     });
   }, [folderFiles]);
 
-  if (!enabled) return null;
-
   return (
-    <BackgroundMedia
-      state={{
-        sourceType,
-        imagePath,
-        folderPick,
-        urlPath,
-        tick,
-        blur,
-        brightness,
-        saturation,
-        sizeMode,
+    <BackgroundShell>
+      {enabled && (
+        <BackgroundMedia
+          state={{
+            sourceType,
+            imagePath,
+            folderPick,
+            urlPath,
+            tick,
+            blur,
+            brightness,
+            saturation,
+            sizeMode,
+          }}
+        />
+      )}
+    </BackgroundShell>
+  );
+}
+
+function BackgroundShell({ children }: { children: React.ReactNode }) {
+  const holes = useSidePanelStore((s) => s.browserHoles);
+  const clipPath = holesClipPath(Object.values(holes));
+  return (
+    <div
+      aria-hidden
+      data-slot="background-layer"
+      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      style={{
+        clipPath,
+        // 实心底：用原始令牌（--background），不能用会被重映射成半透明的 --color-background
+        backgroundColor: 'var(--background)',
       }}
-    />
+    >
+      {children}
+    </div>
   );
 }
 
@@ -116,7 +140,6 @@ interface MediaState {
 }
 
 function BackgroundMedia({ state }: { state: MediaState }) {
-  const holes = useSidePanelStore((s) => s.browserHoles);
   const {
     sourceType,
     imagePath,
@@ -171,24 +194,13 @@ function BackgroundMedia({ state }: { state: MediaState }) {
 
   if (!display) return null;
   const { src, video } = display;
-  const clipPath = holesClipPath(Object.values(holes));
 
   const filter = `blur(${blur}px) brightness(${brightness}) saturate(${saturation})`;
   // 模糊会在边缘产生透明晕边，内层向外扩 2×blur 再被外层裁掉
   const bleed = blur > 0 ? `-${blur * 2}px` : '0';
 
   return (
-    <div
-      aria-hidden
-      data-slot="background-layer"
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
-      style={{
-        clipPath,
-        // 实心底：contain/center 盖不满的区域露主题色；用原始令牌（--background），
-        // 不能用会被重映射成半透明的 --color-background；body 必须保持透明给浏览器挖孔
-        backgroundColor: 'var(--background)',
-      }}
-    >
+    <>
       {video ? (
         <video
           key={src}
@@ -222,6 +234,6 @@ function BackgroundMedia({ state }: { state: MediaState }) {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
