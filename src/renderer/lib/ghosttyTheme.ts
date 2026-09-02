@@ -91,7 +91,9 @@ export function getXtermTheme(name: string): XtermTheme | undefined {
  * 必须配合 allowTransparency: true，否则 xterm 会强制不透明。
  */
 export function withTransparentBackground(theme: XtermTheme | undefined): XtermTheme | undefined {
-  return theme ? { ...theme, background: 'transparent' } : undefined;
+  // 注意：xterm 的颜色解析器不认 'transparent' 关键字（解析失败回退成不透明黑），
+  // 必须用 8 位 hex 的零 alpha
+  return theme ? { ...theme, background: '#00000000' } : undefined;
 }
 
 // Default dark theme for fallback
