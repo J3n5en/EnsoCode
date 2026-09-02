@@ -823,6 +823,25 @@ export const zhTranslations: Record<string, string> = {
     '配对链接已过期或已被使用，请重新生成。',
   'Could not reach the relay. Check your network and try again.':
     '无法连接中继，请检查网络后重试。',
+  // 设置 → 设备（原「手机」页扩充）
+  Devices: '设备',
+  'Allow connections': '允许连入',
+  'Let your phone or another EnsoCode desktop connect to this computer. Keep this app running.':
+    '让手机或另一台 EnsoCode 桌面连到这台电脑。需保持本应用运行。',
+  'Generate pairing code': '生成配对码',
+  'On another EnsoCode desktop, paste the link below into Settings → Devices → Connect to a node.':
+    '在另一台 EnsoCode 桌面，把下方链接粘到「设置 → 设备 → 连接到节点」。',
+  'Generate a pairing code to let a phone or another desktop connect.':
+    '生成配对码，让手机或另一台桌面连入。',
+  'Waiting for device': '等待设备',
+  Copied: '已复制',
+  'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.':
+    '浏览并操控另一台 EnsoCode 桌面上的会话。agent、密钥与历史都留在对方机器上。',
+  'Connected nodes': '已连接的节点',
+  'No connected nodes': '还没有连接节点',
+  'Each connecting computer needs its own pairing code from the other desktop.':
+    '每台要连入的电脑都需要对方桌面单独生成一个配对码。',
+  Disconnect: '断开',
 };
 
 export function normalizeLocale(input?: string): Locale {

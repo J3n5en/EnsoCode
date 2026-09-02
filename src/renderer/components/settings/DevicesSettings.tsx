@@ -1,20 +1,48 @@
 import type { PairStatus } from '@shared/types';
-import { Check, Copy, Loader2, Pencil, Smartphone, Trash2, TriangleAlert } from 'lucide-react';
+import type { RemoteNodeStatus } from '@shared/types/nodes';
+import {
+  Check,
+  Copy,
+  Loader2,
+  Monitor,
+  Pencil,
+  Plus,
+  Smartphone,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react';
 import QRCode from 'qrcode';
 import * as React from 'react';
+import { NodeDot } from '@/components/nodes/NodeSwitcher';
+import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useRemoteNodesStore } from '@/stores/remoteNodes';
 
-/** 手机第二屏：出 QR 配对、管理已配对设备、可改中继地址 */
-export function PhoneSettings() {
+/**
+ * 设备：两个方向。
+ * 「允许连入」= 本机作 host：出 QR/链接给手机或别的桌面扫/粘，管理已配对设备、中继地址。
+ * 「连接到节点」= 本机作 guest：粘别的桌面的配对链接，管理已连节点（在线/重命名/解绑）。
+ */
+export function DevicesSettings() {
+  return (
+    <div className="space-y-10">
+      <AllowConnectionsSection />
+      <ConnectToNodesSection />
+      <RelaySection />
+    </div>
+  );
+}
+
+/** 本机作为 host：出码 + 已配对设备列表 */
+function AllowConnectionsSection() {
   const { t } = useI18n();
   const [status, setStatus] = React.useState<PairStatus | null>(null);
   const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [relayDraft, setRelayDraft] = React.useState<string | null>(null);
   const [remaining, setRemaining] = React.useState<number | null>(null);
   const [copied, setCopied] = React.useState(false);
 
@@ -67,21 +95,17 @@ export function PhoneSettings() {
     if (!result.ok) setError(result.error ?? t('Failed to start pairing'));
   };
 
-  const saveRelay = async () => {
-    if (relayDraft === null) return;
-    setStatus(await window.electronAPI.pair.setRelayUrl(relayDraft));
-    setRelayDraft(null);
-  };
-
   const devices = status?.devices ?? [];
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h3 className="font-medium text-lg">{t('Phone')}</h3>
+          <h3 className="font-medium text-lg">{t('Allow connections')}</h3>
           <p className="text-muted-foreground text-sm">
-            {t('Use your phone as a second screen. Keep this app running.')}
+            {t(
+              'Let your phone or another EnsoCode desktop connect to this computer. Keep this app running.'
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -100,7 +124,7 @@ export function PhoneSettings() {
               ) : (
                 <Smartphone className="mr-1.5 h-4 w-4" />
               )}
-              {t('Pair a phone')}
+              {t('Generate pairing code')}
             </Button>
           )}
         </div>
@@ -131,6 +155,11 @@ export function PhoneSettings() {
             <p className="mt-1 text-muted-foreground text-xs">
               {t(
                 'Scanning opens the app and pairs it. To keep it handy, add it to your home screen.'
+              )}
+            </p>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {t(
+                'On another EnsoCode desktop, paste the link below into Settings → Devices → Connect to a node.'
               )}
             </p>
             <p className="mt-1 text-muted-foreground text-xs">
@@ -172,7 +201,7 @@ export function PhoneSettings() {
             <Smartphone className="mx-auto h-5 w-5 text-muted-foreground" />
             <p className="mt-3 font-medium text-sm">{t('No paired devices')}</p>
             <p className="mt-1 text-muted-foreground text-xs">
-              {t('Pair a phone to view sessions and reply on the go.')}
+              {t('Generate a pairing code to let a phone or another desktop connect.')}
             </p>
           </div>
         ) : (
@@ -198,7 +227,7 @@ export function PhoneSettings() {
                     {device.phoneOnline
                       ? t('Online')
                       : device.connected
-                        ? t('Waiting for phone')
+                        ? t('Waiting for device')
                         : t('Offline')}
                   </span>
                 </div>
@@ -216,6 +245,165 @@ export function PhoneSettings() {
         )}
       </div>
 
+    </div>
+  );
+}
+
+/** 本机作为 guest：粘码连别的桌面 + 已连节点列表 */
+function ConnectToNodesSection() {
+  const { t } = useI18n();
+  const nodes = useRemoteNodesStore((s) => s.nodes);
+  const secureStorage = useRemoteNodesStore((s) => s.secureStorage);
+  const refresh = useRemoteNodesStore((s) => s.refresh);
+  const [pairOpen, setPairOpen] = React.useState(false);
+
+  // 设置窗口独立于主窗口：自行绑定一次状态推送
+  React.useEffect(() => useRemoteNodesStore.getState().bind(), []);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h3 className="font-medium text-lg">{t('Connect to a node')}</h3>
+          <p className="text-muted-foreground text-sm">
+            {t(
+              'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.'
+            )}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={() => setPairOpen(true)}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          {t('Connect to a node')}
+        </Button>
+      </div>
+
+      {!secureStorage && (
+        <div className="flex items-start gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <span className="text-muted-foreground">
+            {t(
+              'Secure storage is unavailable on this system, so pairing keys are stored unencrypted.'
+            )}
+          </span>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <p className="font-medium text-sm">{t('Connected nodes')}</p>
+        {nodes.length === 0 ? (
+          <div className="rounded-md border border-dashed px-3 py-8 text-center">
+            <Monitor className="mx-auto h-5 w-5 text-muted-foreground" />
+            <p className="mt-3 font-medium text-sm">{t('No connected nodes')}</p>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {t('Each connecting computer needs its own pairing code from the other desktop.')}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {nodes.map((node) => (
+              <NodeRow key={node.nodeId} node={node} onChanged={() => void refresh()} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <PairNodeDialog open={pairOpen} onOpenChange={setPairOpen} switchOnSuccess={false} />
+    </div>
+  );
+}
+
+function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () => void }) {
+  const { t } = useI18n();
+  const [draft, setDraft] = React.useState<string | null>(null);
+
+  const commit = async () => {
+    if (draft === null) return;
+    if (draft.trim() && draft.trim() !== node.label) {
+      await window.electronAPI.nodes.rename(node.nodeId, draft);
+      onChanged();
+    }
+    setDraft(null);
+  };
+
+  return (
+    <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <NodeDot node={node} />
+        {draft === null ? (
+          <>
+            <span className="truncate font-medium text-sm">{node.label}</span>
+            {node.hostname && node.hostname !== node.label && (
+              <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
+                {node.hostname}
+              </span>
+            )}
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {node.hostOnline
+                ? t('Online')
+                : node.connected
+                  ? t('Remote desktop is offline')
+                  : t('Offline')}
+            </span>
+          </>
+        ) : (
+          <Input
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commit();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+            className="h-7 text-sm"
+          />
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground"
+          title={t('Rename')}
+          onClick={() => setDraft(node.label)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          title={t('Disconnect')}
+          onClick={() => {
+            void window.electronAPI.nodes.remove(node.nodeId).then(onChanged);
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** 中继地址：两个方向共用（本机作 host 时用它出码；作 guest 时随对方链接走） */
+function RelaySection() {
+  const { t } = useI18n();
+  const [status, setStatus] = React.useState<PairStatus | null>(null);
+  const [relayDraft, setRelayDraft] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    void window.electronAPI.pair.status().then(setStatus);
+    return window.electronAPI.pair.onStatusChanged(setStatus);
+  }, []);
+
+  const saveRelay = async () => {
+    if (relayDraft === null) return;
+    setStatus(await window.electronAPI.pair.setRelayUrl(relayDraft));
+    setRelayDraft(null);
+  };
+
+  return (
+    <div className="space-y-6">
       <div className="space-y-2">
         <p className="font-medium text-sm">{t('Relay server')}</p>
         <p className="text-muted-foreground text-xs">
