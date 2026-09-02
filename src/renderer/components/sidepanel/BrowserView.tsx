@@ -187,9 +187,12 @@ export function BrowserView({
       )}
       <div
         ref={hostRef}
-        className={cn('relative min-h-0 flex-1', state.tabId ? 'bg-transparent' : 'bg-background')}
+        className={cn(
+          'relative min-h-0 flex-1',
+          state.url.startsWith('http') ? 'bg-transparent' : 'bg-background'
+        )}
       >
-        {!state.tabId && (
+        {!state.url.startsWith('http') && (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
             <Globe className="h-6 w-6 opacity-40" />
             <p>{t('Enter a URL above, or let the agent open a page with browser_navigate.')}</p>
