@@ -88,6 +88,9 @@ export class BrowserHost {
   private counter = 0;
   private guestSession?: Session;
   private hostWindow: () => BrowserWindow | null = () => null;
+  /** 工作区整窗 view，必须叠在 guest 之上，HTML 菜单才能盖住网页 */
+  private workbenchView?: WebContentsView;
+  private resizeBound = false;
   /** 渲染层当前展示的会话与面板矩形；null = 面板不可见，全部 tab 压底无头 */
   private shown: { sessionId: string; viewport: BrowserViewport } | null = null;
   private readonly stateListeners = new Set<(sessionId: string, state: BrowserTabState) => void>();
@@ -98,6 +101,11 @@ export class BrowserHost {
   /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
   setHostWindow(provider: () => BrowserWindow | null): void {
     this.hostWindow = provider;
+    const window = provider();
+    if (window && !this.resizeBound) {
+      this.resizeBound = true;
+      window.on('resize', () => this.syncWorkbenchBounds(window));
+    }
   }
 
   onState(listener: (sessionId: string, state: BrowserTabState) => void): () => void {
@@ -142,13 +150,39 @@ export class BrowserHost {
     this.layout();
   }
 
-  /** 工作区 WebContentsView 抬到 guest 之上，HTML 菜单才能盖住网页。 */
-  private raiseWorkbenchViews(contentView: Electron.View): void {
-    const guests = new Set([...this.tabs.values()].map((tab) => tab.view));
-    for (const child of [...contentView.children]) {
-      if (guests.has(child as Electron.WebContentsView)) continue;
-      contentView.addChildView(child);
+  private guests(): Set<WebContentsView> {
+    return new Set([...this.tabs.values()].map((tab) => tab.view));
+  }
+
+  private syncWorkbenchBounds(window: BrowserWindow): void {
+    if (!this.workbenchView || window.isDestroyed()) return;
+    const { width, height } = window.getContentBounds();
+    this.workbenchView.setBounds({ x: 0, y: 0, width, height });
+  }
+
+  /**
+   * 把工作区做成整窗顶层 WebContentsView。BrowserWindow 默认可能不把
+   * win.webContents 放进 contentView.children，guest 就会永远盖住 HTML。
+   */
+  private ensureWorkbenchOnTop(window: BrowserWindow): void {
+    const { contentView } = window;
+    const guests = this.guests();
+    let workbench = this.workbenchView;
+    if (!workbench || !contentView.children.includes(workbench)) {
+      const existing = contentView.children.find((child) => !guests.has(child as WebContentsView));
+      if (existing) {
+        workbench = existing as WebContentsView;
+      } else {
+        try {
+          workbench = new WebContentsView({ webContents: window.webContents });
+        } catch {
+          return;
+        }
+      }
+      this.workbenchView = workbench;
     }
+    this.syncWorkbenchBounds(window);
+    contentView.addChildView(workbench);
   }
 
   private layout(): void {
@@ -158,7 +192,6 @@ export class BrowserHost {
     for (const tab of this.tabs.values()) {
       const onTop = Boolean(this.shown && tab.ownerSessionId === this.shown.sessionId);
       if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
-      this.raiseWorkbenchViews(contentView);
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);
@@ -173,6 +206,7 @@ export class BrowserHost {
         });
       }
     }
+    this.ensureWorkbenchOnTop(window);
   }
 
   /** host 内白名单 CDP；模型永远摸不到 */

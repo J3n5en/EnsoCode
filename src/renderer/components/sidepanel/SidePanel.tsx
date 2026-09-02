@@ -10,6 +10,7 @@ import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
 import { FolderOpen, GitCompare, Globe, Plus, SquareTerminal, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useState } from 'react';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { springStandard } from '@/lib/motion';
 import { addSidePanelBrowser, bindSidePanelDock } from '@/lib/sidePanelDock';
@@ -192,38 +193,39 @@ function NewTabMenu({
   compact?: boolean;
 }) {
   const { t } = useI18n();
-  const open = async (event: { currentTarget: HTMLElement }) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    const chosen = await window.electronAPI.window.popupMenu(
-      [
-        { id: 'terminal', label: t('Terminal') },
-        { id: 'changes', label: t('Changes') },
-        { id: 'files', label: t('Files') },
-        { id: 'browser', label: t('Browser') },
-      ],
-      Math.round(compact ? box.right : box.left),
-      Math.round(box.bottom)
-    );
-    if (chosen === 'terminal') onNewTerminal();
-    else if (chosen === 'changes') onNewChanges();
-    else if (chosen === 'files') onNewFiles();
-    else if (chosen === 'browser') onNewBrowser();
-  };
   return (
-    <button
-      type="button"
-      className={cn(
-        'flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground',
-        compact
-          ? 'h-6 w-6 rounded p-1 hover:bg-muted'
-          : 'h-8 gap-1.5 border border-dashed px-3 text-sm hover:border-solid'
-      )}
-      aria-label={t('New tab')}
-      onClick={(event) => void open(event)}
-    >
-      <Plus className="h-4 w-4" />
-      {!compact && <span>{t('New tab')}</span>}
-    </button>
+    <Menu>
+      <MenuTrigger
+        className={cn(
+          'flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground',
+          compact
+            ? 'h-6 w-6 rounded p-1 hover:bg-muted'
+            : 'h-8 gap-1.5 border border-dashed px-3 text-sm hover:border-solid'
+        )}
+        aria-label={t('New tab')}
+      >
+        <Plus className="h-4 w-4" />
+        {!compact && <span>{t('New tab')}</span>}
+      </MenuTrigger>
+      <MenuPopup align={compact ? 'end' : 'center'} className="min-w-36">
+        <MenuItem onClick={onNewTerminal}>
+          <SquareTerminal className="h-4 w-4" />
+          {t('Terminal')}
+        </MenuItem>
+        <MenuItem onClick={onNewChanges}>
+          <GitCompare className="h-4 w-4" />
+          {t('Changes')}
+        </MenuItem>
+        <MenuItem onClick={onNewFiles}>
+          <FolderOpen className="h-4 w-4" />
+          {t('Files')}
+        </MenuItem>
+        <MenuItem onClick={onNewBrowser}>
+          <Globe className="h-4 w-4" />
+          {t('Browser')}
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
   );
 }
 
