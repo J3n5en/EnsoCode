@@ -64,4 +64,7 @@ export function registerBrowserHandlers(): void {
   browserHost.onReveal((conversationId, tabId) => {
     sendToAllWindows(IPC_CHANNELS.BROWSER_REVEAL, { conversationId, tabId });
   });
+  browserHost.onTabClosed((conversationId, tabId) => {
+    sendToAllWindows(IPC_CHANNELS.BROWSER_TAB_CLOSED, { conversationId, tabId });
+  });
 }

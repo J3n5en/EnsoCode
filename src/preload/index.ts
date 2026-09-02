@@ -662,6 +662,14 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.BROWSER_REVEAL, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_REVEAL, listener);
     },
+    onTabClosed: (
+      callback: (event: { conversationId: string; tabId: string }) => void
+    ): (() => void) => {
+      const listener = (_: unknown, event: { conversationId: string; tabId: string }) =>
+        callback(event);
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_TAB_CLOSED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_TAB_CLOSED, listener);
+    },
   },
 };
 

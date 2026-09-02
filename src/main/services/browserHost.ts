@@ -106,6 +106,7 @@ export class BrowserHost {
     (sessionId: string, tabId: string, state: BrowserTabState) => void
   >();
   private readonly revealListeners = new Set<(sessionId: string, tabId: string) => void>();
+  private readonly closeListeners = new Set<(sessionId: string, tabId: string) => void>();
   /** renderer 还没报矩形前先不关 tab，避免回合结束跑赢面板挂载 */
   private readonly pendingReveal = new Set<string>();
   /** 用户见过的 tab：切走 Terminal / 重启后仍恢复 */
@@ -131,6 +132,11 @@ export class BrowserHost {
   onReveal(listener: (sessionId: string, tabId: string) => void): () => void {
     this.revealListeners.add(listener);
     return () => this.revealListeners.delete(listener);
+  }
+
+  onTabClosed(listener: (sessionId: string, tabId: string) => void): () => void {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
   }
 
   private requestReveal(sessionId: string, tabId?: string): void {
@@ -275,6 +281,7 @@ export class BrowserHost {
     this.userTabs.delete(tabId);
     this.forgetTab(tabId);
     await this.destroyTab(tab);
+    for (const listener of this.closeListeners) listener(tab.ownerSessionId, tabId);
   }
 
   async setLocked(sessionId: string, locked: boolean): Promise<void> {
@@ -375,9 +382,7 @@ export class BrowserHost {
       const tabs = this.tabsForSession(sessionId);
       const tab = index === undefined ? this.tabFor(sessionId) : tabs[index];
       if (!tab) throw new Error('No browser tab to close');
-      this.userTabs.delete(tab.id);
-      this.forgetTab(tab.id);
-      await this.destroyTab(tab);
+      await this.closeTab(tab.id);
       return { closed: tab.id, tabs: list() };
     }
     return { tabs: list() };

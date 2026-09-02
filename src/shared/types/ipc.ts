@@ -164,6 +164,8 @@ export const IPC_CHANNELS = {
   BROWSER_REVEAL: 'browser:reveal',
   BROWSER_RESTORE_TABS: 'browser:restore-tabs',
   BROWSER_CLOSE_TAB: 'browser:close-tab',
+  /** main → renderer:agent 关了页，拆掉 dock tab */
+  BROWSER_TAB_CLOSED: 'browser:tab-closed',
 
   // Auto updater
   UPDATER_CHECK: 'updater:check',

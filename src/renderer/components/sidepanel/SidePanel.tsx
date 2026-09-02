@@ -13,7 +13,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { springStandard } from '@/lib/motion';
-import { addSidePanelBrowser, bindSidePanelDock } from '@/lib/sidePanelDock';
+import { addSidePanelBrowser, bindSidePanelDock, closeSidePanelBrowser } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -362,14 +362,20 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
   useEffect(() => {
-    const stop = window.electronAPI.browser.onReveal((event) => {
+    const stopReveal = window.electronAPI.browser.onReveal((event) => {
       addSidePanelBrowser({
         conversationId: event.conversationId,
         tabId: event.tabId,
       });
     });
+    const stopClosed = window.electronAPI.browser.onTabClosed((event) => {
+      closeSidePanelBrowser(event.conversationId, event.tabId);
+    });
     void window.electronAPI.browser.restoreTabs();
-    return stop;
+    return () => {
+      stopReveal();
+      stopClosed();
+    };
   }, []);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);

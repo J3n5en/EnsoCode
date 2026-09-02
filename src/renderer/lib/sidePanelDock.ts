@@ -111,6 +111,10 @@ export function addSidePanelBrowser(opts?: {
   });
 }
 
+export function closeSidePanelBrowser(conversationId: string, tabId: string): void {
+  docks.get(conversationId)?.getPanel(tabId)?.api.close();
+}
+
 export function closeActiveSidePanelTab(): void {
   const active = activeDock();
   if (!active) return;
