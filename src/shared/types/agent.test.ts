@@ -97,9 +97,7 @@ describe('Main-owned source authority contracts', () => {
     const localKind = { ...project, kind: 'local' };
     expect(parseProjectAuthority(localKind)).toEqual(localKind);
     expect(parseProjectAuthority({ ...project, kind: 'ssh' })).toBeNull();
-    expect(
-      parseProjectAuthority({ ...project, kind: 'ssh', sshHost: 'user@dev-box' })
-    ).toBeNull();
+    expect(parseProjectAuthority({ ...project, kind: 'ssh', sshHost: 'user@dev-box' })).toBeNull();
     expect(
       parseProjectAuthority({
         ...project,
@@ -252,7 +250,7 @@ describe('parent/child commands', () => {
     const withRemote = { ...base, remote: { host: 'user@dev-box', auth: 'key' } };
     expect(parseAgentCommand(withRemote)).toEqual(withRemote);
     expect(parseAgentCommand({ ...base, remote: { host: 'user@dev-box' } })).toBeNull();
-    expect(parseAgentCommand({ ...base, remote: { host: '' , auth: 'key' } })).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: { host: '', auth: 'key' } })).toBeNull();
     expect(parseAgentCommand({ ...base, remote: {} })).toBeNull();
     expect(parseAgentCommand({ ...base, remote: 'user@dev-box' })).toBeNull();
     const withPort = { ...base, remote: { host: 'h', auth: 'key', port: 22 } };
@@ -262,9 +260,7 @@ describe('parent/child commands', () => {
       remote: { host: 'h', auth: 'password', password: 's3cret' },
     };
     expect(parseAgentCommand(withPassword)).toEqual(withPassword);
-    expect(
-      parseAgentCommand({ ...base, remote: { host: 'h', auth: 'password' } })
-    ).toBeNull();
+    expect(parseAgentCommand({ ...base, remote: { host: 'h', auth: 'password' } })).toBeNull();
     expect(
       parseAgentCommand({
         ...base,
@@ -674,5 +670,56 @@ describe('custom entry and snapshot projection', () => {
       })
     ).toBeNull();
     expect(parseChildSessionIdentity({ ...child, profileId: undefined })).toBeNull();
+  });
+});
+
+describe('browser-invoke / browser-result', () => {
+  const invoke = {
+    type: 'browser-invoke',
+    identity: parent,
+    seq: 5,
+    requestId: 'br-1',
+    op: 'navigate',
+    params: { url: 'http://127.0.0.1:3000' },
+  };
+  const result = {
+    type: 'browser-result',
+    identity: parent,
+    requestId: 'br-1',
+    ok: true,
+    result: { url: 'x' },
+  };
+
+  it('browser-invoke 只接受闭集 op，identity 可为 parent 或 child', () => {
+    expect(parseAgentWorkerEvent(invoke)).toEqual(invoke);
+    expect(parseAgentWorkerEvent({ ...invoke, identity: child })).not.toBeNull();
+    for (const op of ['snapshot', 'click', 'type', 'screenshot', 'tabs', 'lock', 'close']) {
+      expect(parseAgentWorkerEvent({ ...invoke, op })).not.toBeNull();
+    }
+    expect(parseAgentWorkerEvent({ ...invoke, op: 'cdp' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...invoke, requestId: '' })).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ ...invoke, identity: { ...parent, generation: 'old' } })
+    ).toBeNull();
+    const { params: _p, ...noParams } = invoke;
+    expect(parseAgentWorkerEvent(noParams)).toBeNull();
+    expect(parseAgentWorkerEvent({ ...invoke, extra: 1 })).toBeNull();
+  });
+
+  it('browser-result 成功带 result，失败带 error，字段互斥', () => {
+    expect(parseAgentCommand(result)).toEqual(result);
+    const failed = {
+      type: 'browser-result',
+      identity: parent,
+      requestId: 'br-1',
+      ok: false,
+      error: 'boom',
+    };
+    expect(parseAgentCommand(failed)).toEqual(failed);
+    expect(parseAgentCommand({ ...failed, error: '' })).toBeNull();
+    expect(parseAgentCommand({ ...result, ok: false })).toBeNull();
+    expect(parseAgentCommand({ ...failed, ok: true })).toBeNull();
+    expect(parseAgentCommand({ ...result, requestId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...result, extra: 1 })).toBeNull();
   });
 });

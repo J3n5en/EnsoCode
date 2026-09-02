@@ -59,6 +59,19 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 /** 审批请求的操作类别 */
 export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
 
+/** 内嵌浏览器操作闭集：worker 只能发这些，raw CDP 永不进协议。 */
+export const BROWSER_OPS = [
+  'navigate',
+  'snapshot',
+  'click',
+  'type',
+  'screenshot',
+  'tabs',
+  'lock',
+  'close',
+] as const;
+export type BrowserOp = (typeof BROWSER_OPS)[number];
+
 /** 待审批请求（worker → 渲染层） */
 export interface ApprovalRequestInfo {
   requestId: string;
@@ -449,6 +462,14 @@ export type AgentCommand =
       requestId: string;
       envelope: CapabilityExecutionEnvelope;
     }
+  | {
+      type: 'browser-result';
+      identity: SessionIdentity | ChildSessionIdentity;
+      requestId: string;
+      ok: boolean;
+      result?: unknown;
+      error?: string;
+    }
   | { type: 'task-stop'; identity: SessionIdentity; taskId: string }
   | {
       type: 'rewind';
@@ -729,6 +750,14 @@ export type AgentWorkerEvent =
       turnId: string;
       requestId: string;
       capabilityId: ProductSurfaceId;
+      params: unknown;
+    }
+  | {
+      type: 'browser-invoke';
+      identity: SessionIdentity | ChildSessionIdentity;
+      seq: number;
+      requestId: string;
+      op: BrowserOp;
       params: unknown;
     }
   | {
@@ -1524,6 +1553,20 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         parseCapabilityExecutionEnvelope(value.envelope)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'browser-result': {
+      if (
+        !hasOnlyKeys(value, ['type', 'identity', 'requestId', 'ok', 'result', 'error']) ||
+        !parseAnySessionIdentity(value.identity) ||
+        !isNonEmptyString(value.requestId) ||
+        typeof value.ok !== 'boolean'
+      ) {
+        return null;
+      }
+      const shapeOk = value.ok
+        ? value.error === undefined
+        : isNonEmptyString(value.error) && value.result === undefined;
+      return shapeOk ? (value as unknown as AgentCommand) : null;
+    }
     case 'task-stop':
       return hasExactKeys(value, ['type', 'identity', 'taskId']) &&
         parseAnySessionIdentity(value.identity) &&
@@ -1638,6 +1681,12 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   const identity = parseAnySessionIdentity(value.identity);
   if (!identity || !isSequence(value.seq)) return null;
   switch (value.type) {
+    case 'browser-invoke':
+      return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'op', 'params']) &&
+        isNonEmptyString(value.requestId) &&
+        BROWSER_OPS.includes(value.op as BrowserOp)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'status':
       return value.status === 'idle' || value.status === 'running' || value.status === 'failed'
         ? (value as unknown as AgentWorkerEvent)
