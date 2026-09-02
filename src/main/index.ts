@@ -15,9 +15,11 @@ import { startPairHost, stopPairHost } from './services/pairHost';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
-// 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试
+// 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试。
+// 同机跑两以上实例（如验证节点互连）时可用 ENSO_CDP_PORT 错开。
 if (!app.isPackaged) {
-  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+  const cdpPort = process.env.ENSO_CDP_PORT?.trim();
+  app.commandLine.appendSwitch('remote-debugging-port', /^\d+$/.test(cdpPort ?? '') ? cdpPort! : '9222');
 }
 
 // 自动化可在开发环境显式指定 userData；打包版永不接受环境覆盖。
