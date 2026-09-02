@@ -156,6 +156,7 @@ export const IPC_CHANNELS = {
   BROWSER_GO_FORWARD: 'browser:go-forward',
   BROWSER_RELOAD: 'browser:reload',
   BROWSER_CLEAR_DATA: 'browser:clear-data',
+  BROWSER_SET_LOCKED: 'browser:set-locked',
   /** main → renderer:当前 tab 状态 */
   BROWSER_STATE: 'browser:state',
   /** main → renderer:agent 已打开页，请建 Browser 面板 */

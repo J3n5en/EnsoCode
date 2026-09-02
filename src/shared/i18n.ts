@@ -64,6 +64,7 @@ export const zhTranslations: Record<string, string> = {
   'Enter a URL': '输入网址',
   'Navigation failed': '导航失败',
   'Agent is browsing': 'Agent 正在操作',
+  'Take control': '接管',
   'Browser data': '浏览器数据',
   'Cookies and site storage of the built-in browser, separate from the app itself.':
     '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',
@@ -558,8 +559,8 @@ export const zhTranslations: Record<string, string> = {
   'Select or create a conversation': '选择或新建一个对话',
   'Collapse sidebar': '折叠侧边栏',
   'Show {{n}} more': '展开其余 {{n}} 条',
-  Collapse: '收起',
   'Archive {{n}} conversations': '归档 {{n}} 条会话',
+  Collapse: '收起',
   'Expand sidebar': '展开侧边栏',
   'Approval required': '需要审批',
   'Type an answer…': '输入回答…',
@@ -783,10 +784,13 @@ export const zhTranslations: Record<string, string> = {
   Minimal: '简洁',
   Full: '完整',
   // 思考档位（模型段的档位后缀；'Med' 是状态栏用的缩写形式）
+  Min: '极低',
   Low: '低',
   Medium: '中',
   Med: '中',
   High: '高',
+  Extra: '极高',
+  'Extra High': '极高',
   Max: '最高',
   'Loading diff…': '加载 diff…',
   // 补齐全 renderer 的中文覆盖（此前缺译文，中文界面下会静默显示英文）

@@ -42,6 +42,13 @@ export function registerBrowserHandlers(): void {
     if (typeof kind !== 'string' || !CLEAR_KINDS.has(kind)) throw new Error('Invalid clear kind');
     await browserHost.clearData(kind as 'cookies' | 'cache' | 'all');
   });
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_SET_LOCKED,
+    async (_event, conversationId: unknown, locked: unknown) => {
+      if (!isId(conversationId) || typeof locked !== 'boolean') return;
+      await browserHost.setLocked(conversationId, locked);
+    }
+  );
   browserHost.onState((conversationId, state) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (window.isDestroyed() || window.webContents.isDestroyed()) continue;

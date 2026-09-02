@@ -597,6 +597,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RELOAD, conversationId),
     clearData: (kind: BrowserClearKind): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLEAR_DATA, kind),
+    setLocked: (conversationId: string, locked: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_LOCKED, conversationId, locked),
     onState: (
       callback: (event: { conversationId: string; state: BrowserTabState }) => void
     ): (() => void) => {

@@ -199,7 +199,7 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
     define(
       'browser_lock',
       'Browser lock',
-      'Lock the current tab while you drive it: it stays open after the turn ends and the user sees an "Agent is browsing" badge. Pass release=true when done.',
+      'Lock the current tab: it stays open after the turn ends, and a page overlay blocks the user from clicking until they press Take control. Pass release=true when done.',
       schema({ release: { type: 'boolean', description: 'Release the lock (default false)' } }),
       (params, signal) => invoker.invoke('lock', { release: params.release === true }, signal)
     ),

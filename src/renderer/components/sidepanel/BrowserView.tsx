@@ -166,10 +166,14 @@ export function BrowserView({
           />
         </form>
         {state.locked && (
-          <span className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+          <button
+            type="button"
+            className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 transition-colors hover:bg-amber-500/25 dark:text-amber-400"
+            onClick={() => void window.electronAPI.browser.setLocked(conversationId, false)}
+          >
             <Hand className="h-3 w-3" />
-            {t('Agent is browsing')}
-          </span>
+            {t('Take control')}
+          </button>
         )}
       </div>
       {error && (

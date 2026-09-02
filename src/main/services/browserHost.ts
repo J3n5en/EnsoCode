@@ -1,4 +1,10 @@
-import { PAGE_SNAPSHOT_SCRIPT, pageClickScript, pageTypeScript } from '@shared/browser/pageScripts';
+import {
+  PAGE_LOCK_OVERLAY_SCRIPT,
+  PAGE_SNAPSHOT_SCRIPT,
+  PAGE_UNLOCK_OVERLAY_SCRIPT,
+  pageClickScript,
+  pageTypeScript,
+} from '@shared/browser/pageScripts';
 import {
   type BrowserSnapshot,
   isKnownRef,
@@ -196,6 +202,20 @@ export class BrowserHost {
     this.tabFor(sessionId)?.view.webContents.reload();
   }
 
+  async setLocked(sessionId: string, locked: boolean): Promise<void> {
+    const tab = this.mustTab(sessionId);
+    tab.locked = locked;
+    await this.syncLockOverlay(tab);
+    this.emitState(sessionId);
+  }
+
+  private async syncLockOverlay(tab: Tab): Promise<void> {
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed() || !tab.ready) return;
+    const script = tab.locked ? PAGE_LOCK_OVERLAY_SCRIPT : PAGE_UNLOCK_OVERLAY_SCRIPT;
+    await contents.executeJavaScript(script, true).catch(() => {});
+  }
+
   getSession(): Session {
     if (!this.guestSession) {
       const name = partitionName(app.isPackaged);
@@ -236,10 +256,9 @@ export class BrowserHost {
         return tab ? [this.state(sessionId)] : [];
       }
       case 'lock': {
-        const tab = this.mustTab(sessionId);
-        tab.locked = !(isRecord(params) && params.release === true);
-        this.emitState(sessionId);
-        return { locked: tab.locked };
+        const locked = !(isRecord(params) && params.release === true);
+        await this.setLocked(sessionId, locked);
+        return { locked };
       }
     }
   }
@@ -370,6 +389,9 @@ export class BrowserHost {
     contents.on('did-navigate', () => {
       tab.lastSnapshot = undefined;
       push();
+    });
+    contents.on('did-finish-load', () => {
+      if (tab.locked) void this.syncLockOverlay(tab);
     });
     contents.once('dom-ready', () => {
       tab.ready = true;

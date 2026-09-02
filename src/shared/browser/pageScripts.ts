@@ -147,3 +147,31 @@ export const pageTypeScript = (ref: string, text: string, submit: boolean): stri
   }
   return 'ok';
 })()`;
+
+const LOCK_OVERLAY_ID = 'enso-browser-lock-overlay';
+
+/** 盖在 guest 页上吞掉用户指针；agent 的 element.click() 不经过这层。 */
+export const PAGE_LOCK_OVERLAY_SCRIPT = `(() => {
+  const ID = ${JSON.stringify(LOCK_OVERLAY_ID)};
+  if (document.getElementById(ID)) return 'ok';
+  const el = document.createElement('div');
+  el.id = ID;
+  Object.assign(el.style, {
+    position: 'fixed',
+    inset: '0',
+    zIndex: '2147483647',
+    background: 'transparent',
+    cursor: 'not-allowed',
+  });
+  const block = (e) => { e.stopPropagation(); e.preventDefault(); };
+  for (const type of ['click','mousedown','mouseup','pointerdown','pointerup','wheel','touchstart','contextmenu']) {
+    el.addEventListener(type, block, true);
+  }
+  document.documentElement.appendChild(el);
+  return 'ok';
+})()`;
+
+export const PAGE_UNLOCK_OVERLAY_SCRIPT = `(() => {
+  document.getElementById(${JSON.stringify(LOCK_OVERLAY_ID)})?.remove();
+  return 'ok';
+})()`;
