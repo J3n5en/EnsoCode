@@ -1,4 +1,10 @@
-import type { CatalogEntry, HostToPhone, PhoneToHost, ProjectEntry, ProviderEntry } from '@enso/pair';
+import type {
+  CatalogEntry,
+  HostToPhone,
+  PhoneToHost,
+  ProjectEntry,
+  ProviderEntry,
+} from '@enso/pair';
 import {
   applyGuestEvent,
   applyGuestHistory,
@@ -192,7 +198,8 @@ function applyAgentEvent(view: NodeView, event: Record<string, unknown>): NodeRe
     const nextSessions = { ...view.sessions };
     for (const { id, view: sessionView, lastIndex } of results) {
       nextSessions[id] = sessionView;
-      if (lastIndex !== undefined) effects.push({ kind: 'cursor', sessionId: id, index: lastIndex });
+      if (lastIndex !== undefined)
+        effects.push({ kind: 'cursor', sessionId: id, index: lastIndex });
     }
     return {
       view: {

@@ -31,8 +31,10 @@ describe('目录类帧', () => {
     v = applyNodeMessage(v, { type: 'catalog', entries: [entry('s1')], pinnedOrder: ['s1'] }).view;
     expect(v.catalog.map((e) => e.id)).toEqual(['s1']);
     expect(v.pinnedOrder).toEqual(['s1']);
-    v = applyNodeMessage(v, { type: 'projects', projects: [{ id: 'p1', name: 'p', path: '/p' }] })
-      .view;
+    v = applyNodeMessage(v, {
+      type: 'projects',
+      projects: [{ id: 'p1', name: 'p', path: '/p' }],
+    }).view;
     expect(v.projects).toHaveLength(1);
     v = applyNodeMessage(v, {
       type: 'providers',
