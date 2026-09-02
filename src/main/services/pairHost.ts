@@ -1,3 +1,4 @@
+import os from 'node:os';
 import {
   attachHeartbeat,
   backoffDelay,
@@ -33,7 +34,7 @@ import type {
   PairSessionConfig,
   PairStatus,
 } from '@shared/types/pair';
-import { powerMonitor, powerSaveBlocker } from 'electron';
+import { app, powerMonitor, powerSaveBlocker } from 'electron';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot } from './agentHost';
 import { MacosSystemSleepAssertion } from './macosSystemSleepAssertion';
@@ -651,6 +652,8 @@ async function sendMeta(conn: Connection): Promise<void> {
   });
   // Web Push 能力下发：手机拿公钥才能 pushManager.subscribe
   await send(conn, { type: 'push-config', vapidPublicKey: getVapidPublicKey() });
+  // 桌面 guest 用作默认节点名；手机忽略
+  await send(conn, { type: 'host-info', hostname: os.hostname(), appVersion: app.getVersion() });
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */

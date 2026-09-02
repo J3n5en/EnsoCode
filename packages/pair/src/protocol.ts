@@ -203,4 +203,9 @@ export type HostToPhone =
   /** Web Push 能力下发：手机拿 VAPID 公钥才能 pushManager.subscribe */
   | { type: 'push-config'; vapidPublicKey: string }
   /** history 命令的应答：baseIndex 之前拼接的一页消息，手机按绝对 index 合并 */
-  | { type: 'history'; sessionId: string; baseIndex: number; messages: unknown[] };
+  | { type: 'history'; sessionId: string; baseIndex: number; messages: unknown[] }
+  /**
+   * host 自述：guest（另一台桌面）用 hostname 作默认节点名。
+   * 旧版 PWA 的 switch 无 default 分支，未知帧直接忽略，因此可安全新增。
+   */
+  | { type: 'host-info'; hostname: string; appVersion: string };
