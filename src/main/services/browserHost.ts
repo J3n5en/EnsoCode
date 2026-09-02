@@ -36,6 +36,9 @@ const PARTITION_SUFFIX = '-browser';
 const NAVIGATE_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 300;
 const MAX_HEADLESS_TABS = 4;
+/** 会话不在看的 Browser 进程，闲置这么久就卸掉（URL 仍落盘） */
+const IDLE_MS = 5 * 60 * 1000;
+const IDLE_TICK_MS = 30_000;
 const SCREENSHOT_MAX_WIDTH = 1280;
 /**
  * 无头 tab 的布局 viewport。contentView 的子视图全画在 renderer 之上，无头只能
@@ -110,6 +113,8 @@ export class BrowserHost {
   private persisted: Record<string, PersistedBrowserTab> = {};
   private persistedLoaded = false;
   private disposing = false;
+  private readonly lastSeen = new Map<string, number>();
+  private idleTimer: ReturnType<typeof setInterval> | undefined;
 
   /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
   setHostWindow(provider: () => BrowserWindow | null): void {
@@ -172,11 +177,12 @@ export class BrowserHost {
   /** 渲染层：某个 dock tab 可见时报矩形；null = 该 tab 隐藏 */
   setViewport(tabId: string, sessionId: string, viewport: BrowserViewport | null): BrowserTabState {
     if (viewport) {
-      if (!this.tabs.has(tabId)) this.createTab(sessionId, tabId);
+      if (!this.tabs.has(tabId)) void this.restoreTab(tabId, sessionId);
       this.currentBySession.set(sessionId, tabId);
       this.userTabs.add(tabId);
       this.pendingReveal.delete(sessionId);
       this.shown = { tabId, sessionId, viewport };
+      this.touch(tabId);
     } else if (this.shown?.tabId === tabId) {
       this.shown = null;
     }
@@ -515,12 +521,12 @@ export class BrowserHost {
     await this.destroyTab(tab);
   }
 
-  private async destroyTab(tab: Tab): Promise<void> {
+  private async destroyTab(tab: Tab, opts?: { keepPersist?: boolean }): Promise<void> {
     this.tabs.delete(tab.id);
     if (this.currentBySession.get(tab.ownerSessionId) === tab.id) {
       this.currentBySession.delete(tab.ownerSessionId);
     }
-    if (!this.disposing && !this.userTabs.has(tab.id)) {
+    if (!this.disposing && !opts?.keepPersist && !this.userTabs.has(tab.id)) {
       this.forgetTab(tab.id);
     }
     await this.flush();
@@ -585,33 +591,62 @@ export class BrowserHost {
     this.writePersisted();
   }
 
-  private async restoreTab(tabId: string): Promise<void> {
+  private touch(tabId: string): void {
+    this.lastSeen.set(tabId, Date.now());
+    if (this.idleTimer) return;
+    this.idleTimer = setInterval(() => void this.hibernateIdleTabs(), IDLE_TICK_MS);
+  }
+
+  private async hibernateIdleTabs(): Promise<void> {
+    const now = Date.now();
+    for (const tab of [...this.tabs.values()]) {
+      if (tab.locked || tab.id === this.shown?.tabId) continue;
+      const seen = this.lastSeen.get(tab.id) ?? tab.createdAt;
+      if (now - seen < IDLE_MS) continue;
+      const state = this.stateOf(tab);
+      if (state.url.startsWith('http')) {
+        this.rememberTab(tab.id, {
+          url: state.url,
+          title: state.title,
+          conversationId: tab.ownerSessionId,
+          at: seen,
+        });
+      }
+      await this.destroyTab(tab, { keepPersist: true });
+    }
+    if (this.tabs.size === 0 && this.idleTimer) {
+      clearInterval(this.idleTimer);
+      this.idleTimer = undefined;
+    }
+  }
+
+  private async restoreTab(tabId: string, sessionId?: string): Promise<void> {
     this.loadPersisted();
+    if (this.tabs.has(tabId)) return;
     const saved = this.persisted[tabId];
-    if (!saved || this.tabs.has(tabId)) return;
+    const owner = saved?.conversationId ?? sessionId ?? tabId;
+    const tab = this.createTab(owner, tabId);
+    this.userTabs.add(tab.id);
+    if (!saved?.url) return;
     try {
       assertAllowedUrl(saved.url);
     } catch {
       return;
     }
-    const sessionId = saved.conversationId ?? tabId;
-    const tab = this.createTab(sessionId, tabId);
-    this.userTabs.add(tab.id);
     await tab.view.webContents.loadURL(saved.url).catch(() => {});
   }
 
   async restorePersistedTabs(): Promise<void> {
     this.loadPersisted();
-    const entries = Object.entries(this.persisted).sort((a, b) => (b[1].at ?? 0) - (a[1].at ?? 0));
-    for (const [tabId, saved] of entries.slice(0, MAX_HEADLESS_TABS)) {
-      await this.restoreTab(tabId);
-      this.requestReveal(saved.conversationId ?? tabId, tabId);
-    }
   }
 
   /** 退出前：flush 后关掉全部 tab。 */
   async dispose(): Promise<void> {
     this.disposing = true;
+    if (this.idleTimer) {
+      clearInterval(this.idleTimer);
+      this.idleTimer = undefined;
+    }
     for (const tab of [...this.tabs.values()]) await this.destroyTab(tab);
   }
 }
