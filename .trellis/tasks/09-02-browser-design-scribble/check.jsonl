@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/testing.md", "reason": "验收须带 vitest 退出码，不能只看手势口述"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "确认未私加未注册通道"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared 不引入 canvas/electron"}
+{"file": ".trellis/tasks/09-02-browser-design-scribble/prd.md", "reason": "对照 AC1–AC7"}

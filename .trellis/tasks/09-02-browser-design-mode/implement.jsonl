@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/testing.md", "reason": "TDD for serialize/parse and mention narrowing"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared types and no-electron constraint"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "IPC three-point chain"}
+{"file": ".trellis/spec/main/index.md", "reason": "host services vs ipc handlers"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "composer/i18n/preload checklist"}
+{"file": ".trellis/tasks/09-02-browser-design-mode/design.md", "reason": "Design Mode architecture"}
+{"file": ".trellis/tasks/09-02-browser-design-mode/prd.md", "reason": "MVP requirements and AC"}

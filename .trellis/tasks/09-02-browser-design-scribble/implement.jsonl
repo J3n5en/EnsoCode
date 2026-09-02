@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/testing.md", "reason": "TDD: 阈值/包围盒/点列属可单测纯函数，须先红后绿"}
+{"file": ".trellis/spec/shared/index.md", "reason": "协议与事件类型进 shared，不能依赖 electron/DOM 合成"}
+{"file": ".trellis/spec/shared/conventions.md", "reason": "跨进程 payload 收窄、字段上限与既有 designMode 净化一致"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "若增通道须三点式；本任务优先复用 binding + 现有 DESIGN_MODE_EVENT"}
+{"file": ".trellis/spec/main/index.md", "reason": "host 截图/debugger 与 DevTools 互斥"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "Composer 只复用 insert + focus，不在 renderer 画冻帧"}
+{"file": ".trellis/tasks/09-02-browser-design-mode/prd.md", "reason": "单击闭环与非目标边界，涂鸦不得破坏 picked 发送行"}
+{"file": ".trellis/tasks/09-02-browser-design-mode/design.md", "reason": "binding 名、hide+CDP、guest 无 preload"}
