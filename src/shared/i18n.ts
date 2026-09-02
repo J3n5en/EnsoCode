@@ -798,6 +798,31 @@ export const zhTranslations: Record<string, string> = {
   Copy: '复制',
   Description: '描述',
   Source: '来源',
+
+  // 连接到节点（本机作为 guest 连别的 EnsoCode 桌面）
+  'This computer': '本机',
+  'Switch node': '切换节点',
+  'Connect to a node': '连接到节点',
+  'Connect to a node…': '连接到节点…',
+  Connect: '连接',
+  Create: '创建',
+  Project: '项目',
+  'No conversations': '没有会话',
+  'Connecting…': '连接中…',
+  'Syncing…': '同步中…',
+  'Remote desktop is offline': '对方桌面离线',
+  'The remote desktop has no projects yet': '对方桌面还没有项目',
+  'Select a conversation on the left, or create one': '从左侧选择会话，或新建一个',
+  'New remote conversation': '新建远程会话',
+  'The conversation runs on the remote computer with its projects, models and keys.':
+    '会话在对方电脑上运行，用的是对方的项目、模型与密钥。',
+  'On the other computer open Settings → Devices, generate a pairing code and copy the link. Paste it here.':
+    '在对方电脑打开「设置 → 设备」，生成配对码并复制链接，粘到这里。',
+  'That is not an EnsoCode pairing link.': '这不是 EnsoCode 配对链接。',
+  'This pairing link has expired or was already used. Generate a new one.':
+    '配对链接已过期或已被使用，请重新生成。',
+  'Could not reach the relay. Check your network and try again.':
+    '无法连接中继，请检查网络后重试。',
 };
 
 export function normalizeLocale(input?: string): Locale {

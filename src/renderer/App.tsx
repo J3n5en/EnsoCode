@@ -17,6 +17,7 @@ import { ChatView } from '@/components/chat/ChatView';
 import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { RemoteNodeView } from '@/components/nodes/RemoteNodeView';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
@@ -27,6 +28,7 @@ import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
+import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -95,6 +97,11 @@ export default function App() {
     bindPairCatalogSync();
   }, []);
 
+  // 连接到节点：订阅 main 推的节点状态与对方下行帧
+  useEffect(() => useRemoteNodesStore.getState().bind(), []);
+  const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
+  const remoteNodeActive = activeNodeId !== 'local';
+
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
   }, []);
@@ -117,6 +124,22 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
+      // 远程节点态：本机会话相关的快捷键不响应（新对话/tab 切换/右侧面板/查找）
+      const remote = useRemoteNodesStore.getState().activeNodeId !== 'local';
+      if (
+        remote &&
+        [
+          'new-conversation',
+          'next-tab',
+          'prev-tab',
+          'toggle-side-panel',
+          'new-side-tab',
+          'close-side-tab',
+          'find-in-chat',
+        ].some((key) => pressed === bindings[key as keyof typeof bindings])
+      ) {
+        return;
+      }
       if (pressed === bindings['toggle-sidebar']) {
         e.preventDefault();
         setCollapsed((v) => !v);
@@ -190,19 +213,24 @@ export default function App() {
       />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
-          <Sidebar
-            width={collapsed ? undefined : width}
-            collapsed={collapsed}
-            onToggleCollapse={() => setCollapsed((v) => !v)}
-          />
-          {!collapsed && <ResizeHandle onResize={handleResize} />}
-          <ChatView />
-          {sideOpen && (
-            <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
-          )}
-          <SidePanel width={sideWidth} resizing={sideResizing} />
-        </DndContext>
+        {remoteNodeActive ? (
+          // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
+          <RemoteNodeView nodeId={activeNodeId} sidebarWidth={width} />
+        ) : (
+          <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
+            <Sidebar
+              width={collapsed ? undefined : width}
+              collapsed={collapsed}
+              onToggleCollapse={() => setCollapsed((v) => !v)}
+            />
+            {!collapsed && <ResizeHandle onResize={handleResize} />}
+            <ChatView />
+            {sideOpen && (
+              <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
+            )}
+            <SidePanel width={sideWidth} resizing={sideResizing} />
+          </DndContext>
+        )}
       </div>
       {!onboarded && <Onboarding />}
     </div>
