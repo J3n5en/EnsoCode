@@ -128,6 +128,7 @@ function createPinnedWorkbench(win: BrowserWindow, entry: string): WebContentsVi
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
   };
+  view.setBackgroundColor('#00000000');
   win.contentView.addChildView(view);
   win.on('resize', sync);
   sync();
@@ -177,6 +178,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     ...(isWindows && { thickFrame: true }),
     show: false,
     backgroundColor: '#00000000',
+    ...(options.pinWorkbenchView ? { transparent: true } : {}),
     webPreferences: webPreferences(),
   });
 
