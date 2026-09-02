@@ -33,9 +33,16 @@ export function emptyGuestView(): GuestSessionView {
 
 export interface GuestEventResult {
   view: GuestSessionView;
-  /** 本次写入的消息 index（仅 message-upsert 有），供调用方存游标 */
+  /**
+   * 事件后的权威游标 = 视图内最大消息 index（空为 -1），仅改动了消息集的事件有。
+   * 调用方应直接覆写落盘（可回退）：游标只涨不跌会在重试/压缩截断后永远高于真实尾部，
+   * host 据此把后续所有新消息当旧消息过掉，手机就「卡住」。
+   */
   lastIndex?: number;
 }
+
+const maxIndex = (messages: ReadonlyMap<number, unknown>): number =>
+  messages.size ? Math.max(...messages.keys()) : -1;
 
 /** 单条（非 snapshot）agent 事件 → 新视图。返回的 messages 总是新 Map，不与入参共享。 */
 export function applyGuestEvent(
@@ -53,7 +60,13 @@ export function applyGuestEvent(
     case 'message-upsert': {
       const index = event.index as number;
       view.messages.set(index, event.message as ProjectedMessage);
-      return { view, lastIndex: index };
+      return { view, lastIndex: maxIndex(view.messages) };
+    }
+    case 'messages-truncated': {
+      // 重试/压缩后尾部被删：同步裁掉并回退游标
+      const length = event.length as number;
+      for (const i of view.messages.keys()) if (i >= length) view.messages.delete(i);
+      return { view, lastIndex: length - 1 };
     }
     case 'status':
       view.status = event.status as string;
@@ -101,6 +114,7 @@ type SnapshotSession = Partial<SessionSnapshot> & {
  * 尾窗快照：按 baseIndex 偏移合并进已有投影。
  * 不能整张 Map 替换——用户可能已上滑加载了更早的分页；
  * 但尾窗与已有内容接不上（离线太久）时丢弃旧段保持时间线连续，上滑可重新拉回。
+ * 尾窗末就是时间线末：已有的更靠后消息（离线期间被截断）一律丢掉。
  */
 export function applyGuestSnapshot(
   sessions: ReadonlyMap<string, GuestSessionView>,
@@ -117,6 +131,7 @@ export function applyGuestSnapshot(
     const messages =
       existing && base <= prevMax + 1 ? new Map(existing) : new Map<number, ProjectedMessage>();
     const incoming = snap.messages ?? [];
+    for (const i of messages.keys()) if (i >= base + incoming.length) messages.delete(i);
     for (const [i, message] of incoming.entries()) messages.set(base + i, message);
     out.push({
       id,
@@ -128,7 +143,7 @@ export function applyGuestSnapshot(
         tasks: snap.backgroundTasks ?? [],
         subagents: snap.subagents ?? [],
       },
-      ...(incoming.length > 0 ? { lastIndex: base + incoming.length - 1 } : {}),
+      lastIndex: base + incoming.length - 1,
     });
   }
   return out;

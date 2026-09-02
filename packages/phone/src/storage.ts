@@ -70,9 +70,10 @@ export function loadCursors(pairId: string): Record<string, number> {
   }
 }
 
+/** 直接覆写（可回退）：截断/压缩后游标必须能退，否则 host 会把后续新消息当旧消息过掉 */
 export function saveCursor(pairId: string, sessionId: string, index: number): void {
   const cursors = loadCursors(pairId);
-  if ((cursors[sessionId] ?? -1) >= index) return;
+  if (cursors[sessionId] === index) return;
   cursors[sessionId] = index;
   localStorage.setItem(cursorKey(pairId), JSON.stringify(cursors));
 }
