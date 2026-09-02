@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/main/ipc.md", "reason": "NODES_* 三点式链路、入参 unknown 校验、结果对象不抛异常、preload 唯一出口"}
+{"file": ".trellis/spec/main/services.md", "reason": "敏感数据不出主进程（contentKey 留 main）、pairGuest 与 pairHost 对称"}
+{"file": ".trellis/spec/renderer/state.md", "reason": "remoteNodes zustand store 的加字段流程与选片订阅"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "节点/设备新增文案键即英文原文"}
+{"file": ".trellis/spec/renderer/dialogs.md", "reason": "PairNodeDialog / NewRemoteSessionDialog 三件套与异步状态"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "投影逻辑抽 shared 不复制第二份"}
+{"file": ".trellis/spec/testing.md", "reason": "guestProjection / nodeStore / reducer TDD 先红后绿"}
+{"file": ".trellis/tasks/09-02-desktop-remote-node/design.md", "reason": "模块边界与数据流"}

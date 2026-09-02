@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "renderer→preload→main→relay 链路完整性"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "NODES_SEND 白名单与 isMainWebContents 检查"}
+{"file": ".trellis/spec/shared/conventions.md", "reason": "中文注释、小步提交、无调试残留"}
+{"file": ".trellis/spec/testing.md", "reason": "新增纯逻辑均有测试"}
