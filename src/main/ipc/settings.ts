@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
 import { app, BrowserWindow, ipcMain } from 'electron';
@@ -103,6 +111,44 @@ export function flushSettings(): boolean {
 
 export type SettingsBroadcast = 'exclude-sender' | 'all-renderers';
 
+/** 一次写入把这些字段从非空写成空，视为破坏性：写前把上一份文件快照下来，给用户留恢复余地。 */
+const PROTECTED_FIELDS = ['providers', 'skills', 'mcpServers', 'instructions'] as const;
+const MAX_BACKUPS = 5;
+
+function settingsState(data: Record<string, unknown> | null): Record<string, unknown> {
+  const store = data?.['enso-settings'];
+  const state =
+    store && typeof store === 'object' ? (store as Record<string, unknown>).state : null;
+  return state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
+}
+
+function destructiveFields(prev: Record<string, unknown> | null, next: Record<string, unknown>) {
+  const before = settingsState(prev);
+  const after = settingsState(next);
+  return PROTECTED_FIELDS.filter((field) => {
+    const was = before[field];
+    const now = after[field];
+    return Array.isArray(was) && was.length > 0 && (!Array.isArray(now) || now.length === 0);
+  });
+}
+
+/** 快照当前磁盘文件为 settings.backup-<ts>.json，只留最近 MAX_BACKUPS 份。失败不影响写入。 */
+function snapshotBeforeDestructiveWrite(fields: string[]): void {
+  try {
+    const settingsPath = getSettingsPath();
+    if (!existsSync(settingsPath)) return;
+    const dir = join(settingsPath, '..');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    copyFileSync(settingsPath, join(dir, `settings.backup-${stamp}.json`));
+    const stale = readdirSync(dir)
+      .filter((f) => f.startsWith('settings.backup-') && f.endsWith('.json'))
+      .sort()
+      .slice(0, -MAX_BACKUPS);
+    for (const f of stale) rmSync(join(dir, f), { force: true });
+    console.warn(`[settings] destructive write empties ${fields.join(', ')}; snapshot saved`);
+  } catch {}
+}
+
 /** 更新缓存、广播窗口、debounce 落盘（SETTINGS_WRITE / WRITE_KEY / Gateway 共用） */
 function scheduleWrite(
   data: Record<string, unknown>,
@@ -110,6 +156,11 @@ function scheduleWrite(
   broadcast: SettingsBroadcast = 'exclude-sender'
 ): boolean {
   try {
+    const destructive = destructiveFields(readSettings(), data);
+    if (destructive.length > 0) {
+      flushSettings();
+      snapshotBeforeDestructiveWrite(destructive);
+    }
     cachedSettings = data;
     isDirty = true;
 

@@ -119,6 +119,22 @@ useSettingsStore.setState({ projects: next });
 而不是断言“最后磁盘里值看起来对”。持久化 fixture 的 `version` 要等于 `SETTINGS_VERSION`，
 否则测到的是 migrate 回写而不是闸门。
 
+### 护栏：破坏性写入前快照
+
+渲染层交上来的 `enso-settings` 是整包，主进程无法分辨「用户真的清空了 providers」和「某个新写路径
+又把 initialState 写回来了」。所以 `scheduleWrite` 不拒绝，但会在一次写入把
+`providers / skills / mcpServers / instructions` 从非空写成空时，先 flush 再把当前磁盘文件复制为
+`settings.backup-<ISO 时间>.json`（只留最近 5 份），并 `console.warn`。
+排查「配置突然丢了」先看 userData 目录里有没有这些快照；新增受保护字段改 `PROTECTED_FIELDS`。
+测试：`src/main/ipc/settingsBackup.test.ts`。
+
+### 跨窗口同步的 lost-update
+
+`settings.onChanged → persist.rehydrate()` 是 `set(snapshot, true)` 整体替换。若本窗口在重读在途时
+也写了一笔，主进程按 IPC 顺序先答复读（旧快照）、后处理写，回包会把这一笔从内存盖掉，下次落盘再把旧值
+写回。`syncSettingsFromMain` 用 `storage.ts` 的 `writeGeneration` 判断重读期间是否有本地写，有则再读一次
+（上限 3 轮）。测试：`hydrationGuard.test.ts` 的 sync 用例。
+
 ## 不适合放这里的数据
 
 - 窗口几何信息 → 独立状态文件，见 [windows.md](windows.md)
