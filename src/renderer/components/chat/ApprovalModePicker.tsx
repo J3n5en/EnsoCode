@@ -36,11 +36,13 @@ export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="flex h-7 min-w-0 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         title={t(MODE_META[mode].descKey)}
       >
         <CurrentIcon className="h-3 w-3 shrink-0" />
-        <span className="hidden @min-[28rem]:inline">{t(MODE_META[mode].labelKey)}</span>
+        <span className="hidden min-w-0 truncate @min-[28rem]:inline">
+          {t(MODE_META[mode].labelKey)}
+        </span>
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-80 [&_[data-slot=popover-viewport]]:p-1">

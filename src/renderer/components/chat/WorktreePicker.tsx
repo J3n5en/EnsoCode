@@ -108,14 +108,15 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={busy}
-          className="flex h-7 max-w-44 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          className="flex h-7 min-w-0 max-w-44 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          title={isolated ? (conversation.worktree?.branch ?? t('Isolated worktree')) : t('Local')}
         >
           {isolated ? (
             <GitBranch className="h-3 w-3 shrink-0" />
           ) : (
             <House className="h-3 w-3 shrink-0" />
           )}
-          <span className="truncate">
+          <span className="min-w-0 truncate">
             {isolated ? (conversation.worktree?.branch ?? t('Isolated worktree')) : t('Local')}
           </span>
           <ChevronDown className="h-3 w-3 shrink-0" />

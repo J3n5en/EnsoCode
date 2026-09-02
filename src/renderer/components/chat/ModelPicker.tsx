@@ -618,9 +618,10 @@ export function ModelPicker({
     <Menu open={open} onOpenChange={handleRootOpenChange}>
       <MenuTrigger
         data-model-picker="trigger"
-        className="flex h-7 max-w-64 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="flex h-7 min-w-14 max-w-64 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title={current?.label ?? modelId ?? t('Model')}
       >
-        <span className="truncate">{current?.label ?? modelId ?? t('Model')}</span>
+        <span className="min-w-0 truncate">{current?.label ?? modelId ?? t('Model')}</span>
         {reasoningEnabled && (
           <span className="flex shrink-0 items-center gap-0.5 text-primary">
             <Brain className="h-3 w-3" />

@@ -29,7 +29,7 @@ export function PresetPicker({ presetId, onSelect, disabled }: PresetPickerProps
   if (disabled) {
     return (
       <span
-        className="flex h-7 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground"
+        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground"
         title={t('Preset is locked after the conversation starts')}
       >
         <Layers className="h-3 w-3 shrink-0" />
@@ -40,9 +40,12 @@ export function PresetPicker({ presetId, onSelect, disabled }: PresetPickerProps
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className="flex h-7 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+      <PopoverTrigger
+        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title={current.name}
+      >
         <Layers className="h-3 w-3 shrink-0" />
-        <span className="truncate">{current.name}</span>
+        <span className="min-w-0 truncate">{current.name}</span>
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-52 [&_[data-slot=popover-viewport]]:p-1">

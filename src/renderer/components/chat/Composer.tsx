@@ -558,15 +558,20 @@ export function Composer({
         </div>
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
-          <div className="flex min-w-0 items-center gap-1">{toolbar}</div>
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">{toolbar}</div>
           {effectiveBusy ? (
-            <Button variant="outline" size="icon" className="h-7 w-7 rounded-lg" onClick={onAbort}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 shrink-0 rounded-lg"
+              onClick={onAbort}
+            >
               <CircleStop className="h-4 w-4" />
             </Button>
           ) : (
             <Button
               size="icon"
-              className="h-7 w-7 rounded-lg"
+              className="h-7 w-7 shrink-0 rounded-lg"
               onClick={handleSend}
               disabled={!hasContent || locked}
               aria-label={agentRecipient ? t('Send only to the selected Agent') : t('Send')}
