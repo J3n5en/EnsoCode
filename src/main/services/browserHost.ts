@@ -85,6 +85,9 @@ export class BrowserHost {
   /** 渲染层当前展示的会话与面板矩形；null = 面板不可见，全部 tab 压底无头 */
   private shown: { sessionId: string; viewport: BrowserViewport } | null = null;
   private readonly stateListeners = new Set<(sessionId: string, state: BrowserTabState) => void>();
+  private readonly revealListeners = new Set<(sessionId: string) => void>();
+  /** renderer 还没报矩形前先不关 tab，避免回合结束跑赢面板挂载 */
+  private readonly pendingReveal = new Set<string>();
 
   /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
   setHostWindow(provider: () => BrowserWindow | null): void {
@@ -94,6 +97,16 @@ export class BrowserHost {
   onState(listener: (sessionId: string, state: BrowserTabState) => void): () => void {
     this.stateListeners.add(listener);
     return () => this.stateListeners.delete(listener);
+  }
+
+  onReveal(listener: (sessionId: string) => void): () => void {
+    this.revealListeners.add(listener);
+    return () => this.revealListeners.delete(listener);
+  }
+
+  private requestReveal(sessionId: string): void {
+    this.pendingReveal.add(sessionId);
+    for (const listener of this.revealListeners) listener(sessionId);
   }
 
   state(sessionId: string): BrowserTabState {
@@ -119,6 +132,7 @@ export class BrowserHost {
   /** 渲染层：面板可见且矩形已知 → 该会话 tab 叠到矩形上；viewport 为 null → 隐藏 */
   setViewport(sessionId: string, viewport: BrowserViewport | null): void {
     this.shown = viewport ? { sessionId, viewport } : null;
+    if (viewport) this.pendingReveal.delete(sessionId);
     this.layout();
   }
 
@@ -241,6 +255,7 @@ export class BrowserHost {
         throw new Error(`Navigation to ${url.href} timed out`);
       }),
     ]);
+    this.requestReveal(sessionId);
     return this.pageInfo(contents);
   }
 
@@ -397,7 +412,12 @@ export class BrowserHost {
   async closeForSession(sessionId: string, opts: { force?: boolean } = {}): Promise<void> {
     const tab = this.tabFor(sessionId);
     if (!tab) return;
-    if (!opts.force && (tab.locked || this.shown?.sessionId === sessionId)) return;
+    if (
+      !opts.force &&
+      (tab.locked || this.shown?.sessionId === sessionId || this.pendingReveal.has(sessionId))
+    ) {
+      return;
+    }
     await this.destroyTab(tab);
   }
 

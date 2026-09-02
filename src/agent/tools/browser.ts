@@ -146,8 +146,8 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
     define(
       'browser_navigate',
       'Browser navigate',
-      "Open a URL in Enso's built-in browser tab (http/https only; localhost is allowed without approval). " +
-        'Runs in the background and does not steal focus. Returns the page title and final URL. Call browser_snapshot next to read the page.',
+      "Open a URL in Enso's built-in browser (http/https only; localhost is allowed without approval). " +
+        'Opens the Browser side panel so the user can see the page. Returns the title and final URL. Call browser_snapshot next to read the page.',
       schema({ url: { type: 'string', description: 'Absolute http(s) URL' } }, ['url']),
       (params, signal) => invoker.invoke('navigate', { url: requireStr(params, 'url') }, signal)
     ),

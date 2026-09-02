@@ -13,7 +13,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
 import { springStandard } from '@/lib/motion';
-import { bindSidePanelDock } from '@/lib/sidePanelDock';
+import { addSidePanelBrowser, bindSidePanelDock } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -355,6 +355,13 @@ function ConversationDock({
 export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
+  useEffect(
+    () =>
+      window.electronAPI.browser.onReveal((conversationId) => {
+        addSidePanelBrowser({ conversationId });
+      }),
+    []
+  );
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);
   const [mountedIds, setMountedIds] = useState<string[]>([]);

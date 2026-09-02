@@ -4,6 +4,7 @@ import { useSidePanelStore } from '@/stores/sidePanel';
 
 const docks = new Map<string, DockviewApi>();
 const filesTabClosers = new Map<string, () => boolean>();
+const pendingBrowserReveal = new Set<string>();
 
 export function registerFilesTabCloser(conversationId: string, close: () => boolean): () => void {
   filesTabClosers.set(conversationId, close);
@@ -14,6 +15,7 @@ export function registerFilesTabCloser(conversationId: string, close: () => bool
 
 export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
   docks.set(conversationId, api);
+  if (pendingBrowserReveal.has(conversationId)) addSidePanelBrowser({ conversationId });
 }
 
 function activeDock(): { api: DockviewApi; conversationId: string; projectId: string } | null {
@@ -73,20 +75,29 @@ export function addSidePanelFiles(opts?: { title?: string }): void {
   });
 }
 
-export function addSidePanelBrowser(opts?: { title?: string }): void {
-  const active = activeDock();
-  if (!active) return;
+export function addSidePanelBrowser(opts?: { title?: string; conversationId?: string }): void {
+  const sessions = useSessionsStore.getState();
+  const conversationId = opts?.conversationId ?? sessions.activeId;
+  if (!conversationId) return;
+  const conversation = sessions.conversations[conversationId];
+  const api = docks.get(conversationId);
+  if (!conversation) return;
   if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
-  const existing = active.api.getPanel('browser');
+  if (!api) {
+    pendingBrowserReveal.add(conversationId);
+    return;
+  }
+  pendingBrowserReveal.delete(conversationId);
+  const existing = api.getPanel('browser');
   if (existing) {
     existing.focus();
     return;
   }
-  active.api.addPanel({
+  api.addPanel({
     id: 'browser',
     component: 'browser',
     title: opts?.title ?? 'Browser',
-    params: { conversationId: active.conversationId, projectId: active.projectId },
+    params: { conversationId, projectId: conversation.projectId },
   });
 }
 

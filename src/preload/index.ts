@@ -605,6 +605,11 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.BROWSER_STATE, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
+    onReveal: (callback: (conversationId: string) => void): (() => void) => {
+      const listener = (_: unknown, conversationId: string) => callback(conversationId);
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_REVEAL, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_REVEAL, listener);
+    },
   },
 };
 

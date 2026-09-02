@@ -48,4 +48,10 @@ export function registerBrowserHandlers(): void {
       window.webContents.send(IPC_CHANNELS.BROWSER_STATE, { conversationId, state });
     }
   });
+  browserHost.onReveal((conversationId) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      window.webContents.send(IPC_CHANNELS.BROWSER_REVEAL, conversationId);
+    }
+  });
 }
