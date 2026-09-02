@@ -1,6 +1,7 @@
 import type { AgentSessionCustomEntry, TodoItem, TurnPerf } from '@shared/types/agent';
 import {
   Bot,
+  BoxSelect,
   Brain,
   Check,
   ChevronRight,
@@ -14,7 +15,6 @@ import {
   History,
   ListTodo,
   LoaderCircle,
-  MousePointer2,
   RefreshCw,
   Sparkles,
   Target,
@@ -221,7 +221,7 @@ function InlineMentionCard({
   label: string;
   title: string;
 }) {
-  const Icon = kind === 'file' ? FileText : kind === 'chat' ? History : MousePointer2;
+  const Icon = kind === 'file' ? FileText : kind === 'chat' ? History : BoxSelect;
   return (
     <span
       className={cn(

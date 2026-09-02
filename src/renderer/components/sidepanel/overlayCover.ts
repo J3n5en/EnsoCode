@@ -13,20 +13,34 @@ export const intersects = (a: Box, b: Box): boolean =>
 export const isCoveredBy = (host: Box, overlays: Box[]): boolean =>
   overlays.some((box) => intersects(host, box));
 
+const OVERLAY_SLOTS = new Set([
+  'dialog-popup',
+  'dialog-viewport',
+  'dialog-backdrop',
+  'alert-dialog-popup',
+  'alert-dialog-viewport',
+  'alert-dialog-backdrop',
+]);
+
+/** Dialog / 菜单等浮层标记；#root 里外都算，避免 WebContentsView 盖住弹窗。 */
+export function isOverlayNode(el: { getAttribute(name: string): string | null }): boolean {
+  if (el.getAttribute('data-enso-float') !== null) return true;
+  const slot = el.getAttribute('data-slot');
+  if (!slot) return false;
+  return OVERLAY_SLOTS.has(slot) || slot.endsWith('-popup') || slot.endsWith('-positioner');
+}
+
 /**
- * 浮层（菜单 / Select / Dialog / Toast）全部 portal 到 body；
- * 收集 #root 之外所有 body 直接子元素的可见盒子。
+ * 浮层（菜单 / Select / Dialog / Toast）不一定 portal 出 #root；
+ * 按标记收集可见盒子，让 guest 能沉到 workbench 下。
  */
-export function overlayBoxes(doc: Document, root: Element | null): Box[] {
+export function overlayBoxes(doc: Document, _root?: Element | null): Box[] {
   const out: Box[] = [];
-  for (const child of Array.from(doc.body.children)) {
-    if (child === root || !(child instanceof HTMLElement)) continue;
-    for (const el of [child, ...Array.from(child.querySelectorAll<HTMLElement>('*'))]) {
-      const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        out.push({ x: r.left, y: r.top, width: r.width, height: r.height });
-        break;
-      }
+  for (const node of Array.from(doc.querySelectorAll<HTMLElement>('*'))) {
+    if (!isOverlayNode(node)) continue;
+    const r = node.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      out.push({ x: r.left, y: r.top, width: r.width, height: r.height });
     }
   }
   return out;

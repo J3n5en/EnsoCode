@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { intersects, isCoveredBy } from './overlayCover';
+import { intersects, isCoveredBy, isOverlayNode } from './overlayCover';
 
 const host = { x: 600, y: 40, width: 400, height: 600 };
 
@@ -28,5 +28,23 @@ describe('isCoveredBy', () => {
   it('none overlapping does not', () => {
     expect(isCoveredBy(host, [{ x: 0, y: 0, width: 200, height: 200 }])).toBe(false);
     expect(isCoveredBy(host, [])).toBe(false);
+  });
+});
+
+describe('isOverlayNode', () => {
+  const attr = (attrs: Record<string, string>) => ({
+    getAttribute: (name: string) => attrs[name] ?? null,
+  });
+
+  it('matches dialog / float markers even inside #root', () => {
+    expect(isOverlayNode(attr({ 'data-enso-float': '' }))).toBe(true);
+    expect(isOverlayNode(attr({ 'data-slot': 'dialog-popup' }))).toBe(true);
+    expect(isOverlayNode(attr({ 'data-slot': 'dialog-viewport' }))).toBe(true);
+    expect(isOverlayNode(attr({ 'data-slot': 'dialog-backdrop' }))).toBe(true);
+  });
+
+  it('ignores ordinary layout nodes', () => {
+    expect(isOverlayNode(attr({ class: 'flex-1' }))).toBe(false);
+    expect(isOverlayNode(attr({ 'data-slot': 'scroll-area-viewport' }))).toBe(false);
   });
 });
