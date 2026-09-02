@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { useRemoteNodesStore } from './stores/remoteNodes';
 import { useSessionsStore } from './stores/sessions';
 import { useSettingsStore } from './stores/settings';
 import { useSidePanelStore } from './stores/sidePanel';
@@ -12,6 +13,7 @@ if (import.meta.env.DEV) {
     sessions: useSessionsStore,
     settings: useSettingsStore,
     sidePanel: useSidePanelStore,
+    remoteNodes: useRemoteNodesStore,
   };
 }
 

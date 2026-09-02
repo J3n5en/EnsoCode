@@ -88,6 +88,18 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
     runEffects(nodeId, effects);
   };
 
+  /**
+   * 进入远程节点视图（切换或窗口重载后仍停在该节点）：恢复上次看的会话并订阅，再要一次目录。
+   * 目录可能还没到（刷新后 store 是空的）：此时先按记忆的会话 id 订阅，目录到达后由 UI 兑现。
+   */
+  const enterNode = (nodeId: string): void => {
+    const view = viewOf(nodeId);
+    const last = localStorage.getItem(lastSessionKey(nodeId));
+    const target = last ?? view.activeSessionId;
+    const r = reduceSelectSession(view, target, loadCursors(nodeId));
+    commit(nodeId, r.view, [...r.effects, { kind: 'send', command: { type: 'snapshot' } }]);
+  };
+
   const applyStatus = (status: NodesStatus): void => {
     const prev = get().nodes;
     set({ nodes: status.nodes, secureStorage: status.secureStorage });
@@ -114,6 +126,9 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
 
     bind: () => {
       void get().refresh();
+      // 窗口重载后仍停在远程节点：main 侧连接没断，只需重新订阅
+      const active = get().activeNodeId;
+      if (active !== 'local') enterNode(active);
       const offStatus = window.electronAPI.nodes.onStatusChanged(applyStatus);
       const offMessage = window.electronAPI.nodes.onMessage((message: NodeMessage) => {
         const r = applyNodeMessage(viewOf(message.nodeId), message.payload);
@@ -136,13 +151,7 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
       if (current === nodeId) return;
       localStorage.setItem(ACTIVE_NODE_KEY, nodeId);
       set({ activeNodeId: nodeId });
-      if (nodeId === 'local') return;
-      // 切到远程节点：恢复上次看的会话（或列表态）；目录由 host 在进房时下发/这里再要一次
-      const view = viewOf(nodeId);
-      const last = localStorage.getItem(lastSessionKey(nodeId));
-      const target = last && view.catalog.some((e) => e.id === last) ? last : view.activeSessionId;
-      const r = reduceSelectSession(view, target, loadCursors(nodeId));
-      commit(nodeId, r.view, [...r.effects, { kind: 'send', command: { type: 'snapshot' } }]);
+      if (nodeId !== 'local') enterNode(nodeId);
     },
 
     selectSession: (nodeId, sessionId) => {
