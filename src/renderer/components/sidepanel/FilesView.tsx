@@ -329,7 +329,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
 
   return (
     <EditProvider createEditor={createEditor}>
-      <div className="flex h-full min-h-0">
+      <div className="flex h-full min-h-0 bg-background">
         <div className="w-56 shrink-0 overflow-auto border-r text-sm">
           <FileTree
             rel=""

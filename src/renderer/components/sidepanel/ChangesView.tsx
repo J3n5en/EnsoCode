@@ -180,7 +180,7 @@ export function ChangesView({
   })();
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex shrink-0 gap-1 border-b px-2 py-1">
         <ModeTab active={mode === 'all'} onClick={() => setMode(conversationId, 'all')}>
           {t('Session')}

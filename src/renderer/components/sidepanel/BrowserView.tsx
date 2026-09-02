@@ -184,7 +184,13 @@ export function BrowserView({
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
       )}
-      <div ref={hostRef} className="relative min-h-0 flex-1 bg-transparent">
+      <div
+        ref={hostRef}
+        className={cn(
+          'relative min-h-0 flex-1',
+          state.tabId ? 'bg-transparent' : 'bg-background'
+        )}
+      >
         {!state.tabId && (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
             <Globe className="h-6 w-6 opacity-40" />
