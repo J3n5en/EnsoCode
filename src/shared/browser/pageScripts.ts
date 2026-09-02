@@ -288,3 +288,194 @@ export const pageDragScript = (
   end.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: to.x, clientY: to.y }));
   return 'ok';
 })()`;
+
+const DESIGN_MODE_ROOT_ID = 'enso-design-mode-root';
+export const DESIGN_MODE_BINDING = 'ensoDesignMode';
+
+/** 顶框注入圈选层；已注入则只重新 enable。身份用 WeakMap，不写 DOM 属性。 */
+export const PAGE_DESIGN_MODE_ENABLE_SCRIPT = `(() => {
+  if (window !== window.top) return 'frame';
+  const ROOT_ID = ${JSON.stringify(DESIGN_MODE_ROOT_ID)};
+  const BINDING = ${JSON.stringify(DESIGN_MODE_BINDING)};
+  const send = (msg) => {
+    try {
+      const fn = window[BINDING];
+      if (typeof fn === 'function') fn(JSON.stringify(msg));
+    } catch {}
+  };
+  const existing = window.__ensoDesignMode;
+  if (existing) {
+    existing.setEnabled(true);
+    return 'on';
+  }
+  let enabled = false;
+  let hoverEl = null;
+  let raf = 0;
+  const root = document.createElement('div');
+  root.id = ROOT_ID;
+  Object.assign(root.style, {
+    position: 'fixed',
+    inset: '0',
+    zIndex: '2147483646',
+    pointerEvents: 'none',
+  });
+  const box = document.createElement('div');
+  Object.assign(box.style, {
+    position: 'fixed',
+    border: '2px solid #7c3aed',
+    background: 'rgba(124,58,237,0.08)',
+    display: 'none',
+    pointerEvents: 'none',
+  });
+  root.appendChild(box);
+  const mount = () => {
+    if (!root.isConnected) document.documentElement.appendChild(root);
+  };
+  const hide = () => {
+    root.style.visibility = 'hidden';
+  };
+  const showChrome = () => {
+    root.style.visibility = '';
+  };
+  const paint = (el) => {
+    if (!el || !enabled) {
+      box.style.display = 'none';
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    Object.assign(box.style, {
+      display: 'block',
+      left: r.x + 'px',
+      top: r.y + 'px',
+      width: Math.max(0, r.width) + 'px',
+      height: Math.max(0, r.height) + 'px',
+    });
+  };
+  const skip = (el) => el === root || root.contains(el);
+  const meaningful = (el) => {
+    if (!(el instanceof Element) || skip(el)) return null;
+    let cur = el;
+    while (cur && cur !== document.documentElement) {
+      if (cur.id === ROOT_ID) return null;
+      const tag = cur.tagName.toLowerCase();
+      if (tag === 'html' || tag === 'body') return cur === el ? null : cur;
+      const role = cur.getAttribute('role') || '';
+      const interactive =
+        /^(a|button|input|select|textarea|summary|label|img)$/.test(tag) ||
+        cur.hasAttribute('onclick') ||
+        cur.hasAttribute('tabindex') ||
+        /button|link|textbox|checkbox|radio|menuitem/.test(role);
+      if (interactive || cur.childElementCount === 0) return cur;
+      cur = cur.parentElement;
+    }
+    return el instanceof Element ? el : null;
+  };
+  const cssPath = (el) => {
+    const parts = [];
+    let cur = el;
+    while (cur && cur.nodeType === 1 && parts.length < 8) {
+      const tag = cur.tagName.toLowerCase();
+      if (cur.id && /^[A-Za-z][A-Za-z0-9_-]*$/.test(cur.id)) {
+        parts.unshift(tag + '#' + cur.id);
+        break;
+      }
+      const parent = cur.parentElement;
+      if (!parent) {
+        parts.unshift(tag);
+        break;
+      }
+      const same = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
+      const nth = same.indexOf(cur) + 1;
+      parts.unshift(same.length > 1 ? tag + ':nth-of-type(' + nth + ')' : tag);
+      cur = parent;
+    }
+    return parts.join(' > ');
+  };
+  const labelOf = (el) => {
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (aria) return aria;
+    if (el instanceof HTMLInputElement || el instanceof HTMLButtonElement) {
+      const value = (el.getAttribute('value') || el.innerText || '').trim();
+      if (value) return value.replace(/s+/g, ' ');
+    }
+    const text = (el.innerText || '').trim().replace(/s+/g, ' ');
+    return text ? text.slice(0, 80) : el.tagName.toLowerCase();
+  };
+  const payload = (el) => {
+    const r = el.getBoundingClientRect();
+    const className = typeof el.className === 'string' ? el.className : '';
+    return {
+      label: labelOf(el),
+      path: cssPath(el),
+      text: (el.innerText || '').trim().replace(/s+/g, ' ').slice(0, 200),
+      tag: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      className: className || undefined,
+      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+    };
+  };
+  const onMove = (event) => {
+    if (!enabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    hoverEl = meaningful(event.target);
+    if (!raf) {
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        paint(hoverEl);
+      });
+    }
+  };
+  const block = (event) => {
+    if (!enabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const onClick = (event) => {
+    if (!enabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = meaningful(event.target);
+    if (!el) return;
+    send({ type: 'picked', payload: payload(el) });
+  };
+  const onKey = (event) => {
+    if (!enabled || event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    send({ type: 'cancelled' });
+  };
+  const setEnabled = (on) => {
+    enabled = on;
+    if (on) {
+      mount();
+      showChrome();
+      document.addEventListener('mousemove', onMove, true);
+      document.addEventListener('click', onClick, true);
+      document.addEventListener('mousedown', block, true);
+      document.addEventListener('pointerdown', block, true);
+      document.addEventListener('keydown', onKey, true);
+      return;
+    }
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('mousedown', block, true);
+    document.removeEventListener('pointerdown', block, true);
+    document.removeEventListener('keydown', onKey, true);
+    hoverEl = null;
+    if (root.isConnected) root.remove();
+  };
+  window.__ensoDesignMode = { setEnabled, hide, showChrome };
+  setEnabled(true);
+  return 'on';
+})()`;
+
+export const PAGE_DESIGN_MODE_DISABLE_SCRIPT = `(() => {
+  window.__ensoDesignMode?.setEnabled(false);
+  return 'off';
+})()`;
+
+export const PAGE_DESIGN_MODE_HIDE_SCRIPT = `(() => {
+  window.__ensoDesignMode?.hide();
+  return 'ok';
+})()`;

@@ -170,6 +170,10 @@ export const IPC_CHANNELS = {
   BROWSER_SET_DEVTOOLS_VIEWPORT: 'browser:set-devtools-viewport',
   /** main → renderer:agent 关了页，拆掉 dock tab */
   BROWSER_TAB_CLOSED: 'browser:tab-closed',
+  /** renderer → main:开关 Design Mode */
+  BROWSER_SET_DESIGN_MODE: 'browser:set-design-mode',
+  /** main → renderer:圈选结果 / 取消 */
+  BROWSER_DESIGN_MODE_EVENT: 'browser:design-mode-event',
 
   // Auto updater
   UPDATER_CHECK: 'updater:check',

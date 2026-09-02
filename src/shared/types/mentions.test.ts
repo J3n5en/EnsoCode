@@ -189,4 +189,23 @@ describe('Agent dispatch strict transport', () => {
     expect(parseMentionCandidate({ ...chat, extra: 1 })).toBeNull();
     expect(parseMentionCandidate({ kind: 'chat', id: 'c1', label: 'x' })).toBeNull();
   });
+
+  it('parses ui-element mention candidates with a strict shape (Design Mode 只走插入，不进 picker)', () => {
+    const ui = {
+      kind: 'ui-element',
+      id: 'ui-1',
+      label: 'SubmitButton',
+      path: 'main > form > button:nth-of-type(2)',
+      text: 'Submit',
+      imageId: 'img-1',
+    };
+    expect(parseMentionCandidate(ui)).toEqual(ui);
+    for (const field of ['id', 'label', 'path', 'text', 'imageId'] as const) {
+      expect(parseMentionCandidate({ ...ui, [field]: '' }), field).toBeNull();
+      expect(parseMentionCandidate({ ...ui, [field]: 1 }), field).toBeNull();
+      const { [field]: _dropped, ...missing } = ui;
+      expect(parseMentionCandidate(missing), `missing ${field}`).toBeNull();
+    }
+    expect(parseMentionCandidate({ ...ui, rect: { x: 0, y: 0, width: 1, height: 1 } })).toBeNull();
+  });
 });

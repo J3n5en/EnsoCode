@@ -31,10 +31,21 @@ export interface ChatMentionCandidate {
   sessionFile: string;
 }
 
+/** Design Mode 圈选：只从 Browser 插入，不进 @ picker。 */
+export interface UiElementMentionCandidate {
+  kind: 'ui-element';
+  id: string;
+  label: string;
+  path: string;
+  text: string;
+  imageId: string;
+}
+
 export type MentionCandidate =
   | FileMentionCandidate
   | AgentTypeMentionCandidate
-  | ChatMentionCandidate;
+  | ChatMentionCandidate
+  | UiElementMentionCandidate;
 
 export interface FileMentionRef {
   id: string;
@@ -169,6 +180,19 @@ export function parseMentionCandidate(value: unknown): MentionCandidate | null {
       return null;
     }
     return candidate as unknown as ChatMentionCandidate;
+  }
+  if (candidate.kind === 'ui-element') {
+    if (
+      !hasExactKeys(candidate, ['kind', 'id', 'label', 'path', 'text', 'imageId']) ||
+      !isNonEmptyString(candidate.id) ||
+      !isNonEmptyString(candidate.label) ||
+      !isNonEmptyString(candidate.path) ||
+      !isNonEmptyString(candidate.text) ||
+      !isNonEmptyString(candidate.imageId)
+    ) {
+      return null;
+    }
+    return candidate as unknown as UiElementMentionCandidate;
   }
   if (candidate.kind !== 'agent-type') return null;
   const typeKey = parseAgentTypeKey(candidate.id);

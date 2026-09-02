@@ -502,10 +502,11 @@ export type AgentCommand =
   | { type: 'pin-sessions'; sessionIds: string[] }
   | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
 
-/** 随消息附带的图片（base64） */
+/** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
   data: string;
   mimeType: string;
+  id?: string;
 }
 
 /** 渲染层可见的消息内容片段。白名单投影，未识别的类型收敛为 unknown */
@@ -829,8 +830,9 @@ const isProductSurfaceId = (value: unknown): value is ProductSurfaceId =>
 function parseAttachedImages(value: unknown): AttachedImage[] | null {
   if (!Array.isArray(value)) return null;
   for (const item of value) {
-    if (!isRecord(item) || !hasExactKeys(item, ['data', 'mimeType'])) return null;
+    if (!isRecord(item) || !hasOnlyKeys(item, ['data', 'mimeType', 'id'])) return null;
     if (!isNonEmptyString(item.data) || !isNonEmptyString(item.mimeType)) return null;
+    if (item.id !== undefined && !isNonEmptyString(item.id)) return null;
   }
   return value as AttachedImage[];
 }

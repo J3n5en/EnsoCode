@@ -13,6 +13,27 @@ export interface BrowserTabState {
   locked: boolean;
   /** 面板内嵌原生 Chrome DevTools */
   devtoolsOpen: boolean;
+  /** 用户圈选 Design Mode */
+  designMode: boolean;
 }
 
 export type BrowserClearKind = 'cookies' | 'cache' | 'all';
+
+export type BrowserDesignModeEvent =
+  | {
+      type: 'picked';
+      conversationId: string;
+      tabId: string;
+      payload: {
+        label: string;
+        path: string;
+        text: string;
+        tag?: string;
+        id?: string;
+        className?: string;
+        rect?: { x: number; y: number; width: number; height: number };
+        component?: string;
+      };
+      image?: { data: string; mimeType: string };
+    }
+  | { type: 'cancelled'; conversationId: string; tabId: string };

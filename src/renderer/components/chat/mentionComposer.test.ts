@@ -515,6 +515,64 @@ describe('typed multi-entity mentions', () => {
       }).text
     ).toBe('/plan go');
   });
+
+  it('round-trips a ui-element segment: wire is the single-line ref; history has no image binding', () => {
+    const ui = {
+      type: 'ui-element' as const,
+      id: 'ui-1',
+      label: 'SubmitButton',
+      path: 'main > form > button:nth-of-type(2)',
+      text: 'Submit',
+      imageId: 'img-1',
+    };
+    const segments = [{ type: 'text' as const, text: 'make ' }, ui, { type: 'text' as const, text: ' bigger' }];
+    const wire = serializeSegments(segments);
+    expect(wire).toBe(
+      'make [Selected UI element "SubmitButton" — path: main > form > button:nth-of-type(2); text: Submit] bigger'
+    );
+    // wire 里没有 id/imageId（绑定只活在编辑器生命周期）：
+    // 历史气泡还原时两者为空串，仅出文字 chip，popover 无图
+    expect(splitInlineMentions(wire)).toEqual([
+      { type: 'text', text: 'make ' },
+      { ...ui, id: '', imageId: '' },
+      { type: 'text', text: ' bigger' },
+    ]);
+  });
+
+  it('collapses ui-element ref lines to @label for titles/plain display', () => {
+    const wire = 'fix [Selected UI element "SubmitButton" — path: form > button; text: Submit] color';
+    expect(mentionDisplayText(wire)).toBe('fix @SubmitButton color');
+  });
+
+  it('createEditorPayload expands ui-element inline and derives a ui-element mention, never a file mention', () => {
+    const ui = {
+      type: 'ui-element' as const,
+      id: 'ui-1',
+      label: 'SubmitButton',
+      path: 'form > button',
+      text: 'Submit',
+      imageId: 'img-1',
+    };
+    const payload = createEditorPayload({
+      segments: [{ type: 'text', text: 'restyle ' }, ui],
+      slash: null,
+      images: [],
+    });
+    expect(payload.text).toBe(
+      'restyle [Selected UI element "SubmitButton" — path: form > button; text: Submit]'
+    );
+    expect(payload.mentions).toEqual([
+      {
+        kind: 'ui-element',
+        id: 'ui-1',
+        label: 'SubmitButton',
+        path: 'form > button',
+        text: 'Submit',
+        imageId: 'img-1',
+      },
+    ]);
+    expect(payload.mentions.some((mention) => mention.kind === 'file')).toBe(false);
+  });
 });
 
 describe('mentionPopupLayout', () => {

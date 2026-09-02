@@ -1,9 +1,6 @@
+import { formatUiElementRefLine, parseUiElementRefLine } from '@shared/browser/designMode';
 import type { AttachedImage } from '@shared/types/agent';
-import type {
-  AgentTypeMentionCandidate,
-  ChatMentionCandidate,
-  MentionCandidate,
-} from '@shared/types/mentions';
+import type { AgentTypeMentionCandidate, MentionCandidate } from '@shared/types/mentions';
 
 export interface ComposerPayload {
   text: string;
@@ -122,51 +119,80 @@ export interface SentMentionRefs {
 
 export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; path: string };
 
-/** 编辑器段模型：文本 / 文件卡片 / 会话卡片，卡片内联在任意位置 */
+/** 编辑器段模型：文本 / 文件卡片 / 会话卡片 / Design Mode 选区 */
 export type MentionSegment =
   | { type: 'text'; text: string }
   | { type: 'file'; path: string }
-  | { type: 'chat'; label: string; sessionFile: string };
+  | { type: 'chat'; label: string; sessionFile: string }
+  | { type: 'ui-element'; id: string; label: string; path: string; text: string; imageId: string };
 
-/** 编辑器段 → wire text：文件原位 @path，会话原位内联引用块（agent 拿路径自己 read） */
+/** 编辑器段 → wire text：文件原位 @path，会话/选区原位内联引用块 */
 export function serializeSegments(segments: readonly MentionSegment[]): string {
   return segments
-    .map((segment) =>
-      segment.type === 'text'
-        ? segment.text
-        : segment.type === 'file'
-          ? `@${segment.path}`
-          : chatRefLine(segment.label, segment.sessionFile)
-    )
+    .map((segment) => {
+      if (segment.type === 'text') return segment.text;
+      if (segment.type === 'file') return `@${segment.path}`;
+      if (segment.type === 'chat') return chatRefLine(segment.label, segment.sessionFile);
+      return formatUiElementRefLine(segment);
+    })
     .join('');
 }
 
 const INLINE_CHAT_REF =
   /\[Referenced past chat "(.+?)" — transcript file: (.+?) \(pi session jsonl; read it if relevant\)\]/g;
+const INLINE_UI_REF = /\[Selected UI element "([^"]*)" — path: (.*?); text: (.*?)\]/g;
 
-/** 把 chat 引用块折叠成 @标题，供标题/纯文本展示用（引用块原文不得污染标题） */
+/** 把引用块折叠成 @标题，供标题/纯文本展示用（引用块原文不得污染标题） */
 export function mentionDisplayText(text: string): string {
-  return text.replace(INLINE_CHAT_REF, (_match, label: string) => `@${label}`);
+  return text
+    .replace(INLINE_CHAT_REF, (_match, label: string) => `@${label}`)
+    .replace(INLINE_UI_REF, (_match, label: string) => `@${label}`);
 }
 
 /**
  * wire text → 段：全文扫描内联 chat 引用块与 @文件 token，供气泡原位渲染卡片。
  * 与 serializeSegments 互为逆；旧格式尾部追加的引用块同样能解到（历史消息兼容）。
  */
+type InlineRefHit = { index: number; length: number; segment: MentionSegment };
+
+function nextInlineRef(text: string, from: number): InlineRefHit | null {
+  INLINE_CHAT_REF.lastIndex = from;
+  INLINE_UI_REF.lastIndex = from;
+  const chat = INLINE_CHAT_REF.exec(text);
+  const ui = INLINE_UI_REF.exec(text);
+  const chatHit: InlineRefHit | null = chat
+    ? {
+        index: chat.index,
+        length: chat[0].length,
+        segment: { type: 'chat', label: chat[1], sessionFile: chat[2] },
+      }
+    : null;
+  const parsedUi = ui ? parseUiElementRefLine(ui[0]) : null;
+  const uiHit: InlineRefHit | null =
+    ui && parsedUi
+      ? {
+          index: ui.index,
+          length: ui[0].length,
+          segment: { type: 'ui-element', id: '', ...parsedUi, imageId: '' },
+        }
+      : null;
+  if (chatHit && uiHit) return chatHit.index <= uiHit.index ? chatHit : uiHit;
+  return chatHit ?? uiHit;
+}
+
 export function splitInlineMentions(text: string): MentionSegment[] {
   const segments: MentionSegment[] = [];
   let cursor = 0;
-  INLINE_CHAT_REF.lastIndex = 0;
-  let match = INLINE_CHAT_REF.exec(text);
-  while (match) {
-    const before = text.slice(cursor, match.index);
+  let hit = nextInlineRef(text, 0);
+  while (hit) {
+    const before = text.slice(cursor, hit.index);
     for (const segment of splitInlineFileTokens(before)) {
       if (segment.type === 'text' && segment.text === '') continue;
       segments.push(segment);
     }
-    segments.push({ type: 'chat', label: match[1], sessionFile: match[2] });
-    cursor = match.index + match[0].length;
-    match = INLINE_CHAT_REF.exec(text);
+    segments.push(hit.segment);
+    cursor = hit.index + hit.length;
+    hit = nextInlineRef(text, cursor);
   }
   const tail = text.slice(cursor);
   if (tail || segments.length === 0) {
@@ -262,25 +288,36 @@ export function createEditorPayload(input: {
   const content = serializeSegments(input.segments).trim();
   const mentions: MentionCandidate[] = input.segments
     .filter((segment) => segment.type !== 'text')
-    .map((segment) =>
-      segment.type === 'file'
-        ? {
-            kind: 'file' as const,
-            id: segment.path,
-            label: segment.path.split('/').at(-1) || segment.path,
-            relativePath: stripFileLineRef(segment.path),
-          }
-        : {
-            kind: 'chat' as const,
-            id: segment.sessionFile,
-            label: segment.label,
-            sessionFile: segment.sessionFile,
-          }
-    );
+    .map((segment) => {
+      if (segment.type === 'file') {
+        return {
+          kind: 'file' as const,
+          id: segment.path,
+          label: segment.path.split('/').at(-1) || segment.path,
+          relativePath: stripFileLineRef(segment.path),
+        };
+      }
+      if (segment.type === 'chat') {
+        return {
+          kind: 'chat' as const,
+          id: segment.sessionFile,
+          label: segment.label,
+          sessionFile: segment.sessionFile,
+        };
+      }
+      return {
+        kind: 'ui-element' as const,
+        id: segment.id,
+        label: segment.label,
+        path: segment.path,
+        text: segment.text,
+        imageId: segment.imageId,
+      };
+    });
   if (input.recipient) mentions.push(input.recipient);
   return {
     text: input.slash ? (content ? `${input.slash} ${content}` : input.slash) : content,
-    images: input.images,
+    images: input.images.map(({ data, mimeType }) => ({ data, mimeType })),
     mentions,
     ...(input.recipient ? { recipient: input.recipient } : {}),
   };
