@@ -720,8 +720,17 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
         continue;
       }
       const narrowed = narrowSnapshot(full, conn.subscribedId);
-      if (narrowed) void send(conn, { type: 'agent-event', event: narrowed });
+      if (narrowed) {
+        // 尾窗已覆盖手机所有已知内容，续传游标完成使命；继续拿它过滤会在
+        // 截断/压缩后把新消息当旧消息丢掉，手机就「卡住」直到重开
+        conn.sinceIndex = undefined;
+        void send(conn, { type: 'agent-event', event: narrowed });
+      }
       continue;
+    }
+    // 时间线被截断：后续同 index 重建的消息必须放行
+    if (e.type === 'messages-truncated' && flatSessionId === conn.subscribedId) {
+      conn.sinceIndex = undefined;
     }
     if (!shouldForward(e, conn.subscribedId, conn.sinceIndex)) continue;
     void send(conn, {

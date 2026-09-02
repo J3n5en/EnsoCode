@@ -283,9 +283,9 @@ export function shouldForward(
   const sessionId = sessionIdOf(event);
   if (SESSION_SCOPED.has(event.type)) {
     if (!subscribedId || sessionId !== subscribedId) return false;
-    // 增量续传：手机已有的旧消息不重发
+    // 增量续传：手机已有的旧消息不重发。游标那条断线时可能还在流式更新，必须重发（>=）
     if (typeof sinceIndex === 'number' && typeof event.index === 'number') {
-      return event.index > sinceIndex;
+      return event.index >= sinceIndex;
     }
     return true;
   }

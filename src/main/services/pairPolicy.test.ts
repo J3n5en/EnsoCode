@@ -230,11 +230,16 @@ describe('下行过滤', () => {
     expect(shouldForward({ type: 'subagent-update', identity: id('a') }, 'a')).toBe(true);
   });
 
-  it('增量续传：只补 index 大于游标的消息', () => {
+  it('增量续传：补 index >= 游标的消息（游标那条可能还在流式更新，必须重发）', () => {
     const ev = (index: number) => ({ type: 'message-upsert', sessionId: 'a', index });
     expect(shouldForward(ev(5), 'a', 3)).toBe(true);
-    expect(shouldForward(ev(3), 'a', 3)).toBe(false);
+    expect(shouldForward(ev(3), 'a', 3)).toBe(true);
     expect(shouldForward(ev(1), 'a', 3)).toBe(false);
+  });
+
+  it('messages-truncated 按会话归属转发（手机据此裁掉尾部并回退游标）', () => {
+    expect(shouldForward({ type: 'messages-truncated', sessionId: 'a' }, 'a')).toBe(true);
+    expect(shouldForward({ type: 'messages-truncated', sessionId: 'b' }, 'a')).toBe(false);
   });
 });
 
