@@ -413,6 +413,14 @@ export function appendSessionCustomEntry(
   });
 }
 
+export function sendBrowserResultToSession(
+  identity: SessionIdentity | ChildSessionIdentity,
+  requestId: string,
+  outcome: { ok: true; result: unknown } | { ok: false; error: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'browser-result', identity, requestId, ...outcome });
+}
+
 export function sendCapabilityResultToSession(
   child: ChildSessionIdentity,
   turnId: string,

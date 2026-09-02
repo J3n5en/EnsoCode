@@ -5,6 +5,7 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
+import { browserHost } from './services/browserHost';
 import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
@@ -98,6 +99,8 @@ if (!gotTheLock) {
   // Electron 退出即断开中继，手机侧收到 host-offline
   app.on('before-quit', () => {
     stopPairHost();
+    // 内嵌浏览器 Cookie / storage 落盘后再关 guest 页
+    void browserHost.dispose();
   });
 }
 

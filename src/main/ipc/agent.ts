@@ -48,6 +48,7 @@ import {
   resumeCoworkerSession,
   retrySession,
   rewindSession,
+  sendBrowserResultToSession,
   setAgentEventListener,
   setSessionApprovalMode,
   setSessionModel,
@@ -58,6 +59,7 @@ import {
   steerSession,
   stopBackgroundTask,
 } from '../services/agentHost';
+import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
 import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -351,6 +353,18 @@ export function registerAgentHandlers(): void {
     }
     if (workerEvent.type === 'capability-invoke') {
       handleCapabilityInvoke(workerEvent);
+      return;
+    }
+    if (workerEvent.type === 'browser-invoke') {
+      const { identity, requestId, op, params } = workerEvent;
+      void browserHost.invoke(identity.sessionId, op, params).then(
+        (result) => sendBrowserResultToSession(identity, requestId, { ok: true, result }),
+        (error: unknown) =>
+          sendBrowserResultToSession(identity, requestId, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+      );
       return;
     }
     if (workerEvent.type === 'child-ready') {
