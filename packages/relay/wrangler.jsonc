@@ -3,7 +3,7 @@
   "name": "enso-pair-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
-  "observability": { "enabled": true },
+  "observability": { "enabled": false },
   // 自定义域：wrangler 自动建 DNS 记录并签证书
   "routes": [{ "pattern": "enso-relay.j3.do", "custom_domain": true }],
   // 必须显式保留：配了 routes 后 workers.dev 默认会被关掉，
