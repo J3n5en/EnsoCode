@@ -138,17 +138,29 @@ function BrowserPanel(props: IDockviewPanelProps<{ conversationId?: string; proj
 }
 
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
-function SidePanelTab(props: IDockviewPanelHeaderProps) {
+function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null }>) {
   const [active, setActive] = useState(props.api.isActive);
   const [title, setTitle] = useState(props.api.title ?? '');
+  const [favicon, setFavicon] = useState<string | null>(props.params.favicon ?? null);
+  const [faviconBroken, setFaviconBroken] = useState(false);
   useEffect(() => {
     const a = props.api.onDidActiveChange(() => setActive(props.api.isActive));
     const t = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ''));
+    const p = props.api.onDidParametersChange((params) => {
+      const next =
+        params && typeof params === 'object' && 'favicon' in params
+          ? ((params as { favicon?: string | null }).favicon ?? null)
+          : (props.api.getParameters()?.favicon ?? null);
+      setFavicon(next ?? null);
+      setFaviconBroken(false);
+    });
     return () => {
       a.dispose();
       t.dispose();
+      p.dispose();
     };
   }, [props.api]);
+  const isBrowser = props.api.id === 'browser' || props.api.id.startsWith('browser:');
   return (
     <div
       className={cn(
@@ -160,7 +172,14 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
         <GitCompare className="h-3 w-3 shrink-0" />
       ) : props.api.id === 'files' ? (
         <FolderOpen className="h-3 w-3 shrink-0" />
-      ) : props.api.id === 'browser' || props.api.id.startsWith('browser:') ? (
+      ) : isBrowser && favicon && !faviconBroken ? (
+        <img
+          src={favicon}
+          alt=""
+          className="h-3 w-3 shrink-0"
+          onError={() => setFaviconBroken(true)}
+        />
+      ) : isBrowser ? (
         <Globe className="h-3 w-3 shrink-0" />
       ) : (
         <SquareTerminal className="h-3 w-3 shrink-0" />
