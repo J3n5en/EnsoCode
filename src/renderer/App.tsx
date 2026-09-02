@@ -7,7 +7,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { Maximize2, Minimize2, PanelRight } from 'lucide-react';
+import { PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
@@ -217,37 +217,18 @@ export default function App() {
         actions={
           // 远程节点态没有右侧面板，隐藏开关避免死按钮
           remoteNodeActive ? undefined : (
-            <>
-              {sideOpen && (
-                <button
-                  type="button"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                  onClick={() => useSidePanelStore.getState().toggleFullscreen()}
-                  aria-label={
-                    sideFullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')
-                  }
-                  title={sideFullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
-                >
-                  {sideFullscreen ? (
-                    <Minimize2 className="h-4 w-4" />
-                  ) : (
-                    <Maximize2 className="h-4 w-4" />
-                  )}
-                </button>
+            <button
+              type="button"
+              className={cn(
+                'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+                sideOpen ? 'text-foreground' : 'text-muted-foreground'
               )}
-              <button
-                type="button"
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                  sideOpen ? 'text-foreground' : 'text-muted-foreground'
-                )}
-                onClick={toggleSidePanel}
-                aria-label={t('Toggle side panel')}
-                title={t('Toggle side panel')}
-              >
-                <PanelRight className="h-4 w-4" />
-              </button>
-            </>
+              onClick={toggleSidePanel}
+              aria-label={t('Toggle side panel')}
+              title={t('Toggle side panel')}
+            >
+              <PanelRight className="h-4 w-4" />
+            </button>
           )
         }
       />
