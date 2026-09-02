@@ -73,6 +73,23 @@ export function addSidePanelFiles(opts?: { title?: string }): void {
   });
 }
 
+export function addSidePanelBrowser(opts?: { title?: string }): void {
+  const active = activeDock();
+  if (!active) return;
+  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  const existing = active.api.getPanel('browser');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  active.api.addPanel({
+    id: 'browser',
+    component: 'browser',
+    title: opts?.title ?? 'Browser',
+    params: { conversationId: active.conversationId, projectId: active.projectId },
+  });
+}
+
 export function closeActiveSidePanelTab(): void {
   const active = activeDock();
   if (!active) return;

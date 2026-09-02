@@ -18,6 +18,7 @@ import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { BrowserView } from './BrowserView';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { TerminalView } from './TerminalView';
@@ -109,6 +110,31 @@ function FilesPanel(props: IDockviewPanelProps<{ conversationId?: string; projec
   return <FilesView conversationId={conversationId} projectId={projectId} />;
 }
 
+function addBrowserPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const existing = api.getPanel('browser');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({
+    id: 'browser',
+    component: 'browser',
+    title: label,
+    params: { conversationId, projectId },
+  });
+}
+
+function BrowserPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
+  const { conversationId } = props.params;
+  if (!conversationId) return null;
+  return <BrowserView conversationId={conversationId} panelApi={props.api} />;
+}
+
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
 function SidePanelTab(props: IDockviewPanelHeaderProps) {
   const [active, setActive] = useState(props.api.isActive);
@@ -132,6 +158,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps) {
         <GitCompare className="h-3 w-3 shrink-0" />
       ) : props.api.id === 'files' ? (
         <FolderOpen className="h-3 w-3 shrink-0" />
+      ) : props.api.id === 'browser' ? (
+        <Globe className="h-3 w-3 shrink-0" />
       ) : (
         <SquareTerminal className="h-3 w-3 shrink-0" />
       )}
@@ -155,11 +183,13 @@ function NewTabMenu({
   onNewTerminal,
   onNewChanges,
   onNewFiles,
+  onNewBrowser,
   compact,
 }: {
   onNewTerminal: () => void;
   onNewChanges: () => void;
   onNewFiles: () => void;
+  onNewBrowser: () => void;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -190,10 +220,9 @@ function NewTabMenu({
           <FolderOpen className="h-4 w-4" />
           {t('Files')}
         </MenuItem>
-        <MenuItem disabled>
+        <MenuItem onClick={onNewBrowser}>
           <Globe className="h-4 w-4" />
           {t('Browser')}
-          <span className="ml-auto text-[10px] text-muted-foreground">{t('Soon')}</span>
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -217,6 +246,9 @@ function Watermark(props: IWatermarkPanelProps) {
           addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
         }
         onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
+        onNewBrowser={() =>
+          addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
+        }
       />
     </div>
   );
@@ -243,12 +275,20 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
           addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
         }
         onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
+        onNewBrowser={() =>
+          addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
+        }
       />
     </div>
   );
 }
 
-const DOCK_COMPONENTS = { terminal: TerminalPanel, changes: ChangesPanel, files: FilesPanel };
+const DOCK_COMPONENTS = {
+  terminal: TerminalPanel,
+  changes: ChangesPanel,
+  files: FilesPanel,
+  browser: BrowserPanel,
+};
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
 function useIsDark(): boolean {
@@ -290,7 +330,7 @@ function ConversationDock({
     });
     // 只有用户关 tab 才回收;dock 本身不随切会话卸载
     event.api.onDidRemovePanel((panel) => {
-      if (panel.id === 'changes' || panel.id === 'files') return;
+      if (panel.id === 'changes' || panel.id === 'files' || panel.id === 'browser') return;
       releaseTerminal(panel.id);
       void window.electronAPI.terminal.dispose(panel.id);
     });

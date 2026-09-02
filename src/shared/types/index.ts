@@ -1,6 +1,7 @@
 export * from './agent';
 export * from './assetScan';
 export * from './assets';
+export * from './browser';
 export * from './builtinTools';
 export * from './filesWorkspace';
 export * from './gitDiff';

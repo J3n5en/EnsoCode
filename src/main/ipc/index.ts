@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { registerAgentHandlers } from './agent';
 import { registerAssetHandlers } from './assets';
+import { registerBrowserHandlers } from './browser';
 import { registerCapabilityHandlers } from './capabilities';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
@@ -24,6 +25,7 @@ export function registerIpcHandlers(): void {
   registerAgentHandlers();
   registerUpdaterHandlers();
   registerProjectHandlers();
+  registerBrowserHandlers();
   registerSshConnectionHandlers();
   registerFileHandlers();
   registerFilesWorkspaceHandlers();

@@ -57,6 +57,7 @@ import type {
   UpdateConversationSelectionRequest,
 } from '@shared/types/agent';
 import { parseDispatchMainEvent } from '@shared/types/agent';
+import type { BrowserClearKind, BrowserTabState } from '@shared/types/browser';
 import type {
   AgentComposerPrefillEvent,
   AgentDispatchRequest,
@@ -570,6 +571,32 @@ const electronAPI = {
       const listener = (_: unknown, event: TerminalExitEvent) => callback(event);
       ipcRenderer.on(IPC_CHANNELS.TERMINAL_EXIT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_EXIT, listener);
+    },
+  },
+  browser: {
+    /** 面板可见时报矩形（CSS px）；不可见传 null */
+    setViewport: (
+      conversationId: string,
+      viewport: { x: number; y: number; width: number; height: number } | null
+    ): Promise<BrowserTabState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_VIEWPORT, conversationId, viewport),
+    navigate: (conversationId: string, url: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_NAVIGATE, conversationId, url),
+    goBack: (conversationId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_BACK, conversationId),
+    goForward: (conversationId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_GO_FORWARD, conversationId),
+    reload: (conversationId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RELOAD, conversationId),
+    clearData: (kind: BrowserClearKind): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLEAR_DATA, kind),
+    onState: (
+      callback: (event: { conversationId: string; state: BrowserTabState }) => void
+    ): (() => void) => {
+      const listener = (_: unknown, event: { conversationId: string; state: BrowserTabState }) =>
+        callback(event);
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_STATE, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
   },
 };

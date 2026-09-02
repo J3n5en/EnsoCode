@@ -6,7 +6,9 @@ import {
   renderSnapshot,
 } from '@shared/browser/snapshot';
 import { assertAllowedUrl } from '@shared/browser/urlPolicy';
+import type { BrowserViewport } from '@shared/browser/viewport';
 import type { BrowserOp } from '@shared/types/agent';
+import type { BrowserClearKind, BrowserTabState } from '@shared/types/browser';
 import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
 
@@ -22,11 +24,11 @@ const SETTLE_MS = 300;
 const MAX_HEADLESS_TABS = 4;
 const SCREENSHOT_MAX_WIDTH = 1280;
 /**
- * 无头 tab 也要有 viewport，否则页面布局全是 0×0（快照抓不到块级元素、截图为空）。
- * `setVisible(false)` 或挪到窗口外都会让 macOS 把尺寸清零，所以放窗口内、
- * 插在子视图最底层——被 renderer 的 view 整个盖住，用户看不见。
+ * 无头 tab 的布局 viewport。contentView 的子视图全画在 renderer 之上，无头只能
+ * `setVisible(false)`；但隐藏后 view 尺寸归零，页面布局全是 0×0（快照抓不到块级
+ * 元素、截图为空），所以再用 CDP `Emulation.setDeviceMetricsOverride` 撑出尺寸。
  */
-const HEADLESS_BOUNDS = { x: 0, y: 0, width: 1280, height: 800 };
+const HEADLESS_BOUNDS = { width: 1280, height: 800 };
 
 export function partitionName(isPackaged: boolean): string {
   return `persist:${isPackaged ? 'enso' : 'enso-dev'}${PARTITION_SUFFIX}`;
@@ -43,7 +45,20 @@ interface Tab {
   ownerSessionId: string;
   createdAt: number;
   lastSnapshot?: BrowserSnapshot;
+  locked: boolean;
+  /** webContents 首次 dom-ready 前 debugger.attach 会让 Main 段错误 */
+  ready: boolean;
 }
+
+const EMPTY_STATE: BrowserTabState = {
+  tabId: null,
+  url: '',
+  title: '',
+  loading: false,
+  canGoBack: false,
+  canGoForward: false,
+  locked: false,
+};
 
 interface PageInfo {
   url: string;
@@ -67,10 +82,104 @@ export class BrowserHost {
   private counter = 0;
   private guestSession?: Session;
   private hostWindow: () => BrowserWindow | null = () => null;
+  /** 渲染层当前展示的会话与面板矩形；null = 面板不可见，全部 tab 压底无头 */
+  private shown: { sessionId: string; viewport: BrowserViewport } | null = null;
+  private readonly stateListeners = new Set<(sessionId: string, state: BrowserTabState) => void>();
 
   /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
   setHostWindow(provider: () => BrowserWindow | null): void {
     this.hostWindow = provider;
+  }
+
+  onState(listener: (sessionId: string, state: BrowserTabState) => void): () => void {
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
+  }
+
+  state(sessionId: string): BrowserTabState {
+    const tab = this.tabFor(sessionId);
+    if (!tab) return EMPTY_STATE;
+    const contents = tab.view.webContents;
+    return {
+      tabId: tab.id,
+      url: contents.getURL(),
+      title: contents.getTitle(),
+      loading: contents.isLoading(),
+      canGoBack: contents.navigationHistory.canGoBack(),
+      canGoForward: contents.navigationHistory.canGoForward(),
+      locked: tab.locked,
+    };
+  }
+
+  private emitState(sessionId: string): void {
+    const state = this.state(sessionId);
+    for (const listener of this.stateListeners) listener(sessionId, state);
+  }
+
+  /** 渲染层：面板可见且矩形已知 → 该会话 tab 叠到矩形上；viewport 为 null → 隐藏 */
+  setViewport(sessionId: string, viewport: BrowserViewport | null): void {
+    this.shown = viewport ? { sessionId, viewport } : null;
+    this.layout();
+  }
+
+  private layout(): void {
+    const window = this.hostWindow();
+    if (!window || window.isDestroyed()) return;
+    const { contentView } = window;
+    for (const tab of this.tabs.values()) {
+      const onTop = Boolean(this.shown && tab.ownerSessionId === this.shown.sessionId);
+      if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view);
+      if (onTop && this.shown) {
+        tab.view.setBounds(this.shown.viewport);
+        tab.view.setVisible(true);
+        void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
+      } else {
+        // contentView 的子视图全部画在 renderer 之上，无头只能真正隐藏；
+        // 隐藏后 view 尺寸归零，用 CDP 设备度量 override 撑出布局 viewport。
+        tab.view.setVisible(false);
+        void this.cdp(tab, 'Emulation.setDeviceMetricsOverride', {
+          width: HEADLESS_BOUNDS.width,
+          height: HEADLESS_BOUNDS.height,
+          deviceScaleFactor: 0,
+          mobile: false,
+        });
+      }
+    }
+  }
+
+  /** host 内白名单 CDP；模型永远摸不到 */
+  private async cdp(tab: Tab, method: string, params: Record<string, unknown>): Promise<unknown> {
+    const contents = tab.view.webContents;
+    if (!tab.ready || contents.isDestroyed()) return undefined;
+    const dbg = contents.debugger;
+    if (!dbg.isAttached()) dbg.attach('1.3');
+    return dbg.sendCommand(method, params).catch((error: unknown) => {
+      console.warn(`[browser] ${method} failed: ${error instanceof Error ? error.message : error}`);
+      return undefined;
+    });
+  }
+
+  /** 面板地址栏 / 按钮 */
+  async userNavigate(sessionId: string, raw: string): Promise<void> {
+    await this.navigate(sessionId, raw);
+  }
+
+  goBack(sessionId: string): void {
+    const tab = this.tabFor(sessionId);
+    if (tab?.view.webContents.navigationHistory.canGoBack()) {
+      tab.view.webContents.navigationHistory.goBack();
+    }
+  }
+
+  goForward(sessionId: string): void {
+    const tab = this.tabFor(sessionId);
+    if (tab?.view.webContents.navigationHistory.canGoForward()) {
+      tab.view.webContents.navigationHistory.goForward();
+    }
+  }
+
+  reload(sessionId: string): void {
+    this.tabFor(sessionId)?.view.webContents.reload();
   }
 
   getSession(): Session {
@@ -108,9 +217,16 @@ export class BrowserHost {
         await this.destroyTab(tab);
         return { closed: tab.id };
       }
-      case 'tabs':
-      case 'lock':
-        throw new Error(`browser ${op} is not available yet`);
+      case 'tabs': {
+        const tab = this.tabFor(sessionId);
+        return tab ? [this.state(sessionId)] : [];
+      }
+      case 'lock': {
+        const tab = this.mustTab(sessionId);
+        tab.locked = !(isRecord(params) && params.release === true);
+        this.emitState(sessionId);
+        return { locked: tab.locked };
+      }
     }
   }
 
@@ -166,16 +282,16 @@ export class BrowserHost {
    * debugger 只在 host 内用，模型摸不到。
    */
   private async screenshot(tab: Tab): Promise<{ data: string; mimeType: string }> {
-    const dbg = tab.view.webContents.debugger;
-    if (!dbg.isAttached()) dbg.attach('1.3');
-    const { width, height } = tab.view.getBounds();
+    const bounds = tab.view.getBounds();
+    const width = bounds.width || HEADLESS_BOUNDS.width;
+    const height = bounds.height || HEADLESS_BOUNDS.height;
     const scale = width > SCREENSHOT_MAX_WIDTH ? SCREENSHOT_MAX_WIDTH / width : 1;
-    const shot = (await dbg.sendCommand('Page.captureScreenshot', {
+    const shot = (await this.cdp(tab, 'Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: true,
       clip: { x: 0, y: 0, width, height, scale },
-    })) as { data?: unknown };
-    if (typeof shot.data !== 'string' || !shot.data) {
+    })) as { data?: unknown } | undefined;
+    if (typeof shot?.data !== 'string' || !shot.data) {
       throw new Error('Screenshot is empty; the page has not painted yet.');
     }
     return { data: shot.data, mimeType: 'image/png' };
@@ -212,8 +328,20 @@ export class BrowserHost {
       },
     });
     const id = `tab-${++this.counter}`;
-    const tab: Tab = { id, view, ownerSessionId: sessionId, createdAt: Date.now() };
+    const tab: Tab = {
+      id,
+      view,
+      ownerSessionId: sessionId,
+      createdAt: Date.now(),
+      locked: false,
+      ready: false,
+    };
     const contents = view.webContents;
+    const push = () => this.emitState(sessionId);
+    contents.on('did-start-loading', push);
+    contents.on('did-stop-loading', push);
+    contents.on('did-navigate-in-page', push);
+    contents.on('page-title-updated', push);
     // 页内链接 / 重定向也过同一道 URL 门
     const guard = (event: { preventDefault(): void }, url: string) => {
       try {
@@ -226,6 +354,11 @@ export class BrowserHost {
     contents.on('will-redirect', guard);
     contents.on('did-navigate', () => {
       tab.lastSnapshot = undefined;
+      push();
+    });
+    contents.once('dom-ready', () => {
+      tab.ready = true;
+      this.layout();
     });
     // window.open / target=_blank：本 tab 内导航，不弹系统浏览器
     contents.setWindowOpenHandler(({ url }) => {
@@ -237,31 +370,35 @@ export class BrowserHost {
     contents.on('destroyed', () => {
       this.tabs.delete(id);
       if (this.currentBySession.get(sessionId) === id) this.currentBySession.delete(sessionId);
+      this.emitState(sessionId);
     });
-    this.attach(view);
     this.tabs.set(id, tab);
     this.currentBySession.set(sessionId, id);
+    this.layout();
+    this.emitState(sessionId);
     return tab;
   }
 
-  private attach(view: WebContentsView): void {
+  private detach(view: WebContentsView): void {
     const window = this.hostWindow();
     if (!window || window.isDestroyed()) return;
-    window.contentView.addChildView(view, 0);
-    view.setBounds(HEADLESS_BOUNDS);
-  }
-
-  private detach(view: WebContentsView): void {
-    for (const window of [this.hostWindow()]) {
-      if (!window || window.isDestroyed()) continue;
-      if (window.contentView.children.includes(view)) window.contentView.removeChildView(view);
-    }
+    if (window.contentView.children.includes(view)) window.contentView.removeChildView(view);
   }
 
   private evictIfNeeded(): void {
     if (this.tabs.size < MAX_HEADLESS_TABS) return;
-    const oldest = [...this.tabs.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
+    const oldest = [...this.tabs.values()]
+      .filter((tab) => !tab.locked && tab.ownerSessionId !== this.shown?.sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt)[0];
     if (oldest) void this.destroyTab(oldest);
+  }
+
+  /** 回合结束：未锁、用户没在看的 tab 关掉（页面不留后台） */
+  async closeForSession(sessionId: string, opts: { force?: boolean } = {}): Promise<void> {
+    const tab = this.tabFor(sessionId);
+    if (!tab) return;
+    if (!opts.force && (tab.locked || this.shown?.sessionId === sessionId)) return;
+    await this.destroyTab(tab);
   }
 
   private async destroyTab(tab: Tab): Promise<void> {
@@ -272,6 +409,7 @@ export class BrowserHost {
     await this.flush();
     this.detach(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    this.emitState(tab.ownerSessionId);
   }
 
   async flush(): Promise<void> {
@@ -280,7 +418,7 @@ export class BrowserHost {
     await this.guestSession.flushStorageData();
   }
 
-  async clearData(kind: 'cookies' | 'cache' | 'all'): Promise<void> {
+  async clearData(kind: BrowserClearKind): Promise<void> {
     const guest = this.getSession();
     if (!isBrowserPartition(partitionName(app.isPackaged))) throw new Error('Refusing to clear');
     if (kind === 'cookies' || kind === 'all') {

@@ -60,6 +60,12 @@ export const zhTranslations: Record<string, string> = {
   Browser: '浏览器',
   'New tab': '新建标签页',
   Soon: '即将支持',
+  Forward: '前进',
+  'Enter a URL': '输入网址',
+  'Navigation failed': '导航失败',
+  'Agent is browsing': 'Agent 正在操作',
+  'Enter a URL above, or let the agent open a page with browser_navigate.':
+    '在上方输入网址，或让 agent 用 browser_navigate 打开页面。',
   'Search...': '搜索…',
   'Case sensitive': '区分大小写',
   'Whole word': '全词匹配',

@@ -297,6 +297,13 @@ export const IPC_PRODUCT_COVERAGE = {
   TERMINAL_DISPOSE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_DATA: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_EXIT: excluded('Side panel terminal pty transport; renderer UI only.'),
+  BROWSER_SET_VIEWPORT: excluded('Side panel browser overlay geometry; renderer UI only.'),
+  BROWSER_NAVIGATE: excluded('Side panel browser address bar; renderer UI only.'),
+  BROWSER_GO_BACK: excluded('Side panel browser history; renderer UI only.'),
+  BROWSER_GO_FORWARD: excluded('Side panel browser history; renderer UI only.'),
+  BROWSER_RELOAD: excluded('Side panel browser reload; renderer UI only.'),
+  BROWSER_CLEAR_DATA: excluded('Side panel browser data reset; renderer UI only.'),
+  BROWSER_STATE: excluded('Side panel browser state push; renderer UI only.'),
   SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
   SSH_CONNECTIONS_UPSERT: surfaces(
     'projects.ssh-connections.add',

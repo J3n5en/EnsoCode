@@ -149,6 +149,16 @@ export const IPC_CHANNELS = {
   /** main → renderer:pty 退出 */
   TERMINAL_EXIT: 'terminal:exit',
 
+  // 右侧面板内嵌浏览器(WebContentsView 叠层)
+  BROWSER_SET_VIEWPORT: 'browser:set-viewport',
+  BROWSER_NAVIGATE: 'browser:navigate',
+  BROWSER_GO_BACK: 'browser:go-back',
+  BROWSER_GO_FORWARD: 'browser:go-forward',
+  BROWSER_RELOAD: 'browser:reload',
+  BROWSER_CLEAR_DATA: 'browser:clear-data',
+  /** main → renderer:当前 tab 状态 */
+  BROWSER_STATE: 'browser:state',
+
   // Auto updater
   UPDATER_CHECK: 'updater:check',
   UPDATER_DOWNLOAD_UPDATE: 'updater:downloadUpdate',
