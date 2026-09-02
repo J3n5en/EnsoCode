@@ -13,7 +13,7 @@ export function TerminalOutput({ command, output }: { command: string; output: s
 
   return (
     <div
-      data-slot="terminal-pane"
+      data-slot="terminal-output"
       className="px-3 py-2 text-xs leading-relaxed"
       style={{
         backgroundColor: theme.background,

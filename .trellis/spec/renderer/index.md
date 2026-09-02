@@ -32,7 +32,7 @@ src/renderer/
 - [ ] 弹窗内有下拉/浮层？必须传 `zIndex={Z_INDEX.DROPDOWN_IN_MODAL}`，否则被遮住。
 - [ ] 往 `Input` / `Textarea` 传 `className` 时，样式该落在包裹层还是内部元素？见 [components.md](components.md)。
 - [ ] 新增设置项：是否有副作用需要写进 `applySettings()` 才能多窗口同步？
-- [ ] 新面板的底色是否用了 `bg-background/60` 这类 `/N` 修饰符或内联色值？会绕过背景图透明化，改用纯令牌。见 [styling.md](styling.md)。
+- [ ] 新面板底色是否用了固定/内联色值或第三方主题底色？必须映射到语义令牌；承载内容的父子面板还要避免多层半透明叠色。见 [styling.md](styling.md)。
 - [ ] 调用主进程能力，preload 里是否已有对应方法？见 [../main/ipc.md](../main/ipc.md)。
 
 ## 详细规范

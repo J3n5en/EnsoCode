@@ -278,10 +278,14 @@ html.bg-image-enabled diffs-container {
 }
 
 /**
- * 右侧面板的终端：xterm 容器与 wrapper 都内联刷主题底色，与代码块同档透出背景。
- * 保留终端主题自己的色相（用 --terminal-bg 而非 --background），只叠 alpha。
+ * 右侧面板的终端：xterm 容器与 wrapper 都内联刷主题底色。
+ * 侧栏终端属于主体面板，底色与 alpha 都必须跟通用面板一致；终端主题只保留前景文字配色。
+ * 聊天流里的 bash 输出（terminal-output）则继续跟代码块档位并保留终端主题底色色相。
  */
 html.bg-image-enabled [data-slot='terminal-pane'] {
+  background-color: oklch(from var(--background) l c h / var(--bg-panel-alpha, 0.15)) !important;
+}
+html.bg-image-enabled [data-slot='terminal-output'] {
   background-color: oklch(from var(--terminal-bg, var(--background)) l c h / var(--bg-code-alpha, 0.45)) !important;
 }
 html.bg-image-enabled [data-slot='terminal-pane'] .xterm,

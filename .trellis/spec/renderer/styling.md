@@ -75,24 +75,25 @@ className={cn('text-sm font-medium', !enabled && 'text-muted-foreground line-thr
 | `--bg-composer-alpha` | 输入框 `[data-slot="composer"]` | 「输入框不透明度」滑块 |
 
 **新页面只要用语义令牌类（`bg-background` 等）就自动跟随，什么都不用做。**
-以下写法会绕过机制，让新面板在背景图模式下变成一块不透明的砖：
+真正会绕过机制的是内联色值、固定色值或第三方组件自带的主题底色：
 
 ```tsx
-// 错误：/60 把 alpha 硬编码进颜色，不再随可见度联动（SidePanel 曾踩过）
-className="bg-background/60"
-// 错误：内联色值、第三方主题色（xterm/shiki/@pierre/diffs 都自带不透明底色）
+// 错误：固定/内联色值不经过 --color-* 令牌重映射
+className="bg-zinc-950"
 style={{ backgroundColor: theme.background }}
 ```
 
 处理办法按情况选：
 
-- **只是想要「稍暗一层」的层次感** → 用不同令牌（`bg-muted` / `bg-card`），不要用 `/N` 修饰符。
-  确实需要 `/N` 的只限 hover/选中等瞬态（`hover:bg-accent/50`），不能用在承载内容的面板底色上。
+- **只是想要「稍暗一层」的层次感** → 优先换语义令牌（`bg-muted` / `bg-card`）。
+  Tailwind 4 的 `/N`（如 `bg-muted/50`）用 `color-mix` 乘在重映射后的令牌上，仍会跟随透明度；
+  但承载内容的大面板应慎用，避免父子多层半透明叠色后比周围更实。hover/选中等瞬态可正常使用。
 - **第三方组件自己刷底色**（终端、代码高亮、diff）→ 给宿主元素挂 `data-slot`，在
-  `globals.css` 的 `html.bg-image-enabled` 区块加一条覆写：内部置透，宿主用
-  `oklch(from <源色> l c h / var(--bg-code-alpha))` 刷**一层**。保留源色色相（如终端主题色
-  走 `--terminal-bg`），只换 alpha。多层元素各刷一遍半透明会叠成不透明（diffs 踩过）。
-- **新的独立区域确实需要自己的档位**（如输入框、代码块）→ 走 settings store 加字段完整流程
+  `globals.css` 的 `html.bg-image-enabled` 区块加一条覆写：内部置透，宿主只刷**一层**。
+  若要求与主体完全一致，底色和 alpha 都取 `var(--background)` + `var(--bg-panel-alpha)`；
+  若产品明确要求保留独立色相（如聊天流代码块），再用源色 + 对应独立 alpha。
+  多层元素各刷一遍半透明会叠成不透明（diffs 踩过）。
+- **新的独立区域确实需要自己的档位**（如输入框、代码块；侧栏终端不属于此类，必须跟主体）→ 走 settings store 加字段完整流程
   （`state.md`），新增一个滑块 + 一个 `--bg-*-alpha` 变量，并在上表登记。不要私自派生
   「面板 alpha + 常数」的公式——低可见度下会封顶到 1，用户感知为功能失效。
 
