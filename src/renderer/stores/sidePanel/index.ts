@@ -1,6 +1,7 @@
 import type { SerializedDockview } from 'dockview-react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { ScreenRect } from '@/lib/guestViewOcclusion';
 import { useSessionsStore } from '@/stores/sessions';
 
 export type ChangesMode = 'all' | 'git';
@@ -15,8 +16,8 @@ interface SidePanelState {
   /** 铺满中间工作区;不 persist,关面板 / 切到关着的会话时清掉 */
   fullscreen: boolean;
   uiByConversation: Record<string, SidePanelUi>;
-  /** 可见的浏览器 guest 数（运行态，不持久化）：>0 时壁纸让出右栏给垫底的原生 view 透出 */
-  browserGuests: number;
+  /** 可见的原生 guest 矩形（运行态，不持久化）：壁纸按这些矩形挖孔给垫底的 view 透出 */
+  browserHoles: Record<string, ScreenRect>;
   /** conversationId -> dockview 序列化布局(分屏结构 + tab 集合) */
   layouts: Record<string, SerializedDockview | undefined>;
   changesModeByConversation: Record<string, ChangesMode>;
@@ -29,8 +30,7 @@ interface SidePanelState {
   saveLayout: (conversationId: string, layout: SerializedDockview) => void;
   setChangesMode: (conversationId: string, mode: ChangesMode) => void;
   saveSnapshots: (conversationId: string, snapshots: Record<string, string>) => void;
-  addBrowserGuest: () => void;
-  removeBrowserGuest: () => void;
+  setBrowserHole: (key: string, rect: ScreenRect | null) => void;
 }
 
 function clampWidth(width: number): number {
@@ -59,7 +59,7 @@ export const useSidePanelStore = create<SidePanelState>()(
     (set, get) => ({
       fullscreen: false,
       uiByConversation: {},
-      browserGuests: 0,
+      browserHoles: {},
       layouts: {},
       changesModeByConversation: {},
       snapshotsByConversation: {},
@@ -107,8 +107,11 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({ fullscreen });
       },
 
-      addBrowserGuest: () => set({ browserGuests: get().browserGuests + 1 }),
-      removeBrowserGuest: () => set({ browserGuests: Math.max(0, get().browserGuests - 1) }),
+      setBrowserHole: (key, rect) => {
+        const { [key]: prev, ...rest } = get().browserHoles;
+        if (!rect && !prev) return;
+        set({ browserHoles: rect ? { ...rest, [key]: rect } : rest });
+      },
 
       saveLayout: (conversationId, layout) => {
         set({ layouts: { ...get().layouts, [conversationId]: layout } });

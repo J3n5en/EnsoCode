@@ -61,8 +61,6 @@ export default function App() {
     (s) => s.uiByConversation[activeConversationId ?? '']?.width ?? SIDE_PANEL_DEFAULT_WIDTH
   );
   const sideFullscreen = useSidePanelStore((s) => s.fullscreen);
-  // 壁纸只在浏览器 guest 可见时才让出右栏（挖孔给垫底原生 view），平时铺满全窗
-  const browserHole = useSidePanelStore((s) => s.browserGuests > 0);
   const toggleSidePanel = useSidePanelStore((s) => s.toggleOpen);
   useEffect(() => {
     if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
@@ -202,12 +200,7 @@ export default function App() {
   );
 
   return (
-    <div
-      className="relative isolate flex h-screen flex-col"
-      style={{
-        ['--enso-side-panel-width' as string]: `${sideOpen && !sideFullscreen && browserHole ? sideWidth : 0}px`,
-      }}
-    >
+    <div className="relative isolate flex h-screen flex-col">
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />
       <BackgroundLayer />

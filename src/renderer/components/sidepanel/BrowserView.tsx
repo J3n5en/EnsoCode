@@ -84,6 +84,11 @@ export function BrowserView({
   lockedRef.current = state.locked;
   const devtoolsOpenRef = useRef(false);
   devtoolsOpenRef.current = state.devtoolsOpen;
+  // host 透明、真正露出网页时才挖壁纸；空白占位/加载中保留壁纸垫底
+  const showsPage = state.url.startsWith('http') && !state.loading;
+  const showsPageRef = useRef(false);
+  showsPageRef.current = showsPage;
+  const lastHole = useRef<Rect | null>(null);
   const tabId = panelApi.id;
 
   useEffect(() => {
@@ -162,16 +167,16 @@ export function BrowserView({
         !sameRect(lastSent.current, rect) ||
         covered !== lastCovered.current
       ) {
-        // 壁纸挖孔跟随 guest 可见性：只在 null↔rect 边沿翻计数（rect 移动/covered 变化不算）
-        const wasVisible = lastSent.current != null;
-        const nowVisible = rect != null;
-        if (!wasVisible && nowVisible) useSidePanelStore.getState().addBrowserGuest();
-        else if (wasVisible && !nowVisible) useSidePanelStore.getState().removeBrowserGuest();
         lastSent.current = rect;
         lastCovered.current = covered;
         void window.electronAPI.browser
           .setViewport(tabId, conversationId, rect, covered)
           .then(setState);
+      }
+      const hole = showsPageRef.current ? rect : null;
+      if (!sameRect(lastHole.current, hole)) {
+        lastHole.current = hole;
+        useSidePanelStore.getState().setBrowserHole(`${tabId}:guest`, hole);
       }
       const dtRect = visible && devtoolsOpenRef.current ? readBox(dtRef.current) : null;
       const dtCovered = dtRect !== null && isCoveredBy(dtRect, overlayBoxes(document, root));
@@ -180,6 +185,7 @@ export function BrowserView({
         !sameRect(lastDt.current, dtRect) ||
         dtCovered !== lastDtCovered.current
       ) {
+        useSidePanelStore.getState().setBrowserHole(`${tabId}:devtools`, dtRect);
         lastDt.current = dtRect;
         lastDtCovered.current = dtCovered;
         void window.electronAPI.browser
@@ -192,8 +198,11 @@ export function BrowserView({
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      const { setBrowserHole } = useSidePanelStore.getState();
+      setBrowserHole(`${tabId}:guest`, null);
+      setBrowserHole(`${tabId}:devtools`, null);
+      lastHole.current = null;
       if (lastSent.current !== null) {
-        if (lastSent.current !== undefined) useSidePanelStore.getState().removeBrowserGuest();
         lastSent.current = null;
         void window.electronAPI.browser.setViewport(tabId, conversationId, null);
       }
@@ -331,7 +340,7 @@ export function BrowserView({
           className={cn(
             'relative min-h-0',
             state.devtoolsOpen ? 'shrink-0' : 'flex-1',
-            state.url.startsWith('http') && !state.loading ? 'bg-transparent' : 'bg-background'
+            showsPage ? 'bg-transparent' : 'bg-background'
           )}
           style={state.devtoolsOpen ? { flex: `${1 - devtoolsRatio} 1 0` } : undefined}
         >
