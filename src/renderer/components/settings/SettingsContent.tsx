@@ -51,7 +51,7 @@ export function SettingsContent() {
   return (
     <div className="flex h-full w-full">
       {/* Left: Category List */}
-      <nav className="w-48 shrink-0 space-y-1 border-r p-2">
+      <nav className="w-48 shrink-0 space-y-1 overflow-y-auto border-r p-2">
         {categories.map((category) => (
           <button
             type="button"

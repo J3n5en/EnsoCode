@@ -10,10 +10,10 @@ function SettingsApp() {
   const { t } = useI18n();
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col overflow-hidden">
       <OauthCredentialBootstrap />
       <TitleBar title={t('Settings')} actions={<SummonEnsoButton label={false} />} />
-      <main className="min-h-0 flex-1">
+      <main className="min-h-0 flex-1 overflow-hidden">
         <SettingsContent />
       </main>
     </div>
