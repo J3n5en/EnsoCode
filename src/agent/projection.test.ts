@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectMessage } from './projection';
+import { PROJECTED_TEXT_LIMIT, projectMessage } from './projection';
 
 describe('projectMessage', () => {
   it('assistant 消息只保留白名单字段，provider 原始数据不出 worker', () => {
@@ -100,5 +100,53 @@ describe('projectMessage', () => {
     expect(projectMessage(null)).toBeNull();
     expect(projectMessage({ content: [] })).toBeNull();
     expect(projectMessage({ role: 'user', content: 42 })).toEqual({ role: 'user', content: [] });
+  });
+
+  it('超长 text / thinking 截断，短的不动', () => {
+    const ok = 'x'.repeat(PROJECTED_TEXT_LIMIT);
+    const huge = `${ok}OVERFLOW`;
+    expect(
+      projectMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: ok }],
+      })?.content
+    ).toEqual([{ type: 'text', text: ok }]);
+    const truncated = projectMessage({
+      role: 'assistant',
+      content: [
+        { type: 'text', text: huge },
+        { type: 'thinking', thinking: huge },
+      ],
+    })?.content;
+    expect(truncated?.[0]).toEqual({ type: 'text', text: `${ok}\n…` });
+    expect(truncated?.[1]).toEqual({ type: 'thinking', text: `${ok}\n…` });
+  });
+
+  it('user 字符串 content 同样截断', () => {
+    const huge = `${'y'.repeat(PROJECTED_TEXT_LIMIT)}Z`;
+    expect(projectMessage({ role: 'user', content: huge })?.content).toEqual([
+      { type: 'text', text: `${'y'.repeat(PROJECTED_TEXT_LIMIT)}\n…` },
+    ]);
+  });
+
+  it('toolCall arguments 里的长字符串截断，path 不动', () => {
+    const body = `${'a'.repeat(PROJECTED_TEXT_LIMIT)}TAIL`;
+    const projected = projectMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'w1',
+          name: 'write',
+          arguments: { path: 'big.ts', content: body },
+        },
+      ],
+    });
+    expect(projected?.content[0]).toEqual({
+      type: 'toolCall',
+      id: 'w1',
+      name: 'write',
+      arguments: { path: 'big.ts', content: `${'a'.repeat(PROJECTED_TEXT_LIMIT)}\n…` },
+    });
   });
 });

@@ -111,8 +111,11 @@ export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+    try {
       window.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
+    } catch {
+      // renderer 已崩但 webContents 对象还在：Render frame was disposed
     }
   }
   maybeNotify(event);

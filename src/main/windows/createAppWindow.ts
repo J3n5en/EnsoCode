@@ -121,6 +121,24 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     return { action: 'deny' };
   });
 
+  // Chromium CHECK（SIGTRAP）主进程收不到 JS 异常，只能靠 gone。
+  // 自动 reload 避免白屏；短时反复崩则停，免得死循环。
+  const recoverable = new Set(['crashed', 'abnormal-exit', 'oom', 'launch-failed']);
+  let goneAt = 0;
+  let goneCount = 0;
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const now = Date.now();
+    if (now - goneAt > 60_000) goneCount = 0;
+    goneAt = now;
+    goneCount += 1;
+    console.error(
+      `[renderer] render-process-gone entry=${options.entry} reason=${details.reason} exitCode=${details.exitCode} count=${goneCount}`
+    );
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    if (!recoverable.has(details.reason) || goneCount > 3) return;
+    win.webContents.reload();
+  });
+
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${options.entry}.html`);
   } else {

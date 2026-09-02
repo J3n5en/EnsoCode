@@ -1,5 +1,8 @@
 import type { ProjectedMessage, ProjectedPart, TodoItem } from '@shared/types/agent';
 
+/** 渲染层单段文本上限。worker 里模型上下文仍是全文，只截投影。 */
+export const PROJECTED_TEXT_LIMIT = 32_768;
+
 const TODO_STATUSES = ['pending', 'in_progress', 'completed'];
 
 /** todo 工具 toolResult.details 的清单快照（白名单校验，脏数据丢弃） */
@@ -64,7 +67,7 @@ function projectUsage(value: unknown): ProjectedMessage['usage'] | null {
 
 function projectContent(content: unknown): ProjectedPart[] {
   // user 消息的 content 可以是纯字符串
-  if (typeof content === 'string') return [{ type: 'text', text: content }];
+  if (typeof content === 'string') return [{ type: 'text', text: capText(content) }];
   if (!Array.isArray(content)) return [];
   return content.map(projectPart);
 }
@@ -73,9 +76,12 @@ function projectPart(part: unknown): ProjectedPart {
   if (!isRecord(part)) return { type: 'unknown' };
   switch (part.type) {
     case 'text':
-      return { type: 'text', text: typeof part.text === 'string' ? part.text : '' };
+      return { type: 'text', text: capText(typeof part.text === 'string' ? part.text : '') };
     case 'thinking':
-      return { type: 'thinking', text: typeof part.thinking === 'string' ? part.thinking : '' };
+      return {
+        type: 'thinking',
+        text: capText(typeof part.thinking === 'string' ? part.thinking : ''),
+      };
     case 'toolCall': {
       const projected: ProjectedPart = {
         type: 'toolCall',
@@ -86,7 +92,7 @@ function projectPart(part: unknown): ProjectedPart {
         projected.arguments =
           projected.name === 'enso_app'
             ? projectEnsoAppReference(part.arguments)
-            : structuredCloneSafe(part.arguments);
+            : capJson(structuredCloneSafe(part.arguments));
       }
       return projected;
     }
@@ -108,6 +114,21 @@ function projectEnsoAppReference(value: unknown): unknown {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+function capText(text: string): string {
+  return text.length <= PROJECTED_TEXT_LIMIT ? text : `${text.slice(0, PROJECTED_TEXT_LIMIT)}\n…`;
+}
+
+function capJson(value: unknown): unknown {
+  if (typeof value === 'string') return capText(value);
+  if (Array.isArray(value)) return value.map(capJson);
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) out[key] = capJson(nested);
+    return out;
+  }
+  return value;
+}
 
 /** 断开与源对象的引用；不可序列化的参数收敛为 undefined */
 function structuredCloneSafe(value: unknown): unknown {
