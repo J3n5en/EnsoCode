@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAllowedCdpMethod } from '@shared/browser/cdpPolicy';
+import { assertDevtoolsIdle } from '@shared/browser/devtools';
+import { pickFaviconUrl } from '@shared/browser/favicon';
 import {
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SNAPSHOT_SCRIPT,
@@ -67,22 +69,28 @@ export function isBrowserPartition(name: string): boolean {
 interface Tab {
   id: string;
   view: WebContentsView;
+  /** 官方 DevTools 前端；懒创建 */
+  devtools?: WebContentsView;
   ownerSessionId: string;
   createdAt: number;
   lastSnapshot?: BrowserSnapshot;
   locked: boolean;
   /** webContents 首次 dom-ready 前 debugger.attach 会让 Main 段错误 */
   ready: boolean;
+  devtoolsOpen: boolean;
+  favicon: string | null;
 }
 
 const EMPTY_STATE: BrowserTabState = {
   tabId: null,
   url: '',
   title: '',
+  favicon: null,
   loading: false,
   canGoBack: false,
   canGoForward: false,
   locked: false,
+  devtoolsOpen: false,
 };
 
 interface PageInfo {
@@ -111,6 +119,12 @@ export class BrowserHost {
   /** 渲染层当前展示的 dock tab 与面板矩形 */
   /** covered：renderer 有浮层压在网页上，guest 要沉到 workbench 之下透洞显示 */
   private shown: {
+    tabId: string;
+    sessionId: string;
+    viewport: BrowserViewport;
+    covered: boolean;
+  } | null = null;
+  private shownDevtools: {
     tabId: string;
     sessionId: string;
     viewport: BrowserViewport;
@@ -173,10 +187,12 @@ export class BrowserHost {
       tabId: tab.id,
       url: contents.getURL(),
       title: contents.getTitle(),
+      favicon: tab.favicon,
       loading: contents.isLoading(),
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
       locked: tab.locked,
+      devtoolsOpen: tab.devtoolsOpen,
     };
   }
 
@@ -215,6 +231,38 @@ export class BrowserHost {
     return this.state(tabId);
   }
 
+  setDevTools(tabId: string, open: boolean): BrowserTabState {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return EMPTY_STATE;
+    tab.devtoolsOpen = open;
+    if (open) {
+      this.detachDebugger(tab);
+      this.ensureDevTools(tab);
+    } else {
+      this.teardownDevTools(tab);
+      this.shownDevtools = null;
+    }
+    this.layout();
+    this.emitState(tab.ownerSessionId, tab.id);
+    return this.stateOf(tab);
+  }
+
+  setDevToolsViewport(
+    tabId: string,
+    sessionId: string,
+    viewport: BrowserViewport | null,
+    covered = false
+  ): BrowserTabState {
+    const tab = this.tabs.get(tabId);
+    if (viewport && tab?.devtoolsOpen) {
+      this.shownDevtools = { tabId, sessionId, viewport, covered };
+    } else if (this.shownDevtools?.tabId === tabId) {
+      this.shownDevtools = null;
+    }
+    this.layout();
+    return this.state(tabId);
+  }
+
   private ensureWorkbenchOnTop(window: BrowserWindow): void {
     const workbench = getWorkbenchView(window);
     if (!workbench) return;
@@ -232,31 +280,91 @@ export class BrowserHost {
     const window = this.hostWindow();
     if (!window || window.isDestroyed()) return;
     const { contentView } = window;
-    let raise: WebContentsView | null = null;
+    const raise: WebContentsView[] = [];
     for (const tab of this.tabs.values()) {
       const onTop = Boolean(this.shown && tab.id === this.shown.tabId);
       if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
+      if (tab.devtools && !contentView.children.includes(tab.devtools)) {
+        contentView.addChildView(tab.devtools, 0);
+      }
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);
-        if (!this.shown.covered) raise = tab.view;
-        void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
+        if (!this.shown.covered) raise.push(tab.view);
+        if (!tab.devtoolsOpen) void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
       } else {
         tab.view.setVisible(false);
-        void this.cdp(tab, 'Emulation.setDeviceMetricsOverride', {
-          width: HEADLESS_BOUNDS.width,
-          height: HEADLESS_BOUNDS.height,
-          deviceScaleFactor: 0,
-          mobile: false,
-        });
+        if (!tab.devtoolsOpen) {
+          void this.cdp(tab, 'Emulation.setDeviceMetricsOverride', {
+            width: HEADLESS_BOUNDS.width,
+            height: HEADLESS_BOUNDS.height,
+            deviceScaleFactor: 0,
+            mobile: false,
+          });
+        }
+      }
+      const dtOnTop = Boolean(
+        tab.devtools && tab.devtoolsOpen && this.shownDevtools?.tabId === tab.id
+      );
+      if (tab.devtools) {
+        if (dtOnTop && this.shownDevtools) {
+          tab.devtools.setBounds(this.shownDevtools.viewport);
+          tab.devtools.setVisible(true);
+          if (!this.shownDevtools.covered) raise.push(tab.devtools);
+        } else {
+          tab.devtools.setVisible(false);
+        }
       }
     }
     this.ensureWorkbenchOnTop(window);
-    if (raise) contentView.addChildView(raise);
+    for (const view of raise) contentView.addChildView(view);
   }
 
   /** host 内白名单 CDP；模型永远摸不到 */
+  private detachDebugger(tab: Tab): void {
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed()) return;
+    const dbg = contents.debugger;
+    if (dbg.isAttached()) {
+      try {
+        dbg.detach();
+      } catch {}
+    }
+  }
+
+  private ensureDevTools(tab: Tab): void {
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed()) return;
+    if (!tab.devtools) {
+      tab.devtools = new WebContentsView({
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+      tab.devtools.setBackgroundColor('#202124');
+    }
+    const dt = tab.devtools.webContents;
+    if (dt.isDestroyed()) return;
+    try {
+      contents.setDevToolsWebContents(dt);
+    } catch {}
+    // detach：不在 guest 自己身上再拆一条 dock，前端只画在我们给的 view 里
+    contents.openDevTools({ mode: 'detach', activate: false });
+  }
+
+  private teardownDevTools(tab: Tab): void {
+    const contents = tab.view.webContents;
+    if (!contents.isDestroyed() && contents.isDevToolsOpened()) contents.closeDevTools();
+    if (tab.devtools) {
+      this.detach(tab.devtools);
+      tab.devtools.setVisible(false);
+    }
+  }
+
   private async cdp(tab: Tab, method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (tab.devtoolsOpen) return undefined;
     const contents = tab.view.webContents;
     if (!tab.ready || contents.isDestroyed()) return undefined;
     const dbg = contents.debugger;
@@ -591,6 +699,7 @@ export class BrowserHost {
     method: string,
     params: Record<string, unknown>
   ): Promise<unknown> {
+    assertDevtoolsIdle(tab.devtoolsOpen);
     assertAllowedCdpMethod(method);
     return this.cdp(tab, method, params);
   }
@@ -601,6 +710,7 @@ export class BrowserHost {
    * debugger 只在 host 内用，模型摸不到。
    */
   private async screenshot(tab: Tab, ref?: string): Promise<{ data: string; mimeType: string }> {
+    assertDevtoolsIdle(tab.devtoolsOpen);
     let clip: { x: number; y: number; width: number; height: number; scale: number };
     if (ref) {
       this.assertRef(tab, ref);
@@ -664,6 +774,8 @@ export class BrowserHost {
         backgroundThrottling: false,
       },
     });
+    // 默认透明会透过无边框窗口看到桌面；导航空白帧要垫一层不透明底
+    view.setBackgroundColor('#ffffff');
     const id = tabId ?? `browser:${++this.counter}-${Date.now().toString(36)}`;
     const tab: Tab = {
       id,
@@ -672,6 +784,8 @@ export class BrowserHost {
       createdAt: Date.now(),
       locked: false,
       ready: false,
+      devtoolsOpen: false,
+      favicon: null,
     };
     const contents = view.webContents;
     const push = () => this.emitState(sessionId, id);
@@ -689,8 +803,13 @@ export class BrowserHost {
     };
     contents.on('will-navigate', guard);
     contents.on('will-redirect', guard);
+    contents.on('page-favicon-updated', (_event, urls) => {
+      tab.favicon = pickFaviconUrl(urls);
+      push();
+    });
     contents.on('did-navigate', () => {
       tab.lastSnapshot = undefined;
+      tab.favicon = null;
       push();
     });
     contents.on('did-finish-load', () => {
@@ -758,6 +877,13 @@ export class BrowserHost {
       this.forgetTab(tab.id);
     }
     await this.flush();
+    this.teardownDevTools(tab);
+    if (this.shownDevtools?.tabId === tab.id) this.shownDevtools = null;
+    if (tab.devtools) {
+      this.detach(tab.devtools);
+      if (!tab.devtools.webContents.isDestroyed()) tab.devtools.webContents.close();
+      tab.devtools = undefined;
+    }
     this.detach(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     this.emitState(tab.ownerSessionId, tab.id);

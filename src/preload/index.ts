@@ -650,6 +650,21 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLEAR_DATA, kind),
     setLocked: (conversationId: string, locked: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_LOCKED, conversationId, locked),
+    setDevTools: (tabId: string, open: boolean): Promise<BrowserTabState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_DEVTOOLS, tabId, open),
+    setDevToolsViewport: (
+      tabId: string,
+      conversationId: string,
+      viewport: { x: number; y: number; width: number; height: number } | null,
+      covered = false
+    ): Promise<BrowserTabState> =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.BROWSER_SET_DEVTOOLS_VIEWPORT,
+        tabId,
+        conversationId,
+        viewport,
+        covered
+      ),
     onState: (
       callback: (event: { conversationId: string; tabId: string; state: BrowserTabState }) => void
     ): (() => void) => {

@@ -4,11 +4,15 @@ export interface BrowserTabState {
   tabId: string | null;
   url: string;
   title: string;
+  /** 当前页 favicon；没有或不可用为 null */
+  favicon: string | null;
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   /** agent 正在操作(第 3 刀 lock);面板显示「接管」 */
   locked: boolean;
+  /** 面板内嵌原生 Chrome DevTools */
+  devtoolsOpen: boolean;
 }
 
 export type BrowserClearKind = 'cookies' | 'cache' | 'all';

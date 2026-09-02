@@ -59,6 +59,22 @@ export function registerBrowserHandlers(): void {
       await browserHost.setLocked(conversationId, locked);
     }
   );
+  ipcMain.handle(IPC_CHANNELS.BROWSER_SET_DEVTOOLS, (_event, tabId: unknown, open: unknown) => {
+    if (!isId(tabId) || typeof open !== 'boolean') return browserHost.state('');
+    return browserHost.setDevTools(tabId, open);
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_SET_DEVTOOLS_VIEWPORT,
+    (_event, tabId: unknown, conversationId: unknown, raw: unknown, covered: unknown) => {
+      if (!isId(tabId) || !isId(conversationId)) return browserHost.state('');
+      return browserHost.setDevToolsViewport(
+        tabId,
+        conversationId,
+        raw === null ? null : parseBrowserViewport(raw),
+        covered === true
+      );
+    }
+  );
   browserHost.onState((conversationId, tabId, state) => {
     sendToAllWindows(IPC_CHANNELS.BROWSER_STATE, { conversationId, tabId, state });
   });

@@ -164,6 +164,10 @@ export const IPC_CHANNELS = {
   BROWSER_REVEAL: 'browser:reveal',
   BROWSER_RESTORE_TABS: 'browser:restore-tabs',
   BROWSER_CLOSE_TAB: 'browser:close-tab',
+  /** renderer → main:开关面板内嵌 DevTools */
+  BROWSER_SET_DEVTOOLS: 'browser:set-devtools',
+  /** renderer → main:DevTools 洞矩形 */
+  BROWSER_SET_DEVTOOLS_VIEWPORT: 'browser:set-devtools-viewport',
   /** main → renderer:agent 关了页，拆掉 dock tab */
   BROWSER_TAB_CLOSED: 'browser:tab-closed',
 

@@ -1,7 +1,7 @@
 {
-  "id": "enso-in-app-browser",
-  "name": "enso-in-app-browser",
-  "title": "Enso 内嵌 BrowserView（Cursor 路线）",
+  "id": "in-app-browser-devtools",
+  "name": "in-app-browser-devtools",
+  "title": "内嵌浏览器原生 DevTools 面板",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -10,7 +10,7 @@
   "priority": "P2",
   "creator": "J3n5en",
   "assignee": "J3n5en",
-  "createdAt": "2026-09-01",
+  "createdAt": "2026-09-02",
   "completedAt": null,
   "branch": null,
   "base_branch": "dev",
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "09-02-in-app-browser-devtools"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "09-01-enso-in-app-browser",
   "relatedFiles": [],
   "notes": "",
   "meta": {}
