@@ -509,6 +509,16 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'retry' })).toBeNull();
   });
 
+  it('snapshot 可带可选 sessionId', () => {
+    expect(parseAgentCommand({ type: 'snapshot' })).toEqual({ type: 'snapshot' });
+    expect(parseAgentCommand({ type: 'snapshot', sessionId: 'c1' })).toEqual({
+      type: 'snapshot',
+      sessionId: 'c1',
+    });
+    expect(parseAgentCommand({ type: 'snapshot', sessionId: '' })).toBeNull();
+    expect(parseAgentCommand({ type: 'snapshot', extra: 1 })).toBeNull();
+  });
+
   it('turn/capability 事件必须 exact identity generation + turnId', () => {
     expect(
       parseAgentWorkerEvent({

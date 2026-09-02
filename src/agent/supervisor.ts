@@ -375,7 +375,16 @@ export class SessionSupervisor {
 
   handleCommand(command: AgentCommand): void {
     if (command.type === 'snapshot') {
-      this.options.emit({ type: 'snapshot', sessions: this.snapshotSessions() });
+      const sessions = command.sessionId
+        ? this.snapshotSessions().filter(
+            (session) => session.identity.sessionId === command.sessionId
+          )
+        : this.snapshotSessions();
+      this.options.emit({
+        type: 'snapshot',
+        sessions,
+        ...(command.sessionId ? { partial: true } : {}),
+      });
       return;
     }
     if (command.type === 'warm-mcp') {

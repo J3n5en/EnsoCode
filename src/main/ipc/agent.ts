@@ -586,7 +586,11 @@ export function registerAgentHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_SNAPSHOT, (): AgentActionResult => requestSnapshot());
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SNAPSHOT,
+    (_event, sessionId: unknown): AgentActionResult =>
+      requestSnapshot(typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : undefined)
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ASK_RESPOND,

@@ -43,6 +43,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { electronStorage } from '@/stores/settings/storage';
+import {
+  evictColdMessages,
+  isBulkyAgentEvent,
+  isMessageCacheHot,
+  MESSAGE_CACHE_TTL_MS,
+  viewedConversationId,
+} from './messageCache';
 import { migrateSessions, SESSIONS_VERSION } from './migrate';
 import {
   applyAgentEvent,
@@ -52,6 +59,17 @@ import {
 } from './reducer';
 import { isPairViewed, nextUnread } from './unread';
 import { workspaceFallbackNote, workspaceMigratedNote } from './worktree';
+
+const lastViewedAt: Record<string, number> = {};
+let evictTimer: ReturnType<typeof setTimeout> | null = null;
+
+function viewedFromState(state: {
+  activeId: string | null;
+  conversations: Record<string, { activeTabId?: string }>;
+}): string | null {
+  const tab = state.activeId ? state.conversations[state.activeId]?.activeTabId : undefined;
+  return viewedConversationId(state.activeId, tab, (id) => Boolean(state.conversations[id]));
+}
 
 function startGoalPrompt(objective: string): string {
   return (
@@ -454,13 +472,19 @@ export const useSessionsStore = create<SessionsState>()(
               }
             }
 
+            const viewed = viewedFromState(state);
+            const now = Date.now();
             for (const id of Object.keys(conversations)) {
               const conversation = conversations[id];
               const snapshot = alive.get(id);
               if (snapshot) {
+                const keepBody =
+                  event.partial === true || isMessageCacheHot(id, viewed, lastViewedAt, now);
+                const next = applyAgentEvent(conversation, id, event);
                 conversations[id] = {
                   ...conversation,
-                  ...applyAgentEvent(conversation, id, event),
+                  ...next,
+                  ...(keepBody ? {} : { messages: [], customEntries: [] }),
                   ...(snapshot.child
                     ? {
                         parentId: snapshot.child.parentId,
@@ -673,6 +697,12 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
+          if (
+            isBulkyAgentEvent(event.type) &&
+            !isMessageCacheHot(id, viewedFromState(state), lastViewedAt, Date.now())
+          ) {
+            return state;
+          }
           const next = applyAgentEvent(conversation, id, event);
           // dev：首个 worker 事件即 spawn 完成信号，即使投影未变也要清 spawning（resume loading 依赖它）
           if (next === conversation && !conversation.spawning) return state;
@@ -1989,10 +2019,10 @@ export const useSessionsStore = create<SessionsState>()(
         activeId: state.activeId,
       }),
       onRehydrateStorage: () => () => {
-        // 刷新时 worker 仍活着：要一份全量投影把消息接回来（并把真活着的会话
-        // 的 started 重新置回 true）。陈旧 started 的清理在 migrate（一次性、回写）
-        // 与 partialize（写侧不落盘），不在这里做读侧补丁。
-        void window.electronAPI.agent.requestSnapshot();
+        // 刷新时 worker 仍活着：只补当前正在看的会话正文。其它会话点开再 snapshot。
+        const state = useSessionsStore.getState();
+        const viewed = viewedFromState(state);
+        if (viewed) void window.electronAPI.agent.requestSnapshot(viewed);
       },
     }
   )
@@ -2002,9 +2032,31 @@ export const useSessionsStore = create<SessionsState>()(
 // tab 生效时以 tab（coworker/子会话）为准,与 sendActive 等处的解析口径一致。
 let lastReportedViewedId: string | null = null;
 useSessionsStore.subscribe((state) => {
-  const activeTab = state.activeId ? state.conversations[state.activeId]?.activeTabId : undefined;
-  const viewed = activeTab && state.conversations[activeTab] ? activeTab : state.activeId;
+  const viewed = viewedFromState(state);
   if (viewed === lastReportedViewedId) return;
   lastReportedViewedId = viewed;
   window.electronAPI.agent.setViewedSession?.(viewed);
+  if (viewed) lastViewedAt[viewed] = Date.now();
+  const conversation = viewed ? state.conversations[viewed] : undefined;
+  if (
+    viewed &&
+    conversation &&
+    (conversation.started || conversation.sessionFile) &&
+    conversation.messages.length === 0 &&
+    !conversation.spawning
+  ) {
+    void window.electronAPI.agent.requestSnapshot(viewed);
+  }
+  if (evictTimer) clearTimeout(evictTimer);
+  evictTimer = setTimeout(() => {
+    const current = useSessionsStore.getState();
+    const next = evictColdMessages(
+      current.conversations,
+      viewedFromState(current),
+      lastViewedAt,
+      Date.now()
+    );
+    if (next !== current.conversations) useSessionsStore.setState({ conversations: next });
+  }, MESSAGE_CACHE_TTL_MS);
+  evictTimer.unref?.();
 });

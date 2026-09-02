@@ -74,8 +74,8 @@ let worker: UtilityProcess | null = null;
 /** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
 let workerReady = false;
 let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
-/** worker 就绪前到达的快照请求，spawn 后补发一次。 */
-let snapshotPending = false;
+/** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
+let snapshotPending: false | true | string = false;
 
 export function setAgentEventListener(
   listener: (event: AgentWorkerEvent | { type: 'worker-exited' }) => void
@@ -99,9 +99,13 @@ export function startAgentWorker(): void {
     workerReady = true;
     const servers = enabledMcpServers();
     if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
-    if (snapshotPending) {
+    if (snapshotPending !== false) {
+      const command: AgentCommand =
+        snapshotPending === true
+          ? { type: 'snapshot' }
+          : { type: 'snapshot', sessionId: snapshotPending };
       snapshotPending = false;
-      child.postMessage({ type: 'snapshot' } satisfies AgentCommand);
+      child.postMessage(command);
     }
   });
   child.on('message', (raw) => {
@@ -577,16 +581,18 @@ export function setSessionApprovalMode(
   return sendAgentCommand({ type: 'set-approval-mode', identity, mode });
 }
 
-export function requestSnapshot(): { ok: boolean; error?: string } {
+export function requestSnapshot(sessionId?: string): { ok: boolean; error?: string } {
   // renderer rehydrate 时就会要快照，而打包版 worker 要等 hydrateShellPath 才 fork；
   // 已 fork 未 spawn 的窗口里 postMessage 也不保证送达。直接拒绝或直发都会让
   // 请求丢失（调用方 void 掉返回值，无重试），会话消息接不回来。
   // 挂起等 spawn 后补发。注意：此处 ok:true 语义是「已入队」而非「已送达」。
   if (!worker || !workerReady) {
-    snapshotPending = true;
+    if (!sessionId) snapshotPending = true;
+    else if (snapshotPending === false) snapshotPending = sessionId;
+    else if (snapshotPending !== sessionId) snapshotPending = true;
     return { ok: true };
   }
-  return sendAgentCommand({ type: 'snapshot' });
+  return sendAgentCommand(sessionId ? { type: 'snapshot', sessionId } : { type: 'snapshot' });
 }
 
 function configuredAgentTypes(

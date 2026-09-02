@@ -488,7 +488,7 @@ export type AgentCommand =
       identity: SessionIdentity;
       entry: AgentSessionCustomEntry;
     }
-  | { type: 'snapshot' }
+  | { type: 'snapshot'; sessionId?: string }
   | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
 
 /** 随消息附带的图片（base64） */
@@ -1594,7 +1594,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'snapshot':
-      return hasExactKeys(value, ['type']) ? { type: 'snapshot' } : null;
+      if (hasExactKeys(value, ['type'])) return { type: 'snapshot' };
+      return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+        ? { type: 'snapshot', sessionId: value.sessionId }
+        : null;
     case 'warm-mcp':
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
