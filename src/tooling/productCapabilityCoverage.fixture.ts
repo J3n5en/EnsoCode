@@ -172,6 +172,7 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_FULLSCREEN_CHANGED: excluded('Renderer fullscreen-state event transport.'),
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: excluded('macOS title-bar implementation detail.'),
   WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
+  WINDOW_POPUP_MENU: excluded('Native application menu popup; renderer chrome only.'),
   PROVIDERS_SCAN_LOCAL: surfaces('providers.import-local'),
   PROVIDERS_COLLECT_IMPORT: excluded('Second phase of the reviewed provider import flow.'),
   PROVIDERS_LIST_MODELS: surfaces('providers.fetch-models'),

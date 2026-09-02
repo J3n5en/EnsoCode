@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed',
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+  WINDOW_POPUP_MENU: 'window:popup-menu',
 
   // Local provider scan/import
   PROVIDERS_SCAN_LOCAL: 'providers:scan-local',

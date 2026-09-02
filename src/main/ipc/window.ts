@@ -1,6 +1,6 @@
 import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import { TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
 import { focusMainWindow } from '../windows/MainWindow';
@@ -77,6 +77,41 @@ export function registerWindowHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, () => {
     openSettingsWindow();
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_POPUP_MENU,
+    async (event, rawItems: unknown, x: unknown, y: unknown) => {
+      const win = senderWindow(event);
+      if (!win || !Array.isArray(rawItems)) return null;
+      const items = rawItems.flatMap((item) => {
+        if (!item || typeof item !== 'object') return [];
+        const rec = item as Record<string, unknown>;
+        if (typeof rec.id !== 'string' || typeof rec.label !== 'string' || !rec.id || !rec.label) {
+          return [];
+        }
+        return [{ id: rec.id, label: rec.label }];
+      });
+      if (items.length === 0) return null;
+      const px = typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : undefined;
+      const py = typeof y === 'number' && Number.isFinite(y) ? Math.round(y) : undefined;
+      return await new Promise<string | null>((resolve) => {
+        let chosen: string | null = null;
+        const menu = Menu.buildFromTemplate(
+          items.map((item) => ({
+            label: item.label,
+            click: () => {
+              chosen = item.id;
+            },
+          }))
+        );
+        menu.popup({
+          window: win,
+          ...(px !== undefined && py !== undefined ? { x: px, y: py } : {}),
+          callback: () => resolve(chosen),
+        });
+      });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SUMMON, (_event, request: unknown) => {
     const snapshot = agentTypeRegistrySnapshot();

@@ -142,19 +142,23 @@ export class BrowserHost {
     this.layout();
   }
 
+  /** 工作区 WebContentsView 抬到 guest 之上，HTML 菜单才能盖住网页。 */
+  private raiseWorkbenchViews(contentView: Electron.View): void {
+    const guests = new Set([...this.tabs.values()].map((tab) => tab.view));
+    for (const child of [...contentView.children]) {
+      if (guests.has(child as Electron.WebContentsView)) continue;
+      contentView.addChildView(child);
+    }
+  }
+
   private layout(): void {
     const window = this.hostWindow();
     if (!window || window.isDestroyed()) return;
     const { contentView } = window;
     for (const tab of this.tabs.values()) {
       const onTop = Boolean(this.shown && tab.ownerSessionId === this.shown.sessionId);
-      // Cursor 同款：guest 永远插在 index 0（工作区 WebContents 下面）。
-      // HTML 挖透明洞透出网页，菜单/弹层仍在 renderer 里，自然盖在网页上。
       if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
-      else if (onTop && contentView.children[0] !== tab.view) {
-        contentView.removeChildView(tab.view);
-        contentView.addChildView(tab.view, 0);
-      }
+      this.raiseWorkbenchViews(contentView);
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);

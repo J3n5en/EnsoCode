@@ -540,6 +540,11 @@ const electronAPI = {
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
     openSettings: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS),
+    popupMenu: (
+      items: { id: string; label: string }[],
+      x: number,
+      y: number
+    ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_POPUP_MENU, items, x, y),
     summonAgent: (request: AgentSummonRequest): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMON, request),
     onAgentComposerPrefill: (
