@@ -51,6 +51,7 @@ import {
   routeDrop,
 } from '@/components/chat/dragDrop';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
+import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -408,8 +409,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         </div>
       )}
       <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
-        <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
-          <span className="text-sm font-medium">{t('Projects')}</span>
+        <div className="flex h-12 shrink-0 items-center justify-between border-b pr-3 pl-1.5">
+          {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
+          <NodeSwitcher />
           <button
             type="button"
             onClick={() => setAddOpen(true)}
