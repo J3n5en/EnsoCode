@@ -162,6 +162,7 @@ export const IPC_CHANNELS = {
   BROWSER_STATE: 'browser:state',
   /** main → renderer:agent 已打开页，请建 Browser 面板 */
   BROWSER_REVEAL: 'browser:reveal',
+  BROWSER_RESTORE_TABS: 'browser:restore-tabs',
 
   // Auto updater
   UPDATER_CHECK: 'updater:check',

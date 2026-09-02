@@ -297,9 +297,9 @@ const electronAPI = {
       agentType?: string
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_HIRE_COWORKER, parentConversationId, name, agentType),
-    /** 请求 worker 全量投影快照（结果经 onEvent 回来），用于刷新后补投影 */
-    requestSnapshot: (): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT),
+    /** 请求 worker 投影快照（结果经 onEvent 回来）。传 sessionId 只补这一路。 */
+    requestSnapshot: (sessionId?: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT, sessionId),
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
@@ -612,6 +612,7 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.BROWSER_STATE, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
+    restoreTabs: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RESTORE_TABS),
     onReveal: (callback: (conversationId: string) => void): (() => void) => {
       const listener = (_: unknown, conversationId: string) => callback(conversationId);
       ipcRenderer.on(IPC_CHANNELS.BROWSER_REVEAL, listener);

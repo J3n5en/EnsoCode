@@ -355,13 +355,13 @@ function ConversationDock({
 export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
   const open = useSidePanelStore((s) => s.open);
-  useEffect(
-    () =>
-      window.electronAPI.browser.onReveal((conversationId) => {
-        addSidePanelBrowser({ conversationId });
-      }),
-    []
-  );
+  useEffect(() => {
+    const stop = window.electronAPI.browser.onReveal((conversationId) => {
+      addSidePanelBrowser({ conversationId });
+    });
+    void window.electronAPI.browser.restoreTabs();
+    return stop;
+  }, []);
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);
   const [mountedIds, setMountedIds] = useState<string[]>([]);

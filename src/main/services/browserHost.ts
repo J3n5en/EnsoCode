@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SNAPSHOT_SCRIPT,
@@ -11,6 +13,11 @@ import {
   parseSnapshotEntries,
   renderSnapshot,
 } from '@shared/browser/snapshot';
+import {
+  type PersistedBrowserTab,
+  parsePersistedBrowserTabs,
+  serializePersistedBrowserTabs,
+} from '@shared/browser/tabPersist';
 import { assertAllowedUrl } from '@shared/browser/urlPolicy';
 import type { BrowserViewport } from '@shared/browser/viewport';
 import type { BrowserOp } from '@shared/types/agent';
@@ -96,6 +103,11 @@ export class BrowserHost {
   private readonly revealListeners = new Set<(sessionId: string) => void>();
   /** renderer 还没报矩形前先不关 tab，避免回合结束跑赢面板挂载 */
   private readonly pendingReveal = new Set<string>();
+  /** 用户见过的 tab：切走 Terminal / 重启后仍恢复 */
+  private readonly userTabs = new Set<string>();
+  private persisted: Record<string, PersistedBrowserTab> = {};
+  private persistedLoaded = false;
+  private disposing = false;
 
   /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
   setHostWindow(provider: () => BrowserWindow | null): void {
@@ -114,6 +126,7 @@ export class BrowserHost {
 
   private requestReveal(sessionId: string): void {
     this.pendingReveal.add(sessionId);
+    this.userTabs.add(sessionId);
     for (const listener of this.revealListeners) listener(sessionId);
   }
 
@@ -134,13 +147,20 @@ export class BrowserHost {
 
   private emitState(sessionId: string): void {
     const state = this.state(sessionId);
+    if (this.userTabs.has(sessionId) && state.url.startsWith('http')) {
+      this.rememberTab(sessionId, { url: state.url, title: state.title, at: Date.now() });
+    }
     for (const listener of this.stateListeners) listener(sessionId, state);
   }
 
   /** 渲染层：面板可见且矩形已知 → 该会话 tab 叠到矩形上；viewport 为 null → 隐藏 */
   setViewport(sessionId: string, viewport: BrowserViewport | null): void {
     this.shown = viewport ? { sessionId, viewport } : null;
-    if (viewport) this.pendingReveal.delete(sessionId);
+    if (viewport) {
+      this.pendingReveal.delete(sessionId);
+      this.userTabs.add(sessionId);
+      if (!this.tabFor(sessionId)) void this.restoreTab(sessionId);
+    }
     this.layout();
   }
 
@@ -445,7 +465,10 @@ export class BrowserHost {
     if (!tab) return;
     if (
       !opts.force &&
-      (tab.locked || this.shown?.sessionId === sessionId || this.pendingReveal.has(sessionId))
+      (tab.locked ||
+        this.shown?.sessionId === sessionId ||
+        this.pendingReveal.has(sessionId) ||
+        this.userTabs.has(sessionId))
     ) {
       return;
     }
@@ -456,6 +479,9 @@ export class BrowserHost {
     this.tabs.delete(tab.id);
     if (this.currentBySession.get(tab.ownerSessionId) === tab.id) {
       this.currentBySession.delete(tab.ownerSessionId);
+    }
+    if (!this.disposing && !this.userTabs.has(tab.ownerSessionId)) {
+      this.forgetTab(tab.ownerSessionId);
     }
     await this.flush();
     this.detach(tab.view);
@@ -483,8 +509,68 @@ export class BrowserHost {
     }
   }
 
+  private persistPath(): string {
+    return join(app.getPath('userData'), 'browser-tabs.json');
+  }
+
+  private loadPersisted(): void {
+    if (this.persistedLoaded) return;
+    this.persistedLoaded = true;
+    try {
+      if (!existsSync(this.persistPath())) return;
+      this.persisted = parsePersistedBrowserTabs(
+        JSON.parse(readFileSync(this.persistPath(), 'utf8')) as unknown
+      );
+    } catch {
+      this.persisted = {};
+    }
+  }
+
+  private writePersisted(): void {
+    try {
+      writeFileSync(this.persistPath(), serializePersistedBrowserTabs(this.persisted));
+    } catch {}
+  }
+
+  private rememberTab(sessionId: string, tab: PersistedBrowserTab): void {
+    this.loadPersisted();
+    this.persisted[sessionId] = tab;
+    this.writePersisted();
+  }
+
+  private forgetTab(sessionId: string): void {
+    this.loadPersisted();
+    if (!(sessionId in this.persisted)) return;
+    delete this.persisted[sessionId];
+    this.writePersisted();
+  }
+
+  private async restoreTab(sessionId: string): Promise<void> {
+    this.loadPersisted();
+    const saved = this.persisted[sessionId];
+    if (!saved || this.tabFor(sessionId)) return;
+    try {
+      assertAllowedUrl(saved.url);
+    } catch {
+      return;
+    }
+    const tab = this.createTab(sessionId);
+    this.userTabs.add(sessionId);
+    await tab.view.webContents.loadURL(saved.url).catch(() => {});
+  }
+
+  async restorePersistedTabs(): Promise<void> {
+    this.loadPersisted();
+    const entries = Object.entries(this.persisted).sort((a, b) => (b[1].at ?? 0) - (a[1].at ?? 0));
+    for (const [sessionId] of entries.slice(0, MAX_HEADLESS_TABS)) {
+      await this.restoreTab(sessionId);
+      this.requestReveal(sessionId);
+    }
+  }
+
   /** 退出前：flush 后关掉全部 tab。 */
   async dispose(): Promise<void> {
+    this.disposing = true;
     for (const tab of [...this.tabs.values()]) await this.destroyTab(tab);
   }
 }

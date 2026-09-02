@@ -308,6 +308,7 @@ export const IPC_PRODUCT_COVERAGE = {
   BROWSER_SET_LOCKED: excluded('Side panel browser take-control; renderer UI only.'),
   BROWSER_STATE: excluded('Side panel browser state push; renderer UI only.'),
   BROWSER_REVEAL: excluded('Side panel browser auto-open; renderer UI only.'),
+  BROWSER_RESTORE_TABS: excluded('Side panel browser session restore; renderer UI only.'),
   SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
   SSH_CONNECTIONS_UPSERT: surfaces(
     'projects.ssh-connections.add',
