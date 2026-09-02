@@ -6,7 +6,7 @@ import type {
   TerminalPalette,
 } from '@enso/pair';
 import { IPC_CHANNELS } from '@shared/types';
-import { BrowserWindow, ipcMain } from 'electron';
+import { ipcMain } from 'electron';
 import {
   cancelPairing,
   getPairStatus,
@@ -20,42 +20,33 @@ import {
   startPairing,
   updatePairCatalog,
 } from '../services/pairHost';
+import { sendToAllWindows } from '../windows/createAppWindow';
 
 export function registerPairHandlers(): void {
   // 状态变化广播回设置页（配对成功、手机上下线、重连）
   setPairStatusListener(() => {
     const status = getPairStatus();
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_STATUS_CHANGED, status);
-    }
+    sendToAllWindows(IPC_CHANNELS.PAIR_STATUS_CHANGED, status);
   });
 
   // 手机订阅历史会话时，请渲染层按桌面同路径恢复（worker 里才有投影可发）
   setPairResumeListener((sessionId) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_RESUME_SESSION, sessionId);
-    }
+    sendToAllWindows(IPC_CHANNELS.PAIR_RESUME_SESSION, sessionId);
   });
 
   // 手机新建会话后请渲染层登记，否则桌面列表看不到它、其事件也会被丢弃
   setPairSessionCreatedListener((session) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CREATED, session);
-    }
+    sendToAllWindows(IPC_CHANNELS.PAIR_SESSION_CREATED, session);
   });
 
   // 手机改会话模型/推理档位：交给渲染层的 store 方法，与桌面选择器同一路径
   setPairSessionConfigListener((config) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CONFIG, config);
-    }
+    sendToAllWindows(IPC_CHANNELS.PAIR_SESSION_CONFIG, config);
   });
 
   // 手机操作排队消息：队列只在 renderer store，交给它处理
   setPairQueueActionListener((action) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_QUEUE_ACTION, action);
-    }
+    sendToAllWindows(IPC_CHANNELS.PAIR_QUEUE_ACTION, action);
   });
 
   ipcMain.handle(IPC_CHANNELS.PAIR_START, async () => startPairing());

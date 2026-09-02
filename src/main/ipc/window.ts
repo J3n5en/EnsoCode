@@ -2,7 +2,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { agentTypeRegistrySnapshot } from '../services/agentHost';
-import { TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
+import { sendToWindow, TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
 import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 
@@ -121,7 +121,7 @@ export function registerWindowHandlers(): void {
     );
     if (!parsed) return { ok: false, error: 'invalid Agent summon request' };
     const window = focusMainWindow();
-    window.webContents.send(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
+    sendToWindow(window, IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
       typeKey: parsed.typeKey,
     });
     return { ok: true };
@@ -131,9 +131,7 @@ export function registerWindowHandlers(): void {
 /** 向渲染层同步窗口最大化/全屏状态变化 */
 export function attachWindowStateEvents(win: BrowserWindow): void {
   const send = (channel: string, value: boolean) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send(channel, value);
-    }
+    sendToWindow(win, channel, value);
   };
 
   win.on('maximize', () => send(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, true));

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
 
 function getSettingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
@@ -114,11 +115,10 @@ function scheduleWrite(
 
     // 普通 store 写排除 sender；Gateway 写显式选择 all-renderers。
     for (const win of BrowserWindow.getAllWindows()) {
-      if (
-        (broadcast === 'all-renderers' || !sender || win.webContents !== sender) &&
-        !win.isDestroyed()
-      ) {
-        win.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED);
+      if (win.isDestroyed()) continue;
+      const ui = getWindowWebContents(win);
+      if (broadcast === 'all-renderers' || !sender || ui !== sender) {
+        sendToWindow(win, IPC_CHANNELS.SETTINGS_CHANGED);
       }
     }
 

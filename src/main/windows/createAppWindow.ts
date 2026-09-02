@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { app, BrowserWindow, Menu, shell, WebContentsView } from 'electron';
+import { app, BrowserWindow, Menu, shell, type WebContents, WebContentsView } from 'electron';
 
 export interface CreateWindowOptions {
   /** renderer 入口 html 文件名（不含扩展名），对应 electron.vite renderer input */
@@ -13,7 +13,7 @@ export interface CreateWindowOptions {
   /** 持久化窗口位置/尺寸的状态文件名，不传则不持久化 */
   stateFile?: string;
   parent?: BrowserWindow;
-  /** 主窗口：把 webContents 做成可叠层的整窗 WebContentsView，guest 才能垫在下面 */
+  /** 主窗口：UI 走独立顶层 WebContentsView，guest 网页才能垫在下面 */
   pinWorkbenchView?: boolean;
 }
 
@@ -41,24 +41,103 @@ export function getWorkbenchView(win: BrowserWindow): WebContentsView | undefine
   return workbenchViews.get(win);
 }
 
-function pinWorkbenchView(win: BrowserWindow): void {
-  try {
-    const view = new WebContentsView({ webContents: win.webContents });
-    const sync = (): void => {
-      if (win.isDestroyed()) return;
-      const { width, height } = win.getContentBounds();
-      view.setBounds({ x: 0, y: 0, width, height });
-    };
-    win.contentView.addChildView(view);
-    win.on('resize', sync);
-    sync();
-    workbenchViews.set(win, view);
-  } catch (error) {
+/** 主窗口 UI 的 webContents（pin 后不是 win.webContents） */
+export function getWindowWebContents(win: BrowserWindow): WebContents {
+  return workbenchViews.get(win)?.webContents ?? win.webContents;
+}
+
+export function sendToWindow(win: BrowserWindow, channel: string, ...args: unknown[]): void {
+  if (win.isDestroyed()) return;
+  const contents = getWindowWebContents(win);
+  if (contents.isDestroyed()) return;
+  contents.send(channel, ...args);
+}
+
+export function sendToAllWindows(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) sendToWindow(win, channel, ...args);
+}
+
+function webPreferences(): Electron.WebPreferences {
+  return {
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: false,
+    preload: join(import.meta.dirname, '../preload/index.mjs'),
+  };
+}
+
+function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, entry: string): void {
+  contents.on('context-menu', (event, params) => {
+    if (params.isEditable) {
+      event.preventDefault();
+      Menu.buildFromTemplate([
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll },
+      ]).popup({ window: win, x: params.x, y: params.y });
+      return;
+    }
+    if (params.selectionText) {
+      event.preventDefault();
+      Menu.buildFromTemplate([{ role: 'copy', enabled: params.editFlags.canCopy }]).popup({
+        window: win,
+        x: params.x,
+        y: params.y,
+      });
+    }
+  });
+
+  contents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https:') || url.startsWith('http:')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  const recoverable = new Set(['crashed', 'abnormal-exit', 'oom', 'launch-failed']);
+  let goneAt = 0;
+  let goneCount = 0;
+  contents.on('render-process-gone', (_event, details) => {
+    const now = Date.now();
+    if (now - goneAt > 60_000) goneCount = 0;
+    goneAt = now;
+    goneCount += 1;
     console.error(
-      '[window] pinWorkbenchView failed:',
-      error instanceof Error ? error.message : error
+      `[renderer] render-process-gone entry=${entry} reason=${details.reason} exitCode=${details.exitCode} count=${goneCount}`
     );
+    if (win.isDestroyed() || contents.isDestroyed()) return;
+    if (!recoverable.has(details.reason) || goneCount > 3) return;
+    contents.reload();
+  });
+}
+
+function loadRenderer(contents: WebContents, entry: string): void {
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    void contents.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${entry}.html`);
+  } else {
+    void contents.loadFile(join(import.meta.dirname, `../renderer/${entry}.html`));
   }
+}
+
+function createPinnedWorkbench(win: BrowserWindow, entry: string): WebContentsView {
+  const view = new WebContentsView({ webPreferences: webPreferences() });
+  const sync = (): void => {
+    if (win.isDestroyed()) return;
+    const { width, height } = win.getContentBounds();
+    view.setBounds({ x: 0, y: 0, width, height });
+  };
+  win.contentView.addChildView(view);
+  win.on('resize', sync);
+  sync();
+  workbenchViews.set(win, view);
+  attachWebContentsHandlers(win, view.webContents, entry);
+  view.webContents.once('did-finish-load', () => {
+    if (!win.isDestroyed()) win.show();
+  });
+  loadRenderer(view.webContents, entry);
+  return view;
 }
 
 function saveWindowState(win: BrowserWindow, stateFile: string): void {
@@ -98,82 +177,25 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     ...(isWindows && { thickFrame: true }),
     show: false,
     backgroundColor: '#00000000',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: false,
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
-    },
+    webPreferences: webPreferences(),
   });
-
-  if (options.pinWorkbenchView) pinWorkbenchView(win);
 
   if (state.isMaximized) {
     win.maximize();
   }
 
-  win.once('ready-to-show', () => {
-    win.show();
-  });
-
   if (options.stateFile) {
     win.on('close', () => saveWindowState(win, options.stateFile as string));
   }
 
-  // 可编辑区域启用原生右键菜单（剪切/复制/粘贴/全选）；非编辑区选中文本时提供复制
-  win.webContents.on('context-menu', (event, params) => {
-    if (params.isEditable) {
-      event.preventDefault();
-      Menu.buildFromTemplate([
-        { role: 'cut', enabled: params.editFlags.canCut },
-        { role: 'copy', enabled: params.editFlags.canCopy },
-        { role: 'paste', enabled: params.editFlags.canPaste },
-        { type: 'separator' },
-        { role: 'selectAll', enabled: params.editFlags.canSelectAll },
-      ]).popup({ window: win, x: params.x, y: params.y });
-      return;
-    }
-    // 对话区域等只读内容：有选中文本时给复制
-    if (params.selectionText) {
-      event.preventDefault();
-      Menu.buildFromTemplate([{ role: 'copy', enabled: params.editFlags.canCopy }]).popup({
-        window: win,
-        x: params.x,
-        y: params.y,
-      });
-    }
-  });
-
-  // 外链跳转系统浏览器
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:') || url.startsWith('http:')) {
-      shell.openExternal(url);
-    }
-    return { action: 'deny' };
-  });
-
-  // Chromium CHECK（SIGTRAP）主进程收不到 JS 异常，只能靠 gone。
-  // 自动 reload 避免白屏；短时反复崩则停，免得死循环。
-  const recoverable = new Set(['crashed', 'abnormal-exit', 'oom', 'launch-failed']);
-  let goneAt = 0;
-  let goneCount = 0;
-  win.webContents.on('render-process-gone', (_event, details) => {
-    const now = Date.now();
-    if (now - goneAt > 60_000) goneCount = 0;
-    goneAt = now;
-    goneCount += 1;
-    console.error(
-      `[renderer] render-process-gone entry=${options.entry} reason=${details.reason} exitCode=${details.exitCode} count=${goneCount}`
-    );
-    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
-    if (!recoverable.has(details.reason) || goneCount > 3) return;
-    win.webContents.reload();
-  });
-
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${options.entry}.html`);
+  if (options.pinWorkbenchView) {
+    createPinnedWorkbench(win, options.entry);
   } else {
-    win.loadFile(join(import.meta.dirname, `../renderer/${options.entry}.html`));
+    win.once('ready-to-show', () => {
+      win.show();
+    });
+    attachWebContentsHandlers(win, win.webContents, options.entry);
+    loadRenderer(win.webContents, options.entry);
   }
 
   return win;

@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron';
-import { createAppWindow } from './createAppWindow';
+import { createAppWindow, getWindowWebContents } from './createAppWindow';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -26,12 +26,9 @@ export function getMainWindow(): BrowserWindow | null {
 }
 
 export function isMainWebContents(webContentsId: number): boolean {
-  return Boolean(
-    mainWindow &&
-      !mainWindow.isDestroyed() &&
-      !mainWindow.webContents.isDestroyed() &&
-      mainWindow.webContents.id === webContentsId
-  );
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const contents = getWindowWebContents(mainWindow);
+  return !contents.isDestroyed() && contents.id === webContentsId;
 }
 
 export function focusMainWindow(): BrowserWindow {

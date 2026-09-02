@@ -31,6 +31,7 @@ import type {
 } from '@shared/types';
 import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
 import { app, BrowserWindow, shell, type WebContents } from 'electron';
+import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
 type AuthInteraction = Parameters<ModelRuntimeType['login']>[2];
@@ -368,8 +369,10 @@ let activeLogin: ActiveLogin | null = null;
 /** 通知除发起窗口外的 renderer：auth.json 账号集合已变化，需要重拉真值快照。 */
 export function broadcastOauthCredentialsChanged(source?: WebContents): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed() || win.webContents === source || win.webContents.isDestroyed()) continue;
-    win.webContents.send(IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
+    if (win.isDestroyed()) continue;
+    const ui = getWindowWebContents(win);
+    if (ui === source || ui.isDestroyed()) continue;
+    sendToWindow(win, IPC_CHANNELS.OAUTH_CREDENTIALS_CHANGED);
   }
 }
 

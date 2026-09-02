@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { UpdateStatus } from '@shared/types/updater';
 import { BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
+import { sendToWindow } from '../../windows/createAppWindow';
 
 const { autoUpdater } = electronUpdater;
 
@@ -86,7 +87,7 @@ class AutoUpdaterService {
     // 下载完成后不再发别的状态,避免更新提示被后续检查冲掉
     if (this.updateDownloaded && status.status !== 'downloaded') return;
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.UPDATER_STATUS, status);
+      sendToWindow(win, IPC_CHANNELS.UPDATER_STATUS, status);
     }
   }
 

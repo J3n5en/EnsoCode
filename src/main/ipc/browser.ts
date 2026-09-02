@@ -1,7 +1,8 @@
 import { parseBrowserViewport } from '@shared/browser/viewport';
 import { IPC_CHANNELS } from '@shared/types';
-import { BrowserWindow, ipcMain } from 'electron';
+import { ipcMain } from 'electron';
 import { browserHost } from '../services/browserHost';
+import { sendToAllWindows } from '../windows/createAppWindow';
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const CLEAR_KINDS = new Set(['cookies', 'cache', 'all']);
@@ -50,15 +51,9 @@ export function registerBrowserHandlers(): void {
     }
   );
   browserHost.onState((conversationId, state) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-      window.webContents.send(IPC_CHANNELS.BROWSER_STATE, { conversationId, state });
-    }
+    sendToAllWindows(IPC_CHANNELS.BROWSER_STATE, { conversationId, state });
   });
   browserHost.onReveal((conversationId) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-      window.webContents.send(IPC_CHANNELS.BROWSER_REVEAL, conversationId);
-    }
+    sendToAllWindows(IPC_CHANNELS.BROWSER_REVEAL, conversationId);
   });
 }

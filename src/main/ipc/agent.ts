@@ -72,6 +72,7 @@ import {
 } from '../services/sessionImport';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
+import { sendToAllWindows, sendToWindow } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
@@ -110,13 +111,10 @@ export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
 }
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-    try {
-      window.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
-    } catch {
-      // renderer 已崩但 webContents 对象还在：Render frame was disposed
-    }
+  try {
+    sendToAllWindows(IPC_CHANNELS.AGENT_EVENT, event);
+  } catch {
+    // renderer 已崩但 webContents 对象还在：Render frame was disposed
   }
   maybeNotify(event);
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
@@ -297,11 +295,7 @@ export function registerAgentHandlers(): void {
       return row ? { host: row.host, user: row.user, name: row.name } : null;
     },
     onChanged: (projection) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-          window.webContents.send(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED, projection);
-        }
-      }
+      sendToAllWindows(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED, projection);
     },
   });
   sourceBindings = new ActiveConversationRegistry({

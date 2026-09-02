@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { app, BrowserWindow, Notification } from 'electron';
 import { readSettings } from '../ipc/settings';
+import { sendToWindow } from '../windows/createAppWindow';
 
 // 文案本地内联：main 段引入 @shared/i18n 会触发 rollup 多入口 chunk 异常
 // （index.js 被打成 0 字节空产物），故不走共享 i18n
@@ -46,7 +47,7 @@ function focusSession(sessionId: string): void {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
-  win.webContents.send(IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION, sessionId);
+  sendToWindow(win, IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION, sessionId);
 }
 
 function notify(sessionId: string, title: string, body: string): void {
