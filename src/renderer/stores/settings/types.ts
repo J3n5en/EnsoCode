@@ -93,7 +93,7 @@ export interface SettingsState {
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
-  /** agent 新完成文件改动时打开右侧 Changes；缺省 true */
+  /** agent 新完成文件改动时打开右侧 Changes；缺省 false */
   openChangesOnFileEdit: boolean;
 
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）

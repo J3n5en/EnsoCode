@@ -66,7 +66,7 @@ export function BrowserView({
   panelApi: DockviewPanelApi;
 }) {
   const { t } = useI18n();
-  const sidebarOpen = useSidePanelStore((s) => s.open);
+  const sidebarOpen = useSidePanelStore((s) => s.uiByConversation[conversationId]?.open ?? false);
   const isActiveConversation = useSessionsStore((s) => s.activeId === conversationId);
   const [state, setState] = useState<BrowserTabState>(EMPTY);
   const [address, setAddress] = useState('');

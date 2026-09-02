@@ -7,7 +7,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { PanelRight } from 'lucide-react';
+import { Maximize2, Minimize2, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
@@ -31,7 +31,7 @@ import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import { SIDE_PANEL_DEFAULT_WIDTH, useSidePanelStore } from '@/stores/sidePanel';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
 const dndCollision: CollisionDetection = (args) => {
@@ -43,9 +43,6 @@ const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 420;
-const SIDE_WIDTH_KEY = 'enso-side-panel-width';
-const SIDE_MIN_WIDTH = 280;
-const SIDE_MAX_WIDTH = 800;
 
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
@@ -56,19 +53,20 @@ export default function App() {
   });
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1');
   const { t } = useI18n();
-  const sideOpen = useSidePanelStore((s) => s.open);
+  const activeConversationId = useSessionsStore((s) => s.activeId);
+  const sideOpen = useSidePanelStore((s) =>
+    activeConversationId ? Boolean(s.uiByConversation[activeConversationId]?.open) : false
+  );
+  const sideWidth = useSidePanelStore(
+    (s) => s.uiByConversation[activeConversationId ?? '']?.width ?? SIDE_PANEL_DEFAULT_WIDTH
+  );
+  const sideFullscreen = useSidePanelStore((s) => s.fullscreen);
   // 壁纸只在浏览器 guest 可见时才让出右栏（挖孔给垫底原生 view），平时铺满全窗
   const browserHole = useSidePanelStore((s) => s.browserGuests > 0);
   const toggleSidePanel = useSidePanelStore((s) => s.toggleOpen);
-  const [sideWidth, setSideWidth] = useState(() => {
-    const saved = Number(localStorage.getItem(SIDE_WIDTH_KEY));
-    return Number.isFinite(saved) && saved >= SIDE_MIN_WIDTH
-      ? Math.min(saved, SIDE_MAX_WIDTH)
-      : 360;
-  });
   useEffect(() => {
-    localStorage.setItem(SIDE_WIDTH_KEY, String(sideWidth));
-  }, [sideWidth]);
+    if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
+  }, [sideOpen, sideFullscreen]);
   useEffect(() => {
     document.documentElement.classList.add('enso-main-shell');
     return () => document.documentElement.classList.remove('enso-main-shell');
@@ -76,7 +74,7 @@ export default function App() {
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
   const handleSideResize = useCallback((deltaX: number) => {
-    setSideWidth((w) => Math.min(SIDE_MAX_WIDTH, Math.max(SIDE_MIN_WIDTH, w - deltaX)));
+    useSidePanelStore.getState().nudgeWidth(-deltaX);
   }, []);
 
   useEffect(() => {
@@ -135,6 +133,7 @@ export default function App() {
           'next-tab',
           'prev-tab',
           'toggle-side-panel',
+          'toggle-side-panel-fullscreen',
           'new-side-tab',
           'close-side-tab',
           'find-in-chat',
@@ -163,6 +162,9 @@ export default function App() {
       } else if (pressed === bindings['toggle-side-panel']) {
         e.preventDefault();
         useSidePanelStore.getState().toggleOpen();
+      } else if (pressed === bindings['toggle-side-panel-fullscreen']) {
+        e.preventDefault();
+        useSidePanelStore.getState().toggleFullscreen();
       } else if (pressed === bindings['new-side-tab']) {
         e.preventDefault();
         addSidePanelTerminal();
@@ -181,6 +183,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [keybindings]);
 
+  useEffect(() => {
+    if (!sideOpen || !sideFullscreen) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (useRemoteNodesStore.getState().activeNodeId !== 'local') return;
+      e.preventDefault();
+      useSidePanelStore.getState().setFullscreen(false);
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [sideOpen, sideFullscreen]);
+
   // 拖拽：侧栏项目排序 / 会话拖入 Composer / 拖到 Pinned 区。
   // 6px 启动阈值：行点击与行内按钮不受影响。onDragEnd 在 Sidebar 的 useDndMonitor 里。
   const dndSensors = useSensors(
@@ -191,7 +205,7 @@ export default function App() {
     <div
       className="relative isolate flex h-screen flex-col"
       style={{
-        ['--enso-side-panel-width' as string]: `${sideOpen && browserHole ? sideWidth : 0}px`,
+        ['--enso-side-panel-width' as string]: `${sideOpen && !sideFullscreen && browserHole ? sideWidth : 0}px`,
       }}
     >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
@@ -203,18 +217,37 @@ export default function App() {
         actions={
           // 远程节点态没有右侧面板，隐藏开关避免死按钮
           remoteNodeActive ? undefined : (
-          <button
-            type="button"
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-              sideOpen ? 'text-foreground' : 'text-muted-foreground'
-            )}
-            onClick={toggleSidePanel}
-            aria-label={t('Toggle side panel')}
-            title={t('Toggle side panel')}
-          >
-            <PanelRight className="h-4 w-4" />
-          </button>
+            <>
+              {sideOpen && (
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                  onClick={() => useSidePanelStore.getState().toggleFullscreen()}
+                  aria-label={
+                    sideFullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')
+                  }
+                  title={sideFullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+                >
+                  {sideFullscreen ? (
+                    <Minimize2 className="h-4 w-4" />
+                  ) : (
+                    <Maximize2 className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+                  sideOpen ? 'text-foreground' : 'text-muted-foreground'
+                )}
+                onClick={toggleSidePanel}
+                aria-label={t('Toggle side panel')}
+                title={t('Toggle side panel')}
+              >
+                <PanelRight className="h-4 w-4" />
+              </button>
+            </>
           )
         }
       />
@@ -231,11 +264,15 @@ export default function App() {
               onToggleCollapse={() => setCollapsed((v) => !v)}
             />
             {!collapsed && <ResizeHandle onResize={handleResize} />}
-            <ChatView />
-            {sideOpen && (
-              <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
-            )}
-            <SidePanel width={sideWidth} resizing={sideResizing} />
+            <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <ChatView />
+              </div>
+              {sideOpen && !sideFullscreen && (
+                <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
+              )}
+              <SidePanel width={sideWidth} resizing={sideResizing} />
+            </div>
           </DndContext>
         )}
       </div>

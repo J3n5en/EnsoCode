@@ -601,6 +601,7 @@ function parseAgentTypeFields(
 const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'toggle-sidebar': 'mod+b',
   'toggle-side-panel': 'mod+j',
+  'toggle-side-panel-fullscreen': 'mod+shift+j',
   'open-settings': 'mod+,',
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',

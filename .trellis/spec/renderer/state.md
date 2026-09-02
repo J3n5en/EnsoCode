@@ -1,6 +1,6 @@
 # 状态管理规范
 
-两个 store：持久化的 `stores/settings/` 与内存态的 `stores/sessions/`。
+两个主 store：持久化的 `stores/settings/` 与内存态的 `stores/sessions/`。右侧面板另有 `stores/sidePanel/`：dock 布局与各会话的开关/宽度 persist 到 localStorage，`fullscreen` 只活在内存里。
 
 ```
 stores/settings/

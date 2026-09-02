@@ -53,6 +53,7 @@ const MAPPED_I18N_KEYS = [
   // GeneralSettings.ACTION_LABEL_KEYS
   'Toggle sidebar',
   'Toggle side panel',
+  'Toggle side panel fullscreen',
   'Open settings',
   'Switch model',
   'Focus chat input',

@@ -1,19 +1,8 @@
 import { useEffect, useRef } from 'react';
+import { fileChangeKeys } from '@/lib/fileChangeKeys';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
-
-function fileChangeKeys(timeline: TimelineItem[]): Set<string> {
-  const keys = new Set<string>();
-  for (const item of timeline) {
-    if (item.kind !== 'tool' || item.state !== 'ok') continue;
-    if (item.name !== 'edit' && item.name !== 'write') continue;
-    if (item.name === 'edit' && !(item.edits && item.edits.length > 0)) continue;
-    if (item.name === 'write' && !item.writeContent) continue;
-    keys.add(item.key);
-  }
-  return keys;
-}
 
 /** 当前会话新完成的 edit/write 时打开 Changes；切换会话只记快照不开面板 */
 export function useOpenChangesOnEdit(

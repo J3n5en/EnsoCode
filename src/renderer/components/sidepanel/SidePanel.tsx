@@ -8,11 +8,20 @@ import type {
 } from 'dockview-react';
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
-import { FolderOpen, GitCompare, Globe, Plus, SquareTerminal, X } from 'lucide-react';
-import { createContext, useContext, useEffect, useState } from 'react';
+import {
+  FolderOpen,
+  GitCompare,
+  Globe,
+  Maximize2,
+  Minimize2,
+  Plus,
+  SquareTerminal,
+  X,
+} from 'lucide-react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useI18n } from '@/i18n';
-import { springStandard } from '@/lib/motion';
+import { easeOutLayout, springStandard } from '@/lib/motion';
 import { addSidePanelBrowser, bindSidePanelDock, closeSidePanelBrowser } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
@@ -279,8 +288,19 @@ function Watermark(props: IWatermarkPanelProps) {
 function GroupRightActions(props: IDockviewHeaderActionsProps) {
   const { t } = useI18n();
   const { conversationId, projectId } = useContext(PanelContext);
+  const fullscreen = useSidePanelStore((s) => s.fullscreen);
+  const toggleFullscreen = useSidePanelStore((s) => s.toggleFullscreen);
   return (
-    <div className="flex h-full items-center">
+    <div className="flex h-full items-center gap-0.5">
+      <button
+        type="button"
+        className="flex h-6 w-6 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        onClick={toggleFullscreen}
+        aria-label={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+        title={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+      >
+        {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+      </button>
       <NewTabMenu
         compact
         onNewTerminal={() => {
@@ -379,7 +399,11 @@ function ConversationDock({
 
 export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
   const { t } = useI18n();
-  const open = useSidePanelStore((s) => s.open);
+  const activeIdForUi = useSessionsStore((s) => s.activeId);
+  const open = useSidePanelStore((s) =>
+    activeIdForUi ? Boolean(s.uiByConversation[activeIdForUi]?.open) : false
+  );
+  const fullscreen = useSidePanelStore((s) => s.fullscreen);
   useEffect(() => {
     const stopReveal = window.electronAPI.browser.onReveal((event) => {
       addSidePanelBrowser({
@@ -399,6 +423,21 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const conversation = useSessionsStore((s) => (s.activeId ? s.conversations[s.activeId] : null));
   const conversations = useSessionsStore((s) => s.conversations);
   const [mountedIds, setMountedIds] = useState<string[]>([]);
+  const [cover, setCover] = useState(fullscreen);
+  const [workspaceW, setWorkspaceW] = useState(0);
+  const asideRef = useRef<HTMLElement>(null);
+  if (fullscreen && !cover) setCover(true);
+  useEffect(() => {
+    const parent = asideRef.current?.parentElement;
+    if (!parent) return;
+    const update = () => setWorkspaceW(parent.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, []);
+  const skipWidthAnim = resizing;
+  const targetW = fullscreen ? workspaceW || width : open ? width : 0;
   const activeId = conversation?.id;
   if (activeId && !mountedIds.includes(activeId)) {
     setMountedIds((ids) => (ids.includes(activeId) ? ids : [...ids, activeId]));
@@ -406,33 +445,41 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   const visibleIds = mountedIds.filter((id) => conversations[id]);
 
   return (
-    <motion.aside
-      initial={false}
-      animate={{ width: open ? width : 0 }}
-      transition={resizing ? { duration: 0 } : springStandard}
-      className={cn(
-        'flex shrink-0 flex-col overflow-hidden',
-        open ? 'border-l bg-transparent' : 'bg-background'
-      )}
-    >
-      <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
-        {visibleIds.length > 0 ? (
-          <div className="relative min-h-0 flex-1">
-            {visibleIds.map((id) => {
-              const conv = conversations[id];
-              return (
-                <div key={id} className={cn('absolute inset-0', id !== activeId && 'hidden')}>
-                  <ConversationDock conversationId={id} projectId={conv.projectId} />
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            {t('Select a conversation to use the side panel.')}
-          </div>
+    <>
+      {cover ? <div className="shrink-0" style={{ width }} aria-hidden /> : null}
+      <motion.aside
+        ref={asideRef}
+        initial={false}
+        animate={{ width: targetW }}
+        transition={skipWidthAnim ? { duration: 0 } : cover ? easeOutLayout : springStandard}
+        onAnimationComplete={() => {
+          if (!fullscreen) setCover(false);
+        }}
+        className={cn(
+          'flex min-h-0 flex-col overflow-hidden bg-background',
+          cover ? 'absolute inset-y-0 right-0' : 'relative shrink-0',
+          open && 'border-l'
         )}
-      </div>
-    </motion.aside>
+      >
+        <div className={cn('flex h-full min-h-0 w-full flex-col', !open && 'hidden')}>
+          {visibleIds.length > 0 ? (
+            <div className="relative min-h-0 flex-1">
+              {visibleIds.map((id) => {
+                const conv = conversations[id];
+                return (
+                  <div key={id} className={cn('absolute inset-0', id !== activeId && 'hidden')}>
+                    <ConversationDock conversationId={id} projectId={conv.projectId} />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              {t('Select a conversation to use the side panel.')}
+            </div>
+          )}
+        </div>
+      </motion.aside>
+    </>
   );
 }

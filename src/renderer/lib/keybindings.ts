@@ -4,6 +4,7 @@
 export const KEYBINDING_ACTIONS = [
   'toggle-sidebar',
   'toggle-side-panel',
+  'toggle-side-panel-fullscreen',
   'open-settings',
   'switch-model',
   'focus-composer',
@@ -19,6 +20,7 @@ export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
 export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'Toggle sidebar',
   'toggle-side-panel': 'Toggle side panel',
+  'toggle-side-panel-fullscreen': 'Toggle side panel fullscreen',
   'open-settings': 'Open settings',
   'switch-model': 'Switch model',
   'focus-composer': 'Focus chat input',
@@ -40,6 +42,7 @@ export const IS_MAC = navigator.platform.startsWith('Mac');
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'mod+b',
   'toggle-side-panel': 'mod+j',
+  'toggle-side-panel-fullscreen': 'mod+shift+j',
   'open-settings': 'mod+,',
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',

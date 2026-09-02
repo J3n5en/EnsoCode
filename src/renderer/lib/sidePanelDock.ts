@@ -37,7 +37,7 @@ function activeDock(): { api: DockviewApi; conversationId: string; projectId: st
 export function addSidePanelTerminal(): void {
   const active = activeDock();
   if (!active) return;
-  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  useSidePanelStore.getState().ensureOpen();
   const count = active.api.panels.length;
   active.api.addPanel({
     id: crypto.randomUUID(),
@@ -50,7 +50,7 @@ export function addSidePanelTerminal(): void {
 export function addSidePanelChanges(opts?: { title?: string }): void {
   const active = activeDock();
   if (!active) return;
-  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  useSidePanelStore.getState().ensureOpen();
   const existing = active.api.getPanel('changes');
   if (existing) {
     existing.focus();
@@ -67,7 +67,7 @@ export function addSidePanelChanges(opts?: { title?: string }): void {
 export function addSidePanelFiles(opts?: { title?: string }): void {
   const active = activeDock();
   if (!active) return;
-  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  useSidePanelStore.getState().ensureOpen();
   const existing = active.api.getPanel('files');
   if (existing) {
     existing.focus();
@@ -92,7 +92,7 @@ export function addSidePanelBrowser(opts?: {
   const conversation = sessions.conversations[conversationId];
   const api = docks.get(conversationId);
   if (!conversation) return;
-  if (!useSidePanelStore.getState().open) useSidePanelStore.getState().toggleOpen();
+  useSidePanelStore.getState().ensureOpen(conversationId);
   const tabId = opts?.tabId ?? `browser:${crypto.randomUUID()}`;
   if (!api) {
     pendingBrowserReveal.push({ conversationId, tabId });
