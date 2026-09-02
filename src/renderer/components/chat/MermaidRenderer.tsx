@@ -5,8 +5,6 @@ import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 
-const MERMAID_CDN_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-
 interface MermaidAPI {
   initialize: (config: Record<string, unknown>) => void;
   render: (id: string, code: string, container?: Element) => Promise<{ svg: string }>;
@@ -20,10 +18,15 @@ let renderSeq = 0;
 async function getMermaid(): Promise<MermaidAPI> {
   if (mermaidInstance) return mermaidInstance;
   if (!mermaidPromise) {
-    mermaidPromise = import(/* @vite-ignore */ MERMAID_CDN_URL).then((mod) => {
-      mermaidInstance = (mod as { default: MermaidAPI }).default;
-      return mermaidInstance;
-    });
+    mermaidPromise = import('mermaid')
+      .then((mod) => {
+        mermaidInstance = mod.default as unknown as MermaidAPI;
+        return mermaidInstance;
+      })
+      .catch((err) => {
+        mermaidPromise = null; // 失败不缓存，允许重试
+        throw err;
+      });
   }
   return mermaidPromise;
 }
