@@ -163,3 +163,15 @@ function isRegisteredSource(id: string, sourcePath: string): boolean { ... }
 
 没有第二道，`instructions:write-source` 就成了「渲染层可写任意文件」的通道。
 新增任何写文件通道时想清楚：**攻击者控制这个参数能写到哪里**。
+
+## browserHost：内嵌浏览器宿主
+
+`browserHost.ts` 持有 `persist:enso[-dev]-browser` 独立 session 与 tab 表（按 agent
+`sessionId` 记「当前 tab」）。worker 经 `browser-invoke` 事件调用，Main 回 `browser-result`。
+
+- URL 门在 `@shared/browser/urlPolicy`：只放 http(s)；`will-navigate` / `will-redirect` /
+  `setWindowOpenHandler` 都过同一道。
+- raw CDP 只在 host 内（截图、设备度量），`BROWSER_OPS` 闭集里没有 `cdp`，不要加。
+- 点 / 填走页内脚本 DOM 事件（`@shared/browser/pageScripts`），ref 只认最近一次快照。
+- 浏览器工具 `executionMode: 'sequential'`：navigate 会清 ref，并行必假 stale。
+- 回合结束（`turn-completed` / `turn-failed`）关未锁且用户没在看的 tab；`parent-ended` 强关。

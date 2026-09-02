@@ -64,3 +64,20 @@ Tailwind 的 `h-11` 会算成 38.5px 而不是 44px，与 `trafficLightPosition:
 - `app.on('browser-window-created')` 统一给所有新窗口挂状态事件，
   见 `ipc/index.ts` 的 `attachWindowStateEvents`。
 - 退出前 `flushSettings()` 落盘未写完的设置（见 [settings-persistence.md](settings-persistence.md)）。
+
+## guest WebContentsView 由 BrowserHost 管，不走 createAppWindow
+
+内嵌浏览器的网页是主窗口 `contentView` 的子 `WebContentsView`，不是 app 窗口：
+不开新 `BrowserWindow`，不进 `createAppWindow`。矩形由渲染层 `browser:set-viewport`
+上报（CSS px = DIP，直接 `setBounds`），可见性由 `browserHost.layout()` 统一决定。
+
+真机踩过的坑（改 `browserHost.ts` 前先读）：
+
+- `contentView` 的子视图**全部画在 renderer 之上**，index 0 也不例外；无头只能 `setVisible(false)`。
+- 隐藏后 view 尺寸归零，页面布局 0×0（快照只剩 inline 元素、截图空）。用 CDP
+  `Emulation.setDeviceMetricsOverride` 撑出 viewport，可见时 `clearDeviceMetricsOverride`。
+- 被遮挡 / 隐藏的 view `capturePage` 报 `UnknownVizError`；截图走 CDP
+  `Page.captureScreenshot` + `captureBeyondViewport`。
+- **首次 `dom-ready` 之前 `debugger.attach` 会让 Main 段错误**（SIGSEGV）。`Tab.ready`
+  门住所有 CDP 调用。
+- 渲染层 CDP 截图只拍 renderer webContents，看不到兄弟 view；验叠层要 `screencapture`。

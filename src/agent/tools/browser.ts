@@ -190,6 +190,20 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
         )
     ),
     define(
+      'browser_tabs',
+      'Browser tabs',
+      'List the browser tab owned by this conversation (url, title, locked state). Empty when no page is open.',
+      schema({}),
+      (_params, signal) => invoker.invoke('tabs', {}, signal)
+    ),
+    define(
+      'browser_lock',
+      'Browser lock',
+      'Lock the current tab while you drive it: it stays open after the turn ends and the user sees an "Agent is browsing" badge. Pass release=true when done.',
+      schema({ release: { type: 'boolean', description: 'Release the lock (default false)' } }),
+      (params, signal) => invoker.invoke('lock', { release: params.release === true }, signal)
+    ),
+    define(
       'browser_screenshot',
       'Browser screenshot',
       'Capture the visible viewport of the current browser tab as an image. For locating elements prefer browser_snapshot refs.',

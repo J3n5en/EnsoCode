@@ -64,6 +64,13 @@ export const zhTranslations: Record<string, string> = {
   'Enter a URL': '输入网址',
   'Navigation failed': '导航失败',
   'Agent is browsing': 'Agent 正在操作',
+  'Browser data': '浏览器数据',
+  'Cookies and site storage of the built-in browser, separate from the app itself.':
+    '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',
+  Cleared: '已清除',
+  'Clear cookies': '清除 Cookie',
+  'Clear cache': '清除缓存',
+  'Clear all browsing data': '清除全部浏览数据',
   'Enter a URL above, or let the agent open a page with browser_navigate.':
     '在上方输入网址，或让 agent 用 browser_navigate 打开页面。',
   'Search...': '搜索…',

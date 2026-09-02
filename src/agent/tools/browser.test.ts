@@ -51,6 +51,8 @@ describe('createBrowserTools', () => {
       'browser_snapshot',
       'browser_click',
       'browser_type',
+      'browser_tabs',
+      'browser_lock',
       'browser_screenshot',
     ]);
     const click = tools.find((tool) => tool.name === 'browser_click')!;

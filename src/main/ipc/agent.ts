@@ -355,6 +355,13 @@ export function registerAgentHandlers(): void {
       handleCapabilityInvoke(workerEvent);
       return;
     }
+    // 回合结束：agent 开的无头 tab 关掉（用户正看的 / 锁住的不动）；parent-ended 强关
+    if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
+      void browserHost.closeForSession(workerEvent.identity.sessionId);
+    }
+    if (workerEvent.type === 'parent-ended') {
+      void browserHost.closeForSession(workerEvent.identity.sessionId, { force: true });
+    }
     if (workerEvent.type === 'browser-invoke') {
       const { identity, requestId, op, params } = workerEvent;
       void browserHost.invoke(identity.sessionId, op, params).then(
