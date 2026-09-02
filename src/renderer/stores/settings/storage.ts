@@ -13,6 +13,10 @@
  */
 const hydratedNames = new Set<string>();
 
+/** 本渲染进程发出的落盘次数。跨窗口同步用它判断重读在途时是否有本地写抢跑。 */
+let writeGeneration = 0;
+export const getWriteGeneration = (): number => writeGeneration;
+
 /** persist 已把磁盘状态 merge 进内存，之后的落盘可放行。读失败（error 有值）不得调用。 */
 export function openPersistWriteGate(name: string): void {
   hydratedNames.add(name);
@@ -30,11 +34,13 @@ export const electronStorage = {
   // 按键写：主进程合并到最新全量,避免与其他 store/窗口的写互相覆盖
   setItem: async (name: string, value: string): Promise<void> => {
     if (!hydratedNames.has(name)) return;
+    writeGeneration++;
     await window.electronAPI.settings.writeKey(name, JSON.parse(value));
   },
 
   removeItem: async (name: string): Promise<void> => {
     if (!hydratedNames.has(name)) return;
+    writeGeneration++;
     await window.electronAPI.settings.writeKey(name, undefined);
   },
 };

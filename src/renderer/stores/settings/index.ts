@@ -20,7 +20,7 @@ import {
   useOauthCredentialStore,
 } from '@/stores/oauthCredentials';
 import { migrateSettings, SETTINGS_VERSION } from './migrate';
-import { electronStorage, openPersistWriteGate } from './storage';
+import { electronStorage, getWriteGeneration, openPersistWriteGate } from './storage';
 import type {
   BackgroundSizeMode,
   BackgroundSourceType,
@@ -665,9 +665,21 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   }
 });
 
+/**
+ * 其它窗口写入后重读磁盘。rehydrate 是 `set(snapshot, true)` 整体替换：若本窗口在重读
+ * 在途时也写了一笔，回包（主进程先答复读、后处理写）会把那一笔从内存里盖掉，下次落盘
+ * 再把旧值写回去。所以只要重读期间本地有写，就再读一次拿含该写入的主进程缓存。
+ */
+async function syncSettingsFromMain(): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const generation = getWriteGeneration();
+    await useSettingsStore.persist.rehydrate();
+    if (getWriteGeneration() === generation) break;
+  }
+  await refreshProjectAuthorityProjection();
+}
+
 // Generic settings is display persistence only; executable project identity is always re-projected by Main.
 window.electronAPI.settings.onChanged(() => {
-  void Promise.resolve(useSettingsStore.persist.rehydrate()).then(
-    refreshProjectAuthorityProjection
-  );
+  void syncSettingsFromMain();
 });

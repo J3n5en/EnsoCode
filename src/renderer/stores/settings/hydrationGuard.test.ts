@@ -94,3 +94,33 @@ describe('settings persist hydration guard', () => {
     expect(writtenProviders().at(-1)).toEqual(providers);
   });
 });
+
+describe('settings sync from another window', () => {
+  it('re-reads when a local write raced the in-flight rehydrate, so the local change survives', async () => {
+    const store = settingsModule.useSettingsStore;
+    const onChanged = (
+      window as unknown as { electronAPI: { settings: { onChanged: ReturnType<typeof vi.fn> } } }
+    ).electronAPI.settings.onChanged;
+    const listener = onChanged.mock.calls[0]?.[0] as (() => void) | undefined;
+    expect(listener).toBeTypeOf('function');
+
+    const onDisk = (theme: string) => ({
+      'enso-settings': { version: SETTINGS_VERSION, state: { ...store.getState(), theme } },
+    });
+    // 另一窗口写入 → 本窗口开始重读；回包在途时用户本地改了主题
+    readSettings.mockClear();
+    listener?.();
+    expect(readSettings).toHaveBeenCalledTimes(1);
+    store.getState().setTheme('dark');
+    await Promise.resolve();
+    // 主进程按 IPC 顺序先答复重读（旧快照 system），再处理我们的 writeKey
+    resolveRead(onDisk('system'));
+    await flush();
+
+    // 必须再读一次拿到含本地写入的最新缓存，而不是停在旧快照上
+    expect(readSettings).toHaveBeenCalledTimes(2);
+    resolveRead(onDisk('dark'));
+    await flush();
+    expect(store.getState().theme).toBe('dark');
+  });
+});
