@@ -25,6 +25,12 @@ interface TerminalViewProps {
   onTitle?: (title: string) => void;
 }
 
+/** 背景图模式下 xterm 自身不刷底色，由 wrapper 用应用底色 + 通用面板 alpha 刷一层 */
+function resolveTerminalTheme(name: string, backgroundImageEnabled: boolean) {
+  const theme = getXtermTheme(name);
+  return backgroundImageEnabled ? withTransparentBackground(theme) : theme;
+}
+
 /** 把 registry 里的 xterm host 挂进视图;切走只 detach,实例与 pty 都保留 */
 export function TerminalView({ termId, conversationId, projectId, onTitle }: TerminalViewProps) {
   const { t } = useI18n();
@@ -43,9 +49,6 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
   const bgImageEnabled = useSettingsStore((s) => s.backgroundImageEnabled);
   const [searchOpen, setSearchOpen] = useState(false);
-  /** 背景图模式下 xterm 自身不刷底色，由 wrapper 的 --terminal-bg + --bg-code-alpha 刷一层 */
-  const xtermTheme = (name: string) =>
-    bgImageEnabled ? withTransparentBackground(getXtermTheme(name)) : getXtermTheme(name);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -62,7 +65,7 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
       }
       const settings = useSettingsStore.getState();
       const instance = attachTerminal(termId, wrapper, {
-        theme: xtermTheme(settings.terminalTheme),
+        theme: resolveTerminalTheme(settings.terminalTheme, settings.backgroundImageEnabled),
         fontFamily: settings.terminalFontFamily,
         fontSize: settings.terminalFontSize,
       });
@@ -111,9 +114,11 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   }, [termId]);
 
   useEffect(() => {
-    updateTerminalAppearance(xtermTheme(terminalTheme), fontFamily, fontSize);
-    // xtermTheme 闭包仅依赖 bgImageEnabled
-    // biome-ignore lint/correctness/useExhaustiveDependencies: 见上
+    updateTerminalAppearance(
+      resolveTerminalTheme(terminalTheme, bgImageEnabled),
+      fontFamily,
+      fontSize
+    );
   }, [terminalTheme, fontFamily, fontSize, bgImageEnabled]);
 
   const findNext = useCallback(
