@@ -261,3 +261,29 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed** — 相关测试 310 绿；全量 `pnpm test` 有 41 个 HEAD 上已存在的失败（electron CJS 命名导出 mock 问题，与本次无关）。
+
+
+## Session 8: Browser Design Mode 圈选与涂鸦落地
+
+**Date**: 2026-09-02
+**Task**: Browser Design Mode 圈选与涂鸦落地
+**Branch**: `dev`
+
+### Summary
+
+圈选落到主 Composer ui-element chip+绑定图；涂鸦冻帧可调裁切后只插无 id 附件图；修浮层遮挡/BoxSelect/冻帧丢 pointerup；Mermaid 改本地包并收紧 CSP。已归档 09-02-browser-design-mode 与 scribble。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e89b767` | (see git log) |
+| `575ba9c` | (see git log) |
+| `aa75b9d` | (see git log) |
+| `8e8f135` | (see git log) |
+| `cb68a58` | (see git log) |
+| `8e5bdce` | (see git log) |
+
+### Status
+
+[OK] **Completed**
