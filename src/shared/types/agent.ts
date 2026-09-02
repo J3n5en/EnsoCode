@@ -517,6 +517,11 @@ export interface TokenUsage {
 export interface TurnPerf {
   /** 该 step 墙钟耗时（ms） */
   runMs: number;
+  /**
+   * 整轮墙钟耗时（ms）：本轮首 step 开始→本 step 完成。
+   * 仅多 step 轮次的末 step（已完结）带；单 step 轮次与 runMs 重复，不带。
+   */
+  turnMs?: number;
   /** 首 token 延迟（ms） */
   ttftMs?: number;
   /** 解码吞吐（tok/s） */

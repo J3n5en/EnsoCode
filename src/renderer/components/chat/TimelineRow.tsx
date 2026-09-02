@@ -30,7 +30,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
-import { useI18n } from '@/i18n';
+import { type TFunction, useI18n } from '@/i18n';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -48,7 +48,13 @@ import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
 
 const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
-  a === b || (!!a && !!b && a.runMs === b.runMs && a.ttftMs === b.ttftMs && a.tps === b.tps);
+  a === b ||
+  (!!a &&
+    !!b &&
+    a.runMs === b.runMs &&
+    a.turnMs === b.turnMs &&
+    a.ttftMs === b.ttftMs &&
+    a.tps === b.tps);
 
 interface TimelineRowProps {
   item: TimelineItem;
@@ -695,6 +701,7 @@ function TextRow({
   searchQuery?: string;
   activeNth?: number;
 }) {
+  const { t } = useI18n();
   return (
     <div className="group text-sm">
       <Markdown
@@ -707,7 +714,7 @@ function TextRow({
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <CopyButton text={item.text} />
           {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
-          {item.perf && <span>· {formatPerf(item.perf)}</span>}
+          {item.perf && <span>· {formatPerf(item.perf, t)}</span>}
         </div>
       )}
     </div>
@@ -744,10 +751,13 @@ const secs = (ms: number): string => {
   const s = ms / 1000;
   return s < 10 ? String(Math.round(s * 10) / 10) : String(Math.round(s));
 };
-function formatPerf(perf: TurnPerf): string {
+/** 末 step 读数：本 step 耗时 · TTFT · tok/s；多 step 轮次再附「总计 Xs」= 整轮墙钟（含工具执行） */
+function formatPerf(perf: TurnPerf, t: TFunction): string {
   const parts = [`${secs(perf.runMs)}s`];
   if (perf.ttftMs !== undefined) parts.push(`TTFT ${secs(perf.ttftMs)}s`);
   if (perf.tps !== undefined) parts.push(`${Math.round(perf.tps)} tok/s`);
+  if (perf.turnMs !== undefined)
+    parts.push(t('total {{duration}}', { duration: formatDuration(perf.turnMs) }));
   return parts.join(' · ');
 }
 

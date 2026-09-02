@@ -679,6 +679,7 @@ export const zhTranslations: Record<string, string> = {
   Todos: '任务清单',
   '{{count}} tool calls': '{{count}} 个工具调用',
   'ran {{count}} commands': '跑了 {{count}} 条命令',
+  'total {{duration}}': '总计 {{duration}}',
   'read {{count}} files': '读了 {{count}} 个文件',
   'searched {{count}} times': '搜索 {{count}} 次',
   '{{count}} other calls': '其他 {{count}} 次调用',

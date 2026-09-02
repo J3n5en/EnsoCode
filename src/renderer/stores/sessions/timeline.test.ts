@@ -145,6 +145,93 @@ describe('buildTimeline', () => {
     ]);
   });
 
+  it('多 step 轮次：末 step 的 perf 带整轮总耗时 turnMs（首 step 开始→末 step 完成），中间 step 不带', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          stopReason: 'toolUse',
+          timing: { stepStartMs: 1_000, firstTokenMs: 1_500, completedMs: 3_000 },
+          content: [
+            { type: 'text', text: '先看看' },
+            { type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'read',
+          isError: false,
+          content: [{ type: 'text', text: 'body' }],
+        },
+        {
+          role: 'assistant',
+          stopReason: 'stop',
+          timing: { stepStartMs: 60_000, firstTokenMs: 61_000, completedMs: 87_000 },
+          content: [{ type: 'text', text: '完成' }],
+        },
+      ],
+      false
+    );
+    const texts = timeline.filter((item) => item.kind === 'text');
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toMatchObject({ perf: { runMs: 2_000 } });
+    expect(texts[0].kind === 'text' && texts[0].perf?.turnMs).toBeUndefined();
+    expect(texts[1]).toMatchObject({ perf: { runMs: 27_000, turnMs: 86_000 } });
+  });
+
+  it('单 step 轮次不带 turnMs（与 runMs 重复）；新一轮 user 消息重置轮起点', () => {
+    const timeline = buildTimeline(
+      [
+        user('a'),
+        {
+          role: 'assistant',
+          stopReason: 'stop',
+          timing: { stepStartMs: 1_000, completedMs: 2_000 },
+          content: [{ type: 'text', text: '一' }],
+        },
+        user('b'),
+        {
+          role: 'assistant',
+          stopReason: 'stop',
+          timing: { stepStartMs: 10_000, completedMs: 12_000 },
+          content: [{ type: 'text', text: '二' }],
+        },
+      ],
+      false
+    );
+    const texts = timeline.filter((item) => item.kind === 'text');
+    expect(texts[0]).toMatchObject({ perf: { runMs: 1_000 } });
+    expect(texts[1]).toMatchObject({ perf: { runMs: 2_000 } });
+    for (const item of texts) {
+      expect(item.kind === 'text' && item.perf?.turnMs).toBeUndefined();
+    }
+  });
+
+  it('轮次仍在 running（末 step 未完成）时不带 turnMs', () => {
+    const timeline = buildTimeline(
+      [
+        user('a'),
+        {
+          role: 'assistant',
+          stopReason: 'toolUse',
+          timing: { stepStartMs: 1_000, completedMs: 2_000 },
+          content: [{ type: 'text', text: '一' }],
+        },
+        {
+          role: 'assistant',
+          stopReason: 'pending',
+          timing: { stepStartMs: 5_000 },
+          content: [{ type: 'text', text: '二' }],
+        },
+      ],
+      true
+    );
+    const texts = timeline.filter((item) => item.kind === 'text');
+    expect(texts[1].kind === 'text' && texts[1].perf).toBeUndefined();
+  });
+
   it('空内容的 part 不产出条目', () => {
     const timeline = buildTimeline(
       [{ role: 'assistant', content: [{ type: 'text', text: '' }, { type: 'unknown' }] }],
@@ -447,16 +534,21 @@ describe('工具路径摘要相对化', () => {
   const cwd = '/Users/j3n5en/project/enso-code';
   const tool = (args: Record<string, unknown>, root?: string) =>
     buildTimeline(
-      [{ role: 'assistant', content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: args }] }],
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: args }],
+        },
+      ],
       false,
       [],
       root
     )[0];
 
   it('项目内绝对路径显示相对路径', () => {
-    expect(
-      tool({ path: `${cwd}/src/renderer/components/chat/Markdown.tsx` }, cwd)
-    ).toMatchObject({ summary: 'src/renderer/components/chat/Markdown.tsx' });
+    expect(tool({ path: `${cwd}/src/renderer/components/chat/Markdown.tsx` }, cwd)).toMatchObject({
+      summary: 'src/renderer/components/chat/Markdown.tsx',
+    });
   });
 
   it('file_path 同样相对化', () => {
@@ -487,7 +579,9 @@ describe('工具路径摘要相对化', () => {
         [
           {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'pnpm test' } }],
+            content: [
+              { type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'pnpm test' } },
+            ],
           },
         ],
         false,

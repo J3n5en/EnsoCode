@@ -157,8 +157,9 @@ function findLastActivePartIndex(content: ProjectedMessage['content']): number {
   return -1;
 }
 
-/** 从该 step 的计时打点算 hover 操作条读数；打点不全则无对应字段 */
-function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
+/** 从该 step 的计时打点算 hover 操作条读数；打点不全则无对应字段。
+ * turnStartMs 为本轮首 step 的起点，仅在「多 step 轮次的末 step」传入→ 附带整轮总耗时 turnMs */
+function perfFromTiming(message: ProjectedMessage, turnStartMs?: number): TurnPerf | undefined {
   const timing = message.timing;
   if (!timing?.completedMs) return undefined;
   const { stepStartMs, firstTokenMs, completedMs } = timing;
@@ -166,6 +167,7 @@ function perfFromTiming(message: ProjectedMessage): TurnPerf | undefined {
   const decodeMs = firstTokenMs !== undefined ? completedMs - firstTokenMs : 0;
   return {
     runMs: Math.max(0, completedMs - stepStartMs),
+    ...(turnStartMs !== undefined ? { turnMs: Math.max(0, completedMs - turnStartMs) } : {}),
     ...(firstTokenMs !== undefined ? { ttftMs: Math.max(0, firstTokenMs - stepStartMs) } : {}),
     ...(out > 0 && decodeMs > 0 ? { tps: out / (decodeMs / 1000) } : {}),
   };
@@ -215,9 +217,20 @@ function buildMessageTimeline(
     }
   }
   const items: TimelineItem[] = [];
+  // 每条消息之后的首个非 toolResult 角色（反向一次扫完）：用于判定「本轮末 step」
+  const nextTurnRole: (string | undefined)[] = new Array(messages.length);
+  for (let i = messages.length - 1, seen: string | undefined; i >= 0; i--) {
+    nextTurnRole[i] = seen;
+    if (messages[i].role !== 'toolResult') seen = messages[i].role;
+  }
+  // 整轮计时：首 step 起点与本轮已见 step 数；遇 user 消息重置
+  let turnStartMs: number | undefined;
+  let turnSteps = 0;
   messages.forEach((message, messageIndex) => {
     const isLastMessage = messageIndex === messages.length - 1;
     if (message.role === 'user') {
+      turnStartMs = undefined;
+      turnSteps = 0;
       const text = partText(message);
       const images = message.content.filter((part) => part.type === 'image');
       // 后台任务完成的合成注入：不按用户气泡渲染，转为系统通知行
@@ -241,6 +254,12 @@ function buildMessageTimeline(
     if (message.role === 'toolResult') return;
     if (message.role !== 'assistant') return;
 
+    // 本轮末 step（后面只剩 toolResult 或已到新一轮 user）且轮内有多个 step 时，正文读数附带整轮总耗时
+    turnSteps += 1;
+    if (turnStartMs === undefined && message.timing) turnStartMs = message.timing.stepStartMs;
+    const isLastStepOfTurn =
+      nextTurnRole[messageIndex] === undefined || nextTurnRole[messageIndex] === 'user';
+    const perfTurnStart = isLastStepOfTurn && turnSteps > 1 ? turnStartMs : undefined;
     // 「流式中」= 最后一个有内容的 part：pi 流式时 thinking/text 后面常已跟着
     // 空占位 part，按「最后一个 part」判会把正在生成的块误判为已完结
     const lastActiveIndex = findLastActivePartIndex(message.content);
@@ -260,7 +279,7 @@ function buildMessageTimeline(
               text: part.text,
               streaming,
               timestamp: message.timestamp,
-              perf: perfFromTiming(message),
+              perf: perfFromTiming(message, perfTurnStart),
             });
           return;
         case 'thinking':
