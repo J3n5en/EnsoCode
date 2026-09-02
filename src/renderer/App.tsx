@@ -197,6 +197,8 @@ export default function App() {
       <TitleBar
         title="EnsoCode"
         actions={
+          // 远程节点态没有右侧面板，隐藏开关避免死按钮
+          remoteNodeActive ? undefined : (
           <button
             type="button"
             className={cn(
@@ -209,6 +211,7 @@ export default function App() {
           >
             <PanelRight className="h-4 w-4" />
           </button>
+          )
         }
       />
       <UpdateBanner />
