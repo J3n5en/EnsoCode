@@ -287,3 +287,29 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: 归档已落地的侧栏与 SSH 任务
+
+**Date**: 2026-09-02
+**Task**: 归档已落地的侧栏与 SSH 任务
+**Branch**: `dev`
+
+### Summary
+
+核对后归档 9 个已落地 in_progress：内嵌 Browser+DevTools、Changes/Files/Terminal、SSH 远程项目/连接/目录浏览、capability open-settings。active 清零。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e89b767` | (see git log) |
+| `575ba9c` | (see git log) |
+| `aa75b9d` | (see git log) |
+| `8e8f135` | (see git log) |
+| `cb68a58` | (see git log) |
+| `8e5bdce` | (see git log) |
+
+### Status
+
+[OK] **Completed**

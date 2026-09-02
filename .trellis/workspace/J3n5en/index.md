@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-09-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~289 | Active |
+| `journal-1.md` | ~315 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-09-02 | 归档已落地的侧栏与 SSH 任务 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
 | 8 | 2026-09-02 | Browser Design Mode 圈选与涂鸦落地 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
 | 7 | 2026-09-02 | 桌面端连接远程 EnsoCode 节点（guest 角色） | `62c8ec8`, `69ab297`, `4bed2e7`, `021b2b3`, `267e899`, `a0872ec`, `6d158cd`, `32122d0`, `f4416ae`, `b6154d8`, `39f14c2`, `3703464`, `d30ff91`, `cbc1884` | `dev` |
 | 6 | 2026-08-30 | dnd-kit 拖拽:项目排序 / 拖拽转 mention / 拖会话置顶 / Pinned 组内手动排序 | `0df3fb6`, `2a106f3`, `1c59c9d`, `5f26e5e`, `9318826`, `2392450`, `12e11ff` | `feat/dnd-kit-drag` |
