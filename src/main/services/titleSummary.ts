@@ -13,13 +13,19 @@ function asModelRef(value: unknown): DefaultModelRef | null {
   return { providerId, modelId };
 }
 
-/** 回退链：独立标题模型 → 全局默认模型（去重；均无 / 形状坏则为空 = 静默跳过） */
+/** 回退链：独立标题模型 → 全局默认 → 当前会话模型（去重；全空则静默跳过）。
+ * 会话模型来自渲染层（不可信），同样走收窄；很多用户从不设全局默认，只在会话里选模，
+ * 没有这一级兑底功能对他们永远不生效。 */
 export function titleModelCandidates(
-  state: Record<string, unknown> | undefined
+  state: Record<string, unknown> | undefined,
+  sessionModel?: DefaultModelRef
 ): DefaultModelRef[] {
-  if (!state) return [];
   const candidates: DefaultModelRef[] = [];
-  for (const ref of [asModelRef(state.titleSummaryModel), asModelRef(state.defaultModel)]) {
+  for (const ref of [
+    asModelRef(state?.titleSummaryModel),
+    asModelRef(state?.defaultModel),
+    asModelRef(sessionModel),
+  ]) {
     if (!ref) continue;
     if (candidates.some((c) => c.providerId === ref.providerId && c.modelId === ref.modelId)) {
       continue;

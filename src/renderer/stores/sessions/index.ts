@@ -1540,7 +1540,10 @@ export const useSessionsStore = create<SessionsState>()(
               const baseline = get().conversations[id]?.title;
               if (baseline) {
                 pendingTitleBaselines.set(id, baseline);
-                void window.electronAPI.agent.summarizeTitle(id, titleSummarySource);
+                void window.electronAPI.agent.summarizeTitle(id, titleSummarySource, {
+                  providerId: target.providerId,
+                  modelId: target.modelId,
+                });
               }
             }
           }

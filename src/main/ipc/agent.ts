@@ -469,6 +469,16 @@ export function registerAgentHandlers(): void {
       if (!isNonEmptyString(conversationId) || !isNonEmptyString(text)) {
         return { ok: false, error: 'invalid title summary request' };
       }
+      // 会话模型是回退链末级：只收 id，凭证照样由 Main 补全；形状坏则当作未传
+      const sessionModelRecord = asRecord(record?.sessionModel);
+      const sessionModel =
+        isNonEmptyString(sessionModelRecord?.providerId) &&
+        isNonEmptyString(sessionModelRecord?.modelId)
+          ? {
+              providerId: sessionModelRecord.providerId,
+              modelId: sessionModelRecord.modelId,
+            }
+          : undefined;
       const state = (
         readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
       )?.state;
@@ -482,7 +492,7 @@ export function registerAgentHandlers(): void {
       } catch {
         return { ok: false, error: 'model credentials unavailable' };
       }
-      for (const candidate of titleModelCandidates(state)) {
+      for (const candidate of titleModelCandidates(state, sessionModel)) {
         const resolved = resolveModelSelection(
           candidate.providerId,
           candidate.modelId,
