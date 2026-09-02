@@ -171,7 +171,13 @@ function isRegisteredSource(id: string, sourcePath: string): boolean { ... }
 
 - URL 门在 `@shared/browser/urlPolicy`：只放 http(s)；`will-navigate` / `will-redirect` /
   `setWindowOpenHandler` 都过同一道。
-- raw CDP 只在 host 内（截图、设备度量），`BROWSER_OPS` 闭集里没有 `cdp`，不要加。
-- 点 / 填走页内脚本 DOM 事件（`@shared/browser/pageScripts`），ref 只认最近一次快照。
+- 模型可用的 `browser_cdp` 只走 `@shared/browser/cdpPolicy.assertAllowedCdpMethod`：给调试面
+  （Runtime / DOM / CSS / Profiler / Performance / Log / Network.enable），拒 `Input.*`、Cookie、
+  `Page.navigate`、下载、`Target.*` / `Browser.*` / `Storage.*`。点击 / 输入 / 导航一律走专用工具，
+  要放宽先改策略测试再改名单。host 自用的 CDP（截图、设备度量）不过这道门。
+- 点 / 填 / 键 / 滚 / 选 / 拖走页内脚本 DOM 事件（`@shared/browser/pageScripts`），ref 只认最近一次快照。
+  按坐标命中（`click_xy` / `drag`）用 `elementFromPoint` 前要先隐掉锁定遮罩，否则命中的是遮罩。
+- 锁定两层防：页内 `PAGE_LOCK_OVERLAY_SCRIPT` 吞用户指针 + renderer 把锁定当 `covered` 让 guest 沉底，
+  hover 遮罩与「接管」按钮画在 renderer（见 windows.md 层级一节）。
 - 浏览器工具 `executionMode: 'sequential'`：navigate 会清 ref，并行必假 stale。
 - 回合结束（`turn-completed` / `turn-failed`）关未锁且用户没在看的 tab；`parent-ended` 强关。

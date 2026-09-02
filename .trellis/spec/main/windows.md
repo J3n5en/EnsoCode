@@ -81,4 +81,13 @@ Tailwind 的 `h-11` 会算成 38.5px 而不是 44px，与 `trafficLightPosition:
 - **首次 `dom-ready` 之前 `debugger.attach` 会让 Main 段错误**（SIGSEGV）。`Tab.ready`
   门住所有 CDP 调用。
 - 渲染层 CDP 截图只拍 renderer webContents，看不到兄弟 view；验叠层要 `screencapture`。
-- **guest 垫在工作区下面**：`contentView.addChildView(view, 0)`，网页区 HTML 挖透明洞（`html.enso-main-shell` body 透明 + `.enso-guest-hole`）。菜单仍在 renderer 里，自然盖住网页。不要把 guest 叠到工作区上面，也不要为弹层整页隐藏 guest。
+- **层级按 `covered` 动态切**（`browserHost.layout()`）。工作区 renderer 是一整块 NSView，
+  **透明像素照样吃掉 hit-test**——guest 垫在它下面时用户点不到网页（锁没锁都一样，真机踩过）。
+  所以：平时 guest `addChildView(view)` 叠在工作区**之上**，用户可直接操作；只有 renderer
+  报 `covered=true` 时才 `addChildView(view, 0)` 沉到底，靠 HTML 透明洞（`.enso-guest-hole`）
+  透出网页，让菜单 / Dialog / 锁定遮罩盖在上面。
+- `covered` 由 `BrowserView.tsx` 的 rAF tick 算：`state.locked`，或 body 下 `#root` 之外任一
+  portal 元素的盒子与网页矩形相交（`overlayCover.ts`）。新增浮层组件只要 portal 到 body 就自动
+  生效，不要为弹层整页隐藏 guest，也不要用原生菜单绕。
+- 验证「用户能不能点网页」必须发 **OS 级鼠标事件**（CGEvent / `cliclick`）；CDP
+  `Input.dispatchMouseEvent` 直接进 webContents，绕过 NSView hit-test，验不出层级问题。
