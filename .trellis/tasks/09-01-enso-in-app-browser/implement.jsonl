@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/main/index.md", "reason": "Main 分层：BrowserHost 进 services，不碰 ipcMain"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "可见面板 IPC 三点式；入参 unknown"}
+{"file": ".trellis/spec/main/windows.md", "reason": "guest view 不走 createAppWindow"}
+{"file": ".trellis/spec/main/services.md", "reason": "worker 协议与特权回跳"}
+{"file": ".trellis/spec/shared/types.md", "reason": "parseAgentCommand 三方契约，禁止静默丢"}
+{"file": ".trellis/spec/testing.md", "reason": "纯逻辑 TDD；窗口行为不单测"}
+{"file": ".trellis/tasks/09-01-enso-in-app-browser/research/cursor-route.md", "reason": "Cursor persist 与 Enso 落点"}

@@ -83,20 +83,24 @@ guest 页不能当 React 子树，也不能用普通 iframe（session / 沙箱�
 
 ## 验收
 
-- [ ] 右侧 `New tab` 能开 Browser；面板可见时能看到真实网页（不是空白占位）
-- [ ] 侧栏关着或切到 Terminal/Files 时，网页不挡其它面板
-- [ ] 拖侧栏宽度 / 缩放窗口后，网页盒子仍对齐 Browser 面板
+- [x] 右侧 `New tab` 能开 Browser；面板可见时能看到真实网页（不是空白占位）
+- [x] 侧栏关着或切到 Terminal/Files 时，网页不挡其它面板
+- [x] 拖侧栏宽度 / 缩放窗口后，网页盒子仍对齐 Browser 面板
 - [ ] 打开 `http://127.0.0.1:<port>`，snapshot 有可点 `ref`，click 后 URL 或树变化
-- [ ] Agent `navigate` 自动打开右侧 Browser 面板并显示网页
+- [x] Agent `navigate` 自动打开右侧 Browser 面板并显示网页
 - [ ] 在内嵌页登录后重启 Enso，同一 origin Cookie 仍在（persist 目录有 `enso-*-browser`）
 - [ ] 主窗口 Cookie 登的站，内嵌页看不到（session 切开）
-- [ ] `file://` / `javascript:` 被拒且有明确错误
+- [x] `file://` / `javascript:` 被拒且有明确错误
 - [ ] 非环回 origin 第一次 `navigate` 走审批；拒绝则不导航
-- [ ] 过期 `ref` 不乱点，返回可理解错误
+- [x] 过期 `ref` 不乱点，返回可理解错误
 - [ ] 设置「清全部」后该站 Cookie 消失
-- [ ] 用户没配任何 MCP server 也能看到上述工具
-- [ ] 改协议时 `parseAgentCommand` / 构造 / 消费三处同步，脏输入丢弃有日志
-- [ ] 可单测逻辑（URL 策略、ref 解析、命令收窄）先红后绿
+- [x] 用户没配任何 MCP server 也能看到上述工具
+- [x] 改协议时 `parseAgentCommand` / 构造 / 消费三处同步，脏输入丢弃有日志
+- [x] 可单测逻辑（URL 策略、ref 解析、命令收窄）先红后绿
+- [x] 未锁定时用户能直接点/滚网页（OS 级点击进 guest；菜单开着时 guest 沉底、点击关菜单）
+- [x] 锁定时 hover 出遮罩 + 居中「接管」，工具栏/地址栏禁用，右上角显示「Enso 正在接管」
+- [x] `browser_cdp` 放 Runtime.evaluate，拒 `Input.dispatchMouseEvent`（真机）
+- [ ] 待手验：91 Cookie 跨重启、92 session 隔离、94 首次 origin 审批、96 设置清全部
 
 ## 分期
 
