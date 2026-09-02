@@ -212,3 +212,37 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 桌面端连接远程 EnsoCode 节点（guest 角色）
+
+**Date**: 2026-09-02
+**Task**: 桌面端连接远程 EnsoCode 节点（guest 角色）
+**Branch**: `dev`
+
+### Summary
+
+对齐 Multica 多机模型：桌面 A 粘贴桌面 B 的配对链接即可作为 guest 连入 B，浏览/操控 B 的会话（列表、聊天、新建、审批/提问、模型切换）。复用现有 pair 中继与手机协议，零中继改动。main 新增 pairGuest/nodeStore/NODES_* IPC（凭据 safeStorage、与 pairHost 对称）；手机 client 的投影逻辑抽成 shared/pair/guestProjection 供两端共用；renderer 新增 remoteNodes store（纯 reducer + effects）、NodeSwitcher、RemoteNodeView，ChatHostContext 隔离时间线对本机 store 的直接读取；设置页「手机」扩为「设备」。协议加 host-info 帧作默认节点名，旧版 host 回落「节点 N」。同机双实例 + 真实中继 + fake provider 走完 AC1–AC10，修了 hostname 采用、重载后重订阅、远程态残留面板开关三处。加 ENSO_CDP_PORT 便于双实例验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62c8ec8` | (see git log) |
+| `69ab297` | (see git log) |
+| `4bed2e7` | (see git log) |
+| `021b2b3` | (see git log) |
+| `267e899` | (see git log) |
+| `a0872ec` | (see git log) |
+| `6d158cd` | (see git log) |
+| `32122d0` | (see git log) |
+| `f4416ae` | (see git log) |
+| `b6154d8` | (see git log) |
+| `39f14c2` | (see git log) |
+| `3703464` | (see git log) |
+| `d30ff91` | (see git log) |
+| `cbc1884` | (see git log) |
+
+### Status
+
+[OK] **Completed**

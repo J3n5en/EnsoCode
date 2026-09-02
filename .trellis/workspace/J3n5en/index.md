@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-08-30
+- **Total Sessions**: 7
+- **Last Active**: 2026-09-02
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~214 | Active |
+| `journal-1.md` | ~248 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-09-02 | 桌面端连接远程 EnsoCode 节点（guest 角色） | `62c8ec8`, `69ab297`, `4bed2e7`, `021b2b3`, `267e899`, `a0872ec`, `6d158cd`, `32122d0`, `f4416ae`, `b6154d8`, `39f14c2`, `3703464`, `d30ff91`, `cbc1884` | `dev` |
 | 6 | 2026-08-30 | dnd-kit 拖拽:项目排序 / 拖拽转 mention / 拖会话置顶 / Pinned 组内手动排序 | `0df3fb6`, `2a106f3`, `1c59c9d`, `5f26e5e`, `9318826`, `2392450`, `12e11ff` | `feat/dnd-kit-drag` |
 | 4 | 2026-08-30 | 重启后 coworker 级联恢复与死 tab 修复 | `ca96deb`, `241fd72`, `5cd4575`, `46fe22d`, `68d09a1`, `0e8fc11`, `ad0f7b5` | `dev` |
 | 3 | 2026-08-30 | 子代理指定模型 + ask 通知修复 + 侧栏置顶/归档 | `01dc99c`, `0bad2f9`, `ef9c928`, `07e9a04`, `58c99f5`, `e898e80`, `2d67e8c`, `c854b38`, `4f0a1d3`, `9bece08` | `dev` |
