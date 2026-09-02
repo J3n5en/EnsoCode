@@ -24,6 +24,7 @@ import type {
 } from '@shared/types/nodes';
 import { powerMonitor, safeStorage } from 'electron';
 import {
+  adoptHostname,
   loadNodes,
   type RemoteNode,
   removeNode as removeFromList,
@@ -336,11 +337,19 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   }
   if (typeof payload !== 'object' || payload === null || typeof payload.type !== 'string') return;
   switch (payload.type) {
-    case 'host-info':
+    case 'host-info': {
       conn.hostname = payload.hostname;
       conn.appVersion = payload.appVersion;
+      // 默认「节点 N」换成对方主机名（用户改过名的不动）
+      const next = adoptHostname(loadNodes(), conn.node.nodeId, payload.hostname);
+      const updated = next.find((n) => n.nodeId === conn.node.nodeId);
+      if (updated && updated.label !== conn.node.label) {
+        saveNodes(next);
+        conn.node = updated;
+      }
       notifyStatus();
       return;
+    }
     // 桌面保留自己的主题；桌面没有 Web Push
     case 'appearance':
     case 'push-config':

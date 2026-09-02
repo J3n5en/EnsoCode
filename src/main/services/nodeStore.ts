@@ -31,6 +31,8 @@ function isSecureStorageAvailable(): boolean {
 
 // ── 纯函数 ────────────────────────────────────────────────────────────
 
+const DEFAULT_LABEL_RE = /^节点 \d+$/;
+
 /** 最小可用的「节点 N」：默认名有洞时填洞，不与自定义名相撞 */
 function defaultLabel(list: readonly RemoteNode[]): string {
   const used = new Set(list.map((n) => n.label));
@@ -57,6 +59,22 @@ export function upsertNode(
     ...list,
     { ...device, nodeId: device.pairId, label: trimmed || defaultLabel(list) },
   ];
+}
+
+/**
+ * 首次收到 host-info：仍是默认「节点 N」的节点改用对方 hostname；用户自定义过的名字不动。
+ * 配对时 claim 的应答里没有对方主机名，只能连上后补。
+ */
+export function adoptHostname(
+  list: readonly RemoteNode[],
+  nodeId: string,
+  hostname: string
+): RemoteNode[] {
+  const trimmed = hostname.trim();
+  if (!trimmed) return [...list];
+  return list.map((n) =>
+    n.nodeId === nodeId && DEFAULT_LABEL_RE.test(n.label) ? { ...n, label: trimmed } : n
+  );
 }
 
 export function removeNode(list: readonly RemoteNode[], nodeId: string): RemoteNode[] {

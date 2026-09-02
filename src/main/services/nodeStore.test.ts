@@ -67,6 +67,18 @@ describe('节点列表纯函数', () => {
     expect(list[0].label).toBe('办公室');
   });
 
+  it('adoptHostname：默认「节点 N」标签被 host-info 的 hostname 替换；自定义名不动', async () => {
+    const { upsertNode, renameNode, adoptHostname } = await store();
+    let list = upsertNode([], cred('p1'), undefined);
+    list = upsertNode(list, cred('p2'), undefined);
+    list = renameNode(list, 'p2', '办公室');
+    list = adoptHostname(list, 'p1', 'dev-box');
+    list = adoptHostname(list, 'p2', 'other-box');
+    expect(list.map((n) => n.label)).toEqual(['dev-box', '办公室']);
+    // 空 hostname 不采用
+    expect(adoptHostname(list, 'p1', '  ')[0].label).toBe('dev-box');
+  });
+
   it('rename：空白名不生效', async () => {
     const { upsertNode, renameNode } = await store();
     const list = upsertNode([], cred('p1'), undefined);
