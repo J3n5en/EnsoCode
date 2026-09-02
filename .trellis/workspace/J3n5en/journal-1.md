@@ -223,6 +223,15 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Summary
 
 对齐 Multica 多机模型：桌面 A 粘贴桌面 B 的配对链接即可作为 guest 连入 B，浏览/操控 B 的会话（列表、聊天、新建、审批/提问、模型切换）。复用现有 pair 中继与手机协议，零中继改动。main 新增 pairGuest/nodeStore/NODES_* IPC（凭据 safeStorage、与 pairHost 对称）；手机 client 的投影逻辑抽成 shared/pair/guestProjection 供两端共用；renderer 新增 remoteNodes store（纯 reducer + effects）、NodeSwitcher、RemoteNodeView，ChatHostContext 隔离时间线对本机 store 的直接读取；设置页「手机」扩为「设备」。协议加 host-info 帧作默认节点名，旧版 host 回落「节点 N」。同机双实例 + 真实中继 + fake provider 走完 AC1–AC10，修了 hostname 采用、重载后重订阅、远程态残留面板开关三处。加 ENSO_CDP_PORT 便于双实例验证。
+## Session 7: worker 会话内存有界化：删除即 release + 闲置回收
+
+**Date**: 2026-09-02
+**Task**: Release idle worker sessions to bound agent memory
+**Branch**: `main`
+
+### Summary
+
+排查「会话是否都塞在内存里」：renderer 侧刚修过（32KB 投影 cap + 只保留正在看的正文），但 agent worker 的 `SessionSupervisor.sessions` 只进不出——`release-parent` 仅 worktree 迁移调用；`removeConversation` 只 abort 不 release，删掉的会话成孤儿常驻到退出。修法：① 删除已启动 parent 走 `agent.release`；② worker 每 60s 扫描，idle 且无挂起 ask/approval/capability/后台任务/提醒/子会话、30 分钟无活动、未 pinned 的父会话在其串行门内重新校验后 release（reason `evicted`）；pinned 集合 = 桌面正在查看 + 手机在线订阅，由 Main 按来源分桶合并后 `pin-sessions` 全量下发，worker 重启后重发。`selectEvictable` 纯函数 TDD 7 例，supervisor 假时钟集成 2 例（做过变异检查确认能判别）。
 
 ### Git Commits
 
@@ -246,3 +255,9 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed**
+| `9a6b3ef` | fix(renderer): 删除已启动会话时 release worker 侧会话 |
+| `d8ca346` | feat(agent): worker 闲置会话定期回收 + pin-sessions |
+
+### Status
+
+[OK] **Completed** — 相关测试 310 绿；全量 `pnpm test` 有 41 个 HEAD 上已存在的失败（electron CJS 命名导出 mock 问题，与本次无关）。
