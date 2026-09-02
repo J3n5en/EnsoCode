@@ -11,12 +11,13 @@ const CLEAR_KINDS = new Set(['cookies', 'cache', 'all']);
 export function registerBrowserHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.BROWSER_SET_VIEWPORT,
-    (_event, tabId: unknown, conversationId: unknown, raw: unknown) => {
+    (_event, tabId: unknown, conversationId: unknown, raw: unknown, covered: unknown) => {
       if (!isId(tabId) || !isId(conversationId)) return browserHost.state('');
       return browserHost.setViewport(
         tabId,
         conversationId,
-        raw === null ? null : parseBrowserViewport(raw)
+        raw === null ? null : parseBrowserViewport(raw),
+        covered === true
       );
     }
   );

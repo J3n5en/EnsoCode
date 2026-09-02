@@ -618,13 +618,20 @@ const electronAPI = {
     },
   },
   browser: {
-    /** 面板可见时报矩形（CSS px）；不可见传 null */
+    /** 面板可见时报矩形（CSS px）；不可见传 null。covered：有 HTML 浮层压在网页上 */
     setViewport: (
       tabId: string,
       conversationId: string,
-      viewport: { x: number; y: number; width: number; height: number } | null
+      viewport: { x: number; y: number; width: number; height: number } | null,
+      covered = false
     ): Promise<BrowserTabState> =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_VIEWPORT, tabId, conversationId, viewport),
+      ipcRenderer.invoke(
+        IPC_CHANNELS.BROWSER_SET_VIEWPORT,
+        tabId,
+        conversationId,
+        viewport,
+        covered
+      ),
     navigate: (
       tabId: string,
       conversationId: string,

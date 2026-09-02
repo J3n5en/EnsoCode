@@ -6,6 +6,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { isCoveredBy, overlayBoxes } from './overlayCover';
 
 const EMPTY: BrowserTabState = {
   tabId: null,
@@ -49,6 +50,7 @@ export function BrowserView({
   const [error, setError] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const lastSent = useRef<Rect | null | undefined>(undefined);
+  const lastCovered = useRef(false);
   const tabId = panelApi.id;
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export function BrowserView({
   useEffect(() => {
     let raf = 0;
     let disposed = false;
+    const root = document.getElementById('root');
     const tick = () => {
       if (disposed) return;
       const el = hostRef.current;
@@ -91,9 +94,17 @@ export function BrowserView({
           };
         }
       }
-      if (lastSent.current === undefined || !sameRect(lastSent.current, rect)) {
+      const covered = rect !== null && isCoveredBy(rect, overlayBoxes(document, root));
+      if (
+        lastSent.current === undefined ||
+        !sameRect(lastSent.current, rect) ||
+        covered !== lastCovered.current
+      ) {
         lastSent.current = rect;
-        void window.electronAPI.browser.setViewport(tabId, conversationId, rect).then(setState);
+        lastCovered.current = covered;
+        void window.electronAPI.browser
+          .setViewport(tabId, conversationId, rect, covered)
+          .then(setState);
       }
       raf = requestAnimationFrame(tick);
     };

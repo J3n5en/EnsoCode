@@ -109,7 +109,13 @@ export class BrowserHost {
   private hostWindow: () => BrowserWindow | null = () => null;
 
   /** 渲染层当前展示的 dock tab 与面板矩形 */
-  private shown: { tabId: string; sessionId: string; viewport: BrowserViewport } | null = null;
+  /** covered：renderer 有浮层压在网页上，guest 要沉到 workbench 之下透洞显示 */
+  private shown: {
+    tabId: string;
+    sessionId: string;
+    viewport: BrowserViewport;
+    covered: boolean;
+  } | null = null;
   private readonly stateListeners = new Set<
     (sessionId: string, tabId: string, state: BrowserTabState) => void
   >();
@@ -189,13 +195,18 @@ export class BrowserHost {
   }
 
   /** 渲染层：某个 dock tab 可见时报矩形；null = 该 tab 隐藏 */
-  setViewport(tabId: string, sessionId: string, viewport: BrowserViewport | null): BrowserTabState {
+  setViewport(
+    tabId: string,
+    sessionId: string,
+    viewport: BrowserViewport | null,
+    covered = false
+  ): BrowserTabState {
     if (viewport) {
       if (!this.tabs.has(tabId)) void this.restoreTab(tabId, sessionId);
       this.currentBySession.set(sessionId, tabId);
       this.userTabs.add(tabId);
       this.pendingReveal.delete(sessionId);
-      this.shown = { tabId, sessionId, viewport };
+      this.shown = { tabId, sessionId, viewport, covered };
       this.touch(tabId);
     } else if (this.shown?.tabId === tabId) {
       this.shown = null;
@@ -212,16 +223,23 @@ export class BrowserHost {
     window.contentView.addChildView(workbench);
   }
 
+  /**
+   * 层级：workbench（renderer）是一整块 NSView，透明像素照样吃掉 hit-test，
+   * 所以 guest 平时必须叠在 workbench 之上才能被用户点；只有 renderer 浮层
+   * 压到网页区域时才沉到 index 0，让菜单 / Dialog 透洞盖在网页上。
+   */
   private layout(): void {
     const window = this.hostWindow();
     if (!window || window.isDestroyed()) return;
     const { contentView } = window;
+    let raise: WebContentsView | null = null;
     for (const tab of this.tabs.values()) {
       const onTop = Boolean(this.shown && tab.id === this.shown.tabId);
       if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);
+        if (!this.shown.covered) raise = tab.view;
         void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
       } else {
         tab.view.setVisible(false);
@@ -234,6 +252,7 @@ export class BrowserHost {
       }
     }
     this.ensureWorkbenchOnTop(window);
+    if (raise) contentView.addChildView(raise);
   }
 
   /** host 内白名单 CDP；模型永远摸不到 */
