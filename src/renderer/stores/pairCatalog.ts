@@ -53,6 +53,16 @@ function buildPayload(): PairCatalogPayload {
     ...(c.reasoningEnabled !== undefined ? { reasoningEnabled: c.reasoningEnabled } : {}),
     ...(c.thinkingLevel ? { thinkingLevel: c.thinkingLevel } : {}),
     ...(c.unread === true ? { unread: true } : {}),
+    // 排队消息：手机队列区展示与操作；图片不下发正文，只给个标记
+    ...(c.queuedMessages?.length
+      ? {
+          queued: c.queuedMessages.map((m) => ({
+            id: m.id,
+            text: m.text,
+            ...(m.images?.length ? { hasImages: true } : {}),
+          })),
+        }
+      : {}),
   });
 
   const topLevel = sessions.order
@@ -145,6 +155,27 @@ export function bindPairCatalogSync(): void {
       store.setReasoning(config.sessionId, config.enabled);
     } else {
       store.setThinking(config.sessionId, config.level);
+    }
+  });
+  // 手机操作排队消息：与桌面队列区同一批 store 方法
+  window.electronAPI.pair.onQueueAction((action) => {
+    const store = useSessionsStore.getState();
+    switch (action.type) {
+      case 'enqueue':
+        store.enqueueMessage(action.sessionId, action.text, action.images);
+        break;
+      case 'queue-remove':
+        store.removeQueuedMessage(action.sessionId, action.messageId);
+        break;
+      case 'queue-update':
+        store.updateQueuedMessage(action.sessionId, action.messageId, action.text);
+        break;
+      case 'queue-send-now':
+        store.sendQueuedNow(action.sessionId, action.messageId);
+        break;
+      case 'queue-interrupt-send':
+        void store.interruptAndSendQueued(action.sessionId, action.messageId);
+        break;
     }
   });
 }

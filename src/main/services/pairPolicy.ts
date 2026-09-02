@@ -1,4 +1,5 @@
 import type { PhoneToHost } from '@enso/pair';
+import { THINKING_LEVELS } from '@shared/types/agent';
 
 /**
  * 手机上行命令的结构校验 + 下行事件过滤。
@@ -6,6 +7,8 @@ import type { PhoneToHost } from '@enso/pair';
  */
 
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+const isThinkingLevel = (v: unknown): boolean =>
+  typeof v === 'string' && (THINKING_LEVELS as readonly string[]).includes(v);
 
 /** spawn 需要的白名单上下文：手机只能在这些集合内选，cwd 由 main 反查，不接受手机传路径 */
 export interface SpawnWhitelist {
@@ -21,7 +24,8 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
   const v = value as Record<string, unknown>;
   switch (v.type) {
     case 'prompt':
-    case 'steer': {
+    case 'steer':
+    case 'enqueue': {
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
       if (typeof v.text !== 'string') return { ok: false, error: 'missing text' };
       const images = v.images;
@@ -46,6 +50,16 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
     }
     case 'abort':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'queue-remove':
+    case 'queue-send-now':
+    case 'queue-interrupt-send':
+      if (!isStr(v.sessionId) || !isStr(v.messageId)) return { ok: false, error: 'missing ids' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'queue-update':
+      if (!isStr(v.sessionId) || !isStr(v.messageId)) return { ok: false, error: 'missing ids' };
+      // 空文本等于把队列项改成发不出去的消息，按非法拒（删除走 queue-remove）
+      if (!isStr(v.text)) return { ok: false, error: 'missing text' };
       return { ok: true, command: value as PhoneToHost };
     case 'approval-respond':
       if (!isStr(v.sessionId) || !isStr(v.requestId)) return { ok: false, error: 'missing ids' };
@@ -79,13 +93,7 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       if (v.reasoningEnabled !== undefined && typeof v.reasoningEnabled !== 'boolean') {
         return { ok: false, error: 'invalid reasoningEnabled' };
       }
-      if (
-        v.thinkingLevel !== undefined &&
-        v.thinkingLevel !== 'low' &&
-        v.thinkingLevel !== 'medium' &&
-        v.thinkingLevel !== 'high' &&
-        v.thinkingLevel !== 'max'
-      ) {
+      if (v.thinkingLevel !== undefined && !isThinkingLevel(v.thinkingLevel)) {
         return { ok: false, error: 'invalid thinkingLevel' };
       }
       return { ok: true, command: value as PhoneToHost };
@@ -100,7 +108,7 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       return { ok: true, command: value as PhoneToHost };
     case 'set-thinking':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
-      if (v.level !== 'low' && v.level !== 'medium' && v.level !== 'high' && v.level !== 'max') {
+      if (!isThinkingLevel(v.level)) {
         return { ok: false, error: 'invalid level' };
       }
       return { ok: true, command: value as PhoneToHost };

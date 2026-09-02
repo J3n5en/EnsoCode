@@ -991,6 +991,31 @@ describe('typed Agent child projection', () => {
     ).toHaveLength(0);
   });
 
+  it('enqueueMessage queues for the given conversation without touching activeId', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'running' as const,
+          queuedMessages: [],
+        },
+      },
+      activeId: null,
+    }));
+    agentPrompt.mockClear();
+
+    sessionsModule.useSessionsStore.getState().enqueueMessage('parent', 'from phone');
+
+    const queued =
+      sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages ?? [];
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ text: 'from phone' });
+    // 入队不投递，等本轮收束后由 flushQueue 发
+    expect(agentPrompt).not.toHaveBeenCalled();
+  });
+
   it('summon only pre-fills the parent composer and never dispatches', () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

@@ -27,6 +27,7 @@ import type {
   OauthProviderInfo,
   PairCatalogPayload,
   PairCreatedSession,
+  PairQueueAction,
   PairSessionConfig,
   PairStatus,
   ProviderApiConfig,
@@ -521,6 +522,12 @@ const electronAPI = {
       const listener = (_: unknown, config: PairSessionConfig) => callback(config);
       ipcRenderer.on(IPC_CHANNELS.PAIR_SESSION_CONFIG, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_SESSION_CONFIG, listener);
+    },
+    /** main 通知：手机操作了排队消息，应用到会话 store */
+    onQueueAction: (callback: (action: PairQueueAction) => void): (() => void) => {
+      const listener = (_: unknown, action: PairQueueAction) => callback(action);
+      ipcRenderer.on(IPC_CHANNELS.PAIR_QUEUE_ACTION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_QUEUE_ACTION, listener);
     },
   },
 

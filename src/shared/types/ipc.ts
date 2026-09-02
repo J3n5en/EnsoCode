@@ -180,6 +180,8 @@ export const IPC_CHANNELS = {
   PAIR_SESSION_CREATED: 'pair:session-created',
   /** main → renderer：手机改了会话模型/推理档位，请求应用到会话 store（与桌面同一路径） */
   PAIR_SESSION_CONFIG: 'pair:session-config',
+  /** main → renderer：手机的排队消息操作（队列只存于 renderer store，不走 agent bridge） */
+  PAIR_QUEUE_ACTION: 'pair:queue-action',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

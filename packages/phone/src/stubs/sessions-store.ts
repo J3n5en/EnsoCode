@@ -26,14 +26,23 @@ export interface Conversation {
   spawning: boolean;
   messages: ProjectedMessage[];
   activeTabId?: string;
+  queuedMessages?: QueuedMessage[];
 }
 
-interface SessionsSlice {
+/** 队列操作：真正的队列在桌面 renderer store，手机只发命令，由 App 注入 */
+export interface QueueActions {
+  removeQueuedMessage(conversationId: string, messageId: string): void;
+  updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
+  sendQueuedNow(conversationId: string, messageId: string): void;
+  interruptAndSendQueued(conversationId: string, messageId: string): Promise<void>;
+}
+
+type SessionsSlice = {
   activeId: string | null;
   conversations: Record<string, Conversation>;
   rewind(sessionId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   retry(sessionId: string): void;
-}
+} & QueueActions;
 
 const state: SessionsSlice = {
   activeId: null,
@@ -41,7 +50,16 @@ const state: SessionsSlice = {
   // 手机端不支持回退（RewindButton 因 started=false 已不渲染，这里只为类型完整）
   rewind: () => {},
   retry: () => {},
+  removeQueuedMessage: () => {},
+  updateQueuedMessage: () => {},
+  sendQueuedNow: () => {},
+  interruptAndSendQueued: async () => {},
 };
+
+/** App 启动时注入：把桌面 MessageQueue 组件的 store 调用转成 pair 命令 */
+export function setQueueActions(actions: QueueActions): void {
+  Object.assign(state, actions);
+}
 
 /** 由 ChatScreen 在渲染前同步当前会话，供复用组件内部读取 */
 export function setDisplayedConversation(next: Conversation | null): void {

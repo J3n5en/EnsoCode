@@ -11,6 +11,7 @@ import {
   cancelPairing,
   getPairStatus,
   revokeDevice,
+  setPairQueueActionListener,
   setPairResumeListener,
   setPairSessionConfigListener,
   setPairSessionCreatedListener,
@@ -47,6 +48,13 @@ export function registerPairHandlers(): void {
   setPairSessionConfigListener((config) => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_SESSION_CONFIG, config);
+    }
+  });
+
+  // 手机操作排队消息：队列只在 renderer store，交给它处理
+  setPairQueueActionListener((action) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.PAIR_QUEUE_ACTION, action);
     }
   });
 

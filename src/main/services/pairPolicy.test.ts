@@ -25,6 +25,29 @@ describe('手机命令白名单', () => {
     for (const cmd of ok) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(true);
   });
 
+  it('放行队列操作命令，缺字段被拒', () => {
+    const ok = [
+      { type: 'enqueue', sessionId: 's', text: 'later' },
+      { type: 'enqueue', sessionId: 's', text: '', images: [{ data: 'b', mimeType: 'image/png' }] },
+      { type: 'queue-remove', sessionId: 's', messageId: 'q1' },
+      { type: 'queue-update', sessionId: 's', messageId: 'q1', text: 'fixed' },
+      { type: 'queue-send-now', sessionId: 's', messageId: 'q1' },
+      { type: 'queue-interrupt-send', sessionId: 's', messageId: 'q1' },
+    ];
+    for (const cmd of ok) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(true);
+
+    const bad = [
+      { type: 'enqueue', sessionId: 's', text: '' },
+      { type: 'enqueue', text: 'x' },
+      { type: 'queue-remove', sessionId: 's' },
+      { type: 'queue-update', sessionId: 's', messageId: 'q1' },
+      { type: 'queue-update', sessionId: 's', messageId: 'q1', text: '' },
+      { type: 'queue-send-now', messageId: 'q1' },
+      { type: 'queue-interrupt-send', sessionId: 's' },
+    ];
+    for (const cmd of bad) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(false);
+  });
+
   it('拒绝白名单外命令（改审批模式 / 设置写入 / 任意命令）', () => {
     for (const cmd of [
       { type: 'set-approval-mode', sessionId: 's', mode: 'full' },
@@ -130,7 +153,7 @@ describe('手机命令白名单', () => {
       false
     );
     expect(parsePhoneCommand({ type: 'set-reasoning', enabled: true }).ok).toBe(false);
-    for (const level of ['low', 'medium', 'high', 'max']) {
+    for (const level of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
       expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level }).ok).toBe(true);
     }
     expect(parsePhoneCommand({ type: 'set-thinking', sessionId: 's', level: 'ultra' }).ok).toBe(

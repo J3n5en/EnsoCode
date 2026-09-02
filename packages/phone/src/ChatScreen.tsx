@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Composer } from '@/components/chat/Composer';
+import { MessageQueue } from '@/components/chat/MessageQueue';
 import {
   CHAT_COL,
   MessageTimeline,
@@ -41,6 +42,8 @@ interface Props {
   /** coworker tab 组（仅当父会话雇有 coworker 时有值）：主会话 + 子会话 */
   tabGroup?: { parent: CatalogEntry; children: CatalogEntry[] };
   onSelectTab?(sessionId: string): void;
+  /** 排队中的消息（桌面下发）：本轮未结束时发的消息先入队 */
+  queued?: { id: string; text: string; hasImages?: boolean }[];
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -70,6 +73,7 @@ export function ChatScreen(props: Props) {
           started: false,
           spawning: false,
           messages,
+          queuedMessages: props.queued?.map((q) => ({ id: q.id, text: q.text })),
         }
       : null
   );
@@ -232,6 +236,11 @@ export function ChatScreen(props: Props) {
           <div className={CHAT_COL}>
             {/* 自动重试横幅：只展示不可取消（pair 桥无 abort-retry 通道，整轮 abort 已够用） */}
             {view?.retry && <RetryBar retry={view.retry} />}
+            {/* 排队区：复用桌面组件，编辑/删除/立即发送/打断并发送经桩发 pair 命令 */}
+            <MessageQueue
+              conversationId={sessionId}
+              queued={(props.queued ?? []).map((q) => ({ id: q.id, text: q.text }))}
+            />
             {/* 后台任务 / subagent 胶囊：复用桌面组件，停止按钮经 stub 降级为无操作 */}
             <TaskBar
               sessionId={sessionId}

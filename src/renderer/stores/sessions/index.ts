@@ -215,6 +215,8 @@ interface SessionsState {
   dismissCoworkerFromUI(parentId: string, coworkerId: string): Promise<void>;
   /** 手动雇佣 coworker（会话建立靠 coworker-update 回流;主 agent 经 worker 通知感知） */
   hireCoworker(parentId: string, name: string, agentType?: string): Promise<string | null>;
+  /** 指定会话入队（不依赖 activeId）：手机端在轮次进行中发消息走这里 */
+  enqueueMessage(conversationId: string, text: string, images?: AttachedImage[]): void;
   removeQueuedMessage(conversationId: string, messageId: string): void;
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   /** 立即发送队列中某条(running 时 steer 插入,否则直接 prompt) */
@@ -1775,6 +1777,20 @@ export const useSessionsStore = create<SessionsState>()(
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
                 (message) => message.id !== messageId
               ),
+            })
+          );
+        },
+
+        enqueueMessage(conversationId, text, images) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation) return;
+          if (!text && !images?.length) return;
+          set((state) =>
+            patch(state, conversationId, {
+              queuedMessages: [
+                ...(state.conversations[conversationId].queuedMessages ?? []),
+                { id: crypto.randomUUID(), text, ...(images?.length ? { images } : {}) },
+              ],
             })
           );
         },

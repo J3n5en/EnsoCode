@@ -9,7 +9,7 @@ export interface AttachedImage {
   data: string;
   mimeType: string;
 }
-export type ThinkingLevel = 'low' | 'medium' | 'high' | 'max';
+export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ApprovalMode = 'supervised' | 'auto-edits' | 'full';
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
@@ -57,6 +57,12 @@ export type PhoneToHost =
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel }
   /** 上滑分页：拉取 beforeIndex 之前的一页历史消息 */
   | { type: 'history'; sessionId: string; beforeIndex: number }
+  /** 排队：轮次进行中发消息，与桌面同语义入队（不打断当前轮） */
+  | { type: 'enqueue'; sessionId: string; text: string; images?: AttachedImage[] }
+  | { type: 'queue-remove'; sessionId: string; messageId: string }
+  | { type: 'queue-update'; sessionId: string; messageId: string; text: string }
+  | { type: 'queue-send-now'; sessionId: string; messageId: string }
+  | { type: 'queue-interrupt-send'; sessionId: string; messageId: string }
   /** 登记/解除 Web Push 订阅：手机离线时桌面用它发系统推送 */
   | { type: 'push-subscribe'; subscription: PushSubscriptionJson }
   | { type: 'push-unsubscribe' }
@@ -80,6 +86,11 @@ export const PHONE_COMMAND_TYPES = [
   'set-reasoning',
   'set-thinking',
   'history',
+  'enqueue',
+  'queue-remove',
+  'queue-update',
+  'queue-send-now',
+  'queue-interrupt-send',
   'push-subscribe',
   'push-unsubscribe',
   'presence',
@@ -117,6 +128,8 @@ export interface CatalogEntry {
   modelId?: string;
   reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** 排队中的消息（桌面 renderer 独有状态），手机队列区展示与操作用 */
+  queued?: { id: string; text: string; hasImages?: boolean }[];
 }
 export interface ProjectEntry {
   id: string;

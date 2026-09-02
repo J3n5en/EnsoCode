@@ -32,6 +32,7 @@ import {
   saveDevices,
   saveLastSession,
 } from './storage';
+import { setQueueActions } from './stubs/sessions-store';
 
 /**
  * 扫码直达：桌面二维码是 https 链接，系统相机可直接打开本页并带上 #relay=…&pk=…。
@@ -204,6 +205,21 @@ export function App() {
     setView(activeId ? (clientRef.current?.getSession(activeId) ?? null) : null);
     if (device) saveLastSession(device.pairId, activeId);
   }, [activeId, device?.pairId]);
+
+  // 排队区复用桌面组件，它经 store 桩调用这些方法；这里转成 pair 命令发回桌面
+  useEffect(() => {
+    setQueueActions({
+      removeQueuedMessage: (sessionId, messageId) =>
+        clientRef.current?.send({ type: 'queue-remove', sessionId, messageId }),
+      updateQueuedMessage: (sessionId, messageId, text) =>
+        clientRef.current?.send({ type: 'queue-update', sessionId, messageId, text }),
+      sendQueuedNow: (sessionId, messageId) =>
+        clientRef.current?.send({ type: 'queue-send-now', sessionId, messageId }),
+      interruptAndSendQueued: async (sessionId, messageId) => {
+        clientRef.current?.send({ type: 'queue-interrupt-send', sessionId, messageId });
+      },
+    });
+  }, []);
 
   // 首次连上且没有选中会话时，落到最近一条
   const firstId = catalog.find((c) => !c.parentId)?.id;
@@ -383,10 +399,12 @@ export function App() {
           activeId && view && view.messages.size > 0 && Math.min(...view.messages.keys()) > 0
         )}
         onLoadOlder={() => activeId && clientRef.current?.requestHistory(activeId)}
+        queued={entry?.queued}
         onSend={(text, images) => {
           if (!activeId) return;
+          // 与桌面同语义：轮次进行中先入队（可编辑/删除/立即发送/打断并发送）
           send({
-            type: view?.status === 'running' ? 'steer' : 'prompt',
+            type: view?.status === 'running' ? 'enqueue' : 'prompt',
             sessionId: activeId,
             text,
             ...(images.length ? { images } : {}),

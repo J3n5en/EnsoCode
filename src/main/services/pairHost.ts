@@ -27,7 +27,12 @@ import type {
   AttachedImage,
   RendererAgentEvent,
 } from '@shared/types/agent';
-import type { PairCreatedSession, PairSessionConfig, PairStatus } from '@shared/types/pair';
+import type {
+  PairCreatedSession,
+  PairQueueAction,
+  PairSessionConfig,
+  PairStatus,
+} from '@shared/types/pair';
 import { powerMonitor, powerSaveBlocker } from 'electron';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot } from './agentHost';
@@ -101,6 +106,8 @@ let onResumeRequest: ((sessionId: string) => void) | null = null;
 let onSessionCreated: ((session: PairCreatedSession) => void) | null = null;
 /** 手机改会话模型/推理档位：renderer 应用到会话 store（与桌面选择器同一路径） */
 let onSessionConfig: ((config: PairSessionConfig) => void) | null = null;
+/** 手机操作排队消息：队列只存于 renderer store，不能走 agentBridge（会绕过 store 失配） */
+let onQueueAction: ((action: PairQueueAction) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
@@ -151,6 +158,10 @@ export function setPairSessionCreatedListener(
 
 export function setPairSessionConfigListener(listener: (config: PairSessionConfig) => void): void {
   onSessionConfig = listener;
+}
+
+export function setPairQueueActionListener(listener: (action: PairQueueAction) => void): void {
+  onQueueAction = listener;
 }
 
 let powerBlockerId: number | null = null;
@@ -547,6 +558,14 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'set-thinking':
       // 结构已校验；store 的 setReasoning/setThinking 自带「已启动会话即时下发」逻辑
       onSessionConfig?.(command);
+      break;
+    case 'enqueue':
+    case 'queue-remove':
+    case 'queue-update':
+    case 'queue-send-now':
+    case 'queue-interrupt-send':
+      // 结构已校验；交 renderer 的会话 store（与桌面队列区同一路径）
+      onQueueAction?.(command);
       break;
     case 'history':
       // 只服务当前订阅会话：其它会话的正文本就不该下发
