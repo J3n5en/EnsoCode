@@ -69,6 +69,8 @@ if (!gotTheLock) {
     registerLocalImageProtocolHandler();
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
+    // 内嵌浏览器 guest view 挂主窗口（无头也要 viewport）；窗口重建后 getMainWindow 自动指向新窗
+    browserHost.setHostWindow(getMainWindow);
     // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
     setImmediate(() => {
       // worker 的 env 是 fork 时的快照：打包版先等登录 shell 探测出真实 PATH

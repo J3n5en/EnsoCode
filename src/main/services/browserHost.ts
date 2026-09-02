@@ -7,7 +7,7 @@ import {
 } from '@shared/browser/snapshot';
 import { assertAllowedUrl } from '@shared/browser/urlPolicy';
 import type { BrowserOp } from '@shared/types/agent';
-import type { Session, WebContents } from 'electron';
+import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
 
 /**
@@ -21,6 +21,12 @@ const NAVIGATE_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 300;
 const MAX_HEADLESS_TABS = 4;
 const SCREENSHOT_MAX_WIDTH = 1280;
+/**
+ * 无头 tab 也要有 viewport，否则页面布局全是 0×0（快照抓不到块级元素、截图为空）。
+ * `setVisible(false)` 或挪到窗口外都会让 macOS 把尺寸清零，所以放窗口内、
+ * 插在子视图最底层——被 renderer 的 view 整个盖住，用户看不见。
+ */
+const HEADLESS_BOUNDS = { x: 0, y: 0, width: 1280, height: 800 };
 
 export function partitionName(isPackaged: boolean): string {
   return `persist:${isPackaged ? 'enso' : 'enso-dev'}${PARTITION_SUFFIX}`;
@@ -60,6 +66,12 @@ export class BrowserHost {
   private readonly currentBySession = new Map<string, string>();
   private counter = 0;
   private guestSession?: Session;
+  private hostWindow: () => BrowserWindow | null = () => null;
+
+  /** guest view 需要挂在某扇窗口上才有 viewport；由 main/index.ts 注入主窗口获取器。 */
+  setHostWindow(provider: () => BrowserWindow | null): void {
+    this.hostWindow = provider;
+  }
 
   getSession(): Session {
     if (!this.guestSession) {
@@ -148,13 +160,25 @@ export class BrowserHost {
     return this.pageInfo(tab.view.webContents);
   }
 
+  /**
+   * 被 renderer 盖住的 view `capturePage` 会报 UnknownVizError（合成器不出帧）。
+   * 走 CDP `Page.captureScreenshot` + captureBeyondViewport 强制 Blink 离屏渲染。
+   * debugger 只在 host 内用，模型摸不到。
+   */
   private async screenshot(tab: Tab): Promise<{ data: string; mimeType: string }> {
-    const image = await tab.view.webContents.capturePage();
-    if (image.isEmpty()) throw new Error('Screenshot is empty; the page has not painted yet.');
-    const { width } = image.getSize();
-    const scaled =
-      width > SCREENSHOT_MAX_WIDTH ? image.resize({ width: SCREENSHOT_MAX_WIDTH }) : image;
-    return { data: scaled.toPNG().toString('base64'), mimeType: 'image/png' };
+    const dbg = tab.view.webContents.debugger;
+    if (!dbg.isAttached()) dbg.attach('1.3');
+    const { width, height } = tab.view.getBounds();
+    const scale = width > SCREENSHOT_MAX_WIDTH ? SCREENSHOT_MAX_WIDTH / width : 1;
+    const shot = (await dbg.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width, height, scale },
+    })) as { data?: unknown };
+    if (typeof shot.data !== 'string' || !shot.data) {
+      throw new Error('Screenshot is empty; the page has not painted yet.');
+    }
+    return { data: shot.data, mimeType: 'image/png' };
   }
 
   private assertRef(tab: Tab, ref: string): void {
@@ -214,9 +238,24 @@ export class BrowserHost {
       this.tabs.delete(id);
       if (this.currentBySession.get(sessionId) === id) this.currentBySession.delete(sessionId);
     });
+    this.attach(view);
     this.tabs.set(id, tab);
     this.currentBySession.set(sessionId, id);
     return tab;
+  }
+
+  private attach(view: WebContentsView): void {
+    const window = this.hostWindow();
+    if (!window || window.isDestroyed()) return;
+    window.contentView.addChildView(view, 0);
+    view.setBounds(HEADLESS_BOUNDS);
+  }
+
+  private detach(view: WebContentsView): void {
+    for (const window of [this.hostWindow()]) {
+      if (!window || window.isDestroyed()) continue;
+      if (window.contentView.children.includes(view)) window.contentView.removeChildView(view);
+    }
   }
 
   private evictIfNeeded(): void {
@@ -231,6 +270,7 @@ export class BrowserHost {
       this.currentBySession.delete(tab.ownerSessionId);
     }
     await this.flush();
+    this.detach(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
   }
 

@@ -128,6 +128,8 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
     label,
     description,
     parameters,
+    // 同一 tab 上的操作有先后依赖（navigate 会清掉 snapshot 的 ref），并行必乱
+    executionMode: 'sequential',
     async execute(_toolCallId, params, signal) {
       const value = await run((params ?? {}) as Params, signal);
       if (name === 'browser_screenshot' && isImage(value)) {
