@@ -558,6 +558,7 @@ export const zhTranslations: Record<string, string> = {
   'Collapse sidebar': '折叠侧边栏',
   'Show {{n}} more': '展开其余 {{n}} 条',
   Collapse: '收起',
+  'Archive {{n}} conversations': '归档 {{n}} 条会话',
   'Expand sidebar': '展开侧边栏',
   'Approval required': '需要审批',
   'Type an answer…': '输入回答…',

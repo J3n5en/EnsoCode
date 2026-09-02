@@ -336,6 +336,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
     await runCleanup(id, true);
   };
 
+  // 批量归档：顺序执行，复用单条归档的 worktree 处理逻辑
+  const handleArchiveMany = async (ids: string[]) => {
+    for (const id of ids) {
+      if (!conversations[id] || conversations[id].archived) continue;
+      await handleToggleArchive(id);
+    }
+  };
+
   const handleMoveToWorktree = async (id: string) => {
     const error = await moveConversationToWorktree(id);
     if (error) {
@@ -640,22 +648,46 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
                               ))}
                               {!searching &&
                                 projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setExpandedProjects((prev) => ({
-                                        ...prev,
-                                        [project.id]: !prev[project.id],
-                                      }))
-                                    }
-                                    className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                                  >
-                                    {expandedProjects[project.id]
-                                      ? t('Collapse')
-                                      : t('Show {{n}} more', {
+                                  <ContextMenu>
+                                    <ContextMenuTrigger
+                                      render={
+                                        (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedProjects((prev) => ({
+                                                ...prev,
+                                                [project.id]: !prev[project.id],
+                                              }))
+                                            }
+                                            className="rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                                          >
+                                            {expandedProjects[project.id]
+                                              ? t('Collapse')
+                                              : t('Show {{n}} more', {
+                                                  n:
+                                                    projectConversations.length -
+                                                    COLLAPSED_SESSION_LIMIT,
+                                                })}
+                                          </button>
+                                        ) as React.ReactElement<Record<string, unknown>>
+                                      }
+                                    />
+                                    <ContextMenuPopup className="min-w-36">
+                                      <ContextMenuItem
+                                        onClick={() =>
+                                          void handleArchiveMany(
+                                            projectConversations.slice(COLLAPSED_SESSION_LIMIT)
+                                          )
+                                        }
+                                      >
+                                        <Archive />
+                                        {t('Archive {{n}} conversations', {
                                           n: projectConversations.length - COLLAPSED_SESSION_LIMIT,
                                         })}
-                                  </button>
+                                      </ContextMenuItem>
+                                    </ContextMenuPopup>
+                                  </ContextMenu>
                                 )}
                               {visibleConversations.length === 0 && (
                                 <p className="py-1.5 pl-9 text-xs text-muted-foreground">
