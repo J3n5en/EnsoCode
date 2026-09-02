@@ -25,6 +25,8 @@ export const safeStorage = {
 };
 
 export const shell = { openExternal: () => {} };
+export class WebContentsView {}
+export const session = { fromPartition: () => ({}) };
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
 export const powerMonitor = { on: () => {} };
 export const powerSaveBlocker = { start: () => 0, stop: () => {} };
@@ -35,6 +37,8 @@ export default {
   BrowserWindow,
   safeStorage,
   shell,
+  WebContentsView,
+  session,
   Menu,
   powerMonitor,
   powerSaveBlocker,

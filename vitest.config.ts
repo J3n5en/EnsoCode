@@ -11,6 +11,7 @@ export default defineConfig({
       '@enso/pair': path.resolve(root, 'packages/pair/src/index.ts'),
       // 主进程模块顶层会 import electron，node 环境下用桩替换
       electron: path.resolve(root, 'test/stubs/electron.ts'),
+      '@electron-toolkit/utils': path.resolve(root, 'test/stubs/electron-toolkit-utils.ts'),
     },
   },
   test: {

@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
     sends,
     windows: [] as Array<{
       isDestroyed: () => boolean;
-      webContents: { id: number; send: (channel: string) => void };
+      webContents: { id: number; isDestroyed: () => boolean; send: (channel: string) => void };
     }>,
   };
 });
@@ -30,8 +30,14 @@ vi.mock('electron', () => ({
 
 beforeAll(() => {
   mocks.windows.push(
-    { isDestroyed: () => false, webContents: { id: 1, send: mocks.sends[0] } },
-    { isDestroyed: () => false, webContents: { id: 2, send: mocks.sends[1] } }
+    {
+      isDestroyed: () => false,
+      webContents: { id: 1, isDestroyed: () => false, send: mocks.sends[0] },
+    },
+    {
+      isDestroyed: () => false,
+      webContents: { id: 2, isDestroyed: () => false, send: mocks.sends[1] },
+    }
   );
 });
 
