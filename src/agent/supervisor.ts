@@ -77,6 +77,11 @@ import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
 import {
+  EVICTION_SWEEP_INTERVAL_MS,
+  type EvictionCandidate,
+  selectEvictable,
+} from './sessionEviction';
+import {
   createSshExecutor,
   resolveSshControlPath,
   type SshExecutor,
@@ -156,6 +161,8 @@ interface ManagedSession {
   pendingRole?: string;
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
+  /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
+  lastActivityAt: number;
   unsubscribe: () => void;
 }
 
@@ -304,6 +311,9 @@ export class SessionSupervisor {
   private readonly mcp = new McpManager();
   private readonly bgTasks: BackgroundTaskManager;
   private runtimePromise: Promise<ModelRuntime> | null = null;
+  /** 不可回收的会话（桌面正在查看 / 手机订阅），由 Main 全量下发 */
+  private pinned: ReadonlySet<string> = new Set();
+  private readonly evictionTimer: ReturnType<typeof setInterval>;
   /** 父会话通知(合并投递):闲则注入合成提示唤醒,忙则挂 pending 搭下次工具结果 */
   private readonly notifier = new ParentNotifier((sessionId, text) => {
     this.deliverNotification(sessionId, text);
@@ -371,6 +381,89 @@ export class SessionSupervisor {
       },
       path.join(options.agentDir, 'task-logs')
     );
+    // 点开过的会话否则常驻到 app 退出（每个 AgentSession 持有全量 jsonl 上下文）
+    this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_SWEEP_INTERVAL_MS);
+    this.evictionTimer.unref?.();
+  }
+
+  private evictionCandidate(managed: ManagedSession): EvictionCandidate {
+    const id = managed.identity.sessionId;
+    return {
+      sessionId: id,
+      isChild: Boolean(managed.parentId || managed.childIdentity),
+      status: managed.status,
+      lastActivityAt: managed.lastActivityAt,
+      hasPendingWork:
+        managed.currentTurnId !== undefined ||
+        managed.gate.snapshot().length > 0 ||
+        managed.asks.snapshot().length > 0 ||
+        (managed.ensoApp?.pendingCount ?? 0) > 0 ||
+        (managed.browser?.pendingCount ?? 0) > 0 ||
+        managed.pendingTaskReminders.length > 0 ||
+        this.bgTasks.snapshot(id).some((task) => task.status === 'running'),
+      hasChildren:
+        managed.coworkers.size > 0 ||
+        [...managed.subagents.values()].some((s) => s.status === 'running') ||
+        [...this.sessions.keys()].some((key) => key.startsWith(`${id}::`)),
+    };
+  }
+
+  private evictIdleSessions(): void {
+    const candidates = [...this.sessions.values()].map((m) => this.evictionCandidate(m));
+    for (const sessionId of selectEvictable(candidates, this.pinned, Date.now())) {
+      void this.gate
+        .run(sessionId, async () => {
+          // 排队期间可能有 prompt/pin 插队，进门后重新校验
+          const managed = this.sessions.get(sessionId);
+          if (!managed) return;
+          const still = selectEvictable([this.evictionCandidate(managed)], this.pinned, Date.now());
+          if (still.length === 0) return;
+          await this.releaseParent(managed, 'evicted');
+        })
+        .catch((error) => {
+          console.error('[evict] failed:', toErrorMessage(error));
+        });
+    }
+  }
+
+  /** 释放父会话：中断 + 销毁 worker 侧会话树，jsonl 留盘。下游靠 parent-ended 把 started
+   *  清回 false，之后可携新 cwd + resumeFile 重新 spawn（Move to worktree / 闲置回收后再点开）。 */
+  private async releaseParent(managed: ManagedSession, reason: string): Promise<void> {
+    const parentId = managed.identity.sessionId;
+    // 先收掉整棵子会话（coworker/child 都以 `${parentId}::` 为键前缀）
+    for (const [id, child] of [...this.sessions]) {
+      if (!id.startsWith(`${parentId}::`)) continue;
+      child.gate.cancelAll();
+      child.asks.cancelAll();
+      child.ensoApp?.cancelAll('Parent released');
+      try {
+        await child.session.abort();
+      } catch {}
+      child.unsubscribe();
+      try {
+        child.session.dispose();
+      } catch {}
+      this.sessions.delete(id);
+    }
+    managed.coworkers.clear();
+    managed.gate.cancelAll();
+    managed.asks.cancelAll();
+    managed.ensoApp?.cancelAll('Session released');
+    managed.browser?.cancelAll('Session released');
+    try {
+      await managed.session.abort();
+    } catch {}
+    managed.unsubscribe();
+    try {
+      managed.session.dispose();
+    } catch {}
+    this.sessions.delete(parentId);
+    this.options.emit({
+      type: 'parent-ended',
+      identity: managed.identity,
+      seq: managed.seq + 1,
+      reason,
+    });
   }
 
   handleCommand(command: AgentCommand): void {
@@ -391,6 +484,10 @@ export class SessionSupervisor {
       void this.mcp.toolsFor(command.servers);
       return;
     }
+    if (command.type === 'pin-sessions') {
+      this.pinned = new Set(command.sessionIds);
+      return;
+    }
     const identity =
       command.type === 'capability-result'
         ? command.child
@@ -401,6 +498,8 @@ export class SessionSupervisor {
               command.type === 'resume-coworker'
             ? command.parent
             : command.identity;
+    const touched = this.sessions.get(identity.sessionId);
+    if (touched) touched.lastActivityAt = Date.now();
     // abort 必须旁路串行门：它要打断的正是占着门的那一轮，排队等于永远等不到
     if (command.type === 'abort') {
       void this.execute(command).catch((error) => {
@@ -725,47 +824,9 @@ export class SessionSupervisor {
         void managed.session.abort().catch(() => {});
         return;
       }
-      case 'release-parent': {
-        // 释放父会话：中断 + 销毁 worker 侧会话树，jsonl 留盘。下游靠 parent-ended
-        // 把 started 清回 false，之后可携新 cwd + resumeFile 重新 spawn（Move to worktree）。
-        const managed = this.must(command.identity);
-        const parentId = command.identity.sessionId;
-        // 先收掉整棵子会话（coworker/child 都以 `${parentId}::` 为键前缀）
-        for (const [id, child] of [...this.sessions]) {
-          if (!id.startsWith(`${parentId}::`)) continue;
-          child.gate.cancelAll();
-          child.asks.cancelAll();
-          child.ensoApp?.cancelAll('Parent released');
-          try {
-            await child.session.abort();
-          } catch {}
-          child.unsubscribe();
-          try {
-            child.session.dispose();
-          } catch {}
-          this.sessions.delete(id);
-        }
-        managed.coworkers.clear();
-        managed.gate.cancelAll();
-        managed.asks.cancelAll();
-        managed.ensoApp?.cancelAll('Session released');
-        managed.browser?.cancelAll('Session released');
-        try {
-          await managed.session.abort();
-        } catch {}
-        managed.unsubscribe();
-        try {
-          managed.session.dispose();
-        } catch {}
-        this.sessions.delete(parentId);
-        this.options.emit({
-          type: 'parent-ended',
-          identity: managed.identity,
-          seq: managed.seq + 1,
-          reason: 'released',
-        });
+      case 'release-parent':
+        await this.releaseParent(this.must(command.identity), 'released');
         return;
-      }
     }
   }
 
@@ -1328,6 +1389,7 @@ export class SessionSupervisor {
       pendingTaskReminders: [],
       subagents: new Map(),
       coworkers: new Map(),
+      lastActivityAt: Date.now(),
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
       ...(opts.coworkerName ? { coworkerName: opts.coworkerName } : {}),
@@ -1781,6 +1843,7 @@ export class SessionSupervisor {
     managed: ManagedSession,
     event: Parameters<Parameters<AgentSession['subscribe']>[0]>[0]
   ): void {
+    managed.lastActivityAt = Date.now();
     switch (event.type) {
       case 'agent_start':
         managed.currentTurnId ??= randomUUID();
@@ -2105,6 +2168,7 @@ export class SessionSupervisor {
 
   /** worker 退出前 fail-closed 清理挂起 capability，并断开 MCP 子进程。 */
   shutdown(): Promise<void> {
+    clearInterval(this.evictionTimer);
     this.bgTasks.stopAll();
     for (const managed of this.sessions.values()) {
       managed.ensoApp?.cancelAll('Enso worker shutdown');

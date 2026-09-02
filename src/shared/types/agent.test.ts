@@ -519,6 +519,20 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'snapshot', extra: 1 })).toBeNull();
   });
 
+  it('pin-sessions 只接受字符串数组（脏项整体拒绝）', () => {
+    expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: [] })).toEqual({
+      type: 'pin-sessions',
+      sessionIds: [],
+    });
+    expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: ['a', 'b'] })).toEqual({
+      type: 'pin-sessions',
+      sessionIds: ['a', 'b'],
+    });
+    expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: ['a', 1] })).toBeNull();
+    expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: 'a' })).toBeNull();
+    expect(parseAgentCommand({ type: 'pin-sessions' })).toBeNull();
+  });
+
   it('turn/capability 事件必须 exact identity generation + turnId', () => {
     expect(
       parseAgentWorkerEvent({

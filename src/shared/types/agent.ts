@@ -49,7 +49,7 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
 }
 
 /** 思考努力档位（reasoning 开启时有效），值域对齐 pi 的 ThinkingLevel。off 由 reasoningEnabled 表达 */
-export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
+export const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /** 审批档位：supervised 写操作全审 / auto-edits 仅命令与 MCP 审 / full 全放行 */
@@ -489,6 +489,8 @@ export type AgentCommand =
       entry: AgentSessionCustomEntry;
     }
   | { type: 'snapshot'; sessionId?: string }
+  /** 不可被闲置回收的会话全集（桌面正在查看 + 手机订阅中），每次全量覆盖 */
+  | { type: 'pin-sessions'; sessionIds: string[] }
   | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
 
 /** 随消息附带的图片（base64） */
@@ -1602,6 +1604,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       if (hasExactKeys(value, ['type'])) return { type: 'snapshot' };
       return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
         ? { type: 'snapshot', sessionId: value.sessionId }
+        : null;
+    case 'pin-sessions':
+      return hasExactKeys(value, ['type', 'sessionIds']) &&
+        Array.isArray(value.sessionIds) &&
+        value.sessionIds.every((id) => typeof id === 'string')
+        ? { type: 'pin-sessions', sessionIds: value.sessionIds }
         : null;
     case 'warm-mcp':
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)

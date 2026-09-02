@@ -76,6 +76,24 @@ let workerReady = false;
 let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
 /** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
 let snapshotPending: false | true | string = false;
+/** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
+const pinnedBySource = new Map<string, readonly string[]>();
+let lastPinnedKey = '';
+
+function pushPinnedSessions(force = false): void {
+  const sessionIds = [...new Set([...pinnedBySource.values()].flat())].sort();
+  const key = sessionIds.join('\n');
+  if (!force && key === lastPinnedKey) return;
+  lastPinnedKey = key;
+  if (worker && workerReady)
+    worker.postMessage({ type: 'pin-sessions', sessionIds } satisfies AgentCommand);
+}
+
+/** 替换某一来源的 pinned 会话集；并集变化才下发 worker。 */
+export function setPinnedSessions(source: 'viewed' | 'pair', sessionIds: readonly string[]): void {
+  pinnedBySource.set(source, sessionIds);
+  pushPinnedSessions();
+}
 
 export function setAgentEventListener(
   listener: (event: AgentWorkerEvent | { type: 'worker-exited' }) => void
@@ -99,6 +117,7 @@ export function startAgentWorker(): void {
     workerReady = true;
     const servers = enabledMcpServers();
     if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
+    pushPinnedSessions(true);
     if (snapshotPending !== false) {
       const command: AgentCommand =
         snapshotPending === true

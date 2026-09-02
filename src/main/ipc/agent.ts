@@ -50,6 +50,7 @@ import {
   rewindSession,
   sendBrowserResultToSession,
   setAgentEventListener,
+  setPinnedSessions,
   setSessionApprovalMode,
   setSessionModel,
   setSessionReasoning,
@@ -744,6 +745,8 @@ export function registerAgentHandlers(): void {
   ipcMain.on(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, (event, sessionId: unknown) => {
     if (!isMainWebContents(event.sender.id)) return;
     setViewedSession(isNonEmptyString(sessionId) ? sessionId : null);
+    // 正在查看的会话不参与 worker 侧闲置回收，否则 release 后 ChatView 会立刻 resume 形成拉锯
+    setPinnedSessions('viewed', isNonEmptyString(sessionId) ? [sessionId] : []);
   });
 
   ipcMain.handle(

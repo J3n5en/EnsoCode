@@ -537,3 +537,68 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('SessionSupervisor idle eviction', () => {
+  beforeEach(() => {
+    mocks.sessions.length = 0;
+    mocks.managers.length = 0;
+    mocks.createAgentSession.mockReset();
+    rmSync('/tmp/sessions', { recursive: true, force: true });
+    mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
+      session: session(options),
+    }));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  });
+
+  it('releases an idle unpinned parent after the TTL and keeps the pinned one', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    const other = { sessionId: 'other', generation: '44444444-4444-4444-8444-444444444444' };
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/w', model });
+    await settle();
+    supervisor.handleCommand({ type: 'pin-sessions', sessionIds: ['other'] });
+
+    await vi.advanceTimersByTimeAsync(31 * 60_000);
+    await settle();
+
+    const ended = events.filter((event) => event.type === 'parent-ended');
+    expect(ended).toEqual([
+      expect.objectContaining({ type: 'parent-ended', identity: parent, reason: 'evicted' }),
+    ]);
+    expect((mocks.sessions[0] as ReturnType<typeof session>).dispose).toHaveBeenCalled();
+    expect((mocks.sessions[1] as ReturnType<typeof session>).dispose).not.toHaveBeenCalled();
+    await supervisor.shutdown();
+    vi.useRealTimers();
+  });
+
+  it('a running turn resets the idle clock', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
+    await settle();
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    parentSession.emit({ type: 'agent_start' });
+    parentSession.emit({ type: 'agent_end', messages: [] });
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    await settle();
+    expect(events.filter((event) => event.type === 'parent-ended')).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    await settle();
+    expect(events.filter((event) => event.type === 'parent-ended')).toHaveLength(1);
+    await supervisor.shutdown();
+    vi.useRealTimers();
+  });
+});

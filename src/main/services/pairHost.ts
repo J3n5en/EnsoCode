@@ -36,7 +36,7 @@ import type {
 } from '@shared/types/pair';
 import { app, powerMonitor, powerSaveBlocker } from 'electron';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
-import { requestSnapshot } from './agentHost';
+import { requestSnapshot, setPinnedSessions } from './agentHost';
 import { MacosSystemSleepAssertion } from './macosSystemSleepAssertion';
 import {
   checkSetModel,
@@ -194,7 +194,17 @@ function syncPowerBlocker(): void {
 function notifyStatus(): void {
   // phoneOnline 的每次变化都会走到这里，顺带同步休眠锁
   syncPowerBlocker();
+  syncPinnedSessions();
   onStatusChange?.();
+}
+
+/** 手机在线且订阅中的会话不参与 worker 闲置回收（回收了手机就收不到投影了） */
+function syncPinnedSessions(): void {
+  const ids: string[] = [];
+  for (const conn of connections.values()) {
+    if (!conn.closed && conn.phoneOnline && conn.subscribedId) ids.push(conn.subscribedId);
+  }
+  setPinnedSessions('pair', ids);
 }
 
 // ── 生命周期 ──────────────────────────────────────────────────────────
@@ -621,6 +631,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       break;
     }
   }
+  syncPinnedSessions();
 }
 
 // ── 发：加密下行 ──────────────────────────────────────────────────────
