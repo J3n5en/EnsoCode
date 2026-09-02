@@ -1,9 +1,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAllowedCdpMethod } from '@shared/browser/cdpPolicy';
+import { sanitizeUiElementPayload } from '@shared/browser/designMode';
 import { assertDevtoolsIdle } from '@shared/browser/devtools';
 import { pickFaviconUrl } from '@shared/browser/favicon';
 import {
+  DESIGN_MODE_BINDING,
+  PAGE_DESIGN_MODE_DISABLE_SCRIPT,
+  PAGE_DESIGN_MODE_ENABLE_SCRIPT,
+  PAGE_DESIGN_MODE_HIDE_SCRIPT,
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SNAPSHOT_SCRIPT,
   PAGE_UNLOCK_OVERLAY_SCRIPT,
@@ -31,7 +36,11 @@ import {
 import { assertAllowedUrl } from '@shared/browser/urlPolicy';
 import type { BrowserViewport } from '@shared/browser/viewport';
 import type { BrowserOp } from '@shared/types/agent';
-import type { BrowserClearKind, BrowserTabState } from '@shared/types/browser';
+import type {
+  BrowserClearKind,
+  BrowserDesignModeEvent,
+  BrowserTabState,
+} from '@shared/types/browser';
 import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
 import { getWorkbenchView } from '../windows/createAppWindow';
@@ -78,7 +87,10 @@ interface Tab {
   /** webContents 首次 dom-ready 前 debugger.attach 会让 Main 段错误 */
   ready: boolean;
   devtoolsOpen: boolean;
+  designMode: boolean;
   favicon: string | null;
+  designBinding?: boolean;
+  pickSeq: number;
 }
 
 const EMPTY_STATE: BrowserTabState = {
@@ -91,6 +103,7 @@ const EMPTY_STATE: BrowserTabState = {
   canGoForward: false,
   locked: false,
   devtoolsOpen: false,
+  designMode: false,
 };
 
 interface PageInfo {
@@ -135,6 +148,7 @@ export class BrowserHost {
   >();
   private readonly revealListeners = new Set<(sessionId: string, tabId: string) => void>();
   private readonly closeListeners = new Set<(sessionId: string, tabId: string) => void>();
+  private readonly designListeners = new Set<(event: BrowserDesignModeEvent) => void>();
   /** renderer 还没报矩形前先不关 tab，避免回合结束跑赢面板挂载 */
   private readonly pendingReveal = new Set<string>();
   /** 用户见过的 tab：切走 Terminal / 重启后仍恢复 */
@@ -167,6 +181,11 @@ export class BrowserHost {
     return () => this.closeListeners.delete(listener);
   }
 
+  onDesignMode(listener: (event: BrowserDesignModeEvent) => void): () => void {
+    this.designListeners.add(listener);
+    return () => this.designListeners.delete(listener);
+  }
+
   private requestReveal(sessionId: string, tabId?: string): void {
     const tab =
       (tabId ? this.tabs.get(tabId) : this.tabFor(sessionId)) ?? this.createTab(sessionId);
@@ -193,6 +212,7 @@ export class BrowserHost {
       canGoForward: contents.navigationHistory.canGoForward(),
       locked: tab.locked,
       devtoolsOpen: tab.devtoolsOpen,
+      designMode: tab.designMode,
     };
   }
 
@@ -234,6 +254,7 @@ export class BrowserHost {
   setDevTools(tabId: string, open: boolean): BrowserTabState {
     const tab = this.tabs.get(tabId);
     if (!tab) return EMPTY_STATE;
+    if (open && tab.designMode) void this.setDesignMode(tabId, false);
     tab.devtoolsOpen = open;
     if (open) {
       this.detachDebugger(tab);
@@ -330,6 +351,7 @@ export class BrowserHost {
         dbg.detach();
       } catch {}
     }
+    tab.designBinding = false;
   }
 
   private ensureDevTools(tab: Tab): void {
@@ -421,9 +443,117 @@ export class BrowserHost {
 
   async setLocked(sessionId: string, locked: boolean): Promise<void> {
     const tab = this.mustTab(sessionId);
+    if (locked && tab.designMode) await this.setDesignMode(tab.id, false);
     tab.locked = locked;
     await this.syncLockOverlay(tab);
     this.emitState(sessionId, tab.id);
+  }
+
+  async setDesignMode(tabId: string, enabled: boolean): Promise<BrowserTabState> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return EMPTY_STATE;
+    if (enabled && (tab.locked || tab.devtoolsOpen)) return this.stateOf(tab);
+    if (!enabled) {
+      tab.designMode = false;
+      tab.pickSeq += 1;
+      await this.runGuest(tab, PAGE_DESIGN_MODE_DISABLE_SCRIPT);
+      this.emitState(tab.ownerSessionId, tab.id);
+      return this.stateOf(tab);
+    }
+    await this.ensureDesignBinding(tab);
+    await this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
+    tab.designMode = true;
+    this.emitState(tab.ownerSessionId, tab.id);
+    return this.stateOf(tab);
+  }
+
+  private emitDesign(event: BrowserDesignModeEvent): void {
+    for (const listener of this.designListeners) listener(event);
+  }
+
+  private async runGuest(tab: Tab, script: string): Promise<unknown> {
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed() || !tab.ready) return undefined;
+    return contents.executeJavaScript(script, true).catch(() => undefined);
+  }
+
+  private async ensureDesignBinding(tab: Tab): Promise<void> {
+    if (tab.designBinding) return;
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed() || !tab.ready) return;
+    const dbg = contents.debugger;
+    if (!dbg.isAttached()) {
+      try {
+        dbg.attach('1.3');
+      } catch {
+        return;
+      }
+    }
+    dbg.on('message', (_event, method, params) => {
+      if (method !== 'Runtime.bindingCalled') return;
+      const name = isRecord(params) ? params.name : undefined;
+      const payload = isRecord(params) ? params.payload : undefined;
+      if (name !== DESIGN_MODE_BINDING || typeof payload !== 'string') return;
+      void this.onDesignBinding(tab, payload);
+    });
+    await this.cdp(tab, 'Runtime.addBinding', { name: DESIGN_MODE_BINDING });
+    tab.designBinding = true;
+  }
+
+  private async onDesignBinding(tab: Tab, raw: string): Promise<void> {
+    if (!tab.designMode) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!isRecord(parsed)) return;
+    if (parsed.type === 'cancelled') {
+      await this.setDesignMode(tab.id, false);
+      this.emitDesign({ type: 'cancelled', conversationId: tab.ownerSessionId, tabId: tab.id });
+      return;
+    }
+    if (parsed.type !== 'picked') return;
+    const payload = sanitizeUiElementPayload(parsed.payload);
+    if (!payload) return;
+    const seq = ++tab.pickSeq;
+    await this.runGuest(tab, PAGE_DESIGN_MODE_HIDE_SCRIPT);
+    let image: { data: string; mimeType: string } | undefined;
+    try {
+      image = await this.screenshotRect(tab, payload.rect);
+    } catch {}
+    if (seq !== tab.pickSeq) return;
+    await this.setDesignMode(tab.id, false);
+    this.emitDesign({
+      type: 'picked',
+      conversationId: tab.ownerSessionId,
+      tabId: tab.id,
+      payload,
+      ...(image ? { image } : {}),
+    });
+  }
+
+  private async screenshotRect(
+    tab: Tab,
+    rect?: { x: number; y: number; width: number; height: number }
+  ): Promise<{ data: string; mimeType: string }> {
+    if (
+      rect &&
+      Number.isFinite(rect.width) &&
+      Number.isFinite(rect.height) &&
+      rect.width >= 1 &&
+      rect.height >= 1
+    ) {
+      return this.screenshotClip(tab, {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        scale: 1,
+      });
+    }
+    return this.screenshot(tab);
   }
 
   private async syncLockOverlay(tab: Tab): Promise<void> {
@@ -733,6 +863,14 @@ export class BrowserHost {
       const scale = width > SCREENSHOT_MAX_WIDTH ? SCREENSHOT_MAX_WIDTH / width : 1;
       clip = { x: 0, y: 0, width, height, scale };
     }
+    return this.screenshotClip(tab, clip);
+  }
+
+  private async screenshotClip(
+    tab: Tab,
+    clip: { x: number; y: number; width: number; height: number; scale: number }
+  ): Promise<{ data: string; mimeType: string }> {
+    assertDevtoolsIdle(tab.devtoolsOpen);
     const shot = (await this.cdp(tab, 'Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: true,
@@ -785,7 +923,9 @@ export class BrowserHost {
       locked: false,
       ready: false,
       devtoolsOpen: false,
+      designMode: false,
       favicon: null,
+      pickSeq: 0,
     };
     const contents = view.webContents;
     const push = () => this.emitState(sessionId, id);
@@ -814,10 +954,12 @@ export class BrowserHost {
     });
     contents.on('did-finish-load', () => {
       if (tab.locked) void this.syncLockOverlay(tab);
+      if (tab.designMode) void this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
     });
     contents.once('dom-ready', () => {
       tab.ready = true;
       this.layout();
+      if (tab.designMode) void this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
     });
     // window.open / target=_blank：本 tab 内导航，不弹系统浏览器
     contents.setWindowOpenHandler(({ url }) => {

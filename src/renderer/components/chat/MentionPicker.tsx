@@ -258,7 +258,9 @@ function MentionOption({
             ? t(candidate.description)
             : candidate.kind === 'chat'
               ? candidate.sessionFile.split('/').at(-1)
-              : candidate.relativePath}
+              : candidate.kind === 'file'
+                ? candidate.relativePath
+                : candidate.path}
         </span>
       </span>
     </button>

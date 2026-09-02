@@ -1,7 +1,9 @@
 import type { BrowserTabState } from '@shared/types/browser';
 import type { DockviewPanelApi } from 'dockview-react';
-import { ArrowLeft, ArrowRight, Bug, Globe, Hand, RotateCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bug, Globe, Hand, PenLine, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { insertUiElementMention } from '@/components/chat/composerMentionBridge';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -18,6 +20,7 @@ const EMPTY: BrowserTabState = {
   canGoForward: false,
   locked: false,
   devtoolsOpen: false,
+  designMode: false,
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -84,6 +87,41 @@ export function BrowserView({
       if (event.tabId === tabId) setState(event.state);
     });
   }, [tabId]);
+
+  useEffect(() => {
+    return window.electronAPI.browser.onDesignMode((event) => {
+      if (event.tabId !== tabId) return;
+      if (event.type === 'cancelled') return;
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `ui-${Date.now()}`;
+      const imageId = `img-${id}`;
+      const inserted = insertUiElementMention(
+        {
+          kind: 'ui-element',
+          id,
+          label: event.payload.label || event.payload.tag || 'element',
+          path: event.payload.path || event.payload.tag || 'element',
+          text: event.payload.text || event.payload.label || event.payload.tag || 'element',
+          imageId,
+        },
+        event.image
+      );
+      if (!inserted) addToast({ type: 'warning', title: t('No Composer for this selection') });
+    });
+  }, [tabId, t]);
+
+  useEffect(() => {
+    if (!state.designMode) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      void window.electronAPI.browser.setDesignMode(tabId, false).then(setState);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [state.designMode, tabId]);
 
   useEffect(() => {
     if (!editing) setAddress(state.url);
@@ -238,6 +276,18 @@ export function BrowserView({
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
         </form>
+        <button
+          type="button"
+          className={cn(iconButton, state.designMode && 'bg-muted text-foreground')}
+          disabled={!state.tabId || state.locked || state.devtoolsOpen}
+          onClick={() =>
+            void window.electronAPI.browser.setDesignMode(tabId, !state.designMode).then(setState)
+          }
+          aria-label={t('Toggle Design Mode')}
+          aria-pressed={state.designMode}
+        >
+          <PenLine className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           className={cn(iconButton, state.devtoolsOpen && 'bg-muted text-foreground')}

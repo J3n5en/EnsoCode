@@ -324,6 +324,10 @@ export const IPC_PRODUCT_COVERAGE = {
     'Side panel browser DevTools overlay geometry; renderer UI only.'
   ),
   BROWSER_TAB_CLOSED: excluded('Side panel browser tab closed push; renderer UI only.'),
+  BROWSER_SET_DESIGN_MODE: excluded('Side panel browser Design Mode toggle; renderer UI only.'),
+  BROWSER_DESIGN_MODE_EVENT: excluded(
+    'Side panel browser Design Mode pick event; renderer UI only.'
+  ),
   SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
   SSH_CONNECTIONS_UPSERT: surfaces(
     'projects.ssh-connections.add',

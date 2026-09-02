@@ -14,6 +14,7 @@ import {
   History,
   ListTodo,
   LoaderCircle,
+  MousePointer2,
   RefreshCw,
   Sparkles,
   Target,
@@ -216,11 +217,11 @@ function InlineMentionCard({
   label,
   title,
 }: {
-  kind: 'file' | 'chat';
+  kind: 'file' | 'chat' | 'ui-element';
   label: string;
   title: string;
 }) {
-  const Icon = kind === 'file' ? FileText : History;
+  const Icon = kind === 'file' ? FileText : kind === 'chat' ? History : MousePointer2;
   return (
     <span
       className={cn(
@@ -266,6 +267,14 @@ function InlineMentionText({
             kind="chat"
             label={segment.label}
             title={segment.sessionFile}
+          />
+        ) : segment.type === 'ui-element' ? (
+          <InlineMentionCard
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            kind="ui-element"
+            label={segment.label}
+            title={`${segment.path}${segment.text ? ` · ${segment.text}` : ''}`}
           />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换

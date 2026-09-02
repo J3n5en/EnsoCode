@@ -1,9 +1,9 @@
-import type { AgentTypeMentionCandidate, ChatMentionCandidate } from '@shared/types/mentions';
-import { Bot, History, X } from 'lucide-react';
+import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
+import { Bot, X } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
-export type MentionKind = 'agent-type' | 'file' | 'chat';
+export type MentionKind = 'agent-type' | 'file' | 'chat' | 'ui-element';
 
 /**
  * 提及 chip 与 SlashChip 同底座（色块 tag），按类型区分颜色：
@@ -15,6 +15,7 @@ const COLORS: Record<MentionKind, string> = {
   'agent-type': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
   file: 'bg-success/15 text-success',
   chat: 'bg-warning/25 text-warning-foreground dark:bg-warning/15 dark:text-warning',
+  'ui-element': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
 };
 
 export function mentionChipClass(kind: MentionKind): string {

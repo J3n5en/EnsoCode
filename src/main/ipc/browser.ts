@@ -84,4 +84,14 @@ export function registerBrowserHandlers(): void {
   browserHost.onTabClosed((conversationId, tabId) => {
     sendToAllWindows(IPC_CHANNELS.BROWSER_TAB_CLOSED, { conversationId, tabId });
   });
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_SET_DESIGN_MODE,
+    async (_event, tabId: unknown, enabled: unknown) => {
+      if (!isId(tabId) || typeof enabled !== 'boolean') return browserHost.state('');
+      return browserHost.setDesignMode(tabId, enabled);
+    }
+  );
+  browserHost.onDesignMode((event) => {
+    sendToAllWindows(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, event);
+  });
 }

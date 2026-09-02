@@ -58,7 +58,11 @@ import type {
   UpdateConversationSelectionRequest,
 } from '@shared/types/agent';
 import { parseDispatchMainEvent } from '@shared/types/agent';
-import type { BrowserClearKind, BrowserTabState } from '@shared/types/browser';
+import type {
+  BrowserClearKind,
+  BrowserDesignModeEvent,
+  BrowserTabState,
+} from '@shared/types/browser';
 import type {
   AgentComposerPrefillEvent,
   AgentDispatchRequest,
@@ -652,6 +656,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_LOCKED, conversationId, locked),
     setDevTools: (tabId: string, open: boolean): Promise<BrowserTabState> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_DEVTOOLS, tabId, open),
+    setDesignMode: (tabId: string, enabled: boolean): Promise<BrowserTabState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_DESIGN_MODE, tabId, enabled),
     setDevToolsViewport: (
       tabId: string,
       conversationId: string,
@@ -691,6 +697,11 @@ const electronAPI = {
         callback(event);
       ipcRenderer.on(IPC_CHANNELS.BROWSER_TAB_CLOSED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_TAB_CLOSED, listener);
+    },
+    onDesignMode: (callback: (event: BrowserDesignModeEvent) => void): (() => void) => {
+      const listener = (_: unknown, event: BrowserDesignModeEvent) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
     },
   },
 };

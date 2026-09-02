@@ -1,4 +1,9 @@
-import type { ChatMentionCandidate, FileMentionCandidate } from '@shared/types/mentions';
+import type { AttachedImage } from '@shared/types/agent';
+import type {
+  ChatMentionCandidate,
+  FileMentionCandidate,
+  UiElementMentionCandidate,
+} from '@shared/types/mentions';
 
 /**
  * Composer 的 insertMention 出口。DndContext 在 App.tsx,而编辑器 ref 在
@@ -11,6 +16,9 @@ type InsertFn = (candidate: FileMentionCandidate | ChatMentionCandidate) => void
 let current: InsertFn | null = null;
 let insertText: ((text: string) => void) | null = null;
 let focusComposer: (() => void) | null = null;
+let insertUiElement:
+  | ((candidate: UiElementMentionCandidate, image?: AttachedImage) => void)
+  | null = null;
 
 export function registerComposerInsert(fn: InsertFn): () => void {
   current = fn;
@@ -50,5 +58,23 @@ export function insertComposerMention(
 export function insertComposerText(text: string): boolean {
   if (!insertText) return false;
   insertText(text);
+  return true;
+}
+
+export function registerComposerInsertUiElement(
+  fn: (candidate: UiElementMentionCandidate, image?: AttachedImage) => void
+): () => void {
+  insertUiElement = fn;
+  return () => {
+    if (insertUiElement === fn) insertUiElement = null;
+  };
+}
+
+export function insertUiElementMention(
+  candidate: UiElementMentionCandidate,
+  image?: AttachedImage
+): boolean {
+  if (!insertUiElement) return false;
+  insertUiElement(candidate, image);
   return true;
 }

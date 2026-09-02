@@ -1,13 +1,22 @@
 import { useDroppable } from '@dnd-kit/core';
+import { unbindImages } from '@shared/browser/designMode';
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
 import type {
   AgentTypeMentionCandidate,
   ChatMentionCandidate,
   MentionCandidate,
+  UiElementMentionCandidate,
 } from '@shared/types/mentions';
 import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogPanel,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
@@ -17,6 +26,7 @@ import {
   registerComposerFocus,
   registerComposerInsert,
   registerComposerInsertText,
+  registerComposerInsertUiElement,
 } from './composerMentionBridge';
 import { COMPOSER_DROP_ID } from './dragDrop';
 import { MentionChip } from './MentionChip';
@@ -93,16 +103,26 @@ export function Composer({
   // 侧栏拖入(dnd-kit):会话/项目行落到输入区插 mention chip。
   // 与 OS 文件拖入(HTML5 dnd)互不干扰:两套事件体系独立。
   const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({ id: COMPOSER_DROP_ID });
+  const [preview, setPreview] = useState<UiElementMentionCandidate | null>(null);
+  const boundIds = useRef(new Set<string>());
   useEffect(() => {
     const unsubInsert = registerComposerInsert((candidate) =>
       editorRef.current?.insertMention(candidate)
     );
     const unsubText = registerComposerInsertText((text) => editorRef.current?.insertText(text));
     const unsubFocus = registerComposerFocus(() => editorRef.current?.focus());
+    const unsubUi = registerComposerInsertUiElement((candidate, image) => {
+      if (image) {
+        setImages((current) => [...current, { ...image, id: candidate.imageId }]);
+      }
+      editorRef.current?.insertMention(candidate);
+      editorRef.current?.focus();
+    });
     return () => {
       unsubInsert();
       unsubText();
       unsubFocus();
+      unsubUi();
     };
   }, []);
   const editorRef = useRef<MentionEditorHandle>(null);
@@ -131,6 +151,17 @@ export function Composer({
   const handleEditorState = useCallback((state: MentionEditorState) => {
     setEditorPlain(state.plainText);
     setEditorHasMentions(state.hasMentions);
+    const nextBound = new Set(
+      state.segments
+        .filter((segment) => segment.type === 'ui-element' && segment.imageId)
+        .map((segment) => (segment.type === 'ui-element' ? segment.imageId : ''))
+    );
+    const dropped = [...boundIds.current].filter((id) => !nextBound.has(id));
+    boundIds.current = nextBound;
+    if (dropped.length > 0) {
+      setImages((current) => unbindImages(current, dropped));
+      setPreview((current) => (current && dropped.includes(current.imageId) ? null : current));
+    }
     setMentionQuery((previous) => {
       if (previous !== state.mentionQuery) {
         setActiveIndex(0);
@@ -156,6 +187,11 @@ export function Composer({
       }
       const draft = focusKey ? drafts.get(focusKey) : undefined;
       editorRef.current?.setSegments(draft?.segments ?? []);
+      boundIds.current = new Set(
+        (draft?.segments ?? [])
+          .filter((segment) => segment.type === 'ui-element' && segment.imageId)
+          .map((segment) => (segment.type === 'ui-element' ? segment.imageId : ''))
+      );
       setImages(draft?.images ?? []);
       setSlash(draft?.slash ?? null);
       setRecipient(draft?.recipient);
@@ -469,27 +505,29 @@ export function Composer({
           ingestFiles(files);
         }}
       >
-        {images.length > 0 && (
+        {images.filter((image) => !image.id).length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">
-            {images.map((image, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: attachments have no stable id.
-              <div key={index} className="group relative">
-                <img
-                  src={`data:${image.mimeType};base64,${image.data}`}
-                  alt=""
-                  className="h-16 w-16 rounded-md border object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setImages((current) => current.filter((_, item) => item !== index))
-                  }
-                  className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+            {images
+              .filter((image) => !image.id)
+              .map((image, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: attachments have no stable id.
+                <div key={index} className="group relative">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt=""
+                    className="h-16 w-16 rounded-md border object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setImages((current) => current.filter((_, item) => item !== index))
+                    }
+                    className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
           </div>
         )}
         <div
@@ -529,6 +567,18 @@ export function Composer({
             }
             disabled={locked}
             onStateChange={handleEditorState}
+            onChipActivate={(segment) => {
+              if (segment.type === 'ui-element') {
+                setPreview({
+                  kind: 'ui-element',
+                  id: segment.id,
+                  label: segment.label,
+                  path: segment.path,
+                  text: segment.text,
+                  imageId: segment.imageId,
+                });
+              }
+            }}
             onKeyDown={handleKeyDown}
             onPaste={(event) => {
               const files = Array.from(event.clipboardData.files);
@@ -582,6 +632,31 @@ export function Composer({
           )}
         </div>
       </div>
+      <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{preview?.label ?? t('Selected UI element')}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel className="space-y-2 text-xs">
+            {preview && (
+              <>
+                <p className="text-muted-foreground break-all">{preview.path}</p>
+                {preview.text && <p>{preview.text}</p>}
+                {(() => {
+                  const image = images.find((item) => item.id === preview.imageId);
+                  return image ? (
+                    <img
+                      src={`data:${image.mimeType};base64,${image.data}`}
+                      alt=""
+                      className="max-h-72 w-full rounded-md border object-contain"
+                    />
+                  ) : null;
+                })()}
+              </>
+            )}
+          </DialogPanel>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

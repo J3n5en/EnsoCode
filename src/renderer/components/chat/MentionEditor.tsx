@@ -1,4 +1,8 @@
-import type { ChatMentionCandidate, FileMentionCandidate } from '@shared/types/mentions';
+import type {
+  ChatMentionCandidate,
+  FileMentionCandidate,
+  UiElementMentionCandidate,
+} from '@shared/types/mentions';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { extractMentionQuery, type MentionSegment } from './mentionComposer';
@@ -14,6 +18,7 @@ export interface MentionEditorState {
   plainText: string;
   /** 是否含提及卡片 */
   hasMentions: boolean;
+  segments: MentionSegment[];
   /** 光标处的 @query(null = 无活动 token) */
   mentionQuery: string | null;
   /** 光标处的 /query(仅编辑器首节点文本;null = 无) */
@@ -27,7 +32,9 @@ export interface MentionEditorHandle {
   setSegments(segments: readonly MentionSegment[]): void;
   clear(): void;
   /** 用卡片替换光标处的 @token(无 token 则插在光标处),尾随一个空格 */
-  insertMention(candidate: FileMentionCandidate | ChatMentionCandidate): void;
+  insertMention(
+    candidate: FileMentionCandidate | ChatMentionCandidate | UiElementMentionCandidate
+  ): void;
   /** 仅移除光标处的 @token 或 /token(agent recipient、slash 选中用) */
   consumeToken(prefix: '@' | '/'): void;
   /** 在光标处插入文件卡片(拖拽文件用,无 token 语义) */
@@ -47,18 +54,22 @@ interface MentionEditorProps {
   onPaste: (event: React.ClipboardEvent) => void;
   onCompositionStart: () => void;
   onCompositionEnd: () => void;
+  onChipActivate?: (segment: MentionSegment) => void;
   ariaProps?: React.AriaAttributes & { role?: string };
 }
 
 /** lucide FileText / History 的静态 path(卡片是命令式 DOM,不走 React 渲染) */
-const ICON_SVG: Record<'file' | 'chat', string> = {
+const ICON_SVG: Record<'file' | 'chat' | 'ui-element', string> = {
   file: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
   chat: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>',
+  'ui-element':
+    '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>',
 };
 
-const CHIP_CLASS: Record<'file' | 'chat', string> = {
+const CHIP_CLASS: Record<'file' | 'chat' | 'ui-element', string> = {
   file: 'bg-success/15 text-success',
   chat: 'bg-warning/25 text-warning-foreground dark:bg-warning/15 dark:text-warning',
+  'ui-element': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
 };
 
 function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpanElement {
@@ -68,9 +79,16 @@ function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpan
   if (segment.type === 'file') {
     chip.dataset.path = segment.path;
     chip.title = segment.path;
-  } else {
+  } else if (segment.type === 'chat') {
     chip.dataset.label = segment.label;
     chip.dataset.sessionFile = segment.sessionFile;
+  } else {
+    chip.dataset.id = segment.id;
+    chip.dataset.label = segment.label;
+    chip.dataset.path = segment.path;
+    chip.dataset.text = segment.text;
+    chip.dataset.imageId = segment.imageId;
+    chip.title = `${segment.path}${segment.text ? ` · ${segment.text}` : ''}`;
   }
   chip.className = cn(
     // align-middle + leading-4：与正文（含 CJK）光学居中，与气泡侧 InlineMentionCard 同参数
@@ -95,6 +113,21 @@ function segmentFromChip(chip: HTMLElement): MentionSegment | null {
   }
   if (chip.dataset.mentionKind === 'chat' && chip.dataset.label && chip.dataset.sessionFile) {
     return { type: 'chat', label: chip.dataset.label, sessionFile: chip.dataset.sessionFile };
+  }
+  if (
+    chip.dataset.mentionKind === 'ui-element' &&
+    chip.dataset.label &&
+    chip.dataset.path &&
+    chip.dataset.text
+  ) {
+    return {
+      type: 'ui-element',
+      id: chip.dataset.id ?? '',
+      label: chip.dataset.label,
+      path: chip.dataset.path,
+      text: chip.dataset.text,
+      imageId: chip.dataset.imageId ?? '',
+    };
   }
   return null;
 }
@@ -250,6 +283,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
       onPaste,
       onCompositionStart,
       onCompositionEnd,
+      onChipActivate,
       ariaProps,
     },
     ref
@@ -313,7 +347,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           slashQuery = before.slice(1);
         }
       }
-      onStateChange({ plainText, hasMentions, mentionQuery, slashQuery });
+      onStateChange({ plainText, hasMentions, segments, mentionQuery, slashQuery });
     }, [onStateChange]);
 
     /** 光标处活动 token 的范围(@ 或 /) */
@@ -399,15 +433,24 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           emitState();
         },
         insertMention: (candidate) => {
-          insertNodeAtCaret(
-            () =>
-              buildChip(
-                candidate.kind === 'file'
-                  ? { type: 'file', path: candidate.relativePath }
-                  : { type: 'chat', label: candidate.label, sessionFile: candidate.sessionFile }
-              ),
-            true
-          );
+          const segment =
+            candidate.kind === 'file'
+              ? { type: 'file' as const, path: candidate.relativePath }
+              : candidate.kind === 'chat'
+                ? {
+                    type: 'chat' as const,
+                    label: candidate.label,
+                    sessionFile: candidate.sessionFile,
+                  }
+                : {
+                    type: 'ui-element' as const,
+                    id: candidate.id,
+                    label: candidate.label,
+                    path: candidate.path,
+                    text: candidate.text,
+                    imageId: candidate.imageId,
+                  };
+          insertNodeAtCaret(() => buildChip(segment), candidate.kind !== 'ui-element');
         },
         consumeToken: (prefix) => {
           const token = activeTokenRange(prefix);
@@ -453,8 +496,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           ) {
             const root = rootRef.current;
             const chip =
-              root &&
-              chipBesideCaret(root, event.key === 'Backspace' ? 'before' : 'after');
+              root && chipBesideCaret(root, event.key === 'Backspace' ? 'before' : 'after');
             if (chip && root) {
               event.preventDefault();
               removeMentionChip(chip, root);
@@ -466,6 +508,15 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           // 边界（手工插 \n/<br> 后尾部光标会被折回，后续输入位置错乱）；
           // 序列化端 walkSegments 已把 <br>/块元素降级为 '\n'
           onKeyDown(event);
+        }}
+        onClick={(event) => {
+          if (!onChipActivate) return;
+          const target = event.target;
+          if (!(target instanceof Element)) return;
+          const chip = target.closest('[data-mention-kind]');
+          if (!(chip instanceof HTMLElement) || !rootRef.current?.contains(chip)) return;
+          const segment = segmentFromChip(chip);
+          if (segment) onChipActivate(segment);
         }}
         onKeyUp={emitState}
         onMouseUp={emitState}
