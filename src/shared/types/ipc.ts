@@ -187,6 +187,17 @@ export const IPC_CHANNELS = {
   PAIR_SESSION_CONFIG: 'pair:session-config',
   /** main → renderer：手机的排队消息操作（队列只存于 renderer store，不走 agent bridge） */
   PAIR_QUEUE_ACTION: 'pair:queue-action',
+
+  // Remote nodes: this desktop as guest connecting to another EnsoCode desktop
+  NODES_LIST: 'nodes:list',
+  NODES_PAIR: 'nodes:pair',
+  NODES_REMOVE: 'nodes:remove',
+  NODES_RENAME: 'nodes:rename',
+  NODES_SEND: 'nodes:send',
+  /** main → renderer：节点列表/连接状态变化 */
+  NODES_STATUS_CHANGED: 'nodes:status-changed',
+  /** main → renderer：解密后的 host 下行帧 */
+  NODES_MESSAGE: 'nodes:message',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

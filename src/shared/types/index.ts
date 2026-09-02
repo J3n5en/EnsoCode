@@ -9,6 +9,7 @@ export * from './ipc';
 export * from './llm';
 export * from './mentions';
 export * from './modelMeta';
+export type * from './nodes';
 export * from './oauthProviders';
 // 纯类型：用 type-only 再导出，避免 rollup 生成 __exportAll 运行时 helper
 // （helper 会被塞进 main 入口，令 agent worker 的共享 chunk 反向 import main，

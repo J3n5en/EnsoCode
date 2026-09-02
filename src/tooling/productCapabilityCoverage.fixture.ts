@@ -293,6 +293,15 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_STATUS_CHANGED: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_SESSION_CONFIG: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   PAIR_QUEUE_ACTION: excluded('Phone second-screen pairing transport; not an Enso capability.'),
+  NODES_LIST: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_PAIR: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_REMOVE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_RENAME: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_SEND: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_STATUS_CHANGED: excluded(
+    'Remote node (desktop guest) pairing transport; not an Enso capability.'
+  ),
+  NODES_MESSAGE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   TERMINAL_CREATE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_WRITE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_RESIZE: excluded('Side panel terminal pty transport; renderer UI only.'),

@@ -10,6 +10,7 @@ import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
 } from './services/localImageProtocol';
+import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
@@ -82,6 +83,8 @@ if (!gotTheLock) {
       }
       // 手机第二屏：恢复已配对设备的中继连接
       startPairHost();
+      // 连接到节点：恢复到别的桌面的 guest 连接
+      startPairGuest();
     });
     void initAutoUpdater(mainWindow);
 
@@ -101,6 +104,7 @@ if (!gotTheLock) {
   // Electron 退出即断开中继，手机侧收到 host-offline
   app.on('before-quit', () => {
     stopPairHost();
+    stopPairGuest();
     // 内嵌浏览器 Cookie / storage 落盘后再关 guest 页
     void browserHost.dispose();
   });

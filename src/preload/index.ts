@@ -69,6 +69,12 @@ import type {
   ParentSourceBindingRequest,
   ParentSourceBindingResult,
 } from '@shared/types/mentions';
+import type {
+  NodeActionResult,
+  NodeMessage,
+  NodePairResult,
+  NodesStatus,
+} from '@shared/types/nodes';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type {
   TerminalCreateRequest,
@@ -528,6 +534,32 @@ const electronAPI = {
       const listener = (_: unknown, action: PairQueueAction) => callback(action);
       ipcRenderer.on(IPC_CHANNELS.PAIR_QUEUE_ACTION, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PAIR_QUEUE_ACTION, listener);
+    },
+  },
+
+  /** 连接到节点：本机作为 guest 连别的 EnsoCode 桌面（密钥与连接在 main） */
+  nodes: {
+    list: (): Promise<NodesStatus> => ipcRenderer.invoke(IPC_CHANNELS.NODES_LIST),
+    /** 粘贴对方的配对链接（https 或 enso://） */
+    pair: (inviteUri: string): Promise<NodePairResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_PAIR, inviteUri),
+    remove: (nodeId: string): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_REMOVE, nodeId),
+    rename: (nodeId: string, label: string): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_RENAME, nodeId, label),
+    /** 发 @enso/pair 的 PhoneToHost 命令（main 按白名单校验后加密上行） */
+    send: (nodeId: string, command: unknown): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_SEND, nodeId, command),
+    onStatusChanged: (callback: (status: NodesStatus) => void): (() => void) => {
+      const listener = (_: unknown, status: NodesStatus) => callback(status);
+      ipcRenderer.on(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
+    },
+    /** 解密后的 host 下行帧（catalog/projects/providers/agent-event/history） */
+    onMessage: (callback: (message: NodeMessage) => void): (() => void) => {
+      const listener = (_: unknown, message: NodeMessage) => callback(message);
+      ipcRenderer.on(IPC_CHANNELS.NODES_MESSAGE, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_MESSAGE, listener);
     },
   },
 
