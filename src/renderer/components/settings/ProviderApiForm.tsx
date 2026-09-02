@@ -1,19 +1,17 @@
 import { mergeFetchedModels } from '@shared/modelEntry';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
-import {
-  CircleCheck,
-  CircleX,
-  Eye,
-  EyeOff,
-  ListPlus,
-  Loader2,
-  Plus,
-  Zap,
-} from 'lucide-react';
+import { CircleCheck, CircleX, Eye, EyeOff, ListPlus, Loader2, Plus, Zap } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { DialogFooter, DialogPanel } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
@@ -24,7 +22,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
 import { ListFilterBar, useVisibleSelection } from './ListFilterBar';
@@ -63,6 +60,7 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
   const [showKey, setShowKey] = React.useState(false);
   const [busy, setBusy] = React.useState<'fetch' | 'test' | null>(null);
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [errorDetail, setErrorDetail] = React.useState<string | null>(null);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [catalogMeta, setCatalogMeta] = React.useState<Record<string, ModelMeta>>({});
 
@@ -111,7 +109,9 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
     const result = await window.electronAPI.providers.listModels(apiConfig);
     setBusy(null);
     if (!result.ok) {
-      setStatus({ ok: false, text: result.error ?? 'Failed' });
+      const text = result.error ?? 'Failed';
+      setStatus({ ok: false, text });
+      setErrorDetail(text);
       return;
     }
     setModels((current) => mergeFetchedModels(current, result.models));
@@ -124,10 +124,9 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
     const target = testModel || models.find(isEnabled)?.id;
     const result = await window.electronAPI.providers.test(apiConfig, target);
     setBusy(null);
-    setStatus({
-      ok: result.ok,
-      text: result.ok ? t('Connected ({{ms}}ms)', { ms: result.latencyMs }) : result.message,
-    });
+    const text = result.ok ? t('Connected ({{ms}}ms)', { ms: result.latencyMs }) : result.message;
+    setStatus({ ok: result.ok, text });
+    if (!result.ok) setErrorDetail(text);
   };
 
   const addModel = (id: string) => {
@@ -355,21 +354,22 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
               </SelectPopup>
             </Select>
           )}
-          {status && (
-            <span
-              className={cn(
-                'flex min-w-0 items-center gap-1 text-xs',
-                status.ok ? 'text-emerald-600 dark:text-emerald-500' : 'text-destructive'
-              )}
-            >
-              {status.ok ? (
+          {status &&
+            (status.ok ? (
+              <span className="flex min-w-0 items-center gap-1 text-emerald-600 text-xs dark:text-emerald-500">
                 <CircleCheck className="h-3.5 w-3.5 shrink-0" />
-              ) : (
+                <span className="truncate">{status.text}</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="flex min-w-0 items-center gap-1 text-destructive text-xs underline-offset-2 hover:underline"
+                onClick={() => setErrorDetail(status.text)}
+              >
                 <CircleX className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="truncate">{status.text}</span>
-            </span>
-          )}
+                <span className="truncate">{status.text}</span>
+              </button>
+            ))}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={onCancel}>
@@ -392,6 +392,24 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
           </Button>
         </div>
       </DialogFooter>
+
+      <Dialog open={errorDetail !== null} onOpenChange={(open) => !open && setErrorDetail(null)}>
+        <DialogPopup zIndexLevel="nested" className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t('Connection failed')}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            <pre className="max-h-80 select-text overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs">
+              {errorDetail}
+            </pre>
+          </DialogPanel>
+          <DialogFooter>
+            <Button size="sm" variant="outline" onClick={() => setErrorDetail(null)}>
+              {t('Close')}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }

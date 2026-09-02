@@ -209,6 +209,7 @@ export const zhTranslations: Record<string, string> = {
   Testing: '测试中...',
   'Fetched {{count}} models': '拉取到 {{count}} 个模型',
   'Connected ({{ms}}ms)': '连接成功({{ms}}ms)',
+  'Connection failed': '连接失败',
   Cancel: '取消',
   // Unified provider setup, default model, and Enso
   'Add a provider subscription or API Key, or import providers from local AI apps':
