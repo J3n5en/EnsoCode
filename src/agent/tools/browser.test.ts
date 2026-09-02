@@ -53,7 +53,16 @@ describe('createBrowserTools', () => {
       'browser_type',
       'browser_tabs',
       'browser_lock',
+      'browser_fill',
+      'browser_press_key',
+      'browser_scroll',
+      'browser_select_option',
+      'browser_mouse_click_xy',
+      'browser_drag',
+      'browser_highlight',
+      'browser_get_bounding_box',
       'browser_screenshot',
+      'browser_cdp',
     ]);
     const click = tools.find((tool) => tool.name === 'browser_click')!;
     await expect(click.execute('c1', {}, undefined, undefined, undefined as never)).rejects.toThrow(

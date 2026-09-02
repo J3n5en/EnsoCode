@@ -1,10 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertAllowedCdpMethod } from '@shared/browser/cdpPolicy';
 import {
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SNAPSHOT_SCRIPT,
   PAGE_UNLOCK_OVERLAY_SCRIPT,
+  pageBoundingBoxScript,
   pageClickScript,
+  pageClickXyScript,
+  pageDragScript,
+  pageHighlightScript,
+  pagePressKeyScript,
+  pageScrollScript,
+  pageSelectOptionScript,
   pageTypeScript,
 } from '@shared/browser/pageScripts';
 import {
@@ -316,7 +324,11 @@ export class BrowserHost {
   async invoke(sessionId: string, op: BrowserOp, params: unknown): Promise<unknown> {
     switch (op) {
       case 'navigate':
-        return this.navigate(sessionId, paramString(params, 'url'));
+        return this.navigate(
+          sessionId,
+          paramString(params, 'url'),
+          isRecord(params) && params.newTab === true
+        );
       case 'snapshot':
         return this.snapshot(this.mustTab(sessionId));
       case 'click':
@@ -326,8 +338,71 @@ export class BrowserHost {
         const submit = isRecord(params) && params.submit === true;
         return this.type(this.mustTab(sessionId), paramString(params, 'ref'), text, submit);
       }
+      case 'fill':
+        return this.type(
+          this.mustTab(sessionId),
+          paramString(params, 'ref'),
+          isRecord(params) && typeof params.value === 'string'
+            ? params.value
+            : isRecord(params) && typeof params.text === 'string'
+              ? params.text
+              : '',
+          false
+        );
+      case 'press_key':
+        return this.runPage(
+          this.mustTab(sessionId),
+          pagePressKeyScript(paramString(params, 'key'))
+        );
+      case 'scroll':
+        return this.runPage(
+          this.mustTab(sessionId),
+          pageScrollScript({
+            ...(isRecord(params) && typeof params.ref === 'string' ? { ref: params.ref } : {}),
+            ...(isRecord(params) && typeof params.direction === 'string'
+              ? { direction: params.direction }
+              : {}),
+            ...(isRecord(params) && typeof params.amount === 'number'
+              ? { amount: params.amount }
+              : {}),
+          })
+        );
+      case 'select_option': {
+        const values =
+          isRecord(params) && Array.isArray(params.values)
+            ? params.values.filter((v): v is string => typeof v === 'string')
+            : isRecord(params) && typeof params.value === 'string'
+              ? [params.value]
+              : [];
+        return this.selectOption(this.mustTab(sessionId), paramString(params, 'ref'), values);
+      }
+      case 'click_xy': {
+        const x = isRecord(params) ? Number(params.x) : Number.NaN;
+        const y = isRecord(params) ? Number(params.y) : Number.NaN;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('x and y are required');
+        return this.runPage(this.mustTab(sessionId), pageClickXyScript(x, y));
+      }
+      case 'drag':
+        return this.drag(this.mustTab(sessionId), params);
+      case 'highlight':
+        return this.runPage(
+          this.mustTab(sessionId),
+          pageHighlightScript(paramString(params, 'ref')),
+          paramString(params, 'ref')
+        );
+      case 'bounding_box':
+        return this.boundingBox(this.mustTab(sessionId), paramString(params, 'ref'));
       case 'screenshot':
-        return this.screenshot(this.mustTab(sessionId));
+        return this.screenshot(
+          this.mustTab(sessionId),
+          isRecord(params) && typeof params.ref === 'string' ? params.ref : undefined
+        );
+      case 'cdp':
+        return this.cdpCommand(
+          this.mustTab(sessionId),
+          paramString(params, 'method'),
+          isRecord(params) && isRecord(params.params) ? params.params : {}
+        );
       case 'close': {
         const tab = this.mustTab(sessionId);
         await this.destroyTab(tab);
@@ -388,9 +463,11 @@ export class BrowserHost {
     return { tabs: list() };
   }
 
-  async navigate(sessionId: string, raw: string): Promise<PageInfo> {
+  async navigate(sessionId: string, raw: string, newTab = false): Promise<PageInfo> {
     const url = assertAllowedUrl(raw);
-    const tab = this.tabFor(sessionId) ?? this.createTab(sessionId);
+    const tab = newTab
+      ? this.createTab(sessionId)
+      : (this.tabFor(sessionId) ?? this.createTab(sessionId));
     const contents = tab.view.webContents;
     tab.lastSnapshot = undefined;
     await Promise.race([
@@ -435,20 +512,102 @@ export class BrowserHost {
     return this.pageInfo(tab.view.webContents);
   }
 
+  private async runPage(tab: Tab, script: string, ref?: string): Promise<PageInfo> {
+    if (ref) this.assertRef(tab, ref);
+    const outcome: unknown = await tab.view.webContents.executeJavaScript(script, true);
+    if (outcome === 'stale') throw staleRef(ref ?? '');
+    if (typeof outcome === 'string' && outcome !== 'ok') {
+      throw new Error(`browser action failed: ${outcome}`);
+    }
+    await sleep(SETTLE_MS);
+    return this.pageInfo(tab.view.webContents);
+  }
+
+  private async selectOption(tab: Tab, ref: string, values: string[]): Promise<PageInfo> {
+    this.assertRef(tab, ref);
+    const outcome: unknown = await tab.view.webContents.executeJavaScript(
+      pageSelectOptionScript(ref, values),
+      true
+    );
+    if (outcome === 'stale') throw staleRef(ref);
+    if (outcome !== 'ok') throw new Error(`Could not select option on ${ref}`);
+    await sleep(SETTLE_MS);
+    return this.pageInfo(tab.view.webContents);
+  }
+
+  private async boundingBox(tab: Tab, ref: string): Promise<unknown> {
+    this.assertRef(tab, ref);
+    const box: unknown = await tab.view.webContents.executeJavaScript(
+      pageBoundingBoxScript(ref),
+      true
+    );
+    if (!box) throw staleRef(ref);
+    return box;
+  }
+
+  private async drag(tab: Tab, params: unknown): Promise<PageInfo> {
+    const fromRef =
+      isRecord(params) && typeof params.fromRef === 'string' ? params.fromRef : undefined;
+    const toRef = isRecord(params) && typeof params.toRef === 'string' ? params.toRef : undefined;
+    const fromX = isRecord(params) ? Number(params.fromX) : Number.NaN;
+    const fromY = isRecord(params) ? Number(params.fromY) : Number.NaN;
+    const toX = isRecord(params) ? Number(params.toX) : Number.NaN;
+    const toY = isRecord(params) ? Number(params.toY) : Number.NaN;
+    const from = fromRef ? { ref: fromRef } : { x: fromX, y: fromY };
+    const to = toRef ? { ref: toRef } : { x: toX, y: toY };
+    if (fromRef) this.assertRef(tab, fromRef);
+    if (toRef) this.assertRef(tab, toRef);
+    const outcome: unknown = await tab.view.webContents.executeJavaScript(
+      pageDragScript(from, to),
+      true
+    );
+    if (outcome === 'stale') throw new Error('Drag source or target ref is stale.');
+    if (outcome !== 'ok') throw new Error('Drag failed.');
+    await sleep(SETTLE_MS);
+    return this.pageInfo(tab.view.webContents);
+  }
+
+  private async cdpCommand(
+    tab: Tab,
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<unknown> {
+    assertAllowedCdpMethod(method);
+    return this.cdp(tab, method, params);
+  }
+
   /**
    * 被 renderer 盖住的 view `capturePage` 会报 UnknownVizError（合成器不出帧）。
    * 走 CDP `Page.captureScreenshot` + captureBeyondViewport 强制 Blink 离屏渲染。
    * debugger 只在 host 内用，模型摸不到。
    */
-  private async screenshot(tab: Tab): Promise<{ data: string; mimeType: string }> {
-    const bounds = tab.view.getBounds();
-    const width = bounds.width || HEADLESS_BOUNDS.width;
-    const height = bounds.height || HEADLESS_BOUNDS.height;
-    const scale = width > SCREENSHOT_MAX_WIDTH ? SCREENSHOT_MAX_WIDTH / width : 1;
+  private async screenshot(tab: Tab, ref?: string): Promise<{ data: string; mimeType: string }> {
+    let clip: { x: number; y: number; width: number; height: number; scale: number };
+    if (ref) {
+      this.assertRef(tab, ref);
+      const box = (await tab.view.webContents.executeJavaScript(
+        pageBoundingBoxScript(ref),
+        true
+      )) as { x: number; y: number; width: number; height: number } | null;
+      if (!box) throw staleRef(ref);
+      clip = {
+        x: box.x,
+        y: box.y,
+        width: Math.max(1, box.width),
+        height: Math.max(1, box.height),
+        scale: 1,
+      };
+    } else {
+      const bounds = tab.view.getBounds();
+      const width = bounds.width || HEADLESS_BOUNDS.width;
+      const height = bounds.height || HEADLESS_BOUNDS.height;
+      const scale = width > SCREENSHOT_MAX_WIDTH ? SCREENSHOT_MAX_WIDTH / width : 1;
+      clip = { x: 0, y: 0, width, height, scale };
+    }
     const shot = (await this.cdp(tab, 'Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: true,
-      clip: { x: 0, y: 0, width, height, scale },
+      clip,
     })) as { data?: unknown } | undefined;
     if (typeof shot?.data !== 'string' || !shot.data) {
       throw new Error('Screenshot is empty; the page has not painted yet.');

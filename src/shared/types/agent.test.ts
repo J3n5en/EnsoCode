@@ -717,10 +717,22 @@ describe('browser-invoke / browser-result', () => {
   it('browser-invoke 只接受闭集 op，identity 可为 parent 或 child', () => {
     expect(parseAgentWorkerEvent(invoke)).toEqual(invoke);
     expect(parseAgentWorkerEvent({ ...invoke, identity: child })).not.toBeNull();
-    for (const op of ['snapshot', 'click', 'type', 'screenshot', 'tabs', 'lock', 'close']) {
+    for (const op of [
+      'snapshot',
+      'click',
+      'type',
+      'fill',
+      'press_key',
+      'scroll',
+      'cdp',
+      'screenshot',
+      'tabs',
+      'lock',
+      'close',
+    ]) {
       expect(parseAgentWorkerEvent({ ...invoke, op })).not.toBeNull();
     }
-    expect(parseAgentWorkerEvent({ ...invoke, op: 'cdp' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...invoke, op: 'hover' })).toBeNull();
     expect(parseAgentWorkerEvent({ ...invoke, requestId: '' })).toBeNull();
     expect(
       parseAgentWorkerEvent({ ...invoke, identity: { ...parent, generation: 'old' } })

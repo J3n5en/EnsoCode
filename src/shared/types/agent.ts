@@ -65,10 +65,19 @@ export const BROWSER_OPS = [
   'snapshot',
   'click',
   'type',
+  'fill',
+  'press_key',
+  'scroll',
+  'select_option',
+  'click_xy',
+  'drag',
+  'highlight',
+  'bounding_box',
   'screenshot',
   'tabs',
   'lock',
   'close',
+  'cdp',
 ] as const;
 export type BrowserOp = (typeof BROWSER_OPS)[number];
 

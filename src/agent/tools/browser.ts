@@ -148,8 +148,19 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
       'Browser navigate',
       "Open a URL in Enso's built-in browser (http/https only; localhost is allowed without approval). " +
         'Opens the Browser side panel so the user can see the page. Returns the title and final URL. Call browser_snapshot next to read the page.',
-      schema({ url: { type: 'string', description: 'Absolute http(s) URL' } }, ['url']),
-      (params, signal) => invoker.invoke('navigate', { url: requireStr(params, 'url') }, signal)
+      schema(
+        {
+          url: { type: 'string', description: 'Absolute http(s) URL' },
+          newTab: { type: 'boolean', description: 'Open in a new tab (default false)' },
+        },
+        ['url']
+      ),
+      (params, signal) =>
+        invoker.invoke(
+          'navigate',
+          { url: requireStr(params, 'url'), newTab: params.newTab === true },
+          signal
+        )
     ),
     define(
       'browser_snapshot',
@@ -225,11 +236,153 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
       (params, signal) => invoker.invoke('lock', { release: params.release === true }, signal)
     ),
     define(
+      'browser_fill',
+      'Browser fill',
+      'Set the value of an input / textarea / contenteditable by ref (replaces existing text). Prefer this over type for forms.',
+      schema(
+        {
+          ref: { type: 'string', description: 'Element ref such as e3' },
+          value: { type: 'string', description: 'Value to set' },
+        },
+        ['ref', 'value']
+      ),
+      (params, signal) =>
+        invoker.invoke(
+          'fill',
+          {
+            ref: requireStr(params, 'ref'),
+            value: typeof params.value === 'string' ? params.value : '',
+          },
+          signal
+        )
+    ),
+    define(
+      'browser_press_key',
+      'Browser press key',
+      'Press a key on the focused element (Enter, Tab, Escape, ArrowDown, ...).',
+      schema({ key: { type: 'string', description: 'Key name such as Enter' } }, ['key']),
+      (params, signal) => invoker.invoke('press_key', { key: requireStr(params, 'key') }, signal)
+    ),
+    define(
+      'browser_scroll',
+      'Browser scroll',
+      'Scroll the page or an element. direction is up or down; optional ref scrolls that element.',
+      schema({
+        direction: { type: 'string', enum: ['up', 'down'] },
+        amount: { type: 'number', description: 'Pixels (default 400)' },
+        ref: { type: 'string', description: 'Optional element ref to scroll' },
+      }),
+      (params, signal) =>
+        invoker.invoke(
+          'scroll',
+          {
+            direction: params.direction === 'up' ? 'up' : 'down',
+            ...(typeof params.amount === 'number' ? { amount: params.amount } : {}),
+            ...(typeof params.ref === 'string' ? { ref: params.ref } : {}),
+          },
+          signal
+        )
+    ),
+    define(
+      'browser_select_option',
+      'Browser select option',
+      'Select one or more options in a <select> by ref.',
+      schema(
+        {
+          ref: { type: 'string' },
+          values: { type: 'array', items: { type: 'string' } },
+          value: { type: 'string' },
+        },
+        ['ref']
+      ),
+      (params, signal) =>
+        invoker.invoke(
+          'select_option',
+          {
+            ref: requireStr(params, 'ref'),
+            ...(Array.isArray(params.values) ? { values: params.values } : {}),
+            ...(typeof params.value === 'string' ? { value: params.value } : {}),
+          },
+          signal
+        )
+    ),
+    define(
+      'browser_mouse_click_xy',
+      'Browser click xy',
+      'Click at viewport coordinates. Prefer browser_click with a snapshot ref when possible.',
+      schema(
+        {
+          x: { type: 'number' },
+          y: { type: 'number' },
+        },
+        ['x', 'y']
+      ),
+      (params, signal) =>
+        invoker.invoke('click_xy', { x: Number(params.x), y: Number(params.y) }, signal)
+    ),
+    define(
+      'browser_drag',
+      'Browser drag',
+      'Drag from one ref or x,y to another ref or x,y.',
+      schema({
+        fromRef: { type: 'string' },
+        toRef: { type: 'string' },
+        fromX: { type: 'number' },
+        fromY: { type: 'number' },
+        toX: { type: 'number' },
+        toY: { type: 'number' },
+      }),
+      (params, signal) => invoker.invoke('drag', params, signal)
+    ),
+    define(
+      'browser_highlight',
+      'Browser highlight',
+      'Outline an element by ref for two seconds (visual debug).',
+      schema({ ref: { type: 'string' } }, ['ref']),
+      (params, signal) => invoker.invoke('highlight', { ref: requireStr(params, 'ref') }, signal)
+    ),
+    define(
+      'browser_get_bounding_box',
+      'Browser bounding box',
+      'Return the viewport bounding box of a snapshot ref.',
+      schema({ ref: { type: 'string' } }, ['ref']),
+      (params, signal) => invoker.invoke('bounding_box', { ref: requireStr(params, 'ref') }, signal)
+    ),
+    define(
       'browser_screenshot',
       'Browser screenshot',
-      'Capture the visible viewport of the current browser tab as an image. For locating elements prefer browser_snapshot refs.',
-      schema({}),
-      (_params, signal) => invoker.invoke('screenshot', {}, signal)
+      'Capture the visible viewport, or a single element when ref is set.',
+      schema({ ref: { type: 'string', description: 'Optional element ref to crop' } }),
+      (params, signal) =>
+        invoker.invoke(
+          'screenshot',
+          typeof params.ref === 'string' ? { ref: params.ref } : {},
+          signal
+        )
+    ),
+    define(
+      'browser_cdp',
+      'Browser CDP',
+      'Send a Chrome DevTools Protocol command for debugging (Runtime.evaluate, DOM, CSS, Profiler, Performance, Network.enable). ' +
+        'Do not use Input.*, cookies, Page.navigate, downloads, or Target.* — use dedicated browser tools instead.',
+      schema(
+        {
+          method: { type: 'string', description: 'CDP method such as Runtime.evaluate' },
+          params: { type: 'object', description: 'CDP params object' },
+        },
+        ['method']
+      ),
+      (params, signal) =>
+        invoker.invoke(
+          'cdp',
+          {
+            method: requireStr(params, 'method'),
+            ...(params.params && typeof params.params === 'object'
+              ? { params: params.params }
+              : {}),
+          },
+          signal
+        )
     ),
   ];
 }
