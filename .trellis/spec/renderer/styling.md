@@ -60,6 +60,45 @@ className={cn('text-sm font-medium', !enabled && 'text-muted-foreground line-thr
 终端主题数据在 `src/renderer/data/terminal-themes.json`（438 个），
 由 `pnpm generate:themes` 生成，**不要手改**。
 
+## 背景图透明化：新界面默认自动跟随，别绕过它
+
+用户可开「背景图」（设置 → 外观）。实现不是透明窗口，而是
+`hooks/useBackgroundImage.ts` 给 `<html>` 挂 `bg-image-enabled` 类并写入几个 alpha 变量，
+`globals.css` 里用相对颜色把 **`--color-*` 令牌**（Tailwind 引用层）重映射成半透明：
+
+| 变量 | 作用范围 | 来源 |
+|------|---------|------|
+| `--bg-panel-alpha` | 普通面板（`bg-background` / `bg-card` / `bg-muted` / `bg-sidebar`…） | 1 − 背景可见度 |
+| `--bg-popover-alpha` | 弹出层（`bg-popover`），保底 0.92 | 派生 |
+| `--bg-border-alpha` | 边框 | 面板 + 0.25 |
+| `--bg-code-alpha` | 代码块 / diff / 终端 | 「代码块不透明度」滑块 |
+| `--bg-composer-alpha` | 输入框 `[data-slot="composer"]` | 「输入框不透明度」滑块 |
+
+**新页面只要用语义令牌类（`bg-background` 等）就自动跟随，什么都不用做。**
+以下写法会绕过机制，让新面板在背景图模式下变成一块不透明的砖：
+
+```tsx
+// 错误：/60 把 alpha 硬编码进颜色，不再随可见度联动（SidePanel 曾踩过）
+className="bg-background/60"
+// 错误：内联色值、第三方主题色（xterm/shiki/@pierre/diffs 都自带不透明底色）
+style={{ backgroundColor: theme.background }}
+```
+
+处理办法按情况选：
+
+- **只是想要「稍暗一层」的层次感** → 用不同令牌（`bg-muted` / `bg-card`），不要用 `/N` 修饰符。
+  确实需要 `/N` 的只限 hover/选中等瞬态（`hover:bg-accent/50`），不能用在承载内容的面板底色上。
+- **第三方组件自己刷底色**（终端、代码高亮、diff）→ 给宿主元素挂 `data-slot`，在
+  `globals.css` 的 `html.bg-image-enabled` 区块加一条覆写：内部置透，宿主用
+  `oklch(from <源色> l c h / var(--bg-code-alpha))` 刷**一层**。保留源色色相（如终端主题色
+  走 `--terminal-bg`），只换 alpha。多层元素各刷一遍半透明会叠成不透明（diffs 踩过）。
+- **新的独立区域确实需要自己的档位**（如输入框、代码块）→ 走 settings store 加字段完整流程
+  （`state.md`），新增一个滑块 + 一个 `--bg-*-alpha` 变量，并在上表登记。不要私自派生
+  「面板 alpha + 常数」的公式——低可见度下会封顶到 1，用户感知为功能失效。
+
+改完在背景图开启状态下截图对比一次；`--bg-code-alpha` 默认 0.65，`useBackgroundImage`
+只在主窗口 `App.tsx` 调用，设置窗口不挂背景。
+
 ## 尺寸惯例
 
 设置页密集列表的常用值，保持一致：
