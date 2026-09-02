@@ -391,7 +391,10 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
       initial={false}
       animate={{ width: open ? width : 0 }}
       transition={resizing ? { duration: 0 } : springStandard}
-      className={cn('flex shrink-0 flex-col overflow-hidden bg-transparent', open && 'border-l')}
+      className={cn(
+        'flex shrink-0 flex-col overflow-hidden',
+        open ? 'border-l bg-transparent' : 'bg-background'
+      )}
     >
       <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
         {visibleIds.length > 0 ? (
