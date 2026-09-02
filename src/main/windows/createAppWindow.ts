@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, shell, WebContentsView } from 'electron';
 
 export interface CreateWindowOptions {
   /** renderer 入口 html 文件名（不含扩展名），对应 electron.vite renderer input */
@@ -13,6 +13,8 @@ export interface CreateWindowOptions {
   /** 持久化窗口位置/尺寸的状态文件名，不传则不持久化 */
   stateFile?: string;
   parent?: BrowserWindow;
+  /** 主窗口：把 webContents 做成可叠层的整窗 WebContentsView，guest 才能垫在下面 */
+  pinWorkbenchView?: boolean;
 }
 
 interface WindowState {
@@ -31,6 +33,32 @@ function loadWindowState(stateFile: string, defaults: WindowState): WindowState 
     }
   } catch {}
   return defaults;
+}
+
+const workbenchViews = new WeakMap<BrowserWindow, WebContentsView>();
+
+export function getWorkbenchView(win: BrowserWindow): WebContentsView | undefined {
+  return workbenchViews.get(win);
+}
+
+function pinWorkbenchView(win: BrowserWindow): void {
+  try {
+    const view = new WebContentsView({ webContents: win.webContents });
+    const sync = (): void => {
+      if (win.isDestroyed()) return;
+      const { width, height } = win.getContentBounds();
+      view.setBounds({ x: 0, y: 0, width, height });
+    };
+    win.contentView.addChildView(view);
+    win.on('resize', sync);
+    sync();
+    workbenchViews.set(win, view);
+  } catch (error) {
+    console.error(
+      '[window] pinWorkbenchView failed:',
+      error instanceof Error ? error.message : error
+    );
+  }
 }
 
 function saveWindowState(win: BrowserWindow, stateFile: string): void {
@@ -77,6 +105,8 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
     },
   });
+
+  if (options.pinWorkbenchView) pinWorkbenchView(win);
 
   if (state.isMaximized) {
     win.maximize();

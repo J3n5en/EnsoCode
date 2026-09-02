@@ -11,6 +11,7 @@ export function createMainWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 600,
     stateFile: 'window-state.json',
+    pinWorkbenchView: true,
   });
 
   mainWindow.on('closed', () => {
