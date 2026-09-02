@@ -364,6 +364,7 @@ export const zhTranslations: Record<string, string> = {
   'Delegate an arbitrary coding subtask to a subagent.': '将任意编码子任务委派给 subagent。',
   'Use the unrestricted coworker tool.': '使用不受限的 Coworker 工具。',
   'Run a background shell task.': '运行后台 shell 任务。',
+  "Browse pages in Enso's built-in browser.": '在 Enso 内嵌浏览器里浏览页面。',
   Save: '保存',
   // Skills & MCP
   Skills: '技能',
@@ -565,6 +566,8 @@ export const zhTranslations: Record<string, string> = {
     '向用户提问并等待回答(带选项/超时)',
   'Background shell task: run long commands in the background and notify on completion':
     '后台 shell 任务:长命令挂后台跑,完成时通知',
+  "Built-in browser: open pages in Enso's own Chromium, read snapshots, click and type by ref":
+    '内嵌浏览器:在 Enso 自带 Chromium 里打开页面,读快照,按 ref 点击与输入',
   '(log unavailable)': '(日志不可用)',
   'Loading…': '加载中…',
   '(no log available)': '(暂无日志)',

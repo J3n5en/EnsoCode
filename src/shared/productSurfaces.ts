@@ -455,6 +455,11 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'action',
     label: 'Run background shell task',
   },
+  'coding-tools.browser': {
+    domain: 'coding-tools',
+    kind: 'action',
+    label: 'Use built-in browser',
+  },
 } as const satisfies Record<string, ProductSurfaceInventoryItem>;
 
 export type ProductSurfaceId = keyof typeof PRODUCT_SURFACE_INVENTORY;

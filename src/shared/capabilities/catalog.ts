@@ -1152,6 +1152,13 @@ export const CAPABILITY_CATALOG = {
     reason: 'Enso never receives command or background process tools.',
     suggestedAction: 'Ask the coding agent to run the background task.',
   }),
+  'coding-tools.browser': unavailable('coding-tools.browser', {
+    description: "Browse pages in Enso's built-in browser.",
+    risk: 'dangerous',
+    targetContext: 'origin-project',
+    reason: 'Enso never receives browsing or page-interaction tools.',
+    suggestedAction: 'Ask the coding agent to use the built-in browser.',
+  }),
 } as const satisfies Record<ProductSurfaceId, CapabilitySpec<ProductSurfaceId, ProductSurfaceId>>;
 
 export type CapabilityCatalog = typeof CAPABILITY_CATALOG;

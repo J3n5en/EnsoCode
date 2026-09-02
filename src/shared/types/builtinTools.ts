@@ -27,6 +27,12 @@ export const BUILTIN_TOOLS: BuiltinToolInfo[] = [
     description: 'Ask the user a question and wait for an answer (options / timeout)',
   },
   {
+    id: 'browser',
+    name: 'Browser',
+    description:
+      "Built-in browser: open pages in Enso's own Chromium, read snapshots, click and type by ref",
+  },
+  {
     id: 'background_tasks',
     name: 'Background tasks',
     description:

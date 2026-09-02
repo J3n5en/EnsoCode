@@ -86,6 +86,7 @@ import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
 import { createTodoTool } from './todo';
+import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 
@@ -138,6 +139,7 @@ interface ManagedSession {
   currentTurnId?: string;
   promptedRequestIds: Set<string>;
   ensoApp?: EnsoAppInvoker;
+  browser?: BrowserInvoker;
   adaptiveDowngraded: boolean;
   /** 最近一次 auto_retry_start 携带的原始错误（取消重试时的终态错误文案） */
   lastRetryError?: string;
@@ -383,11 +385,13 @@ export class SessionSupervisor {
     const identity =
       command.type === 'capability-result'
         ? command.child
-        : command.type === 'dismiss-child' ||
-            command.type === 'dismiss-coworker' ||
-            command.type === 'resume-coworker'
-          ? command.parent
-          : command.identity;
+        : command.type === 'browser-result'
+          ? command.identity
+          : command.type === 'dismiss-child' ||
+              command.type === 'dismiss-coworker' ||
+              command.type === 'resume-coworker'
+            ? command.parent
+            : command.identity;
     void this.gate
       .run(identity.sessionId, () => this.execute(command))
       .catch((error) => {
@@ -616,6 +620,13 @@ export class SessionSupervisor {
         managed.ensoApp?.resolve(command.turnId, command.requestId, command.envelope);
         return;
       }
+      case 'browser-result': {
+        const managed = this.must(command.identity);
+        if (!managed.browser?.resolve(command)) {
+          console.warn(`[browser] dropped result for unknown request ${command.requestId}`);
+        }
+        return;
+      }
       case 'append-session-custom-entry': {
         const managed = this.must(command.identity);
         managed.session.sessionManager.appendCustomEntry('enso-agent-session', command.entry);
@@ -688,6 +699,7 @@ export class SessionSupervisor {
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         managed.ensoApp?.cancelAll('Enso capability invocation aborted');
+        managed.browser?.cancelAll('Browser action aborted');
         managed.currentTurnId = undefined;
         await managed.session.abort();
         return;
@@ -716,6 +728,7 @@ export class SessionSupervisor {
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         managed.ensoApp?.cancelAll('Session released');
+        managed.browser?.cancelAll('Session released');
         try {
           await managed.session.abort();
         } catch {}
@@ -1140,8 +1153,26 @@ export class SessionSupervisor {
       },
     });
     const askManager = this.createAskManager(identity);
+    // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
+    const browser = toolEnabled('browser')
+      ? new BrowserInvoker(identity, (request) => {
+          const managed = managedRef ?? this.sessions.get(sessionId);
+          if (!managed) throw new Error('Session is not ready for browser actions.');
+          this.options.emit({
+            type: 'browser-invoke',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            requestId: request.requestId,
+            op: request.op,
+            params: request.params,
+          });
+        })
+      : undefined;
     const customTools = [
       ...buildCoreTools(),
+      ...(browser
+        ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
+        : []),
       ...(toolEnabled('todo') ? [createTodoTool()] : []),
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
       ...(toolEnabled('subagent') ? [taskTool] : []),
@@ -1188,6 +1219,7 @@ export class SessionSupervisor {
       toolIds: customTools.map((tool) => tool.name),
       checkpoints,
     });
+    managedRef.browser = browser;
     this.options.emit({
       type: 'parent-ready',
       identity,
@@ -2055,6 +2087,7 @@ export class SessionSupervisor {
     this.bgTasks.stopAll();
     for (const managed of this.sessions.values()) {
       managed.ensoApp?.cancelAll('Enso worker shutdown');
+      managed.browser?.cancelAll('Enso worker shutdown');
       managed.currentTurnId = undefined;
     }
     return this.mcp.closeAll();
