@@ -39,6 +39,8 @@ export const SETTINGS_STATE_FIELDS = [
   'autoUpdate',
   'providers',
   'defaultModel',
+  'titleSummaryEnabled',
+  'titleSummaryModel',
   'subagentModelsEnabled',
   'subagentModels',
   'skills',

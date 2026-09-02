@@ -284,6 +284,11 @@ export const useSessionsStore = create<SessionsState>()(
     (set, get) => {
       const pendingSelectionUpdates = new Map<string, Promise<void>>();
       const pendingDispatchEvents = new Map<string, DispatchMainEvent[]>();
+      /**
+       * 标题总结在飞时的基准截断标题。title-generated 回流时只有当前标题仍等于基准
+       * 才覆盖——用户已手动改名的绝不动。不持久化：重启后在飞的总结直接作废。
+       */
+      const pendingTitleBaselines = new Map<string, string>();
 
       /**
        * 已结束 child TAB 的惰性只读回放。四个条件全满足才发请求，失败也标记已尝试，
@@ -572,6 +577,22 @@ export const useSessionsStore = create<SessionsState>()(
                 },
               },
             };
+          });
+          return;
+        }
+
+        if (event.type === 'title-generated') {
+          const baseline = pendingTitleBaselines.get(event.conversationId);
+          pendingTitleBaselines.delete(event.conversationId);
+          set((state) => {
+            const conversation = state.conversations[event.conversationId];
+            // 会话已删 / 用户已手动改名（标题离开基准）→ 丢弃结果
+            if (!conversation || baseline === undefined || conversation.title !== baseline) {
+              return state;
+            }
+            const title = event.title.trim().slice(0, 80);
+            if (!title || title === conversation.title) return state;
+            return patch(state, event.conversationId, { title });
           });
           return;
         }
@@ -1425,6 +1446,8 @@ export const useSessionsStore = create<SessionsState>()(
             text = startGoalPrompt(arg);
           }
           // 工作区迁移/回退提醒：随下一条实际发出的消息前置注入一次（同 goal 模式，可见）
+          // 标题总结的输入在注入前定格：goal 用目标原文，普通消息用用户原文
+          const titleSummarySource = goalMatch?.[1]?.trim() ?? text;
           const workspaceNote = conversation.pendingWorkspaceNote;
           if (workspaceNote && !(conversation.started && conversation.status === 'running')) {
             text = `${workspaceNote}\n\n${text}`;
@@ -1506,6 +1529,20 @@ export const useSessionsStore = create<SessionsState>()(
                 lastModelId: target.modelId,
               })
             );
+            // 标题总结：仅全新会话（resume 有 sessionFile）且未被用户预先命名；
+            // 并行发起不阻塞发消息，失败静默（截断标题已是可用兑底）
+            if (
+              useSettingsStore.getState().titleSummaryEnabled &&
+              !conversation.sessionFile &&
+              !conversation.title &&
+              titleSummarySource.trim()
+            ) {
+              const baseline = get().conversations[id]?.title;
+              if (baseline) {
+                pendingTitleBaselines.set(id, baseline);
+                void window.electronAPI.agent.summarizeTitle(id, titleSummarySource);
+              }
+            }
           }
           const action =
             get().conversations[id]?.status === 'running'

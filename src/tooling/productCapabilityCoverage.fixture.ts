@@ -39,6 +39,8 @@ export const SETTINGS_DATA_COVERAGE = {
   defaultModel: surfaces('providers.default-model'),
   defaultReasoningEnabled: surfaces('providers.default-model'),
   defaultThinkingLevel: surfaces('providers.default-model'),
+  titleSummaryEnabled: excluded('Conversation title summary preference; not an Enso capability.'),
+  titleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
   skills: surfaces('skills.list'),
   mcpServers: surfaces('mcp.list'),
   instructions: surfaces('instructions.list'),
@@ -88,6 +90,10 @@ export const SETTINGS_ACTION_COVERAGE = {
   setDefaultModel: surfaces('providers.default-model'),
   setDefaultReasoningEnabled: surfaces('providers.default-model'),
   setDefaultThinkingLevel: surfaces('providers.default-model'),
+  setTitleSummaryEnabled: excluded(
+    'Conversation title summary preference; not an Enso capability.'
+  ),
+  setTitleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
   revalidateDefaultModel: surfaces('providers.default-model'),
   addProviders: surfaces('providers.add', 'providers.import-local'),
   updateProvider: surfaces(
@@ -215,6 +221,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
   AGENT_CHILD_HISTORY_READ: excluded(
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
+  ),
+  AGENT_SUMMARIZE_TITLE: excluded(
+    'Fire-and-forget conversation title summarization; single LLM completion, no execution rights.'
   ),
   AGENT_SET_MODEL: surfaces('conversations.set-model'),
   AGENT_SET_THINKING: surfaces('conversations.set-thinking'),

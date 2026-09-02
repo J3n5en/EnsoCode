@@ -28,6 +28,7 @@ import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
+import { TitleSummaryPicker } from './TitleSummaryPicker';
 
 /** 订阅行额度：按账号拉取（60s 共享缓存），复用向导里的展示块；拉取失败静默隐藏 */
 function SubscriptionUsage({ accountKey }: { accountKey: string }) {
@@ -131,6 +132,7 @@ export function ProvidersSettings() {
         </div>
       </div>
       <DefaultModelPicker />
+      <TitleSummaryPicker />
       <SubagentModelsSettings />
 
       {providers.length === 0 ? (

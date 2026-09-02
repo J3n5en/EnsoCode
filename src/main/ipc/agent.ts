@@ -59,6 +59,7 @@ import {
   spawnSession,
   steerSession,
   stopBackgroundTask,
+  summarizeConversationTitle,
 } from '../services/agentHost';
 import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
@@ -73,6 +74,7 @@ import {
 } from '../services/sessionImport';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
+import { titleModelCandidates } from '../services/titleSummary';
 import { sendToAllWindows, sendToWindow } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
@@ -455,6 +457,43 @@ export function registerAgentHandlers(): void {
     }
     return readChildHistory(conversationId);
   });
+
+  // 标题总结：渲染层只传 conversationId + 首条消息文本；模型与凭证由 Main 从设置自读（回退链：
+  // 独立标题模型 → 全局默认）。失败路径全部静默：保留截断标题即兑底，不影响发消息。
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SUMMARIZE_TITLE,
+    async (_event, request: unknown): Promise<AgentActionResult> => {
+      const record = asRecord(request);
+      const conversationId = record?.conversationId;
+      const text = record?.text;
+      if (!isNonEmptyString(conversationId) || !isNonEmptyString(text)) {
+        return { ok: false, error: 'invalid title summary request' };
+      }
+      const state = (
+        readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
+      )?.state;
+      // 开关以 Main 自读的设置为准，不采信渲染层的调用时机
+      if (state?.titleSummaryEnabled !== true) {
+        return { ok: false, error: 'title summary disabled' };
+      }
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      for (const candidate of titleModelCandidates(state)) {
+        const resolved = resolveModelSelection(
+          candidate.providerId,
+          candidate.modelId,
+          credentialKeys
+        );
+        if (!resolved.ok || !resolved.selection) continue;
+        return summarizeConversationTitle(conversationId, text, resolved.selection.config);
+      }
+      return { ok: false, error: 'no usable title model' };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE, (event, request: unknown) => {
     const parsed = parseParentSourceBindingRequest(request);

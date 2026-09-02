@@ -313,6 +313,9 @@ const electronAPI = {
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
+    /** 标题总结：只传 id + 首条消息文本，模型/凭证由 Main 自读；结果经 title-generated 事件回流 */
+    summarizeTitle: (conversationId: string, text: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE, { conversationId, text }),
     /** 已启动会话就地换模型（未启动的会话只需记忆，下次 spawn 生效） */
     setModel: (
       sessionId: string,

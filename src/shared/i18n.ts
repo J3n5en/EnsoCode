@@ -250,6 +250,13 @@ export const zhTranslations: Record<string, string> = {
   Local: '本地',
   'Default model': '默认模型',
   'Used for new conversations.': '用于普通新对话。',
+  'Conversation title summary': '会话标题总结',
+  'Generate a short AI title from the first message of a new conversation.':
+    '新会话发出首条消息后，用 AI 自动生成简短标题。',
+  'Follows the default model': '跟随默认模型',
+  'Follow default model': '改跟默认模型',
+  'Selected model is unavailable — falls back to the default model.':
+    '所选模型已不可用——将回退到默认模型。',
   'No default model': '未设置默认模型',
   'No usable models': '没有可用模型',
   'Enable a model and configure valid provider credentials first.':

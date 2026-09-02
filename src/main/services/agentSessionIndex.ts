@@ -94,7 +94,9 @@ function coworkerView(coworker: CoworkerInfo): TeamOperationSuccess['data']['cow
   };
 }
 
-function identityOf(event: Exclude<AgentWorkerEvent, { type: 'snapshot' }>): SessionIdentity {
+function identityOf(
+  event: Exclude<AgentWorkerEvent, { type: 'snapshot' } | { type: 'title-generated' }>
+): SessionIdentity {
   return 'child' in event ? event.child : event.identity;
 }
 
@@ -317,6 +319,9 @@ export class AgentSessionIndex {
       }
       return accepted;
     }
+
+    // 标题总结不属于任何 worker 会话（无 identity/seq），不进会话索引
+    if (event.type === 'title-generated') return false;
 
     const identity = identityOf(event);
     const current = this.sessions.get(identity.sessionId);

@@ -487,6 +487,13 @@ export type AgentCommand =
       restoreFiles?: boolean;
     }
   | { type: 'abort'; identity: SessionIdentity }
+  | {
+      /** 标题总结：一次性补全，不创建会话、不落盘；失败静默（不回事件） */
+      type: 'summarize-title';
+      conversationId: string;
+      text: string;
+      model: SpawnModelConfig;
+    }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
@@ -785,6 +792,12 @@ export type AgentWorkerEvent =
       note: string;
     }
   | { type: 'task-started'; identity: SessionIdentity; seq: number; task: BackgroundTaskInfo }
+  | {
+      /** 标题总结完成：无 identity/seq（不属于任何 worker 会话），渲染层按 conversationId 写回 */
+      type: 'title-generated';
+      conversationId: string;
+      title: string;
+    }
   | {
       type: 'task-output';
       identity: SessionIdentity;
@@ -1511,6 +1524,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     }
+    case 'summarize-title':
+      return hasExactKeys(value, ['type', 'conversationId', 'text', 'model']) &&
+        isNonEmptyString(value.conversationId) &&
+        isNonEmptyString(value.text) &&
+        parseSpawnModelConfig(value.model)
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'prompt':
     case 'steer': {
       const images = value.images === undefined ? [] : parseAttachedImages(value.images);
@@ -1702,6 +1722,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       isNonEmptyString(value.requestId) &&
       isProductSurfaceId(value.capabilityId) &&
       Object.hasOwn(value, 'params')
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'title-generated') {
+    return hasExactKeys(value, ['type', 'conversationId', 'title']) &&
+      isNonEmptyString(value.conversationId) &&
+      isNonEmptyString(value.title)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

@@ -90,6 +90,7 @@ import {
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
+import { buildTitleUserText, extractTitle, TITLE_SYSTEM_PROMPT } from './titleSummary';
 import { createTodoTool } from './todo';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
@@ -486,6 +487,11 @@ export class SessionSupervisor {
     }
     if (command.type === 'pin-sessions') {
       this.pinned = new Set(command.sessionIds);
+      return;
+    }
+    if (command.type === 'summarize-title') {
+      // 标题总结不属于任何会话：旁路串行门；失败静默（截断标题已是可用兑底，不值得报错打扰）
+      void this.summarizeTitle(command).catch(() => {});
       return;
     }
     const identity =
@@ -2190,7 +2196,46 @@ export class SessionSupervisor {
     })();
     return this.runtimePromise;
   }
+
+  /** 会话标题总结：一次性补全，不建 AgentSession、不落盘；成功才回事件，失败静默 */
+  private async summarizeTitle(
+    command: Extract<AgentCommand, { type: 'summarize-title' }>
+  ): Promise<void> {
+    const runtime = await this.getRuntime();
+    const model = resolveBaseModel(runtime, command.model);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
+    try {
+      const message = await runtime.completeSimple(
+        model,
+        {
+          systemPrompt: TITLE_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: buildTitleUserText(command.text),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        { signal: controller.signal }
+      );
+      const title = extractTitle(message);
+      if (title) {
+        this.options.emit({
+          type: 'title-generated',
+          conversationId: command.conversationId,
+          title,
+        });
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
+
+/** 标题总结超时：超过就保留截断标题，不重试 */
+const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;

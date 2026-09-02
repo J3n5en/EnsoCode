@@ -435,6 +435,41 @@ describe('parent/child commands', () => {
   });
 });
 
+describe('标题总结命令与事件', () => {
+  const summarize = {
+    type: 'summarize-title',
+    conversationId: 'conversation-1',
+    text: '帮我把登录页的 bug 修一下',
+    model,
+  };
+
+  it('summarize-title 命令完整往返；缺字段或空值拒绝', () => {
+    expect(parseAgentCommand(summarize)).toEqual(summarize);
+    expect(parseAgentCommand({ ...summarize, conversationId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, text: '' })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, model: undefined })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, extra: 1 })).toBeNull();
+  });
+
+  it('summarize-title 的 model 缺 settingsProviderId 拒绝（与 spawn 同约束）', () => {
+    const { settingsProviderId: _omitted, ...rest } = model;
+    expect(parseAgentCommand({ ...summarize, model: rest })).toBeNull();
+  });
+
+  it('title-generated 事件完整往返；脏输入不崩', () => {
+    const event = {
+      type: 'title-generated',
+      conversationId: 'conversation-1',
+      title: '修复登录 bug',
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, title: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, title: 42 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, conversationId: undefined })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
+  });
+});
+
 describe('generation lifecycle/events', () => {
   it('parent/child ready 使用 exact profile proof，缺资源或伪字段拒绝', () => {
     expect(

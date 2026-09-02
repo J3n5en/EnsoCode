@@ -133,6 +133,10 @@ export interface SettingsState {
   providers: ModelProvider[];
   /** 尚未自选模型的新会话与 Enso 共用的全局默认；只保存 provider entry id + model id */
   defaultModel: DefaultModelRef | null;
+  /** 会话标题总结：首条用户消息后用小模型生成短标题；缺省关 */
+  titleSummaryEnabled: boolean;
+  /** 标题总结独立模型；null = 跟随全局默认模型 */
+  titleSummaryModel: DefaultModelRef | null;
   /** 新会话默认是否开启推理；缺省 true */
   defaultReasoningEnabled: boolean;
   /** 新会话默认思考深度；缺省 medium */
@@ -211,6 +215,10 @@ export interface SettingsState {
   revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => DefaultModelRevalidation;
   setDefaultReasoningEnabled: (value: boolean) => void;
   setDefaultThinkingLevel: (level: ThinkingLevel) => void;
+  // Title summary actions
+  setTitleSummaryEnabled: (value: boolean) => void;
+  /** 设置标题总结独立模型；null = 回到跟随全局默认 */
+  setTitleSummaryModel: (model: DefaultModelRef | null) => void;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;
