@@ -1,3 +1,33 @@
+/* dockview 主题变量重映射到语义令牌：它自带主题写死 #1e1e1e 等色值，
+   不跟随我们的 light/dark/sync-terminal，也绕过背景图透明化。
+   底色全部置透，由宿主 <aside> 的 bg-background 刷一层（避免多层叠色）。 */
+.enso-side-dock .dv-dockview {
+  --dv-group-view-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-floating-titlebar-background-color: var(--color-popover);
+  --dv-context-menu-background-color: var(--color-popover);
+  --dv-icon-hover-background-color: var(--color-accent);
+  --dv-separator-border: var(--color-border);
+  --dv-tab-divider-color: transparent;
+  --dv-paneview-header-border-color: var(--color-border);
+  --dv-drag-over-background-color: var(--color-accent);
+  --dv-drag-over-border-color: var(--color-ring);
+  --dv-tabs-container-scrollbar-color: var(--color-border);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-foreground);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-muted-foreground);
+}
+/* 浮层类元素（溢出下拉、键盘提示）不能全透，否则压在内容上看不清 */
+.enso-side-dock .dv-tabs-overflow-container,
+.enso-side-dock .dv-keyboard-docking-hint {
+  background-color: var(--color-popover);
+}
+
 /* 压掉 dockview 默认 VS 风 tab 条,只留我们自己的 chip */
 .enso-side-dock,
 .enso-side-dock .dv-dockview,

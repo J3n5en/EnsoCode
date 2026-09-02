@@ -85,6 +85,15 @@ export function getXtermTheme(name: string): XtermTheme | undefined {
   return theme ? ghosttyToXterm(theme) : undefined;
 }
 
+/**
+ * 背景图模式下交给 xterm 的主题：底色置透，由宿主容器刷一层半透明。
+ * xterm 会把 theme.background 写进 viewport/行的内联样式，外部 CSS 管不到；
+ * 必须配合 allowTransparency: true，否则 xterm 会强制不透明。
+ */
+export function withTransparentBackground(theme: XtermTheme | undefined): XtermTheme | undefined {
+  return theme ? { ...theme, background: 'transparent' } : undefined;
+}
+
 // Default dark theme for fallback
 export const defaultDarkTheme: XtermTheme = {
   background: '#1e1e1e',

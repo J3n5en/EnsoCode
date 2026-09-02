@@ -7,7 +7,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { useI18n } from '@/i18n';
-import { getXtermTheme } from '@/lib/ghosttyTheme';
+import { getXtermTheme, withTransparentBackground } from '@/lib/ghosttyTheme';
 import {
   attachTerminal,
   clearTerminalSearch,
@@ -41,7 +41,11 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
+  const bgImageEnabled = useSettingsStore((s) => s.backgroundImageEnabled);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** 背景图模式下 xterm 自身不刷底色，由 wrapper 的 --terminal-bg + --bg-code-alpha 刷一层 */
+  const xtermTheme = (name: string) =>
+    bgImageEnabled ? withTransparentBackground(getXtermTheme(name)) : getXtermTheme(name);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -58,7 +62,7 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
       }
       const settings = useSettingsStore.getState();
       const instance = attachTerminal(termId, wrapper, {
-        theme: getXtermTheme(settings.terminalTheme),
+        theme: xtermTheme(settings.terminalTheme),
         fontFamily: settings.terminalFontFamily,
         fontSize: settings.terminalFontSize,
       });
@@ -107,8 +111,10 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   }, [termId]);
 
   useEffect(() => {
-    updateTerminalAppearance(getXtermTheme(terminalTheme), fontFamily, fontSize);
-  }, [terminalTheme, fontFamily, fontSize]);
+    updateTerminalAppearance(xtermTheme(terminalTheme), fontFamily, fontSize);
+    // xtermTheme 闭包仅依赖 bgImageEnabled
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 见上
+  }, [terminalTheme, fontFamily, fontSize, bgImageEnabled]);
 
   const findNext = useCallback(
     (query: string, options?: Parameters<typeof findInTerminal>[3]) =>
