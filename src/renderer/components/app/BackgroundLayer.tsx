@@ -176,7 +176,8 @@ function BackgroundMedia({ state }: { state: MediaState }) {
     <div
       aria-hidden
       data-slot="background-layer"
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      className="pointer-events-none absolute inset-y-0 left-0 -z-10 overflow-hidden"
+      style={{ right: 'var(--enso-side-panel-width, 0px)' }}
     >
       {video ? (
         <video

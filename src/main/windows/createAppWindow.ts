@@ -69,6 +69,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     ...(isMac && { trafficLightPosition: TRAFFIC_LIGHT_POSITION }),
     ...(isWindows && { thickFrame: true }),
     show: false,
+    backgroundColor: '#00000000',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

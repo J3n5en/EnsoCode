@@ -3,7 +3,6 @@ import type { DockviewPanelApi } from 'dockview-react';
 import { ArrowLeft, ArrowRight, Globe, Hand, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
-import { clipGuestRect, collectFloatingRects } from '@/lib/guestViewOcclusion';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -83,24 +82,12 @@ export function BrowserView({
       ) {
         const box = el.getBoundingClientRect();
         if (box.width >= 1 && box.height >= 1 && el.isConnected) {
-          const next = {
+          rect = {
             x: Math.round(box.left),
             y: Math.round(box.top),
             width: Math.round(box.width),
             height: Math.round(box.height),
           };
-          const clipped = clipGuestRect(next, collectFloatingRects(), {
-            width: window.innerWidth,
-            height: window.innerHeight,
-          });
-          rect = clipped
-            ? {
-                x: Math.round(clipped.x),
-                y: Math.round(clipped.y),
-                width: Math.round(clipped.width),
-                height: Math.round(clipped.height),
-              }
-            : null;
         }
       }
       if (lastSent.current === undefined || !sameRect(lastSent.current, rect)) {
@@ -134,7 +121,7 @@ export function BrowserView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 border-b px-2 py-1">
+      <div className="flex items-center gap-1 border-b bg-background px-2 py-1">
         <button
           type="button"
           className={iconButton}
@@ -197,7 +184,7 @@ export function BrowserView({
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
       )}
-      <div ref={hostRef} className="relative min-h-0 flex-1 bg-background">
+      <div ref={hostRef} className="relative min-h-0 flex-1 bg-transparent">
         {!state.tabId && (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
             <Globe className="h-6 w-6 opacity-40" />

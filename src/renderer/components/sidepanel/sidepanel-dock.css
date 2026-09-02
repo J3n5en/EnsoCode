@@ -6,7 +6,7 @@
 }
 
 .enso-side-dock .dv-tabs-and-actions-container {
-  background: transparent;
+  background: var(--background);
   border-bottom: 1px solid var(--border);
   height: auto;
   min-height: 0;

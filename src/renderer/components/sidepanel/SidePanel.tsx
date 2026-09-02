@@ -234,7 +234,7 @@ function Watermark(props: IWatermarkPanelProps) {
   const { t } = useI18n();
   const { conversationId, projectId } = useContext(PanelContext);
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-6 text-center">
       <p className="text-sm text-muted-foreground">
         {t('No tabs yet. Create one to get started.')}
       </p>
@@ -376,7 +376,7 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
       initial={false}
       animate={{ width: open ? width : 0 }}
       transition={resizing ? { duration: 0 } : springStandard}
-      className={cn('flex shrink-0 flex-col overflow-hidden bg-background', open && 'border-l')}
+      className={cn('flex shrink-0 flex-col overflow-hidden bg-transparent', open && 'border-l')}
     >
       <div className={cn('flex h-full min-h-0 flex-col', !open && 'hidden')} style={{ width }}>
         {visibleIds.length > 0 ? (

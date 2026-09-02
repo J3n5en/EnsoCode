@@ -148,14 +148,18 @@ export class BrowserHost {
     const { contentView } = window;
     for (const tab of this.tabs.values()) {
       const onTop = Boolean(this.shown && tab.ownerSessionId === this.shown.sessionId);
-      if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view);
+      // Cursor 同款：guest 永远插在 index 0（工作区 WebContents 下面）。
+      // HTML 挖透明洞透出网页，菜单/弹层仍在 renderer 里，自然盖在网页上。
+      if (!contentView.children.includes(tab.view)) contentView.addChildView(tab.view, 0);
+      else if (onTop && contentView.children[0] !== tab.view) {
+        contentView.removeChildView(tab.view);
+        contentView.addChildView(tab.view, 0);
+      }
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);
         void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
       } else {
-        // contentView 的子视图全部画在 renderer 之上，无头只能真正隐藏；
-        // 隐藏后 view 尺寸归零，用 CDP 设备度量 override 撑出布局 viewport。
         tab.view.setVisible(false);
         void this.cdp(tab, 'Emulation.setDeviceMetricsOverride', {
           width: HEADLESS_BOUNDS.width,

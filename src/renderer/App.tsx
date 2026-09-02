@@ -12,7 +12,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
+import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
 import { ChatView } from '@/components/chat/ChatView';
+import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
@@ -22,8 +24,6 @@ import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
-import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
-import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
@@ -65,6 +65,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDE_WIDTH_KEY, String(sideWidth));
   }, [sideWidth]);
+  useEffect(() => {
+    document.documentElement.classList.add('enso-main-shell');
+    return () => document.documentElement.classList.remove('enso-main-shell');
+  }, []);
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
   const handleSideResize = useCallback((deltaX: number) => {
@@ -159,7 +163,10 @@ export default function App() {
   );
 
   return (
-    <div className="relative isolate flex h-screen flex-col">
+    <div
+      className="relative isolate flex h-screen flex-col"
+      style={{ ['--enso-side-panel-width' as string]: `${sideOpen ? sideWidth : 0}px` }}
+    >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />
       <BackgroundLayer />

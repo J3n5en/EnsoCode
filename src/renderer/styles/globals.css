@@ -127,6 +127,12 @@
     @apply bg-background text-foreground;
   }
 
+  /* 主窗口：body 不铺底，侧栏 Browser 才能挖洞让垫底的 guest view 透出来 */
+  html.enso-main-shell,
+  html.enso-main-shell body {
+    background: transparent;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
