@@ -151,9 +151,11 @@ export function SessionDrawer({
         type="button"
         aria-label="关闭侧栏"
         onClick={onClose}
+        // 关闭后要 visibility:hidden 而非只透明：iOS standalone 的状态栏底色采样页面顶边，
+        // 仅改 opacity 不触发重采，会把遮罩色（黑 40% 叠白 = #999）卡在状态栏直到重开
         className={cn(
-          'fixed inset-0 z-40 bg-black/40 transition-opacity duration-200',
-          open ? 'opacity-100' : 'pointer-events-none opacity-0'
+          'fixed inset-0 z-40 bg-black/40 transition-[opacity,visibility] duration-200',
+          open ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'
         )}
       />
       <aside
