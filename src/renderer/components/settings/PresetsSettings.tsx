@@ -227,7 +227,11 @@ export function PresetEditDialog({
   );
 }
 
-export function setFilteredIds(current: string[], filteredIds: string[], selected: boolean): string[] {
+export function setFilteredIds(
+  current: string[],
+  filteredIds: string[],
+  selected: boolean
+): string[] {
   if (filteredIds.length === 0) return current;
   const vis = new Set(filteredIds);
   if (selected) {
