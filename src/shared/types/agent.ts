@@ -833,6 +833,8 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       seq: number;
       coworker: CoworkerInfo;
+      /** 工具直雇 coworker 自身的会话身份(无 ChildSessionIdentity),Main 据此入索引供用户 tab 直接 prompt */
+      coworkerIdentity?: SessionIdentity;
     }
   | {
       type: 'capability-invoke';

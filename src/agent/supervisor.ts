@@ -1752,6 +1752,7 @@ export class SessionSupervisor {
       identity: parent.identity,
       seq: ++parent.seq,
       coworker: info,
+      coworkerIdentity: identity,
     });
     const managed = this.registerManagedSession(identity, session, gate, modelId, {
       parentId,
