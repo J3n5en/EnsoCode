@@ -828,6 +828,7 @@ export const zhTranslations: Record<string, string> = {
   'Current summary was produced by another model family': '当前摘要由另一模型生成',
   'Context occupancy unavailable until the session starts': '会话启动后才能查看拆账',
   'Open parallel session': '从此处开平行会话',
+  'Parallel session': '平行会话',
   'Keep this session and start a parallel one from here': '保留源线，从这里复制出新会话',
   'Branched from {{title}}': '分支自 {{title}}',
   'Estimated context window (catalog fallback)': '上下文窗口为估算值（取自模型目录回退）',

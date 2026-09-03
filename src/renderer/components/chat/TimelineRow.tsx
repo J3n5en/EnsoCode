@@ -457,7 +457,10 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
           {item.text && (
             <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
           )}
-          <RewindButton messageIndex={Number(item.key)} />
+          <div className="flex items-center gap-2">
+            <ForkButton messageIndex={Number(item.key)} />
+            <RewindButton messageIndex={Number(item.key)} />
+          </div>
         </div>
       );
     }
@@ -630,6 +633,55 @@ function RetryTurnButton() {
   );
 }
 
+function userIndexFromEndAt(conversation: { messages: { role: string }[] }, messageIndex: number) {
+  if (conversation.messages[messageIndex]?.role !== 'user') return null;
+  // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
+  return conversation.messages.slice(messageIndex + 1).filter((message) => message.role === 'user')
+    .length;
+}
+
+function canBranchDisplayedSession(
+  state: ReturnType<typeof useSessionsStore.getState>,
+  host: ReturnType<typeof useChatHost>
+) {
+  if (host && !host.canRewind) return false;
+  const conversation = displayedConversation(state);
+  return Boolean(conversation?.started && !conversation.spawning && conversation.status === 'idle');
+}
+
+const userActionClass =
+  'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground';
+
+/** 分叉入口：与回退并列；仅 idle 且已 spawn 的 root 显示 */
+function ForkButton({ messageIndex }: { messageIndex: number }) {
+  const { t } = useI18n();
+  const host = useChatHost();
+  const canFork = useSessionsStore((state) => {
+    if (!canBranchDisplayedSession(state, host)) return false;
+    const conversation = displayedConversation(state);
+    return Boolean(conversation && !conversation.parentId && !conversation.historyOnly);
+  });
+  if (!canFork) return null;
+  return (
+    <button
+      type="button"
+      className={cn(userActionClass, 'opacity-0 group-hover/user:opacity-100')}
+      title={t('Keep this session and start a parallel one from here')}
+      onClick={() => {
+        const state = useSessionsStore.getState();
+        const conversation = displayedConversation(state);
+        if (!conversation) return;
+        const userIndexFromEnd = userIndexFromEndAt(conversation, messageIndex);
+        if (userIndexFromEnd === null) return;
+        void state.forkFromMessage(conversation.id, userIndexFromEnd);
+      }}
+    >
+      <GitBranch className="h-3 w-3" />
+      {t('Parallel session')}
+    </button>
+  );
+}
+
 /** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选,选后再确认 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
@@ -637,42 +689,17 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   /** 待确认的回退(值 = restoreFiles);null = 无 */
   const [pendingRestoreFiles, setPendingRestoreFiles] = useState<boolean | null>(null);
   const host = useChatHost();
-  const canRewind = useSessionsStore((state) => {
-    if (host && !host.canRewind) return false;
-    const conversation = displayedConversation(state);
-    return Boolean(
-      conversation?.started && !conversation.spawning && conversation.status === 'idle'
-    );
-  });
+  const canRewind = useSessionsStore((state) => canBranchDisplayedSession(state, host));
   if (!canRewind) return null;
   const rewind = (restoreFiles: boolean) => {
     const state = useSessionsStore.getState();
     const conversation = displayedConversation(state);
     if (!conversation) return;
-    if (conversation.messages[messageIndex]?.role !== 'user') return;
-    // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
-    const userIndexFromEnd = conversation.messages
-      .slice(messageIndex + 1)
-      .filter((message) => message.role === 'user').length;
+    const userIndexFromEnd = userIndexFromEndAt(conversation, messageIndex);
+    if (userIndexFromEnd === null) return;
     state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
   };
-  const forkFromHere = () => {
-    const state = useSessionsStore.getState();
-    const conversation = displayedConversation(state);
-    if (!conversation) return;
-    if (conversation.messages[messageIndex]?.role !== 'user') return;
-    const userIndexFromEnd = conversation.messages
-      .slice(messageIndex + 1)
-      .filter((message) => message.role === 'user').length;
-    void state.forkFromMessage(conversation.id, userIndexFromEnd);
-  };
   const options = [
-    {
-      icon: GitBranch,
-      label: t('Open parallel session'),
-      desc: t('Keep this session and start a parallel one from here'),
-      action: () => forkFromHere(),
-    },
     {
       icon: Undo2,
       label: t('Conversation only'),
@@ -692,7 +719,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         className={cn(
-          'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground',
+          userActionClass,
           // popover 打开期间保持可见,否则 hover 移开触发按钮会随组隐藏
           open ? 'opacity-100' : 'opacity-0 group-hover/user:opacity-100'
         )}
