@@ -559,6 +559,36 @@ describe('foldTimeline', () => {
     expect(expanded.map((i) => i.key)).toEqual([groupKey, 't1', 'th', 't2', 't3']);
   });
 
+  it('foldLive：running 时最后一轮也折组，running 行钉在组外', () => {
+    const runningTool = { ...toolItem('r', 'read'), state: 'running' } as TimelineItem;
+    const items = [
+      userItem('u0'),
+      toolItem('a1', 'read'),
+      toolItem('a2', 'grep'),
+      toolItem('a3', 'ls'),
+      runningTool,
+    ];
+    const folded = foldTimeline(items, true, new Set(), { foldLive: true });
+    expect(folded.map((i) => i.kind)).toEqual(['user', 'tool-group', 'tool']);
+    const group = folded[1] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.count).toBe(3);
+    expect(group.stats).toEqual({ commands: 0, reads: 1, searches: 2, others: 0 });
+    expect(folded[2]).toBe(runningTool);
+    // 展开后全量平铺，running 行不重复
+    const expanded = foldTimeline(items, true, new Set([group.key]), { foldLive: true });
+    expect(expanded.map((i) => i.key)).toEqual(['u0', group.key, 'a1', 'a2', 'a3', 'r']);
+  });
+
+  it('foldLive 关时 running 最后一轮仍平铺', () => {
+    const items = [userItem('u0'), toolItem('a1'), toolItem('a2'), toolItem('a3')];
+    expect(foldTimeline(items, true, new Set(), { foldLive: false }).map((i) => i.kind)).toEqual([
+      'user',
+      'tool',
+      'tool',
+      'tool',
+    ]);
+  });
+
   it('todo 行不进组，平铺在组头之后', () => {
     const items = [toolItem('t1'), toolItem('td', 'todo'), toolItem('t2'), toolItem('t3')];
     const folded = foldTimeline(items, false, new Set());
