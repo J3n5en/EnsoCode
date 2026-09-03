@@ -1,6 +1,7 @@
 import { sanitizeDefaultModel } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
+import { normalizeProxyMode, type ProxyMode } from '@shared/proxy';
 import {
   DEFAULT_STATUS_LINE_SEGMENTS,
   normalizeStatusLineSegments,
@@ -101,6 +102,8 @@ const initialState = {
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   autoUpdate: true,
+  proxyMode: 'system' as ProxyMode,
+  customProxyUrl: '',
   openChangesOnFileEdit: false,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
@@ -200,6 +203,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
+      setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
+      setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),

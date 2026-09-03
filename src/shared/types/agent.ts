@@ -507,7 +507,9 @@ export type AgentCommand =
   | { type: 'snapshot'; sessionId?: string }
   /** 不可被闲置回收的会话全集（桌面正在查看 + 手机订阅中），每次全量覆盖 */
   | { type: 'pin-sessions'; sessionIds: string[] }
-  | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
+  | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] }
+  /** 运行中同步代理 env；null 表示删除该键 */
+  | { type: 'set-proxy-env'; env: Record<string, string | null> };
 
 /** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
@@ -1646,6 +1648,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'set-proxy-env': {
+      if (!hasExactKeys(value, ['type', 'env']) || !isRecord(value.env)) return null;
+      for (const entry of Object.values(value.env)) {
+        if (entry !== null && typeof entry !== 'string') return null;
+      }
+      return value as unknown as AgentCommand;
+    }
     default:
       return null;
   }

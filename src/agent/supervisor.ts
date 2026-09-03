@@ -77,6 +77,7 @@ import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
+import { applyWorkerProxyEnv } from './proxyEnv';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
   type EvictionCandidate,
@@ -493,6 +494,10 @@ export class SessionSupervisor {
     if (command.type === 'summarize-title') {
       // 标题总结不属于任何会话：旁路串行门；失败静默（截断标题已是可用兑底，不值得报错打扰）
       void this.summarizeTitle(command).catch(() => {});
+      return;
+    }
+    if (command.type === 'set-proxy-env') {
+      applyWorkerProxyEnv(command.env);
       return;
     }
     const identity =

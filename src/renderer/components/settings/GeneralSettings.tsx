@@ -1,6 +1,8 @@
+import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { UpdateStatus } from '@shared/types/updater';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectItem,
@@ -41,6 +43,7 @@ export function GeneralSettings() {
       </div>
 
       <SidePanelSection />
+      <ProxySection />
       <UpdateSection />
     </div>
   );
@@ -62,6 +65,89 @@ function SidePanelSection() {
         checked={openChangesOnFileEdit}
         onCheckedChange={(checked) => setOpenChangesOnFileEdit(checked === true)}
       />
+    </div>
+  );
+}
+
+function applyProxy(mode: ProxyMode, customUrl: string): void {
+  void window.electronAPI.proxy.apply({ mode, customUrl });
+}
+
+function ProxySection() {
+  const { t } = useI18n();
+  const proxyMode = useSettingsStore((s) => s.proxyMode);
+  const customProxyUrl = useSettingsStore((s) => s.customProxyUrl);
+  const setProxyMode = useSettingsStore((s) => s.setProxyMode);
+  const setCustomProxyUrl = useSettingsStore((s) => s.setCustomProxyUrl);
+  const [draft, setDraft] = React.useState(customProxyUrl);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setDraft(customProxyUrl);
+  }, [customProxyUrl]);
+
+  const changeMode = (mode: ProxyMode) => {
+    setProxyMode(mode);
+    applyProxy(mode, customProxyUrl);
+  };
+
+  const commitUrl = () => {
+    const next = draft.trim();
+    if (next && !isValidProxyUrl(next)) {
+      setError(t('Enter an http(s) proxy URL'));
+      return;
+    }
+    setError(null);
+    setCustomProxyUrl(next);
+    applyProxy(proxyMode, next);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">{t('Network proxy')}</h4>
+        <p className="text-xs text-muted-foreground">
+          {t('Used by model requests, the built-in browser, and agent tools')}
+        </p>
+      </div>
+      <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+        <span className="text-sm font-medium">{t('Proxy mode')}</span>
+        <Select
+          items={{
+            system: t('Follow system proxy'),
+            none: t('No proxy'),
+            custom: t('Custom proxy'),
+          }}
+          value={proxyMode}
+          onValueChange={(value) => changeMode(value as ProxyMode)}
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="system">{t('Follow system proxy')}</SelectItem>
+            <SelectItem value="none">{t('No proxy')}</SelectItem>
+            <SelectItem value="custom">{t('Custom proxy')}</SelectItem>
+          </SelectPopup>
+        </Select>
+      </div>
+      {proxyMode === 'custom' && (
+        <div className="grid grid-cols-[140px_1fr] items-start gap-4">
+          <span className="pt-1.5 text-sm font-medium">{t('Proxy URL')}</span>
+          <div className="min-w-0 space-y-1">
+            <Input
+              value={draft}
+              placeholder="http://127.0.0.1:7890"
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={commitUrl}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitUrl();
+              }}
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

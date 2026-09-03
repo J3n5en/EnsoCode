@@ -127,6 +127,9 @@ importers:
       tweetnacl:
         specifier: ^1.0.3
         version: 1.0.3
+      undici:
+        specifier: ^8.10.1
+        version: 8.10.1
       unist-util-visit:
         specifier: ^5.1.0
         version: 5.1.0
@@ -4590,6 +4593,10 @@ packages:
   undici@7.29.0:
     resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
+
+  undici@8.10.1:
+    resolution: {integrity: sha512-YQ3WlbqjYMmNpdvDH64jAgLjxuAR9+649calDWhbshYaeQGO2bR4nI94ORJmwI3J9YhoKQnpyGOK+0zlWS5N5Q==}
+    engines: {node: '>=22.19.0'}
 
   undici@8.9.0:
     resolution: {integrity: sha512-aWZpUj7XoGonMClx4gdDRfgBjqeA+F473aDmROQQbM9n6PRfK/u1q/a0X4wMTgcHfT8H6fpbt98PFuDUwFg2YA==}
@@ -9552,6 +9559,8 @@ snapshots:
   undici@6.28.0: {}
 
   undici@7.29.0: {}
+
+  undici@8.10.1: {}
 
   undici@8.9.0: {}
 

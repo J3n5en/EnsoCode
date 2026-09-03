@@ -596,6 +596,9 @@ export class BrowserHost {
     if (!this.guestSession) {
       const name = partitionName(app.isPackaged);
       this.guestSession = session.fromPartition(name);
+      void import('./proxyConfig').then(({ getProxyConfig }) =>
+        getProxyConfig().attachSession(this.guestSession as Session)
+      );
       // guest 页拿不到摄像头 / 通知 / 地理位置等；只放剪贴板写
       this.guestSession.setPermissionRequestHandler((_wc, permission, callback) =>
         callback(permission === 'clipboard-sanitized-write')

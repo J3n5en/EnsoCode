@@ -4,6 +4,7 @@ import type {
   OauthCredentialBlock,
 } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
+import type { ProxyMode } from '@shared/proxy';
 import type { StatusLineSegmentId } from '@shared/statusLine';
 import type {
   AgentTypeEntry,
@@ -93,6 +94,11 @@ export interface SettingsState {
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
+  /** 网络代理：系统 / 直连 / 自定义；缺省 system */
+  proxyMode: ProxyMode;
+  /** 自定义代理 URL，仅 custom 模式使用 */
+  customProxyUrl: string;
+
   /** agent 新完成文件改动时打开右侧 Changes；缺省 false */
   openChangesOnFileEdit: boolean;
 
@@ -181,6 +187,8 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
+  setProxyMode: (mode: ProxyMode) => void;
+  setCustomProxyUrl: (url: string) => void;
   setOpenChangesOnFileEdit: (value: boolean) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）

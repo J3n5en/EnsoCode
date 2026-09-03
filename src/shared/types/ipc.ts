@@ -183,6 +183,9 @@ export const IPC_CHANNELS = {
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
   UPDATER_STATUS: 'updater:status',
 
+  // Network proxy
+  PROXY_APPLY: 'proxy:apply',
+
   // Phone second screen (pairing + relay)
   PAIR_START: 'pair:start',
   PAIR_CANCEL: 'pair:cancel',

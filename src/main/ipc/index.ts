@@ -10,6 +10,7 @@ import { registerNodesHandlers } from './nodes';
 import { registerPairHandlers } from './pair';
 import { registerProjectHandlers } from './projects';
 import { registerProviderHandlers } from './providers';
+import { registerProxyHandlers } from './proxy';
 import { registerSettingsHandlers } from './settings';
 import { registerSshConnectionHandlers } from './sshConnections';
 import { registerTerminalHandlers } from './terminal';
@@ -25,6 +26,7 @@ export function registerIpcHandlers(): void {
   registerCapabilityHandlers();
   registerAgentHandlers();
   registerUpdaterHandlers();
+  registerProxyHandlers();
   registerProjectHandlers();
   registerBrowserHandlers();
   registerSshConnectionHandlers();

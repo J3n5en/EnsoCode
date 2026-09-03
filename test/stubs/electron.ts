@@ -26,7 +26,13 @@ export const safeStorage = {
 
 export const shell = { openExternal: () => {} };
 export class WebContentsView {}
-export const session = { fromPartition: () => ({}) };
+export const session = {
+  fromPartition: () => ({}),
+  defaultSession: {
+    setProxy: async () => {},
+    resolveProxy: async () => 'DIRECT',
+  },
+};
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
 export const powerMonitor = { on: () => {} };
 export const powerSaveBlocker = { start: () => 0, stop: () => {} };

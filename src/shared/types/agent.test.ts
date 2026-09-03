@@ -554,6 +554,20 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'snapshot', extra: 1 })).toBeNull();
   });
 
+  it('set-proxy-env 只接受 string|null 值的 env 映射，多余字段拒绝', () => {
+    // 代理切换后 Main 推给 worker 的 env 补丁；null 表示删除该键。
+    const command = {
+      type: 'set-proxy-env',
+      env: { HTTP_PROXY: 'http://127.0.0.1:7890', NO_PROXY: null },
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env' })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: 'x' })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: { HTTP_PROXY: 1 } })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: { HTTP_PROXY: undefined } })).toBeNull();
+  });
+
   it('pin-sessions 只接受字符串数组（脏项整体拒绝）', () => {
     expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: [] })).toEqual({
       type: 'pin-sessions',

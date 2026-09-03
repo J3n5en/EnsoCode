@@ -37,6 +37,8 @@ export const SETTINGS_STATE_FIELDS = [
   'statusLineSegments',
   'loadLocalSkills',
   'autoUpdate',
+  'proxyMode',
+  'customProxyUrl',
   'providers',
   'defaultModel',
   'titleSummaryEnabled',

@@ -182,6 +182,8 @@ function resultSettingField(capabilityId: string): string | null {
     'general.language': 'language',
     'general.load-local-skills': 'loadLocalSkills',
     'general.automatic-updates': 'autoUpdate',
+    'general.proxy-mode': 'proxyMode',
+    'general.custom-proxy-url': 'customProxyUrl',
     'general.keybindings.set': 'keybindings',
     'general.keybindings.reset': 'keybindings',
     'appearance.theme': 'theme',
@@ -627,6 +629,12 @@ export function createCapabilityHandlers(
     'general.language': settingValueHandler(services, 'language', stringValue),
     'general.load-local-skills': settingValueHandler(services, 'loadLocalSkills', booleanValue),
     'general.automatic-updates': settingValueHandler(services, 'autoUpdate', booleanValue),
+    'general.proxy-mode': settingValueHandler(
+      services,
+      'proxyMode',
+      (value) => value === 'system' || value === 'none' || value === 'custom'
+    ),
+    'general.custom-proxy-url': settingValueHandler(services, 'customProxyUrl', stringValue),
     'general.keybindings.list': () => {
       const overrides = asRecord(settingsState(services.readSettings()).keybindings) ?? {};
       const sanitized = Object.fromEntries(

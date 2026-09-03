@@ -493,6 +493,14 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
   },
 
+  proxy: {
+    apply: (settings: {
+      mode: string;
+      customUrl: string;
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROXY_APPLY, settings),
+  },
+
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
