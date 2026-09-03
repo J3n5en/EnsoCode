@@ -53,18 +53,48 @@ function SidePanelSection() {
   const { t } = useI18n();
   const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
   const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
+  const compactReadOnlyTools = useSettingsStore((s) => s.compactReadOnlyTools);
+  const setCompactReadOnlyTools = useSettingsStore((s) => s.setCompactReadOnlyTools);
+  return (
+    <div className="space-y-2">
+      <SwitchRow
+        title={t('Open Changes when files are edited')}
+        description={t(
+          'Automatically show the side panel Changes tab after the agent edits a file'
+        )}
+        checked={openChangesOnFileEdit}
+        onChange={setOpenChangesOnFileEdit}
+      />
+      <SwitchRow
+        title={t('Compact read-only tool calls')}
+        description={t(
+          'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running'
+        )}
+        checked={compactReadOnlyTools}
+        onChange={setCompactReadOnlyTools}
+      />
+    </div>
+  );
+}
+
+function SwitchRow({
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-sm">{t('Open Changes when files are edited')}</p>
-        <p className="text-xs text-muted-foreground">
-          {t('Automatically show the side panel Changes tab after the agent edits a file')}
-        </p>
+        <p className="text-sm">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
       </div>
-      <Switch
-        checked={openChangesOnFileEdit}
-        onCheckedChange={(checked) => setOpenChangesOnFileEdit(checked === true)}
-      />
+      <Switch checked={checked} onCheckedChange={(value) => onChange(value === true)} />
     </div>
   );
 }

@@ -110,6 +110,9 @@ export const zhTranslations: Record<string, string> = {
   'Automatically show the side panel Changes tab after the agent edits a file':
     'Agent 改文件后自动打开右侧 Changes',
   'Open in side panel': '在侧栏打开',
+  'Compact read-only tool calls': '精简只读工具调用',
+  'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running':
+    'read/grep/find/ls 显示为单行，agent 运行中也折叠连续的工具调用',
   'No file changes in this conversation yet.': '本会话还没有文件改动。',
   'No changes relative to HEAD.': '相对 HEAD 没有改动。',
   'Not a git repository.': '不是 git 仓库。',

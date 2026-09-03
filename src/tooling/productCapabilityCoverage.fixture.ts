@@ -37,6 +37,7 @@ export const SETTINGS_DATA_COVERAGE = {
   proxyMode: surfaces('general.proxy-mode'),
   customProxyUrl: surfaces('general.custom-proxy-url'),
   openChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
+  compactReadOnlyTools: excluded('Renderer timeline density preference; not an Enso capability.'),
   providers: surfaces('providers.list'),
   defaultModel: surfaces('providers.default-model'),
   defaultReasoningEnabled: surfaces('providers.default-model'),
@@ -89,6 +90,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   setProxyMode: surfaces('general.proxy-mode'),
   setCustomProxyUrl: surfaces('general.custom-proxy-url'),
   setOpenChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
+  setCompactReadOnlyTools: excluded(
+    'Renderer timeline density preference; not an Enso capability.'
+  ),
   setStatusLineSegments: surfaces('appearance.status-line-segments'),
   toggleStatusLineSegment: surfaces('appearance.status-line-segments'),
   setDefaultModel: surfaces('providers.default-model'),

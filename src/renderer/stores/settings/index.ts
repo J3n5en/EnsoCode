@@ -105,6 +105,7 @@ const initialState = {
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
   openChangesOnFileEdit: false,
+  compactReadOnlyTools: true,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
   backgroundImagePath: '',
@@ -206,6 +207,7 @@ export const useSettingsStore = create<SettingsState>()(
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
+      setCompactReadOnlyTools: (compactReadOnlyTools) => set({ compactReadOnlyTools }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
       setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),

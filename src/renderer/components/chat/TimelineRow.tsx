@@ -38,6 +38,7 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration, formatTokens } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
 import { EditDiff } from './EditDiff';
@@ -955,9 +956,14 @@ function ToolGroupRow({
   );
 }
 
+/** 只读探索工具：开关开时去卡片化为一行（与 timeline.ts 的 SEARCH_TOOLS + read 一致） */
+const READ_ONLY_TOOLS = new Set(['read', 'grep', 'find', 'glob', 'ls']);
+
 /** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const { t } = useI18n();
+  const compactReadOnly = useSettingsStore((s) => s.compactReadOnlyTools);
+  const compact = compactReadOnly && READ_ONLY_TOOLS.has(item.name);
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
   const hasWrite = Boolean(item.writeContent);
   const expandable = hasDiff || hasWrite || Boolean(item.output);
@@ -975,14 +981,15 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
 
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30">
+    <div className={cn(!compact && 'rounded-lg border border-border/60 bg-muted/30')}>
       <div className="flex items-center">
         <button
           type="button"
           disabled={!expandable}
           onClick={() => setExpanded((v) => !v)}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs',
+            'flex min-w-0 flex-1 items-center gap-2 text-left text-xs',
+            compact ? 'rounded px-1.5 py-0.5 text-muted-foreground' : 'px-3 py-1.5',
             expandable && 'cursor-pointer hover:bg-muted/50'
           )}
         >
@@ -1047,7 +1054,14 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         </div>
       )}
       {expanded && !hasDiff && !hasWrite && item.output && (
-        <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
+        <div
+          className={cn(
+            'max-h-96 overflow-auto',
+            compact
+              ? 'mt-1 rounded-lg border border-border/60 bg-muted/30'
+              : 'rounded-b-lg border-t border-border/60'
+          )}
+        >
           {item.name === 'bash' ? (
             <TerminalOutput command={item.summary} output={item.output} />
           ) : item.name === 'read' ? (

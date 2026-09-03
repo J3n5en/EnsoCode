@@ -14,6 +14,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
 import { TimelineRow } from './TimelineRow';
@@ -119,9 +120,10 @@ export function MessageTimeline({
       return next;
     });
   }, []);
+  const foldLive = useSettingsStore((s) => s.compactReadOnlyTools);
   const folded = useMemo(
-    () => foldTimeline(items, running, expandedGroups),
-    [items, running, expandedGroups]
+    () => foldTimeline(items, running, expandedGroups, { foldLive }),
+    [items, running, expandedGroups, foldLive]
   );
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要

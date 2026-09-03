@@ -101,6 +101,8 @@ export interface SettingsState {
 
   /** agent 新完成文件改动时打开右侧 Changes；缺省 false */
   openChangesOnFileEdit: boolean;
+  /** 只读工具（read/grep/find/ls）一行化 + 进行中的轮也折组；缺省 true */
+  compactReadOnlyTools: boolean;
 
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
   /** 背景图总开关；缺省 false */
@@ -190,6 +192,7 @@ export interface SettingsState {
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;
   setOpenChangesOnFileEdit: (value: boolean) => void;
+  setCompactReadOnlyTools: (value: boolean) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
   setBackgroundImageEnabled: (value: boolean) => void;
