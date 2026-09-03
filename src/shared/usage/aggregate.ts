@@ -15,13 +15,16 @@ export interface AggregateOptions {
   now: number;
 }
 
-/** 会话活跃时长由 parser 算好，聚合只做求和 */
-export interface SessionActivity {
-  sessionId: string;
-  activeMs: number;
+/** 一轮的活跃区间 [start, end]，由 parser 算好并截断；聚合时按周期裁剪 */
+export interface ActivitySpan {
+  start: number;
+  end: number;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+export interface SessionActivity {
+  sessionId: string;
+  spans: ActivitySpan[];
+}
 
 function emptyTotals(): UsageTotals {
   return {
@@ -46,16 +49,41 @@ function addCost(current: number | null, cost: number | null): number | null {
   return (current ?? 0) + cost;
 }
 
+/** 本地日历零点再偏移 N 天：跨 DST 也落在真正的 00:00，不用 ms×86400000 硬算 */
+function startOfLocalDay(ts: number, offsetDays = 0): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  return d.getTime();
+}
+
 function localDayKey(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** Σ span 与 [start, end) 的重叠；同 sessionId 只取首个条目 */
+function activeMsWithin(activity: SessionActivity[], start: number, end: number): number {
+  const seen = new Set<string>();
+  let total = 0;
+  for (const a of activity) {
+    if (seen.has(a.sessionId)) continue;
+    seen.add(a.sessionId);
+    for (const span of a.spans) {
+      const overlap = Math.min(span.end, end) - Math.max(span.start, start);
+      if (overlap > 0) total += overlap;
+    }
+  }
+  return total;
+}
+
 function sumTotals(
   records: UsageRecord[],
   activity: SessionActivity[],
-  pricing: PricingTable
+  pricing: PricingTable,
+  start: number,
+  end: number
 ): UsageTotals {
   const totals = emptyTotals();
   const sessions = new Set<string>();
@@ -70,14 +98,12 @@ function sumTotals(
     sessions.add(r.sessionId);
   }
   totals.sessions = sessions.size;
-  for (const a of activity) {
-    if (sessions.has(a.sessionId)) totals.activeMs += a.activeMs;
-  }
+  totals.activeMs = activeMsWithin(activity, start, end);
   return totals;
 }
 
 /**
- * 周期 = 本地今天 00:00 + 24h 往前 days 天，[start, end)。
+ * 周期 = 本地今天 00:00 + 1 天往前 days 个日历日，[start, end)。
  * previous 为紧邻其前的等长周期；daily / heatmap / 排行只用当前周期。
  */
 export function aggregateUsage(
@@ -86,11 +112,9 @@ export function aggregateUsage(
   pricing: PricingTable,
   opts: AggregateOptions
 ): UsageSummary {
-  const today = new Date(opts.now);
-  today.setHours(0, 0, 0, 0);
-  const rangeEnd = today.getTime() + DAY_MS;
-  const rangeStart = rangeEnd - opts.days * DAY_MS;
-  const prevStart = rangeStart - opts.days * DAY_MS;
+  const rangeEnd = startOfLocalDay(opts.now, 1);
+  const rangeStart = startOfLocalDay(opts.now, 1 - opts.days);
+  const prevStart = startOfLocalDay(opts.now, 1 - 2 * opts.days);
 
   const current: UsageRecord[] = [];
   const previous: UsageRecord[] = [];
@@ -99,15 +123,15 @@ export function aggregateUsage(
     else if (r.ts >= prevStart && r.ts < rangeStart) previous.push(r);
   }
 
-  const totals = sumTotals(current, activity, pricing);
+  const totals = sumTotals(current, activity, pricing, rangeStart, rangeEnd);
 
-  const daily: UsageDailyPoint[] = Array.from({ length: opts.days }, (_, i) => ({
-    day: localDayKey(rangeStart + i * DAY_MS),
-    input: 0,
-    output: 0,
-    cache: 0,
-    cost: null,
-  }));
+  const daily: UsageDailyPoint[] = [];
+  const dayIndex = new Map<string, number>();
+  for (let i = 0; i < opts.days; i++) {
+    const day = localDayKey(startOfLocalDay(rangeStart, i));
+    dayIndex.set(day, daily.length);
+    daily.push({ day, input: 0, output: 0, cache: 0, cost: null });
+  }
   const heatmap: number[][] = Array.from({ length: 7 }, () => new Array<number>(24).fill(0));
   const byModel = new Map<string, UsageModelRow>();
   const byProject = new Map<string, UsageProjectRow & { sessionIds: Set<string> }>();
@@ -117,8 +141,7 @@ export function aggregateUsage(
     const cost = costOf(r, pricing);
     const tokens = tokensOf(r);
 
-    const dayIndex = Math.min(opts.days - 1, Math.floor((r.ts - rangeStart) / DAY_MS));
-    const point = daily[dayIndex];
+    const point = daily[dayIndex.get(localDayKey(r.ts)) ?? daily.length - 1];
     point.input += r.input;
     point.output += r.output;
     point.cache += r.cacheRead + r.cacheWrite;
@@ -165,7 +188,7 @@ export function aggregateUsage(
     rangeStart,
     rangeEnd,
     totals,
-    previous: sumTotals(previous, activity, pricing),
+    previous: sumTotals(previous, activity, pricing, prevStart, rangeStart),
     daily,
     heatmap,
     byModel: modelRows,

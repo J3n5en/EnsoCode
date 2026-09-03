@@ -87,6 +87,17 @@ describe('parseSessionJsonl — session 头', () => {
     const parsed = parseSessionJsonl(text);
     expect(parsed?.project).toBe('enso-code');
   });
+
+  it('后续没有 cwd 的 session 行不应把 project 重置为空', () => {
+    const text = jsonl([
+      sessionHeader(),
+      { type: 'session', version: 3, id: '01a065a9', timestamp: iso(1000) },
+      assistantMessage('a1', null, 2000),
+    ]);
+    const parsed = parseSessionJsonl(text);
+    expect(parsed?.project).toBe('enso-code');
+    expect(parsed?.records[0].project).toBe('enso-code');
+  });
 });
 
 describe('parseSessionJsonl — 坏行容错', () => {
@@ -200,7 +211,7 @@ describe('parseSessionJsonl — 重复 id', () => {
   });
 });
 
-describe('parseSessionJsonl — activeMs', () => {
+describe('parseSessionJsonl — activeMs 与 spans', () => {
   it('user 开启一轮，assistant/toolResult 更新轮次结束时间，下一条 user 到来时累加', () => {
     const text = jsonl([
       sessionHeader(),
@@ -212,6 +223,7 @@ describe('parseSessionJsonl — activeMs', () => {
     const parsed = parseSessionJsonl(text);
     // 第一轮 start=0, end=20_000（最后一条 assistant/toolResult）
     expect(parsed?.activeMs).toBe(20_000);
+    expect(parsed?.spans).toEqual([{ start: BASE, end: BASE + 20_000 }]);
   });
 
   it('文件结束时也结算最后一轮', () => {
@@ -222,6 +234,7 @@ describe('parseSessionJsonl — activeMs', () => {
     ]);
     const parsed = parseSessionJsonl(text);
     expect(parsed?.activeMs).toBe(15_000);
+    expect(parsed?.spans).toEqual([{ start: BASE, end: BASE + 15_000 }]);
   });
 
   it('单轮跨度超过 6 小时按 6 小时截断', () => {
@@ -233,6 +246,7 @@ describe('parseSessionJsonl — activeMs', () => {
     ]);
     const parsed = parseSessionJsonl(text);
     expect(parsed?.activeMs).toBe(6 * 60 * 60 * 1000);
+    expect(parsed?.spans).toEqual([{ start: BASE, end: BASE + 6 * 60 * 60 * 1000 }]);
   });
 
   it('userMessages 统计 user 消息条数', () => {

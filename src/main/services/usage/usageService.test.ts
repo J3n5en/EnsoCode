@@ -50,25 +50,25 @@ describe('loadSessions', () => {
   const header = (id: string) =>
     JSON.stringify({ type: 'session', version: 3, id, timestamp: 't', cwd: '/p/demo' });
 
-  it('只读 .jsonl，无 session 头的文件不计', () => {
+  it('只读 .jsonl，无 session 头的文件不计', async () => {
     fs.writeFileSync(path.join(tmp, 'a.jsonl'), `${header('s1')}\n`);
     fs.writeFileSync(path.join(tmp, 'b.jsonl'), '{"type":"message"}\n');
     fs.writeFileSync(path.join(tmp, 'c.txt'), header('s3'));
-    expect(loadSessions(tmp).map((s) => s.sessionId)).toEqual(['s1']);
+    expect((await loadSessions(tmp)).map((s) => s.sessionId)).toEqual(['s1']);
   });
 
-  it('文件内容变化（mtime/size 改变）后重新解析，删除后不再出现', () => {
+  it('文件内容变化（mtime/size 改变）后重新解析，删除后不再出现', async () => {
     const file = path.join(tmp, 'a.jsonl');
     fs.writeFileSync(file, `${header('s1')}\n`);
-    expect(loadSessions(tmp)[0]?.sessionId).toBe('s1');
+    expect((await loadSessions(tmp))[0]?.sessionId).toBe('s1');
     fs.writeFileSync(file, `${header('s1-renamed')}\n`);
     fs.utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
-    expect(loadSessions(tmp)[0]?.sessionId).toBe('s1-renamed');
+    expect((await loadSessions(tmp))[0]?.sessionId).toBe('s1-renamed');
     fs.rmSync(file);
-    expect(loadSessions(tmp)).toEqual([]);
+    expect(await loadSessions(tmp)).toEqual([]);
   });
 
-  it('目录不存在时返回空数组而不抛错', () => {
-    expect(loadSessions(path.join(tmp, 'missing'))).toEqual([]);
+  it('目录不存在时返回空数组而不抛错', async () => {
+    expect(await loadSessions(path.join(tmp, 'missing'))).toEqual([]);
   });
 });

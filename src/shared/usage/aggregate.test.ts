@@ -151,7 +151,7 @@ describe('aggregateUsage — byProject', () => {
   });
 });
 
-describe('aggregateUsage — sessions 与 activeMs', () => {
+describe('aggregateUsage — sessions', () => {
   it('sessions 为周期内出现过的 distinct sessionId 数', () => {
     const records = [
       record({ ts: dayStart(0), sessionId: 's1' }),
@@ -161,15 +161,42 @@ describe('aggregateUsage — sessions 与 activeMs', () => {
     const summary = aggregateUsage(records, [], {}, { days: 1, now: NOW });
     expect(summary.totals.sessions).toBe(2);
   });
+});
 
-  it('activeMs 只累加周期内出现过的 session，忽略周期外 session 的活跃时长', () => {
-    const records = [record({ ts: dayStart(0), sessionId: 's1' })];
+// days=1: rangeStart=dayStart(0), rangeEnd=dayStart(0)+DAY_MS；previous=[dayStart(1), dayStart(0))
+describe('aggregateUsage — activeMs（span 裁剪求和，与是否有记录无关）', () => {
+  it('span 完全落在周期内时整段计入', () => {
     const activity: SessionActivity[] = [
-      { sessionId: 's1', activeMs: 60_000 },
-      { sessionId: 's-not-in-range', activeMs: 999_000 },
+      { sessionId: 's1', spans: [{ start: dayStart(0) + 1_000, end: dayStart(0) + 61_000 }] },
     ];
-    const summary = aggregateUsage(records, activity, {}, { days: 1, now: NOW });
+    const summary = aggregateUsage([], activity, {}, { days: 1, now: NOW });
     expect(summary.totals.activeMs).toBe(60_000);
+  });
+
+  it('span 跨越 rangeStart 时只计入落在周期内的部分', () => {
+    const activity: SessionActivity[] = [
+      { sessionId: 's1', spans: [{ start: dayStart(0) - 30_000, end: dayStart(0) + 30_000 }] },
+    ];
+    const summary = aggregateUsage([], activity, {}, { days: 1, now: NOW });
+    expect(summary.totals.activeMs).toBe(30_000);
+  });
+
+  it('span 完全落在上一周期时计入 previous.activeMs 而非 totals.activeMs', () => {
+    const activity: SessionActivity[] = [
+      { sessionId: 's1', spans: [{ start: dayStart(1) + 1_000, end: dayStart(1) + 21_000 }] },
+    ];
+    const summary = aggregateUsage([], activity, {}, { days: 1, now: NOW });
+    expect(summary.totals.activeMs).toBe(0);
+    expect(summary.previous.activeMs).toBe(20_000);
+  });
+
+  it('同一 sessionId 重复出现的 activity 条目去重，先到的一条为准', () => {
+    const activity: SessionActivity[] = [
+      { sessionId: 's1', spans: [{ start: dayStart(0) + 1_000, end: dayStart(0) + 11_000 }] },
+      { sessionId: 's1', spans: [{ start: dayStart(0) + 50_000, end: dayStart(0) + 150_000 }] },
+    ];
+    const summary = aggregateUsage([], activity, {}, { days: 1, now: NOW });
+    expect(summary.totals.activeMs).toBe(10_000);
   });
 });
 

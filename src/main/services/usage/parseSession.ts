@@ -1,10 +1,13 @@
+import type { ActivitySpan } from '@shared/usage/aggregate';
 import type { UsageRecord } from '@shared/usage/types';
 
 export interface ParsedSession {
   sessionId: string;
   project: string;
   records: UsageRecord[];
-  /** Σ 每轮（user → 该轮最后一条 assistant/toolResult）的跨度，单轮上限 6h */
+  /** 每轮 [user ts, 该轮最后一条 assistant/toolResult ts]，单轮上限 6h */
+  spans: ActivitySpan[];
+  /** Σ spans */
   activeMs: number;
   userMessages: number;
 }
@@ -42,14 +45,14 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
   let project = '';
   const records = new Map<string, UsageRecord>();
   let userMessages = 0;
-  let activeMs = 0;
+  const spans: ActivitySpan[] = [];
   let turnStart: number | null = null;
   let turnEnd: number | null = null;
   let anonymous = 0;
 
   const closeTurn = () => {
-    if (turnStart !== null && turnEnd !== null) {
-      activeMs += Math.min(TURN_CAP_MS, Math.max(0, turnEnd - turnStart));
+    if (turnStart !== null && turnEnd !== null && turnEnd > turnStart) {
+      spans.push({ start: turnStart, end: Math.min(turnEnd, turnStart + TURN_CAP_MS) });
     }
     turnStart = null;
     turnEnd = null;
@@ -68,7 +71,7 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
 
     if (e.type === 'session') {
       if (typeof e.id === 'string') sessionId = e.id;
-      project = basename(e.cwd);
+      if (e.cwd !== undefined) project = basename(e.cwd);
       continue;
     }
     if (e.type !== 'message' || !e.message || typeof e.message !== 'object') continue;
@@ -110,5 +113,6 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
     r.sessionId = sessionId;
     r.project = project;
   }
-  return { sessionId, project, records: [...records.values()], activeMs, userMessages };
+  const activeMs = spans.reduce((sum, span) => sum + (span.end - span.start), 0);
+  return { sessionId, project, records: [...records.values()], spans, activeMs, userMessages };
 }
