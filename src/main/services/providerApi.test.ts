@@ -1,3 +1,4 @@
+import { withVersionSegment } from '@shared/providerCatalog';
 import type { ModelApiKind } from '@shared/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -6,7 +7,6 @@ import {
   resolveBase,
   testProvider,
   toMessage,
-  withVersionSegment,
 } from './providerApi';
 
 describe('resolveBase', () => {
@@ -19,6 +19,9 @@ describe('resolveBase', () => {
   it('留空时回退到该协议的官方地址', () => {
     expect(resolveBase(cfg(''))).toBe('https://api.openai.com/v1');
     expect(resolveBase(cfg('  ', 'anthropic-messages'))).toBe('https://api.anthropic.com');
+    expect(resolveBase(cfg('', 'google-generative-ai'))).toBe(
+      'https://generativelanguage.googleapis.com/v1beta'
+    );
     expect(resolveBase(cfg('', 'ollama'))).toBe('http://127.0.0.1:11434');
   });
 

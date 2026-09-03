@@ -27,6 +27,7 @@ import {
   resolveCustomModelCapabilities,
 } from '@shared/modelCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
+import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import type {
@@ -2335,7 +2336,7 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
   const contextWindow = resolved.contextWindow ?? 128_000;
   const maxTokens = resolved.maxTokens ?? 32_000;
   runtime.registerProvider(providerId, {
-    baseUrl: model.baseUrl,
+    baseUrl: resolvePiProviderBaseUrl(model.api, model.baseUrl),
     api: model.api,
     apiKey: model.apiKey,
     // 统一伪装为 enso-code 客户端（覆盖 pi 默认的 "pi (darwin ...)"）

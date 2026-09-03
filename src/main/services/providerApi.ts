@@ -1,5 +1,5 @@
 import { positiveFiniteNumber } from '@shared/modelCatalog';
-import { DEFAULT_BASE_URLS } from '@shared/providerCatalog';
+import { DEFAULT_BASE_URLS, withVersionSegment } from '@shared/providerCatalog';
 import type {
   FetchedModel,
   ListModelsResult,
@@ -15,11 +15,6 @@ const TIMEOUT_MS = 15000;
 export function resolveBase(config: ProviderApiConfig): string {
   const base = config.baseUrl.trim().replace(/\/+$/, '');
   return base || DEFAULT_BASE_URLS[config.api];
-}
-
-/** anthropic：base 已含 /v1 则不重复拼接 */
-export function withVersionSegment(base: string, segment: string): string {
-  return base.endsWith(`/${segment}`) ? base : `${base}/${segment}`;
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {

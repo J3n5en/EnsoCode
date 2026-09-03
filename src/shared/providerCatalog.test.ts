@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BASE_URLS,
   mergeProviderDefinitions,
+  resolvePiProviderBaseUrl,
   STATIC_PROVIDER_DEFINITIONS,
 } from './providerCatalog';
 import { MODEL_API_KINDS } from './types';
@@ -10,6 +11,27 @@ describe('provider catalog', () => {
   it('每种 ModelApiKind 都有唯一共享默认地址', () => {
     expect(Object.keys(DEFAULT_BASE_URLS).sort()).toEqual([...MODEL_API_KINDS].sort());
     expect(Object.values(DEFAULT_BASE_URLS).every((url) => url.length > 0)).toBe(true);
+    expect(DEFAULT_BASE_URLS['google-generative-ai']).toBe(
+      'https://generativelanguage.googleapis.com/v1beta'
+    );
+  });
+
+  it('Google 交给 pi 的地址始终带 /v1beta', () => {
+    expect(
+      resolvePiProviderBaseUrl('google-generative-ai', 'https://generativelanguage.googleapis.com')
+    ).toBe('https://generativelanguage.googleapis.com/v1beta');
+    expect(
+      resolvePiProviderBaseUrl(
+        'google-generative-ai',
+        'https://generativelanguage.googleapis.com/v1beta/'
+      )
+    ).toBe('https://generativelanguage.googleapis.com/v1beta');
+    expect(resolvePiProviderBaseUrl('google-generative-ai', '')).toBe(
+      DEFAULT_BASE_URLS['google-generative-ai']
+    );
+    expect(resolvePiProviderBaseUrl('openai-completions', 'https://relay.example/v1')).toBe(
+      'https://relay.example/v1'
+    );
   });
 
   it('静态厂商完整且 __custom 恒定在最后', () => {

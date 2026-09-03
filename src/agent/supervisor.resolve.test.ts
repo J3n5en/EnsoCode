@@ -101,6 +101,31 @@ describe('resolveBaseModel apiKey', () => {
     expect(model.maxTokens).toBe(8_000);
   });
 
+  it('google-generative-ai 缺 v1beta 时补上再注册', () => {
+    const registerProvider = vi.fn();
+    const runtime = {
+      getModels: () => [],
+      getModel: () => ({ id: 'gemini-2.5-flash' }),
+      registerProvider,
+    } as unknown as ModelRuntime;
+
+    resolveBaseModel(runtime, {
+      api: 'google-generative-ai',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      apiKey: 'k',
+      modelId: 'gemini-2.5-flash',
+      settingsProviderId: 'settings-provider',
+    });
+
+    expect(registerProvider).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        api: 'google-generative-ai',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      })
+    );
+  });
+
   it('空覆盖跟随 catalog', () => {
     const runtime = mockRuntime({
       catalog: [
