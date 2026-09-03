@@ -2258,6 +2258,8 @@ export const useSessionsStore = create<SessionsState>()(
               worktreeMissing: undefined,
               workspaceMigrating: undefined,
               abortRequested: undefined,
+              compaction: undefined,
+              compactionError: undefined,
             },
           ])
         ),

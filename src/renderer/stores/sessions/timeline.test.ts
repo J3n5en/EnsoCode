@@ -857,7 +857,12 @@ describe('compaction 摘要行', () => {
       ],
       false
     );
-    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction', 'user']);
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-notice',
+    ]);
     expect(timeline[1]).toMatchObject({
       kind: 'compaction',
       summary: 'SUMMARY',
@@ -875,6 +880,71 @@ describe('compaction 摘要行', () => {
       false
     );
     const folded = foldTimeline(timeline, false, new Set());
-    expect(folded.map((item) => item.kind)).toEqual(['user', 'compaction', 'text']);
+    expect(folded.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'text',
+      'compaction-notice',
+    ]);
+  });
+
+  it('压缩进行中时在时间线末尾挂 loading 行，不重复钉摘要提示', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        user('new'),
+      ],
+      false,
+      [],
+      undefined,
+      { compaction: 'running' }
+    );
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-progress',
+    ]);
+    expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-progress', state: 'running' });
+  });
+
+  it('忙碌中排队压缩时末尾挂 queued 行', () => {
+    const timeline = buildTimeline([user('q')], true, [], undefined, { compaction: 'queued' });
+    expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-progress', state: 'queued' });
+  });
+
+  it('压缩完成后若摘要不在末尾，则在底部再钉一条提示', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        {
+          role: 'compactionSummary',
+          content: [{ type: 'text', text: 'SUMMARY' }],
+          tokensBefore: 9000,
+        },
+        user('new'),
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-notice',
+    ]);
+    expect(timeline.at(-1)).toMatchObject({
+      kind: 'compaction-notice',
+      summary: 'SUMMARY',
+      tokensBefore: 9000,
+    });
+  });
+
+  it('摘要已在末尾时不再重复钉提示', () => {
+    const timeline = buildTimeline(
+      [user('old'), { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] }],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction']);
   });
 });

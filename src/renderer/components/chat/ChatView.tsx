@@ -196,9 +196,16 @@ export function ChatView() {
         conversation?.messages ?? [],
         running,
         conversation?.customEntries ?? [],
-        toolCwd
+        toolCwd,
+        { compaction: conversation?.compaction }
       ),
-    [conversation?.customEntries, conversation?.messages, running, toolCwd]
+    [
+      conversation?.compaction,
+      conversation?.customEntries,
+      conversation?.messages,
+      running,
+      toolCwd,
+    ]
   );
   useOpenChangesOnEdit(timeline, conversation?.id);
   const findHits = useMemo(

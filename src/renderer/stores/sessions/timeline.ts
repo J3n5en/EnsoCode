@@ -66,6 +66,10 @@ export type TimelineItem =
   | { kind: 'error'; key: string; text: string }
   /** pi 的 compaction 摘要：之前的历史已被压缩出 LLM 上下文，渲染为分隔行 */
   | { kind: 'compaction'; key: string; summary: string; tokensBefore: number | null }
+  /** 压缩进行中 / 排队：钉在时间线底部，不依赖占用面板 */
+  | { kind: 'compaction-progress'; key: string; state: 'queued' | 'running' }
+  /** 摘要不在末尾时，底部再钉一条可展开提示 */
+  | { kind: 'compaction-notice'; key: string; summary: string; tokensBefore: number | null }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
@@ -443,36 +447,63 @@ const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage
     : Number.NEGATIVE_INFINITY;
 };
 
+function appendCompactionChrome(
+  items: TimelineItem[],
+  compaction?: 'queued' | 'running'
+): TimelineItem[] {
+  if (compaction) {
+    return [
+      ...items,
+      { kind: 'compaction-progress', key: `compaction:${compaction}`, state: compaction },
+    ];
+  }
+  const lastSummary = items.findLast((item) => item.kind === 'compaction');
+  if (!lastSummary || items.at(-1)?.kind === 'compaction') return items;
+  return [
+    ...items,
+    {
+      kind: 'compaction-notice',
+      key: `compaction-notice:${lastSummary.key}`,
+      summary: lastSummary.summary,
+      tokensBefore: lastSummary.tokensBefore,
+    },
+  ];
+}
+
 /** Messages 与 custom entries 仅在展示层按时间合并；custom entries 从不进入 messages。 */
 export function buildTimeline(
   messages: ProjectedMessage[],
   running: boolean,
   customEntries: readonly AgentSessionCustomEntry[] = [],
-  cwd?: string
+  cwd?: string,
+  options?: { compaction?: 'queued' | 'running' }
 ): TimelineItem[] {
   const messageItems = buildMessageTimeline(messages, running, cwd);
-  if (customEntries.length === 0) return messageItems;
-  return [
-    ...messageItems.map((item, order) => ({
-      item,
-      at: messageItemTime(item, messages),
-      order,
-    })),
-    ...customEntries.map((entry, index) => ({
-      item: {
-        kind: 'session-custom' as const,
-        key:
-          entry.kind === 'capability-receipt'
-            ? `custom:receipt:${entry.receipt.receiptId}`
-            : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
-        entry,
-      },
-      at: customEntryTime(entry),
-      order: messageItems.length + index,
-    })),
-  ]
-    .sort((left, right) => left.at - right.at || left.order - right.order)
-    .map(({ item }) => item);
+  const merged =
+    customEntries.length === 0
+      ? messageItems
+      : [
+          ...messageItems.map((item, order) => ({
+            item,
+            at: messageItemTime(item, messages),
+            order,
+          })),
+          ...customEntries.map((entry, index) => ({
+            item: {
+              kind: 'session-custom' as const,
+              key:
+                entry.kind === 'capability-receipt'
+                  ? `custom:receipt:${entry.receipt.receiptId}`
+                  : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
+              entry,
+            },
+            at: customEntryTime(entry),
+            order: messageItems.length + index,
+          })),
+        ]
+          .sort((left, right) => left.at - right.at || left.order - right.order)
+          .map(({ item }) => item);
+  return appendCompactionChrome(merged, options?.compaction);
 }
 
 /** 折叠门槛：段内非 edit 工具数达到该值才收拢 */

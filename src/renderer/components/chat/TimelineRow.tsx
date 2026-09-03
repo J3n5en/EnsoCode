@@ -121,9 +121,15 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
     case 'compaction':
+    case 'compaction-notice':
       return (
-        b.kind === 'compaction' && a.summary === b.summary && a.tokensBefore === b.tokensBefore
+        (b.kind === 'compaction' || b.kind === 'compaction-notice') &&
+        a.kind === b.kind &&
+        a.summary === b.summary &&
+        a.tokensBefore === b.tokensBefore
       );
+    case 'compaction-progress':
+      return b.kind === 'compaction-progress' && a.state === b.state;
     case 'session-custom':
       return b.kind === 'session-custom' && a.entry === b.entry;
   }
@@ -488,7 +494,10 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
     case 'task-note':
       return <TaskNoteRow item={item} />;
     case 'compaction':
+    case 'compaction-notice':
       return <CompactionRow item={item} />;
+    case 'compaction-progress':
+      return <CompactionProgressRow state={item.state} />;
     case 'session-custom':
       return <SessionCustomRow entry={item.entry} />;
   }
@@ -948,8 +957,26 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   );
 }
 
+function CompactionProgressRow({
+  state,
+}: {
+  state: Extract<TimelineItem, { kind: 'compaction-progress' }>['state'];
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <LoaderCircle className="h-3 w-3 animate-spin" />
+      <span>{state === 'queued' ? t('Compacts after this turn') : t('Compacting…')}</span>
+    </div>
+  );
+}
+
 /** compaction 分隔：之上的历史已被压缩出模型上下文；点击展开看模型拿到的摘要 */
-function CompactionRow({ item }: { item: Extract<TimelineItem, { kind: 'compaction' }> }) {
+function CompactionRow({
+  item,
+}: {
+  item: Extract<TimelineItem, { kind: 'compaction' | 'compaction-notice' }>;
+}) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const label =
