@@ -81,6 +81,19 @@ describe('coworker tool model 参数', () => {
     expect(properties.task.description).toMatch(/send/);
   });
 
+  it('何时雇 coworker 写在 coworker 自己的 guideline 首句，不依赖 agentTypes', () => {
+    const first = createCoworkerTool(makeDeps({ agentTypes: [] })).promptGuidelines?.[0] ?? '';
+    expect(first).toMatch(/^Hire a coworker when/);
+    expect(first).toMatch(/multi-round|follow-up/i);
+  });
+
+  it('description/promptSnippet 与 guidelines 同向：不再勝省着用、不再勝先交差', () => {
+    const tool = createCoworkerTool(makeDeps());
+    expect(tool.description).not.toMatch(/return to the user/);
+    expect(tool.promptSnippet).not.toMatch(/prefer few/);
+    expect(tool.promptSnippet).toMatch(/multi-round/);
+  });
+
   it('当 agent_type 锁定模型（allowModelOverride === false）时，spawn 传 model 报错拒绝', async () => {
     const deps = makeDeps({
       agentTypes: [

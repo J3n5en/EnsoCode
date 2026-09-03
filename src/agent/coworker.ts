@@ -60,23 +60,26 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       'The user watches each coworker in its own tab and may reply there directly. ' +
       'Operations: spawn {name, agent_type?, task} / send {name, message} / list / dismiss {name}. ' +
       'spawn and send are ASYNC by default: they return immediately and you are notified automatically ' +
-      'when the round completes — do NOT poll or wait idle; keep working or return to the user. ' +
+      'when the round completes — do NOT poll or wait idle; keep working on other lines meanwhile. ' +
       'Pass wait:true only when you must have the result before continuing. ' +
       'Optional gate: a shell command run after the round; its exit code verifies the work ' +
       '(e.g. "pnpm test"). Results are truncated; the full transcript lives in the coworker tab.' +
       (typeList ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
-      'coworker: hire a persistent named agent (own tab, own accumulating context, multi-round). ' +
-      'Use subagent for self-contained one-shot subtasks; use coworker for multi-round work on the same ' +
-      'accumulated context or when the user should watch and join. ' +
+      'coworker: hire a persistent named agent (own tab, own accumulating context, multi-round by design). ' +
+      'Use subagent for one-shot subtasks; use coworker whenever follow-up rounds are likely or the user ' +
+      'should watch and join, then keep steering it with send. ' +
       'spawn/send are async by default — you get notified on completion, so never block waiting; ' +
       'pass wait:true only when the result is needed immediately. ' +
       'Verify delegated work with gate:"<command>" (exit code speaks, not the coworker). ' +
-      'Coworkers cost resources while alive — dismiss them when done; prefer few with clear roles' +
+      'One coworker per role, reused across rounds; dismiss when its goal is met' +
       (deps.models.length > 0
         ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — see the tool schema for options'
         : ''),
     promptGuidelines: [
+      'Hire a coworker when a line of work will need follow-up rounds (implement then verify then fix), ' +
+        'when you want to keep steering the same accumulated context, or when the user should watch and join. ' +
+        'Prefer it over redoing multi-step work yourself or chaining one-shot subagents for the same thread',
       'A coworker is multi-round by default: give it the role and the first step in spawn, then steer with send. ' +
         'A "finished a round" notice is not completion — reply with send to verify, correct, or ask for evidence; ' +
         'do not redo its work yourself and do not spawn a second coworker for the same role (reuse the name). ' +

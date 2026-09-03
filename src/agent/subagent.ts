@@ -94,21 +94,29 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           },
         }
       : {};
+  const builtinRoleHints: Record<string, string> = {
+    scout: 'scout for recon/reading',
+    worker: 'worker for an isolated code change',
+    reviewer: 'reviewer after a sizeable change',
+  };
+  const roleHints = deps.agentTypes
+    .map((type) => builtinRoleHints[type.name])
+    .filter((hint): hint is string => hint !== undefined);
   return {
     name: 'subagent',
     label: 'Subagent',
     description:
       'Delegate a self-contained task to a subagent that runs in an isolated context with its own tools ' +
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
-      'Use for parallelizable or context-heavy subtasks (research a module, implement an isolated change); ' +
-      'multiple task calls in one message run in parallel. ' +
+      'Default choice for any independent line of work (recon a module, implement an isolated change, verify); ' +
+      'multiple subagent calls in one message run in parallel. ' +
       'The subagent cannot ask you questions — include all needed context in the prompt. ' +
       'Pass wait:false for long tasks to keep working — the final report is delivered to you ' +
       'automatically when it finishes (and the parent abort no longer kills it). ' +
       (deps.agentTypes.length > 0 ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
-      'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
-      'give it a complete prompt and it returns a final report; ' +
+      'subagent: delegate by default — hand any independent subtask to a subagent (isolated context) ' +
+      'with a complete prompt and get a final report back; ' +
       'multiple subagent calls in one message run in parallel' +
       (deps.agentTypes.length > 0
         ? `; agent_type options: ${deps.agentTypes
@@ -122,14 +130,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       'Delegate by default: when a request has 2+ independent lines of work (explore module A / change B / verify C), ' +
         'dispatch them as parallel subagent calls in the same message instead of doing them serially yourself. ' +
         'Searching the whole repo yourself before acting is an anti-pattern when a subagent could do the recon',
-      ...(deps.agentTypes.some((type) => type.name === 'scout') &&
-      deps.agentTypes.some((type) => type.name === 'worker') &&
-      deps.agentTypes.some((type) => type.name === 'reviewer')
-        ? [
-            'Pick agent_type by role: scout for recon/reading, worker for an isolated code change, ' +
-              'reviewer after a sizeable change; use coworker (not subagent) when follow-up rounds are likely',
-          ]
-        : []),
+      ...(roleHints.length > 0 ? [`Pick agent_type by role: ${roleHints.join('; ')}`] : []),
     ],
     parameters: {
       type: 'object',

@@ -1845,7 +1845,7 @@ export class SessionSupervisor {
       if (signal?.aborted) {
         return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
       }
-      return await this.coworkerRoundSummary(managed, opts.gate);
+      return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
     }
 
     // 非阻塞:投递即返回;轮次完成后组摘要经 notifier 回父(失败立即,成功合并)
@@ -1868,8 +1868,7 @@ export class SessionSupervisor {
       const failed = managed.status === 'failed';
       this.notifier.notify(
         parentId,
-        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}\n\n` +
-          '(follow up with coworker send to verify or steer; dismiss only when its goal is met)',
+        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}\n\n${COWORKER_FOLLOW_UP_HINT}`,
         { urgent: failed }
       );
     })().catch(() => {});
@@ -2380,6 +2379,9 @@ const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
+/** 一轮结束回父的摘要尾句：阻塞/非阻塞两条路径共用，把「继续 send」写成默认动作 */
+const COWORKER_FOLLOW_UP_HINT =
+  '(follow up with coworker send to verify or steer; dismiss only when its goal is met)';
 
 /** gate 验收:在会话 cwd 跑命令,退出码即结论(比再叫一个模型评审便宜且诚实)。
  * 远程会话传 executor,命令改在远端 cwd 执行 */

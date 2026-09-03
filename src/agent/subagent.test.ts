@@ -109,6 +109,26 @@ describe('subagent tool model 参数', () => {
     expect(createSubagentTool(makeDeps()).promptGuidelines?.join('\n')).not.toMatch(/scout/);
   });
 
+  it('类型选型按类型逐个拼接，关掉一个不影响其余', () => {
+    const text = createSubagentTool(
+      makeDeps({
+        agentTypes: [
+          { name: 'scout', description: 'recon', systemPrompt: '', tools: 'readonly' },
+          { name: 'worker', description: 'impl', systemPrompt: '', tools: 'all' },
+        ],
+      })
+    ).promptGuidelines?.join('\n');
+    expect(text).toMatch(/scout/);
+    expect(text).toMatch(/worker/);
+    expect(text).not.toMatch(/reviewer/);
+  });
+
+  it('description/promptSnippet 不再用保守措辞抢话', () => {
+    const tool = createSubagentTool(makeDeps());
+    expect(tool.description).not.toMatch(/parallelizable or context-heavy/);
+    expect(tool.promptSnippet).toMatch(/default/i);
+  });
+
   it('当 agent_type 锁定模型（allowModelOverride === false）时，主 agent 传 model 报错拒绝', async () => {
     const deps = makeDeps({
       agentTypes: [

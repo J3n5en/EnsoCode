@@ -15,8 +15,8 @@ export function createMessageMainTool(
       'Send a message to the main agent (your supervisor). Use it to hand off work that belongs to ' +
       'the main session, report findings proactively, or ask the main agent to act. Delivery is ' +
       'asynchronous: the main agent is woken if idle, otherwise the message piggybacks on its next ' +
-      'tool result. You will NOT get a reply through this tool — the main agent responds via ' +
-      'coworker send if needed.',
+      'tool result. This tool has no reply channel: replies arrive as a new message via coworker send, ' +
+      'so continue your own work after sending and act on the reply when it comes.',
     promptSnippet:
       'message_main_agent: proactively message the main agent (hand off tasks, report findings). ' +
       'Async, no reply channel — continue your own work after sending.',
@@ -39,7 +39,7 @@ export function createMessageMainTool(
         content: [
           {
             type: 'text' as const,
-            text: '(delivered to the main agent — async, no reply here; continue your own work)',
+            text: '(delivered to the main agent — async; any reply arrives as a new message via coworker send, continue your own work)',
           },
         ],
         details: undefined,
