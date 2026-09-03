@@ -322,3 +322,27 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: 归档已落地的侧栏全屏与系统代理
+
+**Date**: 2026-09-03
+**Task**: 归档已落地的侧栏全屏与系统代理
+**Branch**: `dev`
+
+### Summary
+
+代码已合入 dev：侧栏全屏（铺满中间工作区、Esc/快捷键退出、空态顶栏按钮）与系统代理三层同步（Chromium / fetch / worker）。此前未走 archive，本轮补归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdf809f` | (see git log) |
+| `8dfd539` | (see git log) |
+| `ee00e8b` | (see git log) |
+| `b837b84` | (see git log) |
+
+### Status
+
+[OK] **Completed**

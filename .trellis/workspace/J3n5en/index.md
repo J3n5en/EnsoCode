@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-09-02
+- **Total Sessions**: 11
+- **Last Active**: 2026-09-03
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~360 | Active |
+| `journal-1.md` | ~348 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-09-03 | 归档已落地的侧栏全屏与系统代理 | `fdf809f`, `8dfd539`, `ee00e8b`, `b837b84` | `dev` |
 | 10 | 2026-09-02 | AI 会话标题总结：设置开关+独立模型+回退链 | `f908812`, `dfb30b8` | `dev` |
 | 9 | 2026-09-02 | 归档已落地的侧栏与 SSH 任务 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
 | 8 | 2026-09-02 | Browser Design Mode 圈选与涂鸦落地 | `e89b767`, `575ba9c`, `aa75b9d`, `8e8f135`, `cb68a58`, `8e5bdce` | `dev` |
