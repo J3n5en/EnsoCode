@@ -90,7 +90,7 @@ import {
   type EvictionCandidate,
   selectEvictable,
 } from './sessionEviction';
-import { branchSessionAtLeaf, resolveForkLeafId } from './sessionFork';
+import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -166,6 +166,8 @@ interface ManagedSession {
   gate: ApprovalGate;
   asks: AskManager;
   pendingTaskReminders: string[];
+  /** 忙碌时收到的手动压缩请求：本轮收束后自动执行（用户选择「排队」而非打断） */
+  pendingCompact?: { instructions?: string };
   subagents: Map<string, SubagentInfo>;
   factory?: SessionFactory;
   parentId?: string;
@@ -808,7 +810,11 @@ export class SessionSupervisor {
           });
           return;
         }
-        const branched = branchSessionAtLeaf(managed.session.sessionManager, entryId);
+        const branched = branchSessionFromPersistedFile(
+          managed.session.sessionManager,
+          entryId,
+          (sessionFile) => SessionManager.open(sessionFile)
+        );
         this.options.emit({
           type: 'fork-done',
           identity: managed.identity,
@@ -817,6 +823,24 @@ export class SessionSupervisor {
           entryId,
           ...(branched.ok ? { sessionFile: branched.sessionFile } : { error: branched.error }),
         });
+        return;
+      }
+      case 'compact': {
+        const managed = this.must(command.identity);
+        if (managed.status !== 'idle') {
+          // 忙碌时排队：不打断当前轮次，turn 收束后由 runCompaction 接手
+          managed.pendingCompact = command.instructions
+            ? { instructions: command.instructions }
+            : {};
+          this.options.emit({
+            type: 'compaction',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            state: 'queued',
+          });
+          return;
+        }
+        await this.runCompaction(managed, command.instructions);
         return;
       }
       case 'rewind': {
@@ -1994,10 +2018,25 @@ export class SessionSupervisor {
         }
         return;
       }
+      case 'compaction_start':
+        this.options.emit({
+          type: 'compaction',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          state: 'start',
+        });
+        return;
       case 'compaction_end':
         // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
         this.reconcileMessages(managed, this.transcript(managed));
         this.emitSessionMeta(managed);
+        this.options.emit({
+          type: 'compaction',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          state: 'end',
+          ...(event.errorMessage ? { error: event.errorMessage } : {}),
+        });
         return;
       case 'agent_end': {
         this.reconcileMessages(managed, this.transcript(managed));
@@ -2039,6 +2078,11 @@ export class SessionSupervisor {
           seq: ++managed.seq,
           turnId,
         });
+        if (managed.pendingCompact) {
+          const queued = managed.pendingCompact;
+          managed.pendingCompact = undefined;
+          void this.runCompaction(managed, queued.instructions);
+        }
         if (managed.pendingTaskReminders.length > 0) {
           setTimeout(() => {
             if (managed.status !== 'idle' || managed.pendingTaskReminders.length === 0) return;
@@ -2204,6 +2248,23 @@ export class SessionSupervisor {
       status: managed.status,
       ...(error ? { error } : {}),
     });
+  }
+
+  /** 执行一次手动压缩。进度/收束由 pi 的 compaction_start / compaction_end 事件推给渲染层；
+   *  这里只兵底 compact() 直接抛错（未走到 compaction_end）的情况，否则 UI 会卡在「压缩中」。 */
+  private async runCompaction(managed: ManagedSession, instructions?: string): Promise<void> {
+    try {
+      await managed.session.compact(instructions);
+    } catch (error) {
+      console.error('[compact] failed:', toErrorMessage(error));
+      this.options.emit({
+        type: 'compaction',
+        identity: managed.identity,
+        seq: ++managed.seq,
+        state: 'end',
+        error: toErrorMessage(error),
+      });
+    }
   }
 
   private emitSessionMeta(managed: ManagedSession): void {

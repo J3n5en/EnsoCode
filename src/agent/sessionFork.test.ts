@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { branchSessionAtLeaf, resolveForkLeafId } from './sessionFork';
+import {
+  branchSessionAtLeaf,
+  branchSessionFromPersistedFile,
+  resolveForkLeafId,
+} from './sessionFork';
 
 describe('branchSessionAtLeaf', () => {
   it('锚点无效或未落盘则失败，不宣称成功', () => {
@@ -36,6 +40,26 @@ describe('branchSessionAtLeaf', () => {
       )
     ).toEqual({ ok: true, sessionFile: '/tmp/new.jsonl' });
     expect(createBranchedSession).toHaveBeenCalledWith('e1');
+  });
+});
+
+describe('branchSessionFromPersistedFile', () => {
+  it('在副本上分叉，不改源 sessionFile', async () => {
+    const copyCreate = vi.fn(() => '/tmp/new.jsonl');
+    expect(
+      branchSessionFromPersistedFile(
+        {
+          getSessionFile: () => '/tmp/source.jsonl',
+          getEntry: (id) => (id === 'e1' ? { id } : undefined),
+        },
+        'e1',
+        () => ({
+          getEntry: (id) => (id === 'e1' ? { id } : undefined),
+          createBranchedSession: copyCreate,
+        })
+      )
+    ).toEqual({ ok: true, sessionFile: '/tmp/new.jsonl' });
+    expect(copyCreate).toHaveBeenCalledWith('e1');
   });
 });
 

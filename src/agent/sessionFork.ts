@@ -48,3 +48,23 @@ export function branchSessionAtLeaf(
   if (!sessionFile) return { ok: false, error: 'branch-not-persisted' };
   return { ok: true, sessionFile };
 }
+
+/**
+ * pi 的 createBranchedSession 会就地改当前 SessionManager（sessionFile + 内存树）。
+ * 必须先打开源 jsonl 副本再分叉，否则源会话被吃掉。
+ */
+export function branchSessionFromPersistedFile(
+  source: {
+    getSessionFile(): string | undefined;
+    getEntry(id: string): { id: string } | undefined;
+  },
+  leafId: string,
+  openCopy: (sessionFile: string) => {
+    createBranchedSession(leafId: string): string | undefined;
+    getEntry(id: string): { id: string } | undefined;
+  }
+): SessionForkResult {
+  const sessionFile = source.getSessionFile();
+  if (!sessionFile || !source.getEntry(leafId)) return { ok: false, error: 'anchor-not-found' };
+  return branchSessionAtLeaf(openCopy(sessionFile), leafId);
+}

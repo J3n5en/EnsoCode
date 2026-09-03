@@ -975,24 +975,24 @@ describe('typed Agent child projection', () => {
         ],
       }));
       selectConversation.mockImplementation(
-        async (request: { conversationId: string; version: number }) => {
+        (request: { conversationId: string; version?: number }) => {
           if (request.conversationId === branchId && request.version !== liveVersion) {
             snapshotVersion = liveVersion;
-            return {
+            return Promise.resolve({
               accepted: false as const,
               error: 'Conversation authority is stale or unavailable.',
-            };
+            }) as never;
           }
-          return {
+          return Promise.resolve({
             accepted: true as const,
             value: {
               conversationId: request.conversationId,
               projectId: 'project',
               kind: 'root' as const,
               lifecycle: 'ready' as const,
-              version: request.version,
+              version: request.version ?? liveVersion,
             },
-          };
+          }) as never;
         }
       );
       sessionsModule.useSessionsStore.setState((state) => ({
