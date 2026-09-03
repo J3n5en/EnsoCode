@@ -106,6 +106,7 @@ import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tool
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { transcriptMessages } from './transcript';
+import { withWriteScope } from './writeScope';
 
 /** 子会话产物：实际 session、模型与精确工具集合。 */
 interface ChildSessionResult {
@@ -1077,8 +1078,14 @@ export class SessionSupervisor {
           return { command: sshCommand, cwd: process.cwd() };
         }
       : undefined;
-    const buildBaseTools = (toolGate: ApprovalGate, cp?: CheckpointManager): Def[] => {
+    const buildBaseTools = (
+      toolGate: ApprovalGate,
+      cp?: CheckpointManager,
+      writeScope?: readonly string[]
+    ): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
+      // 写范围在审批之内、工具之外:越界直接拒绝,不占用审批也不落盘
+      const scoped = (definition: Def): Def => withWriteScope(guarded(definition), cwd, writeScope);
       return [
         ...readOnlyTools(),
         withApproval(
@@ -1100,14 +1107,12 @@ export class SessionSupervisor {
         withApproval(
           toolGate,
           'file-edit',
-          guarded(
-            createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
-          )
+          scoped(createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined))
         ),
         withApproval(
           toolGate,
           'file-write',
-          guarded(
+          scoped(
             createWriteToolDefinition(
               cwd,
               remoteOps ? { operations: remoteOps.write } : undefined
@@ -1205,7 +1210,7 @@ export class SessionSupervisor {
           : [
               ...(resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
                 ? readOnlyTools()
-                : buildBaseTools(childGate)),
+                : buildBaseTools(childGate, undefined, agentType?.writeScope)),
               ...(resolved || agentType ? typeMcpTools : wrapMcpTools(childGate)),
               ...(extraTools as Def[]),
             ];

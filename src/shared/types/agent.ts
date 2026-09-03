@@ -118,6 +118,8 @@ export interface AgentTypeSpawnConfig {
   description: string;
   systemPrompt: string;
   tools: 'all' | 'readonly';
+  /** 可写路径 glob 白名单；缺省不限 */
+  writeScope?: string[];
   /** 精选注入的 skill 目录（main 已按 id 解析） */
   skillPaths?: string[];
   /** 精选注入的 MCP server（main 已按 id 解析） */

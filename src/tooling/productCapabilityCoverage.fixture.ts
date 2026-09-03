@@ -169,6 +169,7 @@ export const BUILTIN_AGENT_TYPE_COVERAGE: Readonly<Record<string, CoverageDispos
   scout: surfaces('agent-types.list', 'team.list-agent-types'),
   worker: surfaces('agent-types.list', 'team.list-agent-types'),
   reviewer: surfaces('agent-types.list', 'team.list-agent-types'),
+  tester: surfaces('agent-types.list', 'team.list-agent-types'),
 };
 
 /** 每条 IPC 单独登记；传输/lifecycle 必须逐项给出排除理由，不按目录 blanket 排除。 */

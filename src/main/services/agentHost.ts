@@ -675,6 +675,7 @@ function configuredAgentTypes(
       description: type.description,
       systemPrompt: type.systemPrompt,
       tools: type.tools,
+      ...(type.writeScope ? { writeScope: [...type.writeScope] } : {}),
       allowModelOverride: effectiveMode === 'agent_pick',
     };
   });
@@ -691,6 +692,7 @@ function configuredAgentTypes(
       description: entry.description,
       systemPrompt: entry.systemPrompt,
       tools: entry.tools,
+      ...(entry.writeScope ? { writeScope: [...entry.writeScope] } : {}),
       allowModelOverride: effectiveMode === 'agent_pick',
       ...(resources.ok && resources.skillPaths.length > 0
         ? { skillPaths: [...resources.skillPaths] }
@@ -858,7 +860,10 @@ function isAgentTypeEntry(value: unknown): value is AgentTypeEntry {
     typeof entry.name === 'string' &&
     typeof entry.description === 'string' &&
     typeof entry.systemPrompt === 'string' &&
-    (entry.tools === 'all' || entry.tools === 'readonly')
+    (entry.tools === 'all' || entry.tools === 'readonly') &&
+    (entry.writeScope === undefined ||
+      (Array.isArray(entry.writeScope) &&
+        entry.writeScope.every((glob) => typeof glob === 'string' && glob.trim() !== '')))
   );
 }
 
