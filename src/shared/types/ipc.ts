@@ -153,6 +153,8 @@ export const IPC_CHANNELS = {
 
   // 右侧面板内嵌浏览器(WebContentsView 叠层)
   BROWSER_SET_VIEWPORT: 'browser:set-viewport',
+  /** 渲染层有模态浮层时，guest 立刻沉到 workbench 之下（避免弹窗被网页挡一帧） */
+  BROWSER_SET_OVERLAY_ACTIVE: 'browser:set-overlay-active',
   BROWSER_NAVIGATE: 'browser:navigate',
   BROWSER_GO_BACK: 'browser:go-back',
   BROWSER_GO_FORWARD: 'browser:go-forward',

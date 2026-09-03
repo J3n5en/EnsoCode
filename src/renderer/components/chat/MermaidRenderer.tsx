@@ -1,5 +1,6 @@
 import { Maximize2, Minimize2, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -91,6 +92,7 @@ export function MermaidRenderer({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  useOverlayGuard(isFullscreen);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
   const svgContentRef = useRef<HTMLDivElement>(null);
@@ -364,6 +366,7 @@ export function MermaidRenderer({
         <div
           className="fixed inset-0 flex select-none flex-col bg-background"
           style={{ zIndex: Z_INDEX.TOAST }}
+          data-enso-float=""
           onClick={handleFullscreenOverlayClick}
         >
           <div

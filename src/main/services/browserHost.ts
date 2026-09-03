@@ -133,6 +133,8 @@ export class BrowserHost {
 
   /** 渲染层当前展示的 dock tab 与面板矩形 */
   /** covered：renderer 有浮层压在网页上，guest 要沉到 workbench 之下透洞显示 */
+  /** 模态浮层开着：不等 rAF 上报矩形，直接不抬升任何 guest */
+  private overlayActive = false;
   private shown: {
     tabId: string;
     sessionId: string;
@@ -253,6 +255,13 @@ export class BrowserHost {
     return this.state(tabId);
   }
 
+  /** 渲染层有模态浮层（Dialog / 全屏预览等）时，所有 guest 立刻沉到 workbench 之下 */
+  setOverlayActive(active: boolean): void {
+    if (this.overlayActive === active) return;
+    this.overlayActive = active;
+    this.layout();
+  }
+
   setDevTools(tabId: string, open: boolean): BrowserTabState {
     const tab = this.tabs.get(tabId);
     if (!tab) return EMPTY_STATE;
@@ -313,7 +322,7 @@ export class BrowserHost {
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
         tab.view.setVisible(true);
-        if (!this.shown.covered) raise.push(tab.view);
+        if (!this.shown.covered && !this.overlayActive) raise.push(tab.view);
         if (!tab.devtoolsOpen) void this.cdp(tab, 'Emulation.clearDeviceMetricsOverride', {});
       } else {
         tab.view.setVisible(false);
@@ -333,7 +342,7 @@ export class BrowserHost {
         if (dtOnTop && this.shownDevtools) {
           tab.devtools.setBounds(this.shownDevtools.viewport);
           tab.devtools.setVisible(true);
-          if (!this.shownDevtools.covered) raise.push(tab.devtools);
+          if (!this.shownDevtools.covered && !this.overlayActive) raise.push(tab.devtools);
         } else {
           tab.devtools.setVisible(false);
         }

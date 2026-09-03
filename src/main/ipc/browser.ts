@@ -21,6 +21,9 @@ export function registerBrowserHandlers(): void {
       );
     }
   );
+  ipcMain.on(IPC_CHANNELS.BROWSER_SET_OVERLAY_ACTIVE, (_event, active: unknown) => {
+    browserHost.setOverlayActive(active === true);
+  });
   ipcMain.handle(
     IPC_CHANNELS.BROWSER_NAVIGATE,
     async (_event, tabId: unknown, conversationId: unknown, url: unknown) => {

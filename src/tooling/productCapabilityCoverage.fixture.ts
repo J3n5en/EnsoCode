@@ -323,6 +323,7 @@ export const IPC_PRODUCT_COVERAGE = {
   TERMINAL_DATA: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_EXIT: excluded('Side panel terminal pty transport; renderer UI only.'),
   BROWSER_SET_VIEWPORT: excluded('Side panel browser overlay geometry; renderer UI only.'),
+  BROWSER_SET_OVERLAY_ACTIVE: excluded('Side panel browser overlay guard; renderer UI only.'),
   BROWSER_NAVIGATE: excluded('Side panel browser address bar; renderer UI only.'),
   BROWSER_GO_BACK: excluded('Side panel browser history; renderer UI only.'),
   BROWSER_GO_FORWARD: excluded('Side panel browser history; renderer UI only.'),

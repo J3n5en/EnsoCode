@@ -3,6 +3,7 @@
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { XIcon } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useTrafficLightsGuard } from '@/hooks/useTrafficLightsGuard';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -74,6 +75,8 @@ function DialogPopup({
   const mergedStyle = disableNestedTransform
     ? ({ ...(style ?? {}), '--nested-dialogs': 0 } as React.CSSProperties)
     : style;
+
+  useOverlayGuard();
 
   const contentZIndex =
     zIndexLevel === 'base' ? Z_INDEX.MODAL_CONTENT : Z_INDEX.NESTED_MODAL_CONTENT;

@@ -651,6 +651,10 @@ const electronAPI = {
         viewport,
         covered
       ),
+    /** 模态浮层开合：fire-and-forget，越早越好 */
+    setOverlayActive: (active: boolean): void => {
+      ipcRenderer.send(IPC_CHANNELS.BROWSER_SET_OVERLAY_ACTIVE, active);
+    },
     navigate: (
       tabId: string,
       conversationId: string,

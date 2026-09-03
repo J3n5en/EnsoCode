@@ -14,6 +14,7 @@ import {
   AutocompleteList,
   AutocompleteSeparator,
 } from '@/components/ui/autocomplete';
+import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { cn } from '@/lib/utils';
 
 const CommandInputContext = React.createContext<{
@@ -58,6 +59,7 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
 
 function CommandDialogPopup({ className, children, ...props }: CommandDialogPrimitive.Popup.Props) {
   const inputRef = React.useRef<HTMLInputElement>(null);
+  useOverlayGuard();
 
   return (
     <CommandDialogPortal>
