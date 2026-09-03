@@ -363,49 +363,59 @@ export const useSessionsStore = create<SessionsState>()(
         project: ProjectAuthorityProjection;
         conversation: ConversationAuthorityProjection;
       } | null> {
-        const projection = await window.electronAPI.sourceAuthority.read();
-        const conversation = projection.conversations.find(
-          (candidate) =>
-            candidate.conversationId === conversationId &&
-            candidate.kind === 'root' &&
-            candidate.lifecycle !== 'ended'
-        );
-        if (!conversation) return null;
-        const project = projection.projects.find(
-          (candidate) =>
-            candidate.projectId === conversation.projectId && candidate.state === 'active'
-        );
-        if (!project) return null;
-        const projectResult = await window.electronAPI.sourceAuthority.selectProject({
-          requestId: crypto.randomUUID(),
-          projectId: project.projectId,
-          version: project.version,
-        });
-        if (!projectResult.accepted) return null;
-        const conversationResult = await window.electronAPI.sourceAuthority.selectConversation({
-          requestId: crypto.randomUUID(),
-          conversationId: conversation.conversationId,
-          version: conversation.version,
-        });
-        if (!conversationResult.accepted) return null;
-        if (conversationResult.value.forkedFrom) {
-          const origin = conversationResult.value.forkedFrom;
-          set((state) => {
-            const local = state.conversations[conversationId];
-            if (!local) return state;
-            if (
-              local.forkedFromConversationId === origin.conversationId &&
-              local.forkedFromEntryId === origin.entryId
-            ) {
-              return state;
-            }
-            return patch(state, conversationId, {
-              forkedFromConversationId: origin.conversationId,
-              forkedFromEntryId: origin.entryId,
-            });
+        // markReady（fork-done / parent-ready）会抬 version；读投影与 select 之间可能过期。
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const projection = await window.electronAPI.sourceAuthority.read();
+          const conversation = projection.conversations.find(
+            (candidate) =>
+              candidate.conversationId === conversationId &&
+              candidate.kind === 'root' &&
+              candidate.lifecycle !== 'ended'
+          );
+          if (!conversation) return null;
+          const project = projection.projects.find(
+            (candidate) =>
+              candidate.projectId === conversation.projectId && candidate.state === 'active'
+          );
+          if (!project) return null;
+          const projectResult = await window.electronAPI.sourceAuthority.selectProject({
+            requestId: crypto.randomUUID(),
+            projectId: project.projectId,
+            version: project.version,
           });
+          if (!projectResult.accepted) {
+            if (attempt === 0) continue;
+            return null;
+          }
+          const conversationResult = await window.electronAPI.sourceAuthority.selectConversation({
+            requestId: crypto.randomUUID(),
+            conversationId: conversation.conversationId,
+            version: conversation.version,
+          });
+          if (!conversationResult.accepted) {
+            if (attempt === 0) continue;
+            return null;
+          }
+          if (conversationResult.value.forkedFrom) {
+            const origin = conversationResult.value.forkedFrom;
+            set((state) => {
+              const local = state.conversations[conversationId];
+              if (!local) return state;
+              if (
+                local.forkedFromConversationId === origin.conversationId &&
+                local.forkedFromEntryId === origin.entryId
+              ) {
+                return state;
+              }
+              return patch(state, conversationId, {
+                forkedFromConversationId: origin.conversationId,
+                forkedFromEntryId: origin.entryId,
+              });
+            });
+          }
+          return { project: projectResult.value, conversation: conversationResult.value };
         }
-        return { project: projectResult.value, conversation: conversationResult.value };
+        return null;
       }
       window.electronAPI.agent.onFocusSession((sessionId) => {
         const conversation = get().conversations[sessionId];

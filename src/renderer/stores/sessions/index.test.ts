@@ -954,6 +954,77 @@ describe('typed Agent child projection', () => {
         expect.objectContaining({ conversationId: phoneSessionId })
       );
     });
+
+    it('权威版本被抬高后重试激活，不把对话分支标成 history-only', async () => {
+      const branchId = '33333333-3333-4333-8333-333333333333';
+      let snapshotVersion = 1;
+      const liveVersion = 2;
+      sourceRead.mockImplementation(async () => ({
+        projects: sourceProjection.projects,
+        conversations: [
+          ...sourceProjection.conversations.filter(
+            (conversation) => conversation.conversationId !== branchId
+          ),
+          {
+            conversationId: branchId,
+            projectId: 'project',
+            kind: 'root',
+            lifecycle: 'ready',
+            version: snapshotVersion,
+          },
+        ],
+      }));
+      selectConversation.mockImplementation(
+        async (request: { conversationId: string; version: number }) => {
+          if (request.conversationId === branchId && request.version !== liveVersion) {
+            snapshotVersion = liveVersion;
+            return {
+              accepted: false as const,
+              error: 'Conversation authority is stale or unavailable.',
+            };
+          }
+          return {
+            accepted: true as const,
+            value: {
+              conversationId: request.conversationId,
+              projectId: 'project',
+              kind: 'root' as const,
+              lifecycle: 'ready' as const,
+              version: request.version,
+            },
+          };
+        }
+      );
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          [branchId]: {
+            ...state.conversations.parent,
+            id: branchId,
+            title: 'Parent (分支)',
+            started: false,
+            sessionFile: '/tmp/branch.jsonl',
+            forkedFromConversationId: 'parent',
+            forkedFromEntryId: 'leaf-1',
+            parentId: undefined,
+            error: undefined,
+          },
+        },
+        order: [branchId, ...state.order],
+      }));
+
+      selectConversation.mockClear();
+      sessionsModule.useSessionsStore.getState().selectConversation(branchId);
+      await vi.waitFor(() =>
+        expect(
+          selectConversation.mock.calls.filter((call) => call[0]?.conversationId === branchId)
+            .length
+        ).toBeGreaterThanOrEqual(2)
+      );
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[branchId]?.error
+      ).toBeUndefined();
+    });
   });
 
   it('interruptAndSendQueued aborts the running turn, then prompts once the turn settles', async () => {
