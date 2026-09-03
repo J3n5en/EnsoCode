@@ -271,6 +271,34 @@ describe('normalizeToolSchema', () => {
     });
   });
 
+  it('去掉 propertyNames / dependencies / contains / uniqueItems 等 Google 400 的校验关键字', () => {
+    expect(
+      normalizeToolSchema({
+        type: 'object',
+        propertyNames: { pattern: '^[a-z]+$' },
+        dependencies: { a: ['b'] },
+        dependentRequired: { a: ['b'] },
+        dependentSchemas: { a: {} },
+        $defs: { x: {} },
+        definitions: { x: {} },
+        if: {},
+        // biome-ignore lint/suspicious/noThenProperty: JSON Schema 条件关键字
+        then: {},
+        else: {},
+        properties: {
+          tags: { type: 'array', items: { type: 'string' }, uniqueItems: true, contains: {} },
+          n: { type: 'number', multipleOf: 2 },
+        },
+      })
+    ).toEqual({
+      type: 'object',
+      properties: {
+        tags: { type: 'array', items: { type: 'string' } },
+        n: { type: 'number' },
+      },
+    });
+  });
+
   it('非对象输入原样返回', () => {
     expect(normalizeToolSchema(null)).toBe(null);
     expect(normalizeToolSchema('x')).toBe('x');

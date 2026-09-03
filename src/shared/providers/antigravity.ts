@@ -593,6 +593,24 @@ const DROPPED_SCHEMA_KEYS: Record<string, true> = {
   exclusiveMinimum: true,
   exclusiveMaximum: true,
   not: true,
+  // 以下均实际在 MCP 工具 schema 里出现过，后端回 `Unknown name "xxx"` 400
+  propertyNames: true,
+  dependencies: true,
+  dependentRequired: true,
+  dependentSchemas: true,
+  $defs: true,
+  definitions: true,
+  if: true,
+  // biome-ignore lint/suspicious/noThenProperty: JSON Schema 条件关键字，不是 thenable
+  then: true,
+  else: true,
+  contains: true,
+  minContains: true,
+  maxContains: true,
+  uniqueItems: true,
+  multipleOf: true,
+  contentMediaType: true,
+  contentEncoding: true,
 };
 
 export function normalizeToolSchema(value: unknown): unknown {
