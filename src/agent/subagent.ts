@@ -118,6 +118,19 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       (deps.models.length > 0
         ? '; a model parameter lets you pick a cheaper/stronger model per subtask — see the tool schema for options'
         : ''),
+    promptGuidelines: [
+      'Delegate by default: when a request has 2+ independent lines of work (explore module A / change B / verify C), ' +
+        'dispatch them as parallel subagent calls in the same message instead of doing them serially yourself. ' +
+        'Searching the whole repo yourself before acting is an anti-pattern when a subagent could do the recon',
+      ...(deps.agentTypes.some((type) => type.name === 'scout') &&
+      deps.agentTypes.some((type) => type.name === 'worker') &&
+      deps.agentTypes.some((type) => type.name === 'reviewer')
+        ? [
+            'Pick agent_type by role: scout for recon/reading, worker for an isolated code change, ' +
+              'reviewer after a sizeable change; use coworker (not subagent) when follow-up rounds are likely',
+          ]
+        : []),
+    ],
     parameters: {
       type: 'object',
       properties: {

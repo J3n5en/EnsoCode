@@ -76,6 +76,13 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       (deps.models.length > 0
         ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — see the tool schema for options'
         : ''),
+    promptGuidelines: [
+      'A coworker is multi-round by default: give it the role and the first step in spawn, then steer with send. ' +
+        'A "finished a round" notice is not completion — reply with send to verify, correct, or ask for evidence; ' +
+        'do not redo its work yourself and do not spawn a second coworker for the same role (reuse the name). ' +
+        'When a coworker reaches you via message_main_agent, answer it with send. ' +
+        "dismiss only when the role's goal is met or the user says stop",
+    ],
     parameters: {
       type: 'object',
       properties: {
@@ -93,7 +100,10 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           description: `Agent type for spawn${typeList ? ` (${typeList})` : ''}; omit for general`,
         },
         ...modelParam,
-        task: { type: 'string', description: 'Initial task for spawn, self-contained' },
+        task: {
+          type: 'string',
+          description: 'First-round task for spawn (role + first step); continue with send',
+        },
         message: { type: 'string', description: 'Message for send' },
         wait: {
           type: 'boolean',

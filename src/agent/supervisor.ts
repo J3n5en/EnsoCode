@@ -1868,7 +1868,8 @@ export class SessionSupervisor {
       const failed = managed.status === 'failed';
       this.notifier.notify(
         parentId,
-        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}`,
+        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}\n\n` +
+          '(follow up with coworker send to verify or steer; dismiss only when its goal is met)',
         { urgent: failed }
       );
     })().catch(() => {});

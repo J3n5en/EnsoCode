@@ -69,6 +69,18 @@ describe('coworker tool model 参数', () => {
     );
   });
 
+  it('promptGuidelines 把多轮闭环写成默认动作，task 不再自称 self-contained', () => {
+    const tool = createCoworkerTool(makeDeps());
+    const text = tool.promptGuidelines?.join('\n') ?? '';
+    expect(text).toMatch(/finished a round.*send/is);
+    expect(text).toMatch(/message_main_agent.*send/is);
+    expect(text).toMatch(/dismiss/);
+    const properties = (tool.parameters as { properties: Record<string, { description: string }> })
+      .properties;
+    expect(properties.task.description).not.toMatch(/self-contained/);
+    expect(properties.task.description).toMatch(/send/);
+  });
+
   it('当 agent_type 锁定模型（allowModelOverride === false）时，spawn 传 model 报错拒绝', async () => {
     const deps = makeDeps({
       agentTypes: [

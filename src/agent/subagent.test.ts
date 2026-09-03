@@ -94,6 +94,21 @@ describe('subagent tool model 参数', () => {
     );
   });
 
+  it('promptGuidelines 写入主动委派规则，含内置类型选型；无类型时不提类型', () => {
+    const guidelines = createSubagentTool(
+      makeDeps({
+        agentTypes: [
+          { name: 'scout', description: 'recon', systemPrompt: '', tools: 'readonly' },
+          { name: 'worker', description: 'impl', systemPrompt: '', tools: 'all' },
+          { name: 'reviewer', description: 'review', systemPrompt: '', tools: 'readonly' },
+        ],
+      })
+    ).promptGuidelines;
+    expect(guidelines?.join('\n')).toMatch(/independent.*same message/i);
+    expect(guidelines?.join('\n')).toMatch(/scout.*worker.*reviewer/s);
+    expect(createSubagentTool(makeDeps()).promptGuidelines?.join('\n')).not.toMatch(/scout/);
+  });
+
   it('当 agent_type 锁定模型（allowModelOverride === false）时，主 agent 传 model 报错拒绝', async () => {
     const deps = makeDeps({
       agentTypes: [
