@@ -56,6 +56,8 @@ export type TimelineItem =
       /** 组内工具数（不含 edit——它平铺在组外） */
       count: number;
       stats: ToolGroupStats;
+      /** compact 模式下组外仍有 running 的只读行：组头显示 Exploring */
+      exploring: boolean;
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
@@ -479,12 +481,15 @@ function classifyTool(name: string, stats: ToolGroupStats): void {
   else stats.others += 1;
 }
 
+const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
+
 /**
  * 工具行分组折叠（折中方案）：
  * - 段 = 连续的 tool/thinking 行（text/user/error 打断）；thinking 收进段内，门槛只数 tool。
  * - 带 diff 的 edit 行不进组，紧跟组头之后平铺（改动是核心产物，不折）。
- * - running 时最后一个 user 之后的段默认不折（进行中的轮实时展示）；
- *   foldLive 开时也折，但 running 行钉在组外（看得见此刻在跑什么）。
+ * - 默认：running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
+ * - compact（对齐 Cursor 的 Explored）：段只收只读工具（read/grep/find/ls/glob），
+ *   bash 等其它工具打断段并平铺；live 也折，running 行钉在组外，组头标 exploring。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
  * 纯函数。
  */
@@ -492,25 +497,26 @@ export function foldTimeline(
   items: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
-  options: { foldLive?: boolean } = {}
+  options: { compact?: boolean } = {}
 ): TimelineItem[] {
+  const compact = options.compact === true;
   const lastUserIndex = items.findLastIndex((item) => item.kind === 'user');
+  const inSegment = (s: TimelineItem): boolean =>
+    s.kind === 'thinking' || (s.kind === 'tool' && (!compact || READ_ONLY_TOOLS.has(s.name)));
   const result: TimelineItem[] = [];
   let i = 0;
   while (i < items.length) {
     const item = items[i];
-    if (item.kind !== 'tool' && item.kind !== 'thinking') {
+    if (!inSegment(item)) {
       result.push(item);
       i += 1;
       continue;
     }
     // 收集连续段
     let end = i;
-    while (end < items.length && (items[end].kind === 'tool' || items[end].kind === 'thinking')) {
-      end += 1;
-    }
+    while (end < items.length && inSegment(items[end])) end += 1;
     const segment = items.slice(i, end);
-    const liveSegment = !options.foldLive && running && lastUserIndex >= 0 && i > lastUserIndex;
+    const liveSegment = !compact && running && lastUserIndex >= 0 && i > lastUserIndex;
     // 钉住的行不进组：edit 的 diff、write 的内容、todo 清单是核心产物，
     // running 行是「此刻在跑什么」，都不折进黑盒
     const pinned = (s: TimelineItem): boolean =>
@@ -534,6 +540,7 @@ export function foldTimeline(
         expanded,
         count: toolCount,
         stats,
+        exploring: compact && editRows.some((s) => s.kind === 'tool' && s.state === 'running'),
         children: groupRows,
       });
       // 展开：原始顺序全量平铺；收拢：仅 edit 行（diff）跟在组头后

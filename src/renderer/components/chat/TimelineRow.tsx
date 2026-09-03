@@ -113,7 +113,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.stats.commands === b.stats.commands &&
         a.stats.reads === b.stats.reads &&
         a.stats.searches === b.stats.searches &&
-        a.stats.others === b.stats.others
+        a.stats.others === b.stats.others &&
+        a.exploring === b.exploring
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
@@ -920,7 +921,7 @@ function CompactionRow({ item }: { item: Extract<TimelineItem, { kind: 'compacti
   );
 }
 
-/** 收拢的工具组头：摘要统计 + chevron；点击展开为组内原始行 */
+/** 收拢的工具组头：摘要统计 + chevron；点击展开为组内原始行。compact 下对齐 Cursor：Explored / Exploring */
 function ToolGroupRow({
   item,
   onToggle,
@@ -929,6 +930,7 @@ function ToolGroupRow({
   onToggle?: (key: string) => void;
 }) {
   const { t } = useI18n();
+  const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const parts: string[] = [];
   if (item.stats.commands > 0)
     parts.push(t('ran {{count}} commands', { count: item.stats.commands }));
@@ -936,6 +938,26 @@ function ToolGroupRow({
   if (item.stats.searches > 0)
     parts.push(t('searched {{count}} times', { count: item.stats.searches }));
   if (item.stats.others > 0) parts.push(t('{{count}} other calls', { count: item.stats.others }));
+  if (compact) {
+    const explored: string[] = [];
+    if (item.stats.reads > 0) explored.push(t('{{count}} files', { count: item.stats.reads }));
+    if (item.stats.searches > 0)
+      explored.push(t('{{count}} searches', { count: item.stats.searches }));
+    return (
+      <button
+        type="button"
+        onClick={() => onToggle?.(item.key)}
+        className={cn(
+          'flex w-full items-baseline gap-1.5 rounded py-0.5 text-left text-sm transition-colors hover:text-foreground',
+          item.expanded ? 'text-foreground' : 'text-foreground/70',
+          item.exploring && 'animate-pulse'
+        )}
+      >
+        <span className="shrink-0">{item.exploring ? t('Exploring') : t('Explored')}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{explored.join(', ')}</span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -988,19 +1010,23 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           disabled={!expandable}
           onClick={() => setExpanded((v) => !v)}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 text-left text-xs',
-            compact ? 'rounded px-1.5 py-0.5 text-muted-foreground' : 'px-3 py-1.5',
-            expandable && 'cursor-pointer hover:bg-muted/50'
+            'flex min-w-0 flex-1 items-center gap-2 text-left',
+            compact
+              ? 'rounded py-0.5 text-sm text-foreground/70 transition-colors hover:text-foreground'
+              : 'px-3 py-1.5 text-xs',
+            expandable && !compact && 'cursor-pointer hover:bg-muted/50',
+            expandable && compact && 'cursor-pointer'
           )}
         >
-          <ToolStateIcon state={item.state} />
-          <span className="shrink-0 font-medium">{item.name}</span>
+          {(!compact || item.state !== 'ok') && <ToolStateIcon state={item.state} />}
+          <span className={cn('shrink-0', !compact && 'font-medium')}>{item.name}</span>
           {item.summary && (
             <>
-              <span className="text-muted-foreground/50">·</span>
+              {!compact && <span className="text-muted-foreground/50">·</span>}
               <span
                 className={cn(
-                  'min-w-0 flex-1 truncate font-mono',
+                  'min-w-0 flex-1 truncate',
+                  compact ? 'font-mono text-[0.8em]' : 'font-mono',
                   item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
                 )}
               >

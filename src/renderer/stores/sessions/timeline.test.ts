@@ -559,7 +559,7 @@ describe('foldTimeline', () => {
     expect(expanded.map((i) => i.key)).toEqual([groupKey, 't1', 'th', 't2', 't3']);
   });
 
-  it('foldLive：running 时最后一轮也折组，running 行钉在组外', () => {
+  it('compact：running 时最后一轮也折组，running 行钉在组外', () => {
     const runningTool = { ...toolItem('r', 'read'), state: 'running' } as TimelineItem;
     const items = [
       userItem('u0'),
@@ -568,25 +568,56 @@ describe('foldTimeline', () => {
       toolItem('a3', 'ls'),
       runningTool,
     ];
-    const folded = foldTimeline(items, true, new Set(), { foldLive: true });
+    const folded = foldTimeline(items, true, new Set(), { compact: true });
     expect(folded.map((i) => i.kind)).toEqual(['user', 'tool-group', 'tool']);
     const group = folded[1] as Extract<TimelineItem, { kind: 'tool-group' }>;
     expect(group.count).toBe(3);
     expect(group.stats).toEqual({ commands: 0, reads: 1, searches: 2, others: 0 });
     expect(folded[2]).toBe(runningTool);
     // 展开后全量平铺，running 行不重复
-    const expanded = foldTimeline(items, true, new Set([group.key]), { foldLive: true });
+    const expanded = foldTimeline(items, true, new Set([group.key]), { compact: true });
     expect(expanded.map((i) => i.key)).toEqual(['u0', group.key, 'a1', 'a2', 'a3', 'r']);
   });
 
-  it('foldLive 关时 running 最后一轮仍平铺', () => {
+  it('compact 关时 running 最后一轮仍平铺', () => {
     const items = [userItem('u0'), toolItem('a1'), toolItem('a2'), toolItem('a3')];
-    expect(foldTimeline(items, true, new Set(), { foldLive: false }).map((i) => i.kind)).toEqual([
+    expect(foldTimeline(items, true, new Set(), { compact: false }).map((i) => i.kind)).toEqual([
       'user',
       'tool',
       'tool',
       'tool',
     ]);
+  });
+
+  it('compact：只读工具才进组，bash 打断段并平铺在外', () => {
+    const items = [
+      toolItem('a1', 'read'),
+      toolItem('a2', 'read'),
+      toolItem('a3', 'grep'),
+      toolItem('b', 'bash'),
+      toolItem('a4', 'read'),
+    ];
+    const folded = foldTimeline(items, false, new Set(), { compact: true });
+    expect(folded.map((i) => (i.kind === 'tool' ? i.name : i.kind))).toEqual([
+      'tool-group',
+      'bash',
+      'read',
+    ]);
+    const group = folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.count).toBe(3);
+    expect(group.stats).toEqual({ commands: 0, reads: 2, searches: 1, others: 0 });
+    expect(group.exploring).toBe(false);
+    // 关：沿用旧逻辑，bash 一起收
+    const legacy = foldTimeline(items, false, new Set(), { compact: false });
+    expect(legacy.map((i) => i.kind)).toEqual(['tool-group']);
+    expect((legacy[0] as Extract<TimelineItem, { kind: 'tool-group' }>).count).toBe(5);
+  });
+
+  it('compact：running 行钉组外时组头标 exploring', () => {
+    const running = { ...toolItem('r', 'read'), state: 'running' } as TimelineItem;
+    const items = [toolItem('a1', 'read'), toolItem('a2', 'ls'), toolItem('a3', 'grep'), running];
+    const folded = foldTimeline(items, true, new Set(), { compact: true });
+    expect((folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>).exploring).toBe(true);
   });
 
   it('todo 行不进组，平铺在组头之后', () => {

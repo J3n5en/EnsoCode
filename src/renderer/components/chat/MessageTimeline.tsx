@@ -120,10 +120,10 @@ export function MessageTimeline({
       return next;
     });
   }, []);
-  const foldLive = useSettingsStore((s) => s.compactReadOnlyTools);
+  const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const folded = useMemo(
-    () => foldTimeline(items, running, expandedGroups, { foldLive }),
-    [items, running, expandedGroups, foldLive]
+    () => foldTimeline(items, running, expandedGroups, { compact }),
+    [items, running, expandedGroups, compact]
   );
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要
