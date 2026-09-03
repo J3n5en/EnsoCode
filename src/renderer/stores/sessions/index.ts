@@ -10,6 +10,7 @@ import type {
   ConversationAuthorityProjection,
   DispatchMainEvent,
   ProjectAuthorityProjection,
+  ProjectedMessage,
   ThinkingLevel,
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
@@ -276,19 +277,32 @@ interface SessionsState {
   clearGoal(conversationId: string): void;
 }
 
-/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
-function firstUserText(projection: SessionProjection): string {
-  const message = projection.messages.find((m) => m.role === 'user');
-  if (!message) return '';
-  const text = message.content
+function userMessageRawText(message: ProjectedMessage): string {
+  if (message.role !== 'user') return '';
+  return message.content
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map((part) => part.text)
     .join(' ')
     .trim();
+}
+
+function truncateTitle(text: string): string {
   // 只取首行，且 chat 引用块折叠成 @标题：引用块原文不得污染标题，
   // 否则带换行的标题会反过来破坏 chat 引用行的单行格式
   const firstLine = mentionDisplayText(text).split('\n')[0].trim();
   return (firstLine || '[image]').slice(0, 40);
+}
+
+/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
+function firstUserText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  if (!message) return '';
+  return truncateTitle(userMessageRawText(message));
+}
+
+function firstUserRawText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  return message ? userMessageRawText(message) : '';
 }
 
 const patch = (
@@ -309,6 +323,33 @@ export const useSessionsStore = create<SessionsState>()(
        * 才覆盖——用户已手动改名的绝不动。不持久化：重启后在飞的总结直接作废。
        */
       const pendingTitleBaselines = new Map<string, string>();
+
+      function trySummarizeTitle(
+        conversationId: string,
+        rawText: string,
+        baselineTitle: string,
+        sessionModel?: { providerId?: string; modelId?: string }
+      ): void {
+        if (
+          !useSettingsStore.getState().titleSummaryEnabled ||
+          !rawText.trim() ||
+          !baselineTitle.trim() ||
+          pendingTitleBaselines.has(conversationId)
+        ) {
+          return;
+        }
+        const conversation = get().conversations[conversationId];
+        if (!conversation || conversation.sessionFile) return;
+
+        pendingTitleBaselines.set(conversationId, baselineTitle);
+        void window.electronAPI.agent.summarizeTitle(
+          conversationId,
+          rawText,
+          sessionModel?.providerId && sessionModel?.modelId
+            ? { providerId: sessionModel.providerId, modelId: sessionModel.modelId }
+            : undefined
+        );
+      }
 
       /**
        * 已结束 child TAB 的惰性只读回放。四个条件全满足才发请求，失败也标记已尝试，
@@ -532,9 +573,11 @@ export const useSessionsStore = create<SessionsState>()(
                 const keepBody =
                   event.partial === true || isMessageCacheHot(id, viewed, lastViewedAt, now);
                 const next = applyAgentEvent(conversation, id, event);
+                const title = conversation.title || firstUserText(next) || '';
                 conversations[id] = {
                   ...conversation,
                   ...next,
+                  title,
                   ...(keepBody ? {} : { messages: [], customEntries: [] }),
                   ...(snapshot.child
                     ? {
@@ -816,10 +859,32 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
+
+          // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上。
+          // 当首条用户消息到达时（message-upsert），无论该会话是否是桌面 hot 缓存，
+          // 都必须捕获首条消息来生成截断标题，并在开启设置时触发标题总结。
+          const isUserMessageUpsert =
+            event.type === 'message-upsert' && event.message.role === 'user';
+          let extractedTitle: string | undefined;
+          let rawUserText: string | undefined;
+          if (!conversation.title && isUserMessageUpsert) {
+            rawUserText = userMessageRawText(event.message);
+            if (rawUserText) {
+              extractedTitle = truncateTitle(rawUserText);
+            }
+          }
+
           if (
             isBulkyAgentEvent(event.type) &&
             !isMessageCacheHot(id, viewedFromState(state), lastViewedAt, Date.now())
           ) {
+            if (extractedTitle && rawUserText) {
+              trySummarizeTitle(id, rawUserText, extractedTitle, {
+                providerId: conversation.lastProviderId,
+                modelId: conversation.lastModelId,
+              });
+              return patch(state, id, { title: extractedTitle });
+            }
             return state;
           }
           const next = applyAgentEvent(conversation, id, event);
@@ -827,7 +892,16 @@ export const useSessionsStore = create<SessionsState>()(
           if (next === conversation && !conversation.spawning) return state;
           // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上，
           // 用它的首条用户消息补一个，否则侧边栏永远显示「新对话」
-          const title = conversation.title || firstUserText(next) || '';
+          const title = conversation.title || extractedTitle || firstUserText(next) || '';
+          if (!conversation.title && title) {
+            const raw = rawUserText || firstUserRawText(next);
+            if (raw) {
+              trySummarizeTitle(id, raw, title, {
+                providerId: conversation.lastProviderId,
+                modelId: conversation.lastModelId,
+              });
+            }
+          }
           return patch(state, id, {
             ...next,
             unread: nextUnread({
@@ -1649,8 +1723,7 @@ export const useSessionsStore = create<SessionsState>()(
             ) {
               const baseline = get().conversations[id]?.title;
               if (baseline) {
-                pendingTitleBaselines.set(id, baseline);
-                void window.electronAPI.agent.summarizeTitle(id, titleSummarySource, {
+                trySummarizeTitle(id, titleSummarySource, baseline, {
                   providerId: target.providerId,
                   modelId: target.modelId,
                 });

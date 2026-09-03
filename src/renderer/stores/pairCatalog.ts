@@ -145,6 +145,7 @@ export function bindPairCatalogSync(): void {
   });
   // 手机新建的会话登记进桌面列表；不登记的话它的 agent 事件会因「未知会话」被丢弃
   window.electronAPI.pair.onSessionCreated((session) => {
+    setPairViewedSession(session.sessionId);
     useSessionsStore.getState().adoptPairSession(session);
   });
   // 手机改会话模型/推理档位：走桌面选择器同一 store 方法
