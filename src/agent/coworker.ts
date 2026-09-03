@@ -27,7 +27,7 @@ export interface CoworkerToolDeps {
   /** 阻塞至该 coworker 当前轮结束;空闲则立即返回最近一轮摘要 */
   wait(name: string, opts?: { signal?: AbortSignal; gate?: string }): Promise<string>;
   /** 最近一轮的完整结果(未截断) */
-  report(name: string): string;
+  report(name: string): string | Promise<string>;
 }
 
 const truncate = (text: string, name: string): string =>
@@ -213,7 +213,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         }
         case 'report': {
           if (!name.trim()) throw new Error('report requires a name');
-          return text(truncateReport(deps.report(name.trim())));
+          return text(truncateReport(await deps.report(name.trim())));
         }
         case 'list': {
           const roster = deps.list();

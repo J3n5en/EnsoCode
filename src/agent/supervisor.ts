@@ -180,6 +180,8 @@ interface ManagedSession {
   roundWaiters: Set<() => void>;
   /** 父正在 wait 阻塞等本轮;message_main_agent 据此免去冗余上报 */
   parentWaiting?: boolean;
+  /** 已投递、尚未进入 running 的一轮(send 与 agent_start 之间);wait 据此不把它当空闲 */
+  roundPending?: boolean;
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
@@ -1292,19 +1294,34 @@ export class SessionSupervisor {
         });
       },
     });
+    // 模型常把 spawn 与 send/wait 放进同一批并行工具调用:后者按名字等 spawn 落地再解析。
+    // 无 pending 时同步解析,避免多一跳微任务(parentWaiting 等状态位要在调用当刻立起)
+    const pendingSpawns = new Map<string, Promise<CoworkerInfo>>();
+    const withCoworker = <T>(
+      name: string,
+      fn: (info: CoworkerInfo) => T | Promise<T>
+    ): Promise<T> => {
+      const pending = pendingSpawns.get(name);
+      if (!pending) return Promise.resolve(fn(this.mustCoworker(identity, name)));
+      return pending.catch(() => {}).then(() => fn(this.mustCoworker(identity, name)));
+    };
     const coworkerTool = createCoworkerTool({
       agentTypes,
       models: subagentModels,
-      spawn: (name, agentTypeName, modelName) =>
-        this.spawnCoworker(
+      spawn: (name, agentTypeName, modelName) => {
+        const spawning = this.spawnCoworker(
           sessionId,
           `${sessionId}::cw-${slugify(name)}`,
           name,
           agentTypeName,
           modelName
-        ),
+        );
+        pendingSpawns.set(name, spawning);
+        void spawning.finally(() => pendingSpawns.delete(name)).catch(() => {});
+        return spawning;
+      },
       send: (name, message, opts) =>
-        this.coworkerSend(this.mustCoworker(identity, name).id, message, opts),
+        withCoworker(name, (info) => this.coworkerSend(info.id, message, opts)),
       list: () => {
         const parent = this.must(identity);
         return [...parent.coworkers.values()].map((info) => ({
@@ -1312,16 +1329,16 @@ export class SessionSupervisor {
           status: this.sessions.get(info.id)?.status ?? info.status,
         }));
       },
-      dismiss: async (name) => {
-        const parent = this.must(identity);
-        const info = parent.coworkers.get(name);
-        if (!info) throw new Error(`unknown coworker "${name}"`);
-        await this.dismissCoworker(sessionId, info.id);
-      },
-      wait: (name, opts) => this.coworkerWait(this.mustCoworker(identity, name).id, opts),
+      dismiss: (name) =>
+        withCoworker(name, async (info) => {
+          await this.dismissCoworker(sessionId, info.id);
+        }),
+      wait: (name, opts) => withCoworker(name, (info) => this.coworkerWait(info.id, opts)),
       report: (name) =>
-        this.sessions.get(this.mustCoworker(identity, name).id)?.lastRoundSummary ??
-        '(no round completed yet)',
+        withCoworker(
+          name,
+          (info) => this.sessions.get(info.id)?.lastRoundSummary ?? '(no round completed yet)'
+        ),
     });
     const askManager = this.createAskManager(identity);
     // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
@@ -1826,14 +1843,21 @@ export class SessionSupervisor {
     const { signal } = opts;
     // 先登记等待再启动,防终态竞态;终态由 settleRound 统一判定(含重试耗尽/abort/销毁)
     const done = this.waitRoundEnd(managed, signal);
+    managed.roundPending = true;
     managed.currentTurnId = randomUUID();
     const start = async () => {
       if (managed.status === 'running') {
         await managed.session.steer(text);
       } else {
-        void managed.session.prompt(consumeRole(managed, text)).catch((error) => {
-          this.failTurn(managed, toErrorMessage(error));
-        });
+        void managed.session
+          .prompt(consumeRole(managed, text))
+          .then(() => {
+            // prompt 已归但未见任何终态事件(不应发生的退化路径):不让 wait 挂死
+            if (managed.status !== 'running' && managed.roundPending) this.settleRound(managed);
+          })
+          .catch((error) => {
+            this.failTurn(managed, toErrorMessage(error));
+          });
       }
     };
 
@@ -1892,7 +1916,7 @@ export class SessionSupervisor {
     opts: { signal?: AbortSignal; gate?: string } = {}
   ): Promise<string> {
     const managed = this.mustCurrent(coworkerId);
-    if (managed.status === 'running') {
+    if (managed.status === 'running' || managed.roundPending) {
       managed.parentWaiting = true;
       try {
         await this.waitRoundEnd(managed, opts.signal);
@@ -2308,6 +2332,7 @@ export class SessionSupervisor {
       managed.status === 'failed' ||
       (managed.session.messages as { role?: string }[]).some((m) => m.role === 'assistant');
     if (managed.coworkerName && ran) managed.lastRoundSummary = this.roundBaseSummary(managed);
+    managed.roundPending = false;
     const waiters = [...managed.roundWaiters];
     managed.roundWaiters.clear();
     for (const resolve of waiters) resolve();

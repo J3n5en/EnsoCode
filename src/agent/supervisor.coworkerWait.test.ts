@@ -387,4 +387,66 @@ describe('SessionSupervisor coworker wait/report', () => {
     expect(parentSession.prompt).toHaveBeenCalled();
     expect((result2.content[0] as { text: string }).text).not.toMatch(/waiting/);
   });
+
+  it('spawn 与 wait 同批并行下发时,wait 等 spawn 落地并等首轮结束,而不是报 unknown coworker', async () => {
+    const events: AgentWorkerEvent[] = [];
+    // 第二个会话(coworker)的 prompt 挂起不归,模拟真实 pi:prompt 在 agent_end 之后才 resolve
+    let releasePrompt: () => void = () => {};
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => {
+      const value = session(options);
+      if (mocks.sessions.length === 2) {
+        value.prompt = vi.fn(
+          () =>
+            new Promise<undefined>((resolve) => {
+              releasePrompt = () => resolve(undefined);
+            })
+        );
+      }
+      return { session: value };
+    });
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await settle();
+    const parentOptions = mocks.createAgentSession.mock.calls[0][0] as {
+      customTools: CoworkerToolLike[];
+    };
+    const coworkerTool = parentOptions.customTools.find(
+      (tool) => (tool as unknown as { name: string }).name === 'coworker'
+    ) as unknown as CoworkerToolLike;
+
+    const spawnPromise = coworkerTool.execute(
+      't1',
+      { operation: 'spawn', name: 'bob', task: 'first task' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    let waited: string | undefined;
+    const waitPromise = textOf(
+      coworkerTool.execute(
+        't2',
+        { operation: 'wait', name: 'bob' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).then((text) => {
+      waited = text;
+      return text;
+    });
+    await spawnPromise;
+    await settle();
+    expect(waited).toBeUndefined();
+    const coworkerSession = mocks.sessions[1] as ReturnType<typeof session>;
+    coworkerSession.emit({ type: 'agent_start' });
+    coworkerSession.messages.push({ role: 'assistant', content: 'first round done' });
+    coworkerSession.emit({ type: 'agent_end', willRetry: false });
+    releasePrompt();
+
+    expect(await waitPromise).toMatch(/first round done/);
+  });
 });
