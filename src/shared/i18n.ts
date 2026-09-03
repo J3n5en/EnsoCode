@@ -100,6 +100,8 @@ export const zhTranslations: Record<string, string> = {
   'Expand side panel': '全屏右侧面板',
   'Exit side panel fullscreen': '退出右侧面板全屏',
   'New terminal tab': '新建终端标签',
+  'New terminal when the side panel is focused; otherwise new conversation':
+    '焦点在右侧边栏时新建终端，否则新建会话',
   'Close terminal tab': '关闭终端标签',
   'Collapse side panel': '折叠右侧面板',
   'Select a conversation to use the side panel.': '选择一个会话后使用右侧面板。',

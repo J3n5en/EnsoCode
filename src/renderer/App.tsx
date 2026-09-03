@@ -24,7 +24,7 @@ import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
-import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
@@ -119,6 +119,12 @@ export default function App() {
       const current = tabs.indexOf(parent.activeTabId);
       sessions.selectTab(parent.id, tabs[(current + direction + tabs.length) % tabs.length]);
     };
+    const startNewConversation = () => {
+      const sessions = useSessionsStore.getState();
+      const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+      const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
+      if (projectId) void sessions.newConversation(projectId);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
@@ -147,10 +153,11 @@ export default function App() {
         void window.electronAPI.window.openSettings();
       } else if (pressed === bindings['new-conversation']) {
         e.preventDefault();
-        const sessions = useSessionsStore.getState();
-        const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
-        const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-        if (projectId) void sessions.newConversation(projectId);
+        startNewConversation();
+      } else if (pressed === bindings['new-side-tab']) {
+        e.preventDefault();
+        if (isEventInSidePanel(e.target)) addSidePanelTerminal();
+        else startNewConversation();
       } else if (pressed === bindings['next-tab']) {
         e.preventDefault();
         cycleTab(1);
@@ -163,9 +170,6 @@ export default function App() {
       } else if (pressed === bindings['toggle-side-panel-fullscreen']) {
         e.preventDefault();
         useSidePanelStore.getState().toggleFullscreen();
-      } else if (pressed === bindings['new-side-tab']) {
-        e.preventDefault();
-        addSidePanelTerminal();
       } else if (pressed === bindings['close-side-tab']) {
         e.preventDefault();
         closeActiveSidePanelTab();

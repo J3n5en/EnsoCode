@@ -449,6 +449,7 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
       {cover ? <div className="shrink-0" style={{ width }} aria-hidden /> : null}
       <motion.aside
         ref={asideRef}
+        data-slot="side-panel"
         initial={false}
         animate={{ width: targetW }}
         transition={skipWidthAnim ? { duration: 0 } : cover ? easeOutLayout : springStandard}
