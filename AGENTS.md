@@ -41,9 +41,12 @@ TDD 纪律最容易坏在两处：「红」造假（测试和实现同一个脑�
 逻辑面大的改动（跨模块、用例多、协议/解析器类），推荐用 coworker
 做角色分离，在结构上防住这两点：
 
-- **测试先行者**（coworker）：只读 PRD 与接口契约，产出失败测试并确认红灯；
+- **测试先行者**（coworker，`agent_type: tester`）：只读 PRD 与接口契约，产出失败测试并确认红灯；
+  tester 类型的 edit/write 被硬限制在 `*.test.ts` / `*.spec.ts` / `test/**`，写不了实现；
 - **实现者**（主会话或另一 coworker）：只许改实现，不许动测试文件让灯变绿；
-- 验收用 `gate: "pnpm test"`，以退出码为准，不采信文字汇报。
+  **红灯到手前不要开写实现**，否则 tester 能读到实现，红灯就不独立了；
+- 验收用 `gate: "pnpm test"`，以退出码为准，不采信文字汇报；
+- 等 coworker 用 `coworker wait {name}`，不要 `sleep` 轮询；回报被截断时用 `coworker report {name}` 取全文。
 
 小的纯函数改动不必拉 coworker，inline Red-Green 即可——判断标准：
 测试文件预计 < 50 行，或用例 < 10 个，直接 inline。
