@@ -498,6 +498,7 @@ export type AgentCommand =
       decision: ApprovalDecision;
     }
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  | { type: 'compact'; identity: SessionIdentity; instructions?: string }
   | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
   | {
       type: 'capability-result';
@@ -791,6 +792,14 @@ export type AgentWorkerEvent =
       targetConversationId: string;
       sessionFile?: string;
       entryId?: string;
+      error?: string;
+    }
+  /** 上下文压缩进度（手动 /compact 与自动压缩共用）。queued = 忙碌中已排队，待本轮收束后执行 */
+  | {
+      type: 'compaction';
+      identity: SessionIdentity;
+      seq: number;
+      state: 'queued' | 'start' | 'end';
       error?: string;
     }
   | { type: 'commands'; identity: SessionIdentity; seq: number; commands: SlashCommand[] }
@@ -1716,6 +1725,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         isNonEmptyString(value.taskId)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'compact':
+      return hasOnlyKeys(value, ['type', 'identity', 'instructions']) &&
+        parseAnySessionIdentity(value.identity) &&
+        (value.instructions === undefined || isNonEmptyString(value.instructions))
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'rewind':
       return hasOnlyKeys(value, ['type', 'identity', 'userIndexFromEnd', 'restoreFiles']) &&
         parseAnySessionIdentity(value.identity) &&
@@ -1905,6 +1920,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isUuid(value.targetConversationId) &&
         (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
         (value.entryId === undefined || isNonEmptyString(value.entryId)) &&
+        (value.error === undefined || typeof value.error === 'string')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'compaction':
+      return (value.state === 'queued' || value.state === 'start' || value.state === 'end') &&
         (value.error === undefined || typeof value.error === 'string')
         ? (value as unknown as AgentWorkerEvent)
         : null;

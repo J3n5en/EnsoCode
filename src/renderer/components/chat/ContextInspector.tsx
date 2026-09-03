@@ -14,6 +14,30 @@ const BUCKET_LABELS: Record<ContextOccupancyBucketId, string> = {
   reminders: 'Reminders',
 };
 
+/** 面板底部的手动压缩按钮。忙碌中也可点：worker 排队，本轮收束后自动执行。 */
+function CompactButton({ conversationId }: { conversationId: string }) {
+  const { t } = useI18n();
+  const compaction = useSessionsStore((s) => s.conversations[conversationId]?.compaction);
+  const started = useSessionsStore((s) => s.conversations[conversationId]?.started);
+  if (!started) return null;
+  const label =
+    compaction === 'running'
+      ? t('Compacting…')
+      : compaction === 'queued'
+        ? t('Compacts after this turn')
+        : t('Compact context');
+  return (
+    <button
+      type="button"
+      disabled={Boolean(compaction)}
+      className="w-full rounded-sm border border-border px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
+      onClick={() => useSessionsStore.getState().compact(conversationId)}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function ContextInspector({
   occupancy,
   conversationId,
@@ -86,6 +110,7 @@ export function ContextInspector({
           );
         })}
       </ul>
+      {conversationId && <CompactButton conversationId={conversationId} />}
     </div>
   );
 }

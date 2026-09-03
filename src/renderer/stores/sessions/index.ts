@@ -1,5 +1,6 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
+import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, resolveChatModel } from '@shared/defaultModel';
 import type {
   ApprovalMode,
@@ -107,6 +108,10 @@ export interface Conversation extends SessionProjection {
   contextWindow?: number;
   /** Worker 拆账单；未 spawn 时缺省 */
   occupancy?: ContextOccupancy;
+  /** 上下文压缩进度：排队中（等本轮收束）/ 压缩中；未压缩时缺省 */
+  compaction?: 'queued' | 'running';
+  /** 最近一次压缩失败的原文（如「Nothing to compact」），UI 弹完 toast 后清除 */
+  compactionError?: string;
   forkedFromConversationId?: string;
   forkedFromEntryId?: string;
   /** 上次使用的模型，resume 时沿用 */
@@ -253,6 +258,10 @@ interface SessionsState {
   /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
+  compact(conversationId: string, instructions?: string): void;
+  /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
+  clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
   forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
@@ -754,6 +763,23 @@ export const useSessionsStore = create<SessionsState>()(
           });
           void get().resumeConversation(targetId);
           get().selectConversation(targetId);
+          return;
+        }
+
+        if (event.type === 'compaction') {
+          set((state) =>
+            state.conversations[id]
+              ? patch(state, id, {
+                  compaction:
+                    event.state === 'queued'
+                      ? 'queued'
+                      : event.state === 'start'
+                        ? 'running'
+                        : undefined,
+                  ...(event.state === 'end' ? { compactionError: event.error } : {}),
+                })
+              : state
+          );
           return;
         }
 
@@ -1497,6 +1523,13 @@ export const useSessionsStore = create<SessionsState>()(
           if (conversation?.historyOnly) {
             return 'this Agent instance has ended — its history is read-only';
           }
+          // /compact 应用级命令:压缩上下文,不发给 agent。会话未启动时无上下文可压
+          const compactCommand = parseCompactCommand(text);
+          if (compactCommand) {
+            if (!conversation.started) return 'nothing to compact yet';
+            get().compact(id, compactCommand.instructions);
+            return null;
+          }
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -1954,6 +1987,17 @@ export const useSessionsStore = create<SessionsState>()(
               ),
             })
           );
+        },
+
+        compact(conversationId, instructions) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation?.started || conversation.compaction) return;
+          void window.electronAPI.agent.compact(conversationId, instructions);
+        },
+
+        clearCompactionError(conversationId) {
+          if (!get().conversations[conversationId]?.compactionError) return;
+          set((state) => patch(state, conversationId, { compactionError: undefined }));
         },
 
         rewind(conversationId, userIndexFromEnd, restoreFiles) {

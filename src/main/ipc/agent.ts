@@ -35,6 +35,7 @@ import {
   abortSession,
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
+  compactSession,
   dismissChildSession,
   dismissCoworkerSession,
   forkSession,
@@ -787,6 +788,21 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid approval mode or stale generation' };
       }
       return setSessionApprovalMode(identity, mode as ApprovalMode);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_COMPACT,
+    (_event, sessionId: unknown, instructions: unknown): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      if (
+        !identity ||
+        (instructions !== undefined &&
+          (typeof instructions !== 'string' || instructions.trim().length === 0))
+      ) {
+        return { ok: false, error: 'invalid compact request or stale generation' };
+      }
+      return compactSession(identity, instructions as string | undefined);
     }
   );
 

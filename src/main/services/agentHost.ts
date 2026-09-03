@@ -582,6 +582,17 @@ export function respondAsk(
   return sendAgentCommand({ type: 'ask-respond', identity, requestId, answer });
 }
 
+export function compactSession(
+  identity: SessionIdentity,
+  instructions?: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'compact',
+    identity,
+    ...(instructions ? { instructions } : {}),
+  });
+}
+
 export function rewindSession(
   identity: SessionIdentity,
   userIndexFromEnd: number,

@@ -70,6 +70,8 @@ export const IPC_CHANNELS = {
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
+  /** 手动压缩会话上下文（/compact 与上下文面板按钮共用） */
+  AGENT_COMPACT: 'agent:compact',
   AGENT_FORK: 'agent:fork',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_HIRE_COWORKER: 'agent:hire-coworker',

@@ -244,6 +244,9 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
   AGENT_REWIND: surfaces('conversations.rewind', 'conversations.rewind-files'),
+  AGENT_COMPACT: excluded(
+    'Desktop context-window maintenance (/compact and the context panel button); renderer-only, not an Enso capability.'
+  ),
   AGENT_FORK: excluded(
     'Desktop parallel-session fork; renderer Command/Timeline only, not an Enso capability.'
   ),
