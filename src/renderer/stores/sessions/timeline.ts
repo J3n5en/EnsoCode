@@ -173,6 +173,36 @@ function perfFromTiming(message: ProjectedMessage, turnStartMs?: number): TurnPe
   };
 }
 
+const THINKING_OPEN = '<thinking>';
+const THINKING_CLOSE = '</thinking>';
+
+/** Gemini 无签名思考会降级成 <thinking> 正文；拆成 thinking/text 片段，标签本身丢掉 */
+function splitThinkingTaggedText(text: string): Array<{ kind: 'text' | 'thinking'; text: string }> {
+  const pieces: Array<{ kind: 'text' | 'thinking'; text: string }> = [];
+  const push = (kind: 'text' | 'thinking', raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed) pieces.push({ kind, text: trimmed });
+  };
+  let i = 0;
+  while (i < text.length) {
+    const openAt = text.indexOf(THINKING_OPEN, i);
+    if (openAt === -1) {
+      push('text', text.slice(i));
+      break;
+    }
+    if (openAt > i) push('text', text.slice(i, openAt));
+    const contentStart = openAt + THINKING_OPEN.length;
+    const closeAt = text.indexOf(THINKING_CLOSE, contentStart);
+    if (closeAt === -1) {
+      push('thinking', text.slice(contentStart));
+      break;
+    }
+    push('thinking', text.slice(contentStart, closeAt));
+    i = closeAt + THINKING_CLOSE.length;
+  }
+  return pieces;
+}
+
 /**
  * 把消息投影聚合为渲染时间线：
  * - toolResult 不单独成行，折进对应 toolCall 条目（按 toolCallId 关联）
@@ -270,9 +300,13 @@ function buildMessageTimeline(
       const settled = Boolean(message.stopReason) && message.stopReason !== 'pending';
       const streaming = running && isStreamingPart && !settled;
       switch (part.type) {
-        case 'text':
+        case 'text': {
           // trim：纯空白正文（工具轮的空 text part）不产出——否则显示为幽灵空行
-          if (part.text.trim())
+          if (!part.text.trim()) return;
+          const pieces = splitThinkingTaggedText(part.text);
+          if (pieces.length === 0) return;
+          // 无标签：保持原文（含首尾空白），避免改已有 text 行形态
+          if (pieces.length === 1 && pieces[0].kind === 'text') {
             items.push({
               kind: 'text',
               key,
@@ -281,7 +315,32 @@ function buildMessageTimeline(
               timestamp: message.timestamp,
               perf: perfFromTiming(message, perfTurnStart),
             });
+            return;
+          }
+          pieces.forEach((piece, i) => {
+            const pieceKey = pieces.length === 1 ? key : `${key}-${i}`;
+            const pieceStreaming = streaming && i === pieces.length - 1;
+            if (piece.kind === 'thinking') {
+              items.push({
+                kind: 'thinking',
+                key: pieceKey,
+                text: piece.text,
+                streaming: pieceStreaming,
+                durationMs: null,
+              });
+              return;
+            }
+            items.push({
+              kind: 'text',
+              key: pieceKey,
+              text: piece.text,
+              streaming: pieceStreaming,
+              timestamp: message.timestamp,
+              perf: perfFromTiming(message, perfTurnStart),
+            });
+          });
           return;
+        }
         case 'thinking':
           if (part.text) {
             // 思考耗时：step 起点到首个非 thinking 输出（无则到 step 完成）

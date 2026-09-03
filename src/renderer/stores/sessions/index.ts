@@ -43,6 +43,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { electronStorage, openPersistWriteGate } from '@/stores/settings/storage';
+import { purgeConversationAuthority } from './authorityCleanup';
 import {
   evictColdMessages,
   isBulkyAgentEvent,
@@ -1226,23 +1227,9 @@ export const useSessionsStore = create<SessionsState>()(
             void window.electronAPI.agent.abort(id);
           }
           if (!conversation.parentId) {
-            void window.electronAPI.sourceAuthority.read().then(async (projection) => {
-              const authority = projection.conversations.find(
-                (candidate) => candidate.conversationId === id && candidate.lifecycle !== 'ended'
-              );
-              if (!authority) return;
-              const ended = await window.electronAPI.sourceAuthority.endConversation({
-                requestId: crypto.randomUUID(),
-                conversationId: id,
-                version: authority.version,
-              });
-              if (!ended.accepted) return;
-              await window.electronAPI.sourceAuthority.removeConversation({
-                requestId: crypto.randomUUID(),
-                conversationId: id,
-                version: ended.value.version,
-              });
-            });
+            void purgeConversationAuthority(window.electronAPI.sourceAuthority, id, () =>
+              crypto.randomUUID()
+            );
           }
           set((state) => {
             const conversations = { ...state.conversations };

@@ -145,6 +145,81 @@ describe('buildTimeline', () => {
     ]);
   });
 
+  it('整段 <thinking> 包裹的 text 变成 thinking 块，标签不入正文', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '<thinking>\n**Analyzing** antigravity.ts\n</thinking>',
+            },
+          ],
+        },
+      ],
+      false
+    );
+    expect(timeline).toEqual([
+      {
+        kind: 'thinking',
+        key: '0-0',
+        text: '**Analyzing** antigravity.ts',
+        streaming: false,
+        durationMs: null,
+      },
+    ]);
+  });
+
+  it('正文中夹着的 <thinking> 拆成 thinking 与 text，工具行不受影响', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '<thinking>\n先 grep\n</thinking>',
+            },
+            { type: 'toolCall', id: 't1', name: 'grep', arguments: { pattern: 'high' } },
+            {
+              type: 'text',
+              text: '前缀<thinking>再读文件</thinking>\n结论',
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'grep',
+          isError: false,
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline).toMatchObject([
+      { kind: 'thinking', text: '先 grep', streaming: false },
+      { kind: 'tool', name: 'grep', state: 'ok' },
+      { kind: 'text', text: '前缀' },
+      { kind: 'thinking', text: '再读文件' },
+      { kind: 'text', text: '结论' },
+    ]);
+  });
+
+  it('流式中未闭合的 <thinking> 当 thinking 跟看，不露开标签', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: '<thinking>\n正在想' }],
+        },
+      ],
+      true
+    );
+    expect(timeline).toMatchObject([{ kind: 'thinking', text: '正在想', streaming: true }]);
+  });
+
   it('多 step 轮次：末 step 的 perf 带整轮总耗时 turnMs（首 step 开始→末 step 完成），中间 step 不带', () => {
     const timeline = buildTimeline(
       [
