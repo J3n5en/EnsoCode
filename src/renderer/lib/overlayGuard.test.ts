@@ -35,6 +35,18 @@ describe('overlayGuard', () => {
     expect(events).toEqual([true, false]);
   });
 
+  it('tolerates an electronAPI without the browser bridge (PWA shim)', () => {
+    const g = globalThis as { window?: unknown };
+    const had = 'window' in g;
+    g.window = { electronAPI: {} };
+    setOverlayGuardSink();
+    try {
+      expect(() => acquireOverlayGuard()).not.toThrow();
+    } finally {
+      if (!had) delete g.window;
+    }
+  });
+
   it('ignores unbalanced releases', () => {
     releaseOverlayGuard();
     expect(events).toEqual([]);

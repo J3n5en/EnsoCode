@@ -2,7 +2,8 @@ type Sink = (active: boolean) => void;
 
 const defaultSink: Sink = (active) => {
   if (typeof window === 'undefined') return;
-  window.electronAPI?.browser.setOverlayActive(active);
+  // PWA 的 electronAPI 是降级 shim，没有 browser 桥；缺链即静默跳过。
+  window.electronAPI?.browser?.setOverlayActive(active);
 };
 
 let sink: Sink = defaultSink;
