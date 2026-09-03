@@ -1087,8 +1087,9 @@ export class SessionSupervisor {
       writeScope?: readonly string[]
     ): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
-      // 写范围在审批之内、工具之外:越界直接拒绝,不占用审批也不落盘
-      const scoped = (definition: Def): Def => withWriteScope(guarded(definition), cwd, writeScope);
+      // 写范围在审批之外:越界直接拒绝,不占用审批也不落盘
+      const scoped = (kind: 'file-edit' | 'file-write', definition: Def): Def =>
+        withWriteScope(withApproval(toolGate, kind, guarded(definition)), cwd, writeScope);
       return [
         ...readOnlyTools(),
         withApproval(
@@ -1107,20 +1108,16 @@ export class SessionSupervisor {
             )
           )
         ),
-        withApproval(
-          toolGate,
+        scoped(
           'file-edit',
-          scoped(createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined))
+          createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
         ),
-        withApproval(
-          toolGate,
+        scoped(
           'file-write',
-          scoped(
-            createWriteToolDefinition(
-              cwd,
-              remoteOps ? { operations: remoteOps.write } : undefined
-            ) as unknown as Def
-          )
+          createWriteToolDefinition(
+            cwd,
+            remoteOps ? { operations: remoteOps.write } : undefined
+          ) as unknown as Def
         ),
       ];
     };

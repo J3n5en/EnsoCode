@@ -33,11 +33,12 @@ export function isPathInWriteScope(
   cwd: string,
   scope: readonly string[]
 ): boolean {
-  const normalized = filePath.replace(/\\/g, '/');
-  const rel = path.posix
-    .relative(cwd.replace(/\\/g, '/'), path.posix.resolve(cwd.replace(/\\/g, '/'), normalized))
-    .replace(/\\/g, '/');
-  if (rel === '' || rel.startsWith('../') || path.posix.isAbsolute(rel)) return false;
+  // cwd 带盘符按 Windows 语义解析(盘符不同则 relative 给出绝对路径);否则反斜杠一律视为分隔符
+  const win = /^[A-Za-z]:[\\/]/.test(cwd);
+  const P = win ? path.win32 : path.posix;
+  const target = win ? filePath : filePath.replace(/\\/g, '/');
+  const rel = P.relative(cwd, P.resolve(cwd, target)).split(P.sep).join('/');
+  if (rel === '' || rel === '..' || rel.startsWith('../') || P.isAbsolute(rel)) return false;
   return scope.some((glob) => globToRegExp(glob).test(rel));
 }
 

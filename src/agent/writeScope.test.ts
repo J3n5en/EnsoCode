@@ -43,6 +43,19 @@ describe('isPathInWriteScope', () => {
   it('Windows 反斜杠路径归一后仍能命中', () => {
     expect(isPathInWriteScope('src\\a.test.ts', cwd, scope)).toBe(true);
   });
+
+  it('绝对路径不在 cwd 下恒为 false', () => {
+    expect(isPathInWriteScope('/other/src/a.test.ts', cwd, scope)).toBe(false);
+  });
+
+  it('Windows cwd 下盘符绝对路径命中', () => {
+    expect(isPathInWriteScope('C:\\repo\\src\\a.test.ts', 'C:\\repo', scope)).toBe(true);
+  });
+
+  it('Windows cwd 下其他盘符/cwd 外绝对路径恒为 false', () => {
+    expect(isPathInWriteScope('D:\\repo\\src\\a.test.ts', 'C:\\repo', scope)).toBe(false);
+    expect(isPathInWriteScope('C:\\outside\\a.test.ts', 'C:\\repo', scope)).toBe(false);
+  });
 });
 
 describe('withWriteScope', () => {
