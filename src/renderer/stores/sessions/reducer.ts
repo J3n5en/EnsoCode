@@ -244,6 +244,11 @@ export function applyAgentEvent(
           ? current.messages.slice()
           : current.messages.slice(0, firstOptimistic);
       let tail = firstOptimistic === -1 ? [] : current.messages.slice(firstOptimistic);
+      // 正文被冷缓存清空后重新变热，snapshot 回来前的 upsert 以原 index 到达：直接写会
+      // 留下稀疏空洞（.role/.optimistic 读 undefined 崩溃）。丢掉正文、只推进 seq，等 snapshot 整体被覆。
+      if (event.index > authoritative.length) {
+        return { ...current, lastOutputAt: now, lastSeq: event.seq };
+      }
       authoritative[event.index] = event.message;
       // 同文本的 user upsert 到达 = 回显对应的真消息落地，消费掉避免重复
       if (event.message.role === 'user' && tail.length > 0) {
