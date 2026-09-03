@@ -46,3 +46,30 @@ describe('costOf', () => {
     ).toBeNull();
   });
 });
+
+describe('costOf — 思考档位后缀兜底', () => {
+  const table: PricingTable = {
+    'grok-4.6-fast': { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 },
+    'claude-fable-5-max': { input: 10, output: 10, cacheRead: 10, cacheWrite: 10 },
+    'claude-fable-5': { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 },
+  };
+  const tokens = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  // 真实场景：Antigravity / xAI 账号把思考档位拼进 model id（grok-4.6-fast-max），catalog 里只有基础 id
+  it('精确 id 缺失时，剥掉结尾的思考档位后缀再查', () => {
+    expect(costOf({ model: 'grok-4.6-fast-max', ...tokens }, table)).toBe(1);
+    expect(costOf({ model: 'grok-4.6-fast-medium', ...tokens }, table)).toBe(1);
+  });
+
+  it('精确 id 存在时优先精确匹配，不剥后缀', () => {
+    expect(costOf({ model: 'claude-fable-5-max', ...tokens }, table)).toBe(10);
+  });
+
+  it('剥掉后缀仍查不到则返回 null', () => {
+    expect(costOf({ model: 'gemini-3.8-flash-high', ...tokens }, table)).toBeNull();
+  });
+
+  it('后缀不是思考档位的不剥', () => {
+    expect(costOf({ model: 'grok-4.6-fast-turbo', ...tokens }, table)).toBeNull();
+  });
+});
