@@ -12,6 +12,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
   DefaultResourceLoader,
+  estimateTokens,
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
@@ -66,6 +67,11 @@ import {
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
 import { resolveChildReasoning } from './childReasoning';
+import {
+  collectContextOccupancy,
+  type OccupancyBranchEntry,
+  type OccupancySkill,
+} from './contextOccupancy';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -1421,14 +1427,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       commands: managed.commands,
     });
-    const contextWindow = positiveContextWindow(session.model);
-    this.options.emit({
-      type: 'session-meta',
-      identity,
-      seq: ++managed.seq,
-      sessionFile: managed.session.sessionFile,
-      ...(contextWindow !== undefined ? { contextWindow } : {}),
-    });
+    this.emitSessionMeta(managed);
     if (opts.resumeFile) {
       managed.messages = this.transcript(managed)
         .map(projectMessage)
@@ -1958,6 +1957,7 @@ export class SessionSupervisor {
       case 'compaction_end':
         // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
         this.reconcileMessages(managed, this.transcript(managed));
+        this.emitSessionMeta(managed);
         return;
       case 'agent_end': {
         this.reconcileMessages(managed, this.transcript(managed));
@@ -1992,6 +1992,7 @@ export class SessionSupervisor {
         managed.currentTurnId = undefined;
         managed.status = 'idle';
         this.emitStatus(managed);
+        this.emitSessionMeta(managed);
         this.options.emit({
           type: 'turn-completed',
           identity: managed.identity,
@@ -2162,6 +2163,24 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       status: managed.status,
       ...(error ? { error } : {}),
+    });
+  }
+
+  private emitSessionMeta(managed: ManagedSession): void {
+    const contextWindow = positiveContextWindow(managed.session.model);
+    let occupancy: ReturnType<typeof collectContextOccupancy> | undefined;
+    try {
+      occupancy = occupancyFromManaged(managed, contextWindow);
+    } catch {
+      occupancy = undefined;
+    }
+    this.options.emit({
+      type: 'session-meta',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      sessionFile: managed.session.sessionFile,
+      ...(occupancy ? { occupancy } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
     });
   }
 
@@ -2389,6 +2408,62 @@ const runtimeAdaptiveBlocklist = new Set<string>();
 
 export function supportsAdaptiveThinking(modelId: string): boolean {
   return !ADAPTIVE_UNSUPPORTED.test(modelId) && !runtimeAdaptiveBlocklist.has(modelId);
+}
+
+function occupancyFromManaged(
+  managed: ManagedSession,
+  contextWindow: number | undefined
+): ReturnType<typeof collectContextOccupancy> {
+  const loader = managed.session.resourceLoader as {
+    getAgentsFiles?: () => { agentsFiles?: ReadonlyArray<{ path: string; content: string }> };
+    getSkills?: () => { skills?: OccupancySkill[] };
+  };
+  const sessionManager = managed.session.sessionManager as {
+    buildSessionContext?: () => { messages?: unknown[] };
+    getBranch?: () => OccupancyBranchEntry[];
+  };
+  const branch = sessionManager.getBranch?.() ?? [];
+  return collectContextOccupancy({
+    systemPrompt: managed.session.systemPrompt ?? '',
+    agentsFiles: loader.getAgentsFiles?.().agentsFiles ?? [],
+    skills: loader.getSkills?.().skills ?? [],
+    tools: typeof managed.session.getAllTools === 'function' ? managed.session.getAllTools() : [],
+    contextMessages: sessionManager.buildSessionContext?.().messages ?? [],
+    branch,
+    currentModelFamily: modelFamilyOf(managed.session.model?.id ?? managed.modelId),
+    compactionModelFamily: compactionModelFamilyOf(branch),
+    contextWindow,
+    pendingTaskReminders: managed.pendingTaskReminders,
+    estimateMessageTokens: (message) => {
+      try {
+        return estimateTokens(message as never);
+      } catch {
+        return 0;
+      }
+    },
+  });
+}
+
+function compactionModelFamilyOf(
+  branch: ReadonlyArray<{ type: string; modelId?: string }>
+): string | undefined {
+  let lastModel: string | undefined;
+  for (const entry of branch) {
+    if (entry.type === 'model_change' && typeof entry.modelId === 'string')
+      lastModel = entry.modelId;
+    if (entry.type === 'compaction') return lastModel ? modelFamilyOf(lastModel) : undefined;
+  }
+  return undefined;
+}
+
+function modelFamilyOf(modelId: string): string {
+  const id = modelId.toLowerCase();
+  if (id.includes('claude')) return 'claude';
+  if (id.includes('gpt') || id.includes('o1') || id.includes('o3') || id.includes('o4'))
+    return 'gpt';
+  if (id.includes('gemini')) return 'gemini';
+  const vendor = id.split(/[-/_]/)[0];
+  return vendor || id;
 }
 
 /**

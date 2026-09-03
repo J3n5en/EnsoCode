@@ -5,6 +5,7 @@ import type {
   ApprovalMode,
   AttachedImage,
   ChildConversationMetadata,
+  ContextOccupancy,
   ConversationAuthorityProjection,
   DispatchMainEvent,
   ProjectAuthorityProjection,
@@ -104,6 +105,8 @@ export interface Conversation extends SessionProjection {
   lastActiveAt?: number;
   /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
   contextWindow?: number;
+  /** Worker 拆账单；未 spawn 时缺省 */
+  occupancy?: ContextOccupancy;
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
@@ -711,6 +714,7 @@ export const useSessionsStore = create<SessionsState>()(
               ...next,
               sessionFile: event.sessionFile,
               ...(event.contextWindow !== undefined ? { contextWindow: event.contextWindow } : {}),
+              ...(event.occupancy ? { occupancy: event.occupancy } : {}),
             });
           });
           return;

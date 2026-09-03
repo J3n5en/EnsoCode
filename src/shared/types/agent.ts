@@ -212,6 +212,32 @@ export interface ProjectAuthority {
 
 export type ProjectAuthorityProjection = ProjectAuthority;
 
+export const CONTEXT_OCCUPANCY_BUCKETS = [
+  'system',
+  'instructions',
+  'skills',
+  'tools',
+  'conversation',
+  'compaction',
+  'projectMemory',
+  'reminders',
+] as const;
+
+export type ContextOccupancyBucketId = (typeof CONTEXT_OCCUPANCY_BUCKETS)[number];
+
+export type ContextOccupancyBuckets = Record<ContextOccupancyBucketId, number>;
+
+export interface ContextOccupancy {
+  buckets: ContextOccupancyBuckets;
+  used: number;
+  estimated: true;
+  compactedMessageCount: number;
+  compactionModelMismatch: boolean;
+  contextWindow?: number;
+  percent?: number;
+  compactionEntryId?: string;
+}
+
 export interface ConversationAuthority {
   conversationId: string;
   projectId: string;
@@ -751,6 +777,7 @@ export type AgentWorkerEvent =
       seq: number;
       sessionFile?: string;
       contextWindow?: number;
+      occupancy?: ContextOccupancy;
     }
   | {
       type: 'approval-request';
@@ -842,6 +869,28 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
 
 const isSequence = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
+
+export function parseContextOccupancy(value: unknown): ContextOccupancy | null {
+  if (!isRecord(value) || !isRecord(value.buckets) || value.estimated !== true) return null;
+  const buckets = {} as ContextOccupancyBuckets;
+  for (const id of CONTEXT_OCCUPANCY_BUCKETS) {
+    const tokens = value.buckets[id];
+    if (!isSequence(tokens)) return null;
+    buckets[id] = tokens;
+  }
+  if (
+    !isSequence(value.used) ||
+    !isSequence(value.compactedMessageCount) ||
+    typeof value.compactionModelMismatch !== 'boolean' ||
+    (value.contextWindow !== undefined &&
+      !(typeof value.contextWindow === 'number' && value.contextWindow > 0)) ||
+    (value.percent !== undefined && !isSequence(value.percent)) ||
+    (value.compactionEntryId !== undefined && !isNonEmptyString(value.compactionEntryId))
+  ) {
+    return null;
+  }
+  return value as unknown as ContextOccupancy;
+}
 
 const isProductSurfaceId = (value: unknown): value is ProductSurfaceId =>
   typeof value === 'string' && Object.hasOwn(PRODUCT_SURFACE_INVENTORY, value);
@@ -1786,12 +1835,16 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         : null;
     case 'commands':
       return Array.isArray(value.commands) ? (value as unknown as AgentWorkerEvent) : null;
-    case 'session-meta':
+    case 'session-meta': {
+      const occupancy =
+        value.occupancy === undefined ? undefined : parseContextOccupancy(value.occupancy);
+      if (value.occupancy !== undefined && !occupancy) return null;
       return (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
         (value.contextWindow === undefined ||
           (typeof value.contextWindow === 'number' && value.contextWindow > 0))
-        ? (value as unknown as AgentWorkerEvent)
+        ? ({ ...value, ...(occupancy ? { occupancy } : {}) } as unknown as AgentWorkerEvent)
         : null;
+    }
     case 'approval-request':
       return isRecord(value.request) && isNonEmptyString(value.request.requestId)
         ? (value as unknown as AgentWorkerEvent)

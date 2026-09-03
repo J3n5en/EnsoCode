@@ -34,6 +34,7 @@ import { Z_INDEX } from '@/lib/z-index';
 import type { Conversation } from '@/stores/sessions';
 import { computeStats, formatDuration, formatTokens } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
+import { ContextInspector } from './ContextInspector';
 import { StatusLineSettings } from './StatusLineSettings';
 
 interface StatsLineProps {
@@ -538,37 +539,46 @@ export function StatsLine({ messages, conversation }: StatsLineProps) {
             if (!value) return null;
             const Icon = icons[id];
             const showRing = id === 'context' && value.percent !== undefined;
+            const segment = (
+              <span
+                title={`${t(SEGMENT_LABEL_KEYS[id])} · ${value.full}`}
+                onMouseEnter={() => setHoveredId(id)}
+                onMouseLeave={() => setHoveredId((current) => (current === id ? null : current))}
+                className={cn(
+                  'relative flex items-center gap-1 text-[11px] tabular-nums',
+                  value.critical ? 'text-destructive' : 'text-muted-foreground/70'
+                )}
+              >
+                {showRing ? (
+                  <ContextRing percent={value.percent ?? 0} critical={Boolean(value.critical)} />
+                ) : (
+                  <Icon className="h-3 w-3 shrink-0" />
+                )}
+                {value.compact && <span className="truncate">{value.compact}</span>}
+                {hoveredId === id && id !== 'context' && (
+                  <div
+                    style={{ zIndex: Z_INDEX.TOOLTIP }}
+                    className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-1.5 w-max max-w-56 overflow-hidden rounded-md border bg-popover px-2 py-1 text-popover-foreground shadow-md"
+                  >
+                    <span className="break-words font-medium">{t(SEGMENT_LABEL_KEYS[id])}</span>
+                    <span className="ml-1 break-words text-muted-foreground">{value.full}</span>
+                  </div>
+                )}
+              </span>
+            );
             return (
               <span key={id} className="flex shrink-0 items-center gap-1.5">
                 {index > 0 && <Separator orientation="vertical" className="h-3" />}
-                {/* relative：给下面的浮层提供定位锚点；onMouseEnter/Leave 挂在这一整段
-                 * （图标+文字）上，热区覆盖整段——子元素即便有 pointer-events-none 也不影响，
-                 * React 的 enter/leave 语义按这个元素的包围盒判定，不依赖具体命中的子节点。 */}
-                <span
-                  title={`${t(SEGMENT_LABEL_KEYS[id])} · ${value.full}`}
-                  onMouseEnter={() => setHoveredId(id)}
-                  onMouseLeave={() => setHoveredId((current) => (current === id ? null : current))}
-                  className={cn(
-                    'relative flex items-center gap-1 text-[11px] tabular-nums',
-                    value.critical ? 'text-destructive' : 'text-muted-foreground/70'
-                  )}
-                >
-                  {showRing ? (
-                    <ContextRing percent={value.percent ?? 0} critical={Boolean(value.critical)} />
-                  ) : (
-                    <Icon className="h-3 w-3 shrink-0" />
-                  )}
-                  {value.compact && <span className="truncate">{value.compact}</span>}
-                  {hoveredId === id && (
-                    <div
-                      style={{ zIndex: Z_INDEX.TOOLTIP }}
-                      className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-1.5 w-max max-w-56 overflow-hidden rounded-md border bg-popover px-2 py-1 text-popover-foreground shadow-md"
-                    >
-                      <span className="break-words font-medium">{t(SEGMENT_LABEL_KEYS[id])}</span>
-                      <span className="ml-1 break-words text-muted-foreground">{value.full}</span>
-                    </div>
-                  )}
-                </span>
+                {id === 'context' ? (
+                  <Popover>
+                    <PopoverTrigger className="rounded-sm outline-none">{segment}</PopoverTrigger>
+                    <PopoverPopup side="top" className="w-72 [&_[data-slot=popover-viewport]]:p-0">
+                      <ContextInspector occupancy={conversation.occupancy} />
+                    </PopoverPopup>
+                  </Popover>
+                ) : (
+                  segment
+                )}
               </span>
             );
           })}

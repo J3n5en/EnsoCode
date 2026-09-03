@@ -530,6 +530,45 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentWorkerEvent(withoutError)).toBeNull();
   });
 
+  it('session-meta 可带 occupancy；脏桶拒绝', () => {
+    const occupancy = {
+      buckets: {
+        system: 1,
+        instructions: 2,
+        skills: 0,
+        tools: 1,
+        conversation: 10,
+        compaction: 0,
+        projectMemory: 0,
+        reminders: 0,
+      },
+      used: 14,
+      estimated: true as const,
+      compactedMessageCount: 0,
+      compactionModelMismatch: false,
+    };
+    const event = {
+      type: 'session-meta',
+      identity: parent,
+      seq: 4,
+      sessionFile: '/s.jsonl',
+      occupancy,
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        occupancy: { ...occupancy, estimated: false },
+      })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        occupancy: { ...occupancy, buckets: { ...occupancy.buckets, system: -1 } },
+      })
+    ).toBeNull();
+  });
+
   it('abort-retry 命令只携 identity，多余字段拒绝', () => {
     const command = { type: 'abort-retry', identity: parent };
     expect(parseAgentCommand(command)).toEqual(command);
