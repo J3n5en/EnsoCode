@@ -1,6 +1,6 @@
 import { withVersionSegment } from '@shared/providerCatalog';
 import type { ModelApiKind } from '@shared/types';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   extractModelEntries,
   listModels,
@@ -242,5 +242,56 @@ describe('远端错误边界', () => {
     expect(JSON.stringify([listed, tested])).not.toContain(secret);
     expect(JSON.stringify([listed, tested])).toContain('[redacted]');
     vi.unstubAllGlobals();
+  });
+});
+
+function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+  const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body));
+}
+
+describe('testProvider 探测请求', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubOkFetch() {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK' }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('Google 不传 maxOutputTokens: 1，避免 thinking 模型探测 502', async () => {
+    const fetchMock = stubOkFetch();
+    await testProvider(
+      {
+        api: 'google-generative-ai',
+        apiKey: 'k',
+        baseUrl: 'http://127.0.0.1:9831',
+      },
+      'gemini-3.8-flash'
+    );
+    const body = requestBody(fetchMock);
+    const maxOutputTokens = (body.generationConfig as { maxOutputTokens?: number } | undefined)
+      ?.maxOutputTokens;
+    expect(maxOutputTokens).not.toBe(1);
+    expect(maxOutputTokens === undefined || maxOutputTokens >= 2048).toBe(true);
+  });
+
+  it('Anthropic / OpenAI 探测上限同样避开 1 token', async () => {
+    const anthropic = stubOkFetch();
+    await testProvider(
+      { api: 'anthropic-messages', apiKey: 'k', baseUrl: 'https://api.anthropic.com' },
+      'claude-sonnet-4'
+    );
+    expect(requestBody(anthropic).max_tokens).not.toBe(1);
+
+    vi.unstubAllGlobals();
+    const openai = stubOkFetch();
+    await testProvider(
+      { api: 'openai-completions', apiKey: 'k', baseUrl: 'https://api.openai.com/v1' },
+      'gpt-4o'
+    );
+    expect(requestBody(openai).max_tokens).not.toBe(1);
   });
 });
