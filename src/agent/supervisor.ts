@@ -2302,7 +2302,11 @@ export class SessionSupervisor {
    * 唤醒所有等待者。与触发来源(主 agent send / 用户 tab / 重试耗尽)无关。
    */
   private settleRound(managed: ManagedSession): void {
-    if (managed.coworkerName) managed.lastRoundSummary = this.roundBaseSummary(managed);
+    // 注册时的首次 emitStatus 也走到这里:没跑过任何轮(无 assistant 消息且未失败)不记摘要
+    const ran =
+      managed.status === 'failed' ||
+      (managed.session.messages as { role?: string }[]).some((m) => m.role === 'assistant');
+    if (managed.coworkerName && ran) managed.lastRoundSummary = this.roundBaseSummary(managed);
     const waiters = [...managed.roundWaiters];
     managed.roundWaiters.clear();
     for (const resolve of waiters) resolve();
