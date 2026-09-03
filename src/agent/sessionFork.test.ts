@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { branchSessionAtLeaf } from './sessionFork';
+import { branchSessionAtLeaf, resolveForkLeafId } from './sessionFork';
 
 describe('branchSessionAtLeaf', () => {
   it('锚点无效或未落盘则失败，不宣称成功', () => {
@@ -36,5 +36,37 @@ describe('branchSessionAtLeaf', () => {
       )
     ).toEqual({ ok: true, sessionFile: '/tmp/new.jsonl' });
     expect(createBranchedSession).toHaveBeenCalledWith('e1');
+  });
+});
+
+type ForkEntry = { id: string; type: string; message?: { role: string } };
+
+function branch(entries: ForkEntry[]) {
+  return entries;
+}
+
+describe('resolveForkLeafId', () => {
+  const tree: ForkEntry[] = [
+    { id: 'u1', type: 'message', message: { role: 'user' } },
+    { id: 'a1', type: 'message', message: { role: 'assistant' } },
+    { id: 'u2', type: 'message', message: { role: 'user' } },
+    { id: 'a2', type: 'message', message: { role: 'assistant' } },
+    { id: 'u3', type: 'message', message: { role: 'user' } },
+  ];
+
+  it('user 锚点扩到该轮最后一条，未回复则停在该 user', () => {
+    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 2 })).toBe('a1');
+    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 1 })).toBe('a2');
+    expect(resolveForkLeafId(branch(tree), { userIndexFromEnd: 0 })).toBe('u3');
+  });
+
+  it('指定 entry 时同样扩到该轮末，compaction 不扩', () => {
+    expect(resolveForkLeafId(branch(tree), { entryId: 'u1' })).toBe('a1');
+    expect(resolveForkLeafId(branch(tree), { entryId: 'a2' })).toBe('a2');
+    const compacted: ForkEntry[] = [
+      { id: 'c1', type: 'compaction' },
+      { id: 'u1', type: 'message', message: { role: 'user' } },
+    ];
+    expect(resolveForkLeafId(branch(compacted), { entryId: 'c1' })).toBe('c1');
   });
 });

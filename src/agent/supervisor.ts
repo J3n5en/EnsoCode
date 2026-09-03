@@ -90,7 +90,7 @@ import {
   type EvictionCandidate,
   selectEvictable,
 } from './sessionEviction';
-import { branchSessionAtLeaf } from './sessionFork';
+import { branchSessionAtLeaf, resolveForkLeafId } from './sessionFork';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -792,12 +792,12 @@ export class SessionSupervisor {
           });
           return;
         }
-        const userEntries = managed.session.sessionManager
-          .getBranch()
-          .filter((entry) => entry.type === 'message' && entry.message.role === 'user');
-        const entryId =
-          command.entryId ??
-          userEntries[userEntries.length - 1 - (command.userIndexFromEnd ?? -1)]?.id;
+        const entryId = resolveForkLeafId(
+          managed.session.sessionManager.getBranch(),
+          command.entryId
+            ? { entryId: command.entryId }
+            : { userIndexFromEnd: command.userIndexFromEnd ?? 0 }
+        );
         if (!entryId) {
           this.options.emit({
             type: 'fork-done',

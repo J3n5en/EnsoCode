@@ -20,6 +20,8 @@ export type TimelineItem =
       streaming: boolean;
       timestamp?: number;
       perf?: TurnPerf;
+      /** 本轮已结束的最后一条正文：可从这里开平行会话 */
+      turnEnd?: boolean;
     }
   | {
       kind: 'thinking';
@@ -327,6 +329,7 @@ function buildMessageTimeline(
               streaming,
               timestamp: message.timestamp,
               perf: perfFromTiming(message, perfTurnStart),
+              ...(isLastStepOfTurn && !streaming ? { turnEnd: true } : {}),
             });
             return;
           }
@@ -350,6 +353,9 @@ function buildMessageTimeline(
               streaming: pieceStreaming,
               timestamp: message.timestamp,
               perf: perfFromTiming(message, perfTurnStart),
+              ...(isLastStepOfTurn && !pieceStreaming && i === pieces.length - 1
+                ? { turnEnd: true }
+                : {}),
             });
           });
           return;

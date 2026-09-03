@@ -457,10 +457,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
           {item.text && (
             <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
           )}
-          <div className="flex items-center gap-2">
-            <ForkButton messageIndex={Number(item.key)} />
-            <RewindButton messageIndex={Number(item.key)} />
-          </div>
+          <RewindButton messageIndex={Number(item.key)} />
         </div>
       );
     }
@@ -640,6 +637,16 @@ function userIndexFromEndAt(conversation: { messages: { role: string }[] }, mess
     .length;
 }
 
+function userIndexFromEndForTurn(
+  conversation: { messages: { role: string }[] },
+  messageIndex: number
+) {
+  for (let i = messageIndex; i >= 0; i--) {
+    if (conversation.messages[i]?.role === 'user') return userIndexFromEndAt(conversation, i);
+  }
+  return null;
+}
+
 function canBranchDisplayedSession(
   state: ReturnType<typeof useSessionsStore.getState>,
   host: ReturnType<typeof useChatHost>
@@ -665,13 +672,13 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
   return (
     <button
       type="button"
-      className={cn(userActionClass, 'opacity-0 group-hover/user:opacity-100')}
+      className={userActionClass}
       title={t('Keep this session and start a parallel one from here')}
       onClick={() => {
         const state = useSessionsStore.getState();
         const conversation = displayedConversation(state);
         if (!conversation) return;
-        const userIndexFromEnd = userIndexFromEndAt(conversation, messageIndex);
+        const userIndexFromEnd = userIndexFromEndForTurn(conversation, messageIndex);
         if (userIndexFromEnd === null) return;
         void state.forkFromMessage(conversation.id, userIndexFromEnd);
       }}
@@ -791,6 +798,7 @@ function TextRow({
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <CopyButton text={item.text} />
+          {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
           {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
           {item.perf && <span>· {formatPerf(item.perf, t)}</span>}
         </div>

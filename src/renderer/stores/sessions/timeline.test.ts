@@ -149,6 +149,40 @@ describe('buildTimeline', () => {
       { kind: 'thinking', streaming: false },
       { kind: 'text', streaming: true },
     ]);
+    expect(timeline.some((item) => item.kind === 'text' && item.turnEnd)).toBe(false);
+  });
+
+  it('idle 时本轮最后一条正文标 turnEnd，中间步不标', () => {
+    const timeline = buildTimeline(
+      [
+        user('改'),
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '先看' },
+            { type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'read',
+          isError: false,
+          content: [{ type: 'text', text: 'ok' }],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: '结论' }],
+        },
+        user('还没答'),
+      ],
+      false
+    );
+    expect(timeline.filter((item) => item.kind === 'text')).toMatchObject([
+      { text: '先看' },
+      { text: '结论', turnEnd: true },
+    ]);
+    expect(timeline.filter((item) => item.kind === 'text' && item.turnEnd)).toHaveLength(1);
   });
 
   it('整段 <thinking> 包裹的 text 变成 thinking 块，标签不入正文', () => {
@@ -504,7 +538,7 @@ describe('isReadOnlyCommand', () => {
     'git remote -v',
     'git config --get user.name',
     'LC_ALL=C sort a.txt',
-    'awk -F: \'{print $1}\' /etc/passwd',
+    "awk -F: '{print $1}' /etc/passwd",
     'yq .a f.yml',
   ])('只读：%s', (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(true);
