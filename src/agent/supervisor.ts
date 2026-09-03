@@ -52,6 +52,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry } from '@shared/types/agent';
+import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -691,7 +692,7 @@ export class SessionSupervisor {
       case 'set-model': {
         const managed = this.must(command.identity);
         const runtime = await this.getRuntime();
-        const base = resolveBaseModel(runtime, command.model);
+        const base = await resolveBaseModelOrRefresh(runtime, command.model);
         const next = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
           managed.session.model ? Boolean(managed.session.model.reasoning) : false,
@@ -871,7 +872,7 @@ export class SessionSupervisor {
     }
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
-    const baseModel = resolveBaseModel(runtime, model);
+    const baseModel = await resolveBaseModelOrRefresh(runtime, model);
     const piModel = applyReasoningToModel(
       { ...baseModel, compat: baseModel.compat ? { ...baseModel.compat } : undefined },
       reasoningEnabled,
@@ -1059,7 +1060,7 @@ export class SessionSupervisor {
         extraTools = [],
       }) => {
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
-        const base = resolveBaseModel(runtime, selectedModel);
+        const base = await resolveBaseModelOrRefresh(runtime, selectedModel);
         // 条目级推理覆盖（subagent-models）赢过父会话；缺省跟随父
         const childReasoning = resolveChildReasoning(
           selectedModel,
@@ -2290,6 +2291,21 @@ const toErrorMessage = (error: unknown): string =>
 function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string }): string {
   const keyFp = createHash('sha256').update(model.apiKey).digest('hex').slice(0, 8);
   return `enso-${model.api}-${model.baseUrl}-${keyFp}`;
+}
+
+/**
+ * worker 的 ModelRuntime 按进程常驻，订阅清单只在首次建 runtime 时联网拉一次。之后用户
+ * 才登录 / 后端上新（如 `gemini-3.8-flash-tiered` 这种不在兜底表里的 wire id），Main 侧
+ * 已能选到，worker 这边仍是旧清单 → 未命中时对基础 provider 补一次联网刷新再重试。
+ */
+export async function resolveBaseModelOrRefresh(runtime: ModelRuntime, model: SpawnModelConfig) {
+  try {
+    return resolveBaseModel(runtime, model);
+  } catch (error) {
+    if (!model.oauthAccountKey) throw error;
+    await refreshWorkerProviderModels(runtime, providerIdOfAccountKey(model.oauthAccountKey));
+    return resolveBaseModel(runtime, model);
+  }
 }
 
 /**

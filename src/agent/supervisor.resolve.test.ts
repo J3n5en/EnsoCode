@@ -1,6 +1,6 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { resolveBaseModel } from './supervisor';
+import { resolveBaseModel, resolveBaseModelOrRefresh } from './supervisor';
 
 vi.mock('@shared/piAccounts', () => ({
   ensureAccountProvider: vi.fn(),
@@ -160,5 +160,57 @@ describe('resolveBaseModel oauth', () => {
     expect(resolved).toBe(oauthModel);
     expect(runtime.getModel).toHaveBeenCalledWith('anthropic', 'claude-sonnet-4-5');
     expect(registerProvider).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveBaseModelOrRefresh', () => {
+  const spawn = {
+    api: 'anthropic-messages' as const,
+    baseUrl: '',
+    apiKey: '',
+    modelId: 'gemini-3.8-flash-tiered',
+    settingsProviderId: 'settings-provider',
+    oauthAccountKey: 'google-antigravity#2',
+  };
+
+  it('worker 清单过期漏掉后端新模型时，联网刷新基础 provider 后重试', async () => {
+    const late = { id: 'gemini-3.8-flash-tiered', provider: 'google-antigravity#2' };
+    let refreshed = false;
+    const refresh = vi.fn(async () => {
+      refreshed = true;
+      return { aborted: false, errors: new Map() };
+    });
+    const runtime = {
+      getModel: vi.fn(() => (refreshed ? late : undefined)),
+      refresh,
+    } as unknown as ModelRuntime;
+
+    await expect(resolveBaseModelOrRefresh(runtime, spawn)).resolves.toBe(late);
+    expect(refresh).toHaveBeenCalledWith({
+      providers: ['google-antigravity'],
+      allowNetwork: true,
+    });
+  });
+
+  it('刷新后仍缺才报错，且刷新失败不吞掉原始错误', async () => {
+    const runtime = {
+      getModel: vi.fn(() => undefined),
+      refresh: vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    } as unknown as ModelRuntime;
+
+    await expect(resolveBaseModelOrRefresh(runtime, spawn)).rejects.toThrow(
+      'oauth model not found: google-antigravity#2/gemini-3.8-flash-tiered'
+    );
+  });
+
+  it('首次命中不触发刷新', async () => {
+    const hit = { id: 'gemini-3.8-flash-tiered' };
+    const refresh = vi.fn();
+    const runtime = { getModel: vi.fn(() => hit), refresh } as unknown as ModelRuntime;
+
+    await expect(resolveBaseModelOrRefresh(runtime, spawn)).resolves.toBe(hit);
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
