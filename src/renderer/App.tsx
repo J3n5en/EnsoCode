@@ -246,6 +246,7 @@ export default function App() {
               width={collapsed ? undefined : width}
               collapsed={collapsed}
               onToggleCollapse={() => setCollapsed((v) => !v)}
+              onOpenSearch={() => setSearchOpen(true)}
             />
             {!collapsed && <ResizeHandle onResize={handleResize} />}
             <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">

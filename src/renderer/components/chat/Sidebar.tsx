@@ -63,6 +63,7 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { effectiveKeybindings, formatBinding } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -95,11 +96,14 @@ interface SidebarProps {
   width?: number;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  onOpenSearch?: () => void;
 }
 
-export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: SidebarProps) {
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
+  const keybindings = useSettingsStore((state) => state.keybindings);
+  const searchShortcut = formatBinding(effectiveKeybindings(keybindings)['search-workspace']);
   const addProject = useSettingsStore((state) => state.addProject);
   const removeProject = useSettingsStore((state) => state.removeProject);
   const conversations = useSessionsStore((state) => state.conversations);
@@ -373,6 +377,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         <div className="flex w-12 flex-1 flex-col items-center gap-1 py-2">
           <button
             type="button"
+            onClick={onOpenSearch}
+            className={ICON_BUTTON_CLASS}
+            title={`${t('Search anything')} (${searchShortcut})`}
+          >
+            <Search className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
             onClick={() => setAddOpen(true)}
             className={ICON_BUTTON_CLASS}
             title={t('Add project')}
@@ -412,14 +424,24 @@ export function Sidebar({ width, collapsed, onToggleCollapse }: SidebarProps) {
         <div className="flex h-12 shrink-0 items-center justify-between border-b pr-3 pl-1.5">
           {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
           <NodeSwitcher />
-          <button
-            type="button"
-            onClick={() => setAddOpen(true)}
-            className={ICON_BUTTON_CLASS}
-            title={t('Add project')}
-          >
-            <FolderPlus className="h-4 w-4" />
-          </button>
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className={ICON_BUTTON_CLASS}
+              title={`${t('Search anything')} (${searchShortcut})`}
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className={ICON_BUTTON_CLASS}
+              title={t('Add project')}
+            >
+              <FolderPlus className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="shrink-0 border-b px-2 py-2">
           <div className="relative">
