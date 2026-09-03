@@ -4,12 +4,19 @@ function trimOne(value: number): string {
   return value.toFixed(1).replace(/\.0$/, '');
 }
 
-/** 1500000 → '1.5M'；240000 → '240K'；3.1e9 → '3.1B'；<1000 原样 */
+const UNITS: Array<[number, string]> = [
+  [1_000_000_000, 'B'],
+  [1_000_000, 'M'],
+  [1_000, 'K'],
+];
+
+/** 1500000 → '1.5M'；240000 → '240K'；3.1e9 → '3.1B'；<1000 原样；四舍五入到 1000 时进位（999990 → '1M'） */
 export function formatTokens(tokens: number): string {
-  if (tokens < 1_000) return String(Math.round(tokens));
-  if (tokens < 1_000_000) return `${trimOne(tokens / 1_000)}K`;
-  if (tokens < 1_000_000_000) return `${trimOne(tokens / 1_000_000)}M`;
-  return `${trimOne(tokens / 1_000_000_000)}B`;
+  for (const [unit, suffix] of UNITS) {
+    // 一位小数后 ≥ 999.95 会被 toFixed 进成 1000.0，那就该升一档
+    if (tokens >= unit * 0.99995) return `${trimOne(tokens / unit)}${suffix}`;
+  }
+  return String(Math.round(tokens));
 }
 
 /** null（无定价）→ '—'；否则 '$1911.88' */
@@ -34,6 +41,7 @@ export function formatDelta(
   if (prev === null || prev === undefined || cur === null || cur === undefined) return null;
   if (prev === 0) return cur > 0 ? 'new' : null;
   const pct = ((cur - prev) / prev) * 100;
-  const sign = pct >= 0 ? '+' : '-';
+  if (Math.abs(pct) < 0.05) return '0.0%';
+  const sign = pct > 0 ? '+' : '-';
   return `${sign}${Math.abs(pct).toFixed(1)}%`;
 }

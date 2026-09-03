@@ -22,8 +22,16 @@ describe('formatTokens', () => {
     expect(formatTokens(1_000_000_000)).toBe('1B');
   });
 
-  it('临界值 999999 仍按 K 计算（未满 1e6）', () => {
-    expect(formatTokens(999_999)).toBe('1000K');
+  it('临界值 999999 四舍五入后进位为 M', () => {
+    expect(formatTokens(999_999)).toBe('1M');
+  });
+
+  it('四舍五入达到 1000K 时进位为 M', () => {
+    expect(formatTokens(999_990)).toBe('1M');
+  });
+
+  it('四舍五入达到 1000M 时进位为 B', () => {
+    expect(formatTokens(999_999_999)).toBe('1B');
   });
 });
 
@@ -83,5 +91,13 @@ describe('formatDelta', () => {
 
   it('下降时带负号，保留一位小数', () => {
     expect(formatDelta(100, 63.1)).toBe('-36.9%');
+  });
+
+  it('|变化幅度| < 0.05% 时不带符号', () => {
+    expect(formatDelta(100, 99.96)).toBe('0.0%');
+  });
+
+  it('prev 与 cur 相等且都不为 0 时不带符号', () => {
+    expect(formatDelta(100, 100)).toBe('0.0%');
   });
 });
