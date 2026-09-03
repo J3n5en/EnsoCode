@@ -491,7 +491,7 @@ function classifyTool(
 
 const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
 
-/** 只读 bash 白名单：段首程序在这里且无写副作用标志才算探索 */
+/** 只读 bash 白名单：段首程序在这里且无写副作用标志才算探索（env/xargs/tee 等能转执行或写文件的不收） */
 const READ_ONLY_PROGRAMS = new Set([
   'ls',
   'tree',
@@ -535,7 +535,6 @@ const READ_ONLY_PROGRAMS = new Set([
   'dirname',
   'realpath',
   'readlink',
-  'env',
   'printenv',
   'date',
   'whoami',
@@ -564,46 +563,74 @@ const GIT_READ_SUBCOMMANDS = new Set([
   'name-rev',
   'remote',
   'config',
+  'branch',
+  'tag',
 ]);
+/** 各程序里会写文件 / 转执行的参数，命中即非只读 */
+const WRITE_FLAGS: Record<string, RegExp> = {
+  sed: /^(-[a-zA-Z]*i|--in-place)|\/[a-zA-Z]*e[a-zA-Z]*['"]?$|^['"]?e\b/,
+  awk: /system\s*\(/,
+  yq: /^(-i|--inplace)$/,
+  sort: /^(-o|--output)/,
+  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fprint0|fls)$/,
+  git: /^--output/,
+};
+/** git 只读子命令里带这些参数就是写：branch -d / tag -a / config --unset / remote add … */
+const GIT_WRITE_ARGS: Record<string, RegExp> = {
+  branch: /^-(d|D|m|M|c|C|u|f|-delete|-move|-copy|-set-upstream-to|-unset-upstream|-force)/,
+  tag: /^-(a|s|d|f|m|F|-annotate|-sign|-delete|-force|-message)/,
+  config: /^(-e|--edit|--unset|--unset-all|--add|--replace-all|--rename-section|--remove-section)$/,
+  remote: /^(add|remove|rm|rename|set-url|set-head|set-branches|prune|update)$/,
+};
 
-function firstProgram(segment: string): string {
+function splitEnvPrefix(segment: string): { env: string[]; tokens: string[] } {
   const tokens = segment.trim().split(/\s+/);
-  // 跳过前置环境变量赋值（FOO=1 rg …）
   let i = 0;
   while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
-  const head = tokens[i] ?? '';
+  return { env: tokens.slice(0, i), tokens: tokens.slice(i) };
+}
+
+function firstProgram(segment: string): string {
+  const head = splitEnvPrefix(segment).tokens[0] ?? '';
   return head.slice(head.lastIndexOf('/') + 1);
 }
 
 /**
  * 判定一条 bash 命令是否纯只读（ls/rg/cat/git status …），用于精简模式把它当探索折进组。
- * 保守策略：任何拿不准的（重定向、命令替换、写子命令、未知程序）都判为非只读。
+ * 只影响展示密度，不参与审批；策略保守：重定向、命令/进程替换、后台 &、写参数、
+ * 未知程序、GIT_* 环境前缀（GIT_EXTERNAL_DIFF 等会转执行）一律判非只读。
  */
 export function isReadOnlyCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
-  // 命令替换 / 反引号可藏任意命令
-  if (/\$\(|`/.test(trimmed)) return false;
+  // 命令替换 / 进程替换 / 反引号可藏任意命令；控制字符（\r 等）可拼接隐藏命令
+  if (/\$\(|<\(|`|[\x00-\x09\x0b-\x1f]/.test(trimmed)) return false;
   // 去掉无害的 stderr 重定向后，剩余任何 > 都视为写文件
   const withoutStderr = trimmed.replace(/2>&1|[12]?>\s*\/dev\/null/g, '');
   if (withoutStderr.includes('>')) return false;
-  const segments = withoutStderr.split(/\|\|?|&&|;|\n/);
+  // 段分隔：| || && ; & 换行（单个 & 是后台执行，同样开新命令）
+  const segments = withoutStderr.split(/\|\|?|&&?|;|\n/);
   for (const raw of segments) {
     const segment = raw.trim();
     if (!segment) continue;
-    const tokens = segment.split(/\s+/);
+    const { env, tokens } = splitEnvPrefix(segment);
+    if (env.some((e) => e.startsWith('GIT_'))) return false;
     const program = firstProgram(segment);
     if (!READ_ONLY_PROGRAMS.has(program)) return false;
-    if (program === 'sed' && tokens.some((t) => /^-[a-zA-Z]*i/.test(t) || t === '--in-place'))
-      return false;
-    if (program === 'find' && tokens.some((t) => t === '-delete' || t === '-exec' || t === '-ok'))
-      return false;
+    const writeFlag = WRITE_FLAGS[program];
+    if (writeFlag && tokens.slice(1).some((t) => writeFlag.test(t))) return false;
     if (program === 'git') {
       const sub = tokens.find((t, i) => i > 0 && !t.startsWith('-'));
       if (!sub || !GIT_READ_SUBCOMMANDS.has(sub)) return false;
-      // git remote add / git config --global x y 之类的写法
-      const rest = tokens.slice(tokens.indexOf(sub) + 1).filter((t) => !t.startsWith('-'));
-      if ((sub === 'remote' || sub === 'config') && rest.length > 1) return false;
+      const args = tokens.slice(tokens.indexOf(sub) + 1);
+      const writeArg = GIT_WRITE_ARGS[sub];
+      if (writeArg && args.some((t) => writeArg.test(t))) return false;
+      // git config 只读形态：--get/--list/-l；裸 `git config a b` 是写
+      if (
+        sub === 'config' &&
+        !args.some((t) => /^(--get|--get-all|--list|-l|--get-regexp)$/.test(t))
+      )
+        return false;
     }
   }
   return true;

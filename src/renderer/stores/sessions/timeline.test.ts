@@ -501,6 +501,11 @@ describe('isReadOnlyCommand', () => {
     '/usr/bin/tree -L 2',
     'sed -n 1,20p src/a.ts',
     'git diff --stat',
+    'git remote -v',
+    'git config --get user.name',
+    'LC_ALL=C sort a.txt',
+    'awk -F: \'{print $1}\' /etc/passwd',
+    'yq .a f.yml',
   ])('只读：%s', (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(true);
   });
@@ -519,6 +524,23 @@ describe('isReadOnlyCommand', () => {
     'pnpm test',
     'xargs rm',
     '',
+    // 绕过向量
+    'ls & rm -rf x',
+    'cat <(rm -rf x)',
+    'env rm -rf x',
+    'awk \'BEGIN{system("rm -rf x")}\' a.txt',
+    "sed 's/a/b/e' a.txt",
+    'sed --in-place=.bak s/a/b/ x',
+    'yq -i .a=1 f.yml',
+    'sort -o out.txt in.txt',
+    'git log --output=/tmp/x',
+    'find . -execdir rm {} \\;',
+    'find . -fprint /tmp/x',
+    'git config --unset user.name',
+    'git remote remove origin',
+    'GIT_EXTERNAL_DIFF=./evil git diff',
+    'rg foo 2>err.txt',
+    'ls\rrm -rf x',
   ])('非只读：%s', (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(false);
   });
