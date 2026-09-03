@@ -62,7 +62,7 @@ export function ContextInspector({
                   .forkFromEntry(conversationId, occupancy.compactionEntryId!);
               }}
             >
-              {t('Open parallel session')}
+              {t('Conversation branch')}
             </button>
           )}
         </div>

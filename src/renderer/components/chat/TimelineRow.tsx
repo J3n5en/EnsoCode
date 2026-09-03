@@ -684,7 +684,7 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
       }}
     >
       <GitBranch className="h-3 w-3" />
-      {t('Parallel session')}
+      {t('Conversation branch')}
     </button>
   );
 }
