@@ -1,8 +1,10 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentTypeSpawnConfig, CoworkerInfo, SubagentModelOption } from '@shared/types/agent';
 
-/** 回传主 agent 的结果上限,全文永远在 coworker tab 里 */
+/** 回传主 agent 的结果上限;全文经 report 操作可取 */
 const RESULT_LIMIT = 4000;
+/** report 操作的上限 */
+const REPORT_LIMIT = 20000;
 
 export interface CoworkerSendOptions {
   signal?: AbortSignal;
@@ -22,11 +24,20 @@ export interface CoworkerToolDeps {
   send(name: string, message: string, opts?: CoworkerSendOptions): Promise<string>;
   list(): CoworkerInfo[];
   dismiss(name: string): Promise<void>;
+  /** 阻塞至该 coworker 当前轮结束;空闲则立即返回最近一轮摘要 */
+  wait(name: string, opts?: { signal?: AbortSignal; gate?: string }): Promise<string>;
+  /** 最近一轮的完整结果(未截断) */
+  report(name: string): string;
 }
 
-const truncate = (text: string): string =>
+const truncate = (text: string, name: string): string =>
   text.length > RESULT_LIMIT
-    ? `${text.slice(0, RESULT_LIMIT)}\n…(truncated — full transcript in the coworker tab)`
+    ? `${text.slice(0, RESULT_LIMIT)}\n…(truncated — use coworker report "${name}" for the full text)`
+    : text;
+
+const truncateReport = (text: string): string =>
+  text.length > REPORT_LIMIT
+    ? `${text.slice(0, REPORT_LIMIT)}\n…(truncated at ${REPORT_LIMIT} chars)`
     : text;
 
 /**
@@ -58,19 +69,21 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       'Unlike `subagent` (one-shot, disposed after a single report), a coworker stays alive: ' +
       'spawn it once with a role and initial task, then send follow-ups that build on everything it has seen. ' +
       'The user watches each coworker in its own tab and may reply there directly. ' +
-      'Operations: spawn {name, agent_type?, task} / send {name, message} / list / dismiss {name}. ' +
+      'Operations: spawn {name, agent_type?, task} / send {name, message} / wait {name, gate?} / ' +
+      'report {name} / list / dismiss {name}. ' +
       'spawn and send are ASYNC by default: they return immediately and you are notified automatically ' +
-      'when the round completes — do NOT poll or wait idle; keep working on other lines meanwhile. ' +
-      'Pass wait:true only when you must have the result before continuing. ' +
+      'when the round completes — keep working on other lines meanwhile. When you have nothing else to do, ' +
+      'use wait {name} to block until its current round ends (never sleep/poll). ' +
+      'Pass wait:true on send only when you must have the result before continuing. ' +
       'Optional gate: a shell command run after the round; its exit code verifies the work ' +
-      '(e.g. "pnpm test"). Results are truncated; the full transcript lives in the coworker tab.' +
+      '(e.g. "pnpm test"). Inline results are truncated; report {name} returns the full text of the last round.' +
       (typeList ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
       'coworker: hire a persistent named agent (own tab, own accumulating context, multi-round by design). ' +
       'Use subagent for one-shot subtasks; use coworker whenever follow-up rounds are likely or the user ' +
       'should watch and join, then keep steering it with send. ' +
-      'spawn/send are async by default — you get notified on completion, so never block waiting; ' +
-      'pass wait:true only when the result is needed immediately. ' +
+      'spawn/send are async by default — you get notified on completion; when idle use wait {name} ' +
+      'instead of sleep/poll, and report {name} for the untruncated last result. ' +
       'Verify delegated work with gate:"<command>" (exit code speaks, not the coworker). ' +
       'One coworker per role, reused across rounds; dismiss when its goal is met' +
       (deps.models.length > 0
@@ -91,12 +104,14 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       properties: {
         operation: {
           type: 'string',
-          enum: ['spawn', 'send', 'list', 'dismiss'],
-          description: 'spawn: hire + first task; send: follow-up; list: roster; dismiss: fire',
+          enum: ['spawn', 'send', 'wait', 'report', 'list', 'dismiss'],
+          description:
+            'spawn: hire + first task; send: follow-up; wait: block until current round ends; ' +
+            'report: full text of last round; list: roster; dismiss: fire',
         },
         name: {
           type: 'string',
-          description: 'Coworker name (short slug), required for spawn/send/dismiss',
+          description: 'Coworker name (short slug), required for all operations except list',
         },
         agent_type: {
           type: 'string',
@@ -118,7 +133,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           type: 'string',
           description:
             'Shell command to verify the round (run in the workspace after completion; ' +
-            'exit code decides pass/fail), e.g. "pnpm test"',
+            'exit code decides pass/fail), e.g. "pnpm test". Applies to spawn/send/wait',
         },
       },
       required: ['operation'],
@@ -178,7 +193,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
           const result = await deps.send(info.name, task, sendOptions);
           return text(
-            `Coworker "${info.name}" hired${info.agentType ? ` (${info.agentType})` : ''}.\n\n${truncate(result)}`
+            `Coworker "${info.name}" hired${info.agentType ? ` (${info.agentType})` : ''}.\n\n${truncate(result, info.name)}`
           );
         }
         case 'send': {
@@ -189,7 +204,16 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
             `<message-from-main-agent>\n${message}\n</message-from-main-agent>`,
             sendOptions
           );
-          return text(truncate(result));
+          return text(truncate(result, name.trim()));
+        }
+        case 'wait': {
+          if (!name.trim()) throw new Error('wait requires a name');
+          const result = await deps.wait(name.trim(), { signal, ...(gate ? { gate } : {}) });
+          return text(truncate(result, name.trim()));
+        }
+        case 'report': {
+          if (!name.trim()) throw new Error('report requires a name');
+          return text(truncateReport(deps.report(name.trim())));
         }
         case 'list': {
           const roster = deps.list();
@@ -210,7 +234,9 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           return text(`Coworker "${name.trim()}" dismissed.`);
         }
         default:
-          throw new Error(`unknown operation "${operation}". Use spawn/send/list/dismiss.`);
+          throw new Error(
+            `unknown operation "${operation}". Use spawn/send/wait/report/list/dismiss.`
+          );
       }
     },
   };

@@ -173,6 +173,10 @@ interface ManagedSession {
   parentId?: string;
   coworkerName?: string;
   pendingRole?: string;
+  /** 最近一轮的完整摘要(含 gate 结论),供 coworker report/wait 取用 */
+  lastRoundSummary?: string;
+  /** 父正在 wait 阻塞等本轮;message_main_agent 据此免去冗余上报 */
+  parentWaiting?: boolean;
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
@@ -1294,16 +1298,8 @@ export class SessionSupervisor {
           agentTypeName,
           modelName
         ),
-      send: (name, message, opts) => {
-        const parent = this.must(identity);
-        const info = parent.coworkers.get(name);
-        if (!info) {
-          throw new Error(
-            `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
-          );
-        }
-        return this.coworkerSend(info.id, message, opts);
-      },
+      send: (name, message, opts) =>
+        this.coworkerSend(this.mustCoworker(identity, name).id, message, opts),
       list: () => {
         const parent = this.must(identity);
         return [...parent.coworkers.values()].map((info) => ({
@@ -1317,6 +1313,10 @@ export class SessionSupervisor {
         if (!info) throw new Error(`unknown coworker "${name}"`);
         await this.dismissCoworker(sessionId, info.id);
       },
+      wait: (name, opts) => this.coworkerWait(this.mustCoworker(identity, name).id, opts),
+      report: (name) =>
+        this.sessions.get(this.mustCoworker(identity, name).id)?.lastRoundSummary ??
+        '(no round completed yet)',
     });
     const askManager = this.createAskManager(identity);
     // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
@@ -1727,7 +1727,8 @@ export class SessionSupervisor {
         createAskTool(askManager),
         createMessageMainTool(
           (text, urgent) => this.notifier.notify(parentId, text, { urgent }),
-          name
+          name,
+          () => this.sessions.get(coworkerId)?.parentWaiting === true
         ),
       ],
     });
@@ -1835,15 +1836,17 @@ export class SessionSupervisor {
 
     if (opts.wait) {
       signal?.addEventListener('abort', onAbort, { once: true });
+      managed.parentWaiting = true;
       try {
         await this.gate.run(coworkerId, start);
         await done;
       } finally {
+        managed.parentWaiting = false;
         unsubscribe();
         signal?.removeEventListener('abort', onAbort);
       }
       if (signal?.aborted) {
-        return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
+        return `(send interrupted — coworker keeps running; use coworker wait/send to follow up)`;
       }
       return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
     }
@@ -1866,9 +1869,14 @@ export class SessionSupervisor {
       }
       const summary = await this.coworkerRoundSummary(managed, opts.gate);
       const failed = managed.status === 'failed';
+      const label = managed.coworkerName ?? coworkerId;
+      const brief =
+        summary.length > NOTIFY_SUMMARY_LIMIT
+          ? `${summary.slice(0, NOTIFY_SUMMARY_LIMIT)}\n…(truncated — use coworker report "${label}" for the full text)`
+          : summary;
       this.notifier.notify(
         parentId,
-        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}\n\n${COWORKER_FOLLOW_UP_HINT}`,
+        `Coworker "${label}" finished a round:\n${brief}\n\n${COWORKER_FOLLOW_UP_HINT}`,
         { urgent: failed }
       );
     })().catch(() => {});
@@ -1879,7 +1887,60 @@ export class SessionSupervisor {
     );
   }
 
-  /** 轮次结果摘要:最终文本 + 输出截断/上下文水位警告 + gate 验收结果 */
+  /**
+   * 阻塞至 coworker 当前轮结束(无论由主 agent 还是用户 tab 触发);空闲则立即返回最近一轮摘要。
+   * 传 gate 时重跑验收。父 abort 只提前返回。
+   */
+  private async coworkerWait(
+    coworkerId: string,
+    opts: { signal?: AbortSignal; gate?: string } = {}
+  ): Promise<string> {
+    const managed = this.mustCurrent(coworkerId);
+    if (managed.status !== 'running') {
+      if (!managed.lastRoundSummary) return '(no round completed yet — coworker is idle)';
+      const gateResult = opts.gate ? `\n\n${await this.runParentGate(managed, opts.gate)}` : '';
+      return `${managed.lastRoundSummary}${gateResult}\n\n${COWORKER_FOLLOW_UP_HINT}`;
+    }
+    const { signal } = opts;
+    const { promise: done, resolve: resolveDone } = Promise.withResolvers<void>();
+    const unsubscribe = managed.session.subscribe((event) => {
+      if (event.type === 'agent_end') resolveDone();
+    });
+    const onAbort = () => resolveDone();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    managed.parentWaiting = true;
+    try {
+      await done;
+    } finally {
+      managed.parentWaiting = false;
+      unsubscribe();
+      signal?.removeEventListener('abort', onAbort);
+    }
+    if (signal?.aborted) {
+      return '(wait interrupted — coworker keeps running; use coworker wait/send to follow up)';
+    }
+    return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
+  }
+
+  private mustCoworker(identity: SessionIdentity, name: string): CoworkerInfo {
+    const parent = this.must(identity);
+    const info = parent.coworkers.get(name);
+    if (!info) {
+      throw new Error(
+        `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
+      );
+    }
+    return info;
+  }
+
+  private runParentGate(managed: ManagedSession, gateCommand: string): Promise<string> {
+    const parentFactory = this.sessions.get(managed.parentId ?? '')?.factory;
+    return parentFactory
+      ? parentFactory.runGate(gateCommand)
+      : runGateCommand(process.cwd(), gateCommand);
+  }
+
+  /** 轮次结果摘要:最终文本 + 输出截断/上下文水位警告 + gate 验收结果;同时记入 lastRoundSummary */
   private async coworkerRoundSummary(
     managed: ManagedSession,
     gateCommand?: string
@@ -1907,12 +1968,8 @@ export class SessionSupervisor {
       const pct = Math.round((used / window) * 100);
       summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
-    if (gateCommand) {
-      const parentFactory = this.sessions.get(managed.parentId ?? '')?.factory;
-      summary += `\n\n${await (parentFactory
-        ? parentFactory.runGate(gateCommand)
-        : runGateCommand(process.cwd(), gateCommand))}`;
-    }
+    if (gateCommand) summary += `\n\n${await this.runParentGate(managed, gateCommand)}`;
+    managed.lastRoundSummary = summary;
     return summary;
   }
 
@@ -2379,6 +2436,8 @@ const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
+/** 异步通知里的摘要上限;全文经 coworker report 取 */
+const NOTIFY_SUMMARY_LIMIT = 1500;
 /** 一轮结束回父的摘要尾句：阻塞/非阻塞两条路径共用，把「继续 send」写成默认动作 */
 const COWORKER_FOLLOW_UP_HINT =
   '(follow up with coworker send to verify or steer; dismiss only when its goal is met)';
