@@ -1,5 +1,5 @@
 import { OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ANTIGRAVITY_FALLBACK_MODELS,
   ANTIGRAVITY_LOGICAL_MODELS,
@@ -1041,5 +1041,44 @@ describe('本地 AssistantMessageEventStream', () => {
     stream.push({ type: 'done', reason: 'stop', message });
     await Promise.resolve();
     expect(outcome).toBe(message);
+  });
+});
+
+describe('refreshModels 与 pi 刷新契约', () => {
+  // pi 每次 registerProvider 都会以 allowNetwork:false 重跑 refreshModels 并原样发布返回值
+  // （provider-composer.js），返回兜底表会把此前联网发现的清单冲掉
+  const credential = { type: 'oauth', access: 'tok', refresh: 'r', expires: Date.now() + 1e6 };
+  const backend = {
+    models: {
+      'gemini-3.8-flash-tiered': { displayName: 'Gemini 3.8 Flash Tiered' },
+      'gemini-3.1-pro-low': { displayName: 'Gemini 3.1 Pro (Low)' },
+    },
+  };
+  const refresh = (allowNetwork: boolean) =>
+    antigravityProviderConfig().refreshModels?.({
+      credential,
+      allowNetwork,
+      signal: new AbortController().signal,
+      stored: undefined,
+      publish: async () => true,
+    } as never);
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('离线重跑时保留最近一次联网发现的清单，而不是退回兜底表', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) =>
+        String(url).includes('fetchAvailableModels')
+          ? new Response(JSON.stringify(backend), { status: 200 })
+          : new Response('', { status: 404 })
+      )
+    );
+    const online = await refresh(true);
+    expect(online?.map((m) => m.id)).toContain('gemini-3.8-flash-tiered');
+
+    const offline = await refresh(false);
+    expect(offline?.map((m) => m.id)).toContain('gemini-3.8-flash-tiered');
+    expect(offline).toEqual(online);
   });
 });

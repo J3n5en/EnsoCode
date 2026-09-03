@@ -1782,18 +1782,28 @@ async function fetchAvailableModels(
   return undefined;
 }
 
+/**
+ * 最近一次联网发现的清单。pi 的 provider-composer 在每次 registerProvider 后都会以
+ * `allowNetwork:false` 重跑 refreshModels 并原样发布返回值——这时若退回兜底表，就会把
+ * 已发现的、兜底表里没有的 wire id（如 `gemini-3.8-flash-tiered`）冲掉，推理时报 model not found。
+ */
+let lastDiscoveredModels: PiModelSpec[] | undefined;
+
 async function refreshModels(context: PiRefreshModelsContext): Promise<PiModelSpec[]> {
   const credential = context.credential;
   const access =
     credential && credential.type === 'oauth' ? optionalString(credential.access) : undefined;
-  if (!context.allowNetwork || !access) return ANTIGRAVITY_FALLBACK_MODELS;
+  const cached = lastDiscoveredModels ?? ANTIGRAVITY_FALLBACK_MODELS;
+  if (!context.allowNetwork || !access) return cached;
 
   await ensureAntigravityVersion(fetch, context.signal);
   const payload = await fetchAvailableModels(access, context.signal);
   const discovered = parseAvailableModels(payload);
-  if (discovered.length === 0) return ANTIGRAVITY_FALLBACK_MODELS;
+  if (discovered.length === 0) return cached;
   const merged = mergeAntigravityModels(discovered);
-  return merged.length > 0 ? merged : ANTIGRAVITY_FALLBACK_MODELS;
+  if (merged.length === 0) return cached;
+  lastDiscoveredModels = merged;
+  return merged;
 }
 
 // ---- 额度 ----
