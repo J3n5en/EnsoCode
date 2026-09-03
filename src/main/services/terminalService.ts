@@ -58,6 +58,14 @@ export function localShellSpec(cwd: string): TerminalSpawnSpec {
   };
 }
 
+/** node-pty 在 cols/rows 为 0 时 shell 会立刻 exit 0 */
+export function resolvePtySize(cols?: number, rows?: number): { cols: number; rows: number } {
+  return {
+    cols: typeof cols === 'number' && cols >= 1 ? Math.floor(cols) : 80,
+    rows: typeof rows === 'number' && rows >= 1 ? Math.floor(rows) : 24,
+  };
+}
+
 export function createTerminal(
   request: TerminalCreateRequest,
   sender: WebContents,
@@ -79,11 +87,12 @@ export function createTerminal(
     return { ok: true };
   }
   try {
+    const { cols, rows } = resolvePtySize(request.cols, request.rows);
     const pty = spawn(spec.file, spec.args, {
       name: 'xterm-256color',
       cwd: spec.cwd,
-      cols: request.cols ?? 80,
-      rows: request.rows ?? 24,
+      cols,
+      rows,
       env: spec.env,
     });
     const entry: TerminalEntry = { pty, sender };
