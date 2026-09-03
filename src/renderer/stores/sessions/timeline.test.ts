@@ -1,6 +1,12 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, foldTimeline, type TimelineItem, terminalErrorText } from './timeline';
+import {
+  buildTimeline,
+  foldTimeline,
+  isReadOnlyCommand,
+  type TimelineItem,
+  terminalErrorText,
+} from './timeline';
 
 const user = (text: string): ProjectedMessage => ({
   role: 'user',
@@ -481,7 +487,60 @@ describe('terminalErrorText', () => {
   });
 });
 
+describe('isReadOnlyCommand', () => {
+  it.each([
+    'ls -la',
+    'rg -n "foo" src',
+    'grep -r foo . | head -20',
+    'cat package.json',
+    'find . -name "*.ts" | wc -l',
+    'git status && git log --oneline -5',
+    'cd packages/phone && ls src',
+    'FOO=1 rg foo 2>/dev/null',
+    'rg foo 2>&1 | sort | uniq -c',
+    '/usr/bin/tree -L 2',
+    'sed -n 1,20p src/a.ts',
+    'git diff --stat',
+  ])('只读：%s', (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(true);
+  });
+
+  it.each([
+    'rm -rf dist',
+    'ls > out.txt',
+    'cat a >> b',
+    'sed -i "s/a/b/" x',
+    'find . -name "*.log" -delete',
+    'find . -exec rm {} \\;',
+    'git commit -m x',
+    'git checkout -- .',
+    'ls && npm install',
+    'echo $(rm -rf x)',
+    'pnpm test',
+    'xargs rm',
+    '',
+  ])('非只读：%s', (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+});
+
 describe('foldTimeline', () => {
+  it('compact：只读 bash 进探索组，cat 记作 read、rg 记作 search', () => {
+    const items = [
+      { ...toolItem('a1', 'bash'), summary: 'cat README.md' },
+      { ...toolItem('a2', 'bash'), summary: 'rg -n foo src' },
+      toolItem('a3', 'read'),
+      { ...toolItem('b', 'bash'), summary: 'pnpm test' },
+    ] as TimelineItem[];
+    const folded = foldTimeline(items, false, new Set(), { compact: true });
+    expect(folded.map((i) => (i.kind === 'tool' ? i.summary : i.kind))).toEqual([
+      'tool-group',
+      'pnpm test',
+    ]);
+    const group = folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.stats).toEqual({ commands: 0, reads: 2, searches: 1, others: 0 });
+  });
+
   it('连续 ≥3 条工具收拢为组头，thinking 收进组，统计归类', () => {
     const items = [
       userItem('u0'),

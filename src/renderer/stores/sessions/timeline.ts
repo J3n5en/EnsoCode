@@ -474,14 +474,147 @@ const FOLD_MIN_TOOLS = 3;
 
 const SEARCH_TOOLS = new Set(['grep', 'find', 'glob', 'ls']);
 
-function classifyTool(name: string, stats: ToolGroupStats): void {
-  if (name === 'bash') stats.commands += 1;
-  else if (name === 'read') stats.reads += 1;
+function classifyTool(
+  name: string,
+  summary: string,
+  stats: ToolGroupStats,
+  compact: boolean
+): void {
+  if (name === 'read') stats.reads += 1;
   else if (SEARCH_TOOLS.has(name)) stats.searches += 1;
-  else stats.others += 1;
+  else if (name === 'bash') {
+    if (!compact || !isReadOnlyCommand(summary)) stats.commands += 1;
+    else if (READ_FILE_PROGRAMS.has(firstProgram(summary))) stats.reads += 1;
+    else stats.searches += 1;
+  } else stats.others += 1;
 }
 
 const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
+
+/** 只读 bash 白名单：段首程序在这里且无写副作用标志才算探索 */
+const READ_ONLY_PROGRAMS = new Set([
+  'ls',
+  'tree',
+  'pwd',
+  'cd',
+  'cat',
+  'bat',
+  'head',
+  'tail',
+  'wc',
+  'nl',
+  'tac',
+  'less',
+  'more',
+  'rg',
+  'grep',
+  'egrep',
+  'fgrep',
+  'ag',
+  'find',
+  'fd',
+  'fdfind',
+  'which',
+  'type',
+  'file',
+  'stat',
+  'du',
+  'df',
+  'sort',
+  'uniq',
+  'cut',
+  'tr',
+  'awk',
+  'sed',
+  'diff',
+  'jq',
+  'yq',
+  'echo',
+  'printf',
+  'basename',
+  'dirname',
+  'realpath',
+  'readlink',
+  'env',
+  'printenv',
+  'date',
+  'whoami',
+  'uname',
+  'column',
+  'true',
+  'test',
+  '[',
+  'git',
+]);
+const READ_FILE_PROGRAMS = new Set(['cat', 'bat', 'head', 'tail', 'less', 'more', 'nl', 'tac']);
+const GIT_READ_SUBCOMMANDS = new Set([
+  'status',
+  'log',
+  'diff',
+  'show',
+  'blame',
+  'grep',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'describe',
+  'shortlog',
+  'reflog',
+  'cat-file',
+  'name-rev',
+  'remote',
+  'config',
+]);
+
+function firstProgram(segment: string): string {
+  const tokens = segment.trim().split(/\s+/);
+  // 跳过前置环境变量赋值（FOO=1 rg …）
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
+  const head = tokens[i] ?? '';
+  return head.slice(head.lastIndexOf('/') + 1);
+}
+
+/**
+ * 判定一条 bash 命令是否纯只读（ls/rg/cat/git status …），用于精简模式把它当探索折进组。
+ * 保守策略：任何拿不准的（重定向、命令替换、写子命令、未知程序）都判为非只读。
+ */
+export function isReadOnlyCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  // 命令替换 / 反引号可藏任意命令
+  if (/\$\(|`/.test(trimmed)) return false;
+  // 去掉无害的 stderr 重定向后，剩余任何 > 都视为写文件
+  const withoutStderr = trimmed.replace(/2>&1|[12]?>\s*\/dev\/null/g, '');
+  if (withoutStderr.includes('>')) return false;
+  const segments = withoutStderr.split(/\|\|?|&&|;|\n/);
+  for (const raw of segments) {
+    const segment = raw.trim();
+    if (!segment) continue;
+    const tokens = segment.split(/\s+/);
+    const program = firstProgram(segment);
+    if (!READ_ONLY_PROGRAMS.has(program)) return false;
+    if (program === 'sed' && tokens.some((t) => /^-[a-zA-Z]*i/.test(t) || t === '--in-place'))
+      return false;
+    if (program === 'find' && tokens.some((t) => t === '-delete' || t === '-exec' || t === '-ok'))
+      return false;
+    if (program === 'git') {
+      const sub = tokens.find((t, i) => i > 0 && !t.startsWith('-'));
+      if (!sub || !GIT_READ_SUBCOMMANDS.has(sub)) return false;
+      // git remote add / git config --global x y 之类的写法
+      const rest = tokens.slice(tokens.indexOf(sub) + 1).filter((t) => !t.startsWith('-'));
+      if ((sub === 'remote' || sub === 'config') && rest.length > 1) return false;
+    }
+  }
+  return true;
+}
+
+/** 精简模式下按「探索」处理的工具行：只读工具，或只读的 bash 命令 */
+export function isReadOnlyTool(item: { name: string; summary: string }): boolean {
+  return (
+    READ_ONLY_TOOLS.has(item.name) || (item.name === 'bash' && isReadOnlyCommand(item.summary))
+  );
+}
 
 /**
  * 工具行分组折叠（折中方案）：
@@ -502,7 +635,7 @@ export function foldTimeline(
   const compact = options.compact === true;
   const lastUserIndex = items.findLastIndex((item) => item.kind === 'user');
   const inSegment = (s: TimelineItem): boolean =>
-    s.kind === 'thinking' || (s.kind === 'tool' && (!compact || READ_ONLY_TOOLS.has(s.name)));
+    s.kind === 'thinking' || (s.kind === 'tool' && (!compact || isReadOnlyTool(s)));
   const result: TimelineItem[] = [];
   let i = 0;
   while (i < items.length) {
@@ -530,7 +663,7 @@ export function foldTimeline(
     } else {
       const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
       for (const row of groupRows) {
-        if (row.kind === 'tool') classifyTool(row.name, stats);
+        if (row.kind === 'tool') classifyTool(row.name, row.summary, stats, compact);
       }
       const key = `group-${segment[0].key}`;
       const expanded = expandedKeys.has(key);

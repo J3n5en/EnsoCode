@@ -37,7 +37,7 @@ import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration, formatTokens } from '@/stores/sessions/stats';
-import type { TimelineItem } from '@/stores/sessions/timeline';
+import { isReadOnlyTool, type TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
@@ -426,14 +426,12 @@ function UserText({
   );
 }
 
-const READ_ONLY_TOOLS = new Set(['read', 'grep', 'find', 'glob', 'ls']);
-
 /** 精简模式下贴紧排的行：探索组头 / 只读一行 / 夹在其间的思考行（对齐 Cursor 的行距） */
 export function isCompactRow(item: TimelineItem): boolean {
   return (
     item.kind === 'tool-group' ||
     item.kind === 'thinking' ||
-    (item.kind === 'tool' && READ_ONLY_TOOLS.has(item.name))
+    (item.kind === 'tool' && isReadOnlyTool(item))
   );
 }
 
@@ -995,7 +993,7 @@ function ToolGroupRow({
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const { t } = useI18n();
   const compactReadOnly = useSettingsStore((s) => s.compactReadOnlyTools);
-  const compact = compactReadOnly && READ_ONLY_TOOLS.has(item.name);
+  const compact = compactReadOnly && isReadOnlyTool(item);
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
   const hasWrite = Boolean(item.writeContent);
   const expandable = hasDiff || hasWrite || Boolean(item.output);
