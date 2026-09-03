@@ -41,6 +41,12 @@ worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared �
 - `sameChild` 的 exact generation 比对（旧 / 伪造 generation 一律拒）
 - `terminateGeneration` 的级联撤销
 
+**撤销边界只能是 child 生命周期，不能是回合结束。** `trySettle` 只收口「本次派发
+任务」（发完成通知、清 active），**不得调 `terminateGeneration`**：child 会话在派发轮
+结束后仍活着并继续接后续轮次，提前撤销会让第二轮起的 `enso_app` 全部返回
+`not bound`（现象：第一轮添加成功、后面删除全被拒）。合法撤销点只有
+`child-ended` / `child-rejected` / `worker-exited` / `releaseWindow`。
+
 receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派发轮次），
 不是 child 内部每轮的 uuid，否则跨 turn 的 receipt 在协调器侧关联不上。
 
