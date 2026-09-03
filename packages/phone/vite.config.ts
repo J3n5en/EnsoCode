@@ -7,9 +7,13 @@ import { defineConfig } from 'vite';
 /** 构建时固化当前 commit 短哈希，侧边栏展示版本用（非 git 环境降级为 dev） */
 const commit = (() => {
   try {
-    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+    const hash = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
       .toString()
       .trim();
+    const dirty = execSync('git status --porcelain', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    return dirty ? `${hash}-dirty` : hash;
   } catch {
     return 'dev';
   }
