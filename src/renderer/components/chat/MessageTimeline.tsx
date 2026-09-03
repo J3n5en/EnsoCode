@@ -93,7 +93,13 @@ export function MessageTimeline({
   const atBottomRef = useRef(true);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const settleRef = useRef(0);
+  const followSettleRef = useRef(0);
   const observerRef = useRef<ResizeObserver | null>(null);
+  /** 内容长高贴底纠正中：忽略这段期间的 scroll 误判，避免展开瞬间被当成用户上滚 */
+  const pinningRef = useRef(false);
+  /** 用户正在/刚触摸过滚动容器：只有这时才允许解除跟随 */
+  const userScrollingRef = useRef(false);
+  const userScrollTimerRef = useRef(0);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
   /*
@@ -151,6 +157,7 @@ export function MessageTimeline({
     const scroller = scrollerRef.current;
     if (!scroller) return;
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
+      pinningRef.current = true;
       scroller.scrollTop = scroller.scrollHeight;
     }
   }, []);
@@ -171,6 +178,7 @@ export function MessageTimeline({
     let bound: HTMLElement | null = null;
     const abort = () => {
       cancelAnimationFrame(settleRef.current);
+      pinningRef.current = false;
       bound?.removeEventListener('touchstart', abort);
       bound?.removeEventListener('wheel', abort);
     };
@@ -196,7 +204,14 @@ export function MessageTimeline({
     setAtBottom(true);
     atBottomRef.current = true;
   }, [pinToBottom]);
-  useEffect(() => () => cancelAnimationFrame(settleRef.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(settleRef.current);
+      cancelAnimationFrame(followSettleRef.current);
+      window.clearTimeout(userScrollTimerRef.current);
+    },
+    []
+  );
 
   /*
    * 全量渲染下的跟随：内容常在提交之后才继续长高（markdown 渲染、代码高亮、图片），
@@ -211,7 +226,25 @@ export function MessageTimeline({
       observerRef.current = null;
       if (!el) return;
       const observer = new ResizeObserver(() => {
-        if (atBottomRef.current) pinToBottom();
+        if (!atBottomRef.current && !pinningRef.current) return;
+        /*
+         * 末条 edit/write 默认展开时高度一次涨几百 px。overflow-anchor 会钉住工具头，
+         * 单次写 scrollTop 又可能被 iOS 钳在半截；钳位 scroll 再把 atBottom 打成 false，
+         * 跟随停在工具开头、底下还露一截。短帧跟贴，避免每次流式增高都重启 1.2s 循环。
+         */
+        cancelAnimationFrame(followSettleRef.current);
+        let frames = 8;
+        const tick = () => {
+          pinToBottom();
+          const scroller = scrollerRef.current;
+          const leftover = scroller
+            ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+            : 0;
+          if (leftover <= 2) return;
+          if (--frames > 0) followSettleRef.current = requestAnimationFrame(tick);
+          else scrollToBottom();
+        };
+        tick();
       });
       observer.observe(el);
       observerRef.current = observer;
@@ -317,8 +350,40 @@ export function MessageTimeline({
             ref={(el) => {
               scrollerRef.current = el;
             }}
+            onTouchStart={() => {
+              userScrollingRef.current = true;
+              window.clearTimeout(userScrollTimerRef.current);
+            }}
+            onTouchEnd={() => {
+              window.clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = window.setTimeout(() => {
+                userScrollingRef.current = false;
+              }, 400);
+            }}
+            onWheel={() => {
+              userScrollingRef.current = true;
+              window.clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = window.setTimeout(() => {
+                userScrollingRef.current = false;
+              }, 400);
+            }}
             onScroll={(e) => {
               const el = e.currentTarget;
+              if (pinningRef.current) {
+                pinningRef.current = false;
+                atBottomRef.current = true;
+                setAtBottom(true);
+                return;
+              }
+              /*
+               * 进行中的 write/edit 会先以标题贴底、再突然插入 max-h-96 正文。
+               * 浏览器会为这次长高发一次非用户 scroll（钉住工具头），若据此解除跟随，
+               * 画面就停在工具开头。完成态不再默认展开，所以只有 loading 才复现。
+               */
+              if (!userScrollingRef.current) {
+                if (atBottomRef.current) pinToBottom();
+                return;
+              }
               const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
               if (value !== atBottomRef.current) {
                 atBottomRef.current = value;
@@ -333,7 +398,7 @@ export function MessageTimeline({
                 }
               }
             }}
-            className="h-full select-text overflow-y-auto"
+            className="h-full select-text overflow-y-auto [overflow-anchor:none]"
           >
             <div ref={attachContent}>
               <div className="h-6" />
