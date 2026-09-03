@@ -107,6 +107,8 @@ export interface Conversation extends SessionProjection {
   contextWindow?: number;
   /** Worker 拆账单；未 spawn 时缺省 */
   occupancy?: ContextOccupancy;
+  forkedFromConversationId?: string;
+  forkedFromEntryId?: string;
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
@@ -175,7 +177,10 @@ interface SessionsState {
   /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
   pendingAgentPrefill?: AgentTypeKey;
 
-  newConversation(projectId: string): Promise<string | null>;
+  newConversation(
+    projectId: string,
+    options?: { forkedFrom?: { conversationId: string; entryId: string } }
+  ): Promise<string | null>;
   /** 会话切到隔离 worktree（composer 选择器/右键菜单入口）。
    *  fresh（未开聊）直接绑定；已有内容走完整迁移（主树干净检查 + release + 迁移提醒）。返回错误或 null */
   moveConversationToWorktree(id: string): Promise<string | null>;
@@ -248,6 +253,8 @@ interface SessionsState {
   /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
+  forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
   retry(conversationId: string): void;
   /** ChatInput 消费预填文本后清除 */
@@ -380,9 +387,25 @@ export const useSessionsStore = create<SessionsState>()(
           conversationId: conversation.conversationId,
           version: conversation.version,
         });
-        return conversationResult.accepted
-          ? { project: projectResult.value, conversation: conversationResult.value }
-          : null;
+        if (!conversationResult.accepted) return null;
+        if (conversationResult.value.forkedFrom) {
+          const origin = conversationResult.value.forkedFrom;
+          set((state) => {
+            const local = state.conversations[conversationId];
+            if (!local) return state;
+            if (
+              local.forkedFromConversationId === origin.conversationId &&
+              local.forkedFromEntryId === origin.entryId
+            ) {
+              return state;
+            }
+            return patch(state, conversationId, {
+              forkedFromConversationId: origin.conversationId,
+              forkedFromEntryId: origin.entryId,
+            });
+          });
+        }
+        return { project: projectResult.value, conversation: conversationResult.value };
       }
       window.electronAPI.agent.onFocusSession((sessionId) => {
         const conversation = get().conversations[sessionId];
@@ -687,6 +710,40 @@ export const useSessionsStore = create<SessionsState>()(
               goal: { ...conversation.goal, status, note: event.note },
             });
           });
+          return;
+        }
+
+        if (event.type === 'fork-done') {
+          const targetId = event.targetConversationId;
+          const source = get().conversations[id];
+          if (event.error || !event.sessionFile) {
+            if (get().conversations[targetId]) get().removeConversation(targetId);
+            return;
+          }
+          set((state) => {
+            const target = state.conversations[targetId];
+            if (!target) return state;
+            return patch(state, targetId, {
+              sessionFile: event.sessionFile,
+              started: false,
+              spawning: false,
+              title: target.title || `${source?.title || ''} (分支)`.trim(),
+              lastProviderId: source?.lastProviderId,
+              lastModelId: source?.lastModelId,
+              reasoningEnabled: source?.reasoningEnabled,
+              thinkingLevel: source?.thinkingLevel,
+              presetId: source?.presetId,
+              approvalMode: source?.approvalMode,
+              worktree: source?.worktree,
+              forkedFromConversationId: source?.id,
+              forkedFromEntryId: event.entryId,
+              pendingWorkspaceNote: source?.worktree
+                ? `本会话从 ${source.title || '源会话'} 分出，与源会话共用工作区`
+                : undefined,
+            });
+          });
+          void get().resumeConversation(targetId);
+          get().selectConversation(targetId);
           return;
         }
 
@@ -1038,7 +1095,7 @@ export const useSessionsStore = create<SessionsState>()(
           });
         },
 
-        async newConversation(projectId) {
+        async newConversation(projectId, options) {
           const projection = await window.electronAPI.sourceAuthority.read();
           const activeConversationIds = new Set(
             projection.conversations
@@ -1050,17 +1107,19 @@ export const useSessionsStore = create<SessionsState>()(
               )
               .map((conversation) => conversation.conversationId)
           );
-          const existing = get().order.find((id) => {
-            const conversation = get().conversations[id];
-            return (
-              activeConversationIds.has(id) &&
-              conversation.projectId === projectId &&
-              !conversation.started &&
-              !conversation.sessionFile &&
-              conversation.messages.length === 0 &&
-              !conversation.title
-            );
-          });
+          const existing = options?.forkedFrom
+            ? undefined
+            : get().order.find((id) => {
+                const conversation = get().conversations[id];
+                return (
+                  activeConversationIds.has(id) &&
+                  conversation.projectId === projectId &&
+                  !conversation.started &&
+                  !conversation.sessionFile &&
+                  conversation.messages.length === 0 &&
+                  !conversation.title
+                );
+              });
           if (existing) {
             if (!(await activateConversationAuthority(existing))) return null;
             const pendingAgentPrefill = get().pendingAgentPrefill;
@@ -1084,6 +1143,7 @@ export const useSessionsStore = create<SessionsState>()(
             requestId: crypto.randomUUID(),
             projectId,
             projectVersion: project.version,
+            ...(options?.forkedFrom ? { forkedFrom: options.forkedFrom } : {}),
           });
           if (!created.accepted) return null;
           const id = created.value.conversationId;
@@ -1107,6 +1167,12 @@ export const useSessionsStore = create<SessionsState>()(
             thinkingLevel: defaultThinkingLevel ?? 'medium',
             ...defaultPreset,
             ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
+            ...(options?.forkedFrom
+              ? {
+                  forkedFromConversationId: options.forkedFrom.conversationId,
+                  forkedFromEntryId: options.forkedFrom.entryId,
+                }
+              : {}),
           };
           set((state) => ({
             conversations: { ...state.conversations, [id]: conversation },
@@ -1886,6 +1952,14 @@ export const useSessionsStore = create<SessionsState>()(
           void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
         },
 
+        async forkFromMessage(conversationId, userIndexFromEnd) {
+          return forkConversation(get, set, conversationId, { userIndexFromEnd });
+        },
+
+        async forkFromEntry(conversationId, entryId) {
+          return forkConversation(get, set, conversationId, { entryId });
+        },
+
         retry(conversationId) {
           const conversation = get().conversations[conversationId];
           if (
@@ -2106,3 +2180,35 @@ useSessionsStore.subscribe((state) => {
   }, MESSAGE_CACHE_TTL_MS);
   evictTimer.unref?.();
 });
+
+async function forkConversation(
+  get: () => {
+    conversations: Record<string, Conversation>;
+    newConversation: (
+      projectId: string,
+      options?: { forkedFrom?: { conversationId: string; entryId: string } }
+    ) => Promise<string | null>;
+    removeConversation: (id: string) => void;
+  },
+  _set: unknown,
+  sourceId: string,
+  anchor: { entryId: string } | { userIndexFromEnd: number }
+): Promise<string | null> {
+  const source = get().conversations[sourceId];
+  if (!source?.started || source.status !== 'idle' || source.parentId || source.historyOnly) {
+    return null;
+  }
+  const targetId = await get().newConversation(source.projectId, {
+    forkedFrom: {
+      conversationId: source.id,
+      entryId: 'entryId' in anchor ? anchor.entryId : `user:${anchor.userIndexFromEnd}`,
+    },
+  });
+  if (!targetId) return null;
+  const result = await window.electronAPI.agent.fork(sourceId, targetId, anchor);
+  if (!result.ok) {
+    get().removeConversation(targetId);
+    return null;
+  }
+  return targetId;
+}

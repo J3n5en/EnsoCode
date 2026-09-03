@@ -72,6 +72,56 @@ describe('SourceAuthorityRegistry', () => {
     ).toEqual({ accepted: false, error: 'Conversation authority is stale or unavailable.' });
   });
 
+  it('persists forkedFrom across create, markReady, and reload', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const registryFile = path.join(root, 'registry.json');
+    const ids = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
+    ];
+    const registry = new SourceAuthorityRegistry({
+      registryFile,
+      randomUuid: () => ids.shift()!,
+    });
+    const project = registry.createProject({ requestId: 'p', path: projectPath });
+    expect(project.accepted).toBe(true);
+    if (!project.accepted) return;
+    const source = registry.createConversation({
+      requestId: 'c1',
+      projectId: project.value.projectId,
+      projectVersion: project.value.version,
+    });
+    expect(source.accepted).toBe(true);
+    if (!source.accepted) return;
+    const origin = {
+      conversationId: source.value.conversationId,
+      entryId: 'leaf-1',
+    };
+    const branched = registry.createConversation({
+      requestId: 'c2',
+      projectId: project.value.projectId,
+      projectVersion: project.value.version,
+      forkedFrom: origin,
+    });
+    expect(branched.accepted).toBe(true);
+    if (!branched.accepted) return;
+    expect(branched.value.forkedFrom).toEqual(origin);
+    registry.markReady(
+      branched.value.conversationId,
+      '/tmp/branch.jsonl',
+      { providerId: 'p', modelId: 'm' },
+      { conversationId: source.value.conversationId, entryId: 'leaf-2' }
+    );
+    const reloaded = new SourceAuthorityRegistry({ registryFile });
+    expect(reloaded.conversation(branched.value.conversationId)?.forkedFrom).toEqual({
+      conversationId: source.value.conversationId,
+      entryId: 'leaf-2',
+    });
+  });
+
   it('skips legacy session files outside the safe session root', () => {
     const root = temporary();
     const projectPath = path.join(root, 'project');

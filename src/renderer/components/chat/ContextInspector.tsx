@@ -1,5 +1,6 @@
 import type { ContextOccupancy, ContextOccupancyBucketId } from '@shared/types/agent';
 import { useI18n } from '@/i18n';
+import { useSessionsStore } from '@/stores/sessions';
 import { formatTokens } from '@/stores/sessions/stats';
 
 const BUCKET_LABELS: Record<ContextOccupancyBucketId, string> = {
@@ -13,7 +14,13 @@ const BUCKET_LABELS: Record<ContextOccupancyBucketId, string> = {
   reminders: 'Reminders',
 };
 
-export function ContextInspector({ occupancy }: { occupancy?: ContextOccupancy }) {
+export function ContextInspector({
+  occupancy,
+  conversationId,
+}: {
+  occupancy?: ContextOccupancy;
+  conversationId?: string;
+}) {
   const { t } = useI18n();
   if (!occupancy) {
     return (
@@ -39,11 +46,26 @@ export function ContextInspector({ occupancy }: { occupancy?: ContextOccupancy }
         </p>
       )}
       {occupancy.compactedMessageCount > 0 && (
-        <p className="text-[11px] text-muted-foreground">
-          {t('{{count}} older messages are folded into the summary', {
-            count: occupancy.compactedMessageCount,
-          })}
-        </p>
+        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <p>
+            {t('{{count}} older messages are folded into the summary', {
+              count: occupancy.compactedMessageCount,
+            })}
+          </p>
+          {conversationId && occupancy.compactionEntryId && (
+            <button
+              type="button"
+              className="shrink-0 text-foreground/80 hover:underline"
+              onClick={() => {
+                void useSessionsStore
+                  .getState()
+                  .forkFromEntry(conversationId, occupancy.compactionEntryId!);
+              }}
+            >
+              {t('Open parallel session')}
+            </button>
+          )}
+        </div>
       )}
       <ul className="flex flex-col gap-1">
         {(Object.keys(BUCKET_LABELS) as ContextOccupancyBucketId[]).map((id) => {

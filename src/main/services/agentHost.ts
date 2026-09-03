@@ -595,6 +595,21 @@ export function rewindSession(
   });
 }
 
+export function forkSession(
+  identity: SessionIdentity,
+  targetConversationId: string,
+  anchor: { entryId: string } | { userIndexFromEnd: number }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'fork',
+    identity,
+    targetConversationId,
+    ...('entryId' in anchor
+      ? { entryId: anchor.entryId }
+      : { userIndexFromEnd: anchor.userIndexFromEnd }),
+  });
+}
+
 export function stopBackgroundTask(
   identity: SessionIdentity,
   taskId: string

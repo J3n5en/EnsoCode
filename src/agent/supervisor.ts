@@ -90,6 +90,7 @@ import {
   type EvictionCandidate,
   selectEvictable,
 } from './sessionEviction';
+import { branchSessionAtLeaf } from './sessionFork';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -779,6 +780,45 @@ export class SessionSupervisor {
         this.must(command.identity);
         this.bgTasks.stop(command.taskId);
         return;
+      case 'fork': {
+        const managed = this.must(command.identity);
+        if (managed.status !== 'idle' || managed.childIdentity) {
+          this.options.emit({
+            type: 'fork-done',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            targetConversationId: command.targetConversationId,
+            error: 'source-not-idle',
+          });
+          return;
+        }
+        const userEntries = managed.session.sessionManager
+          .getBranch()
+          .filter((entry) => entry.type === 'message' && entry.message.role === 'user');
+        const entryId =
+          command.entryId ??
+          userEntries[userEntries.length - 1 - (command.userIndexFromEnd ?? -1)]?.id;
+        if (!entryId) {
+          this.options.emit({
+            type: 'fork-done',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            targetConversationId: command.targetConversationId,
+            error: 'anchor-not-found',
+          });
+          return;
+        }
+        const branched = branchSessionAtLeaf(managed.session.sessionManager, entryId);
+        this.options.emit({
+          type: 'fork-done',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          targetConversationId: command.targetConversationId,
+          entryId,
+          ...(branched.ok ? { sessionFile: branched.sessionFile } : { error: branched.error }),
+        });
+        return;
+      }
       case 'rewind': {
         const managed = this.must(command.identity);
         if (managed.status !== 'idle') {

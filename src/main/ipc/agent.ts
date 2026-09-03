@@ -26,7 +26,7 @@ import {
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
-import { app, BrowserWindow, ipcMain, webContents } from 'electron';
+import { app, ipcMain, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
@@ -37,6 +37,7 @@ import {
   appendSessionCustomEntry,
   dismissChildSession,
   dismissCoworkerSession,
+  forkSession,
   promptChildSession,
   promptSession,
   releaseParentSession,
@@ -75,11 +76,11 @@ import {
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { titleModelCandidates } from '../services/titleSummary';
-import { sendToAllWindows, sendToWindow } from '../windows/createAppWindow';
+import { sendToAllWindows } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
-import { sessionWorktree } from './worktree';
+import { sessionWorktree, shareSessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -350,6 +351,26 @@ export function registerAgentHandlers(): void {
         workerEvent.model
       );
       sourceBindings?.invalidateBindingsForConversation(workerEvent.identity.sessionId);
+    }
+    if (workerEvent.type === 'fork-done') {
+      const target = sourceAuthority?.conversation(workerEvent.targetConversationId);
+      if (workerEvent.sessionFile && target) {
+        sourceAuthority?.markReady(
+          workerEvent.targetConversationId,
+          workerEvent.sessionFile,
+          target.selection ?? { providerId: 'unknown', modelId: 'unknown' },
+          workerEvent.entryId
+            ? { conversationId: workerEvent.identity.sessionId, entryId: workerEvent.entryId }
+            : target.forkedFrom
+        );
+        shareSessionWorktree(workerEvent.identity.sessionId, workerEvent.targetConversationId);
+      } else if (target) {
+        sourceAuthority?.removeConversation({
+          requestId: randomUUID(),
+          conversationId: target.conversationId,
+          version: target.version,
+        });
+      }
     }
     if (workerEvent.type === 'capability-invoke') {
       handleCapabilityInvoke(workerEvent);
@@ -787,6 +808,37 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid rewind or stale generation' };
       }
       return rewindSession(identity, userIndexFromEnd, restoreFiles as boolean | undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_FORK,
+    (
+      _event,
+      sessionId: unknown,
+      targetConversationId: unknown,
+      anchor: unknown
+    ): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      const record = asRecord(anchor);
+      const entryId = typeof record?.entryId === 'string' ? record.entryId : undefined;
+      const userIndexFromEnd =
+        typeof record?.userIndexFromEnd === 'number' ? record.userIndexFromEnd : undefined;
+      if (
+        !identity ||
+        typeof targetConversationId !== 'string' ||
+        !/^[0-9a-f-]{36}$/i.test(targetConversationId) ||
+        (entryId
+          ? userIndexFromEnd !== undefined
+          : userIndexFromEnd === undefined || userIndexFromEnd < 0)
+      ) {
+        return { ok: false, error: 'invalid fork or stale generation' };
+      }
+      return forkSession(
+        identity,
+        targetConversationId,
+        entryId ? { entryId } : { userIndexFromEnd: userIndexFromEnd as number }
+      );
     }
   );
 

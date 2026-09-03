@@ -238,6 +238,11 @@ export interface ContextOccupancy {
   compactionEntryId?: string;
 }
 
+export interface ConversationForkOrigin {
+  conversationId: string;
+  entryId: string;
+}
+
 export interface ConversationAuthority {
   conversationId: string;
   projectId: string;
@@ -246,6 +251,7 @@ export interface ConversationAuthority {
   version: number;
   sessionFile?: string;
   selection?: DefaultModelRef & { revision: number };
+  forkedFrom?: ConversationForkOrigin;
 }
 
 export type ConversationAuthorityProjection = ConversationAuthority;
@@ -280,6 +286,7 @@ export interface CreateConversationAuthorityRequest {
   projectVersion: number;
   /** 手机配对等已有 id：登记为 root，不再由 Main 另发 UUID */
   conversationId?: string;
+  forkedFrom?: ConversationForkOrigin;
 }
 
 export interface ConversationAuthorityRequest {
@@ -513,6 +520,13 @@ export type AgentCommand =
       identity: SessionIdentity;
       userIndexFromEnd: number;
       restoreFiles?: boolean;
+    }
+  | {
+      type: 'fork';
+      identity: SessionIdentity;
+      targetConversationId: string;
+      entryId?: string;
+      userIndexFromEnd?: number;
     }
   | { type: 'abort'; identity: SessionIdentity }
   | {
@@ -769,6 +783,15 @@ export type AgentWorkerEvent =
       seq: number;
       editorText?: string;
       filesRestored?: boolean;
+    }
+  | {
+      type: 'fork-done';
+      identity: SessionIdentity;
+      seq: number;
+      targetConversationId: string;
+      sessionFile?: string;
+      entryId?: string;
+      error?: string;
     }
   | { type: 'commands'; identity: SessionIdentity; seq: number; commands: SlashCommand[] }
   | {
@@ -1031,6 +1054,7 @@ export function parseConversationAuthority(value: unknown): ConversationAuthorit
       'version',
       'sessionFile',
       'selection',
+      'forkedFrom',
     ]) ||
     !isUuid(value.conversationId) ||
     !isUuid(value.projectId) ||
@@ -1048,6 +1072,16 @@ export function parseConversationAuthority(value: unknown): ConversationAuthorit
       !isNonEmptyString(value.selection.providerId) ||
       !isNonEmptyString(value.selection.modelId) ||
       !isSequence(value.selection.revision)
+    ) {
+      return null;
+    }
+  }
+  if (value.forkedFrom !== undefined) {
+    if (
+      !isRecord(value.forkedFrom) ||
+      !hasExactKeys(value.forkedFrom, ['conversationId', 'entryId']) ||
+      !isUuid(value.forkedFrom.conversationId) ||
+      !isNonEmptyString(value.forkedFrom.entryId)
     ) {
       return null;
     }
@@ -1117,13 +1151,29 @@ export function parseCreateConversationAuthorityRequest(
 ): CreateConversationAuthorityRequest | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['requestId', 'projectId', 'projectVersion', 'conversationId']) ||
+    !hasOnlyKeys(value, [
+      'requestId',
+      'projectId',
+      'projectVersion',
+      'conversationId',
+      'forkedFrom',
+    ]) ||
     !isNonEmptyString(value.requestId) ||
     !isUuid(value.projectId) ||
     !isSequence(value.projectVersion) ||
     (value.conversationId !== undefined && !isUuid(value.conversationId))
   ) {
     return null;
+  }
+  if (value.forkedFrom !== undefined) {
+    if (
+      !isRecord(value.forkedFrom) ||
+      !hasExactKeys(value.forkedFrom, ['conversationId', 'entryId']) ||
+      !isUuid(value.forkedFrom.conversationId) ||
+      !isNonEmptyString(value.forkedFrom.entryId)
+    ) {
+      return null;
+    }
   }
   return value as unknown as CreateConversationAuthorityRequest;
 }
@@ -1673,6 +1723,24 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.restoreFiles === undefined || typeof value.restoreFiles === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;
+    case 'fork': {
+      const hasEntry = typeof value.entryId === 'string';
+      const hasIndex = typeof value.userIndexFromEnd === 'number';
+      return hasOnlyKeys(value, [
+        'type',
+        'identity',
+        'targetConversationId',
+        'entryId',
+        'userIndexFromEnd',
+      ]) &&
+        parseAnySessionIdentity(value.identity) &&
+        isUuid(value.targetConversationId) &&
+        (hasEntry
+          ? !hasIndex && isNonEmptyString(value.entryId)
+          : hasIndex && isSequence(value.userIndexFromEnd))
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
     case 'abort':
     case 'abort-retry':
     case 'retry':
@@ -1831,6 +1899,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'rewind-done':
       return (value.editorText === undefined || typeof value.editorText === 'string') &&
         (value.filesRestored === undefined || typeof value.filesRestored === 'boolean')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'fork-done':
+      return isUuid(value.targetConversationId) &&
+        (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
+        (value.entryId === undefined || isNonEmptyString(value.entryId)) &&
+        (value.error === undefined || typeof value.error === 'string')
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'commands':

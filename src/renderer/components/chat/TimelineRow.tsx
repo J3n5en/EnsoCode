@@ -656,18 +656,36 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
       .filter((message) => message.role === 'user').length;
     state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
   };
+  const forkFromHere = () => {
+    const state = useSessionsStore.getState();
+    const conversation = displayedConversation(state);
+    if (!conversation) return;
+    if (conversation.messages[messageIndex]?.role !== 'user') return;
+    const userIndexFromEnd = conversation.messages
+      .slice(messageIndex + 1)
+      .filter((message) => message.role === 'user').length;
+    void state.forkFromMessage(conversation.id, userIndexFromEnd);
+  };
   const options = [
+    {
+      icon: GitBranch,
+      label: t('Open parallel session'),
+      desc: t('Keep this session and start a parallel one from here'),
+      action: () => forkFromHere(),
+    },
     {
       icon: Undo2,
       label: t('Conversation only'),
       desc: t('Rewind to this message'),
       restoreFiles: false,
+      action: () => setPendingRestoreFiles(false),
     },
     {
       icon: History,
       label: t('Conversation + files'),
       desc: t('Rewind and restore files to before this turn'),
       restoreFiles: true,
+      action: () => setPendingRestoreFiles(true),
     },
   ];
   return (
@@ -690,7 +708,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
             type="button"
             onClick={() => {
               setOpen(false);
-              setPendingRestoreFiles(option.restoreFiles);
+              option.action();
             }}
             className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
           >

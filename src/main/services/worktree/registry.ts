@@ -36,6 +36,13 @@ export class WorktreeRegistry {
     this.flush();
   }
 
+  share(fromConversationId: string, toConversationId: string): void {
+    const source = this.records.get(fromConversationId);
+    if (!source) return;
+    this.records.set(toConversationId, { ...source, conversationId: toConversationId });
+    this.flush();
+  }
+
   delete(conversationId: string): void {
     if (this.records.delete(conversationId)) this.flush();
   }

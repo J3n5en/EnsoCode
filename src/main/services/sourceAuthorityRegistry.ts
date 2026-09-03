@@ -243,6 +243,7 @@ export class SourceAuthorityRegistry {
       kind: 'root',
       lifecycle: 'draft',
       version: 1,
+      ...(request.forkedFrom ? { forkedFrom: { ...request.forkedFrom } } : {}),
     };
     this.conversations.set(value.conversationId, value);
     this.commit();
@@ -295,11 +296,17 @@ export class SourceAuthorityRegistry {
     return { accepted: true, value: this.copyConversation(conversation) };
   }
 
-  markReady(conversationId: string, sessionFile: string, model: ModelRef): void {
+  markReady(
+    conversationId: string,
+    sessionFile: string,
+    model: ModelRef,
+    forkedFrom?: ConversationAuthority['forkedFrom']
+  ): void {
     const conversation = this.conversations.get(conversationId);
     if (!conversation || conversation.lifecycle === 'ended') return;
     conversation.lifecycle = 'ready';
     conversation.sessionFile = sessionFile;
+    if (forkedFrom) conversation.forkedFrom = { ...forkedFrom };
     if (
       !conversation.selection ||
       conversation.selection.providerId !== model.providerId ||
@@ -323,7 +330,11 @@ export class SourceAuthorityRegistry {
   }
 
   private copyConversation(value: ConversationAuthority): ConversationAuthorityProjection {
-    return { ...value, ...(value.selection ? { selection: { ...value.selection } } : {}) };
+    return {
+      ...value,
+      ...(value.selection ? { selection: { ...value.selection } } : {}),
+      ...(value.forkedFrom ? { forkedFrom: { ...value.forkedFrom } } : {}),
+    };
   }
 
   private commit(): void {

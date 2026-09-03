@@ -244,6 +244,9 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
   AGENT_REWIND: surfaces('conversations.rewind', 'conversations.rewind-files'),
+  AGENT_FORK: excluded(
+    'Desktop parallel-session fork; renderer Command/Timeline only, not an Enso capability.'
+  ),
   AGENT_DISMISS_COWORKER: surfaces('team.dismiss-coworker'),
   AGENT_HIRE_COWORKER: surfaces('team.hire-coworker'),
   AGENT_ASK_RESPOND: surfaces('conversations.ask.respond'),

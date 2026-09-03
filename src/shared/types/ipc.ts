@@ -70,6 +70,7 @@ export const IPC_CHANNELS = {
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
+  AGENT_FORK: 'agent:fork',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_HIRE_COWORKER: 'agent:hire-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',

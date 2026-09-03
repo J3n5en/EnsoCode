@@ -1164,6 +1164,7 @@ interface ConversationRowProps {
     createdAt: number;
     projectId: string;
     messages: { timestamp?: number }[];
+    forkedFromConversationId?: string;
   };
   active: boolean;
   locale: Parameters<typeof formatRelativeTime>[1];
@@ -1212,6 +1213,9 @@ function ConversationRow({
   const archived = conversation.archived === true;
   const PinIcon = pinned ? PinOff : Pin;
   const displayTitle = conversation.title || t('New conversation');
+  const sourceTitle = conversation.forkedFromConversationId
+    ? useSessionsStore.getState().conversations[conversation.forkedFromConversationId]?.title
+    : undefined;
   const row = (
     <div
       data-slot="conversation-row"
@@ -1237,6 +1241,11 @@ function ConversationRow({
     >
       <ConversationDot conversation={conversation} />
       {isolated && <WorktreeBadge status={worktreeStatus} />}
+      {sourceTitle && (
+        <span className="truncate text-[10px] text-muted-foreground/70">
+          {t('Branched from {{title}}', { title: sourceTitle })}
+        </span>
+      )}
       {renaming ? (
         <ConversationTitleEdit
           title={displayTitle}

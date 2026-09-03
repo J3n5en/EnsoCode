@@ -211,6 +211,27 @@ describe('Main-owned source authority contracts', () => {
       })
     ).toBeNull();
     expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        forkedFrom: { conversationId, entryId: 'leaf-1' },
+      })
+    ).toEqual({
+      requestId: 'c1',
+      projectId,
+      projectVersion: 1,
+      forkedFrom: { conversationId, entryId: 'leaf-1' },
+    });
+    expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        forkedFrom: { conversationId, entryId: '' },
+      })
+    ).toBeNull();
+    expect(
       parseConversationAuthorityRequest({ requestId: 'c2', conversationId, version: 2 })
     ).not.toBeNull();
     expect(

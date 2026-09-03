@@ -573,7 +573,10 @@ export function StatsLine({ messages, conversation }: StatsLineProps) {
                   <Popover>
                     <PopoverTrigger className="rounded-sm outline-none">{segment}</PopoverTrigger>
                     <PopoverPopup side="top" className="w-72 [&_[data-slot=popover-viewport]]:p-0">
-                      <ContextInspector occupancy={conversation.occupancy} />
+                      <ContextInspector
+                        occupancy={conversation.occupancy}
+                        conversationId={conversation.id}
+                      />
                     </PopoverPopup>
                   </Popover>
                 ) : (
