@@ -383,3 +383,65 @@ pi createBranchedSession 会就地改源 SessionManager；改为打开源 jsonl 
 
 - 重启桌面后真机验证对话分支不吞源会话
 - D 项目记忆填 Inspector 记忆桶
+
+
+## Session 13: Usage statistics dashboard (Settings → Usage)
+
+**Date**: 2026-09-04
+**Task**: Usage statistics dashboard (Settings → Usage)
+**Branch**: `enso/3085e88f`
+
+### Summary
+
+本地 pi session jsonl 解析 + catalog 定价估算 + 设置页用量 dashboard（统计卡/每日趋势/分时热力图/模型与项目排行）。TDD 角色分离（tester coworker 写红灯），reviewer 评审后修 DST 日边界、活跃时长按周期裁剪、异步扫描、零单价即未定价、请求竞态。真机 CDP 验证通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9766e4f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 14: Coworker protocol: wait/report, parent-waiting message_main_agent, tester agent type + writeScope
+
+**Date**: 2026-09-04
+**Task**: Coworker protocol: wait/report, parent-waiting message_main_agent, tester agent type + writeScope
+**Branch**: `enso/3085e88f`
+
+### Summary
+
+Reviewed the tester coworker's session jsonl, then fixed the protocol gaps it exposed
+
+### Main Changes
+
+- coworker wait/report ops; message_main_agent no-op while parent waits; tester builtin type with writeScope-enforced edit/write; centralized settleRound; index tool-hired coworkers so tab prompts work; in-flight spawn name resolution; wait dedupes async notice
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b2054a5` | (see git log) |
+| `db0beaa` | (see git log) |
+| `871296d` | (see git log) |
+| `e16c96d` | (see git log) |
+| `90b5ccb` | (see git log) |
+| `60cdd83` | (see git log) |
+| `ebd3594` | (see git log) |
+| `5b11c3f` | (see git log) |
+| `25b59f7` | (see git log) |
+
+### Testing
+
+- [OK] 1542 vitest pass, typecheck clean, biome clean on touched files; CDP verification with fake provider: write scope rejects src/impl.ts, allows src/impl.test.ts; spawn+wait+report batch
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Consider exposing writeScope in AgentTypesSettings UI; harden agentDispatch.test.ts settle() flakiness noted by tester
