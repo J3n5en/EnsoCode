@@ -29,7 +29,8 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
   const max = Math.max(0, ...values);
   const n = Math.max(1, daily.length);
   const slot = W / n;
-  const barW = slot * (1 - GAP_RATIO);
+  // 单日视图不要拉成一整块色块
+  const barW = Math.min(slot * (1 - GAP_RATIO), 64);
   const plotH = H - PAD_TOP - PAD_BOTTOM;
   const scale = (v: number) => (max > 0 ? (v / max) * plotH : 0);
 
