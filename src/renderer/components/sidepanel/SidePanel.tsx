@@ -259,33 +259,13 @@ function NewTabMenu({
   );
 }
 
-/** 空态水印:无任何 tab 时的新建入口 */
-function Watermark(props: IWatermarkPanelProps) {
-  const { t } = useI18n();
-  const { conversationId, projectId } = useContext(PanelContext);
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-      <p className="text-sm text-muted-foreground">
-        {t('No tabs yet. Create one to get started.')}
-      </p>
-      <NewTabMenu
-        onNewTerminal={() =>
-          addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
-        }
-        onNewChanges={() =>
-          addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
-        }
-        onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
-        onNewBrowser={() =>
-          addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
-        }
-      />
-    </div>
-  );
-}
-
-/** 每个分组 tab 条右侧的 + 按钮:新 tab 落在该组 */
-function GroupRightActions(props: IDockviewHeaderActionsProps) {
+function SidePanelHeaderActions({
+  containerApi,
+  group,
+}: {
+  containerApi: DockviewApi;
+  group?: IDockviewHeaderActionsProps['group'];
+}) {
   const { t } = useI18n();
   const { conversationId, projectId } = useContext(PanelContext);
   const fullscreen = useSidePanelStore((s) => s.fullscreen);
@@ -304,24 +284,61 @@ function GroupRightActions(props: IDockviewHeaderActionsProps) {
       <NewTabMenu
         compact
         onNewTerminal={() => {
-          props.containerApi.addPanel({
-            id: crypto.randomUUID(),
-            component: 'terminal',
-            title: nextTerminalTitle(props.containerApi, t('Terminal')),
-            params: { conversationId, projectId },
-            position: { referenceGroup: props.group },
-          });
+          if (group) {
+            containerApi.addPanel({
+              id: crypto.randomUUID(),
+              component: 'terminal',
+              title: nextTerminalTitle(containerApi, t('Terminal')),
+              params: { conversationId, projectId },
+              position: { referenceGroup: group },
+            });
+            return;
+          }
+          addTerminalPanel(containerApi, conversationId, projectId, t('Terminal'));
         }}
-        onNewChanges={() =>
-          addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
-        }
-        onNewFiles={() => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))}
-        onNewBrowser={() =>
-          addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
-        }
+        onNewChanges={() => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))}
+        onNewFiles={() => addFilesPanel(containerApi, conversationId, projectId, t('Files'))}
+        onNewBrowser={() => addBrowserPanel(containerApi, conversationId, projectId, t('Browser'))}
       />
     </div>
   );
+}
+
+/** 空态水印:无任何 tab 时的新建入口 */
+function Watermark(props: IWatermarkPanelProps) {
+  const { t } = useI18n();
+  const { conversationId, projectId } = useContext(PanelContext);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
+        <SidePanelHeaderActions containerApi={props.containerApi} />
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          {t('No tabs yet. Create one to get started.')}
+        </p>
+        <NewTabMenu
+          onNewTerminal={() =>
+            addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
+          }
+          onNewChanges={() =>
+            addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
+          }
+          onNewFiles={() =>
+            addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))
+          }
+          onNewBrowser={() =>
+            addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+/** 每个分组 tab 条右侧的 + 按钮:新 tab 落在该组 */
+function GroupRightActions(props: IDockviewHeaderActionsProps) {
+  return <SidePanelHeaderActions containerApi={props.containerApi} group={props.group} />;
 }
 
 const DOCK_COMPONENTS = {
