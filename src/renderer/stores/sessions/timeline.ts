@@ -60,6 +60,8 @@ export type TimelineItem =
       children: TimelineItem[];
     }
   | { kind: 'error'; key: string; text: string }
+  /** pi 的 compaction 摘要：之前的历史已被压缩出 LLM 上下文，渲染为分隔行 */
+  | { kind: 'compaction'; key: string; summary: string; tokensBefore: number | null }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
@@ -279,6 +281,15 @@ function buildMessageTimeline(
       if (text || images.length > 0) {
         items.push({ kind: 'user', key: `${messageIndex}`, text, images });
       }
+      return;
+    }
+    if (message.role === 'compactionSummary') {
+      items.push({
+        kind: 'compaction',
+        key: `${messageIndex}`,
+        summary: partText(message),
+        tokensBefore: message.tokensBefore ?? null,
+      });
       return;
     }
     if (message.role === 'toolResult') return;

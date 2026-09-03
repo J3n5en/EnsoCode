@@ -15,6 +15,7 @@ import {
   History,
   ListTodo,
   LoaderCircle,
+  PackageMinus,
   RefreshCw,
   Sparkles,
   Target,
@@ -35,7 +36,7 @@ import { type TFunction, useI18n } from '@/i18n';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { formatDuration } from '@/stores/sessions/stats';
+import { formatDuration, formatTokens } from '@/stores/sessions/stats';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
@@ -117,6 +118,10 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'error' && a.text === b.text;
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
+    case 'compaction':
+      return (
+        b.kind === 'compaction' && a.summary === b.summary && a.tokensBefore === b.tokensBefore
+      );
     case 'session-custom':
       return b.kind === 'session-custom' && a.entry === b.entry;
   }
@@ -471,6 +476,8 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       );
     case 'task-note':
       return <TaskNoteRow item={item} />;
+    case 'compaction':
+      return <CompactionRow item={item} />;
     case 'session-custom':
       return <SessionCustomRow entry={item.entry} />;
   }
@@ -872,6 +879,41 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
               : t('(no log available)')}
           </pre>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** compaction 分隔：之上的历史已被压缩出模型上下文；点击展开看模型拿到的摘要 */
+function CompactionRow({ item }: { item: Extract<TimelineItem, { kind: 'compaction' }> }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const label =
+    item.tokensBefore === null
+      ? t('Context compacted')
+      : t('Context compacted ({{tokens}} tokens before)', {
+          tokens: formatTokens(item.tokensBefore),
+        });
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3"
+        title={t('Messages above are no longer in the model context; only this summary is.')}
+      >
+        <span className="h-px flex-1 bg-border" />
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+          <PackageMinus className="h-3 w-3" />
+          {label}
+          <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </button>
+      {expanded && (
+        <pre className="mt-1.5 max-h-80 overflow-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {item.summary || t('(summary unavailable)')}
+        </pre>
       )}
     </div>
   );

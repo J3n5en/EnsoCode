@@ -615,6 +615,11 @@ export const zhTranslations: Record<string, string> = {
   '(log unavailable)': '(日志不可用)',
   'Loading…': '加载中…',
   '(no log available)': '(暂无日志)',
+  'Context compacted': '上下文已压缩',
+  'Context compacted ({{tokens}} tokens before)': '上下文已压缩（压缩前 {{tokens}} tokens）',
+  'Messages above are no longer in the model context; only this summary is.':
+    '以上消息已不在模型上下文中，模型只看到这份摘要。',
+  '(summary unavailable)': '(摘要不可用)',
   Note: '注意',
   Tip: '提示',
   Important: '重要',

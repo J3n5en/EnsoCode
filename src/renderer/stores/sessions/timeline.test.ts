@@ -666,3 +666,39 @@ describe('工具路径摘要相对化', () => {
     ).toMatchObject({ summary: 'pnpm test' });
   });
 });
+
+describe('compaction 摘要行', () => {
+  it('compactionSummary 消息渲染为 compaction 行，带摘要与压缩前 token 数', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        {
+          role: 'compactionSummary',
+          content: [{ type: 'text', text: 'SUMMARY' }],
+          tokensBefore: 9000,
+        },
+        user('new'),
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction', 'user']);
+    expect(timeline[1]).toMatchObject({
+      kind: 'compaction',
+      summary: 'SUMMARY',
+      tokensBefore: 9000,
+    });
+  });
+
+  it('compaction 行不打断 tool-group 折叠之外的顺序，且不被 foldTimeline 吞掉', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+      ],
+      false
+    );
+    const folded = foldTimeline(timeline, false, new Set());
+    expect(folded.map((item) => item.kind)).toEqual(['user', 'compaction', 'text']);
+  });
+});
