@@ -88,6 +88,10 @@ import type {
 } from '@shared/types/sidePanel';
 import type { UpdateStatus } from '@shared/types/updater';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
+import type {
+  WorkspaceSearchQueryRequest,
+  WorkspaceSearchQueryResult,
+} from '@shared/workspaceSearchQuery';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
@@ -319,7 +323,11 @@ const electronAPI = {
       text: string,
       sessionModel?: { providerId: string; modelId: string }
     ): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE, { conversationId, text, sessionModel }),
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE, {
+        conversationId,
+        text,
+        sessionModel,
+      }),
     /** 已启动会话就地换模型（未启动的会话只需记忆，下次 spawn 生效） */
     setModel: (
       sessionId: string,
@@ -722,6 +730,11 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
     },
+  },
+
+  workspaceSearch: {
+    query: (request: WorkspaceSearchQueryRequest): Promise<WorkspaceSearchQueryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SEARCH_QUERY, request),
   },
 };
 

@@ -357,6 +357,9 @@ export const IPC_PRODUCT_COVERAGE = {
   SSH_CONNECTIONS_LIST_DIRS: excluded(
     'Remote directory browsing helper for the add-project picker.'
   ),
+  WORKSPACE_SEARCH_QUERY: excluded(
+    'Desktop workspace search over local session projections; renderer Command Dialog only.'
+  ),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

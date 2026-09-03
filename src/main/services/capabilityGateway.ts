@@ -619,6 +619,7 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',
   'find-in-chat': 'mod+f',
+  'search-workspace': 'mod+k',
   'new-conversation': 'mod+n',
   'next-tab': process.platform === 'darwin' ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': process.platform === 'darwin' ? 'ctrl+shift+tab' : 'mod+shift+tab',

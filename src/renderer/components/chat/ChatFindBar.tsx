@@ -6,8 +6,17 @@ import { useI18n } from '@/i18n';
 
 export const OPEN_CHAT_FIND_EVENT = 'enso:open-chat-find';
 
-export function requestOpenChatFind() {
+let pendingFindQuery: string | undefined;
+
+export function requestOpenChatFind(query?: string) {
+  pendingFindQuery = query;
   window.dispatchEvent(new Event(OPEN_CHAT_FIND_EVENT));
+}
+
+export function consumePendingFindQuery(): string | undefined {
+  const query = pendingFindQuery;
+  pendingFindQuery = undefined;
+  return query;
 }
 
 export function ChatFindBar({

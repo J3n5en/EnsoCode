@@ -20,7 +20,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
-import { ChatFindBar, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
+import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { Composer } from './Composer';
 import { CoworkerTabs } from './CoworkerTabs';
 import { timelineSearchHits } from './chatSearch';
@@ -221,17 +221,30 @@ export function ChatView() {
 
   useEffect(() => {
     const open = () => {
+      const pending = consumePendingFindQuery();
       setFindOpen(true);
+      if (pending) {
+        setFindQuery(pending);
+        setFindIndex(0);
+      }
     };
     window.addEventListener(OPEN_CHAT_FIND_EVENT, open);
     return () => window.removeEventListener(OPEN_CHAT_FIND_EVENT, open);
   }, []);
 
+  const conversationId = conversation?.id;
   useEffect(() => {
+    const pending = consumePendingFindQuery();
     setFindIndex(0);
+    if (pending) {
+      setFindQuery(pending);
+      setFindOpen(true);
+      return;
+    }
+    if (!conversationId) return;
     setFindQuery('');
     setFindOpen(false);
-  }, [conversation?.id]);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!findOpen || findHits.length === 0) return;

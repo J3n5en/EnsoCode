@@ -20,6 +20,7 @@ import { Sidebar } from '@/components/chat/Sidebar';
 import { RemoteNodeView } from '@/components/nodes/RemoteNodeView';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
@@ -47,6 +48,7 @@ const MAX_WIDTH = 420;
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   useBackgroundImage();
+  const [searchOpen, setSearchOpen] = useState(false);
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;
@@ -141,6 +143,7 @@ export default function App() {
           'new-side-tab',
           'close-side-tab',
           'find-in-chat',
+          'search-workspace',
         ].some((key) => pressed === bindings[key as keyof typeof bindings])
       ) {
         return;
@@ -179,6 +182,9 @@ export default function App() {
       } else if (pressed === bindings['find-in-chat']) {
         e.preventDefault();
         requestOpenChatFind();
+      } else if (pressed === bindings['search-workspace']) {
+        e.preventDefault();
+        setSearchOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -255,6 +261,7 @@ export default function App() {
         )}
       </div>
       {!onboarded && <Onboarding />}
+      <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

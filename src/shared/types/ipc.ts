@@ -215,6 +215,8 @@ export const IPC_CHANNELS = {
   NODES_STATUS_CHANGED: 'nodes:status-changed',
   /** main → renderer：解密后的 host 下行帧 */
   NODES_MESSAGE: 'nodes:message',
+
+  WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
