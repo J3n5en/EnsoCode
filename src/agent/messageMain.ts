@@ -19,7 +19,7 @@ export function createMessageMainTool(
       'so continue your own work after sending and act on the reply when it comes.',
     promptSnippet:
       'message_main_agent: proactively message the main agent (hand off tasks, report findings). ' +
-      'Async, no reply channel — continue your own work after sending.',
+      'Async; any reply arrives later via coworker send — continue your own work meanwhile.',
     parameters: {
       type: 'object',
       properties: {

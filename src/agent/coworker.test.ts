@@ -87,7 +87,7 @@ describe('coworker tool model 参数', () => {
     expect(first).toMatch(/multi-round|follow-up/i);
   });
 
-  it('description/promptSnippet 与 guidelines 同向：不再勝省着用、不再勝先交差', () => {
+  it('description/promptSnippet 与 guidelines 同向：不再劝省着用、不再劝先交差', () => {
     const tool = createCoworkerTool(makeDeps());
     expect(tool.description).not.toMatch(/return to the user/);
     expect(tool.promptSnippet).not.toMatch(/prefer few/);
