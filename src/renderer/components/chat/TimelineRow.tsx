@@ -426,6 +426,17 @@ function UserText({
   );
 }
 
+const READ_ONLY_TOOLS = new Set(['read', 'grep', 'find', 'glob', 'ls']);
+
+/** 精简模式下贴紧排的行：探索组头 / 只读一行 / 夹在其间的思考行（对齐 Cursor 的行距） */
+export function isCompactRow(item: TimelineItem): boolean {
+  return (
+    item.kind === 'tool-group' ||
+    item.kind === 'thinking' ||
+    (item.kind === 'tool' && READ_ONLY_TOOLS.has(item.name))
+  );
+}
+
 export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
@@ -948,7 +959,7 @@ function ToolGroupRow({
         type="button"
         onClick={() => onToggle?.(item.key)}
         className={cn(
-          'flex w-full items-baseline gap-1.5 rounded py-0.5 text-left text-sm transition-colors hover:text-foreground',
+          'flex w-full items-baseline gap-1.5 text-left text-sm leading-6 transition-colors hover:text-foreground',
           item.expanded ? 'text-foreground' : 'text-foreground/70',
           item.exploring && 'animate-pulse'
         )}
@@ -979,7 +990,6 @@ function ToolGroupRow({
 }
 
 /** 只读探索工具：开关开时去卡片化为一行（与 timeline.ts 的 SEARCH_TOOLS + read 一致） */
-const READ_ONLY_TOOLS = new Set(['read', 'grep', 'find', 'glob', 'ls']);
 
 /** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
@@ -1012,7 +1022,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           className={cn(
             'flex min-w-0 flex-1 items-center gap-2 text-left',
             compact
-              ? 'rounded py-0.5 text-sm text-foreground/70 transition-colors hover:text-foreground'
+              ? 'text-sm leading-6 text-foreground/70 transition-colors hover:text-foreground'
               : 'px-3 py-1.5 text-xs',
             expandable && !compact && 'cursor-pointer hover:bg-muted/50',
             expandable && compact && 'cursor-pointer'

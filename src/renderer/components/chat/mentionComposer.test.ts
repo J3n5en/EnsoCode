@@ -525,7 +525,11 @@ describe('typed multi-entity mentions', () => {
       text: 'Submit',
       imageId: 'img-1',
     };
-    const segments = [{ type: 'text' as const, text: 'make ' }, ui, { type: 'text' as const, text: ' bigger' }];
+    const segments = [
+      { type: 'text' as const, text: 'make ' },
+      ui,
+      { type: 'text' as const, text: ' bigger' },
+    ];
     const wire = serializeSegments(segments);
     expect(wire).toBe(
       'make [Selected UI element "SubmitButton" — path: main > form > button:nth-of-type(2); text: Submit] bigger'
@@ -540,7 +544,8 @@ describe('typed multi-entity mentions', () => {
   });
 
   it('collapses ui-element ref lines to @label for titles/plain display', () => {
-    const wire = 'fix [Selected UI element "SubmitButton" — path: form > button; text: Submit] color';
+    const wire =
+      'fix [Selected UI element "SubmitButton" — path: form > button; text: Submit] color';
     expect(mentionDisplayText(wire)).toBe('fix @SubmitButton color');
   });
 

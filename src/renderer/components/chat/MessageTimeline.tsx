@@ -17,7 +17,7 @@ import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
-import { TimelineRow } from './TimelineRow';
+import { isCompactRow, TimelineRow } from './TimelineRow';
 
 /** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。 */
 export const CHAT_COL =
@@ -261,17 +261,22 @@ export function MessageTimeline({
     [searchQuery, activeHit?.key, activeHit?.nth]
   );
 
-  const renderRow = (item: TimelineItem) => (
-    <div
-      key={item.key}
-      data-nav-key={item.key}
-      className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
-    >
-      <RowErrorBoundary itemKey={item.key}>
-        <TimelineRow item={item} onToggleGroup={toggleGroup} />
-      </RowErrorBoundary>
-    </div>
-  );
+  // 精简模式：相邻两行都是探索类（组头/只读/思考）时贴紧排，末行到正文仍留常规间距
+  const renderRow = (item: TimelineItem, index: number) => {
+    const next = folded[index + 1];
+    const tight = compact && isCompactRow(item) && next !== undefined && isCompactRow(next);
+    return (
+      <div
+        key={item.key}
+        data-nav-key={item.key}
+        className={cn(CHAT_COL, tight ? 'pb-1' : 'pb-4', '[overflow-wrap:anywhere]')}
+      >
+        <RowErrorBoundary itemKey={item.key}>
+          <TimelineRow item={item} onToggleGroup={toggleGroup} />
+        </RowErrorBoundary>
+      </div>
+    );
+  };
   const renderFooter = () => (
     <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
       {busy && (
@@ -288,94 +293,94 @@ export function MessageTimeline({
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
-    <div className="@container relative min-h-0 flex-1">
-      <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
-      {items.length === 0 && !busy ? (
-        <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-          <p className="text-lg font-medium">{emptyTitle}</p>
-          <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
-        </div>
-      ) : items.length === 0 ? (
-        // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
-        <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
-          <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
-        </div>
-      ) : !virtualize ? (
-        <div
-          ref={(el) => {
-            scrollerRef.current = el;
-          }}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
-            if (value !== atBottomRef.current) {
-              atBottomRef.current = value;
-              setAtBottom(value);
-            }
-            if (onStartReached) {
-              if (el.scrollTop < 80 && !startReachedLatch.current) {
-                startReachedLatch.current = true;
-                onStartReached();
-              } else if (el.scrollTop > 240) {
-                startReachedLatch.current = false;
-              }
-            }
-          }}
-          className="h-full select-text overflow-y-auto"
-        >
-          <div ref={attachContent}>
-            <div className="h-6" />
-            {folded.map(renderRow)}
-            {renderFooter()}
+      <div className="@container relative min-h-0 flex-1">
+        <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
+        {items.length === 0 && !busy ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <p className="text-lg font-medium">{emptyTitle}</p>
+            <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
           </div>
-        </div>
-      ) : (
-        <Virtuoso
-          ref={virtuosoRef}
-          data={folded}
-          computeItemKey={(_, item) => item.key}
-          // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
-          followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
-          atBottomThreshold={AT_BOTTOM_THRESHOLD}
-          atBottomStateChange={(value) => {
-            setAtBottom(value);
-            atBottomRef.current = value;
-          }}
-          increaseViewportBy={{ top: 600, bottom: 600 }}
-          initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
-          // 可视范围起点附近的 user 轮次作为导航条高亮
-          rangeChanged={({ startIndex }) => {
-            scheduleActiveNavKey(() => {
-              let current: string | null = null;
-              for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
-                if (folded[i]?.kind === 'user') current = folded[i].key;
+        ) : items.length === 0 ? (
+          // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
+          <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
+            <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
+          </div>
+        ) : !virtualize ? (
+          <div
+            ref={(el) => {
+              scrollerRef.current = el;
+            }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
+              if (value !== atBottomRef.current) {
+                atBottomRef.current = value;
+                setAtBottom(value);
               }
-              return current;
-            });
-          }}
-          scrollerRef={(el) => {
-            scrollerRef.current = el instanceof HTMLElement ? el : null;
-          }}
-          className="h-full select-text"
-          components={{
-            Header: () => <div className="h-6" />,
-            Footer: renderFooter,
-          }}
-          itemContent={(_, item) => renderRow(item)}
-        />
-      )}
-      {!atBottom && items.length > 0 && (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background p-2 text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
-          title={t('Scroll to bottom')}
-        >
-          <ArrowDown className="h-4 w-4" />
-        </button>
-      )}
-    </div>
+              if (onStartReached) {
+                if (el.scrollTop < 80 && !startReachedLatch.current) {
+                  startReachedLatch.current = true;
+                  onStartReached();
+                } else if (el.scrollTop > 240) {
+                  startReachedLatch.current = false;
+                }
+              }
+            }}
+            className="h-full select-text overflow-y-auto"
+          >
+            <div ref={attachContent}>
+              <div className="h-6" />
+              {folded.map((item, index) => renderRow(item, index))}
+              {renderFooter()}
+            </div>
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuosoRef}
+            data={folded}
+            computeItemKey={(_, item) => item.key}
+            // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
+            followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+            atBottomThreshold={AT_BOTTOM_THRESHOLD}
+            atBottomStateChange={(value) => {
+              setAtBottom(value);
+              atBottomRef.current = value;
+            }}
+            increaseViewportBy={{ top: 600, bottom: 600 }}
+            initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
+            // 可视范围起点附近的 user 轮次作为导航条高亮
+            rangeChanged={({ startIndex }) => {
+              scheduleActiveNavKey(() => {
+                let current: string | null = null;
+                for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
+                  if (folded[i]?.kind === 'user') current = folded[i].key;
+                }
+                return current;
+              });
+            }}
+            scrollerRef={(el) => {
+              scrollerRef.current = el instanceof HTMLElement ? el : null;
+            }}
+            className="h-full select-text"
+            components={{
+              Header: () => <div className="h-6" />,
+              Footer: renderFooter,
+            }}
+            itemContent={(index, item) => renderRow(item, index)}
+          />
+        )}
+        {!atBottom && items.length > 0 && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background p-2 text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
+            title={t('Scroll to bottom')}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+        )}
+      </div>
     </ChatSearchHighlightContext.Provider>
   );
 }
@@ -385,8 +390,7 @@ function groupContainsKey(
   key: string
 ): boolean {
   return group.children.some(
-    (child) =>
-      child.key === key || (child.kind === 'tool-group' && groupContainsKey(child, key))
+    (child) => child.key === key || (child.kind === 'tool-group' && groupContainsKey(child, key))
   );
 }
 

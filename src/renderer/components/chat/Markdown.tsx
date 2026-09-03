@@ -4,9 +4,9 @@ import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { highlightNode } from './highlightQuery';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
+import { highlightNode } from './highlightQuery';
 import { MermaidRenderer } from './MermaidRenderer';
 
 /**
