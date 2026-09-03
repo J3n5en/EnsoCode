@@ -261,15 +261,21 @@ export function MessageTimeline({
     [searchQuery, activeHit?.key, activeHit?.nth]
   );
 
-  // 精简模式：相邻两行都是探索类（组头/只读/思考）时贴紧排，末行到正文仍留常规间距
-  const renderRow = (item: TimelineItem, index: number) => {
+  // 精简模式：探索类行（组头/只读/思考）之间贴紧排；正文→探索 也收紧（正文自带 hover 操作条占位），
+  // 探索→正文留一点距离
+  const rowGap = (item: TimelineItem, index: number): string => {
+    if (!compact) return 'pb-4';
     const next = folded[index + 1];
-    const tight = compact && isCompactRow(item) && next !== undefined && isCompactRow(next);
+    const nextCompact = next !== undefined && isCompactRow(next);
+    if (isCompactRow(item)) return nextCompact ? 'pb-1' : 'pb-2';
+    return item.kind === 'text' && nextCompact ? 'pb-1' : 'pb-4';
+  };
+  const renderRow = (item: TimelineItem, index: number) => {
     return (
       <div
         key={item.key}
         data-nav-key={item.key}
-        className={cn(CHAT_COL, tight ? 'pb-1' : 'pb-4', '[overflow-wrap:anywhere]')}
+        className={cn(CHAT_COL, rowGap(item, index), '[overflow-wrap:anywhere]')}
       >
         <RowErrorBoundary itemKey={item.key}>
           <TimelineRow item={item} onToggleGroup={toggleGroup} />
