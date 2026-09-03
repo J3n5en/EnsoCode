@@ -346,3 +346,40 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: 对话分支副本分叉与 B/C 归档
+
+**Date**: 2026-09-03
+**Task**: 对话分支副本分叉与 B/C 归档
+**Branch**: `dev`
+
+### Summary
+
+pi createBranchedSession 会就地改源 SessionManager；改为打开源 jsonl 副本再分叉。归档 Context Inspector 与会话分叉子任务。父任务仍留搜索与项目记忆。
+
+### Main Changes
+
+- branchSessionFromPersistedFile：副本上分叉，源 sessionFile/内存树不动
+- 登记并归档 09-03-context-inspector / 09-03-session-fork
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32dec92` | (see git log) |
+| `e128a5f` | (see git log) |
+| `503b342` | (see git log) |
+
+### Testing
+
+- [OK] vitest src/agent/sessionFork.test.ts 绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启桌面后真机验证对话分支不吞源会话
+- D 项目记忆填 Inspector 记忆桶
