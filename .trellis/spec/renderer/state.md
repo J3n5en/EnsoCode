@@ -28,6 +28,14 @@ stores/sessions/
    否则多窗口同步时另一个窗口不生效
 5. 会被主进程读取（去重比对）→ 同步 `src/main/services/assetScan/index.ts` 的 `existingKeys()`
 
+## 手机目录的 provider 口径
+
+`pairCatalog` 下发给手机的「模型服务」必须与桌面聊天选择器同一套可用判定：启用 + 凭证真实可用 + 启用模型（`usableProvidersForOauthSnapshot`）。
+
+订阅条目的凭证是 `oauthAccountKey`，`apiKey` 为空。只认 `apiKey` 会把已登录订阅全部滤掉，手机新建会话就只剩 API-key 服务。OAuth 快照从未 ready 到 ready 也要重新推目录，否则登录完成后手机仍看不到订阅。
+
+密钥、baseUrl、oauthAccountKey 仍只留在 renderer / main，不下发手机。
+
 ## 订阅要选片，不要整取
 
 ```tsx

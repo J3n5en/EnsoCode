@@ -1,6 +1,8 @@
 import { toPairProjectEntry } from '@enso/pair';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
+import { useOauthCredentialStore } from '@/stores/oauthCredentials';
+import { toPairProviderEntries } from '@/stores/pairCatalogProviders';
 import { useSessionsStore } from '@/stores/sessions';
 import { setPairViewedSession } from '@/stores/sessions/unread';
 import { useSettingsStore } from '@/stores/settings';
@@ -15,7 +17,7 @@ import {
 /**
  * 会话目录同步：会话标题、项目、provider 只存在于 renderer，
  * main 与 worker 都没有，故由此处 debounce 推给 main 供手机端展示。
- * providers 在这里剥掉 apiKey/baseUrl，密钥永不出 main。
+ * providers 与桌面选择器同口径，并剥掉 apiKey/baseUrl/oauthAccountKey，密钥永不出 main。
  */
 
 const DEBOUNCE_MS = 300;
@@ -77,17 +79,11 @@ function buildPayload(): PairCatalogPayload {
 
   const catalog = [...topLevel, ...children].map(toEntry);
 
-  // 只下发可用 provider（启用 + 有 key），且剥掉密钥与 baseUrl
-  const providers = settings.providers
-    .filter((p) => p.enabled && p.apiKey)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      models: p.models
-        .filter((m) => m.enabled !== false)
-        .map((m) => ({ id: m.id, ...(m.label ? { label: m.label } : {}) })),
-    }))
-    .filter((p) => p.models.length > 0);
+  // 与桌面选择器同一套可用口径（启用 + 凭证真实可用 + 启用模型），并剥掉密钥 / 账号 key
+  const providers = toPairProviderEntries(
+    settings.providers,
+    useOauthCredentialStore.getState().snapshot
+  );
 
   return {
     catalog,
@@ -122,6 +118,9 @@ export function bindPairCatalogSync(): void {
   schedulePush();
   useSessionsStore.subscribe((state, prev) => {
     if (state.conversations !== prev.conversations || state.order !== prev.order) schedulePush();
+  });
+  useOauthCredentialStore.subscribe((state, prev) => {
+    if (state.snapshot !== prev.snapshot) schedulePush();
   });
   useSettingsStore.subscribe((state, prev) => {
     if (
