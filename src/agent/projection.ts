@@ -35,6 +35,13 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.stopReason === 'string') projected.stopReason = value.stopReason;
   if (typeof value.errorMessage === 'string') projected.errorMessage = value.errorMessage;
   if (typeof value.timestamp === 'number') projected.timestamp = value.timestamp;
+  if (value.role === 'compactionSummary') {
+    // pi 的 compaction 消息用 summary 字段而不是 content
+    if (typeof value.summary === 'string') {
+      projected.content = [{ type: 'text', text: capText(value.summary) }];
+    }
+    if (typeof value.tokensBefore === 'number') projected.tokensBefore = value.tokensBefore;
+  }
   const usage = projectUsage(value.usage);
   if (usage) projected.usage = usage;
   if (value.role === 'toolResult' && value.toolName === 'todo') {

@@ -589,6 +589,8 @@ export interface ProjectedMessage {
   toolDurationMs?: number;
   /** subagent 工具 toolResult 的执行元数据 */
   subagentMeta?: { modelId?: string; outputTokens?: number; steps?: number };
+  /** compactionSummary 消息：压缩前的上下文 token 数 */
+  tokensBefore?: number;
 }
 
 export interface SessionSnapshot {

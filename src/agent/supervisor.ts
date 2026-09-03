@@ -98,6 +98,7 @@ import { createTodoTool } from './todo';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
+import { transcriptMessages } from './transcript';
 
 /** 子会话产物：实际 session、模型与精确工具集合。 */
 interface ChildSessionResult {
@@ -812,7 +813,7 @@ export class SessionSupervisor {
           }
         }
         const result = await managed.session.navigateTree(target.id);
-        this.reconcileMessages(managed, managed.session.messages as unknown[]);
+        this.reconcileMessages(managed, this.transcript(managed));
         this.options.emit({
           type: 'rewind-done',
           identity: managed.identity,
@@ -1429,7 +1430,7 @@ export class SessionSupervisor {
       ...(contextWindow !== undefined ? { contextWindow } : {}),
     });
     if (opts.resumeFile) {
-      managed.messages = (managed.session.messages as unknown[])
+      managed.messages = this.transcript(managed)
         .map(projectMessage)
         .filter((message): message is ProjectedMessage => message !== null);
       this.options.emit({
@@ -1954,8 +1955,12 @@ export class SessionSupervisor {
         }
         return;
       }
+      case 'compaction_end':
+        // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
+        this.reconcileMessages(managed, this.transcript(managed));
+        return;
       case 'agent_end': {
-        this.reconcileMessages(managed, managed.session.messages as unknown[]);
+        this.reconcileMessages(managed, this.transcript(managed));
         // pi 将自动重试瞬态错误（随后 auto_retry_start）：非终态，不 settle、
         // 不发 turn-completed、状态保持 running，否则输入框解锁后又自己跑起来
         if (event.willRetry) {
@@ -2070,6 +2075,14 @@ export class SessionSupervisor {
       index,
       message: decorated,
     });
+  }
+
+  /** 渲染层口径的完整记录：compaction 之前的历史 + pi 当前上下文 */
+  private transcript(managed: ManagedSession): unknown[] {
+    return transcriptMessages(
+      managed.session.sessionManager,
+      managed.session.messages as unknown[]
+    );
   }
 
   private reconcileMessages(managed: ManagedSession, rawMessages: unknown[]): void {
