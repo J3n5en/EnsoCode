@@ -25,7 +25,10 @@ export function GeneralSettings() {
         <p className="text-sm text-muted-foreground">{t('General application settings')}</p>
       </div>
 
-      <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+      <div
+        className="grid grid-cols-[140px_1fr] items-center gap-4"
+        data-settings-row="general.language"
+      >
         <span className="text-sm font-medium">{t('Language')}</span>
         <Select
           items={{ en: 'English', zh: '简体中文' }}
@@ -58,6 +61,7 @@ function SidePanelSection() {
   return (
     <div className="space-y-2">
       <SwitchRow
+        rowId="general.openChangesOnFileEdit"
         title={t('Open Changes when files are edited')}
         description={t(
           'Automatically show the side panel Changes tab after the agent edits a file'
@@ -66,6 +70,7 @@ function SidePanelSection() {
         onChange={setOpenChangesOnFileEdit}
       />
       <SwitchRow
+        rowId="general.compactReadOnlyTools"
         title={t('Compact read-only tool calls')}
         description={t(
           'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running'
@@ -82,14 +87,19 @@ function SwitchRow({
   description,
   checked,
   onChange,
+  rowId,
 }: {
   title: string;
   description: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  rowId?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row={rowId}
+    >
       <div className="min-w-0">
         <p className="text-sm">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
@@ -133,7 +143,7 @@ function ProxySection() {
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-settings-row="general.proxy">
       <div>
         <h4 className="text-sm font-medium">{t('Network proxy')}</h4>
         <p className="text-xs text-muted-foreground">
@@ -220,7 +230,7 @@ function UpdateSection() {
   const busy = status?.status === 'checking' || status?.status === 'downloading';
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-settings-row="general.updates">
       <div>
         <h4 className="text-sm font-medium">{t('Updates')}</h4>
         <p className="text-xs text-muted-foreground">{t('Application update settings')}</p>

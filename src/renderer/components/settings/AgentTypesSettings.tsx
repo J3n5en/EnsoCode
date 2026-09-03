@@ -30,7 +30,7 @@ export function AgentTypesSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-settings-row="agents.root">
         <h3 className="font-medium text-lg">{t('Agent types')}</h3>
         <p className="text-muted-foreground text-sm">
           {t(

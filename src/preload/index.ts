@@ -9,6 +9,8 @@ import type {
   StartOauthResult,
   StartOauthWizardRequest,
 } from '@shared/capabilities/types';
+import type { BrowserSearchTab } from '@shared/searchAnything';
+import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import type {
   CollectedAsset,
   CollectedProvider,
@@ -607,7 +609,15 @@ const electronAPI = {
     isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FULLSCREEN),
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
-    openSettings: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS),
+    openSettings: (link?: SettingsDeepLink): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
+    onSettingsDeepLink: (callback: (link: SettingsDeepLink) => void): (() => void) => {
+      const listener = (_: unknown, link: SettingsDeepLink) => callback(link);
+      ipcRenderer.on(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
+    },
+    consumeSettingsDeepLink: (): Promise<SettingsDeepLink | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME),
     popupMenu: (
       items: { id: string; label: string }[],
       x: number,
@@ -718,6 +728,8 @@ const electronAPI = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
     restoreTabs: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RESTORE_TABS),
+    listSearchableTabs: (): Promise<BrowserSearchTab[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_LIST_SEARCHABLE_TABS),
     onReveal: (
       callback: (event: { conversationId: string; tabId: string }) => void
     ): (() => void) => {

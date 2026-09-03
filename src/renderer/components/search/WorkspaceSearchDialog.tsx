@@ -1,6 +1,13 @@
+import type { BrowserSearchTab, SettingsSearchEntry } from '@shared/searchAnything';
+import {
+  buildSettingsCatalog,
+  recentBrowserTabs,
+  searchBrowserTabs,
+  searchSettingsEntries,
+} from '@shared/searchAnything';
 import type { WorkspaceSearchHit, WorkspaceSearchScope } from '@shared/workspaceSearch';
 import { searchWorkspace } from '@shared/workspaceSearch';
-import { useEffect, useMemo, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
 import {
   Command,
@@ -14,6 +21,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { useI18n } from '@/i18n';
+import { addSidePanelBrowser } from '@/lib/sidePanelDock';
 import { conversationToSearchDoc } from '@/lib/workspaceSearchDocs';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -29,10 +37,16 @@ export function WorkspaceSearchDialog({
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<WorkspaceSearchScope>('project');
   const [coldHits, setColdHits] = useState<WorkspaceSearchHit[]>([]);
+  const [browserTabs, setBrowserTabs] = useState<BrowserSearchTab[]>([]);
+  const [sshConnections, setSshConnections] = useState<Array<{ id: string; name: string }>>([]);
   const conversations = useSessionsStore((state) => state.conversations);
   const order = useSessionsStore((state) => state.order);
   const activeId = useSessionsStore((state) => state.activeId);
   const projects = useSettingsStore((state) => state.projects);
+  const providers = useSettingsStore((state) => state.providers);
+  const skills = useSettingsStore((state) => state.skills);
+  const mcpServers = useSettingsStore((state) => state.mcpServers);
+  const instructions = useSettingsStore((state) => state.instructions);
   const currentProjectId =
     (activeId ? conversations[activeId]?.projectId : undefined) ?? projects[0]?.id ?? '';
 
@@ -78,12 +92,62 @@ export function WorkspaceSearchDialog({
       .slice(0, 8);
   }, [conversations, currentProjectId, order, scope]);
 
+  const settingsCatalog = useMemo(
+    () =>
+      buildSettingsCatalog({
+        providers: providers.map((item) => ({ id: item.id, name: item.name })),
+        skills: skills.map((item) => ({ id: item.id, name: item.name })),
+        mcpServers: mcpServers.map((item) => ({ id: item.id, name: item.name })),
+        instructions: instructions.map((item) => ({ id: item.id, name: item.name })),
+        sshConnections,
+      }),
+    [instructions, mcpServers, providers, skills, sshConnections]
+  );
+
+  const settingsHits = useMemo(
+    () => (query.trim() ? searchSettingsEntries(settingsCatalog, query) : []),
+    [query, settingsCatalog]
+  );
+
+  const browserHits = useMemo(
+    () => (query.trim() ? searchBrowserTabs(browserTabs, query) : []),
+    [browserTabs, query]
+  );
+
+  const recentBrowsers = useMemo(() => recentBrowserTabs(browserTabs), [browserTabs]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenChange(false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [onOpenChange, open]);
+
   useEffect(() => {
     if (!open) {
       setQuery('');
       setColdHits([]);
       return;
     }
+    void window.electronAPI.browser
+      .listSearchableTabs()
+      .then(setBrowserTabs)
+      .catch(() => {
+        setBrowserTabs([]);
+      });
+    void window.electronAPI.sshConnections
+      .list()
+      .then((list) => {
+        setSshConnections(list.map((item) => ({ id: item.id, name: item.name })));
+      })
+      .catch(() => {
+        setSshConnections([]);
+      });
     const trimmed = query.trim();
     if (!trimmed || !currentProjectId) {
       setColdHits([]);
@@ -133,51 +197,101 @@ export function WorkspaceSearchDialog({
     }
   };
 
-  return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandDialogPopup>
-        <Command
-          items={hits}
-          itemToStringValue={(item) => {
-            const hit = item as WorkspaceSearchHit;
-            return `${hit.title} ${hit.snippet}`;
+  const openBrowser = (tab: BrowserSearchTab) => {
+    const sessions = useSessionsStore.getState();
+    const target = sessions.conversations[tab.conversationId];
+    const parentId = target?.parentId;
+    if (parentId && sessions.conversations[parentId]) {
+      sessions.selectConversation(parentId);
+      sessions.selectTab(parentId, tab.conversationId);
+    } else {
+      sessions.selectConversation(tab.conversationId);
+    }
+    addSidePanelBrowser({
+      conversationId: tab.conversationId,
+      tabId: tab.tabId,
+      title: tab.title || t('Browser'),
+    });
+    onOpenChange(false);
+  };
+
+  const openSetting = (entry: SettingsSearchEntry) => {
+    void window.electronAPI.window.openSettings({
+      category: entry.category as import('@shared/settingsDeepLink').SettingsCategory,
+      rowId: entry.id,
+    });
+    onOpenChange(false);
+  };
+
+  const trimmed = query.trim();
+  const empty =
+    trimmed.length > 0 &&
+    hits.length === 0 &&
+    browserHits.length === 0 &&
+    settingsHits.length === 0;
+
+  const closeOnEscape = (event: ReactKeyboardEvent | KeyboardEvent) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenChange(false);
+  };
+
+  const conversationScope = (
+    <div
+      className="ml-auto flex gap-0.5"
+      data-search-scope="conversation"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {(
+        [
+          ['project', 'This project'],
+          ['all', 'All projects'],
+          ['all-including-archived', 'Include archived'],
+        ] as const
+      ).map(([value, label]) => (
+        <button
+          key={value}
+          type="button"
+          tabIndex={-1}
+          className={`rounded-md px-1.5 py-0.5 text-[10px] ${
+            scope === value ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
+          }`}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setScope(value);
           }}
         >
+          {t(label)}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <CommandDialogPopup onKeyDown={closeOnEscape}>
+        <Command>
           <CommandInput
-            placeholder={t('Search conversations...')}
+            placeholder={t('Search anything...')}
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
+            onKeyDown={closeOnEscape}
           />
-          <div className="flex gap-1 px-3 pb-1.5">
-            {(
-              [
-                ['project', 'This project'],
-                ['all', 'All projects'],
-                ['all-including-archived', 'Include archived'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`rounded-md px-2 py-0.5 text-xs ${
-                  scope === value ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
-                }`}
-                onClick={() => setScope(value)}
-              >
-                {t(label)}
-              </button>
-            ))}
-          </div>
           <CommandList>
-            <CommandEmpty>{t('No matching conversations')}</CommandEmpty>
-            {!query.trim() && (
+            {empty && <CommandEmpty>{t('No matching results')}</CommandEmpty>}
+            {!trimmed && (
               <>
                 <CommandGroup>
-                  <CommandGroupLabel>{t('Recent')}</CommandGroupLabel>
+                  <CommandGroupLabel className="flex items-center gap-2">
+                    {t('Recent')}
+                    {conversationScope}
+                  </CommandGroupLabel>
                   {recent.map((conversation) => (
                     <CommandItem
                       key={conversation.id}
-                      value={conversation.id}
+                      value={`recent-${conversation.id}`}
                       onClick={() =>
                         openHit({
                           conversationId: conversation.id,
@@ -190,6 +304,23 @@ export function WorkspaceSearchDialog({
                     </CommandItem>
                   ))}
                 </CommandGroup>
+                {recentBrowsers.length > 0 && (
+                  <CommandGroup>
+                    <CommandGroupLabel>{t('Browser')}</CommandGroupLabel>
+                    {recentBrowsers.map((tab) => (
+                      <CommandItem
+                        key={`recent-browser-${tab.tabId}`}
+                        value={`recent-browser-${tab.tabId}`}
+                        onClick={() => openBrowser(tab)}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="truncate text-sm">{tab.title || tab.url}</span>
+                          <p className="truncate text-xs text-muted-foreground">{tab.url}</p>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
                 <CommandGroup>
                   <CommandGroupLabel>{t('Actions')}</CommandGroupLabel>
                   <CommandItem
@@ -214,31 +345,76 @@ export function WorkspaceSearchDialog({
                 </CommandGroup>
               </>
             )}
-            {query.trim() &&
-              hits.map((hit) => (
-                <CommandItem
-                  key={`${hit.conversationId}-${hit.field}`}
-                  value={hit.conversationId}
-                  onClick={() => openHit(hit)}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm">{hit.title}</span>
-                      {hit.isCurrent && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {t('Current')}
-                        </span>
-                      )}
-                      {hit.archived && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {t('Archived')}
-                        </span>
+            {trimmed.length > 0 && (
+              <CommandGroup>
+                <CommandGroupLabel className="flex items-center gap-2">
+                  {t('Conversations')}
+                  {conversationScope}
+                </CommandGroupLabel>
+                {hits.map((hit) => (
+                  <CommandItem
+                    key={`${hit.conversationId}-${hit.field}`}
+                    value={`conv-${hit.conversationId}-${hit.field}`}
+                    onClick={() => openHit(hit)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm">{hit.title}</span>
+                        {hit.isCurrent && (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {t('Current')}
+                          </span>
+                        )}
+                        {hit.archived && (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {t('Archived')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">{hit.snippet}</p>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {trimmed.length > 0 && browserHits.length > 0 && (
+              <CommandGroup>
+                <CommandGroupLabel>{t('Browser')}</CommandGroupLabel>
+                {browserHits.map((tab) => (
+                  <CommandItem
+                    key={`browser-${tab.tabId}`}
+                    value={`browser-${tab.tabId}`}
+                    onClick={() => openBrowser(tab)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm">{tab.title || tab.url}</span>
+                      <p className="truncate text-xs text-muted-foreground">{tab.url}</p>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {trimmed.length > 0 && settingsHits.length > 0 && (
+              <CommandGroup>
+                <CommandGroupLabel>{t('Settings')}</CommandGroupLabel>
+                {settingsHits.map((entry) => (
+                  <CommandItem
+                    key={entry.id}
+                    value={`settings-${entry.id}`}
+                    onClick={() => openSetting(entry)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm">{t(entry.title)}</span>
+                      {entry.description && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {t(entry.description)}
+                        </p>
                       )}
                     </div>
-                    <p className="truncate text-xs text-muted-foreground">{hit.snippet}</p>
-                  </div>
-                </CommandItem>
-              ))}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </CommandDialogPopup>

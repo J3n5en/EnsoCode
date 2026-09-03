@@ -15,6 +15,9 @@ export const IPC_CHANNELS = {
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed',
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+  /** main → settings renderer：打开后切分类并闪行 */
+  SETTINGS_DEEP_LINK: 'settings:deep-link',
+  SETTINGS_DEEP_LINK_CONSUME: 'settings:deep-link-consume',
   WINDOW_POPUP_MENU: 'window:popup-menu',
 
   // Local provider scan/import
@@ -169,6 +172,7 @@ export const IPC_CHANNELS = {
   /** main → renderer:agent 已打开页，请建 Browser 面板 */
   BROWSER_REVEAL: 'browser:reveal',
   BROWSER_RESTORE_TABS: 'browser:restore-tabs',
+  BROWSER_LIST_SEARCHABLE_TABS: 'browser:list-searchable-tabs',
   BROWSER_CLOSE_TAB: 'browser:close-tab',
   /** renderer → main:开关面板内嵌 DevTools */
   BROWSER_SET_DEVTOOLS: 'browser:set-devtools',

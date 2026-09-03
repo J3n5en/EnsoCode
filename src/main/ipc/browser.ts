@@ -55,6 +55,7 @@ export function registerBrowserHandlers(): void {
     await browserHost.clearData(kind as 'cookies' | 'cache' | 'all');
   });
   ipcMain.handle(IPC_CHANNELS.BROWSER_RESTORE_TABS, () => browserHost.restorePersistedTabs());
+  ipcMain.handle(IPC_CHANNELS.BROWSER_LIST_SEARCHABLE_TABS, () => browserHost.listSearchableTabs());
   ipcMain.handle(
     IPC_CHANNELS.BROWSER_SET_LOCKED,
     async (_event, conversationId: unknown, locked: unknown) => {

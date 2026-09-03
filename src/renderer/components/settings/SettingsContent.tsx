@@ -1,3 +1,4 @@
+import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import {
   Bot,
   FileText,
@@ -29,9 +30,41 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { SshSettings } from './SshSettings';
 
+function flashSettingsRow(rowId: string): void {
+  window.requestAnimationFrame(() => {
+    const el = document.querySelector(`[data-settings-row="${CSS.escape(rowId)}"]`);
+    if (!(el instanceof HTMLElement)) return;
+    el.scrollIntoView({ block: 'center' });
+    el.dataset.settingsFlash = 'true';
+    window.setTimeout(() => {
+      delete el.dataset.settingsFlash;
+    }, 1600);
+  });
+}
+
 export function SettingsContent() {
   const { t } = useI18n();
   const [activeCategory, setActiveCategory] = React.useState<SettingsCategory>('general');
+  const [flashRowId, setFlashRowId] = React.useState<string | null>(null);
+
+  const applyLink = React.useCallback((link: SettingsDeepLink) => {
+    setActiveCategory(link.category);
+    setFlashRowId(link.rowId);
+  }, []);
+
+  React.useEffect(() => {
+    void window.electronAPI.window.consumeSettingsDeepLink().then((link) => {
+      if (link) applyLink(link);
+    });
+    return window.electronAPI.window.onSettingsDeepLink(applyLink);
+  }, [applyLink]);
+
+  React.useLayoutEffect(() => {
+    if (!flashRowId) return;
+    flashSettingsRow(flashRowId);
+    const timer = window.setTimeout(() => setFlashRowId(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [flashRowId]);
 
   const categories: Array<{ id: SettingsCategory; icon: React.ElementType; label: string }> = [
     { id: 'general', icon: Settings, label: t('General') },

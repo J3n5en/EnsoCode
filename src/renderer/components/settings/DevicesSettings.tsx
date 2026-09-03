@@ -99,7 +99,7 @@ function AllowConnectionsSection() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="phone.root">
         <div>
           <h3 className="font-medium text-lg">{t('Allow connections')}</h3>
           <p className="text-muted-foreground text-sm">

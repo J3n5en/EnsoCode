@@ -186,6 +186,8 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_FULLSCREEN_CHANGED: excluded('Renderer fullscreen-state event transport.'),
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: excluded('macOS title-bar implementation detail.'),
   WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
+  SETTINGS_DEEP_LINK: excluded('Settings window deep-link transport.'),
+  SETTINGS_DEEP_LINK_CONSUME: excluded('Settings window deep-link handshake.'),
   WINDOW_POPUP_MENU: excluded('Native application menu popup; renderer chrome only.'),
   PROVIDERS_SCAN_LOCAL: surfaces('providers.import-local'),
   PROVIDERS_COLLECT_IMPORT: excluded('Second phase of the reviewed provider import flow.'),
@@ -343,6 +345,7 @@ export const IPC_PRODUCT_COVERAGE = {
   BROWSER_STATE: excluded('Side panel browser state push; renderer UI only.'),
   BROWSER_REVEAL: excluded('Side panel browser auto-open; renderer UI only.'),
   BROWSER_RESTORE_TABS: excluded('Side panel browser session restore; renderer UI only.'),
+  BROWSER_LIST_SEARCHABLE_TABS: excluded('Search Anything tab list; renderer UI only.'),
   BROWSER_CLOSE_TAB: excluded('Side panel browser tab close; renderer UI only.'),
   BROWSER_SET_DEVTOOLS: excluded('Side panel browser native DevTools toggle; renderer UI only.'),
   BROWSER_SET_DEVTOOLS_VIEWPORT: excluded(

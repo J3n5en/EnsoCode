@@ -28,7 +28,7 @@ export function PresetsSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="presets.root">
         <div>
           <h3 className="font-medium text-lg">{t('Presets')}</h3>
           <p className="text-muted-foreground text-sm">

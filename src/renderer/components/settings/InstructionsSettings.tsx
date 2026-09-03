@@ -23,7 +23,7 @@ export function InstructionsSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="instructions.root">
         <div>
           <h3 className="font-medium text-lg">{t('Instruction Files')}</h3>
           <p className="text-muted-foreground text-sm">
@@ -59,6 +59,7 @@ export function InstructionsSettings() {
             <div
               key={instruction.id}
               className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+              data-settings-row={`instructions.${instruction.id}`}
             >
               <div className="flex min-w-0 items-center gap-2">
                 <span

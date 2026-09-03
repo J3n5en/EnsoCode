@@ -26,7 +26,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'switch-model': 'Switch model',
   'focus-composer': 'Focus chat input',
   'find-in-chat': 'Find in conversation',
-  'search-workspace': 'Search workspace',
+  'search-workspace': 'Search anything',
   'new-conversation': 'New conversation',
   'next-tab': 'Next coworker tab',
   'prev-tab': 'Previous coworker tab',

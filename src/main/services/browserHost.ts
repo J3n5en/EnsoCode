@@ -37,6 +37,7 @@ import {
 } from '@shared/browser/tabPersist';
 import { assertAllowedUrl } from '@shared/browser/urlPolicy';
 import type { BrowserViewport } from '@shared/browser/viewport';
+import { mergeBrowserSearchTabs } from '@shared/searchAnything';
 import type { BrowserOp } from '@shared/types/agent';
 import type {
   BrowserClearKind,
@@ -1175,6 +1176,37 @@ export class BrowserHost {
 
   async restorePersistedTabs(): Promise<void> {
     this.loadPersisted();
+  }
+
+  listSearchableTabs(): import('@shared/searchAnything').BrowserSearchTab[] {
+    this.loadPersisted();
+    const live: import('@shared/searchAnything').BrowserSearchTab[] = [];
+    for (const tab of this.tabs.values()) {
+      if (!this.userTabs.has(tab.id)) continue;
+      const state = this.stateOf(tab);
+      if (!state.url.startsWith('http')) continue;
+      live.push({
+        tabId: tab.id,
+        conversationId: tab.ownerSessionId,
+        title: state.title,
+        url: state.url,
+        at: this.lastSeen.get(tab.id) ?? tab.createdAt,
+        live: true,
+      });
+    }
+    const persisted = Object.entries(this.persisted).flatMap(([tabId, saved]) => {
+      if (!saved.url) return [];
+      return [
+        {
+          tabId,
+          conversationId: saved.conversationId ?? tabId,
+          title: saved.title,
+          url: saved.url,
+          at: saved.at,
+        },
+      ];
+    });
+    return mergeBrowserSearchTabs(live, persisted);
   }
 
   /** 退出前：flush 后关掉全部 tab。 */
