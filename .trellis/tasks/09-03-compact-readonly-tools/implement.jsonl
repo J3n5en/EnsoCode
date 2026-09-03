@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/renderer/state.md", "reason": "settings store 加字段五步流程；本任务新增 compactReadOnlyTools 开关"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "开关文案走 t() 并同步 src/shared/i18n.ts 中文"}
+{"file": ".trellis/spec/renderer/styling.md", "reason": "只读一行化去卡片底色，需用语义令牌"}
+{"file": ".trellis/spec/testing.md", "reason": "foldTimeline 是纯函数，Red-Green 先写失败测试"}
