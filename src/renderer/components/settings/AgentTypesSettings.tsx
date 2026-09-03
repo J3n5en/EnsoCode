@@ -1,9 +1,10 @@
-import { isReservedAgentTypeName } from '@shared/builtinAgents';
-import type { AgentTypeEntry } from '@shared/types';
+import { ENSO_AGENT_TYPE_KEY, isReservedAgentTypeName } from '@shared/builtinAgents';
+import type { AgentTypeEntry, AgentTypeModelMode } from '@shared/types';
 import { hasProviderCredentials } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
-import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Bot, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +24,10 @@ import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
 
 export function AgentTypesSettings() {
   const { t } = useI18n();
+  const subagentModelsEnabled = useSettingsStore((state) => state.subagentModelsEnabled);
+  const subagentModels = useSettingsStore((state) => state.subagentModels);
+  const hasSubagentModels = subagentModelsEnabled && subagentModels.length > 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -33,13 +38,38 @@ export function AgentTypesSettings() {
           )}
         </p>
       </div>
-      <AgentTypeList />
+      {!hasSubagentModels && (
+        <Alert variant="warning" className="text-xs">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="text-xs text-foreground/90">
+            {t('Subagent models not configured warning')}
+          </AlertDescription>
+          <AlertAction>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2.5 text-xs bg-background/80 hover:bg-background"
+              onClick={() => {
+                void window.electronAPI.window.summonAgent({
+                  typeKey: ENSO_AGENT_TYPE_KEY,
+                  prompt: t('Ask Enso to configure subagent models'),
+                });
+              }}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              {t('Auto configure with AI')}
+            </Button>
+          </AlertAction>
+        </Alert>
+      )}
+      <AgentTypeList hasSubagentModels={hasSubagentModels} />
     </div>
   );
 }
 
 /** 类型清单：Enso 固定只读；内置可开关；自定义可增删改且保留名 fail-closed。 */
-export function AgentTypeList() {
+export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?: boolean }) {
   const { t } = useI18n();
   const agentTypes = useSettingsStore((state) => state.agentTypes);
   const removeAgentType = useSettingsStore((state) => state.removeAgentType);
@@ -95,6 +125,11 @@ export function AgentTypeList() {
               {type.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
             </p>
             <p className="truncate text-muted-foreground text-xs">{type.description}</p>
+            <p className="text-muted-foreground/80 text-[11px] mt-0.5">
+              {hasSubagentModels
+                ? t('Picked by main agent')
+                : `${t('Picked by main agent')} (${t('Follows the conversation model')})`}
+            </p>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setEditing({ defaults: type })}>
             <Pencil className="h-4 w-4" />
@@ -108,6 +143,16 @@ export function AgentTypeList() {
 
       {agentTypes.map((entry) => {
         const provider = providers.find((p) => p.id === entry.providerId);
+        const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
+        const modeLabel =
+          mode === 'agent_pick'
+            ? hasSubagentModels
+              ? t('Picked by main agent')
+              : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
+            : mode === 'fixed'
+              ? `${provider?.name ?? '?'} / ${entry.modelId}`
+              : t('Follows the conversation model');
+
         return (
           <div key={entry.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
             <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -120,9 +165,7 @@ export function AgentTypeList() {
                 {entry.tools === 'readonly' && <Badge variant="outline">{t('Read-only')}</Badge>}
               </p>
               <p className="truncate text-muted-foreground text-xs">
-                {entry.modelId
-                  ? `${provider?.name ?? '?'} / ${entry.modelId}`
-                  : t('Follows the conversation model')}
+                {modeLabel}
                 {entry.description ? ` · ${entry.description}` : ''}
               </p>
             </div>
@@ -149,6 +192,7 @@ export function AgentTypeList() {
         <AgentTypeEditDialog
           entry={editing !== 'new' && 'id' in editing ? editing : null}
           defaults={editing !== 'new' && 'defaults' in editing ? editing.defaults : undefined}
+          hasSubagentModels={hasSubagentModels}
           onClose={() => setEditing(null)}
         />
       )}
@@ -171,11 +215,13 @@ export const isCustomAgentTypeNameAllowed = (value: string): boolean => {
 export function AgentTypeEditDialog({
   entry,
   defaults,
+  hasSubagentModels = true,
   onClose,
 }: {
   entry: AgentTypeEntry | null;
   /** 编辑内置时的预填内容（保存生成同名 custom 覆盖，内置行随之隐藏；删除 custom 后内置恢复） */
   defaults?: Omit<AgentTypeEntry, 'id'>;
+  hasSubagentModels?: boolean;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -184,6 +230,9 @@ export function AgentTypeEditDialog({
   const updateAgentType = useSettingsStore((state) => state.updateAgentType);
 
   const seed = entry ?? defaults;
+  const initialMode: AgentTypeModelMode =
+    seed?.modelMode ?? (seed?.providerId && seed?.modelId ? 'fixed' : 'agent_pick');
+  const [modelMode, setModelMode] = React.useState<AgentTypeModelMode>(initialMode);
   const [name, setName] = React.useState(seed?.name ?? '');
   const [description, setDescription] = React.useState(seed?.description ?? '');
   const [systemPrompt, setSystemPrompt] = React.useState(seed?.systemPrompt ?? '');
@@ -208,14 +257,18 @@ export function AgentTypeEditDialog({
       description,
       systemPrompt,
       tools,
+      modelMode,
       skillIds,
       mcpServerIds,
-      ...(providerId && modelId ? { providerId, modelId } : {}),
+      ...(modelMode === 'fixed' && providerId && modelId ? { providerId, modelId } : {}),
     };
     if (entry) updateAgentType(entry.id, payload);
     else addAgentType(payload);
     onClose();
   };
+
+  const isSaveDisabled =
+    !isCustomAgentTypeNameAllowed(name) || (modelMode === 'fixed' && (!providerId || !modelId));
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -249,44 +302,61 @@ export function AgentTypeEditDialog({
               placeholder={t('You are a fast recon agent. Explore, never modify…')}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel>{t('Provider (optional)')}</FieldLabel>
-              <select
-                value={providerId}
-                onChange={(e) => {
-                  setProviderId(e.target.value);
-                  setModelId('');
-                }}
-                className="h-8 w-full rounded-md border bg-transparent px-2 text-sm outline-none"
-              >
-                <option value="">{t('Follow conversation')}</option>
-                {providers
-                  .filter((p) => p.enabled && hasProviderCredentials(p))
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
+          <Field>
+            <FieldLabel>{t('Model selection')}</FieldLabel>
+            <select
+              value={modelMode}
+              onChange={(e) => setModelMode(e.target.value as AgentTypeModelMode)}
+              className="h-8 w-full rounded-md border bg-transparent px-2 text-sm outline-none"
+            >
+              <option value="agent_pick">
+                {t('Must be picked by main agent')}
+                {!hasSubagentModels ? ` (${t('Follows the conversation model')})` : ''}
+              </option>
+              <option value="follow">{t('Follow conversation')}</option>
+              <option value="fixed">{t('Fixed model')}</option>
+            </select>
+          </Field>
+          {modelMode === 'fixed' && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field>
+                <FieldLabel>{t('Provider (optional)')}</FieldLabel>
+                <select
+                  value={providerId}
+                  onChange={(e) => {
+                    setProviderId(e.target.value);
+                    setModelId('');
+                  }}
+                  className="h-8 w-full rounded-md border bg-transparent px-2 text-sm outline-none"
+                >
+                  <option value="">{t('Select provider') || '选择服务商'}</option>
+                  {providers
+                    .filter((p) => p.enabled && hasProviderCredentials(p))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field>
+                <FieldLabel>{t('Model')}</FieldLabel>
+                <select
+                  value={modelId}
+                  onChange={(e) => setModelId(e.target.value)}
+                  disabled={!providerId}
+                  className="h-8 w-full rounded-md border bg-transparent px-2 text-sm outline-none disabled:opacity-50"
+                >
+                  <option value="">{providerId ? t('Select model') : '—'}</option>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.id}
                     </option>
                   ))}
-              </select>
-            </Field>
-            <Field>
-              <FieldLabel>{t('Model')}</FieldLabel>
-              <select
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                disabled={!providerId}
-                className="h-8 w-full rounded-md border bg-transparent px-2 text-sm outline-none disabled:opacity-50"
-              >
-                <option value="">{providerId ? t('Select model') : '—'}</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
+                </select>
+              </Field>
+            </div>
+          )}
           <Field>
             <FieldLabel>{t('Toolset')}</FieldLabel>
             <select
@@ -349,7 +419,7 @@ export function AgentTypeEditDialog({
           <Button variant="ghost" onClick={onClose}>
             {t('Cancel')}
           </Button>
-          <Button onClick={save} disabled={!isCustomAgentTypeNameAllowed(name)}>
+          <Button onClick={save} disabled={isSaveDisabled}>
             {t('Save')}
           </Button>
         </DialogFooter>

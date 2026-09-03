@@ -147,8 +147,16 @@ describe('Agent dispatch strict transport', () => {
     ).toBeNull();
     expect(parseAgentDispatchRequest({ ...dispatch, mainRevision: 4 }, known)).toBeNull();
     expect(parseAgentSummonRequest({ typeKey: 'agent:enso' }, known)).not.toBeNull();
+    expect(parseAgentSummonRequest({ typeKey: 'agent:enso', prompt: 'hello' }, known)).toEqual({
+      typeKey: 'agent:enso',
+      prompt: 'hello',
+    });
     expect(parseAgentSummonRequest({ typeKey: 'builtin:unknown' }, known)).toBeNull();
     expect(parseAgentComposerPrefillEvent({ typeKey: 'agent:enso' })).not.toBeNull();
+    expect(parseAgentComposerPrefillEvent({ typeKey: 'agent:enso', prompt: 'hi' })).toEqual({
+      typeKey: 'agent:enso',
+      prompt: 'hi',
+    });
   });
 
   it('mention candidate 支持 system/builtin/custom AgentType，不接受实例名路由', () => {

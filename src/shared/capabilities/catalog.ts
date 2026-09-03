@@ -245,6 +245,7 @@ const AGENT_TYPE_FIELDS = {
   description: { type: 'string' },
   systemPrompt: { type: 'string' },
   tools: { type: 'string', enum: ['readonly', 'all'] },
+  modelMode: { type: 'string', enum: ['agent_pick', 'follow', 'fixed'] },
   providerId: { type: 'string', minLength: 1 },
   modelId: { type: 'string', minLength: 1 },
   skillIds: STRING_ID_ARRAY_SCHEMA,

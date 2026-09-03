@@ -1,6 +1,7 @@
+import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import type { ModelProvider, ModelThinkingLevelOverride, SubagentModelEntry } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Sparkles, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
@@ -143,10 +144,17 @@ export function SubagentModelsSettings() {
     return null;
   }, [candidates, defaultModel]);
 
+  const handleAiConfigure = () => {
+    void window.electronAPI.window.summonAgent({
+      typeKey: ENSO_AGENT_TYPE_KEY,
+      prompt: t('Ask Enso to configure subagent models'),
+    });
+  };
+
   return (
     <section data-slot="subagent-models" className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h4 className="font-medium text-sm">{t('Let the agent pick subagent models')}</h4>
           <p className="mt-0.5 text-muted-foreground text-xs">
             {t(
@@ -154,7 +162,19 @@ export function SubagentModelsSettings() {
             )}
           </p>
         </div>
-        <Switch checked={enabled} onCheckedChange={setEnabled} />
+        <div className="flex shrink-0 items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 px-2.5 text-xs"
+            onClick={handleAiConfigure}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            {t('Auto configure with AI')}
+          </Button>
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </div>
       </div>
 
       {enabled && (

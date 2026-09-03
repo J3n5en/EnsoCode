@@ -85,7 +85,7 @@ export default function App() {
   useEffect(
     () =>
       window.electronAPI.window.onAgentComposerPrefill((prefill) => {
-        useSessionsStore.getState().prefillAgent(prefill.typeKey);
+        useSessionsStore.getState().prefillAgent(prefill.typeKey, prefill.prompt);
       }),
     []
   );

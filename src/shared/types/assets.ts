@@ -44,7 +44,10 @@ export interface Preset {
 
 export const DEFAULT_PRESET_ID = 'default';
 
-/** 内置 subagent 类型（默认启用,可关闭不可删；模型跟随会话） */
+/** 子代理模型选型模式：agent_pick（必须由主 agent 选择）、follow（跟随会话）、fixed（自选固定模型） */
+export type AgentTypeModelMode = 'agent_pick' | 'follow' | 'fixed';
+
+/** 内置 subagent 类型（默认启用,可关闭不可删；模型默认由主 agent 选择） */
 export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
   {
     name: 'scout',
@@ -53,6 +56,7 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are a fast reconnaissance agent. Read and search only — never modify files or run commands with side effects. ' +
       'Return a compact, well-structured report of findings with concrete file paths.',
     tools: 'readonly',
+    modelMode: 'agent_pick',
   },
   {
     name: 'worker',
@@ -61,6 +65,7 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are an implementation agent. Complete the assigned coding subtask end to end: read the relevant code, ' +
       'make the changes, and verify them (typecheck/tests where available). Report what you changed and any follow-ups.',
     tools: 'all',
+    modelMode: 'agent_pick',
   },
   {
     name: 'reviewer',
@@ -69,6 +74,7 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are a code review agent. Read the relevant code or diff and return a prioritized list of concrete issues ' +
       '(correctness first), each with file:line and a suggested fix. Do not modify anything.',
     tools: 'readonly',
+    modelMode: 'agent_pick',
   },
 ];
 
@@ -81,7 +87,9 @@ export interface AgentTypeEntry {
   description: string;
   /** 子会话系统提示（前置进任务 prompt） */
   systemPrompt: string;
-  /** 绑定模型；缺省 = 跟随父会话 */
+  /** 模型选型模式：agent_pick（必须由主 agent 选择）、follow（跟随会话）、fixed（自选固定模型） */
+  modelMode?: AgentTypeModelMode;
+  /** 绑定模型；在 modelMode 为 fixed 时必选 */
   providerId?: string;
   modelId?: string;
   /** 工具集：all 全部 / readonly 仅只读（read+grep/find/ls,无 bash/edit/write/MCP） */

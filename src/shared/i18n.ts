@@ -648,6 +648,15 @@ export const zhTranslations: Record<string, string> = {
   Pin: '置顶',
   Unpin: '取消置顶',
   Rename: '重命名',
+  'Model selection': '模型选择',
+  'Auto configure with AI': 'AI 自动配置',
+  'Ask Enso to configure subagent models':
+    '请帮我配置【允许子代理指定模型】（subagent-models），根据当前可用的模型服务，挑选适合子任务的便宜轻量模型和主力模型，并生成选型依据描述。',
+  'Must be picked by main agent': '必须由主 Agent 选择',
+  'Picked by main agent': '由主 Agent 选择',
+  'Fixed model': '自选固定模型',
+  'Subagent models not configured warning':
+    '未在【模型服务】中配置【允许子代理指定模型】。设为【必须由主 Agent 选择】的子代理类型将暂时回退为跟随会话。',
   'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.':
     '自定义子代理预设:系统提示、模型与工具集,主 agent 经 agent_type 参数选用。',
   'New agent type': '新建类型',

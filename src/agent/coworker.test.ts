@@ -68,4 +68,34 @@ describe('coworker tool model 参数', () => {
       /model parameter/
     );
   });
+
+  it('当 agent_type 锁定模型（allowModelOverride === false）时，spawn 传 model 报错拒绝', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'reviewer',
+          description: 'reviewer',
+          systemPrompt: '',
+          tools: 'readonly',
+          allowModelOverride: false,
+        },
+      ],
+    });
+    const tool = createCoworkerTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        {
+          operation: 'spawn',
+          name: 'bob',
+          task: 'do',
+          agent_type: 'reviewer',
+          model: 'OpenAI/gpt-cheap',
+        },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/does not allow custom model selection/i);
+  });
 });

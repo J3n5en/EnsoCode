@@ -123,6 +123,7 @@ export function registerWindowHandlers(): void {
     const window = focusMainWindow();
     sendToWindow(window, IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
       typeKey: parsed.typeKey,
+      ...(parsed.prompt ? { prompt: parsed.prompt } : {}),
     });
     return { ok: true };
   });

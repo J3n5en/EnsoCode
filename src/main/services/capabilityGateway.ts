@@ -564,6 +564,16 @@ function parseAgentTypeFields(
       : existing?.tools === 'all' || existing?.tools === 'readonly'
         ? existing.tools
         : 'readonly';
+  const modelMode =
+    params.modelMode === 'agent_pick' ||
+    params.modelMode === 'follow' ||
+    params.modelMode === 'fixed'
+      ? params.modelMode
+      : existing?.modelMode === 'agent_pick' ||
+          existing?.modelMode === 'follow' ||
+          existing?.modelMode === 'fixed'
+        ? existing.modelMode
+        : undefined;
   const providerId =
     typeof params.providerId === 'string'
       ? params.providerId
@@ -593,6 +603,7 @@ function parseAgentTypeFields(
             ? existing.systemPrompt
             : '',
       tools,
+      ...(modelMode ? { modelMode } : {}),
       ...(providerId && modelId ? { providerId, modelId } : {}),
       ...(skillIds.length > 0 ? { skillIds } : {}),
       ...(mcpServerIds.length > 0 ? { mcpServerIds } : {}),

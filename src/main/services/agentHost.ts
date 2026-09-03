@@ -310,8 +310,8 @@ export function spawnSession(
   );
   const skillPaths = enabledSkillPaths(preset);
   const mcpServers = enabledMcpServers(preset);
-  const agentTypes = configuredAgentTypes(authenticatedAccountKeys);
   const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
+  const agentTypes = configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
   const state = readSettingsState();
   const disabledTools = Array.isArray(state?.disabledBuiltinTools)
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
@@ -624,7 +624,8 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
 }
 
 function configuredAgentTypes(
-  authenticatedAccountKeys: ReadonlySet<string>
+  authenticatedAccountKeys: ReadonlySet<string>,
+  hasSubagentModels = false
 ): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
   const disabled = new Set(
@@ -637,16 +638,26 @@ function configuredAgentTypes(
   const customNames = new Set(custom.map((entry) => entry.name.trim().toLowerCase()));
   const builtins = BUILTIN_AGENT_TYPES.filter(
     (type) => !disabled.has(type.name) && !customNames.has(type.name)
-  ).map((type) => ({
-    name: type.name,
-    description: type.description,
-    systemPrompt: type.systemPrompt,
-    tools: type.tools,
-  }));
+  ).map((type) => {
+    // 只有配置了允许主 agent 选择的模型时，'agent_pick' 才生效；否则优雅回退到跟随会话（allowModelOverride = false）
+    const effectiveMode =
+      (type.modelMode ?? 'agent_pick') === 'agent_pick' && hasSubagentModels
+        ? 'agent_pick'
+        : 'follow';
+    return {
+      name: type.name,
+      description: type.description,
+      systemPrompt: type.systemPrompt,
+      tools: type.tools,
+      allowModelOverride: effectiveMode === 'agent_pick',
+    };
+  });
   const customs = custom.map((entry): AgentTypeSpawnConfig => {
     const resources = resolveAgentTypeResources(entry);
+    const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
+    const effectiveMode = mode === 'agent_pick' && !hasSubagentModels ? 'follow' : mode;
     const bound =
-      entry.providerId && entry.modelId
+      effectiveMode === 'fixed' && entry.providerId && entry.modelId
         ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
         : null;
     return {
@@ -654,6 +665,7 @@ function configuredAgentTypes(
       description: entry.description,
       systemPrompt: entry.systemPrompt,
       tools: entry.tools,
+      allowModelOverride: effectiveMode === 'agent_pick',
       ...(resources.ok && resources.skillPaths.length > 0
         ? { skillPaths: [...resources.skillPaths] }
         : {}),

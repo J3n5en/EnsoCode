@@ -153,6 +153,14 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
               `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
             );
           }
+          const targetType = agentTypeName
+            ? deps.agentTypes.find((type) => type.name === agentTypeName)
+            : undefined;
+          if (targetType && targetType.allowModelOverride === false && modelName) {
+            throw new Error(
+              `agent_type "${targetType.name}" does not allow custom model selection (it is locked to ${targetType.model ? targetType.model.modelId : 'conversation model'}).`
+            );
+          }
           const info = await deps.spawn(name.trim(), agentTypeName, modelName);
           // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
           const result = await deps.send(info.name, task, sendOptions);

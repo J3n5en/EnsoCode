@@ -93,4 +93,65 @@ describe('subagent tool model 参数', () => {
       /model parameter/
     );
   });
+
+  it('当 agent_type 锁定模型（allowModelOverride === false）时，主 agent 传 model 报错拒绝', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'fixed-worker',
+          description: 'fixed',
+          systemPrompt: '',
+          tools: 'all',
+          allowModelOverride: false,
+        },
+      ],
+    });
+    const tool = createSubagentTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        {
+          description: 'x',
+          prompt: 'do',
+          agent_type: 'fixed-worker',
+          model: 'OpenAI/gpt-cheap',
+        },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/does not allow custom model selection/i);
+  });
+
+  it('当 agent_type 设为必须自选（allowModelOverride === true）时，允许指定 model', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'scout',
+          description: 'scout',
+          systemPrompt: '',
+          tools: 'readonly',
+          allowModelOverride: true,
+        },
+      ],
+    });
+    const tool = createSubagentTool(deps);
+    const result = await tool.execute(
+      't1',
+      {
+        description: 'x',
+        prompt: 'do',
+        agent_type: 'scout',
+        model: 'OpenAI/gpt-cheap',
+      },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.createSubSession).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'scout' }),
+      cheapConfig
+    );
+    expect((result.details as { modelId?: string }).modelId).toBe('gpt-cheap');
+  });
 });

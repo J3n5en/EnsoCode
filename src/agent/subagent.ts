@@ -66,7 +66,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     .map(
       (type) =>
         `"${type.name}" — ${type.description || 'custom agent'}` +
-        `${type.model ? ` (model: ${type.model.modelId})` : ''}${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
+        `${type.allowModelOverride ? ' [custom model required]' : type.model ? ` (model: ${type.model.modelId})` : ' (follows conversation model)'}` +
+        `${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
     )
     .join('; ');
   const modelNames = deps.models.map((option) => option.name);
@@ -176,6 +177,11 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       if (modelName && !modelOption) {
         throw new Error(
           `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+        );
+      }
+      if (agentType && agentType.allowModelOverride === false && modelName) {
+        throw new Error(
+          `agent_type "${agentType.name}" does not allow custom model selection (it is locked to ${agentType.model ? agentType.model.modelId : 'conversation model'}).`
         );
       }
       const id = `agent-${++counter}-${Date.now().toString(36)}`;

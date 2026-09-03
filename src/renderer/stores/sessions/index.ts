@@ -199,7 +199,7 @@ interface SessionsState {
     task: AgentDispatchTask,
     selectedModel: DefaultModelRef | null
   ): Promise<AgentDispatchResult>;
-  prefillAgent(typeKey: AgentTypeKey): void;
+  prefillAgent(typeKey: AgentTypeKey, prompt?: string): void;
   clearAgentPrefill(conversationId: string): void;
   respondCapabilityAsk(
     conversationId: string,
@@ -1335,7 +1335,7 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        prefillAgent(typeKey) {
+        prefillAgent(typeKey, prompt) {
           const parentId = get().activeId;
           if (parentId && get().conversations[parentId]) {
             set((state) => ({
@@ -1343,13 +1343,23 @@ export const useSessionsStore = create<SessionsState>()(
               conversations: patch(state, parentId, {
                 activeTabId: undefined,
                 prefillAgentTypeKey: typeKey,
+                ...(prompt ? { draftText: prompt } : {}),
               }).conversations,
             }));
             return;
           }
           set({ pendingAgentPrefill: typeKey });
           const project = useSettingsStore.getState().projects[0];
-          if (project) void get().newConversation(project.id);
+          if (project) {
+            void get()
+              .newConversation(project.id)
+              .then(() => {
+                const newActiveId = get().activeId;
+                if (newActiveId && prompt) {
+                  set((state) => patch(state, newActiveId, { draftText: prompt }));
+                }
+              });
+          }
         },
 
         clearAgentPrefill(conversationId) {
