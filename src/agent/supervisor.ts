@@ -1335,10 +1335,13 @@ export class SessionSupervisor {
         }),
       wait: (name, opts) => withCoworker(name, (info) => this.coworkerWait(info.id, opts)),
       report: (name) =>
-        withCoworker(
-          name,
-          (info) => this.sessions.get(info.id)?.lastRoundSummary ?? '(no round completed yet)'
-        ),
+        withCoworker(name, (info) => {
+          const managed = this.sessions.get(info.id);
+          const base = managed?.lastRoundSummary ?? '(no round completed yet)';
+          return managed?.status === 'running' || managed?.roundPending
+            ? `${base}\n\n(a round is in progress — use coworker wait to get its result)`
+            : base;
+        }),
     });
     const askManager = this.createAskManager(identity);
     // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
@@ -1880,9 +1883,12 @@ export class SessionSupervisor {
       await this.gate.run(coworkerId, start);
       await done;
       const parentId = managed.parentId;
+      // 父正在 wait 阻塞等这一轮:结果由 wait 内联返回,不再重复通知
+      // (本等待者先于 wait 登记,在 wait 的 finally 复位 parentWaiting 之前运行)
       if (
         !parentId ||
         !this.sessions.has(coworkerId) ||
+        managed.parentWaiting ||
         managed.childMetadata?.dispatchOrigin === 'typed-mention'
       ) {
         return;

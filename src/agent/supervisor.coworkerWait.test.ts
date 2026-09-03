@@ -449,4 +449,59 @@ describe('SessionSupervisor coworker wait/report', () => {
 
     expect(await waitPromise).toMatch(/first round done/);
   });
+
+  it('wait 内联拿到本轮结果后,不再向父重复投递 finished a round 通知', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const { coworkerTool, coworkerSession, parentSession } = await spawnParentAndCoworker(events);
+    vi.advanceTimersByTime(2000);
+    await settle();
+    (parentSession.prompt as ReturnType<typeof vi.fn>).mockClear();
+    // 真实 pi 的 prompt 到 agent_end 之后才归;这里挂起,由测试手动驱动事件
+    coworkerSession.prompt = vi.fn(() => new Promise<undefined>(() => {}));
+
+    await coworkerTool.execute(
+      't1',
+      { operation: 'send', name: 'bob', message: 'second task' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    coworkerSession.emit({ type: 'agent_start' });
+    const waitPromise = textOf(
+      coworkerTool.execute(
+        't2',
+        { operation: 'wait', name: 'bob' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    );
+    coworkerSession.messages.push({ role: 'assistant', content: 'inline result' });
+    coworkerSession.emit({ type: 'agent_end', willRetry: false });
+    expect(await waitPromise).toMatch(/inline result/);
+
+    vi.advanceTimersByTime(2000);
+    await settle();
+    const notified = (parentSession.prompt as ReturnType<typeof vi.fn>).mock.calls.some((call) =>
+      String(call[0]).includes('finished a round')
+    );
+    expect(notified).toBe(false);
+  });
+
+  it('report 在一轮进行中时附注 in progress,提示改用 wait', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const { coworkerTool, coworkerSession } = await spawnParentAndCoworker(events);
+    coworkerSession.emit({ type: 'agent_start' });
+    const text = await textOf(
+      coworkerTool.execute(
+        't1',
+        { operation: 'report', name: 'bob' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    );
+    expect(text).toMatch(/in progress/);
+  });
 });
