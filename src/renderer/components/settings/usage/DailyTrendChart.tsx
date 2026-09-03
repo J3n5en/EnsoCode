@@ -54,7 +54,7 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
       </div>
       <div className="relative">
         <div className="pointer-events-none absolute left-0 top-0 font-mono text-[10px] text-muted-foreground">
-          {metric === 'tokens' ? formatTokens(max) : formatCost(max)}
+          {metric === 'tokens' ? formatTokens(max) : formatCost(max > 0 ? max : null)}
         </div>
         {hovered && (
           <div className="pointer-events-none absolute right-0 top-0 rounded bg-popover px-2 py-1 font-mono text-[11px] text-popover-foreground shadow-sm ring-1 ring-border">
@@ -79,7 +79,7 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
                     { v: p.input, cls: 'fill-foreground/45' },
                     { v: p.output, cls: 'fill-foreground' },
                   ]
-                : [{ v: p.cost ?? 0, cls: 'fill-emerald-500' }];
+                : [{ v: p.cost ?? 0, cls: 'fill-emerald-600 dark:fill-emerald-500' }];
             let y = base;
             return (
               <g key={p.day} onMouseEnter={() => setHover(i)}>

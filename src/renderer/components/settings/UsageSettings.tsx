@@ -29,15 +29,20 @@ export function UsageSettings() {
   const [summary, setSummary] = React.useState<UsageSummary | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  // latest-wins：快速切换周期时，慢响应不得覆盖新周期的结果
+  const requestId = React.useRef(0);
 
   const load = React.useCallback(async (range: UsageRangeDays) => {
+    const id = ++requestId.current;
     setLoading(true);
     const result = await window.electronAPI.usage.summary(range);
+    if (id !== requestId.current) return;
     setLoading(false);
     if (result.ok) {
       setSummary(result.summary);
       setError(null);
     } else {
+      setSummary(null);
       setError(result.error);
     }
   }, []);
