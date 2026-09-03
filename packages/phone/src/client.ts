@@ -30,7 +30,7 @@ import {
   type SyncTracking,
 } from '@shared/pair/syncProjection';
 import { loadCursors, saveCursor } from './storage';
-import { setTerminalAppearance } from './stubs/settings-store';
+import { setCompactReadOnlyTools, setTerminalAppearance } from './stubs/settings-store';
 import { setHostTheme } from './theme';
 
 /**
@@ -215,6 +215,7 @@ export class PairClient {
         // 先写调色板再算主题：sync-terminal 要用它推导整套 UI 变量
         setTerminalAppearance(payload.terminal, payload.terminalFontFamily);
         setHostTheme(payload.theme);
+        setCompactReadOnlyTools(payload.compactReadOnlyTools !== false);
         break;
       case 'agent-event':
         this.applyAgentEvent(payload.event as Record<string, unknown>);

@@ -129,4 +129,5 @@ export interface PairCatalogPayload {
     brightWhite: string;
   };
   terminalFontFamily?: string;
+  compactReadOnlyTools?: boolean;
 }

@@ -120,6 +120,7 @@ let theme: HostAppearance = 'system';
 /** 桌面终端配色（bash 输出用），随外观一起下发 */
 let terminal: TerminalPalette | undefined;
 let terminalFontFamily: string | undefined;
+let compactReadOnlyTools = true;
 /** 剥密前的完整项目路径映射，用于 spawn 反查 cwd */
 let whitelist: SpawnWhitelist = { projects: [], providers: [] };
 
@@ -660,6 +661,7 @@ async function sendMeta(conn: Connection): Promise<void> {
     theme,
     ...(terminal ? { terminal } : {}),
     ...(terminalFontFamily ? { terminalFontFamily } : {}),
+    compactReadOnlyTools,
   });
   // Web Push 能力下发：手机拿公钥才能 pushManager.subscribe
   await send(conn, { type: 'push-config', vapidPublicKey: getVapidPublicKey() });
@@ -750,6 +752,7 @@ export function updatePairCatalog(payload: {
   theme: HostAppearance;
   terminal?: TerminalPalette;
   terminalFontFamily?: string;
+  compactReadOnlyTools?: boolean;
 }): void {
   catalog = payload.catalog;
   pinnedOrder = payload.pinnedOrder ?? [];
@@ -758,6 +761,7 @@ export function updatePairCatalog(payload: {
   theme = payload.theme;
   terminal = payload.terminal;
   terminalFontFamily = payload.terminalFontFamily;
+  compactReadOnlyTools = payload.compactReadOnlyTools !== false;
   whitelist = {
     projects: payload.projectPaths,
     providers: payload.providers.map((p) => ({

@@ -1,5 +1,6 @@
 import type { TerminalPalette } from '@enso/pair';
 import type { Locale } from '@shared/i18n';
+import { useSyncExternalStore } from 'react';
 import type { Theme } from '../../../../src/renderer/stores/settings/types';
 
 /**
@@ -20,9 +21,11 @@ interface SettingsSlice {
   presets: never[];
   agentTypes: never[];
   loadLocalSkills: boolean;
+  /** 桌面下发（appearance 帧）；缺省按开，与桌面默认一致 */
+  compactReadOnlyTools: boolean;
 }
 
-const state: SettingsSlice = {
+let state: SettingsSlice = {
   language: 'system',
   // 手机端跟随系统深浅色（theme.ts 切 .dark class），此处给渲染组件一个确定值
   theme: 'system',
@@ -35,7 +38,16 @@ const state: SettingsSlice = {
   presets: [],
   agentTypes: [],
   loadLocalSkills: true,
+  compactReadOnlyTools: true,
 };
+
+type Listener = (state: SettingsSlice, prev: SettingsSlice) => void;
+const listeners = new Set<Listener>();
+function setState(patch: Partial<SettingsSlice>): void {
+  const prev = state;
+  state = { ...state, ...patch };
+  for (const l of listeners) l(state, prev);
+}
 
 /**
  * 桌面下发的终端配色。TerminalOutput 走 getXtermTheme(terminalTheme)，
@@ -46,17 +58,27 @@ let terminalPalette: TerminalPalette | undefined;
 export function setTerminalAppearance(palette?: TerminalPalette, fontFamily?: string): void {
   terminalPalette = palette;
   // terminalTheme 只作为「是否有下发配色」的标记，实际取值走 getTerminalPalette
-  state.terminalTheme = palette ? 'host' : '';
-  state.terminalFontFamily = fontFamily ?? '';
+  setState({ terminalTheme: palette ? 'host' : '', terminalFontFamily: fontFamily ?? '' });
+}
+
+export function setCompactReadOnlyTools(enabled: boolean): void {
+  if (state.compactReadOnlyTools !== enabled) setState({ compactReadOnlyTools: enabled });
 }
 
 export function getTerminalPalette(): TerminalPalette | undefined {
   return terminalPalette;
 }
 
+const subscribe = (l: Listener): (() => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
+
 export function useSettingsStore<T>(selector: (s: SettingsSlice) => T): T {
-  return selector(state);
+  return useSyncExternalStore(subscribe, () => selector(state));
 }
 
 useSettingsStore.getState = () => state;
-useSettingsStore.subscribe = () => () => {};
+useSettingsStore.subscribe = subscribe;

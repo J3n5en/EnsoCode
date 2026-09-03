@@ -103,6 +103,7 @@ function buildPayload(): PairCatalogPayload {
     // 只下发选中主题解析后的调色板（约几百字节），手机不必打包整份主题库
     terminal: getXtermTheme(settings.terminalTheme),
     terminalFontFamily: settings.terminalFontFamily,
+    compactReadOnlyTools: settings.compactReadOnlyTools,
   };
 }
 
@@ -128,7 +129,8 @@ export function bindPairCatalogSync(): void {
       state.providers !== prev.providers ||
       state.theme !== prev.theme ||
       state.terminalTheme !== prev.terminalTheme ||
-      state.terminalFontFamily !== prev.terminalFontFamily
+      state.terminalFontFamily !== prev.terminalFontFamily ||
+      state.compactReadOnlyTools !== prev.compactReadOnlyTools
     ) {
       schedulePush();
     }
