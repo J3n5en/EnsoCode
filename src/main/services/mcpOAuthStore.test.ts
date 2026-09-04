@@ -63,6 +63,16 @@ describe('McpOAuthStore', () => {
     );
   });
 
+  it('clearTokens 只清 tokens，保留 clientInformation', () => {
+    const store = new McpOAuthStore({ file: file(), encryptionAvailable: () => false });
+    store.saveClientInformation('s1', { client_id: 'c1' }, 'https://mcp.test/mcp');
+    store.saveTokens('s1', { access_token: 'a1' });
+    store.clearTokens('s1');
+    expect(store.tokens('s1')).toBeUndefined();
+    expect(store.record('s1')?.clientInformation).toEqual({ client_id: 'c1' });
+    expect(store.record('s1')?.serverUrl).toBe('https://mcp.test/mcp');
+  });
+
   it('authState 只列出确有 tokens 的 server', () => {
     const store = new McpOAuthStore({ file: file(), encryptionAvailable: () => false });
     store.saveClientInformation('s1', { client_id: 'c1' });

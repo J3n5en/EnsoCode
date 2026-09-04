@@ -195,6 +195,8 @@ async function runAuthorize(
   codePromise.catch(() => {});
 
   try {
+    // 失效的旧 token 会让 SDK 先走 refresh 并在 invalid_grant 上直接抛错，重新授权前先清掉
+    deps.store.clearTokens(serverId);
     const provider = new McpOAuthClientProvider({
       serverId,
       serverUrl,

@@ -229,6 +229,36 @@ describe('authorizeMcpServer', () => {
     }
   });
 
+  it('重新授权忽略已失效 token，但保留 clientInformation', async () => {
+    const store = newStore();
+    store.saveClientInformation('s1', { client_id: 'c1' }, 'https://mcp.test/mcp');
+    store.saveTokens('s1', { access_token: 'stale', refresh_token: 'dead' });
+    const server = fakeCallbackServer('c');
+    let seenTokens: unknown = 'unset';
+    let seenClient: unknown;
+    const result = await authorizeMcpServer('s1', {
+      store,
+      resolveServer: () => ({
+        id: 's1',
+        name: 'notion',
+        transport: 'http',
+        url: 'https://mcp.test/mcp',
+      }),
+      startCallbackServer: server.start as never,
+      auth: vi.fn(async (provider: McpOAuthClientProvider) => {
+        seenTokens = provider.tokens();
+        seenClient = await provider.clientInformation();
+        await provider.saveTokens({ access_token: 'fresh' } as never);
+        return 'AUTHORIZED' as const;
+      }) as never,
+      openExternal: vi.fn(),
+    });
+    expect(result).toEqual({ ok: true });
+    expect(seenTokens).toBeUndefined();
+    expect(seenClient).toEqual({ client_id: 'c1' });
+    expect(store.tokens('s1')).toEqual({ access_token: 'fresh' });
+  });
+
   it('同一 server 并发授权复用同一条流程', async () => {
     const server = fakeCallbackServer('c');
     let resolveAuth: (() => void) | undefined;

@@ -66,6 +66,15 @@ export class McpOAuthStore {
     this.merge(serverId, { clientInformation, ...(serverUrl ? { serverUrl } : {}) });
   }
 
+  /** 只弃用 token（重新授权前避开失效 refresh_token），DCR 注册信息保留 */
+  clearTokens(serverId: string): void {
+    const rows = this.load();
+    const row = rows[serverId];
+    if (!row?.tokens) return;
+    const { tokens: _tokens, ...rest } = row;
+    this.save({ ...rows, [serverId]: rest });
+  }
+
   clear(serverId: string): void {
     const rows = { ...this.load() };
     if (!(serverId in rows)) return;
