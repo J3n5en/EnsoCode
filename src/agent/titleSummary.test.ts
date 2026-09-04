@@ -11,11 +11,14 @@ describe('extractTitle：模型回复 → 可用标题', () => {
     expect(extractTitle(assistant('修复登录页 bug'))).toBe('修复登录页 bug');
   });
 
-  it('剥掉模型习惯性包裹的中英文引号与句号', () => {
+  it('剥掉模型习惯性包裹的中英文引号与句号、冒号、问号', () => {
     expect(extractTitle(assistant('"修复登录页 bug"'))).toBe('修复登录页 bug');
     expect(extractTitle(assistant('「修复登录页 bug」'))).toBe('修复登录页 bug');
     expect(extractTitle(assistant('修复登录页 bug。'))).toBe('修复登录页 bug');
     expect(extractTitle(assistant('“修复登录页 bug”'))).toBe('修复登录页 bug');
+    expect(extractTitle(assistant('从这里继续:'))).toBe('从这里继续');
+    expect(extractTitle(assistant('工厂配置层通用性讨论：'))).toBe('工厂配置层通用性讨论');
+    expect(extractTitle(assistant('这个接口怎么调用？'))).toBe('这个接口怎么调用');
   });
 
   it('多行回复只取首个非空行（模型可能附加解释）', () => {
@@ -63,5 +66,42 @@ describe('buildTitleUserText：送给模型的用户消息', () => {
 
   it('首尾空白剔除', () => {
     expect(buildTitleUserText('  帮我修 bug\n')).toBe('帮我修 bug');
+  });
+
+  it('剥离内部 chat 引用块与跳转前缀，提取用户真正的提问正文', () => {
+    const raw = [
+      '从这里继续:',
+      '[Referenced past chat "@D:\\WORK\\project." — transcript file: C:\\Users\\user\\session.jsonl (pi session jsonl; read it if relevant)]',
+      '',
+      '但是你说的这个都是完全针对性的修改了吧，会有通用性影响吗？',
+    ].join('\n');
+    expect(buildTitleUserText(raw)).toBe(
+      '但是你说的这个都是完全针对性的修改了吧，会有通用性影响吗？'
+    );
+  });
+
+  it('内联在文本中的 chat 引用块折叠，保留用户正文', () => {
+    const raw =
+      '[Referenced past chat "修复登录bug" — transcript file: /tmp/s.jsonl (pi session jsonl; read it if relevant)] 从这里继续，修一下这个新bug';
+    expect(buildTitleUserText(raw)).toBe('从这里继续，修一下这个新bug');
+  });
+
+  it('剥离 UI 元素引用块', () => {
+    const raw = '[Selected UI element "button" — path: div > button; text: 提交] 这个按钮点击没反应';
+    expect(buildTitleUserText(raw)).toBe('这个按钮点击没反应');
+  });
+
+  it('只有引用块且无额外正文时，退化提取引用的会话标题', () => {
+    const raw =
+      '[Referenced past chat "用户鉴权模块设计" — transcript file: C:\\Users\\user\\session.jsonl (pi session jsonl; read it if relevant)]';
+    expect(buildTitleUserText(raw)).toBe('用户鉴权模块设计');
+  });
+
+  it('只有跳转词和引用块且无额外正文时，退化提取引用的会话标题', () => {
+    const raw = [
+      '从这里继续:',
+      '[Referenced past chat "用户鉴权模块设计" — transcript file: C:\\Users\\user\\session.jsonl (pi session jsonl; read it if relevant)]',
+    ].join('\n');
+    expect(buildTitleUserText(raw)).toBe('用户鉴权模块设计');
   });
 });

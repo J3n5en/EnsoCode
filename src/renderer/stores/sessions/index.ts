@@ -17,7 +17,11 @@ import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/menti
 import type { PairCreatedSession } from '@shared/types/pair';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 // 纯逻辑模块(仅类型级依赖),store 引用不破坏 node 环境测试
-import { mentionDisplayText } from '@/components/chat/mentionComposer';
+import {
+  cleanTitleSummarySource,
+  extractRepresentativeTitle,
+  mentionDisplayText,
+} from '@/components/chat/mentionComposer';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -292,10 +296,8 @@ function userMessageRawText(message: ProjectedMessage): string {
 }
 
 function truncateTitle(text: string): string {
-  // 只取首行，且 chat 引用块折叠成 @标题：引用块原文不得污染标题，
-  // 否则带换行的标题会反过来破坏 chat 引用行的单行格式
-  const firstLine = mentionDisplayText(text).split('\n')[0].trim();
-  return (firstLine || '[image]').slice(0, 40);
+  // 提炼代表行作为标题：chat 引用块折叠成 @标题，跳过无业务意义引导行，引用块原文不得污染标题
+  return extractRepresentativeTitle(text);
 }
 
 /** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
@@ -335,9 +337,10 @@ export const useSessionsStore = create<SessionsState>()(
         baselineTitle: string,
         sessionModel?: { providerId?: string; modelId?: string }
       ): void {
+        const cleanedText = cleanTitleSummarySource(rawText);
         if (
           !useSettingsStore.getState().titleSummaryEnabled ||
-          !rawText.trim() ||
+          !cleanedText.trim() ||
           !baselineTitle.trim() ||
           pendingTitleBaselines.has(conversationId)
         ) {
@@ -349,7 +352,7 @@ export const useSessionsStore = create<SessionsState>()(
         pendingTitleBaselines.set(conversationId, baselineTitle);
         void window.electronAPI.agent.summarizeTitle(
           conversationId,
-          rawText,
+          cleanedText,
           sessionModel?.providerId && sessionModel?.modelId
             ? { providerId: sessionModel.providerId, modelId: sessionModel.modelId }
             : undefined
@@ -1645,8 +1648,8 @@ export const useSessionsStore = create<SessionsState>()(
             text = startGoalPrompt(arg);
           }
           // 工作区迁移/回退提醒：随下一条实际发出的消息前置注入一次（同 goal 模式，可见）
-          // 标题总结的输入在注入前定格：goal 用目标原文，普通消息用用户原文
-          const titleSummarySource = goalMatch?.[1]?.trim() ?? text;
+          // 标题总结的输入在注入前定格：goal 用目标原文，普通消息清洗掉内部引用块与引导行
+          const titleSummarySource = goalMatch?.[1]?.trim() ?? cleanTitleSummarySource(text);
           const workspaceNote = conversation.pendingWorkspaceNote;
           if (workspaceNote && !(conversation.started && conversation.status === 'running')) {
             text = `${workspaceNote}\n\n${text}`;
@@ -1697,8 +1700,8 @@ export const useSessionsStore = create<SessionsState>()(
                 title:
                   conversation.title ||
                   spawnTitle ||
-                  // chat 引用块折叠成 @标题，与 firstUserText 同规则
-                  (mentionDisplayText(text).split('\n')[0].trim() || '[image]').slice(0, 40),
+                  // 代表行提炼：chat 引用块折叠成 @标题，跳过无业务意义引导行，与 firstUserText 同规则
+                  extractRepresentativeTitle(text),
               })
             );
             const result = await window.electronAPI.agent.spawn({

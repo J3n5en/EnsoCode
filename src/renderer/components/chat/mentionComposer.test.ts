@@ -9,8 +9,10 @@ import {
   toFileMentionCandidates,
 } from '../../hooks/useMentionSearch';
 import {
+  cleanTitleSummarySource,
   createEditorPayload,
   extractMentionQuery,
+  extractRepresentativeTitle,
   mentionDisplayText,
   mentionPopupLayout,
   resolvePopupKeyAction,
@@ -655,5 +657,60 @@ describe('mentionPopupLayout', () => {
         flyoutGap,
       }).flyoutSide
     ).toBe('left');
+  });
+
+  describe('cleanTitleSummarySource：清洗送给标题总结模型的输入源', () => {
+    it('普通自然语言原样保留', () => {
+      expect(cleanTitleSummarySource('帮我修复登录页问题')).toBe('帮我修复登录页问题');
+    });
+
+    it('剥离内部 chat 引用块与引导行，提取真实提问', () => {
+      const raw = [
+        '从这里继续:',
+        '[Referenced past chat "@D:\\WORK\\llm-data-cleaning" — transcript file: C:\\Users\\user\\s.jsonl (pi session jsonl; read it if relevant)]',
+        '',
+        '但是你说的这个都是针对性修改了吧，通用性会受影响吗？',
+      ].join('\n');
+      expect(cleanTitleSummarySource(raw)).toBe(
+        '但是你说的这个都是针对性修改了吧，通用性会受影响吗？'
+      );
+    });
+
+    it('只有引用块无正文时，退化为引用的会话标题', () => {
+      const raw =
+        '[Referenced past chat "用户登录模块" — transcript file: /s/1.jsonl (pi session jsonl; read it if relevant)]';
+      expect(cleanTitleSummarySource(raw)).toBe('用户登录模块');
+    });
+  });
+
+  describe('extractRepresentativeTitle：提取首条消息的代表行作为暂存标题', () => {
+    it('普通单行直接作为标题（截断40字符）', () => {
+      expect(extractRepresentativeTitle('普通消息')).toBe('普通消息');
+    });
+
+    it('跳过首行的「从这里继续:」，取后续真实用户输入', () => {
+      const raw = [
+        '从这里继续:',
+        '[Referenced past chat "旧会话" — transcript file: /s/1.jsonl (pi session jsonl; read it if relevant)]',
+        '',
+        '但是你说的这个都是针对性修改了吧，通用性会受影响吗？',
+      ].join('\n');
+      expect(extractRepresentativeTitle(raw)).toBe(
+        '但是你说的这个都是针对性修改了吧，通用性会受影响吗？'.slice(0, 40)
+      );
+    });
+
+    it('没有后续正文只有引用块时，使用折叠后的 @标题', () => {
+      const raw = [
+        '从这里继续:',
+        '[Referenced past chat "用户登录模块" — transcript file: /s/1.jsonl (pi session jsonl; read it if relevant)]',
+      ].join('\n');
+      expect(extractRepresentativeTitle(raw)).toBe('@用户登录模块');
+    });
+
+    it('空消息回退到 [image]', () => {
+      expect(extractRepresentativeTitle('')).toBe('[image]');
+      expect(extractRepresentativeTitle('   \n  ')).toBe('[image]');
+    });
   });
 });

@@ -2453,7 +2453,7 @@ export class SessionSupervisor {
     command: Extract<AgentCommand, { type: 'summarize-title' }>
   ): Promise<void> {
     const runtime = await this.getRuntime();
-    const model = resolveBaseModel(runtime, command.model);
+    const model = await resolveBaseModelOrRefresh(runtime, command.model);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
     try {

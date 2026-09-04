@@ -14,8 +14,42 @@ export const TITLE_SYSTEM_PROMPT = [
   '- Write the title in the same language as the user message.',
 ].join('\n');
 
+const INLINE_CHAT_REF =
+  /\[Referenced past chat "(.+?)" — transcript file: (.+?) \(pi session jsonl; read it if relevant\)\]/g;
+const INLINE_UI_REF = /\[Selected UI element "([^"]*)" — path: (.*?); text: (.*?)\]/g;
+const CONTINUATION_LINE = /^(?:从这里继续|继续|continue(?:\s+here)?)\s*[:：]?\s*$/i;
+
 export function buildTitleUserText(text: string): string {
-  return text.trim().slice(0, MAX_INPUT_CHARS);
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+
+  const chatLabels: string[] = [];
+  for (const match of trimmed.matchAll(INLINE_CHAT_REF)) {
+    if (match[1]?.trim()) chatLabels.push(match[1].trim());
+  }
+
+  const stripped = trimmed
+    .replace(INLINE_CHAT_REF, '')
+    .replace(INLINE_UI_REF, '');
+
+  const lines = stripped
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  while (lines.length > 1 && CONTINUATION_LINE.test(lines[0])) {
+    lines.shift();
+  }
+  const cleanBody = lines.join('\n').trim();
+
+  if (cleanBody && !CONTINUATION_LINE.test(cleanBody)) {
+    return cleanBody.slice(0, MAX_INPUT_CHARS);
+  }
+
+  if (chatLabels.length > 0) {
+    return chatLabels[0].slice(0, MAX_INPUT_CHARS);
+  }
+
+  return cleanBody.slice(0, MAX_INPUT_CHARS);
 }
 
 /** 模型习惯性包裹的引号/书名号对 */
@@ -53,6 +87,6 @@ export function extractTitle(message: unknown): string {
       title = title.slice(open.length, title.length - close.length).trim();
     }
   }
-  title = title.replace(/[。．.！!]+$/u, '').trim();
+  title = title.replace(/[。．.！!？?：:，,…]+$/u, '').trim();
   return title.slice(0, MAX_TITLE_CHARS);
 }

@@ -1229,4 +1229,43 @@ describe('typed Agent child projection', () => {
     });
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  it('发送首条带「从这里继续:」和 chat 引用块的消息时，暂存标题跳过引导词且总结源被清洗', async () => {
+    const raw = [
+      '从这里继续:',
+      '[Referenced past chat "@旧会话" — transcript file: C:\\Users\\user\\s.jsonl (pi session jsonl; read it if relevant)]',
+      '',
+      '但是你说的这个都是针对性修改了吧，通用性会受影响吗？',
+    ].join('\n');
+
+    settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+    summarizeTitle.mockClear();
+
+    const id = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(id).toBeTruthy();
+
+    await sessionsModule.useSessionsStore.getState().send(
+      raw,
+      { providerId: 'provider-1', modelId: 'model-1', cwd: '/project' }
+    );
+
+    const conv = sessionsModule.useSessionsStore.getState().conversations[id!];
+    // 暂存标题跳过「从这里继续:」，直接提取首条正文
+    expect(conv.title).toBe('但是你说的这个都是针对性修改了吧，通用性会受影响吗？');
+
+    // 送给 summarizeTitle 的文本清洗掉内部标签和引导行
+    expect(summarizeTitle).toHaveBeenCalledWith(
+      id,
+      '但是你说的这个都是针对性修改了吧，通用性会受影响吗？',
+      { providerId: 'provider-1', modelId: 'model-1' }
+    );
+
+    // title-generated 事件到达时，会话标题成功更新
+    onAgentEvent?.({
+      type: 'title-generated',
+      conversationId: id!,
+      title: '配置层通用性评估',
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations[id!].title).toBe('配置层通用性评估');
+  });
 });
