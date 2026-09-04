@@ -51,6 +51,13 @@ function McpStatusBadge({ status }: { status: McpServerStatus }) {
       </Badge>
     );
   }
+  if (status.state === 'idle') {
+    return (
+      <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
+        {t('Authorized, pending connection')}
+      </Badge>
+    );
+  }
   return (
     <Badge variant="error" className="shrink-0 text-[11px]" title={status.error}>
       {t('Connection failed')}
@@ -71,6 +78,12 @@ export function McpSettings() {
   const revoke = useMcpStatusStore((state) => state.revoke);
   React.useEffect(() => useMcpStatusStore.getState().bind(), []);
   const [importOpen, setImportOpen] = React.useState(false);
+  // 已运行会话的工具集在 spawn 时定格，授权只影响新会话：成功后明示一句
+  const [authorizedHint, setAuthorizedHint] = React.useState<string | null>(null);
+  const runAuthorize = async (serverId: string) => {
+    await authorize(serverId);
+    setAuthorizedHint(useMcpStatusStore.getState().authorized[serverId] === true ? serverId : null);
+  };
   const [editing, setEditing] = React.useState<McpServerEntry | 'new' | null>(null);
   const [query, setQuery] = React.useState('');
   const visible = mcpServers.filter((server) =>
@@ -154,89 +167,98 @@ export function McpSettings() {
                 // 事件可能缺 serverId（旧配置），按名字兜底
                 const status = statuses[server.id] ?? statuses[server.name];
                 const authorizing = pending[server.id] === true;
+                // 授权入口不能依赖 unauthorized 状态：discovery/DCR 失败会归为 error，用户会无路可走
+                const canAuthorize =
+                  server.transport !== 'stdio' && authorizedMap[server.id] !== true;
                 return (
-                  <div
-                    key={server.id}
-                    className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                    data-settings-row={`mcp.${server.id}`}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Checkbox
-                        checked={selection.isSelected(server.id)}
-                        onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
-                      />
-                      <span
-                        className={cn(
-                          'shrink-0 font-medium text-sm',
-                          !server.enabled && 'text-muted-foreground line-through'
-                        )}
-                      >
-                        {server.name}
-                      </span>
-                      <Badge variant="outline" className="shrink-0 text-[11px]">
-                        {server.transport}
-                      </Badge>
-                      <Badge variant="secondary" className="shrink-0 text-[11px]">
-                        {server.source}
-                      </Badge>
-                      {status && <McpStatusBadge status={status} />}
-                      <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-                        {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
-                      </span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {status?.state === 'unauthorized' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                          disabled={authorizing}
-                          onClick={() => void authorize(server.id)}
-                        >
-                          {authorizing ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                  <div key={server.id} className="space-y-1">
+                    <div
+                      className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+                      data-settings-row={`mcp.${server.id}`}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Checkbox
+                          checked={selection.isSelected(server.id)}
+                          onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
+                        />
+                        <span
+                          className={cn(
+                            'shrink-0 font-medium text-sm',
+                            !server.enabled && 'text-muted-foreground line-through'
                           )}
-                          {authorizing ? t('Authorizing') : t('Authorize')}
-                        </Button>
-                      )}
-                      {authorizedMap[server.id] === true && (
+                        >
+                          {server.name}
+                        </span>
+                        <Badge variant="outline" className="shrink-0 text-[11px]">
+                          {server.transport}
+                        </Badge>
+                        <Badge variant="secondary" className="shrink-0 text-[11px]">
+                          {server.source}
+                        </Badge>
+                        {status && <McpStatusBadge status={status} />}
+                        <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+                          {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {(canAuthorize || status?.state === 'unauthorized') && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7"
+                            disabled={authorizing}
+                            onClick={() => void runAuthorize(server.id)}
+                          >
+                            {authorizing ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            {authorizing ? t('Authorizing') : t('Authorize')}
+                          </Button>
+                        )}
+                        {authorizedMap[server.id] === true && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={t('Revoke authorization')}
+                            className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                            onClick={() => void revoke(server.id)}
+                          >
+                            <ShieldOff className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        <OccupancyMark
+                          row={occupancy.rows[server.id]}
+                          pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
+                        />
+                        <Switch
+                          checked={server.enabled}
+                          onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
+                        />
                         <Button
                           variant="ghost"
                           size="icon"
-                          title={t('Revoke authorization')}
                           className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                          onClick={() => void revoke(server.id)}
+                          onClick={() => setEditing(server)}
                         >
-                          <ShieldOff className="h-3.5 w-3.5" />
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                      <OccupancyMark
-                        row={occupancy.rows[server.id]}
-                        pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
-                      />
-                      <Switch
-                        checked={server.enabled}
-                        onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                        onClick={() => setEditing(server)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                        onClick={() => removeMcpServer(server.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                          onClick={() => removeMcpServer(server.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
+                    {authorizedHint === server.id && (
+                      <p className="px-3 text-muted-foreground text-xs">
+                        {t('Authorized. Takes effect in new conversations.')}
+                      </p>
+                    )}
                   </div>
                 );
               })}

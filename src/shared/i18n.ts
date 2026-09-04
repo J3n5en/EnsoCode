@@ -256,6 +256,8 @@ export const zhTranslations: Record<string, string> = {
   'Revoke authorization': '取消授权',
   Connecting: '连接中',
   'Not authorized': '未授权',
+  'Authorized, pending connection': '已授权，待连接',
+  'Authorized. Takes effect in new conversations.': '已授权，新会话生效。',
   '{{count}} tools': '{{count}} 个工具',
   Fetching: '拉取中...',
   Testing: '测试中...',
