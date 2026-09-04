@@ -106,6 +106,8 @@ export interface SettingsState {
   openChangesOnFileEdit: boolean;
   /** 只读工具（read/grep/find/ls）一行化 + 进行中的轮也折组；缺省 true */
   compactReadOnlyTools: boolean;
+  /** 无 token/工具结果超过此时长则中止；0 = 永不；单位分钟 */
+  generationStallTimeoutMin: number;
 
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
   /** 背景图总开关；缺省 false */
@@ -197,6 +199,7 @@ export interface SettingsState {
   setCustomProxyUrl: (url: string) => void;
   setOpenChangesOnFileEdit: (value: boolean) => void;
   setCompactReadOnlyTools: (value: boolean) => void;
+  setGenerationStallTimeoutMin: (minutes: number) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
   setBackgroundImageEnabled: (value: boolean) => void;

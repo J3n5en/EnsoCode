@@ -24,6 +24,7 @@ import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
+import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
@@ -49,6 +50,7 @@ const MAX_WIDTH = 420;
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   useBackgroundImage();
+  useGenerationStallTimeout();
   const [searchOpen, setSearchOpen] = useState(false);
   useWindowsWindowChrome();
   const [width, setWidth] = useState(() => {

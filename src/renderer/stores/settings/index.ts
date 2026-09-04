@@ -107,6 +107,7 @@ const initialState = {
   customProxyUrl: '',
   openChangesOnFileEdit: false,
   compactReadOnlyTools: true,
+  generationStallTimeoutMin: 0,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
   backgroundImagePath: '',
@@ -210,6 +211,12 @@ export const useSettingsStore = create<SettingsState>()(
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
       setCompactReadOnlyTools: (compactReadOnlyTools) => set({ compactReadOnlyTools }),
+      setGenerationStallTimeoutMin: (minutes) =>
+        set({
+          generationStallTimeoutMin: Number.isFinite(minutes)
+            ? Math.min(120, Math.max(0, Math.round(minutes)))
+            : 0,
+        }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
       setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),

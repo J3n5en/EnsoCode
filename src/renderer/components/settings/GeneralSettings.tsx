@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { GENERATION_STALL_TIMEOUT_MINUTES } from '@/stores/sessions/stallTimeout';
 import { useSettingsStore } from '@/stores/settings';
 
 export function GeneralSettings() {
@@ -58,6 +59,8 @@ function SidePanelSection() {
   const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
   const compactReadOnlyTools = useSettingsStore((s) => s.compactReadOnlyTools);
   const setCompactReadOnlyTools = useSettingsStore((s) => s.setCompactReadOnlyTools);
+  const generationStallTimeoutMin = useSettingsStore((s) => s.generationStallTimeoutMin);
+  const setGenerationStallTimeoutMin = useSettingsStore((s) => s.setGenerationStallTimeoutMin);
   return (
     <div className="space-y-2">
       <SwitchRow
@@ -78,6 +81,40 @@ function SidePanelSection() {
         checked={compactReadOnlyTools}
         onChange={setCompactReadOnlyTools}
       />
+      <div
+        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+        data-settings-row="general.generationStallTimeout"
+      >
+        <div className="min-w-0">
+          <p className="text-sm">{t('Stop if no output')}</p>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Abort and retry the run when no tokens or tool results arrive for this long. Thinking counts as output.'
+            )}
+          </p>
+        </div>
+        <Select
+          items={Object.fromEntries(
+            GENERATION_STALL_TIMEOUT_MINUTES.map((value) => [
+              String(value),
+              value === 0 ? t('Never') : t('{{count}} min', { count: value }),
+            ])
+          )}
+          value={String(generationStallTimeoutMin)}
+          onValueChange={(value) => setGenerationStallTimeoutMin(Number(value))}
+        >
+          <SelectTrigger className="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {GENERATION_STALL_TIMEOUT_MINUTES.map((value) => (
+              <SelectItem key={value} value={String(value)}>
+                {value === 0 ? t('Never') : t('{{count}} min', { count: value })}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
     </div>
   );
 }

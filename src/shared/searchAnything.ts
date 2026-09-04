@@ -130,6 +130,11 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Compact read-only tool calls',
   },
   {
+    id: 'general.generationStallTimeout',
+    category: 'general',
+    title: 'Stop if no output',
+  },
+  {
     id: 'general.proxy',
     category: 'general',
     title: 'Network proxy',

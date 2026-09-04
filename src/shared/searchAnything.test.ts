@@ -195,6 +195,7 @@ describe('buildSettingsCatalog', () => {
     'general.language',
     'general.openChangesOnFileEdit',
     'general.compactReadOnlyTools',
+    'general.generationStallTimeout',
     'general.proxy',
     'general.updates',
     'shortcuts.root',
