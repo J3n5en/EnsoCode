@@ -65,6 +65,7 @@ import {
   applyDispatchEvent,
   emptyProjection,
   type SessionProjection,
+  type TimelineMessage,
   upsertOutOfRange,
 } from './reducer';
 import { isPairViewed, nextUnread } from './unread';
@@ -1009,7 +1010,15 @@ export const useSessionsStore = create<SessionsState>()(
         id: string,
         text: string,
         images: AttachedImage[] | undefined,
-        mode: 'prompt' | 'steer'
+        mode: 'prompt' | 'steer',
+        /** 投递失败时按 deliveryId 收回的乐观回显，及内容退回何处 */
+        rollback: {
+          deliveryId: string;
+          restore:
+            | { kind: 'draft'; text: string }
+            | { kind: 'queue'; item: QueuedMessage }
+            | { kind: 'goal' };
+        }
       ): Promise<string | null> {
         const result =
           mode === 'steer'
@@ -1017,20 +1026,46 @@ export const useSessionsStore = create<SessionsState>()(
             : await window.electronAPI.agent.prompt(id, text, images);
         if (result.ok) return null;
         const error = result.error ?? 'send failed';
+        const { restore } = rollback;
         set((state) => {
           const current = state.conversations[id];
           if (!current) return state;
-          const messages = [...current.messages];
-          if (messages.at(-1)?.optimistic) messages.pop();
           return patch(state, id, {
-            messages,
-            draftText: text,
+            messages: current.messages.filter(
+              (message) => message.deliveryId !== rollback.deliveryId
+            ),
+            ...(restore.kind === 'draft' ? { draftText: restore.text } : {}),
+            // 排队消息连同图片回到队首，不丢附件不乱序
+            ...(restore.kind === 'queue'
+              ? { queuedMessages: [restore.item, ...(current.queuedMessages ?? [])] }
+              : {}),
+            // goal 内部指令不进输入框：暂停并标注原因，由用户重新 resume
+            ...(restore.kind === 'goal' && current.goal
+              ? { goal: { ...current.goal, status: 'paused' as const, note: error } }
+              : {}),
             started: false,
             status: 'failed',
             error,
           });
         });
         return error;
+      }
+
+      function optimisticUserMessage(
+        text: string,
+        images: AttachedImage[] | undefined,
+        deliveryId: string
+      ): TimelineMessage {
+        return {
+          role: 'user',
+          content: [
+            ...(text ? [{ type: 'text' as const, text }] : []),
+            ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+          ],
+          timestamp: Date.now(),
+          optimistic: true,
+          deliveryId,
+        };
       }
 
       /** goal 续跑:轮次收束且空闲、无排队消息/挂起项时,自动注入一条继续指令(带安全限制) */
@@ -1097,20 +1132,16 @@ export const useSessionsStore = create<SessionsState>()(
           'Continue working toward it. If it is genuinely done, call goal_complete with evidence; ' +
           'if you cannot proceed without the user, call goal_blocked; if waiting on something ' +
           'external, call goal_wait. Otherwise take the next concrete step now.\n</goal-continuation>';
+        const deliveryId = crypto.randomUUID();
         set((state) =>
           patch(state, id, {
             messages: [
               ...state.conversations[id].messages,
-              {
-                role: 'user',
-                content: [{ type: 'text' as const, text }],
-                timestamp: Date.now(),
-                optimistic: true,
-              },
+              optimisticUserMessage(text, undefined, deliveryId),
             ],
           })
         );
-        void deliver(id, text, undefined, 'prompt');
+        void deliver(id, text, undefined, 'prompt', { deliveryId, restore: { kind: 'goal' } });
       }
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
@@ -1125,24 +1156,20 @@ export const useSessionsStore = create<SessionsState>()(
         ) {
           return;
         }
+        const deliveryId = crypto.randomUUID();
         set((state) =>
           patch(state, id, {
             queuedMessages: rest,
             messages: [
               ...state.conversations[id].messages,
-              {
-                role: 'user',
-                content: [
-                  ...(next.text ? [{ type: 'text' as const, text: next.text }] : []),
-                  ...(next.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                ],
-                timestamp: Date.now(),
-                optimistic: true,
-              },
+              optimisticUserMessage(next.text, next.images, deliveryId),
             ],
           })
         );
-        void deliver(id, next.text, next.images, 'prompt');
+        void deliver(id, next.text, next.images, 'prompt', {
+          deliveryId,
+          restore: { kind: 'queue', item: next },
+        });
       }
 
       return {
@@ -1735,21 +1762,14 @@ export const useSessionsStore = create<SessionsState>()(
           // 乐观回显：立即上屏，不等 spawn/prompt 往返。optimistic 标记使其作为
           // 未确认尾巴浮在权威消息之后，同文本 user upsert 到达时被消费；
           // 万一错位由 agent_end 的全量 reconcile 兜底。
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, id, {
               // 用户主动发新消息：上一次停止的抑制标记到此失效
               abortRequested: false,
               messages: [
                 ...state.conversations[id].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(text ? [{ type: 'text' as const, text }] : []),
-                    ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(text, images, deliveryId),
               ],
             })
           );
@@ -1812,17 +1832,14 @@ export const useSessionsStore = create<SessionsState>()(
               }
             }
           }
-          const failure = await deliver(
+          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文
+          return deliver(
             id,
             text,
             images,
-            get().conversations[id]?.status === 'running' ? 'steer' : 'prompt'
+            get().conversations[id]?.status === 'running' ? 'steer' : 'prompt',
+            { deliveryId, restore: { kind: 'draft', text: submittedText } }
           );
-          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文
-          if (failure && text !== submittedText) {
-            set((state) => patch(state, id, { draftText: submittedText }));
-          }
-          return failure;
         },
 
         async resumeConversation(id) {
@@ -2022,20 +2039,19 @@ export const useSessionsStore = create<SessionsState>()(
           // kickoff:目标说明 + 终止工具指引;后续每轮收束由 continueGoal 续跑
           if (conversation.started && conversation.status === 'idle') {
             const kickoff = startGoalPrompt(text.trim());
+            const deliveryId = crypto.randomUUID();
             set((state) =>
               patch(state, conversationId, {
                 messages: [
                   ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [{ type: 'text' as const, text: kickoff }],
-                    timestamp: Date.now(),
-                    optimistic: true,
-                  },
+                  optimisticUserMessage(kickoff, undefined, deliveryId),
                 ],
               })
             );
-            void deliver(conversationId, kickoff, undefined, 'prompt');
+            void deliver(conversationId, kickoff, undefined, 'prompt', {
+              deliveryId,
+              restore: { kind: 'goal' },
+            });
           }
         },
 
@@ -2067,19 +2083,19 @@ export const useSessionsStore = create<SessionsState>()(
             const text =
               `<goal-continuation>\nSession goal resumed: ${goal.text}\n` +
               'Continue working toward it (goal_complete / goal_blocked / goal_wait to stop).\n</goal-continuation>';
+            const deliveryId = crypto.randomUUID();
             set((state) =>
               patch(state, conversationId, {
                 messages: [
                   ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [{ type: 'text' as const, text }],
-                    timestamp: Date.now(),
-                  },
+                  optimisticUserMessage(text, undefined, deliveryId),
                 ],
               })
             );
-            void deliver(conversationId, text, undefined, 'prompt');
+            void deliver(conversationId, text, undefined, 'prompt', {
+              deliveryId,
+              restore: { kind: 'goal' },
+            });
           }
         },
 
@@ -2199,6 +2215,7 @@ export const useSessionsStore = create<SessionsState>()(
           // 出队并乐观回显。optimistic 标记使其浮在权威消息之后：running 时 steer
           // 要到下一个循环边界才送达，期间当前轮的 assistant upsert 若按裸 index
           // 覆盖会把回显顶掉（消息凭空消失，轮次结束后又出现）。
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
@@ -2206,20 +2223,15 @@ export const useSessionsStore = create<SessionsState>()(
               ),
               messages: [
                 ...state.conversations[conversationId].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(item.text, item.images, deliveryId),
               ],
             })
           );
           // running 时 steer 插入当前轮
-          void deliver(conversationId, item.text, item.images, running ? 'steer' : 'prompt');
+          void deliver(conversationId, item.text, item.images, running ? 'steer' : 'prompt', {
+            deliveryId,
+            restore: { kind: 'queue', item },
+          });
         },
 
         async interruptAndSendQueued(conversationId, messageId) {
@@ -2255,6 +2267,7 @@ export const useSessionsStore = create<SessionsState>()(
             const timer = setTimeout(done, 10_000);
           });
           if (!get().conversations[conversationId]?.started) return;
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
@@ -2262,19 +2275,14 @@ export const useSessionsStore = create<SessionsState>()(
               ),
               messages: [
                 ...state.conversations[conversationId].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(item.text, item.images, deliveryId),
               ],
             })
           );
-          void deliver(conversationId, item.text, item.images, 'prompt');
+          void deliver(conversationId, item.text, item.images, 'prompt', {
+            deliveryId,
+            restore: { kind: 'queue', item },
+          });
         },
 
         async hireCoworker(parentId, name, agentType) {

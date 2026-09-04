@@ -17,7 +17,11 @@ import {
  * 时间线消息：乐观回显（本地先上屏、worker 尚未确认）带 optimistic 标记，
  * 只允许出现在数组尾部（权威消息之后）。
  */
-export type TimelineMessage = ProjectedMessage & { optimistic?: boolean };
+export type TimelineMessage = ProjectedMessage & {
+  optimistic?: boolean;
+  /** 本地投递标识：投递失败时按它精确收回，不误删并发的另一条乐观消息 */
+  deliveryId?: string;
+};
 
 function textOf(message: ProjectedMessage): string {
   return message.content
