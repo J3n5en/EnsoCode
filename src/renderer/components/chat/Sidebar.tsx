@@ -75,7 +75,7 @@ import {
   projectConversationIds,
   staleArchivedConversationIds,
 } from '@/stores/sessions/pinned';
-import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
+import { DIRTY_MAIN_TREE, worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
 import {
@@ -300,6 +300,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     id: string;
     status?: WorktreeStatus;
   } | null>(null);
+  // 主树有未提交改动时的切隔离二次确认（改动不会丢，只是不跟随会话）
+  const [pendingDirtyMove, setPendingDirtyMove] = useState<string | null>(null);
 
   const freshWorktreeStatus = async (id: string): Promise<WorktreeStatus | undefined> => {
     const result = await window.electronAPI.worktree.status(id);
@@ -349,8 +351,12 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     }
   };
 
-  const handleMoveToWorktree = async (id: string) => {
-    const error = await moveConversationToWorktree(id);
+  const handleMoveToWorktree = async (id: string, allowDirtyMainTree = false) => {
+    const error = await moveConversationToWorktree(id, { allowDirtyMainTree });
+    if (error === DIRTY_MAIN_TREE) {
+      setPendingDirtyMove(id);
+      return;
+    }
     if (error) {
       addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
       return;
@@ -909,6 +915,23 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
         onConfirm={() => {
           if (!pendingWorktreeAction) return;
           void runCleanup(pendingWorktreeAction.id, pendingWorktreeAction.kind === 'archive');
+        }}
+      />
+      <ConfirmDialog
+        open={pendingDirtyMove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDirtyMove(null);
+        }}
+        title={t('Main working tree has uncommitted changes')}
+        description={t(
+          'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.'
+        )}
+        confirmLabel={t('Move anyway')}
+        onConfirm={() => {
+          if (!pendingDirtyMove) return;
+          const id = pendingDirtyMove;
+          setPendingDirtyMove(null);
+          void handleMoveToWorktree(id, true);
         }}
       />
       <ConfirmDialog

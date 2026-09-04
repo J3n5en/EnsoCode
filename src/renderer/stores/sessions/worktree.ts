@@ -5,6 +5,13 @@
 
 import type { WorktreeStatus } from '@shared/types/worktree';
 
+/**
+ * 主工作树有未提交改动时的哨兵返回值（非错误文案）：
+ * worktree 从 HEAD 切出，脏改动会留在主树不会丢，风险只是「会话此前在主树的改动没带过去」，
+ * 由 UI 弹二次确认让用户决定，确认后以 allowDirtyMainTree 重试。
+ */
+export const DIRTY_MAIN_TREE = 'dirty-main-tree';
+
 /** worktree 有未落地成果（未提交或领先未合并），清理/归档/删除前需要确认 */
 export function worktreeHasPendingWork(status: WorktreeStatus | undefined): boolean {
   if (!status) return false;

@@ -7,7 +7,7 @@ import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { worktreeHasPendingWork } from '@/stores/sessions/worktree';
+import { DIRTY_MAIN_TREE, worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 
 /**
@@ -24,6 +24,7 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingCleanup, setPendingCleanup] = useState<WorktreeStatus | null>(null);
+  const [dirtyConfirm, setDirtyConfirm] = useState(false);
 
   const project = useSettingsStore((state) =>
     conversation ? state.projects.find((p) => p.id === conversation.projectId) : undefined
@@ -42,11 +43,13 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
     }
   };
 
-  const handleIsolate = async () => {
+  const handleIsolate = async (allowDirtyMainTree = false) => {
     setBusy(true);
     try {
-      const error = await moveConversationToWorktree(conversationId);
-      if (error) {
+      const error = await moveConversationToWorktree(conversationId, { allowDirtyMainTree });
+      if (error === DIRTY_MAIN_TREE) {
+        setDirtyConfirm(true);
+      } else if (error) {
         addToast({ type: 'error', title: t('Failed to move to worktree'), description: error });
       } else {
         void refreshWorktreeStatuses();
@@ -94,6 +97,22 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
       },
     },
   ];
+
+  const dirtyDialog = (
+    <ConfirmDialog
+      open={dirtyConfirm}
+      onOpenChange={setDirtyConfirm}
+      title={t('Main working tree has uncommitted changes')}
+      description={t(
+        'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.'
+      )}
+      confirmLabel={t('Move anyway')}
+      onConfirm={() => {
+        setDirtyConfirm(false);
+        void handleIsolate(true);
+      }}
+    />
+  );
 
   const cleanupWarning = (): string => {
     const parts: string[] = [];
@@ -171,6 +190,7 @@ export function WorktreePicker({ conversationId }: { conversationId: string }) {
           void runCleanup();
         }}
       />
+      {dirtyDialog}
     </>
   );
 }

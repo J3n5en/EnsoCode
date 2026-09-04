@@ -653,6 +653,10 @@ export interface SessionSnapshot {
   child?: ChildConversationMetadata;
   customEntries?: AgentSessionCustomEntry[];
   safeJournal?: SafeJournalProjection;
+  /** 压缩进度：重连/刷新后重建投影用（compaction 是瞬时事件，不重放） */
+  compaction?: 'queued' | 'running';
+  /** 压完提示的锚点，**绝对消息 index** 口径（压完那刻 messages.length），不随 baseIndex 平移 */
+  compactionNoticeAt?: number;
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -1525,6 +1529,8 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
       'safeJournal',
       'child',
       'customEntries',
+      'compaction',
+      'compactionNoticeAt',
     ]) ||
     !parseAnySessionIdentity(value.identity) ||
     (value.status !== 'idle' && value.status !== 'running' && value.status !== 'failed') ||

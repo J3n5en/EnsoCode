@@ -765,6 +765,9 @@ describe('custom entry and snapshot projection', () => {
     };
     expect(parseSafeJournalProjection(safeJournal)).toEqual(safeJournal);
     expect(parseSessionSnapshot(snapshot)).toEqual(snapshot);
+    // 压缩状态要能过白名单：漏了整帧 snapshot 会被判 null 静默丢弃，表现是手机全白
+    const compacted = { ...snapshot, compaction: 'running', compactionNoticeAt: 12 };
+    expect(parseSessionSnapshot(compacted)).toEqual(compacted);
     expect(
       parseSafeJournalRecord({
         type: 'enso-operation',

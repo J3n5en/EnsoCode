@@ -171,9 +171,9 @@ export function applyGuestSnapshot(
         asks: snap.pendingAsks ?? [],
         tasks: snap.backgroundTasks ?? [],
         subagents: snap.subagents ?? [],
-        // 快照不带压缩状态（瞬时事件）：沿用已有投影，重连不把进度/提示抹掉
-        compaction: sessions.get(id)?.compaction,
-        compactionNoticeAt: sessions.get(id)?.compactionNoticeAt,
+        // 快照带了就以快照为准（手机刷新后无旧投影）；旧 host 不带则沿用，重连不抹掉进度/提示
+        compaction: snap.compaction ?? sessions.get(id)?.compaction,
+        compactionNoticeAt: snap.compactionNoticeAt ?? sessions.get(id)?.compactionNoticeAt,
       },
       lastIndex: base + incoming.length - 1,
     });

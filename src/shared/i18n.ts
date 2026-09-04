@@ -619,6 +619,10 @@ export const zhTranslations: Record<string, string> = {
   'Run this session on its own git worktree': '让这个会话在独立的 git worktree 里运行',
   'Move to worktree': '切到隔离 worktree',
   'Failed to move to worktree': '切到隔离 worktree 失败',
+  'Main working tree has uncommitted changes': '主工作树有未提交改动',
+  'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.':
+    '新 worktree 从 HEAD 切出，这些改动会留在主工作树，不会跟随本会话。',
+  'Move anyway': '仍然切换',
   'Clean up worktree': '清理 worktree',
   'Clean up worktree?': '清理 worktree？',
   'Failed to clean up worktree': '清理 worktree 失败',
