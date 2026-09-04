@@ -38,6 +38,7 @@ export const SETTINGS_STATE_FIELDS = [
   'loadLocalSkills',
   'loadHarnessAssets',
   'exploreFoldEnabled',
+  'localMemoryEnabled',
   'autoUpdate',
   'proxyMode',
   'customProxyUrl',

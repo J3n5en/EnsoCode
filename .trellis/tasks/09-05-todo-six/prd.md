@@ -40,10 +40,11 @@
 
 ## Acceptance Criteria
 
-- [ ] `checkBashInterception` 单测覆盖 POSIX + PowerShell + 管道放过
-- [ ] explore-fold：mark 后 fold，后续 prompt 的 LLM 视图含 report、不含中间 tool 结果
-- [ ] subagent + schema：合法 JSON 一次过；非法再催；仍非法则失败
-- [ ] `agent://id?q=` 能抽出字段
-- [ ] coworker `message` 能投到另一 coworker，不绕主会话正文
-- [ ] 会话结束后 `.enso/learned.md` 有去重追加（开关开）
-- [ ] `pnpm typecheck && pnpm test` 绿；不改无关功能
+- [x] `checkBashInterception` 单测覆盖 POSIX + PowerShell + 管道放过
+- [x] explore-fold：mark 后 fold，后续 prompt 的 LLM 视图含 report、不含中间 tool 结果
+- [x] subagent + schema：合法 JSON 一次过；非法再催；仍非法则失败
+- [x] `agent://id?q=` 能抽出字段
+- [x] coworker `message` 能投到另一 coworker，不绕主会话正文
+- [x] 会话结束后 `.enso/learned.md` 有去重追加（开关开）
+- [x] `pnpm typecheck && pnpm test` 绿；不改无关功能
+- [x] stats：usage jsonl 只有 token，无工具失败埋点，本批跳过
