@@ -487,3 +487,39 @@ describe('applyAgentEvent', () => {
     expect(staleGeneration).toBe(terminal);
   });
 });
+
+describe('applyAgentEvent tool-output', () => {
+  const toolOutput = (seq: number, output: string): RendererAgentEvent => ({
+    type: 'tool-output',
+    identity: identity(),
+    seq,
+    toolCallId: 't1',
+    output,
+  });
+
+  it('累积工具增量输出快照（后到覆盖先到）', () => {
+    const first = applyAgentEvent(base, 's1', toolOutput(1, 'line 1'));
+    const second = applyAgentEvent(first, 's1', toolOutput(2, 'line 1\nline 2'));
+    expect(second.toolOutputs).toEqual({ t1: 'line 1\nline 2' });
+  });
+
+  it('轮次收口后清空增量快照，避免残留与无限增长', () => {
+    const withOutput = applyAgentEvent(base, 's1', toolOutput(1, 'partial'));
+    const done = applyAgentEvent(withOutput, 's1', {
+      type: 'turn-completed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+    });
+    expect(done.toolOutputs).toEqual({});
+
+    const failed = applyAgentEvent(withOutput, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(failed.toolOutputs).toEqual({});
+  });
+});

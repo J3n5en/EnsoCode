@@ -200,11 +200,13 @@ export function ChatView() {
         {
           compaction: conversation?.compaction,
           compactionNoticeAt: conversation?.compactionNoticeAt,
+          toolOutputs: conversation?.toolOutputs,
         }
       ),
     [
       conversation?.compaction,
       conversation?.compactionNoticeAt,
+      conversation?.toolOutputs,
       conversation?.customEntries,
       conversation?.messages,
       running,

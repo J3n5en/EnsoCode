@@ -2099,6 +2099,29 @@ export class SessionSupervisor {
           managed.toolStartAt.set(event.toolCallId, Date.now());
         }
         return;
+      case 'tool_execution_update': {
+        // pi 已按 BASH_UPDATE_THROTTLE_MS 节流下发全量快照，这里只做投影，不再二次节流
+        const parts: unknown = event.partialResult?.content;
+        if (!Array.isArray(parts)) return;
+        const output = parts
+          .filter(
+            (part): part is { type: 'text'; text: string } =>
+              typeof part === 'object' &&
+              part !== null &&
+              (part as { type?: string }).type === 'text'
+          )
+          .map((part) => part.text)
+          .join('');
+        if (!output) return;
+        this.options.emit({
+          type: 'tool-output',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          toolCallId: event.toolCallId,
+          output,
+        });
+        return;
+      }
       case 'tool_execution_end': {
         const start = managed.toolStartAt.get(event.toolCallId);
         managed.toolStartAt.delete(event.toolCallId);

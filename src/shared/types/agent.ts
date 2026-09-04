@@ -783,6 +783,14 @@ export type AgentWorkerEvent =
       delayMs: number;
       error: string;
     }
+  /** 工具执行中的输出快照（pi tool_execution_update 节流下发）：工具行运行中即可展开查看 */
+  | {
+      type: 'tool-output';
+      identity: SessionIdentity;
+      seq: number;
+      toolCallId: string;
+      output: string;
+    }
   | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
   | {
       type: 'rewind-done';
