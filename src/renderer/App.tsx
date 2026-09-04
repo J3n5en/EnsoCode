@@ -23,6 +23,7 @@ import { Onboarding } from '@/components/onboarding/Onboarding';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
+import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
@@ -47,6 +48,7 @@ const MAX_WIDTH = 420;
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   useBackgroundImage();
+  useWindowsWindowChrome();
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;

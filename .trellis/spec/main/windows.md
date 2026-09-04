@@ -32,6 +32,23 @@ frame: isMac,
 
 macOS 保留系统红绿灯，Windows/Linux 由渲染层自绘（`components/app/TitleBar.tsx`）。
 
+Windows 透明主窗口无框后系统不再画圆角和外框。主窗口渲染层用
+`useWindowsWindowChrome` 给 `html` 挂 `enso-win`，`globals.css` 给 `#root`
+在 `enso-main-shell.enso-win` 下画 8px 圆角和描边；最大化/全屏挂
+`enso-win-flush` 去掉这层。普通不透明窗口（如设置页）保留 Windows/DWM
+已有的圆角和边框，不要重复挂自绘 chrome。
+不要给透明主窗口开 Electron `roundedCorners`。
+
+窗口状态事件可能先于初始 IPC 查询返回；初始快照不能覆盖已经收到事件的字段，
+Effect 清理后也不能让未完成的查询重新写 class。初始查询完成前挂
+`enso-win-pending`，避免恢复最大化窗口时短暂闪出普通态圆角。
+Windows 恢复窗口时 `unmaximize` 通知可能不到 pinned renderer；renderer 收到
+`resize` 后要防抖重查 `isMaximized` / `isFullScreen`，事件通知只作为快速路径。
+
+Browser guest/devtools 是独立原生 `WebContentsView`，提到 workbench 上方时不受
+`#root` 的圆角裁切和 CSS z-index 约束。普通窗口下，renderer 上报 viewport 的
+`browser-native-stack` 必须给右描边留 1px、给底部圆角留 8px；flush 状态取消预留。
+
 ## macOS 红绿灯
 
 三条来自实际排查的约束：
