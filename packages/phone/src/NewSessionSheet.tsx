@@ -41,6 +41,7 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
   supervised: '受监督（每步确认）',
   'auto-edits': '自动接受编辑',
   full: '完全放行',
+  assistant: '助手代审',
 };
 
 // 与 SessionConfigSheet 同一套档位文案，保持两处选择器观感一致

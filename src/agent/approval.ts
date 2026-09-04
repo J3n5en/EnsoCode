@@ -8,7 +8,16 @@ import type {
 
 interface PendingApproval {
   info: ApprovalRequestInfo;
-  settle(result: 'allow' | 'deny' | 'cancel'): void;
+  settle(result: 'allow' | 'deny' | 'block' | 'cancel'): void;
+}
+
+export type ApprovalReviewFn = (
+  info: ApprovalRequestInfo,
+  signal: AbortSignal | undefined
+) => Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }>;
+
+export interface ApprovalGateOptions {
+  review?: ApprovalReviewFn;
 }
 
 /**
@@ -23,7 +32,8 @@ export class ApprovalGate {
   constructor(
     public mode: ApprovalMode,
     private readonly onRequest: (info: ApprovalRequestInfo) => void,
-    private readonly onResolve: (requestId: string) => void
+    private readonly onResolve: (requestId: string) => void,
+    private readonly options?: ApprovalGateOptions
   ) {}
 
   needsApproval(kind: ApprovalKind, tool: string): boolean {
@@ -38,12 +48,15 @@ export class ApprovalGate {
     kind: ApprovalKind,
     summary: string,
     signal: AbortSignal | undefined
-  ): Promise<'allow' | 'deny' | 'cancel'> {
+  ): Promise<'allow' | 'deny' | 'block' | 'cancel'> {
     const requestId = `apr-${++this.counter}-${Date.now()}`;
     const info: ApprovalRequestInfo = { requestId, tool, kind, summary };
     return new Promise((resolve) => {
-      const settle = (result: 'allow' | 'deny' | 'cancel') => {
-        if (!this.pending.delete(requestId)) return;
+      let settled = false;
+      const settle = (result: 'allow' | 'deny' | 'block' | 'cancel') => {
+        if (settled) return;
+        settled = true;
+        this.pending.delete(requestId);
         signal?.removeEventListener('abort', onAbort);
         this.onResolve(requestId);
         resolve(result);
@@ -51,7 +64,32 @@ export class ApprovalGate {
       const onAbort = () => settle('cancel');
       this.pending.set(requestId, { info, settle });
       signal?.addEventListener('abort', onAbort, { once: true });
-      this.onRequest(info);
+      if (signal?.aborted) {
+        settle('cancel');
+        return;
+      }
+      const review = this.mode === 'assistant' ? this.options?.review : undefined;
+      if (!review) {
+        this.onRequest(info);
+        return;
+      }
+      void Promise.resolve()
+        .then(() => review(info, signal))
+        .then((result) => {
+          if (settled) return;
+          if (result.decision === 'auto_allow') {
+            settle('allow');
+            return;
+          }
+          if (result.decision === 'block') {
+            settle('block');
+            return;
+          }
+          this.onRequest(info);
+        })
+        .catch(() => {
+          if (!settled) this.onRequest(info);
+        });
     });
   }
 
@@ -98,6 +136,7 @@ export function withApproval(
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (gate.needsApproval(kind, definition.name)) {
         const result = await gate.ask(definition.name, kind, summarize(kind, params), signal);
+        if (result === 'block') throw new Error('Assistant approval blocked this operation');
         if (result === 'deny') throw new Error('User denied this operation');
         if (result === 'cancel') throw new Error('Approval cancelled');
       }

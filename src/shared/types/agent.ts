@@ -52,8 +52,8 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
 export const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-/** 审批档位：supervised 写操作全审 / auto-edits 仅命令与 MCP 审 / full 全放行 */
-export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full'] as const;
+/** 审批档位：supervised 全审 / auto-edits 免文件 / assistant 助手代审 / full 全放行 */
+export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full', 'assistant'] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 /** 审批请求的操作类别 */
@@ -466,6 +466,8 @@ export type AgentCommand =
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
       approvalMode?: ApprovalMode;
+      /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
+      approvalReviewer?: SpawnModelConfig;
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
@@ -526,6 +528,7 @@ export type AgentCommand =
       decision: ApprovalDecision;
     }
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  | { type: 'set-approval-reviewer'; model?: SpawnModelConfig }
   | { type: 'compact'; identity: SessionIdentity; instructions?: string }
   | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
   | {
@@ -1657,6 +1660,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'mcpServers',
           'instruction',
           'approvalMode',
+          'approvalReviewer',
           'agentTypes',
           'subagentModels',
           'disabledTools',
@@ -1670,7 +1674,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||
-            value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null)))
+            value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
+        (value.approvalReviewer !== undefined &&
+          parseSpawnModelConfig(value.approvalReviewer) === null)
       ) {
         return null;
       }
@@ -1783,6 +1789,11 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'identity', 'mode']) &&
         parseAnySessionIdentity(value.identity) &&
         APPROVAL_MODES.includes(value.mode as ApprovalMode)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-approval-reviewer':
+      return hasOnlyKeys(value, ['type', 'model']) &&
+        (value.model === undefined || parseSpawnModelConfig(value.model))
         ? (value as unknown as AgentCommand)
         : null;
     case 'ask-respond':

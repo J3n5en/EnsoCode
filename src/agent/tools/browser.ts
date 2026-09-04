@@ -410,6 +410,7 @@ export function withNavigateApproval(gate: ApprovalGate, tool: ToolDefinition): 
           `Open ${host} in the built-in browser`,
           signal
         );
+        if (result === 'block') throw new Error('Assistant approval blocked this operation');
         if (result === 'deny') throw new Error('User denied this operation');
         if (result === 'cancel') throw new Error('Approval cancelled');
       }

@@ -129,6 +129,7 @@ const initialState = {
   defaultModel: null,
   titleSummaryEnabled: false,
   titleSummaryModel: null as import('@shared/defaultModel').DefaultModelRef | null,
+  approvalReviewer: null as import('@shared/defaultModel').DefaultModelRef | null,
   defaultReasoningEnabled: true,
   defaultThinkingLevel: 'medium' as import('@shared/types/agent').ThinkingLevel,
   skills: [] as import('@shared/types').SkillEntry[],
@@ -283,6 +284,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setTitleSummaryEnabled: (titleSummaryEnabled) => set({ titleSummaryEnabled }),
       setTitleSummaryModel: (titleSummaryModel) => set({ titleSummaryModel }),
+      setApprovalReviewer: (approvalReviewer) => set({ approvalReviewer }),
 
       revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {
         const defaultModel = get().defaultModel;

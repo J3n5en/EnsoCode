@@ -21,6 +21,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
+import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
@@ -133,6 +134,7 @@ export function ProvidersSettings() {
       </div>
       <DefaultModelPicker />
       <TitleSummaryPicker />
+      <ApprovalReviewerPicker />
       <SubagentModelsSettings />
 
       {providers.length === 0 ? (

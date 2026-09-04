@@ -10,6 +10,7 @@ import {
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
 
 function getSettingsPath(): string {
@@ -44,6 +45,7 @@ export const SETTINGS_STATE_FIELDS = [
   'defaultModel',
   'titleSummaryEnabled',
   'titleSummaryModel',
+  'approvalReviewer',
   'subagentModelsEnabled',
   'subagentModels',
   'skills',
@@ -206,6 +208,11 @@ function scheduleWrite(
       pendingWrite = null;
     }, DEBOUNCE_MS);
 
+    void import('../services/agentHost')
+      .then(async ({ pushApprovalReviewer }) => {
+        pushApprovalReviewer(await readStoredOauthCredentialKeys());
+      })
+      .catch(() => {});
     return true;
   } catch {
     return false;

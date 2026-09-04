@@ -19,6 +19,7 @@ import {
   Shield,
   ShieldCheck,
   ShieldOff,
+  Sparkles,
   Tag,
   Users,
   Wallet,
@@ -113,12 +114,14 @@ const APPROVAL_LABEL_KEYS: Record<ApprovalMode, string> = {
   supervised: 'Supervised',
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
+  assistant: 'Assistant approval',
 };
 
 const APPROVAL_ICONS: Record<ApprovalMode, LucideIcon> = {
   supervised: ShieldCheck,
   'auto-edits': Shield,
   full: ShieldOff,
+  assistant: Sparkles,
 };
 
 /** 设置弹层里代表每段的 icon（全部 13 段恒有值）；状态栏本体的 `context` 段用图形环

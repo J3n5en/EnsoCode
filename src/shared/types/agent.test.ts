@@ -648,6 +648,13 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'set-proxy-env', env: { HTTP_PROXY: undefined } })).toBeNull();
   });
 
+  it('set-approval-mode 接受 assistant 合法字面量；未知 mode 不解析成 assistant', () => {
+    const base = { type: 'set-approval-mode', identity: parent, mode: 'assistant' };
+    expect(parseAgentCommand(base)).toEqual(base);
+    expect(parseAgentCommand({ ...base, mode: 'bogus-mode' })).toBeNull();
+    expect(parseAgentCommand({ ...base, mode: undefined })).toBeNull();
+  });
+
   it('pin-sessions 只接受字符串数组（脏项整体拒绝）', () => {
     expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: [] })).toEqual({
       type: 'pin-sessions',

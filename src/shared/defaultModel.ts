@@ -143,6 +143,15 @@ export function isUsableModel(
   return modelUsability(selection, providers, credentials) === 'usable';
 }
 
+/** 新会话缺省审批档：代审模型可用则 assistant，否则 full。 */
+export function defaultApprovalMode(
+  reviewer: DefaultModelRef | null,
+  providers: readonly ModelProvider[],
+  credentials: ModelCredentialContext
+): 'assistant' | 'full' {
+  return isUsableModel(reviewer, providers, credentials) ? 'assistant' : 'full';
+}
+
 export function resolveChatModel(input: {
   defaultModel: DefaultModelRef | null;
   lastProviderId?: string;

@@ -151,6 +151,8 @@ export interface SettingsState {
   titleSummaryEnabled: boolean;
   /** 标题总结独立模型；null = 跟随全局默认模型 */
   titleSummaryModel: DefaultModelRef | null;
+  /** 助手代审模型；null = 该档不可用 */
+  approvalReviewer: DefaultModelRef | null;
   /** 新会话默认是否开启推理；缺省 true */
   defaultReasoningEnabled: boolean;
   /** 新会话默认思考深度；缺省 medium */
@@ -241,6 +243,7 @@ export interface SettingsState {
   setTitleSummaryEnabled: (value: boolean) => void;
   /** 设置标题总结独立模型；null = 回到跟随全局默认 */
   setTitleSummaryModel: (model: DefaultModelRef | null) => void;
+  setApprovalReviewer: (model: DefaultModelRef | null) => void;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;

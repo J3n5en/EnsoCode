@@ -12,7 +12,11 @@ import {
   type SessionIdentity,
 } from '@shared/builtinAgents';
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
-import { type ModelCredentialContext, modelUsability } from '@shared/defaultModel';
+import {
+  type DefaultModelRef,
+  type ModelCredentialContext,
+  modelUsability,
+} from '@shared/defaultModel';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import type {
@@ -141,6 +145,7 @@ export function startAgentWorker(): void {
     const queued = commandsPending;
     commandsPending = [];
     for (const command of queued) child.postMessage(command);
+    pushApprovalReviewer();
   });
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
@@ -344,6 +349,14 @@ export function spawnSession(
     authenticatedAccountKeys
   );
   if (!resolved.ok) return { ok: false, error: resolved.error };
+  const reviewer = resolveApprovalReviewer(authenticatedAccountKeys);
+  if (!reviewer.ok) {
+    if (request.approvalMode === 'assistant') return { ok: false, error: reviewer.error };
+  }
+  if (request.approvalMode === 'assistant' && (!reviewer.ok || !reviewer.selection)) {
+    return { ok: false, error: 'Select an assistant approval model in Settings first.' };
+  }
+  const approvalReviewerConfig = reviewer.ok ? reviewer.selection?.config : undefined;
   const preset = resolvePreset(request.presetId);
   const instruction = resolveGlobalInstruction(
     preset ? { instructionId: preset.instructionId } : undefined
@@ -370,6 +383,7 @@ export function spawnSession(
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
+    ...(approvalReviewerConfig ? { approvalReviewer: approvalReviewerConfig } : {}),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
     ...(subagentModels.length > 0 ? { subagentModels } : {}),
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
@@ -672,8 +686,17 @@ export function stopBackgroundTask(
 
 export function setSessionApprovalMode(
   identity: SessionIdentity,
-  mode: ApprovalMode
+  mode: ApprovalMode,
+  authenticatedAccountKeys: ReadonlySet<string> = new Set()
 ): { ok: boolean; error?: string } {
+  if (mode === 'assistant') {
+    const reviewer = resolveApprovalReviewer(authenticatedAccountKeys);
+    if (!reviewer.ok) return reviewer;
+    if (!reviewer.selection) {
+      return { ok: false, error: 'Select an assistant approval model in Settings first.' };
+    }
+    pushApprovalReviewer(authenticatedAccountKeys);
+  }
   return sendAgentCommand({ type: 'set-approval-mode', identity, mode });
 }
 
@@ -858,6 +881,36 @@ function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
     ...(server.url ? { url: server.url } : {}),
     ...(oauth ? { oauth } : {}),
   };
+}
+
+function asModelRef(value: unknown): DefaultModelRef | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as { providerId?: unknown; modelId?: unknown };
+  return typeof candidate.providerId === 'string' &&
+    candidate.providerId.trim() &&
+    typeof candidate.modelId === 'string' &&
+    candidate.modelId.trim()
+    ? { providerId: candidate.providerId, modelId: candidate.modelId }
+    : null;
+}
+
+export function resolveApprovalReviewer(
+  authenticatedAccountKeys: ReadonlySet<string>
+): ModelSelectionResult | { ok: true; selection: null } {
+  const ref = asModelRef(readSettingsState()?.approvalReviewer);
+  if (!ref) return { ok: true, selection: null };
+  return resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
+}
+
+export function pushApprovalReviewer(authenticatedAccountKeys?: ReadonlySet<string>): void {
+  if (!worker || !workerReady) return;
+  const keys = authenticatedAccountKeys ?? new Set<string>();
+  const resolved = resolveApprovalReviewer(keys);
+  const model = resolved.ok ? resolved.selection?.config : undefined;
+  worker.postMessage({
+    type: 'set-approval-reviewer',
+    ...(model ? { model } : {}),
+  } satisfies AgentCommand);
 }
 
 export function readSettingsState(): Record<string, unknown> | undefined {
