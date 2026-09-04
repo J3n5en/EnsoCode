@@ -1791,7 +1791,20 @@ export const useSessionsStore = create<SessionsState>()(
           // coworker 由 worker 侧创建/恢复,永不走 spawn 分支；未恢复时在回显前拦下并显式报错
           if (!conversation.started && conversation.parentId) {
             const error = 'coworker not restored yet — resume the conversation first';
-            set((state) => patch(state, id, { draftText: submittedText, status: 'failed', error }));
+            set((state) =>
+              patch(state, id, {
+                status: 'failed',
+                error,
+                ...(images?.length
+                  ? {
+                      queuedMessages: [
+                        { id: crypto.randomUUID(), text: submittedText, images },
+                        ...(state.conversations[id].queuedMessages ?? []),
+                      ],
+                    }
+                  : { draftText: submittedText }),
+              })
+            );
             return error;
           }
           const deliveryId = crypto.randomUUID();
