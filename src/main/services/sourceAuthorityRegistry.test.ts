@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeRemoteProjectPath, SourceAuthorityRegistry } from './sourceAuthorityRegistry';
@@ -313,6 +313,200 @@ describe('SourceAuthorityRegistry', () => {
     expect(project?.sshConnectionId).toBe(connA);
 
     expect(registry.createProject({ requestId: 'p5', path: '/srv/app' }).accepted).toBe(false);
+  });
+
+  it('reuses the existing local project when the same directory is added again', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+    });
+    const created = registry.createProject({ requestId: 'p1', path: projectPath });
+    expect(created.accepted).toBe(true);
+    if (!created.accepted) return;
+    const again = registry.createProject({
+      requestId: 'p2',
+      path: `${projectPath}${path.sep}`,
+    });
+    expect(again).toEqual(created);
+    expect(
+      registry.projection().projects.filter((project) => project.state === 'active')
+    ).toHaveLength(1);
+  });
+
+  it('merges persisted local duplicates onto the earliest project and remaps conversations', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const keeperId = '11111111-1111-4111-8111-111111111111';
+    const duplicateId = '22222222-2222-4222-8222-222222222222';
+    const keeperConversation = '33333333-3333-4333-8333-333333333333';
+    const duplicateConversation = '44444444-4444-4444-8444-444444444444';
+    const registryFile = path.join(root, 'registry.json');
+    writeFileSync(
+      registryFile,
+      JSON.stringify({
+        migrationVersion: 1,
+        projects: [
+          {
+            projectId: keeperId,
+            canonicalPath: projectPath,
+            state: 'active',
+            version: 1,
+          },
+          {
+            projectId: duplicateId,
+            canonicalPath: `${projectPath}${path.sep}`,
+            state: 'active',
+            version: 1,
+          },
+        ],
+        conversations: [
+          {
+            conversationId: keeperConversation,
+            projectId: keeperId,
+            kind: 'root',
+            lifecycle: 'draft',
+            version: 1,
+          },
+          {
+            conversationId: duplicateConversation,
+            projectId: duplicateId,
+            kind: 'root',
+            lifecycle: 'draft',
+            version: 1,
+          },
+        ],
+      })
+    );
+    const registry = new SourceAuthorityRegistry({ registryFile });
+    expect(registry.project(keeperId)?.state).toBe('active');
+    expect(registry.project(duplicateId)?.state).toBe('removed');
+    expect(registry.conversation(keeperConversation)?.projectId).toBe(keeperId);
+    expect(registry.conversation(duplicateConversation)?.projectId).toBe(keeperId);
+    expect(
+      registry.projection().projects.filter((project) => project.state === 'active')
+    ).toHaveLength(1);
+    const reloaded = new SourceAuthorityRegistry({ registryFile });
+    expect(reloaded.conversation(duplicateConversation)?.projectId).toBe(keeperId);
+    expect(reloaded.project(duplicateId)?.state).toBe('removed');
+  });
+
+  it('treats a symlink and its realpath as the same local project', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    const linkPath = path.join(root, 'alias');
+    mkdirSync(projectPath);
+    symlinkSync(projectPath, linkPath);
+    const registryFile = path.join(root, 'registry.json');
+    writeFileSync(
+      registryFile,
+      JSON.stringify({
+        migrationVersion: 1,
+        projects: [
+          {
+            projectId: '11111111-1111-4111-8111-111111111111',
+            canonicalPath: linkPath,
+            state: 'active',
+            version: 1,
+          },
+        ],
+        conversations: [],
+      })
+    );
+    const registry = new SourceAuthorityRegistry({ registryFile });
+    const again = registry.createProject({ requestId: 'p', path: projectPath });
+    expect(again.accepted).toBe(true);
+    if (!again.accepted) return;
+    expect(again.value.projectId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(again.value.canonicalPath).toBe(projectPath);
+  });
+
+  it('merges duplicate legacy settings projects onto the earliest path identity', () => {
+    const root = temporary();
+    const projectPath = path.join(root, 'project');
+    mkdirSync(projectPath);
+    const keeperId = '11111111-1111-4111-8111-111111111111';
+    const duplicateId = '22222222-2222-4222-8222-222222222222';
+    const conversationId = '33333333-3333-4333-8333-333333333333';
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+      legacySettings: () => ({
+        'enso-settings': {
+          state: {
+            projects: [
+              { id: keeperId, path: projectPath },
+              { id: duplicateId, path: `${projectPath}${path.sep}` },
+            ],
+          },
+        },
+        'enso-conversations': {
+          state: {
+            conversations: {
+              [conversationId]: { projectId: duplicateId },
+            },
+          },
+        },
+      }),
+    });
+    expect(registry.project(keeperId)?.state).toBe('active');
+    expect(registry.project(duplicateId)).toBeUndefined();
+    expect(registry.conversation(conversationId)?.projectId).toBe(keeperId);
+    expect(
+      registry.projection().projects.filter((project) => project.state === 'active')
+    ).toHaveLength(1);
+  });
+
+  it('merges persisted ssh duplicates on the same connection and path', () => {
+    const root = temporary();
+    const connA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const keeperId = '11111111-1111-4111-8111-111111111111';
+    const duplicateId = '22222222-2222-4222-8222-222222222222';
+    const registryFile = path.join(root, 'registry.json');
+    writeFileSync(
+      registryFile,
+      JSON.stringify({
+        migrationVersion: 1,
+        projects: [
+          {
+            projectId: keeperId,
+            canonicalPath: '/srv/app/',
+            kind: 'ssh',
+            sshHost: 'user@dev-box',
+            sshConnectionId: connA,
+            state: 'active',
+            version: 1,
+          },
+          {
+            projectId: duplicateId,
+            canonicalPath: '/srv/app',
+            kind: 'ssh',
+            sshHost: 'user@dev-box',
+            sshConnectionId: connA,
+            state: 'active',
+            version: 1,
+          },
+        ],
+        conversations: [],
+      })
+    );
+    const registry = new SourceAuthorityRegistry({
+      registryFile,
+      resolveSshConnection: (id) =>
+        id === connA ? { host: 'dev-box', user: 'user', name: 'prod' } : null,
+    });
+    expect(registry.project(keeperId)?.canonicalPath).toBe('/srv/app');
+    expect(registry.project(duplicateId)?.state).toBe('removed');
+    const again = registry.createProject({
+      requestId: 'p',
+      path: '/srv/app',
+      kind: 'ssh',
+      sshConnectionId: connA,
+    });
+    expect(again.accepted).toBe(true);
+    if (!again.accepted) return;
+    expect(again.value.projectId).toBe(keeperId);
   });
 });
 

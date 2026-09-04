@@ -60,6 +60,7 @@ import {
   viewedConversationId,
 } from './messageCache';
 import { migrateSessions, SESSIONS_VERSION } from './migrate';
+import { remapConversationProjectIds } from './projectAuthorityRemap';
 import {
   applyAgentEvent,
   applyDispatchEvent,
@@ -2420,10 +2421,25 @@ export const useSessionsStore = create<SessionsState>()(
         const state = useSessionsStore.getState();
         const viewed = viewedFromState(state);
         if (viewed) void window.electronAPI.agent.requestSnapshot(viewed);
+        void syncConversationProjectIds();
       },
     }
   )
 );
+
+async function syncConversationProjectIds(): Promise<void> {
+  const authority = await window.electronAPI.sourceAuthority.read();
+  const conversations = useSessionsStore.getState().conversations;
+  const next = remapConversationProjectIds(conversations, authority.conversations);
+  if (next !== conversations) useSessionsStore.setState({ conversations: next });
+}
+
+void syncConversationProjectIds();
+window.electronAPI.sourceAuthority.onChanged((projection) => {
+  const conversations = useSessionsStore.getState().conversations;
+  const next = remapConversationProjectIds(conversations, projection.conversations);
+  if (next !== conversations) useSessionsStore.setState({ conversations: next });
+});
 
 // 上报「当前正在查看的会话」给 main：窗口聚焦时,只有正被查看的会话才抑制系统通知。
 // tab 生效时以 tab（coworker/子会话）为准,与 sendActive 等处的解析口径一致。

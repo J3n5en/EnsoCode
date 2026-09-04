@@ -232,6 +232,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     sshConnectionId?: string;
     sshHost?: string;
   }) => {
+    const knownIds = new Set(projects.map((project) => project.id));
     if (request.sshConnectionId) {
       setPendingProject({
         name: request.path.split('/').filter(Boolean).pop() ?? request.path,
@@ -244,7 +245,26 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
       request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined
     )
       .then((project) => {
-        if (project) void newConversation(project.id);
+        if (!project) return;
+        if (archivedProjectIds.includes(project.id)) {
+          const next = archivedProjectIds.filter((id) => id !== project.id);
+          setArchivedProjectIds(next);
+          writeSidebarOrder(ARCHIVED_PROJECTS_KEY, next);
+        }
+        if (knownIds.has(project.id)) {
+          setCollapsedProjects((prev) => {
+            if (prev[project.id] !== true) return prev;
+            const next = { ...prev, [project.id]: false };
+            localStorage.setItem('enso-collapsed-projects', JSON.stringify(next));
+            return next;
+          });
+          const latest = projectConversationIds(order, conversations, project.id)[0];
+          if (latest) {
+            void selectConversation(latest);
+            return;
+          }
+        }
+        void newConversation(project.id);
       })
       .catch((error: unknown) => {
         addToast({

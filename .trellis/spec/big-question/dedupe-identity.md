@@ -31,6 +31,7 @@ const skillKey = (target: string): string => path.resolve(target);
 | 技能 | **名称**（小写） | 技能按名称调用，同名无法共存；同一技能常被多个工具各装一份 |
 | MCP 服务器 | 启动命令 + 参数，或 URL | 名字各家不同（`cunzhi` / `寸止`），命令才是身份 |
 | 指令文件 | **内容 SHA-256** | 文件名相同内容各异（多家的 `AGENTS.md`）；内容相同文件名各异（`CLAUDE.md` 与 `AGENTS.md` 常是同一份） |
+| 工作区项目 | 本地 `realpath`；SSH 为 `connectionId + 规范化绝对路径` | 斜杠、符号链接、遗留重复 id 都是同一目录；本地与 SSH 不互认 |
 
 改成名称去重后：59 条技能 → 37 个唯一名称，被标记的 22 条正好是那 11 个三重副本。
 

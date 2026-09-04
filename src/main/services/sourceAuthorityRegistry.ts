@@ -61,6 +61,28 @@ const validId = (value: unknown): value is string =>
   typeof value === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
+function projectIdentity(
+  project: Pick<ProjectAuthority, 'kind' | 'canonicalPath' | 'sshConnectionId'>
+): string {
+  return project.kind === 'ssh'
+    ? `ssh:${project.sshConnectionId}:${project.canonicalPath}`
+    : `local:${project.canonicalPath}`;
+}
+
+function normalizeStoredProject(project: ProjectAuthority): { canonicalPath: string } {
+  if (project.kind === 'ssh') {
+    const canonicalPath = normalizeRemoteProjectPath(project.canonicalPath);
+    return { canonicalPath: canonicalPath ?? project.canonicalPath };
+  }
+  try {
+    const canonicalPath = realpathSync(project.canonicalPath);
+    if (!statSync(canonicalPath).isDirectory()) return { canonicalPath: project.canonicalPath };
+    return { canonicalPath };
+  } catch {
+    return { canonicalPath: project.canonicalPath };
+  }
+}
+
 export class SourceAuthorityRegistry {
   private readonly projects = new Map<string, ProjectAuthority>();
   private readonly conversations = new Map<string, ConversationAuthority>();
@@ -69,6 +91,7 @@ export class SourceAuthorityRegistry {
   constructor(private readonly options: SourceAuthorityRegistryOptions) {
     this.randomUuid = options.randomUuid ?? randomUUID;
     if (!this.load()) this.migrateLegacy(options.legacySettings?.());
+    if (this.normalizeLoadedProjects()) this.commit();
   }
 
   private hydrateProject(value: ProjectAuthority): ProjectAuthority {
@@ -121,12 +144,7 @@ export class SourceAuthorityRegistry {
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     const canonicalPath = realpathSync(request.path);
     if (!statSync(canonicalPath).isDirectory()) throw new Error('Project path is not a directory.');
-    const existing = [...this.projects.values()].find(
-      (project) =>
-        project.kind !== 'ssh' &&
-        project.canonicalPath === canonicalPath &&
-        project.state === 'active'
-    );
+    const existing = this.findActiveByIdentity(`local:${canonicalPath}`);
     if (existing) return { accepted: true, value: { ...existing } };
     return this.insertProject({
       projectId: this.randomUuid(),
@@ -149,13 +167,7 @@ export class SourceAuthorityRegistry {
     const sshHost = resolveSshTarget(connection);
     const canonicalPath = normalizeRemoteProjectPath(request.path);
     if (!canonicalPath) return { accepted: false, error: 'Remote project path must be absolute.' };
-    const existing = [...this.projects.values()].find(
-      (project) =>
-        project.kind === 'ssh' &&
-        project.sshConnectionId === connectionId &&
-        project.canonicalPath === canonicalPath &&
-        project.state === 'active'
-    );
+    const existing = this.findActiveByIdentity(`ssh:${connectionId}:${canonicalPath}`);
     if (existing) return { accepted: true, value: this.hydrateProject(existing) };
     return this.insertProject({
       projectId: this.randomUuid(),
@@ -350,6 +362,45 @@ export class SourceAuthorityRegistry {
     this.options.onChanged?.(this.projection());
   }
 
+  private findActiveByIdentity(identity: string): ProjectAuthority | undefined {
+    return [...this.projects.values()].find(
+      (project) => project.state === 'active' && projectIdentity(project) === identity
+    );
+  }
+
+  /** 把磁盘/遗留数据折成当前身份：规范化路径，同身份只留最早一条，会话并过去。 */
+  private normalizeLoadedProjects(): boolean {
+    let changed = false;
+    const keepers = new Map<string, ProjectAuthority>();
+    const remap = new Map<string, string>();
+    for (const project of this.projects.values()) {
+      const normalized = normalizeStoredProject(project);
+      if (normalized.canonicalPath !== project.canonicalPath) {
+        project.canonicalPath = normalized.canonicalPath;
+        changed = true;
+      }
+      if (project.state !== 'active') continue;
+      const identity = projectIdentity(project);
+      const keeper = keepers.get(identity);
+      if (!keeper) {
+        keepers.set(identity, project);
+        continue;
+      }
+      project.state = 'removed';
+      project.version += 1;
+      remap.set(project.projectId, keeper.projectId);
+      changed = true;
+    }
+    for (const conversation of this.conversations.values()) {
+      const nextProjectId = remap.get(conversation.projectId);
+      if (!nextProjectId) continue;
+      conversation.projectId = nextProjectId;
+      conversation.version += 1;
+      changed = true;
+    }
+    return changed;
+  }
+
   private load(): boolean {
     if (!existsSync(this.options.registryFile)) return false;
     try {
@@ -384,12 +435,23 @@ export class SourceAuthorityRegistry {
   private migrateLegacy(settings: Record<string, unknown> | null | undefined): void {
     const state = record(record(settings?.['enso-settings'])?.state);
     const projects = Array.isArray(state?.projects) ? state.projects : [];
+    const remap = new Map<string, string>();
     for (const raw of projects) {
       const project = record(raw);
       if (!validId(project?.id) || typeof project?.path !== 'string') continue;
       try {
         const canonicalPath = realpathSync(project.path);
         if (!statSync(canonicalPath).isDirectory()) continue;
+        const existing = [...this.projects.values()].find(
+          (candidate) =>
+            candidate.state === 'active' &&
+            candidate.kind !== 'ssh' &&
+            candidate.canonicalPath === canonicalPath
+        );
+        if (existing) {
+          if (existing.projectId !== project.id) remap.set(project.id, existing.projectId);
+          continue;
+        }
         this.projects.set(project.id, {
           projectId: project.id,
           canonicalPath,
@@ -403,11 +465,16 @@ export class SourceAuthorityRegistry {
     if (conversations) {
       for (const [conversationId, raw] of Object.entries(conversations)) {
         const conversation = record(raw);
+        const projectId =
+          typeof conversation?.projectId === 'string'
+            ? (remap.get(conversation.projectId) ?? conversation.projectId)
+            : undefined;
         if (
+          !conversation ||
           !validId(conversationId) ||
-          conversation?.parentId ||
-          !validId(conversation?.projectId) ||
-          !this.projects.has(conversation.projectId)
+          conversation.parentId ||
+          !validId(projectId) ||
+          !this.projects.has(projectId)
         )
           continue;
         const sessionFile = this.validLegacySessionFile(conversation.sessionFile);
@@ -417,7 +484,7 @@ export class SourceAuthorityRegistry {
           typeof conversation.lastModelId === 'string' ? conversation.lastModelId : undefined;
         this.conversations.set(conversationId, {
           conversationId,
-          projectId: conversation.projectId,
+          projectId,
           kind: 'root',
           lifecycle: sessionFile ? 'ready' : 'draft',
           version: 1,
