@@ -57,6 +57,7 @@ import { parseAgentSessionCustomEntry } from '@shared/types/agent';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
+import { withBashInterception } from './bashInterceptor';
 import { AskManager, createAskTool } from './ask';
 import { ensureAssistantUsage } from './assistantUsage';
 import {
@@ -1169,10 +1170,12 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createBashToolDefinition(
-                cwd,
-                remoteOps ? { operations: remoteOps.bash } : undefined
-              ) as unknown as Def,
+              withBashInterception(
+                createBashToolDefinition(
+                  cwd,
+                  remoteOps ? { operations: remoteOps.bash } : undefined
+                ) as unknown as Def
+              ),
               this.bgTasks,
               sessionId,
               cwd,
