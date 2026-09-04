@@ -43,6 +43,9 @@ export function registerMcpHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_REVOKE, (event, serverId: unknown) => {
     if (!isTrustedWindow(event.sender.id) || typeof serverId !== 'string') return { ok: false };
     revokeMcpServer(serverId);
+    // 不同步缓存的话，另一个窗口（或稍后重开的设置页）拉快照会看到旧的 ready
+    const name = resolveServerFromSettings(serverId)?.name;
+    if (name) emitStatus({ type: 'mcp-status', serverId, serverName: name, state: 'unauthorized' });
     pushMcpWarmup();
     return { ok: true };
   });

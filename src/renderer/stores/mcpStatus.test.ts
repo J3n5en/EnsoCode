@@ -118,6 +118,23 @@ describe('useMcpStatusStore', () => {
     expect(useMcpStatusStore.getState().statuses.legacy).toEqual({ state: 'ready', toolCount: 1 });
   });
 
+  it('快照覆盖本地残留的过渡态，快照里没有的键才保留', async () => {
+    useMcpStatusStore.setState({
+      statuses: { 'srv-1': { state: 'error', error: 'stale' }, other: { state: 'connecting' } },
+    });
+    statusSnapshot.mockResolvedValueOnce([
+      { type: 'mcp-status', serverId: 'srv-1', serverName: 'notion', state: 'ready', toolCount: 2 },
+    ]);
+    useMcpStatusStore.getState().bind();
+    await vi.waitFor(() =>
+      expect(useMcpStatusStore.getState().statuses['srv-1']).toEqual({
+        state: 'ready',
+        toolCount: 2,
+      })
+    );
+    expect(useMcpStatusStore.getState().statuses.other).toEqual({ state: 'connecting' });
+  });
+
   it('worker 退出的清空事件把状态清干净', () => {
     useMcpStatusStore.setState({ statuses: { 'srv-1': { state: 'ready', toolCount: 3 } } });
     useMcpStatusStore.getState().bind();

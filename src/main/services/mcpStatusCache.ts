@@ -16,6 +16,13 @@ export function mcpStatusSnapshot(): McpStatusEvent[] {
   return [...statuses.values()];
 }
 
-export function clearMcpStatuses(): void {
+export function resetMcpStatuses(): void {
   statuses.clear();
+}
+
+/** worker 退出时调用；idle 记的是「已授权待连接」，非 worker 派生，保留 */
+export function clearMcpStatuses(): void {
+  for (const [key, event] of statuses) {
+    if (event.state !== 'idle') statuses.delete(key);
+  }
 }

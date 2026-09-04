@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearMcpStatuses, mcpStatusSnapshot, recordMcpStatus } from './mcpStatusCache';
+import {
+  clearMcpStatuses,
+  mcpStatusSnapshot,
+  recordMcpStatus,
+  resetMcpStatuses,
+} from './mcpStatusCache';
 
-beforeEach(() => clearMcpStatuses());
+beforeEach(() => resetMcpStatuses());
 
 describe('mcpStatusCache', () => {
   it('按 serverId 归并，后到的状态覆盖前一条', () => {
@@ -47,5 +52,14 @@ describe('mcpStatusCache', () => {
     recordMcpStatus({ type: 'mcp-status', serverId: 'a', serverName: 'A', state: 'ready' });
     clearMcpStatuses();
     expect(mcpStatusSnapshot()).toEqual([]);
+  });
+
+  it('清空保留 idle：它记的是「已授权待连接」，与 worker 存活无关', () => {
+    recordMcpStatus({ type: 'mcp-status', serverId: 'a', serverName: 'A', state: 'ready' });
+    recordMcpStatus({ type: 'mcp-status', serverId: 'b', serverName: 'B', state: 'idle' });
+    clearMcpStatuses();
+    expect(mcpStatusSnapshot()).toEqual([
+      { type: 'mcp-status', serverId: 'b', serverName: 'B', state: 'idle' },
+    ]);
   });
 });

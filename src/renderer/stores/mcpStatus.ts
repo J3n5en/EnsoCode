@@ -75,7 +75,8 @@ export const useMcpStatusStore = create<McpStatusState>()((set, get) => ({
       .catch(() => undefined);
     void window.electronAPI.mcp
       .statusSnapshot()
-      .then((events) => set({ statuses: { ...applyStatusSnapshot(events), ...get().statuses } }))
+      // 快照是 Main 侧最近值，比本地残留的过渡态新；只补快照里没有的键
+      .then((events) => set({ statuses: { ...get().statuses, ...applyStatusSnapshot(events) } }))
       .catch(() => undefined);
     return window.electronAPI.mcp.onStatus((push) => {
       if (push.type === 'mcp-status-cleared') {
@@ -83,6 +84,11 @@ export const useMcpStatusStore = create<McpStatusState>()((set, get) => ({
         return;
       }
       set({ statuses: applyStatusEvent(get().statuses, push) });
+      // 授权/撤销在别的窗口发生时，授权态也要跟着变
+      void window.electronAPI.mcp
+        .authState()
+        .then((authorized) => set({ authorized }))
+        .catch(() => undefined);
     });
   },
 
