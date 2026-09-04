@@ -397,6 +397,13 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const rejected = events.find((event) => event.type === 'parent-rejected');
     expect(rejected).toMatchObject({ identity: parent, seq: 0 });
     expect((rejected as { reason: string }).reason).toContain('parent');
+
+    supervisor.handleCommand({ type: 'prompt', identity: child, text: 'hello' });
+    await settle();
+    expect(events.find((event) => event.type === 'child-rejected')).toMatchObject({
+      identity: child,
+      seq: 0,
+    });
   });
 
   it('dismiss-coworker 遥控解雇 worker 直雇 coworker：exact 父代执行，旧代拒绝', async () => {

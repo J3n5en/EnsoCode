@@ -596,16 +596,14 @@ export class SessionSupervisor {
         if (!managed || !isSameGeneration(managed.identity, identity)) {
           // 会话已不在 worker（驱逐 / 释放 / 换代）而 renderer 仍认为 started：静默丢弃会让
           // 后续每次发送都绕过 spawn 直发到空会话。按拒绝回流，让 renderer 清 started 并报错。
-          if (
-            (command.type === 'prompt' || command.type === 'steer') &&
-            !('parent' in command.identity)
-          ) {
-            this.options.emit({
-              type: 'parent-rejected',
-              identity: command.identity,
-              seq: 0,
-              reason: message,
-            });
+          if (command.type === 'prompt' || command.type === 'steer') {
+            // 命令类型声明为 SessionIdentity，但 coworker tab 发来的是完整 ChildSessionIdentity
+            const target = command.identity as SessionIdentity | ChildSessionIdentity;
+            this.options.emit(
+              'parent' in target
+                ? { type: 'child-rejected', identity: target, seq: 0, reason: message }
+                : { type: 'parent-rejected', identity: target, seq: 0, reason: message }
+            );
           }
           return;
         }
