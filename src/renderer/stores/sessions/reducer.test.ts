@@ -161,6 +161,23 @@ describe('applyAgentEvent', () => {
     });
     expect(next.status).toBe('failed');
     expect(next.messages).toHaveLength(1);
+    // 并发两条未确认：worker 按序失败，先收回最早一条（A）而非尾部（B）
+    const twoPending: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'A' }], timestamp: 1, optimistic: true },
+        { role: 'user', content: [{ type: 'text', text: 'B' }], timestamp: 2, optimistic: true },
+      ],
+    };
+    const afterFirst = applyAgentEvent(twoPending, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 1,
+      turnId: 't',
+      error: 'stuck',
+      undelivered: true,
+    });
+    expect(afterFirst.messages.map((m) => (m.content[0] as { text: string }).text)).toEqual(['B']);
     // 普通 turn-failed（消息已送达）不动时间线
     const plain = applyAgentEvent(withOptimistic, 's1', {
       type: 'turn-failed',

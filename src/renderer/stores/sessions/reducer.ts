@@ -23,6 +23,11 @@ export type TimelineMessage = ProjectedMessage & {
   deliveryId?: string;
 };
 
+function dropOldestOptimistic(messages: readonly TimelineMessage[]): TimelineMessage[] {
+  const index = messages.findIndex((message) => message.optimistic);
+  return index < 0 ? [...messages] : messages.filter((_, position) => position !== index);
+}
+
 function textOf(message: ProjectedMessage): string {
   return message.content
     .map((part) => (part.type === 'text' ? part.text : ''))
@@ -394,10 +399,9 @@ export function applyAgentEvent(
     case 'turn-failed':
       return {
         ...settleTiming(current, now),
-        // 从未提交给 pi 的消息：乐观尾巴不会被任何 upsert 确认，留着就是“看起来发出去了”的假象
-        ...(event.undelivered && current.messages.at(-1)?.optimistic
-          ? { messages: current.messages.slice(0, -1) }
-          : {}),
+        // 从未提交给 pi 的消息：乐观回显不会被任何 upsert 确认，留着就是“看起来发出去了”的假象。
+        // worker 按会话串行处理 prompt，失败回流与发送同序：收回最早一条未确认消息，而非尾部
+        ...(event.undelivered ? { messages: dropOldestOptimistic(current.messages) } : {}),
         status: 'failed',
         error: event.error,
         retry: undefined,

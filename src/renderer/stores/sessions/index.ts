@@ -955,11 +955,15 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
-            // 未提交的消息被 reducer 收回乐观回显：文本退回输入框，用户不用重敲
+            // 未提交的消息被 reducer 收回乐观回显（最早一条）：文本退回输入框，用户不用重敲
             ...(event.type === 'turn-failed' &&
             event.undelivered &&
             next.messages.length < conversation.messages.length
-              ? { draftText: userMessageRawText(conversation.messages.at(-1)!) || undefined }
+              ? {
+                  draftText:
+                    userMessageRawText(conversation.messages.find((m) => m.optimistic)!) ||
+                    undefined,
+                }
               : {}),
             ...(event.type === 'parent-ready'
               ? {
@@ -1802,8 +1806,17 @@ export const useSessionsStore = create<SessionsState>()(
               approvalMode: conversation.approvalMode ?? 'full',
             });
             if (!result.ok) {
+              // 与 deliver 失败同口径：收回回显、原文退回输入框，不留“看起来发出去了”的假象
               set((state) =>
-                patch(state, id, { spawning: false, status: 'failed', error: result.error })
+                patch(state, id, {
+                  spawning: false,
+                  status: 'failed',
+                  error: result.error,
+                  messages: state.conversations[id].messages.filter(
+                    (message) => message.deliveryId !== deliveryId
+                  ),
+                  draftText: submittedText,
+                })
               );
               return result.error ?? 'spawn failed';
             }

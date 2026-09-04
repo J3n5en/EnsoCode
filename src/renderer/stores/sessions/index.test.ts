@@ -1244,10 +1244,9 @@ describe('typed Agent child projection', () => {
     const id = await sessionsModule.useSessionsStore.getState().newConversation('project');
     expect(id).toBeTruthy();
 
-    await sessionsModule.useSessionsStore.getState().send(
-      raw,
-      { providerId: 'provider-1', modelId: 'model-1', cwd: '/project' }
-    );
+    await sessionsModule.useSessionsStore
+      .getState()
+      .send(raw, { providerId: 'provider-1', modelId: 'model-1', cwd: '/project' });
 
     const conv = sessionsModule.useSessionsStore.getState().conversations[id!];
     // 暂存标题跳过「从这里继续:」，直接提取首条正文
@@ -1266,6 +1265,8 @@ describe('typed Agent child projection', () => {
       conversationId: id!,
       title: '配置层通用性评估',
     });
-    expect(sessionsModule.useSessionsStore.getState().conversations[id!].title).toBe('配置层通用性评估');
+    expect(sessionsModule.useSessionsStore.getState().conversations[id!].title).toBe(
+      '配置层通用性评估'
+    );
   });
 });
