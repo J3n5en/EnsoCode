@@ -1,5 +1,6 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
-import { Minus, Sparkles, Square, X } from 'lucide-react';
+import { Copy, Minus, Sparkles, Square, X } from 'lucide-react';
+import { useWindowMaximized } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -33,7 +34,9 @@ export function SummonEnsoButton({ label = true }: { label?: boolean }) {
  * - Windows/Linux: 自绘最小化/最大化/关闭按钮
  */
 export function TitleBar({ title, className, actions }: TitleBarProps) {
+  const { t } = useI18n();
   const isMac = window.electronAPI.env.platform === 'darwin';
+  const maximized = useWindowMaximized();
 
   return (
     <header
@@ -54,6 +57,8 @@ export function TitleBar({ title, className, actions }: TitleBarProps) {
             type="button"
             className="flex h-full w-12 items-center justify-center hover:bg-muted"
             onClick={() => window.electronAPI.window.minimize()}
+            aria-label={t('Minimize')}
+            title={t('Minimize')}
           >
             <Minus className="h-4 w-4" />
           </button>
@@ -61,13 +66,17 @@ export function TitleBar({ title, className, actions }: TitleBarProps) {
             type="button"
             className="flex h-full w-12 items-center justify-center hover:bg-muted"
             onClick={() => window.electronAPI.window.maximize()}
+            aria-label={maximized ? t('Restore') : t('Maximize')}
+            title={maximized ? t('Restore') : t('Maximize')}
           >
-            <Square className="h-3.5 w-3.5" />
+            {maximized ? <Copy className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
           </button>
           <button
             type="button"
             className="flex h-full w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground"
             onClick={() => window.electronAPI.window.close()}
+            aria-label={t('Close')}
+            title={t('Close')}
           >
             <X className="h-4 w-4" />
           </button>

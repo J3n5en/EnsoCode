@@ -176,6 +176,9 @@ export const zhTranslations: Record<string, string> = {
   Next: '下一步',
   'Get started': '开始',
   Close: '关闭',
+  Minimize: '最小化',
+  Maximize: '最大化',
+  Restore: '还原',
   'No new providers imported': '没有新导入的模型服务',
   'Fetch models for each provider, then enable the ones you want.':
     '为每个模型服务拉取模型，再启用你需要的。',
