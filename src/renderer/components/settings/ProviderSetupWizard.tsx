@@ -255,7 +255,14 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
             oauth={false}
             onCancel={back}
             onSave={(value) => {
-              addProviders([{ ...value, id: crypto.randomUUID(), enabled: true }]);
+              addProviders([
+                {
+                  ...value,
+                  id: crypto.randomUUID(),
+                  enabled: true,
+                  catalogId: selected.id,
+                },
+              ]);
               close();
             }}
           />

@@ -62,11 +62,16 @@ const VENDOR_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * 三步、无第四种情况：订阅条目反解基础 providerId → baseUrl hostname 查表 → `__custom`。
+ * 顺序：订阅账号 → 向导 catalogId（含 `__custom`）→ baseUrl hostname 查表 → `__custom`。
  * baseUrl 为空或非法（new URL 抛异常）同样落 `__custom`，不向外抛。
  */
-export function vendorOf(provider: Pick<ModelProvider, 'oauthAccountKey' | 'baseUrl'>): string {
+export function vendorOf(
+  provider: Pick<ModelProvider, 'oauthAccountKey' | 'baseUrl' | 'catalogId'>
+): string {
   if (provider.oauthAccountKey) return providerIdOfAccountKey(provider.oauthAccountKey);
+  // 向导选择优先于 hostname：Custom 即使填了官方 URL 也要单独成组。
+  if (provider.catalogId === CUSTOM_VENDOR_ID) return CUSTOM_VENDOR_ID;
+  if (provider.catalogId) return provider.catalogId;
 
   let host: string;
   try {

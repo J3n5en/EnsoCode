@@ -52,6 +52,24 @@ describe('vendorOf', () => {
     expect(vendorOf({ baseUrl: 'http://[::1]/v1' })).toBe('local');
   });
 
+  it('向导选 Custom 时即使 URL 是官方 xAI 也落 Custom 组', () => {
+    expect(
+      vendorOf({
+        baseUrl: 'https://api.x.ai/v1',
+        catalogId: CUSTOM_VENDOR_ID,
+      })
+    ).toBe(CUSTOM_VENDOR_ID);
+  });
+
+  it('向导选中的厂商 id 优先于 hostname，避免改了中转地址后漂到 Custom', () => {
+    expect(
+      vendorOf({
+        baseUrl: 'https://relay.internal/v1',
+        catalogId: 'xai',
+      })
+    ).toBe('xai');
+  });
+
   it('baseUrl 带端口时仍按 hostname 归组', () => {
     expect(vendorOf({ baseUrl: 'https://api.anthropic.com:8443/v1' })).toBe('anthropic');
   });

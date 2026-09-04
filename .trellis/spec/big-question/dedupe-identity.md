@@ -27,7 +27,7 @@ const skillKey = (target: string): string => path.resolve(target);
 
 | 资产 | 指纹 | 理由 |
 |------|------|------|
-| 模型服务 | `baseUrl + apiKey` | 同端点同钥匙就是同一个服务 |
+| 模型服务 | `baseUrl + apiKey`（向导 Custom 另加标记） | 同端点同钥匙默认是同一个服务；**显式选 Custom** 即使 URL 撞上官方 hostname（如 api.x.ai）也是另一条，模型清单必须保留。撞车时合并模型，不要整条丢弃。 |
 | 技能 | **名称**（小写） | 技能按名称调用，同名无法共存；同一技能常被多个工具各装一份 |
 | MCP 服务器 | 启动命令 + 参数，或 URL | 名字各家不同（`cunzhi` / `寸止`），命令才是身份 |
 | 指令文件 | **内容 SHA-256** | 文件名相同内容各异（多家的 `AGENTS.md`）；内容相同文件名各异（`CLAUDE.md` 与 `AGENTS.md` 常是同一份） |

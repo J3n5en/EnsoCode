@@ -1,6 +1,7 @@
 import { sanitizeDefaultModel } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
+import { applyIncomingProviders } from '@shared/providerIdentity';
 import { normalizeProxyMode, type ProxyMode } from '@shared/proxy';
 import {
   DEFAULT_STATUS_LINE_SEGMENTS,
@@ -242,24 +243,11 @@ export const useSettingsStore = create<SettingsState>()(
             : state.statusLineSegments.filter((segment) => segment !== id),
         })),
 
-      // 按 baseUrl+apiKey 指纹去重；订阅条目按 oauthAccountKey——同一厂商的多个账号
-      // key 各异，用基础 providerId 会把第二个账号当重复项吞掉
+      // Custom 与官方同 URL 不算同一条；撞车时合并模型而不是整条丢弃。
       addProviders: (providers) => {
-        const fingerprint = (p: { baseUrl: string; apiKey: string; oauthAccountKey?: string }) =>
-          p.oauthAccountKey
-            ? `oauth::${p.oauthAccountKey}`
-            : `${p.baseUrl.trim().replace(/\/+$/, '')}::${p.apiKey.trim()}`;
-        const known = new Set(get().providers.map(fingerprint));
-        const fresh = providers.filter((provider) => {
-          const key = fingerprint(provider);
-          if (known.has(key)) return false;
-          known.add(key);
-          return true;
-        });
-        if (fresh.length > 0) {
-          set((state) => ({ providers: [...state.providers, ...fresh] }));
-        }
-        return fresh.length;
+        const { providers: next, added } = applyIncomingProviders(get().providers, providers);
+        if (added > 0) set({ providers: next });
+        return added;
       },
 
       updateProvider: (id, updates) => {
