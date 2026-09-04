@@ -36,6 +36,7 @@ export const SETTINGS_STATE_FIELDS = [
   'favoriteTerminalThemes',
   'statusLineSegments',
   'loadLocalSkills',
+  'loadHarnessAssets',
   'autoUpdate',
   'proxyMode',
   'customProxyUrl',

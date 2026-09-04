@@ -91,6 +91,9 @@ export interface SettingsState {
   /** 是否让 agent 加载本机 skill（.agents/skills、.pi/skills）；缺省视为 true */
   loadLocalSkills: boolean;
 
+  /** 是否同时加载项目内 .claude/.codex/.cursor 的 skills 与规则文件（.cursorrules、.cursor/rules）；缺省 false */
+  loadHarnessAssets: boolean;
+
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
@@ -188,6 +191,7 @@ export interface SettingsState {
   setTerminalFontWeightBold: (weight: FontWeight) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
+  setLoadHarnessAssets: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;

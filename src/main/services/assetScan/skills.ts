@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { resolveHarnessSkillRoots } from '../../../agent/harnessAssets';
 
 const HOME = os.homedir();
 
@@ -60,16 +61,19 @@ export function readSkillsRoot(root: string, groupName: string): DiscoveredSkill
 }
 
 /** spawn 前斜杠菜单用：覆盖 pi 运行时会自动发现的全部根（项目 + 用户全局，
- * 见 pi docs/skills.md），否则未 spawn 的新会话看不到 /skill；项目同名优先 */
+ * 见 pi docs/skills.md），否则未 spawn 的新会话看不到 /skill；项目同名优先。
+ * includeHarness 对应设置里的「加载项目内其它工具目录」，在 pi 根之后追加项目内 .claude/.codex/.cursor 的 skills */
 export function listProjectSkills(
   cwd: string,
-  home: string = HOME
+  home: string = HOME,
+  options: { includeHarness?: boolean } = {}
 ): { name: string; description: string }[] {
   const seen = new Set<string>();
   const skills: { name: string; description: string }[] = [];
   const roots = [
     path.join(cwd, '.agents', 'skills'),
     path.join(cwd, '.pi', 'skills'),
+    ...(options.includeHarness ? resolveHarnessSkillRoots(cwd) : []),
     path.join(home, '.agents', 'skills'),
     path.join(home, '.pi', 'agent', 'skills'),
   ];

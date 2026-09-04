@@ -322,6 +322,7 @@ export function spawnSession(
   const disabledTools = Array.isArray(state?.disabledBuiltinTools)
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
     : [];
+  const loadHarnessAssets = state?.loadHarnessAssets === true;
   return sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -331,6 +332,7 @@ export function spawnSession(
     ...(request.reasoningEnabled ? { reasoningEnabled: true } : {}),
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
+    ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
@@ -814,7 +816,7 @@ function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
   };
 }
 
-function readSettingsState(): Record<string, unknown> | undefined {
+export function readSettingsState(): Record<string, unknown> | undefined {
   const settings = readSettings();
   return (settings?.['enso-settings'] as { state?: Record<string, unknown> } | undefined)?.state;
 }

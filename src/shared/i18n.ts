@@ -846,6 +846,9 @@ export const zhTranslations: Record<string, string> = {
     '{{skills}} 个技能 · {{mcp}} 个 MCP · {{instruction}} 份指令',
   'Let the agent auto-discover skills under .agents/skills and .pi/skills':
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
+  'Load project harness assets': '加载项目内其它工具目录',
+  'Also load skills from .claude/.codex/.cursor and rule files (.cursorrules, .cursor/rules, .claude/rules) in the project':
+    '同时加载项目内 .claude/.codex/.cursor 下的 skills，以及规则文件（.cursorrules、.cursor/rules、.claude/rules）',
   // Model providers · 供应商分组与删除确认
   Custom: '自定义',
   'Remove provider?': '删除该配置？',

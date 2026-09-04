@@ -101,6 +101,7 @@ const initialState = {
   favoriteTerminalThemes: [] as string[],
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
+  loadHarnessAssets: false,
   autoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
@@ -203,6 +204,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
+      setLoadHarnessAssets: (loadHarnessAssets) => set({ loadHarnessAssets }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),

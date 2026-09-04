@@ -181,6 +181,7 @@ function resultSettingField(capabilityId: string): string | null {
   const fields: Record<string, string> = {
     'general.language': 'language',
     'general.load-local-skills': 'loadLocalSkills',
+    'general.load-harness-assets': 'loadHarnessAssets',
     'general.automatic-updates': 'autoUpdate',
     'general.proxy-mode': 'proxyMode',
     'general.custom-proxy-url': 'customProxyUrl',
@@ -640,6 +641,11 @@ export function createCapabilityHandlers(
   const handlers = {
     'general.language': settingValueHandler(services, 'language', stringValue),
     'general.load-local-skills': settingValueHandler(services, 'loadLocalSkills', booleanValue),
+    'general.load-harness-assets': settingValueHandler(
+      services,
+      'loadHarnessAssets',
+      booleanValue
+    ),
     'general.automatic-updates': settingValueHandler(services, 'autoUpdate', booleanValue),
     'general.proxy-mode': settingValueHandler(
       services,

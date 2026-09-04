@@ -139,3 +139,25 @@ describe('listProjectSkills', () => {
     ]);
   });
 });
+
+describe('listProjectSkills · harness 根', () => {
+  it('includeHarness 时追加项目内 .claude/.codex/.cursor 的 skills；缺省不含', () => {
+    const cwd = path.join(tmp, 'proj');
+    const home = path.join(tmp, 'home');
+    writeSkill(path.join(cwd, '.claude', 'skills'), 'cc-only', 'name: cc-only\ndescription: c');
+    writeSkill(path.join(cwd, '.cursor', 'skills'), 'cur-only', 'name: cur-only\ndescription: u');
+    expect(listProjectSkills(cwd, home).map((s) => s.name)).toEqual([]);
+    const names = listProjectSkills(cwd, home, { includeHarness: true }).map((s) => s.name);
+    expect(names).toEqual(['cc-only', 'cur-only']);
+  });
+
+  it('harness 根里的同名 skill 不覆盖 .agents/skills 的', () => {
+    const cwd = path.join(tmp, 'proj');
+    const home = path.join(tmp, 'home');
+    writeSkill(path.join(cwd, '.agents', 'skills'), 'dup', 'name: dup\ndescription: agents');
+    writeSkill(path.join(cwd, '.claude', 'skills'), 'dup', 'name: dup\ndescription: claude');
+    expect(listProjectSkills(cwd, home, { includeHarness: true })).toEqual([
+      { name: 'dup', description: 'agents' },
+    ]);
+  });
+});

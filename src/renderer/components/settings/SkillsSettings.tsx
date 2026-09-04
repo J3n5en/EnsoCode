@@ -24,6 +24,8 @@ export function SkillsSettings() {
   const removeSkill = useSettingsStore((state) => state.removeSkill);
   const loadLocalSkills = useSettingsStore((state) => state.loadLocalSkills);
   const setLoadLocalSkills = useSettingsStore((state) => state.setLoadLocalSkills);
+  const loadHarnessAssets = useSettingsStore((state) => state.loadHarnessAssets);
+  const setLoadHarnessAssets = useSettingsStore((state) => state.setLoadHarnessAssets);
   const [importOpen, setImportOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const visible = skills.filter((skill) =>
@@ -51,6 +53,18 @@ export function SkillsSettings() {
           </p>
         </div>
         <Switch checked={loadLocalSkills} onCheckedChange={setLoadLocalSkills} />
+      </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+        <div>
+          <p className="font-medium text-sm">{t('Load project harness assets')}</p>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'Also load skills from .claude/.codex/.cursor and rule files (.cursorrules, .cursor/rules, .claude/rules) in the project'
+            )}
+          </p>
+        </div>
+        <Switch checked={loadHarnessAssets} onCheckedChange={setLoadHarnessAssets} />
       </div>
 
       <div className="flex items-end justify-between gap-4" data-settings-row="skills.root">

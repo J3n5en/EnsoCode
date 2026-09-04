@@ -436,6 +436,8 @@ export type AgentCommand =
       reasoningEnabled?: boolean;
       thinkingLevel?: ThinkingLevel;
       loadLocalSkills?: boolean;
+      /** 同时加载项目内 .claude/.codex/.cursor 的 skills 与规则文件（.cursorrules、.cursor/rules） */
+      loadHarnessAssets?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1577,6 +1579,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'reasoningEnabled',
           'thinkingLevel',
           'loadLocalSkills',
+          'loadHarnessAssets',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1590,6 +1593,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         typeof value.cwd !== 'string' ||
         !parseSpawnModelConfig(value.model) ||
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
+        (value.loadHarnessAssets !== undefined && typeof value.loadHarnessAssets !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

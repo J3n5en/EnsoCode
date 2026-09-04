@@ -380,6 +380,13 @@ export const CAPABILITY_CATALOG = {
       BOOLEAN_VALUE_INPUT_SCHEMA
     )
   ),
+  'general.load-harness-assets': executable(
+    'general.load-harness-assets',
+    reversibleGlobal(
+      'Read or change whether coding sessions also load skills and rule files from project-level .claude/.codex/.cursor directories.',
+      BOOLEAN_VALUE_INPUT_SCHEMA
+    )
+  ),
   'general.automatic-updates': executable(
     'general.automatic-updates',
     reversibleGlobal('Read or change automatic update downloads.', BOOLEAN_VALUE_INPUT_SCHEMA)
@@ -1193,6 +1200,7 @@ export type CapabilityHandlerId = ExecutableCapabilityId;
 export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId, true>> = {
   'general.language': true,
   'general.load-local-skills': true,
+  'general.load-harness-assets': true,
   'general.automatic-updates': true,
   'general.proxy-mode': true,
   'general.custom-proxy-url': true,

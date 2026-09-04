@@ -1,6 +1,7 @@
 import type { InstructionEntry, McpServerEntry, SkillEntry } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
+import { readSettingsState } from '../services/agentHost';
 import { snapshotBuiltinOccupancyTools } from '../../agent/builtinOccupancy';
 import {
   instructionReader,
@@ -78,7 +79,10 @@ export function registerAssetHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, (_event, cwd: unknown) => {
     if (typeof cwd !== 'string' || !cwd) return [];
-    return listProjectSkills(cwd);
+    // 与 spawn 同一来源读开关：菜单预览与实际注入的 skill 集合保持一致
+    return listProjectSkills(cwd, undefined, {
+      includeHarness: readSettingsState()?.loadHarnessAssets === true,
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.ASSETS_SKILL_OCCUPANCY, (_event, ids: unknown) =>

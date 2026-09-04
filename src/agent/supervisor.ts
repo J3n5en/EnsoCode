@@ -80,6 +80,7 @@ import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
 import { EnsoSafeJournal } from './ensoSafeJournal';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
+import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
 import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
@@ -204,10 +205,11 @@ export interface SupervisorOptions {
   sessionDir: string;
 }
 
-/** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份。 */
+/** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
 function sessionAgentsFilesOverride(
   agentDir: string,
-  instruction?: { path: string; content: string }
+  instruction?: { path: string; content: string },
+  harnessRuleFiles: Array<{ path: string; content: string }> = []
 ) {
   const resolvedAgentDir = path.resolve(agentDir);
   return (current: { agentsFiles: Array<{ path: string; content: string }> }) => ({
@@ -216,6 +218,7 @@ function sessionAgentsFilesOverride(
       ...current.agentsFiles.filter(
         (file) => path.resolve(path.dirname(file.path)) !== resolvedAgentDir
       ),
+      ...harnessRuleFiles,
     ],
   });
 }
@@ -230,13 +233,19 @@ function createSessionResourceLoader(options: {
   instruction?: { path: string; content: string };
   /** 远程会话:替换掉本地 cwd 扫描出的 AGENTS.md(cwd 在本机不存在),只用预取的远端文件 */
   remoteAgentsFiles?: Array<{ path: string; content: string }>;
+  /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
+  loadHarnessAssets?: boolean;
 }): DefaultResourceLoader {
+  const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
+  const skillPaths = harness
+    ? [...options.skillPaths, ...resolveHarnessSkillRoots(options.cwd)]
+    : options.skillPaths;
   return new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
     noSkills: options.noSkills,
     ...(options.noExtensions ? { noExtensions: true } : {}),
-    ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
+    ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
           agentsFiles: [
@@ -244,7 +253,11 @@ function createSessionResourceLoader(options: {
             ...(options.remoteAgentsFiles ?? []),
           ],
         })
-      : sessionAgentsFilesOverride(options.agentDir, options.instruction),
+      : sessionAgentsFilesOverride(
+          options.agentDir,
+          options.instruction,
+          harness ? readHarnessRuleFiles(options.cwd) : []
+        ),
   });
 }
 
@@ -597,7 +610,8 @@ export class SessionSupervisor {
           command.disabledTools,
           command.instruction,
           command.subagentModels,
-          command.remote
+          command.remote,
+          command.loadHarnessAssets
         );
         return;
       case 'spawn-child':
@@ -950,7 +964,8 @@ export class SessionSupervisor {
     disabledTools: string[] = [],
     instruction?: { path: string; content: string },
     subagentModels: SubagentModelOption[] = [],
-    remote?: AgentRemoteConfig
+    remote?: AgentRemoteConfig,
+    loadHarnessAssets = false
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1002,6 +1017,7 @@ export class SessionSupervisor {
       skillPaths,
       instruction,
       remoteAgentsFiles,
+      loadHarnessAssets,
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
@@ -1238,6 +1254,8 @@ export class SessionSupervisor {
               skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
               instruction,
               remoteAgentsFiles,
+              // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
+              loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
             });
         await subLoader.reload();
         const safeJournal =

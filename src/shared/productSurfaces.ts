@@ -30,6 +30,11 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Load local skills',
   },
+  'general.load-harness-assets': {
+    domain: 'general',
+    kind: 'setting',
+    label: 'Load project harness assets',
+  },
   'general.automatic-updates': {
     domain: 'general',
     kind: 'setting',
