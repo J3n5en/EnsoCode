@@ -24,6 +24,7 @@ enso 从未订阅该事件，所以数据在 supervisor 处就断了。
 - 不改 pi SDK 的节流策略
 - 不做输出内容的搜索/复制增强
 - 不改后台任务（background=true）的既有展示
+- 不下发给手机端（pair）：增量帧频繁，暂不进 SESSION_SCOPED 白名单
 
 ## 验收标准
 
@@ -39,10 +40,10 @@ enso 从未订阅该事件，所以数据在 supervisor 处就断了。
 |---|---|
 | `src/agent/supervisor.ts` | 新增 `case 'tool_execution_update'`，提取 toolCallId + 文本并 emit |
 | `src/shared/types/agent.ts` | `AgentWorkerEvent` 新增 tool 增量分支 |
-| main / preload | 复用既有 `AGENT_EVENT` 广播；pair 侧补白名单与 guest 投影 |
+| main / preload | 复用既有 `AGENT_EVENT` 广播（无需改动） |
 | `src/renderer/stores/sessions/` | 维护 `Map<toolCallId, string>` partial 输出，turn 结束/收到 toolResult 时清除 |
 | `src/renderer/stores/sessions/timeline.ts` | `buildMessageTimeline` 接受 partial map，填充 running 态 `item.output` |
-| `TimelineRow.tsx` `ToolRow` | running + 有 output 时允许展开 |
+| `TimelineRow.tsx` `ToolRow` | 无需改动：`expandable` 本就看 `item.output` |
 
 ## TDD
 
