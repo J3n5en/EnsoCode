@@ -206,7 +206,7 @@ function ProxySection() {
         </Select>
       </div>
       {proxyMode === 'custom' && (
-        <div className="grid grid-cols-[140px_1fr] items-start gap-4">
+        <div className="flex items-start gap-3">
           <span className="pt-1.5 text-sm font-medium">{t('Proxy URL')}</span>
           <div className="min-w-0 space-y-1">
             <Input

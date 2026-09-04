@@ -1341,15 +1341,18 @@ export function buildRequest(
   const isClaude = model.id.startsWith('claude-');
   const envelope = nextEnvelope(options?.sessionId, isClaude);
   const requestedLevel = options?.reasoning;
-  const level = requestedLevel
-    ? clampProjectThinkingLevel(
-        requestedLevel,
-        supportedProjectThinkingLevels({
-          reasoning: model.reasoning,
-          thinkingLevelMap: model.thinkingLevelMap,
-        })
-      )
-    : undefined;
+  // 只钳位声明了 thinkingLevelMap 的模型（如 3.8 不支持 minimal）。
+  // 无 map 时保持原档：否则 xhigh/max 会被默认支持集压成 high，误用 high 预算。
+  const level =
+    requestedLevel && model.thinkingLevelMap
+      ? clampProjectThinkingLevel(
+          requestedLevel,
+          supportedProjectThinkingLevels({
+            reasoning: model.reasoning,
+            thinkingLevelMap: model.thinkingLevelMap,
+          })
+        )
+      : requestedLevel;
   // 逻辑 id ≠ wire id：后端一个思考档一个模型 id，必须按钳位后的有效档位解析后再发
   const wireModelId = resolveAntigravityWireModelId(model.id, level);
 

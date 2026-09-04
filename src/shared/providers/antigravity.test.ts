@@ -891,6 +891,33 @@ describe('buildRequest 的 model 字段用解析后的 wire id', () => {
     expect(generationConfig.thinkingConfig?.thinkingLevel).toBe('LOW');
   });
 
+  it('无 thinkingLevelMap 的模型不钳位档位，xhigh 不误用 high 预算', () => {
+    const flash25 = ANTIGRAVITY_FALLBACK_MODELS.find((m) => m.id === 'gemini-2.5-flash');
+    expect(flash25).toBeDefined();
+    if (!flash25) throw new Error('gemini-2.5-flash 不在兜底模型列表中');
+    expect(flash25.thinkingLevelMap).toBeUndefined();
+
+    const request = buildRequest(
+      {
+        ...flash25,
+        provider: ANTIGRAVITY_PROVIDER_ID,
+        api: flash25.api ?? ('google-antigravity-cca' as const),
+        baseUrl: flash25.baseUrl ?? 'https://daily-cloudcode-pa.googleapis.com',
+      },
+      { messages: [] },
+      'projects/p',
+      {
+        reasoning: 'xhigh',
+        thinkingBudgets: { high: 999 },
+      }
+    );
+    expect(request.model).toBe('gemini-2.5-flash-thinking');
+    const generationConfig = request.request.generationConfig as {
+      thinkingConfig?: { thinkingBudget?: number };
+    };
+    expect(generationConfig.thinkingConfig?.thinkingBudget).toBeUndefined();
+  });
+
   it('不给档位时发 requestModelId', () => {
     const request = buildRequest(logicalModel, { messages: [] }, 'projects/p', undefined);
     expect(request.model).toBe('gemini-3.5-flash-extra-low');
