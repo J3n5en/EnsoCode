@@ -462,6 +462,8 @@ export type AgentCommand =
       loadLocalSkills?: boolean;
       /** 同时加载项目内 .claude/.codex/.cursor 的 skills 与规则文件（.cursorrules、.cursor/rules） */
       loadHarnessAssets?: boolean;
+      /** 探后折叠工具 + context 折叠 */
+      exploreFoldEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1653,6 +1655,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'thinkingLevel',
           'loadLocalSkills',
           'loadHarnessAssets',
+          'exploreFoldEnabled',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1667,6 +1670,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         !parseSpawnModelConfig(value.model) ||
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
         (value.loadHarnessAssets !== undefined && typeof value.loadHarnessAssets !== 'boolean') ||
+        (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

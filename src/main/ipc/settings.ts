@@ -37,6 +37,7 @@ export const SETTINGS_STATE_FIELDS = [
   'statusLineSegments',
   'loadLocalSkills',
   'loadHarnessAssets',
+  'exploreFoldEnabled',
   'autoUpdate',
   'proxyMode',
   'customProxyUrl',

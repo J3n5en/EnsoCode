@@ -156,8 +156,8 @@ export function withBashInterception(definition: ToolDefinition): ToolDefinition
       const command = (params as { command?: string }).command;
       if (typeof command === 'string') {
         const names =
-          ctx && typeof ctx === 'object' && Array.isArray((ctx as { toolNames?: unknown }).toolNames)
-            ? ((ctx as { toolNames: string[] }).toolNames)
+          ctx && typeof ctx === 'object' && Array.isArray((ctx as unknown as { toolNames?: unknown }).toolNames)
+            ? ((ctx as unknown as { toolNames: string[] }).toolNames)
             : DEFAULT_TOOLS;
         const hit = checkBashInterception(command, names);
         if (hit.block) throw new Error(hit.message);

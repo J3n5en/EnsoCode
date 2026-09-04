@@ -84,6 +84,7 @@ import {
   ContextUsageTracker as UsageTracker,
 } from './contextUsage';
 import { createCoworkerTool } from './coworker';
+import { createExploreFoldState, createExploreFoldTools } from './exploreFold';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
 import { createNormalizedEditTool } from './editTool';
@@ -249,6 +250,7 @@ function createSessionResourceLoader(options: {
   remoteAgentsFiles?: Array<{ path: string; content: string }>;
   /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
   loadHarnessAssets?: boolean;
+  exploreFold?: ReturnType<typeof createExploreFoldState>;
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -260,6 +262,21 @@ function createSessionResourceLoader(options: {
     noSkills: options.noSkills,
     ...(options.noExtensions ? { noExtensions: true } : {}),
     ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+    ...(options.exploreFold
+      ? {
+          extensionFactories: [
+            {
+              name: 'explore-fold',
+              hidden: true,
+              factory: (pi) => {
+                pi.on('context', (event) => ({
+                  messages: options.exploreFold!.apply(event.messages as never) as typeof event.messages,
+                }));
+              },
+            },
+          ],
+        }
+      : {}),
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
           agentsFiles: [
@@ -638,7 +655,8 @@ export class SessionSupervisor {
           command.instruction,
           command.subagentModels,
           command.remote,
-          command.loadHarnessAssets
+          command.loadHarnessAssets,
+          command.exploreFoldEnabled
         );
         return;
       case 'spawn-child':
@@ -1009,7 +1027,8 @@ export class SessionSupervisor {
     instruction?: { path: string; content: string },
     subagentModels: SubagentModelOption[] = [],
     remote?: AgentRemoteConfig,
-    loadHarnessAssets = false
+    loadHarnessAssets = false,
+    exploreFoldEnabled = false
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1054,6 +1073,7 @@ export class SessionSupervisor {
           )
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
+    const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -1062,6 +1082,7 @@ export class SessionSupervisor {
       instruction,
       remoteAgentsFiles,
       loadHarnessAssets,
+      exploreFold,
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
@@ -1454,6 +1475,7 @@ export class SessionSupervisor {
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
       ...(toolEnabled('subagent') ? [taskTool] : []),
       ...(toolEnabled('coworker') ? [coworkerTool] : []),
+      ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
       ...(toolEnabled('background_tasks') ? createTaskTools(this.bgTasks) : []),
       ...(toolEnabled('goal')
         ? createGoalTools((kind, note) => {

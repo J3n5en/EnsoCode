@@ -351,6 +351,7 @@ export function spawnSession(
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
     : [];
   const loadHarnessAssets = state?.loadHarnessAssets === true;
+  const exploreFoldEnabled = state?.exploreFoldEnabled === true;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
@@ -363,6 +364,7 @@ export function spawnSession(
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
+    ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
