@@ -110,6 +110,7 @@ function session(options: Record<string, unknown>) {
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
+    waitForIdle: vi.fn(async () => undefined),
     dispose: vi.fn(),
     setThinkingLevel: vi.fn(),
     navigateTree: vi.fn(async () => ({ cancelled: false })),
@@ -324,7 +325,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'));
   });
 
-  it('idle 投影但 pi 仍在 streaming 时 prompt 改走 steer，避免 AgentBusyError', async () => {
+  it('idle 投影但 pi 仍在 streaming（agent_end 尚未回流）：等空闲后按新轮 prompt，不 steer', async () => {
     const supervisor = new SessionSupervisor({
       emit: vi.fn(),
       agentDir: '/tmp/agent',
@@ -339,10 +340,63 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await settle();
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
     parentSession.isStreaming = true;
+    parentSession.waitForIdle = vi.fn(async () => {
+      parentSession.isStreaming = false;
+      return undefined;
+    });
     supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
     await settle();
-    expect(parentSession.steer).toHaveBeenCalledWith('follow up', undefined);
-    expect(parentSession.prompt).not.toHaveBeenCalled();
+    expect(parentSession.prompt).toHaveBeenCalledWith('follow up', undefined);
+    expect(parentSession.steer).not.toHaveBeenCalled();
+  });
+
+  it('idle 投影但 pi 僵尸轮永不空闲：限时后按失败收口，绝不静默 steer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir: '/tmp/sessions',
+      });
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+      });
+      await settle();
+      const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+      parentSession.isStreaming = true;
+      parentSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
+      await settle();
+      expect(parentSession.steer).not.toHaveBeenCalled();
+      await vi.runAllTimersAsync();
+      await settle();
+      expect(parentSession.steer).not.toHaveBeenCalled();
+      expect(parentSession.prompt).not.toHaveBeenCalled();
+      expect(events.find((event) => event.type === 'turn-failed')).toBeDefined();
+      expect(
+        events.find((event) => event.type === 'status' && event.status === 'failed' && event.error)
+      ).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('worker 中不存在的会话收到 prompt：发 parent-rejected 而非静默丢弃', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hello' });
+    await settle();
+    const rejected = events.find((event) => event.type === 'parent-rejected');
+    expect(rejected).toMatchObject({ identity: parent, seq: 0 });
+    expect((rejected as { reason: string }).reason).toContain('parent');
   });
 
   it('dismiss-coworker 遥控解雇 worker 直雇 coworker：exact 父代执行，旧代拒绝', async () => {
