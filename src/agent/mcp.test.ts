@@ -203,13 +203,32 @@ describe('McpManager connection cache', () => {
     expect(clientState.instances).toBe(1);
   });
 
-  it('token 变化时关闭旧连接并重建', async () => {
+  it('token 变化时原地更新 provider，不重建也不关正在用的连接', async () => {
     const { manager } = makeManager();
     await manager.toolsFor([{ ...httpServer, oauth: { access_token: 'a' } }]);
     await manager.toolsFor([{ ...httpServer, oauth: { access_token: 'b' } }]);
+    // 已跑会话的工具闭包捕获着这个 client，关了它等于弄坏它们
+    expect(clientState.instances).toBe(1);
+    expect(clientState.closed).toBe(0);
+    expect((authProviderOf(0).tokens() as { access_token: string }).access_token).toBe('b');
+  });
+
+  it('worker 自己 refresh 后主进程回传同一 token，不回退也不重建', async () => {
+    const { manager } = makeManager();
+    await manager.toolsFor([{ ...httpServer, oauth: { access_token: 'a' } }]);
+    await authProviderOf(0).saveTokens({ access_token: 'refreshed', token_type: 'Bearer' });
+    await manager.toolsFor([{ ...httpServer, oauth: { access_token: 'a' } }]);
+    expect(clientState.instances).toBe(1);
+    expect((authProviderOf(0).tokens() as { access_token: string }).access_token).toBe('refreshed');
+  });
+
+  it('主进程不再下发凭据（撤销）时下线旧连接并重建', async () => {
+    const { manager } = makeManager();
+    await manager.toolsFor([{ ...httpServer, oauth: { access_token: 'a' } }]);
+    await manager.toolsFor([httpServer]);
     expect(clientState.instances).toBe(2);
     await vi.waitFor(() => expect(clientState.closed).toBe(1));
-    expect((authProviderOf(1).tokens() as { access_token: string }).access_token).toBe('b');
+    expect(authProviderOf(1).tokens()).toBeUndefined();
   });
 
   it('listTools 失败时关闭 client，不泄漏子进程', async () => {

@@ -29,6 +29,8 @@ const CALL_TIMEOUT_MS = 120_000;
 interface Connection {
   client: Client;
   tools: ToolDefinition[];
+  /** http/sse 连接的凭据持有方，供 Main 下发新 token 时原地替换 */
+  provider?: WorkerOAuthProvider;
 }
 
 export interface McpManagerOptions {
@@ -85,6 +87,11 @@ class WorkerOAuthProvider implements OAuthClientProvider {
     return { ...this.tokenState, token_type: this.tokenState.token_type ?? 'Bearer' };
   }
 
+  /** Main 下发了新凭据：原地换掉，避免为了换 token 重建连接 */
+  updateTokens(tokens: McpOAuthTokens): void {
+    this.tokenState = tokens;
+  }
+
   saveTokens(tokens: OAuthTokens): void {
     this.tokenState = tokens;
     // 纵深防御：发出前先裁成白名单，id_token 等不出 worker
@@ -117,7 +124,7 @@ const isUnauthorized = (error: unknown): boolean =>
   error instanceof InteractiveAuthRequiredError ||
   /\b401\b|unauthorized/i.test(errorMessage(error));
 
-/** token 指纹：token 明文不进缓存 key，只用 hash 前缀判断「是否换了 token」 */
+/** token 指纹：token 明文不入内存索引，只用 hash 前缀判断「Main 是否换了下发的 token」 */
 export const oauthFingerprint = (tokens: McpOAuthTokens | undefined): string =>
   tokens?.access_token
     ? createHash('sha256').update(tokens.access_token).digest('hex').slice(0, 16)
@@ -147,6 +154,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
  */
 export class McpManager {
   private readonly connections = new Map<string, Promise<Connection | null>>();
+  /** 每条连接最近一次被下发的 token 指纹，用来区分「换了凭据」与「回传了旧凭据」 */
+  private readonly dispatched = new Map<string, string>();
 
   constructor(private readonly options: McpManagerOptions = { emit: () => {} }) {}
 
@@ -170,8 +179,7 @@ export class McpManager {
   }
 
   private connectionFor(server: McpServerSpawnConfig): Promise<Connection | null> {
-    // key 含 token 指纹：换/撤 token 必须重建连接，否则新凭据永不生效、旧连接一直可用
-    const identity = JSON.stringify([
+    const key = JSON.stringify([
       server.id,
       server.transport,
       server.command,
@@ -179,9 +187,8 @@ export class McpManager {
       server.env,
       server.url,
     ]);
-    const key = `${identity}#${oauthFingerprint(server.oauth)}`;
-    this.closeStaleConnections(identity, key);
     let pending = this.connections.get(key);
+    if (pending) pending = this.applyDispatchedTokens(key, server, pending);
     if (!pending) {
       pending = this.connect(server).catch((error) => {
         console.error(`[mcp] connect failed for "${server.name}":`, error);
@@ -194,16 +201,31 @@ export class McpManager {
       });
       this.connections.set(key, pending);
     }
+    this.dispatched.set(key, oauthFingerprint(server.oauth));
     return pending;
   }
 
-  /** 同一 server 的旧 token 连接：换 token 后立即下线，避免撤销/过期凭据继续可用 */
-  private closeStaleConnections(identity: string, key: string): void {
-    for (const [existing, pending] of this.connections) {
-      if (existing === key || !existing.startsWith(`${identity}#`)) continue;
-      this.connections.delete(existing);
+  /**
+   * Main 下发的凭据与上次不同时：换新 token 只原地更新 provider——已跑会话的工具闭包
+   * 捕获着这个 client，为换 token 重建连接等于弄坏它们；只有撤销（不再下发凭据）才下线重建。
+   * 指纹与上次相同则是回传旧凭据，忽略以免覆盖 worker 内已 refresh 的 token。
+   */
+  private applyDispatchedTokens(
+    key: string,
+    server: McpServerSpawnConfig,
+    pending: Promise<Connection | null>
+  ): Promise<Connection | null> | undefined {
+    const previous = this.dispatched.get(key);
+    const fingerprint = oauthFingerprint(server.oauth);
+    if (previous === undefined || previous === fingerprint) return pending;
+    if (!server.oauth) {
+      this.connections.delete(key);
       void pending.then((connection) => connection?.client.close().catch(() => {}));
+      return undefined;
     }
+    const tokens = server.oauth;
+    void pending.then((connection) => connection?.provider?.updateTokens(tokens));
+    return pending;
   }
 
   private emitStatus(
@@ -223,10 +245,14 @@ export class McpManager {
   private async connect(server: McpServerSpawnConfig): Promise<Connection> {
     this.emitStatus(server, 'connecting');
     const client = new Client({ name: 'enso-code', version: '0.1.0' });
+    const provider =
+      server.transport === 'stdio'
+        ? undefined
+        : new WorkerOAuthProvider(server, (event) => this.options.emit(event));
     let tools: Awaited<ReturnType<Client['listTools']>>['tools'];
     try {
       await withTimeout(
-        client.connect(this.createTransport(server)),
+        client.connect(this.createTransport(server, provider)),
         CONNECT_TIMEOUT_MS,
         `connect ${server.name}`
       );
@@ -243,11 +269,12 @@ export class McpManager {
     this.emitStatus(server, 'ready', { toolCount: tools.length });
     return {
       client,
+      provider,
       tools: tools.map((tool) => this.toToolDefinition(client, server.name, tool)),
     };
   }
 
-  private createTransport(server: McpServerSpawnConfig) {
+  private createTransport(server: McpServerSpawnConfig, provider?: WorkerOAuthProvider) {
     switch (server.transport) {
       case 'stdio': {
         if (!server.command) throw new Error('stdio server missing command');
@@ -261,14 +288,12 @@ export class McpManager {
       case 'http': {
         if (!server.url) throw new Error('http server missing url');
         return new StreamableHTTPClientTransport(new URL(server.url), {
-          authProvider: new WorkerOAuthProvider(server, (event) => this.options.emit(event)),
+          authProvider: provider,
         });
       }
       case 'sse': {
         if (!server.url) throw new Error('sse server missing url');
-        return new SSEClientTransport(new URL(server.url), {
-          authProvider: new WorkerOAuthProvider(server, (event) => this.options.emit(event)),
-        });
+        return new SSEClientTransport(new URL(server.url), { authProvider: provider });
       }
       default:
         throw new Error(`unknown transport: ${server.transport}`);
