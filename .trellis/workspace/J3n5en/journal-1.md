@@ -445,3 +445,28 @@ Reviewed the tester coworker's session jsonl, then fixed the protocol gaps it ex
 ### Next Steps
 
 - Consider exposing writeScope in AgentTypesSettings UI; harden agentDispatch.test.ts settle() flakiness noted by tester
+
+
+## Session 15: Cmd session switch and v0.1.19
+
+**Date**: 2026-09-04
+**Task**: Cmd session switch and v0.1.19
+**Branch**: `dev`
+
+### Summary
+
+侧栏按住 mod 显示 ⌘1–⌘9 切会话；额度文案防溢出；订阅可拉模型；生成中有草稿显示发送。发 v0.1.19。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `159713a` | (see git log) |
+| `a87e9ce` | (see git log) |
+| `d505874` | (see git log) |
+| `99db782` | (see git log) |
+| `75f0ed5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
