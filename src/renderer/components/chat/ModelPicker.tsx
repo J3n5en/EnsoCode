@@ -1,8 +1,8 @@
 import { resolveCustomModelView } from '@shared/modelCatalog';
-import { clampProjectThinkingLevel } from '@shared/modelThinking';
+import { clampProjectThinkingLevel, visibleThinkingLevels } from '@shared/modelThinking';
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
 import type { ModelEntry, ModelMeta, ModelProvider, OauthProviderInfo } from '@shared/types';
-import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import type { ThinkingLevel } from '@shared/types/agent';
 import { BadgeCheck, Brain, Check, ChevronDown, KeyRound } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -546,7 +546,10 @@ export function ModelPicker({
       onSelect(targetProviderId, targetModelId);
       // 同一次交互内钳位:目标模型已知的支持档集若不含当前档,自动降到最近支持档并回写
       const meta = metaByProvider[targetProviderId]?.[targetModelId];
-      const clamped = clampProjectThinkingLevel(thinkingLevel, meta?.thinkingLevels);
+      const clamped = clampProjectThinkingLevel(
+        thinkingLevel,
+        visibleThinkingLevels(meta?.thinkingLevels)
+      );
       if (clamped !== thinkingLevel) onThinkingChange(clamped);
       setOpen(false);
     },
@@ -556,9 +559,10 @@ export function ModelPicker({
   const currentProviderMeta = useModelMeta(currentProvider);
   const currentModelMeta = currentProviderMeta[modelId];
   const supportedLevels = currentModelMeta?.thinkingLevels;
+  const visibleLevels = visibleThinkingLevels(supportedLevels);
   const reasoningUnsupported =
     currentModelMeta?.reasoning === false || supportedLevels?.length === 0;
-  const levelIndex = Math.max(0, THINKING_LEVELS.indexOf(thinkingLevel));
+  const levelIndex = Math.max(0, visibleLevels.indexOf(thinkingLevel));
 
   /**
    * 归一化 effect：钳位不能只挂在 handleSelectModel 的 onClick 上，两条路径会漏掉——
@@ -572,18 +576,19 @@ export function ModelPicker({
    * 配合这个判断，每次 meta 到位最多触发一次修正性 setState，不会死循环。
    */
   useEffect(() => {
-    if (!currentModelMeta) return; // 未知 = 不加限制，不回写
+    if (!currentModelMeta) return;
     if (reasoningUnsupported) {
       if (reasoningEnabled) onReasoningChange(false);
       return;
     }
-    if (!reasoningEnabled || supportedLevels === undefined) return;
-    if (supportedLevels.includes(thinkingLevel)) return;
-    onThinkingChange(clampProjectThinkingLevel(thinkingLevel, supportedLevels));
+    if (!reasoningEnabled) return;
+    if (visibleLevels.includes(thinkingLevel)) return;
+    if (visibleLevels.length === 0) return;
+    onThinkingChange(clampProjectThinkingLevel(thinkingLevel, visibleLevels));
   }, [
     currentModelMeta,
     reasoningUnsupported,
-    supportedLevels,
+    visibleLevels,
     reasoningEnabled,
     thinkingLevel,
     onReasoningChange,
@@ -781,54 +786,46 @@ export function ModelPicker({
               </p>
             )}
 
-            {reasoningEnabled && !reasoningUnsupported && (
+            {reasoningEnabled && !reasoningUnsupported && visibleLevels.length > 0 && (
               <div className="mt-3">
                 <Slider
                   tabIndex={-1}
                   min={0}
-                  max={THINKING_LEVELS.length - 1}
+                  max={Math.max(0, visibleLevels.length - 1)}
                   step={1}
                   value={levelIndex}
                   onValueChange={(value) => {
                     const index = Array.isArray(value) ? value[0] : value;
-                    const target = THINKING_LEVELS[index] ?? 'medium';
-                    onThinkingChange(clampProjectThinkingLevel(target, supportedLevels));
+                    const target = visibleLevels[index] ?? visibleLevels[0] ?? 'medium';
+                    onThinkingChange(target);
                   }}
                 />
                 <div className="mt-1 flex justify-between gap-0">
-                  {THINKING_LEVELS.map((entry, index) => {
-                    const disabled =
-                      supportedLevels !== undefined && !supportedLevels.includes(entry);
-                    return (
-                      <button
-                        key={entry}
-                        type="button"
-                        tabIndex={-1}
-                        disabled={disabled}
-                        onClick={disabled ? undefined : () => onThinkingChange(entry)}
+                  {visibleLevels.map((entry, index) => (
+                    <button
+                      key={entry}
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => onThinkingChange(entry)}
+                      className={cn(
+                        'flex min-w-0 flex-1 flex-col items-center gap-0',
+                        index === 0 && 'items-start',
+                        index === visibleLevels.length - 1 && 'items-end'
+                      )}
+                    >
+                      <span className="h-1.5 w-px bg-muted-foreground/40" />
+                      <span
                         className={cn(
-                          'flex min-w-0 flex-1 flex-col items-center gap-0',
-                          index === 0 && 'items-start',
-                          index === THINKING_LEVELS.length - 1 && 'items-end',
-                          disabled && 'cursor-not-allowed'
+                          'text-[10px] transition-colors',
+                          entry === thinkingLevel
+                            ? 'font-medium text-primary'
+                            : 'text-muted-foreground/70 hover:text-foreground'
                         )}
                       >
-                        <span className="h-1.5 w-px bg-muted-foreground/40" />
-                        <span
-                          className={cn(
-                            'text-[10px] transition-colors',
-                            entry === thinkingLevel
-                              ? 'font-medium text-primary'
-                              : disabled
-                                ? 'text-muted-foreground/30'
-                                : 'text-muted-foreground/70 hover:text-foreground'
-                          )}
-                        >
-                          {t(LEVEL_LABEL_KEYS[entry])}
-                        </span>
-                      </button>
-                    );
-                  })}
+                        {t(LEVEL_LABEL_KEYS[entry])}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
