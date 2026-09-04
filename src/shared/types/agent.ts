@@ -965,11 +965,14 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
 const isSequence = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
 
-/** worker 回传的 token：只认白名单字段，id_token 等敏感内容不进主进程 */
+/**
+ * worker 回传的 token：白名单外的字段（SDK 会保留 id_token）**裁掉而不是整条判负——
+ * 否则服务端轮换 refresh_token 时刷新结果会被静默丢弃，本地凭据直接作废。
+ * expires_in 是相对秒数，当前只原样存盘不参与判断（SDK 自己按 401 重试 refresh）。
+ */
 export function parseMcpOAuthTokens(value: unknown): McpOAuthTokens | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['access_token', 'token_type', 'refresh_token', 'expires_in', 'scope']) ||
     !isNonEmptyString(value.access_token) ||
     (value.token_type !== undefined && typeof value.token_type !== 'string') ||
     (value.refresh_token !== undefined && typeof value.refresh_token !== 'string') ||
@@ -978,7 +981,13 @@ export function parseMcpOAuthTokens(value: unknown): McpOAuthTokens | null {
   ) {
     return null;
   }
-  return value as unknown as McpOAuthTokens;
+  return {
+    access_token: value.access_token,
+    ...(value.token_type !== undefined ? { token_type: value.token_type } : {}),
+    ...(value.refresh_token !== undefined ? { refresh_token: value.refresh_token } : {}),
+    ...(value.expires_in !== undefined ? { expires_in: value.expires_in } : {}),
+    ...(value.scope !== undefined ? { scope: value.scope } : {}),
+  };
 }
 
 export function parseContextOccupancy(value: unknown): ContextOccupancy | null {
@@ -1965,11 +1974,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       : null;
   }
   if (value.type === 'mcp-tokens-refreshed') {
-    return hasOnlyKeys(value, ['type', 'serverId', 'tokens']) &&
-      isNonEmptyString(value.serverId) &&
-      parseMcpOAuthTokens(value.tokens)
-      ? (value as unknown as AgentWorkerEvent)
-      : null;
+    if (!hasOnlyKeys(value, ['type', 'serverId', 'tokens']) || !isNonEmptyString(value.serverId)) {
+      return null;
+    }
+    const tokens = parseMcpOAuthTokens(value.tokens);
+    return tokens ? { type: 'mcp-tokens-refreshed', serverId: value.serverId, tokens } : null;
   }
   if (value.type === 'title-generated') {
     return hasExactKeys(value, ['type', 'conversationId', 'title']) &&

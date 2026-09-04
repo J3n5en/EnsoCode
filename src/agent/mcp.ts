@@ -19,6 +19,7 @@ import type {
   McpServerSpawnConfig,
   McpWorkerEvent,
 } from '@shared/types/agent';
+import { parseMcpOAuthTokens } from '@shared/types/agent';
 
 /** 连接与 listTools 的整体超时；慢/坏 server 不能卡住 spawn */
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -86,8 +87,10 @@ class WorkerOAuthProvider implements OAuthClientProvider {
 
   saveTokens(tokens: OAuthTokens): void {
     this.tokenState = tokens;
-    if (this.server.id) {
-      this.emit({ type: 'mcp-tokens-refreshed', serverId: this.server.id, tokens });
+    // 纵深防御：发出前先裁成白名单，id_token 等不出 worker
+    const trimmed = parseMcpOAuthTokens(tokens);
+    if (this.server.id && trimmed) {
+      this.emit({ type: 'mcp-tokens-refreshed', serverId: this.server.id, tokens: trimmed });
     }
   }
 

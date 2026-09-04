@@ -917,16 +917,25 @@ describe('MCP 旁路事件收窄', () => {
     expect(parseAgentWorkerEvent({ ...status, html: '<script>' })).toBeNull();
   });
 
-  it('mcp-tokens-refreshed 只接受白名单 token 字段', () => {
+  it('mcp-tokens-refreshed 裁剪白名单外的 token 字段，不丢整条事件', () => {
     const event = {
       type: 'mcp-tokens-refreshed',
       serverId: 'srv-1',
       tokens: { access_token: 'a', token_type: 'Bearer', refresh_token: 'r', expires_in: 60 },
     };
     expect(parseAgentWorkerEvent(event)).toEqual(event);
+    // SDK 会保留 id_token：裁掉它，但 refresh 结果必须能落盘（否则轮换的 refresh_token 会丢）
     expect(
-      parseAgentWorkerEvent({ ...event, tokens: { access_token: 'a', id_token: 'jwt' } })
-    ).toBeNull();
+      parseAgentWorkerEvent({
+        ...event,
+        tokens: { access_token: 'a', refresh_token: 'r2', id_token: 'jwt' },
+      })
+    ).toEqual({
+      type: 'mcp-tokens-refreshed',
+      serverId: 'srv-1',
+      tokens: { access_token: 'a', refresh_token: 'r2' },
+    });
+    expect(parseAgentWorkerEvent({ ...event, tokens: { token_type: 'Bearer' } })).toBeNull();
     expect(
       parseAgentWorkerEvent({ ...event, tokens: { access_token: 'a', expires_in: 'x' } })
     ).toBeNull();

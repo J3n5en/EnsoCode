@@ -160,6 +160,22 @@ describe('McpManager oauth provider', () => {
     expect(provider.tokens()).toMatchObject({ access_token: 'new' });
   });
 
+  it('回传前先裁剪：id_token 等非白名单字段不出 worker', async () => {
+    const { manager, events } = makeManager();
+    await manager.toolsFor([httpServer]);
+    await authProviderOf().saveTokens({
+      access_token: 'new',
+      token_type: 'Bearer',
+      refresh_token: 'r2',
+      id_token: 'jwt',
+    });
+    expect(events.at(-1)).toEqual({
+      type: 'mcp-tokens-refreshed',
+      serverId: 'srv-1',
+      tokens: { access_token: 'new', token_type: 'Bearer', refresh_token: 'r2' },
+    });
+  });
+
   it('does not emit refreshed tokens without a server id', async () => {
     const { manager, events } = makeManager();
     await manager.toolsFor([{ name: 'anon', transport: 'http', url: 'https://x.test/mcp' }]);
