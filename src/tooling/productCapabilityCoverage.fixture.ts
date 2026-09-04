@@ -370,6 +370,9 @@ export const IPC_PRODUCT_COVERAGE = {
   WORKSPACE_SEARCH_QUERY: excluded(
     'Desktop workspace search over local session projections; renderer Command Dialog only.'
   ),
+  USAGE_SUMMARY: excluded(
+    'Read-only local token usage aggregation for the Settings → Usage panel.'
+  ),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

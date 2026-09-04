@@ -244,7 +244,6 @@ function AllowConnectionsSection() {
           </div>
         )}
       </div>
-
     </div>
   );
 }

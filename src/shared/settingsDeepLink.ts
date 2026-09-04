@@ -11,6 +11,7 @@ export const SETTINGS_CATEGORIES = [
   'tools',
   'phone',
   'ssh',
+  'usage',
 ] as const;
 
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
