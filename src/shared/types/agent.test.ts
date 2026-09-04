@@ -211,6 +211,27 @@ describe('Main-owned source authority contracts', () => {
       })
     ).toBeNull();
     expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        forkedFrom: { conversationId, entryId: 'leaf-1' },
+      })
+    ).toEqual({
+      requestId: 'c1',
+      projectId,
+      projectVersion: 1,
+      forkedFrom: { conversationId, entryId: 'leaf-1' },
+    });
+    expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c1',
+        projectId,
+        projectVersion: 1,
+        forkedFrom: { conversationId, entryId: '' },
+      })
+    ).toBeNull();
+    expect(
       parseConversationAuthorityRequest({ requestId: 'c2', conversationId, version: 2 })
     ).not.toBeNull();
     expect(
@@ -435,6 +456,41 @@ describe('parent/child commands', () => {
   });
 });
 
+describe('标题总结命令与事件', () => {
+  const summarize = {
+    type: 'summarize-title',
+    conversationId: 'conversation-1',
+    text: '帮我把登录页的 bug 修一下',
+    model,
+  };
+
+  it('summarize-title 命令完整往返；缺字段或空值拒绝', () => {
+    expect(parseAgentCommand(summarize)).toEqual(summarize);
+    expect(parseAgentCommand({ ...summarize, conversationId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, text: '' })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, model: undefined })).toBeNull();
+    expect(parseAgentCommand({ ...summarize, extra: 1 })).toBeNull();
+  });
+
+  it('summarize-title 的 model 缺 settingsProviderId 拒绝（与 spawn 同约束）', () => {
+    const { settingsProviderId: _omitted, ...rest } = model;
+    expect(parseAgentCommand({ ...summarize, model: rest })).toBeNull();
+  });
+
+  it('title-generated 事件完整往返；脏输入不崩', () => {
+    const event = {
+      type: 'title-generated',
+      conversationId: 'conversation-1',
+      title: '修复登录 bug',
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, title: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, title: 42 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, conversationId: undefined })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
+  });
+});
+
 describe('generation lifecycle/events', () => {
   it('parent/child ready 使用 exact profile proof，缺资源或伪字段拒绝', () => {
     expect(
@@ -495,6 +551,45 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentWorkerEvent(withoutError)).toBeNull();
   });
 
+  it('session-meta 可带 occupancy；脏桶拒绝', () => {
+    const occupancy = {
+      buckets: {
+        system: 1,
+        instructions: 2,
+        skills: 0,
+        tools: 1,
+        conversation: 10,
+        compaction: 0,
+        projectMemory: 0,
+        reminders: 0,
+      },
+      used: 14,
+      estimated: true as const,
+      compactedMessageCount: 0,
+      compactionModelMismatch: false,
+    };
+    const event = {
+      type: 'session-meta',
+      identity: parent,
+      seq: 4,
+      sessionFile: '/s.jsonl',
+      occupancy,
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        occupancy: { ...occupancy, estimated: false },
+      })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        occupancy: { ...occupancy, buckets: { ...occupancy.buckets, system: -1 } },
+      })
+    ).toBeNull();
+  });
+
   it('abort-retry 命令只携 identity，多余字段拒绝', () => {
     const command = { type: 'abort-retry', identity: parent };
     expect(parseAgentCommand(command)).toEqual(command);
@@ -517,6 +612,20 @@ describe('generation lifecycle/events', () => {
     });
     expect(parseAgentCommand({ type: 'snapshot', sessionId: '' })).toBeNull();
     expect(parseAgentCommand({ type: 'snapshot', extra: 1 })).toBeNull();
+  });
+
+  it('set-proxy-env 只接受 string|null 值的 env 映射，多余字段拒绝', () => {
+    // 代理切换后 Main 推给 worker 的 env 补丁；null 表示删除该键。
+    const command = {
+      type: 'set-proxy-env',
+      env: { HTTP_PROXY: 'http://127.0.0.1:7890', NO_PROXY: null },
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env' })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: 'x' })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: { HTTP_PROXY: 1 } })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-proxy-env', env: { HTTP_PROXY: undefined } })).toBeNull();
   });
 
   it('pin-sessions 只接受字符串数组（脏项整体拒绝）', () => {

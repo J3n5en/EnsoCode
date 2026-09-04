@@ -119,14 +119,19 @@ export type ParentSourceBindingResult =
 
 export interface AgentSummonRequest {
   typeKey: AgentTypeKey;
+  prompt?: string;
 }
 
 export interface AgentComposerPrefillEvent {
   typeKey: AgentTypeKey;
+  prompt?: string;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
 
 const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
   const actual = Object.keys(value);
@@ -331,14 +336,24 @@ export function parseAgentSummonRequest(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const request = value as Record<string, unknown>;
   const typeKey = parseAgentTypeKey(request.typeKey);
-  return hasExactKeys(request, ['typeKey']) && typeKey && knownTypeKeys.has(typeKey)
-    ? { typeKey }
-    : null;
+  if (!typeKey || !knownTypeKeys.has(typeKey)) return null;
+  if (!hasOnlyKeys(request, ['typeKey', 'prompt'])) return null;
+  if (request.prompt !== undefined && typeof request.prompt !== 'string') return null;
+  return {
+    typeKey,
+    ...(typeof request.prompt === 'string' ? { prompt: request.prompt } : {}),
+  };
 }
 
 export function parseAgentComposerPrefillEvent(value: unknown): AgentComposerPrefillEvent | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const event = value as Record<string, unknown>;
   const typeKey = parseAgentTypeKey(event.typeKey);
-  return hasExactKeys(event, ['typeKey']) && typeKey ? { typeKey } : null;
+  if (!typeKey) return null;
+  if (!hasOnlyKeys(event, ['typeKey', 'prompt'])) return null;
+  if (event.prompt !== undefined && typeof event.prompt !== 'string') return null;
+  return {
+    typeKey,
+    ...(typeof event.prompt === 'string' ? { prompt: event.prompt } : {}),
+  };
 }

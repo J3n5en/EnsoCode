@@ -182,6 +182,8 @@ function resultSettingField(capabilityId: string): string | null {
     'general.language': 'language',
     'general.load-local-skills': 'loadLocalSkills',
     'general.automatic-updates': 'autoUpdate',
+    'general.proxy-mode': 'proxyMode',
+    'general.custom-proxy-url': 'customProxyUrl',
     'general.keybindings.set': 'keybindings',
     'general.keybindings.reset': 'keybindings',
     'appearance.theme': 'theme',
@@ -562,6 +564,16 @@ function parseAgentTypeFields(
       : existing?.tools === 'all' || existing?.tools === 'readonly'
         ? existing.tools
         : 'readonly';
+  const modelMode =
+    params.modelMode === 'agent_pick' ||
+    params.modelMode === 'follow' ||
+    params.modelMode === 'fixed'
+      ? params.modelMode
+      : existing?.modelMode === 'agent_pick' ||
+          existing?.modelMode === 'follow' ||
+          existing?.modelMode === 'fixed'
+        ? existing.modelMode
+        : undefined;
   const providerId =
     typeof params.providerId === 'string'
       ? params.providerId
@@ -591,6 +603,7 @@ function parseAgentTypeFields(
             ? existing.systemPrompt
             : '',
       tools,
+      ...(modelMode ? { modelMode } : {}),
       ...(providerId && modelId ? { providerId, modelId } : {}),
       ...(skillIds.length > 0 ? { skillIds } : {}),
       ...(mcpServerIds.length > 0 ? { mcpServerIds } : {}),
@@ -606,6 +619,7 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',
   'find-in-chat': 'mod+f',
+  'search-workspace': 'mod+k',
   'new-conversation': 'mod+n',
   'next-tab': process.platform === 'darwin' ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': process.platform === 'darwin' ? 'ctrl+shift+tab' : 'mod+shift+tab',
@@ -627,6 +641,12 @@ export function createCapabilityHandlers(
     'general.language': settingValueHandler(services, 'language', stringValue),
     'general.load-local-skills': settingValueHandler(services, 'loadLocalSkills', booleanValue),
     'general.automatic-updates': settingValueHandler(services, 'autoUpdate', booleanValue),
+    'general.proxy-mode': settingValueHandler(
+      services,
+      'proxyMode',
+      (value) => value === 'system' || value === 'none' || value === 'custom'
+    ),
+    'general.custom-proxy-url': settingValueHandler(services, 'customProxyUrl', stringValue),
     'general.keybindings.list': () => {
       const overrides = asRecord(settingsState(services.readSettings()).keybindings) ?? {};
       const sanitized = Object.fromEntries(

@@ -20,7 +20,7 @@ export function BuiltinToolsSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-settings-row="tools.root">
         <h3 className="font-medium text-lg">{t('Built-in tools')}</h3>
         <p className="text-muted-foreground text-sm">
           {t('Toggle the built-in tools available to agents. All enabled by default.')}

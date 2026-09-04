@@ -4,6 +4,7 @@ import type {
   OauthCredentialBlock,
 } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
+import type { ProxyMode } from '@shared/proxy';
 import type { StatusLineSegmentId } from '@shared/statusLine';
 import type {
   AgentTypeEntry,
@@ -93,8 +94,15 @@ export interface SettingsState {
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
+  /** 网络代理：系统 / 直连 / 自定义；缺省 system */
+  proxyMode: ProxyMode;
+  /** 自定义代理 URL，仅 custom 模式使用 */
+  customProxyUrl: string;
+
   /** agent 新完成文件改动时打开右侧 Changes；缺省 false */
   openChangesOnFileEdit: boolean;
+  /** 只读工具（read/grep/find/ls）一行化 + 进行中的轮也折组；缺省 true */
+  compactReadOnlyTools: boolean;
 
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
   /** 背景图总开关；缺省 false */
@@ -133,6 +141,10 @@ export interface SettingsState {
   providers: ModelProvider[];
   /** 尚未自选模型的新会话与 Enso 共用的全局默认；只保存 provider entry id + model id */
   defaultModel: DefaultModelRef | null;
+  /** 会话标题总结：首条用户消息后用小模型生成短标题；缺省关 */
+  titleSummaryEnabled: boolean;
+  /** 标题总结独立模型；null = 跟随全局默认模型 */
+  titleSummaryModel: DefaultModelRef | null;
   /** 新会话默认是否开启推理；缺省 true */
   defaultReasoningEnabled: boolean;
   /** 新会话默认思考深度；缺省 medium */
@@ -177,7 +189,10 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
+  setProxyMode: (mode: ProxyMode) => void;
+  setCustomProxyUrl: (url: string) => void;
   setOpenChangesOnFileEdit: (value: boolean) => void;
+  setCompactReadOnlyTools: (value: boolean) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
   setBackgroundImageEnabled: (value: boolean) => void;
@@ -211,6 +226,10 @@ export interface SettingsState {
   revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => DefaultModelRevalidation;
   setDefaultReasoningEnabled: (value: boolean) => void;
   setDefaultThinkingLevel: (level: ThinkingLevel) => void;
+  // Title summary actions
+  setTitleSummaryEnabled: (value: boolean) => void;
+  /** 设置标题总结独立模型；null = 回到跟随全局默认 */
+  setTitleSummaryModel: (model: DefaultModelRef | null) => void;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;

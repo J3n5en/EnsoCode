@@ -28,7 +28,7 @@ export function PresetsSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="presets.root">
         <div>
           <h3 className="font-medium text-lg">{t('Presets')}</h3>
           <p className="text-muted-foreground text-sm">
@@ -227,7 +227,11 @@ export function PresetEditDialog({
   );
 }
 
-export function setFilteredIds(current: string[], filteredIds: string[], selected: boolean): string[] {
+export function setFilteredIds(
+  current: string[],
+  filteredIds: string[],
+  selected: boolean
+): string[] {
   if (filteredIds.length === 0) return current;
   const vis = new Set(filteredIds);
   if (selected) {

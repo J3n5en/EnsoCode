@@ -1,13 +1,16 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
+import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, resolveChatModel } from '@shared/defaultModel';
 import type {
   ApprovalMode,
   AttachedImage,
   ChildConversationMetadata,
+  ContextOccupancy,
   ConversationAuthorityProjection,
   DispatchMainEvent,
   ProjectAuthorityProjection,
+  ProjectedMessage,
   ThinkingLevel,
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
@@ -43,6 +46,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { electronStorage, openPersistWriteGate } from '@/stores/settings/storage';
+import { purgeConversationAuthority } from './authorityCleanup';
 import {
   evictColdMessages,
   isBulkyAgentEvent,
@@ -103,6 +107,14 @@ export interface Conversation extends SessionProjection {
   lastActiveAt?: number;
   /** 当前模型上下文窗口（session-meta 下发；未知则水位表显示 ?） */
   contextWindow?: number;
+  /** Worker 拆账单；未 spawn 时缺省 */
+  occupancy?: ContextOccupancy;
+  /** 上下文压缩进度：排队中（等本轮收束）/ 压缩中；未压缩时缺省 */
+  compaction?: 'queued' | 'running';
+  /** 最近一次压缩失败的原文（如「Nothing to compact」），UI 弹完 toast 后清除 */
+  compactionError?: string;
+  forkedFromConversationId?: string;
+  forkedFromEntryId?: string;
   /** 上次使用的模型，resume 时沿用 */
   lastProviderId?: string;
   lastModelId?: string;
@@ -171,7 +183,10 @@ interface SessionsState {
   /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
   pendingAgentPrefill?: AgentTypeKey;
 
-  newConversation(projectId: string): Promise<string | null>;
+  newConversation(
+    projectId: string,
+    options?: { forkedFrom?: { conversationId: string; entryId: string } }
+  ): Promise<string | null>;
   /** 会话切到隔离 worktree（composer 选择器/右键菜单入口）。
    *  fresh（未开聊）直接绑定；已有内容走完整迁移（主树干净检查 + release + 迁移提醒）。返回错误或 null */
   moveConversationToWorktree(id: string): Promise<string | null>;
@@ -198,7 +213,7 @@ interface SessionsState {
     task: AgentDispatchTask,
     selectedModel: DefaultModelRef | null
   ): Promise<AgentDispatchResult>;
-  prefillAgent(typeKey: AgentTypeKey): void;
+  prefillAgent(typeKey: AgentTypeKey, prompt?: string): void;
   clearAgentPrefill(conversationId: string): void;
   respondCapabilityAsk(
     conversationId: string,
@@ -244,6 +259,12 @@ interface SessionsState {
   /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
+  compact(conversationId: string, instructions?: string): void;
+  /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
+  clearCompactionError(conversationId: string): void;
+  forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
+  forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
   retry(conversationId: string): void;
   /** ChatInput 消费预填文本后清除 */
@@ -256,19 +277,32 @@ interface SessionsState {
   clearGoal(conversationId: string): void;
 }
 
-/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
-function firstUserText(projection: SessionProjection): string {
-  const message = projection.messages.find((m) => m.role === 'user');
-  if (!message) return '';
-  const text = message.content
+function userMessageRawText(message: ProjectedMessage): string {
+  if (message.role !== 'user') return '';
+  return message.content
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map((part) => part.text)
     .join(' ')
     .trim();
+}
+
+function truncateTitle(text: string): string {
   // 只取首行，且 chat 引用块折叠成 @标题：引用块原文不得污染标题，
   // 否则带换行的标题会反过来破坏 chat 引用行的单行格式
   const firstLine = mentionDisplayText(text).split('\n')[0].trim();
   return (firstLine || '[image]').slice(0, 40);
+}
+
+/** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
+function firstUserText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  if (!message) return '';
+  return truncateTitle(userMessageRawText(message));
+}
+
+function firstUserRawText(projection: SessionProjection): string {
+  const message = projection.messages.find((m) => m.role === 'user');
+  return message ? userMessageRawText(message) : '';
 }
 
 const patch = (
@@ -284,6 +318,38 @@ export const useSessionsStore = create<SessionsState>()(
     (set, get) => {
       const pendingSelectionUpdates = new Map<string, Promise<void>>();
       const pendingDispatchEvents = new Map<string, DispatchMainEvent[]>();
+      /**
+       * 标题总结在飞时的基准截断标题。title-generated 回流时只有当前标题仍等于基准
+       * 才覆盖——用户已手动改名的绝不动。不持久化：重启后在飞的总结直接作废。
+       */
+      const pendingTitleBaselines = new Map<string, string>();
+
+      function trySummarizeTitle(
+        conversationId: string,
+        rawText: string,
+        baselineTitle: string,
+        sessionModel?: { providerId?: string; modelId?: string }
+      ): void {
+        if (
+          !useSettingsStore.getState().titleSummaryEnabled ||
+          !rawText.trim() ||
+          !baselineTitle.trim() ||
+          pendingTitleBaselines.has(conversationId)
+        ) {
+          return;
+        }
+        const conversation = get().conversations[conversationId];
+        if (!conversation || conversation.sessionFile) return;
+
+        pendingTitleBaselines.set(conversationId, baselineTitle);
+        void window.electronAPI.agent.summarizeTitle(
+          conversationId,
+          rawText,
+          sessionModel?.providerId && sessionModel?.modelId
+            ? { providerId: sessionModel.providerId, modelId: sessionModel.modelId }
+            : undefined
+        );
+      }
 
       /**
        * 已结束 child TAB 的惰性只读回放。四个条件全满足才发请求，失败也标记已尝试，
@@ -347,33 +413,59 @@ export const useSessionsStore = create<SessionsState>()(
         project: ProjectAuthorityProjection;
         conversation: ConversationAuthorityProjection;
       } | null> {
-        const projection = await window.electronAPI.sourceAuthority.read();
-        const conversation = projection.conversations.find(
-          (candidate) =>
-            candidate.conversationId === conversationId &&
-            candidate.kind === 'root' &&
-            candidate.lifecycle !== 'ended'
-        );
-        if (!conversation) return null;
-        const project = projection.projects.find(
-          (candidate) =>
-            candidate.projectId === conversation.projectId && candidate.state === 'active'
-        );
-        if (!project) return null;
-        const projectResult = await window.electronAPI.sourceAuthority.selectProject({
-          requestId: crypto.randomUUID(),
-          projectId: project.projectId,
-          version: project.version,
-        });
-        if (!projectResult.accepted) return null;
-        const conversationResult = await window.electronAPI.sourceAuthority.selectConversation({
-          requestId: crypto.randomUUID(),
-          conversationId: conversation.conversationId,
-          version: conversation.version,
-        });
-        return conversationResult.accepted
-          ? { project: projectResult.value, conversation: conversationResult.value }
-          : null;
+        // markReady（fork-done / parent-ready）会抬 version；读投影与 select 之间可能过期。
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const projection = await window.electronAPI.sourceAuthority.read();
+          const conversation = projection.conversations.find(
+            (candidate) =>
+              candidate.conversationId === conversationId &&
+              candidate.kind === 'root' &&
+              candidate.lifecycle !== 'ended'
+          );
+          if (!conversation) return null;
+          const project = projection.projects.find(
+            (candidate) =>
+              candidate.projectId === conversation.projectId && candidate.state === 'active'
+          );
+          if (!project) return null;
+          const projectResult = await window.electronAPI.sourceAuthority.selectProject({
+            requestId: crypto.randomUUID(),
+            projectId: project.projectId,
+            version: project.version,
+          });
+          if (!projectResult.accepted) {
+            if (attempt === 0) continue;
+            return null;
+          }
+          const conversationResult = await window.electronAPI.sourceAuthority.selectConversation({
+            requestId: crypto.randomUUID(),
+            conversationId: conversation.conversationId,
+            version: conversation.version,
+          });
+          if (!conversationResult.accepted) {
+            if (attempt === 0) continue;
+            return null;
+          }
+          if (conversationResult.value.forkedFrom) {
+            const origin = conversationResult.value.forkedFrom;
+            set((state) => {
+              const local = state.conversations[conversationId];
+              if (!local) return state;
+              if (
+                local.forkedFromConversationId === origin.conversationId &&
+                local.forkedFromEntryId === origin.entryId
+              ) {
+                return state;
+              }
+              return patch(state, conversationId, {
+                forkedFromConversationId: origin.conversationId,
+                forkedFromEntryId: origin.entryId,
+              });
+            });
+          }
+          return { project: projectResult.value, conversation: conversationResult.value };
+        }
+        return null;
       }
       window.electronAPI.agent.onFocusSession((sessionId) => {
         const conversation = get().conversations[sessionId];
@@ -481,9 +573,11 @@ export const useSessionsStore = create<SessionsState>()(
                 const keepBody =
                   event.partial === true || isMessageCacheHot(id, viewed, lastViewedAt, now);
                 const next = applyAgentEvent(conversation, id, event);
+                const title = conversation.title || firstUserText(next) || '';
                 conversations[id] = {
                   ...conversation,
                   ...next,
+                  title,
                   ...(keepBody ? {} : { messages: [], customEntries: [] }),
                   ...(snapshot.child
                     ? {
@@ -572,6 +666,22 @@ export const useSessionsStore = create<SessionsState>()(
                 },
               },
             };
+          });
+          return;
+        }
+
+        if (event.type === 'title-generated') {
+          const baseline = pendingTitleBaselines.get(event.conversationId);
+          pendingTitleBaselines.delete(event.conversationId);
+          set((state) => {
+            const conversation = state.conversations[event.conversationId];
+            // 会话已删 / 用户已手动改名（标题离开基准）→ 丢弃结果
+            if (!conversation || baseline === undefined || conversation.title !== baseline) {
+              return state;
+            }
+            const title = event.title.trim().slice(0, 80);
+            if (!title || title === conversation.title) return state;
+            return patch(state, event.conversationId, { title });
           });
           return;
         }
@@ -665,6 +775,57 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
+        if (event.type === 'fork-done') {
+          const targetId = event.targetConversationId;
+          const source = get().conversations[id];
+          if (event.error || !event.sessionFile) {
+            if (get().conversations[targetId]) get().removeConversation(targetId);
+            return;
+          }
+          set((state) => {
+            const target = state.conversations[targetId];
+            if (!target) return state;
+            return patch(state, targetId, {
+              sessionFile: event.sessionFile,
+              started: false,
+              spawning: false,
+              title: target.title || `${source?.title || ''} (分支)`.trim(),
+              lastProviderId: source?.lastProviderId,
+              lastModelId: source?.lastModelId,
+              reasoningEnabled: source?.reasoningEnabled,
+              thinkingLevel: source?.thinkingLevel,
+              presetId: source?.presetId,
+              approvalMode: source?.approvalMode,
+              worktree: source?.worktree,
+              forkedFromConversationId: source?.id,
+              forkedFromEntryId: event.entryId,
+              pendingWorkspaceNote: source?.worktree
+                ? `本会话从 ${source.title || '源会话'} 分出，与源会话共用工作区`
+                : undefined,
+            });
+          });
+          void get().resumeConversation(targetId);
+          get().selectConversation(targetId);
+          return;
+        }
+
+        if (event.type === 'compaction') {
+          set((state) =>
+            state.conversations[id]
+              ? patch(state, id, {
+                  compaction:
+                    event.state === 'queued'
+                      ? 'queued'
+                      : event.state === 'start'
+                        ? 'running'
+                        : undefined,
+                  ...(event.state === 'end' ? { compactionError: event.error } : {}),
+                })
+              : state
+          );
+          return;
+        }
+
         if (event.type === 'rewind-done') {
           set((state) => {
             const conversation = state.conversations[id];
@@ -689,6 +850,7 @@ export const useSessionsStore = create<SessionsState>()(
               ...next,
               sessionFile: event.sessionFile,
               ...(event.contextWindow !== undefined ? { contextWindow: event.contextWindow } : {}),
+              ...(event.occupancy ? { occupancy: event.occupancy } : {}),
             });
           });
           return;
@@ -697,10 +859,32 @@ export const useSessionsStore = create<SessionsState>()(
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
+
+          // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上。
+          // 当首条用户消息到达时（message-upsert），无论该会话是否是桌面 hot 缓存，
+          // 都必须捕获首条消息来生成截断标题，并在开启设置时触发标题总结。
+          const isUserMessageUpsert =
+            event.type === 'message-upsert' && event.message.role === 'user';
+          let extractedTitle: string | undefined;
+          let rawUserText: string | undefined;
+          if (!conversation.title && isUserMessageUpsert) {
+            rawUserText = userMessageRawText(event.message);
+            if (rawUserText) {
+              extractedTitle = truncateTitle(rawUserText);
+            }
+          }
+
           if (
             isBulkyAgentEvent(event.type) &&
             !isMessageCacheHot(id, viewedFromState(state), lastViewedAt, Date.now())
           ) {
+            if (extractedTitle && rawUserText) {
+              trySummarizeTitle(id, rawUserText, extractedTitle, {
+                providerId: conversation.lastProviderId,
+                modelId: conversation.lastModelId,
+              });
+              return patch(state, id, { title: extractedTitle });
+            }
             return state;
           }
           const next = applyAgentEvent(conversation, id, event);
@@ -708,7 +892,16 @@ export const useSessionsStore = create<SessionsState>()(
           if (next === conversation && !conversation.spawning) return state;
           // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上，
           // 用它的首条用户消息补一个，否则侧边栏永远显示「新对话」
-          const title = conversation.title || firstUserText(next) || '';
+          const title = conversation.title || extractedTitle || firstUserText(next) || '';
+          if (!conversation.title && title) {
+            const raw = rawUserText || firstUserRawText(next);
+            if (raw) {
+              trySummarizeTitle(id, raw, title, {
+                providerId: conversation.lastProviderId,
+                modelId: conversation.lastModelId,
+              });
+            }
+          }
           return patch(state, id, {
             ...next,
             unread: nextUnread({
@@ -1012,7 +1205,7 @@ export const useSessionsStore = create<SessionsState>()(
           });
         },
 
-        async newConversation(projectId) {
+        async newConversation(projectId, options) {
           const projection = await window.electronAPI.sourceAuthority.read();
           const activeConversationIds = new Set(
             projection.conversations
@@ -1024,17 +1217,19 @@ export const useSessionsStore = create<SessionsState>()(
               )
               .map((conversation) => conversation.conversationId)
           );
-          const existing = get().order.find((id) => {
-            const conversation = get().conversations[id];
-            return (
-              activeConversationIds.has(id) &&
-              conversation.projectId === projectId &&
-              !conversation.started &&
-              !conversation.sessionFile &&
-              conversation.messages.length === 0 &&
-              !conversation.title
-            );
-          });
+          const existing = options?.forkedFrom
+            ? undefined
+            : get().order.find((id) => {
+                const conversation = get().conversations[id];
+                return (
+                  activeConversationIds.has(id) &&
+                  conversation.projectId === projectId &&
+                  !conversation.started &&
+                  !conversation.sessionFile &&
+                  conversation.messages.length === 0 &&
+                  !conversation.title
+                );
+              });
           if (existing) {
             if (!(await activateConversationAuthority(existing))) return null;
             const pendingAgentPrefill = get().pendingAgentPrefill;
@@ -1058,6 +1253,7 @@ export const useSessionsStore = create<SessionsState>()(
             requestId: crypto.randomUUID(),
             projectId,
             projectVersion: project.version,
+            ...(options?.forkedFrom ? { forkedFrom: options.forkedFrom } : {}),
           });
           if (!created.accepted) return null;
           const id = created.value.conversationId;
@@ -1081,6 +1277,12 @@ export const useSessionsStore = create<SessionsState>()(
             thinkingLevel: defaultThinkingLevel ?? 'medium',
             ...defaultPreset,
             ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
+            ...(options?.forkedFrom
+              ? {
+                  forkedFromConversationId: options.forkedFrom.conversationId,
+                  forkedFromEntryId: options.forkedFrom.entryId,
+                }
+              : {}),
           };
           set((state) => ({
             conversations: { ...state.conversations, [id]: conversation },
@@ -1205,23 +1407,9 @@ export const useSessionsStore = create<SessionsState>()(
             void window.electronAPI.agent.abort(id);
           }
           if (!conversation.parentId) {
-            void window.electronAPI.sourceAuthority.read().then(async (projection) => {
-              const authority = projection.conversations.find(
-                (candidate) => candidate.conversationId === id && candidate.lifecycle !== 'ended'
-              );
-              if (!authority) return;
-              const ended = await window.electronAPI.sourceAuthority.endConversation({
-                requestId: crypto.randomUUID(),
-                conversationId: id,
-                version: authority.version,
-              });
-              if (!ended.accepted) return;
-              await window.electronAPI.sourceAuthority.removeConversation({
-                requestId: crypto.randomUUID(),
-                conversationId: id,
-                version: ended.value.version,
-              });
-            });
+            void purgeConversationAuthority(window.electronAPI.sourceAuthority, id, () =>
+              crypto.randomUUID()
+            );
           }
           set((state) => {
             const conversations = { ...state.conversations };
@@ -1327,7 +1515,7 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        prefillAgent(typeKey) {
+        prefillAgent(typeKey, prompt) {
           const parentId = get().activeId;
           if (parentId && get().conversations[parentId]) {
             set((state) => ({
@@ -1335,13 +1523,23 @@ export const useSessionsStore = create<SessionsState>()(
               conversations: patch(state, parentId, {
                 activeTabId: undefined,
                 prefillAgentTypeKey: typeKey,
+                ...(prompt ? { draftText: prompt } : {}),
               }).conversations,
             }));
             return;
           }
           set({ pendingAgentPrefill: typeKey });
           const project = useSettingsStore.getState().projects[0];
-          if (project) void get().newConversation(project.id);
+          if (project) {
+            void get()
+              .newConversation(project.id)
+              .then(() => {
+                const newActiveId = get().activeId;
+                if (newActiveId && prompt) {
+                  set((state) => patch(state, newActiveId, { draftText: prompt }));
+                }
+              });
+          }
         },
 
         clearAgentPrefill(conversationId) {
@@ -1399,6 +1597,13 @@ export const useSessionsStore = create<SessionsState>()(
           if (conversation?.historyOnly) {
             return 'this Agent instance has ended — its history is read-only';
           }
+          // /compact 应用级命令:压缩上下文,不发给 agent。会话未启动时无上下文可压
+          const compactCommand = parseCompactCommand(text);
+          if (compactCommand) {
+            if (!conversation.started) return 'nothing to compact yet';
+            get().compact(id, compactCommand.instructions);
+            return null;
+          }
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -1425,6 +1630,8 @@ export const useSessionsStore = create<SessionsState>()(
             text = startGoalPrompt(arg);
           }
           // 工作区迁移/回退提醒：随下一条实际发出的消息前置注入一次（同 goal 模式，可见）
+          // 标题总结的输入在注入前定格：goal 用目标原文，普通消息用用户原文
+          const titleSummarySource = goalMatch?.[1]?.trim() ?? text;
           const workspaceNote = conversation.pendingWorkspaceNote;
           if (workspaceNote && !(conversation.started && conversation.status === 'running')) {
             text = `${workspaceNote}\n\n${text}`;
@@ -1506,6 +1713,22 @@ export const useSessionsStore = create<SessionsState>()(
                 lastModelId: target.modelId,
               })
             );
+            // 标题总结：仅全新会话（resume 有 sessionFile）且未被用户预先命名；
+            // 并行发起不阻塞发消息，失败静默（截断标题已是可用兑底）
+            if (
+              useSettingsStore.getState().titleSummaryEnabled &&
+              !conversation.sessionFile &&
+              !conversation.title &&
+              titleSummarySource.trim()
+            ) {
+              const baseline = get().conversations[id]?.title;
+              if (baseline) {
+                trySummarizeTitle(id, titleSummarySource, baseline, {
+                  providerId: target.providerId,
+                  modelId: target.modelId,
+                });
+              }
+            }
           }
           const action =
             get().conversations[id]?.status === 'running'
@@ -1839,10 +2062,29 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
+        compact(conversationId, instructions) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation?.started || conversation.compaction) return;
+          void window.electronAPI.agent.compact(conversationId, instructions);
+        },
+
+        clearCompactionError(conversationId) {
+          if (!get().conversations[conversationId]?.compactionError) return;
+          set((state) => patch(state, conversationId, { compactionError: undefined }));
+        },
+
         rewind(conversationId, userIndexFromEnd, restoreFiles) {
           const conversation = get().conversations[conversationId];
           if (!conversation?.started || conversation.status !== 'idle') return;
           void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
+        },
+
+        async forkFromMessage(conversationId, userIndexFromEnd) {
+          return forkConversation(get, set, conversationId, { userIndexFromEnd });
+        },
+
+        async forkFromEntry(conversationId, entryId) {
+          return forkConversation(get, set, conversationId, { entryId });
         },
 
         retry(conversationId) {
@@ -2016,6 +2258,8 @@ export const useSessionsStore = create<SessionsState>()(
               worktreeMissing: undefined,
               workspaceMigrating: undefined,
               abortRequested: undefined,
+              compaction: undefined,
+              compactionError: undefined,
             },
           ])
         ),
@@ -2065,3 +2309,35 @@ useSessionsStore.subscribe((state) => {
   }, MESSAGE_CACHE_TTL_MS);
   evictTimer.unref?.();
 });
+
+async function forkConversation(
+  get: () => {
+    conversations: Record<string, Conversation>;
+    newConversation: (
+      projectId: string,
+      options?: { forkedFrom?: { conversationId: string; entryId: string } }
+    ) => Promise<string | null>;
+    removeConversation: (id: string) => void;
+  },
+  _set: unknown,
+  sourceId: string,
+  anchor: { entryId: string } | { userIndexFromEnd: number }
+): Promise<string | null> {
+  const source = get().conversations[sourceId];
+  if (!source?.started || source.status !== 'idle' || source.parentId || source.historyOnly) {
+    return null;
+  }
+  const targetId = await get().newConversation(source.projectId, {
+    forkedFrom: {
+      conversationId: source.id,
+      entryId: 'entryId' in anchor ? anchor.entryId : `user:${anchor.userIndexFromEnd}`,
+    },
+  });
+  if (!targetId) return null;
+  const result = await window.electronAPI.agent.fork(sourceId, targetId, anchor);
+  if (!result.ok) {
+    get().removeConversation(targetId);
+    return null;
+  }
+  return targetId;
+}

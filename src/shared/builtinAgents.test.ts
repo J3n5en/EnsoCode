@@ -72,6 +72,7 @@ describe('AgentType registry and locked Enso profile', () => {
     expect(snapshot.candidates.map((candidate) => candidate.typeKey)).toEqual([
       'agent:enso',
       'builtin:reviewer',
+      'builtin:tester',
       `custom:${CUSTOM_ID}`,
     ]);
     expect(parseAgentTypeRegistrySnapshot(snapshot)).toEqual(snapshot);

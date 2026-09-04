@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickSessionCwd } from './terminalService';
+import { pickSessionCwd, resolvePtySize } from './terminalService';
 
 const exists = (dir: string) => dir === '/wt' || dir === '/proj';
 
@@ -42,5 +42,16 @@ describe('pickSessionCwd', () => {
         exists,
       })
     ).toBe('/proj');
+  });
+});
+
+describe('resolvePtySize', () => {
+  it('缺省落到 80x24', () => {
+    expect(resolvePtySize()).toEqual({ cols: 80, rows: 24 });
+  });
+
+  it('0 或负数不当成有效尺寸', () => {
+    expect(resolvePtySize(0, 0)).toEqual({ cols: 80, rows: 24 });
+    expect(resolvePtySize(-1, 12)).toEqual({ cols: 80, rows: 12 });
   });
 });

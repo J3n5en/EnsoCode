@@ -44,7 +44,10 @@ export interface Preset {
 
 export const DEFAULT_PRESET_ID = 'default';
 
-/** 内置 subagent 类型（默认启用,可关闭不可删；模型跟随会话） */
+/** 子代理模型选型模式：agent_pick（必须由主 agent 选择）、follow（跟随会话）、fixed（自选固定模型） */
+export type AgentTypeModelMode = 'agent_pick' | 'follow' | 'fixed';
+
+/** 内置 subagent 类型（默认启用,可关闭不可删；模型默认由主 agent 选择） */
 export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
   {
     name: 'scout',
@@ -53,6 +56,7 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are a fast reconnaissance agent. Read and search only — never modify files or run commands with side effects. ' +
       'Return a compact, well-structured report of findings with concrete file paths.',
     tools: 'readonly',
+    modelMode: 'agent_pick',
   },
   {
     name: 'worker',
@@ -61,6 +65,7 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are an implementation agent. Complete the assigned coding subtask end to end: read the relevant code, ' +
       'make the changes, and verify them (typecheck/tests where available). Report what you changed and any follow-ups.',
     tools: 'all',
+    modelMode: 'agent_pick',
   },
   {
     name: 'reviewer',
@@ -69,6 +74,22 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'You are a code review agent. Read the relevant code or diff and return a prioritized list of concrete issues ' +
       '(correctness first), each with file:line and a suggested fix. Do not modify anything.',
     tools: 'readonly',
+    modelMode: 'agent_pick',
+  },
+  {
+    name: 'tester',
+    description:
+      'Writes failing tests first (TDD RED); can only write test files, never implementation',
+    systemPrompt:
+      'You are a test-first author. Write failing tests that pin down the contract described in the task, ' +
+      'run them and confirm each fails because the behavior is missing (not because of a typo). ' +
+      'Never write or edit implementation files — only test files (the toolset enforces this). ' +
+      'Read specs, type contracts and existing tests; avoid reading the implementation body of the module ' +
+      'under test so the tests stay independent of it. ' +
+      'Report the test files, case counts, and the exact failure reasons.',
+    tools: 'all',
+    writeScope: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx', 'test/**'],
+    modelMode: 'agent_pick',
   },
 ];
 
@@ -81,11 +102,15 @@ export interface AgentTypeEntry {
   description: string;
   /** 子会话系统提示（前置进任务 prompt） */
   systemPrompt: string;
-  /** 绑定模型；缺省 = 跟随父会话 */
+  /** 模型选型模式：agent_pick（必须由主 agent 选择）、follow（跟随会话）、fixed（自选固定模型） */
+  modelMode?: AgentTypeModelMode;
+  /** 绑定模型；在 modelMode 为 fixed 时必选 */
   providerId?: string;
   modelId?: string;
   /** 工具集：all 全部 / readonly 仅只读（read+grep/find/ls,无 bash/edit/write/MCP） */
   tools: 'all' | 'readonly';
+  /** 可写路径 glob 白名单（相对 cwd，posix）；只约束 edit/write；缺省不限 */
+  writeScope?: string[];
   /** 启用的 skill（按 SkillEntry id 精选；缺省无） */
   skillIds?: string[];
   /** 启用的 MCP server（按 McpServerEntry id 精选；缺省无） */

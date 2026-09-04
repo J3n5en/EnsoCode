@@ -480,10 +480,10 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
     );
 
     return (
+      // biome-ignore lint/a11y/useAriaPropsSupportedByRole: contentEditable 输入必须是 textbox，aria-placeholder 无原生等价
       <div
         ref={rootRef}
         contentEditable={!disabled}
-        // biome-ignore lint/a11y/useSemanticElements: contentEditable 富文本输入没有语义等价元素
         role={ariaProps?.role ?? 'textbox'}
         aria-placeholder={placeholder}
         data-placeholder={placeholder}

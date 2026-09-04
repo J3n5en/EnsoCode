@@ -267,11 +267,18 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 
 **Date**: 2026-09-02
 **Task**: Browser Design Mode 圈选与涂鸦落地
+
+
+## Session 8: AI 会话标题总结：设置开关+独立模型+回退链
+
+**Date**: 2026-09-02
+**Task**: AI 会话标题总结：设置开关+独立模型+回退链
 **Branch**: `dev`
 
 ### Summary
 
 圈选落到主 Composer ui-element chip+绑定图；涂鸦冻帧可调裁切后只插无 id 附件图；修浮层遮挡/BoxSelect/冻帧丢 pointerup；Mermaid 改本地包并收紧 CSP。已归档 09-02-browser-design-mode 与 scribble。
+新增会话标题总结功能：设置页开关+独立模型选择（settings v3 迁移），首条用户消息后经 Main 解析模型（标题模型→全局默认→会话模型回退链）由 worker completeSimple 生成短标题，title-generated 事件回流写回（手动改名守卫、失败静默）。TDD 共 29 个新用例；CDP 真机端到端验证通过（t+6s 出 AI 标题）。顺带确认两个既有问题：pairHost typecheck 错误与本机 ~55 个环境性测试失败均先于本次改动存在。
 
 ### Git Commits
 
@@ -309,7 +316,132 @@ spec 新增 big-question/pi-auto-retry-willretry.md。
 | `8e8f135` | (see git log) |
 | `cb68a58` | (see git log) |
 | `8e5bdce` | (see git log) |
+| `f908812` | (see git log) |
+| `dfb30b8` | (see git log) |
 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: 归档已落地的侧栏全屏与系统代理
+
+**Date**: 2026-09-03
+**Task**: 归档已落地的侧栏全屏与系统代理
+**Branch**: `dev`
+
+### Summary
+
+代码已合入 dev：侧栏全屏（铺满中间工作区、Esc/快捷键退出、空态顶栏按钮）与系统代理三层同步（Chromium / fetch / worker）。此前未走 archive，本轮补归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fdf809f` | (see git log) |
+| `8dfd539` | (see git log) |
+| `ee00e8b` | (see git log) |
+| `b837b84` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 12: 对话分支副本分叉与 B/C 归档
+
+**Date**: 2026-09-03
+**Task**: 对话分支副本分叉与 B/C 归档
+**Branch**: `dev`
+
+### Summary
+
+pi createBranchedSession 会就地改源 SessionManager；改为打开源 jsonl 副本再分叉。归档 Context Inspector 与会话分叉子任务。父任务仍留搜索与项目记忆。
+
+### Main Changes
+
+- branchSessionFromPersistedFile：副本上分叉，源 sessionFile/内存树不动
+- 登记并归档 09-03-context-inspector / 09-03-session-fork
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32dec92` | (see git log) |
+| `e128a5f` | (see git log) |
+| `503b342` | (see git log) |
+
+### Testing
+
+- [OK] vitest src/agent/sessionFork.test.ts 绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启桌面后真机验证对话分支不吞源会话
+- D 项目记忆填 Inspector 记忆桶
+
+
+## Session 13: Usage statistics dashboard (Settings → Usage)
+
+**Date**: 2026-09-04
+**Task**: Usage statistics dashboard (Settings → Usage)
+**Branch**: `enso/3085e88f`
+
+### Summary
+
+本地 pi session jsonl 解析 + catalog 定价估算 + 设置页用量 dashboard（统计卡/每日趋势/分时热力图/模型与项目排行）。TDD 角色分离（tester coworker 写红灯），reviewer 评审后修 DST 日边界、活跃时长按周期裁剪、异步扫描、零单价即未定价、请求竞态。真机 CDP 验证通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9766e4f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 14: Coworker protocol: wait/report, parent-waiting message_main_agent, tester agent type + writeScope
+
+**Date**: 2026-09-04
+**Task**: Coworker protocol: wait/report, parent-waiting message_main_agent, tester agent type + writeScope
+**Branch**: `enso/3085e88f`
+
+### Summary
+
+Reviewed the tester coworker's session jsonl, then fixed the protocol gaps it exposed
+
+### Main Changes
+
+- coworker wait/report ops; message_main_agent no-op while parent waits; tester builtin type with writeScope-enforced edit/write; centralized settleRound; index tool-hired coworkers so tab prompts work; in-flight spawn name resolution; wait dedupes async notice
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b2054a5` | (see git log) |
+| `db0beaa` | (see git log) |
+| `871296d` | (see git log) |
+| `e16c96d` | (see git log) |
+| `90b5ccb` | (see git log) |
+| `60cdd83` | (see git log) |
+| `ebd3594` | (see git log) |
+| `5b11c3f` | (see git log) |
+| `25b59f7` | (see git log) |
+
+### Testing
+
+- [OK] 1542 vitest pass, typecheck clean, biome clean on touched files; CDP verification with fake provider: write scope rejects src/impl.ts, allows src/impl.test.ts; spawn+wait+report batch
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Consider exposing writeScope in AgentTypesSettings UI; harden agentDispatch.test.ts settle() flakiness noted by tester

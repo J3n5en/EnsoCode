@@ -14,9 +14,10 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
-import { TimelineRow } from './TimelineRow';
+import { isCompactRow, TimelineRow } from './TimelineRow';
 
 /** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。 */
 export const CHAT_COL =
@@ -92,7 +93,13 @@ export function MessageTimeline({
   const atBottomRef = useRef(true);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const settleRef = useRef(0);
+  const followSettleRef = useRef(0);
   const observerRef = useRef<ResizeObserver | null>(null);
+  /** 内容长高贴底纠正中：忽略这段期间的 scroll 误判，避免展开瞬间被当成用户上滚 */
+  const pinningRef = useRef(false);
+  /** 用户正在/刚触摸过滚动容器：只有这时才允许解除跟随 */
+  const userScrollingRef = useRef(false);
+  const userScrollTimerRef = useRef(0);
   const [activeNavKey, setActiveNavKey] = useState<string | null>(null);
 
   /*
@@ -119,9 +126,10 @@ export function MessageTimeline({
       return next;
     });
   }, []);
+  const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const folded = useMemo(
-    () => foldTimeline(items, running, expandedGroups),
-    [items, running, expandedGroups]
+    () => foldTimeline(items, running, expandedGroups, { compact }),
+    [items, running, expandedGroups, compact]
   );
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要
@@ -149,6 +157,7 @@ export function MessageTimeline({
     const scroller = scrollerRef.current;
     if (!scroller) return;
     if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
+      pinningRef.current = true;
       scroller.scrollTop = scroller.scrollHeight;
     }
   }, []);
@@ -169,6 +178,7 @@ export function MessageTimeline({
     let bound: HTMLElement | null = null;
     const abort = () => {
       cancelAnimationFrame(settleRef.current);
+      pinningRef.current = false;
       bound?.removeEventListener('touchstart', abort);
       bound?.removeEventListener('wheel', abort);
     };
@@ -194,7 +204,14 @@ export function MessageTimeline({
     setAtBottom(true);
     atBottomRef.current = true;
   }, [pinToBottom]);
-  useEffect(() => () => cancelAnimationFrame(settleRef.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(settleRef.current);
+      cancelAnimationFrame(followSettleRef.current);
+      window.clearTimeout(userScrollTimerRef.current);
+    },
+    []
+  );
 
   /*
    * 全量渲染下的跟随：内容常在提交之后才继续长高（markdown 渲染、代码高亮、图片），
@@ -209,7 +226,25 @@ export function MessageTimeline({
       observerRef.current = null;
       if (!el) return;
       const observer = new ResizeObserver(() => {
-        if (atBottomRef.current) pinToBottom();
+        if (!atBottomRef.current && !pinningRef.current) return;
+        /*
+         * 末条 edit/write 默认展开时高度一次涨几百 px。overflow-anchor 会钉住工具头，
+         * 单次写 scrollTop 又可能被 iOS 钳在半截；钳位 scroll 再把 atBottom 打成 false，
+         * 跟随停在工具开头、底下还露一截。短帧跟贴，避免每次流式增高都重启 1.2s 循环。
+         */
+        cancelAnimationFrame(followSettleRef.current);
+        let frames = 8;
+        const tick = () => {
+          pinToBottom();
+          const scroller = scrollerRef.current;
+          const leftover = scroller
+            ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+            : 0;
+          if (leftover <= 2) return;
+          if (--frames > 0) followSettleRef.current = requestAnimationFrame(tick);
+          else scrollToBottom();
+        };
+        tick();
       });
       observer.observe(el);
       observerRef.current = observer;
@@ -259,17 +294,28 @@ export function MessageTimeline({
     [searchQuery, activeHit?.key, activeHit?.nth]
   );
 
-  const renderRow = (item: TimelineItem) => (
-    <div
-      key={item.key}
-      data-nav-key={item.key}
-      className={cn(CHAT_COL, 'pb-4 [overflow-wrap:anywhere]')}
-    >
-      <RowErrorBoundary itemKey={item.key}>
-        <TimelineRow item={item} onToggleGroup={toggleGroup} />
-      </RowErrorBoundary>
-    </div>
-  );
+  // 精简模式：探索类行（组头/只读/思考）之间贴紧排；正文→探索 也收紧（正文自带 hover 操作条占位），
+  // 探索→正文留一点距离
+  const rowGap = (item: TimelineItem, index: number): string => {
+    if (!compact) return 'pb-4';
+    const next = folded[index + 1];
+    const nextCompact = next !== undefined && isCompactRow(next);
+    if (isCompactRow(item)) return nextCompact ? 'pb-1' : 'pb-2';
+    return item.kind === 'text' && nextCompact ? 'pb-1' : 'pb-4';
+  };
+  const renderRow = (item: TimelineItem, index: number) => {
+    return (
+      <div
+        key={item.key}
+        data-nav-key={item.key}
+        className={cn(CHAT_COL, rowGap(item, index), '[overflow-wrap:anywhere]')}
+      >
+        <RowErrorBoundary itemKey={item.key}>
+          <TimelineRow item={item} onToggleGroup={toggleGroup} />
+        </RowErrorBoundary>
+      </div>
+    );
+  };
   const renderFooter = () => (
     <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
       {busy && (
@@ -286,94 +332,126 @@ export function MessageTimeline({
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
-    <div className="@container relative min-h-0 flex-1">
-      <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
-      {items.length === 0 && !busy ? (
-        <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-          <p className="text-lg font-medium">{emptyTitle}</p>
-          <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
-        </div>
-      ) : items.length === 0 ? (
-        // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
-        <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
-          <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
-        </div>
-      ) : !virtualize ? (
-        <div
-          ref={(el) => {
-            scrollerRef.current = el;
-          }}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
-            if (value !== atBottomRef.current) {
-              atBottomRef.current = value;
-              setAtBottom(value);
-            }
-            if (onStartReached) {
-              if (el.scrollTop < 80 && !startReachedLatch.current) {
-                startReachedLatch.current = true;
-                onStartReached();
-              } else if (el.scrollTop > 240) {
-                startReachedLatch.current = false;
-              }
-            }
-          }}
-          className="h-full select-text overflow-y-auto"
-        >
-          <div ref={attachContent}>
-            <div className="h-6" />
-            {folded.map(renderRow)}
-            {renderFooter()}
+      <div className="@container relative min-h-0 flex-1">
+        <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
+        {items.length === 0 && !busy ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <p className="text-lg font-medium">{emptyTitle}</p>
+            <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
           </div>
-        </div>
-      ) : (
-        <Virtuoso
-          ref={virtuosoRef}
-          data={folded}
-          computeItemKey={(_, item) => item.key}
-          // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
-          followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
-          atBottomThreshold={AT_BOTTOM_THRESHOLD}
-          atBottomStateChange={(value) => {
-            setAtBottom(value);
-            atBottomRef.current = value;
-          }}
-          increaseViewportBy={{ top: 600, bottom: 600 }}
-          initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
-          // 可视范围起点附近的 user 轮次作为导航条高亮
-          rangeChanged={({ startIndex }) => {
-            scheduleActiveNavKey(() => {
-              let current: string | null = null;
-              for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
-                if (folded[i]?.kind === 'user') current = folded[i].key;
+        ) : items.length === 0 ? (
+          // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
+          <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
+            <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
+          </div>
+        ) : !virtualize ? (
+          <div
+            ref={(el) => {
+              scrollerRef.current = el;
+            }}
+            onTouchStart={() => {
+              userScrollingRef.current = true;
+              window.clearTimeout(userScrollTimerRef.current);
+            }}
+            onTouchEnd={() => {
+              window.clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = window.setTimeout(() => {
+                userScrollingRef.current = false;
+              }, 400);
+            }}
+            onWheel={() => {
+              userScrollingRef.current = true;
+              window.clearTimeout(userScrollTimerRef.current);
+              userScrollTimerRef.current = window.setTimeout(() => {
+                userScrollingRef.current = false;
+              }, 400);
+            }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              if (pinningRef.current) {
+                pinningRef.current = false;
+                atBottomRef.current = true;
+                setAtBottom(true);
+                return;
               }
-              return current;
-            });
-          }}
-          scrollerRef={(el) => {
-            scrollerRef.current = el instanceof HTMLElement ? el : null;
-          }}
-          className="h-full select-text"
-          components={{
-            Header: () => <div className="h-6" />,
-            Footer: renderFooter,
-          }}
-          itemContent={(_, item) => renderRow(item)}
-        />
-      )}
-      {!atBottom && items.length > 0 && (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background p-2 text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
-          title={t('Scroll to bottom')}
-        >
-          <ArrowDown className="h-4 w-4" />
-        </button>
-      )}
-    </div>
+              /*
+               * 进行中的 write/edit 会先以标题贴底、再突然插入 max-h-96 正文。
+               * 浏览器会为这次长高发一次非用户 scroll（钉住工具头），若据此解除跟随，
+               * 画面就停在工具开头。完成态不再默认展开，所以只有 loading 才复现。
+               */
+              if (!userScrollingRef.current) {
+                if (atBottomRef.current) pinToBottom();
+                return;
+              }
+              const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
+              if (value !== atBottomRef.current) {
+                atBottomRef.current = value;
+                setAtBottom(value);
+              }
+              if (onStartReached) {
+                if (el.scrollTop < 80 && !startReachedLatch.current) {
+                  startReachedLatch.current = true;
+                  onStartReached();
+                } else if (el.scrollTop > 240) {
+                  startReachedLatch.current = false;
+                }
+              }
+            }}
+            className="h-full select-text overflow-y-auto [overflow-anchor:none]"
+          >
+            <div ref={attachContent}>
+              <div className="h-6" />
+              {folded.map((item, index) => renderRow(item, index))}
+              {renderFooter()}
+            </div>
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuosoRef}
+            data={folded}
+            computeItemKey={(_, item) => item.key}
+            // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
+            followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+            atBottomThreshold={AT_BOTTOM_THRESHOLD}
+            atBottomStateChange={(value) => {
+              setAtBottom(value);
+              atBottomRef.current = value;
+            }}
+            increaseViewportBy={{ top: 600, bottom: 600 }}
+            initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
+            // 可视范围起点附近的 user 轮次作为导航条高亮
+            rangeChanged={({ startIndex }) => {
+              scheduleActiveNavKey(() => {
+                let current: string | null = null;
+                for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {
+                  if (folded[i]?.kind === 'user') current = folded[i].key;
+                }
+                return current;
+              });
+            }}
+            scrollerRef={(el) => {
+              scrollerRef.current = el instanceof HTMLElement ? el : null;
+            }}
+            className="h-full select-text"
+            components={{
+              Header: () => <div className="h-6" />,
+              Footer: renderFooter,
+            }}
+            itemContent={(index, item) => renderRow(item, index)}
+          />
+        )}
+        {!atBottom && items.length > 0 && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background p-2 text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
+            title={t('Scroll to bottom')}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+        )}
+      </div>
     </ChatSearchHighlightContext.Provider>
   );
 }
@@ -383,8 +461,7 @@ function groupContainsKey(
   key: string
 ): boolean {
   return group.children.some(
-    (child) =>
-      child.key === key || (child.kind === 'tool-group' && groupContainsKey(child, key))
+    (child) => child.key === key || (child.kind === 'tool-group' && groupContainsKey(child, key))
   );
 }
 

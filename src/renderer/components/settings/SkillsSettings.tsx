@@ -39,7 +39,7 @@ export function SkillsSettings() {
         <Switch checked={loadLocalSkills} onCheckedChange={setLoadLocalSkills} />
       </div>
 
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="skills.root">
         <div>
           <h3 className="font-medium text-lg">
             {t('Skills')}
@@ -92,6 +92,7 @@ export function SkillsSettings() {
                 <div
                   key={skill.id}
                   className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+                  data-settings-row={`skills.${skill.id}`}
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <Checkbox

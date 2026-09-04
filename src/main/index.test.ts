@@ -54,6 +54,12 @@ vi.mock('./services/pairGuest', () => ({
   stopPairGuest: vi.fn(),
 }));
 vi.mock('./services/agentHost', () => ({ startAgentWorker: mocks.startAgentWorker }));
+vi.mock('./services/proxyConfig', () => ({
+  getProxyConfig: () => ({
+    initFromConfig: vi.fn(),
+    whenReady: () => Promise.resolve(true),
+  }),
+}));
 vi.mock('./services/updater/AutoUpdater', () => ({
   autoUpdaterService: { init: mocks.autoUpdaterInit },
 }));
@@ -90,8 +96,9 @@ describe('Main startup order', () => {
     expect(mocks.startAgentWorker).not.toHaveBeenCalled();
 
     await new Promise<void>((resolve) => setImmediate(resolve));
-    // worker 与 pair host 都不依赖窗口，同样延后到首帧之后，不得插到 window 之前。
-    expect(mocks.order).toEqual(['ipc', 'window', 'worker', 'pair']);
+    // pair 不依赖代理；worker 等 whenReady 后再 fork，所以排在 pair 之后。
+    await Promise.resolve();
+    expect(mocks.order).toEqual(['ipc', 'window', 'pair', 'worker']);
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.startAgentWorker).toHaveBeenCalledOnce();
   });

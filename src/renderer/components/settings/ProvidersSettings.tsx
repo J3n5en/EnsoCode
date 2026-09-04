@@ -28,6 +28,7 @@ import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
+import { TitleSummaryPicker } from './TitleSummaryPicker';
 
 /** 订阅行额度：按账号拉取（60s 共享缓存），复用向导里的展示块；拉取失败静默隐藏 */
 function SubscriptionUsage({ accountKey }: { accountKey: string }) {
@@ -112,7 +113,7 @@ export function ProvidersSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="providers.root">
         <div>
           <h3 className="text-lg font-medium">{t('Model Providers')}</h3>
           <p className="text-sm text-muted-foreground">
@@ -131,6 +132,7 @@ export function ProvidersSettings() {
         </div>
       </div>
       <DefaultModelPicker />
+      <TitleSummaryPicker />
       <SubagentModelsSettings />
 
       {providers.length === 0 ? (
@@ -168,7 +170,10 @@ export function ProvidersSettings() {
                       : provider.name;
                     return (
                       <React.Fragment key={provider.id}>
-                        <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+                        <div
+                          className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+                          data-settings-row={`providers.${provider.id}`}
+                        >
                           <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2">
                               {isSubscription ? (

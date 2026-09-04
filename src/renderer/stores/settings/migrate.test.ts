@@ -47,6 +47,8 @@ describe('设置持久化迁移', () => {
     expect(migrateSettings(v1, 1)).toEqual({
       ...v1,
       defaultModel: null,
+      titleSummaryEnabled: false,
+      titleSummaryModel: null,
     });
   });
 
@@ -71,6 +73,24 @@ describe('设置持久化迁移', () => {
     expect(migrated.providers[0]).toEqual(apiKeyProvider);
   });
 
+  it('v2 → v3 新增标题总结缺省：功能关闭、无独立模型', () => {
+    const v2 = { theme: 'dark', defaultModel: { providerId: 'p', modelId: 'm' } };
+    expect(migrateSettings(v2, 2)).toEqual({
+      ...v2,
+      titleSummaryEnabled: false,
+      titleSummaryModel: null,
+    });
+  });
+
+  it('v0 数据一路迁到当前版本，标题总结字段同样补齐', () => {
+    const migrated = migrateSettings({ providers: [legacyProvider] }, 0) as Record<string, unknown>;
+    expect(migrated).toMatchObject({
+      defaultModel: null,
+      titleSummaryEnabled: false,
+      titleSummaryModel: null,
+    });
+  });
+
   it('已是当前版本时原样返回，不重复搬运', () => {
     const current = { providers: [{ id: 'p1', oauthAccountKey: 'anthropic#2' }] };
     expect(migrateSettings(current, SETTINGS_VERSION)).toBe(current);
@@ -82,6 +102,8 @@ describe('设置持久化迁移', () => {
       providers: null,
       theme: 'dark',
       defaultModel: null,
+      titleSummaryEnabled: false,
+      titleSummaryModel: null,
     });
   });
 

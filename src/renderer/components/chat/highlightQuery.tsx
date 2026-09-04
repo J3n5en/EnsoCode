@@ -55,6 +55,7 @@ export function highlightNode(
   }
   if (Array.isArray(node)) {
     return node.map((child, index) => (
+      // biome-ignore lint/suspicious/noArrayIndexKey: 混合 ReactNode 没有稳定 identity
       <Fragment key={index}>{highlightNode(child, query, activeNth, counter)}</Fragment>
     ));
   }

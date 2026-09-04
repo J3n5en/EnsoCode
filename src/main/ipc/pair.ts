@@ -74,6 +74,7 @@ export function registerPairHandlers(): void {
       theme?: HostAppearance;
       terminal?: TerminalPalette;
       terminalFontFamily?: string;
+      compactReadOnlyTools?: boolean;
     };
     if (!p || typeof p !== 'object') return;
     updatePairCatalog({
@@ -90,6 +91,7 @@ export function registerPairHandlers(): void {
       ...(typeof p.terminalFontFamily === 'string' && p.terminalFontFamily
         ? { terminalFontFamily: p.terminalFontFamily }
         : {}),
+      compactReadOnlyTools: p.compactReadOnlyTools !== false,
     });
   });
 }

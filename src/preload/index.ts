@@ -9,6 +9,8 @@ import type {
   StartOauthResult,
   StartOauthWizardRequest,
 } from '@shared/capabilities/types';
+import type { BrowserSearchTab } from '@shared/searchAnything';
+import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import type {
   CollectedAsset,
   CollectedProvider,
@@ -88,6 +90,11 @@ import type {
 } from '@shared/types/sidePanel';
 import type { UpdateStatus } from '@shared/types/updater';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
+import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
+import type {
+  WorkspaceSearchQueryRequest,
+  WorkspaceSearchQueryResult,
+} from '@shared/workspaceSearchQuery';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const electronAPI = {
@@ -109,6 +116,11 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, listener);
     },
+  },
+
+  usage: {
+    summary: (days: UsageRangeDays): Promise<UsageSummaryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.USAGE_SUMMARY, days),
   },
 
   providers: {
@@ -313,6 +325,17 @@ const electronAPI = {
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
+    /** 标题总结：只传 id + 首条消息文本（+会话模型作回退链末级），凭证由 Main 自读；结果经 title-generated 事件回流 */
+    summarizeTitle: (
+      conversationId: string,
+      text: string,
+      sessionModel?: { providerId: string; modelId: string }
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE, {
+        conversationId,
+        text,
+        sessionModel,
+      }),
     /** 已启动会话就地换模型（未启动的会话只需记忆，下次 spawn 生效） */
     setModel: (
       sessionId: string,
@@ -338,6 +361,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode),
     stopTask: (sessionId: string, taskId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_TASK_STOP, sessionId, taskId),
+    /** 手动压缩上下文；忙碌时 worker 自行排队，进度经 compaction 事件回来 */
+    compact: (sessionId: string, instructions?: string): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_COMPACT, sessionId, instructions),
     /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；结果经 rewind-done 事件回来。
      *  restoreFiles 同时把工作树还原到该轮首个写操作前(无快照静默降级) */
     rewind: (
@@ -346,6 +372,12 @@ const electronAPI = {
       restoreFiles?: boolean
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_REWIND, sessionId, userIndexFromEnd, restoreFiles),
+    fork: (
+      sessionId: string,
+      targetConversationId: string,
+      anchor: { entryId: string } | { userIndexFromEnd: number }
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_FORK, sessionId, targetConversationId, anchor),
     /** 上报当前正在查看的会话（null = 没在看任何会话），供 main 抑制重复的系统通知 */
     setViewedSession: (sessionId: string | null): void =>
       ipcRenderer.send(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, sessionId),
@@ -486,6 +518,14 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
   },
 
+  proxy: {
+    apply: (settings: {
+      mode: string;
+      customUrl: string;
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROXY_APPLY, settings),
+  },
+
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
@@ -575,7 +615,15 @@ const electronAPI = {
     isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FULLSCREEN),
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
-    openSettings: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS),
+    openSettings: (link?: SettingsDeepLink): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
+    onSettingsDeepLink: (callback: (link: SettingsDeepLink) => void): (() => void) => {
+      const listener = (_: unknown, link: SettingsDeepLink) => callback(link);
+      ipcRenderer.on(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
+    },
+    consumeSettingsDeepLink: (): Promise<SettingsDeepLink | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME),
     popupMenu: (
       items: { id: string; label: string }[],
       x: number,
@@ -636,6 +684,10 @@ const electronAPI = {
         viewport,
         covered
       ),
+    /** 模态浮层开合：fire-and-forget，越早越好 */
+    setOverlayActive: (active: boolean): void => {
+      ipcRenderer.send(IPC_CHANNELS.BROWSER_SET_OVERLAY_ACTIVE, active);
+    },
     navigate: (
       tabId: string,
       conversationId: string,
@@ -682,6 +734,8 @@ const electronAPI = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_STATE, listener);
     },
     restoreTabs: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_RESTORE_TABS),
+    listSearchableTabs: (): Promise<BrowserSearchTab[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_LIST_SEARCHABLE_TABS),
     onReveal: (
       callback: (event: { conversationId: string; tabId: string }) => void
     ): (() => void) => {
@@ -703,6 +757,11 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_DESIGN_MODE_EVENT, listener);
     },
+  },
+
+  workspaceSearch: {
+    query: (request: WorkspaceSearchQueryRequest): Promise<WorkspaceSearchQueryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SEARCH_QUERY, request),
   },
 };
 

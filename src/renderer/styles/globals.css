@@ -331,3 +331,12 @@ html.bg-image-enabled [data-slot='terminal-pane'] .xterm-screen {
 html.bg-image-enabled [data-slot='composer'] {
   background-color: oklch(from var(--background) l c h / var(--bg-composer-alpha, 0.6));
 }
+
+@keyframes settings-row-flash {
+  0%, 100% { box-shadow: none; }
+  25%, 75% { box-shadow: 0 0 0 2px var(--color-ring); }
+}
+[data-settings-flash="true"] {
+  animation: settings-row-flash 0.45s ease-in-out 3;
+  border-radius: 0.5rem;
+}

@@ -18,6 +18,7 @@ import {
   reopenOauthLogin,
 } from '../services/oauthProviders';
 import { listModels, testProvider } from '../services/providerApi';
+import { getProxyConfig } from '../services/proxyConfig';
 import { getRecentProjects } from '../services/recentProjects';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { sshProbeLogin } from '../services/sshProbe';
@@ -52,8 +53,29 @@ const transport: CapabilityGatewayTransport = {
 export const capabilityGateway = new CapabilityGateway(
   {
     readSettings,
-    patchSettings: (field, value, ownerWebContentsId) =>
-      patchSettingsState(field, value, senderById(ownerWebContentsId), 'all-renderers'),
+    patchSettings: (field, value, ownerWebContentsId) => {
+      const result = patchSettingsState(
+        field,
+        value,
+        senderById(ownerWebContentsId),
+        'all-renderers'
+      );
+      if (result.ok && (field === 'proxyMode' || field === 'customProxyUrl')) {
+        const state = (
+          readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
+        )?.state;
+        const proxy = getProxyConfig();
+        if (typeof state?.proxyMode === 'string') {
+          proxy.setProxyMode(
+            state.proxyMode === 'none' || state.proxyMode === 'custom' ? state.proxyMode : 'system'
+          );
+        }
+        if (typeof state?.customProxyUrl === 'string')
+          proxy.setCustomProxyUrl(state.customProxyUrl);
+        void proxy.resolveProxy();
+      }
+      return result;
+    },
     removeProject: (projectId, ownerWebContentsId) =>
       removeProjectAndConversations(projectId, senderById(ownerWebContentsId), 'all-renderers'),
     listModels,

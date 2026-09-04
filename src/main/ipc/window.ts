@@ -5,6 +5,7 @@ import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import { sendToWindow, TRAFFIC_LIGHT_POSITION } from '../windows/createAppWindow';
 import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
+import { parseOpenSettingsRequest } from './searchAnything';
 
 /** 窗口控制：所有 handler 作用于发起 IPC 的窗口，天然支持多窗口 */
 export function registerWindowHandlers(): void {
@@ -74,8 +75,20 @@ export function registerWindowHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, () => {
-    openSettingsWindow();
+  let pendingDeepLink: ReturnType<typeof parseOpenSettingsRequest> = null;
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, (_event, raw: unknown) => {
+    const link = parseOpenSettingsRequest(raw);
+    const win = openSettingsWindow();
+    if (!link) return;
+    pendingDeepLink = link;
+    sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME, () => {
+    const link = pendingDeepLink;
+    pendingDeepLink = null;
+    return link;
   });
 
   ipcMain.handle(
@@ -123,6 +136,7 @@ export function registerWindowHandlers(): void {
     const window = focusMainWindow();
     sendToWindow(window, IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
       typeKey: parsed.typeKey,
+      ...(parsed.prompt ? { prompt: parsed.prompt } : {}),
     });
     return { ok: true };
   });

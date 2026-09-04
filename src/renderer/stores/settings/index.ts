@@ -1,6 +1,7 @@
 import { sanitizeDefaultModel } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
+import { normalizeProxyMode, type ProxyMode } from '@shared/proxy';
 import {
   DEFAULT_STATUS_LINE_SEGMENTS,
   normalizeStatusLineSegments,
@@ -101,7 +102,10 @@ const initialState = {
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   autoUpdate: true,
+  proxyMode: 'system' as ProxyMode,
+  customProxyUrl: '',
   openChangesOnFileEdit: false,
+  compactReadOnlyTools: true,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
   backgroundImagePath: '',
@@ -119,6 +123,8 @@ const initialState = {
   backgroundRefreshNonce: 0,
   providers: [] as import('@shared/types').ModelProvider[],
   defaultModel: null,
+  titleSummaryEnabled: false,
+  titleSummaryModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   defaultReasoningEnabled: true,
   defaultThinkingLevel: 'medium' as import('@shared/types/agent').ThinkingLevel,
   skills: [] as import('@shared/types').SkillEntry[],
@@ -198,7 +204,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
+      setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
+      setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
+      setCompactReadOnlyTools: (compactReadOnlyTools) => set({ compactReadOnlyTools }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
       setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),
@@ -272,6 +281,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       setDefaultReasoningEnabled: (defaultReasoningEnabled) => set({ defaultReasoningEnabled }),
       setDefaultThinkingLevel: (defaultThinkingLevel) => set({ defaultThinkingLevel }),
+
+      setTitleSummaryEnabled: (titleSummaryEnabled) => set({ titleSummaryEnabled }),
+      setTitleSummaryModel: (titleSummaryModel) => set({ titleSummaryModel }),
 
       revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {
         const defaultModel = get().defaultModel;

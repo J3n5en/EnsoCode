@@ -196,6 +196,21 @@ describe('applyAgentEvent', () => {
     expect(updated.messages[0].content).toEqual([{ type: 'text', text: 'hi!' }]);
   });
 
+  it('message-upsert beyond the known tail never leaves holes (cold-evicted body awaiting snapshot)', () => {
+    // 复现：冷会话正文被清空后重新查看，snapshot 回来前流式 upsert 以原 index 到达，
+    // 直接按 index 写会产生稀疏空洞 → 后续 .optimistic / .role 读 undefined 崩溃
+    const next = applyAgentEvent(base, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 7,
+      index: 5,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'late' }] },
+    });
+    expect(next.messages.every((message) => message !== undefined)).toBe(true);
+    expect(next.messages).toHaveLength(0);
+    expect(next.lastSeq).toBe(7);
+  });
+
   it('乐观尾巴不被同 index 的 assistant upsert 覆盖，同文本 user upsert 将其消费', () => {
     // 复现：running 中“立即发送”乐观回显在本地尾部，当前轮的 assistant
     // upsert 撞同 index 把它覆盖 → 用户看到消息凭空消失，轮次结束后又出现。

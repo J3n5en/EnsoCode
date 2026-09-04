@@ -51,15 +51,11 @@ describe('SshConnectionStore', () => {
 
   it('钥匙串不可用时拒绝保存密码连接', () => {
     const s = store(false);
-    expect(
-      s.upsert({ name: 'box', host: 'dev', auth: 'password', password: 'x' })
-    ).toEqual({
+    expect(s.upsert({ name: 'box', host: 'dev', auth: 'password', password: 'x' })).toEqual({
       ok: false,
       error: '无法加密保存密码:系统钥匙串不可用。',
     });
-    expect(
-      s.upsert({ name: 'key', host: 'dev', auth: 'key' }).ok
-    ).toBe(true);
+    expect(s.upsert({ name: 'key', host: 'dev', auth: 'key' }).ok).toBe(true);
   });
 
   it('改名可不重输密码;删除后口令消失', () => {

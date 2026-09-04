@@ -73,6 +73,33 @@ describe('subagent tool model 参数', () => {
     expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined);
   });
 
+  it('报告末尾附运行脚注:工具调用统计与模型', async () => {
+    const session = {
+      ...fakeSession('report body'),
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'c1', name: 'read', arguments: {} }],
+        },
+        { role: 'assistant', content: [{ type: 'text', text: 'report body' }] },
+      ],
+    } as unknown as AgentSession;
+    const deps = makeDeps({ createSubSession: vi.fn(async () => session) });
+    const tool = createSubagentTool(deps);
+    const result = await tool.execute(
+      't1',
+      { description: 'x', prompt: 'do' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    const text = (result.content[0] as { text: string }).text;
+    expect(text.startsWith('report body')).toBe(true);
+    expect(text).toContain('read 1');
+    expect(text).toContain('bash 0');
+    expect(text).toContain('parent-model');
+  });
+
   it('model 参数说明携带用户写的选型描述', () => {
     const tool = createSubagentTool(makeDeps());
     const properties = (tool.parameters as { properties: Record<string, { description?: string }> })
@@ -92,5 +119,101 @@ describe('subagent tool model 参数', () => {
     expect(createSubagentTool(makeDeps({ models: [] })).promptSnippet).not.toMatch(
       /model parameter/
     );
+  });
+
+  it('promptGuidelines 写入主动委派规则，含内置类型选型；无类型时不提类型', () => {
+    const guidelines = createSubagentTool(
+      makeDeps({
+        agentTypes: [
+          { name: 'scout', description: 'recon', systemPrompt: '', tools: 'readonly' },
+          { name: 'worker', description: 'impl', systemPrompt: '', tools: 'all' },
+          { name: 'reviewer', description: 'review', systemPrompt: '', tools: 'readonly' },
+        ],
+      })
+    ).promptGuidelines;
+    expect(guidelines?.join('\n')).toMatch(/independent.*same message/i);
+    expect(guidelines?.join('\n')).toMatch(/scout.*worker.*reviewer/s);
+    expect(createSubagentTool(makeDeps()).promptGuidelines?.join('\n')).not.toMatch(/scout/);
+  });
+
+  it('类型选型按类型逐个拼接，关掉一个不影响其余', () => {
+    const text = createSubagentTool(
+      makeDeps({
+        agentTypes: [
+          { name: 'scout', description: 'recon', systemPrompt: '', tools: 'readonly' },
+          { name: 'worker', description: 'impl', systemPrompt: '', tools: 'all' },
+        ],
+      })
+    ).promptGuidelines?.join('\n');
+    expect(text).toMatch(/scout/);
+    expect(text).toMatch(/worker/);
+    expect(text).not.toMatch(/reviewer/);
+  });
+
+  it('description/promptSnippet 不再用保守措辞抢话', () => {
+    const tool = createSubagentTool(makeDeps());
+    expect(tool.description).not.toMatch(/parallelizable or context-heavy/);
+    expect(tool.promptSnippet).toMatch(/default/i);
+  });
+
+  it('当 agent_type 锁定模型（allowModelOverride === false）时，主 agent 传 model 报错拒绝', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'fixed-worker',
+          description: 'fixed',
+          systemPrompt: '',
+          tools: 'all',
+          allowModelOverride: false,
+        },
+      ],
+    });
+    const tool = createSubagentTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        {
+          description: 'x',
+          prompt: 'do',
+          agent_type: 'fixed-worker',
+          model: 'OpenAI/gpt-cheap',
+        },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/does not allow custom model selection/i);
+  });
+
+  it('当 agent_type 设为必须自选（allowModelOverride === true）时，允许指定 model', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'scout',
+          description: 'scout',
+          systemPrompt: '',
+          tools: 'readonly',
+          allowModelOverride: true,
+        },
+      ],
+    });
+    const tool = createSubagentTool(deps);
+    const result = await tool.execute(
+      't1',
+      {
+        description: 'x',
+        prompt: 'do',
+        agent_type: 'scout',
+        model: 'OpenAI/gpt-cheap',
+      },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.createSubSession).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'scout' }),
+      cheapConfig
+    );
+    expect((result.details as { modelId?: string }).modelId).toBe('gpt-cheap');
   });
 });

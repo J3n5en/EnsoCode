@@ -310,8 +310,8 @@ export function spawnSession(
   );
   const skillPaths = enabledSkillPaths(preset);
   const mcpServers = enabledMcpServers(preset);
-  const agentTypes = configuredAgentTypes(authenticatedAccountKeys);
   const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
+  const agentTypes = configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
   const state = readSettingsState();
   const disabledTools = Array.isArray(state?.disabledBuiltinTools)
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
@@ -499,6 +499,15 @@ export function steerSession(
   });
 }
 
+/** 标题总结：一次性补全命令，不绑会话身份；结果经 title-generated 事件回流 */
+export function summarizeConversationTitle(
+  conversationId: string,
+  text: string,
+  model: SpawnModelConfig
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'summarize-title', conversationId, text, model });
+}
+
 export function abortSession(identity: SessionIdentity): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'abort', identity });
 }
@@ -573,6 +582,17 @@ export function respondAsk(
   return sendAgentCommand({ type: 'ask-respond', identity, requestId, answer });
 }
 
+export function compactSession(
+  identity: SessionIdentity,
+  instructions?: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'compact',
+    identity,
+    ...(instructions ? { instructions } : {}),
+  });
+}
+
 export function rewindSession(
   identity: SessionIdentity,
   userIndexFromEnd: number,
@@ -583,6 +603,21 @@ export function rewindSession(
     identity,
     userIndexFromEnd,
     ...(restoreFiles ? { restoreFiles } : {}),
+  });
+}
+
+export function forkSession(
+  identity: SessionIdentity,
+  targetConversationId: string,
+  anchor: { entryId: string } | { userIndexFromEnd: number }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'fork',
+    identity,
+    targetConversationId,
+    ...('entryId' in anchor
+      ? { entryId: anchor.entryId }
+      : { userIndexFromEnd: anchor.userIndexFromEnd }),
   });
 }
 
@@ -615,7 +650,8 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
 }
 
 function configuredAgentTypes(
-  authenticatedAccountKeys: ReadonlySet<string>
+  authenticatedAccountKeys: ReadonlySet<string>,
+  hasSubagentModels = false
 ): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
   const disabled = new Set(
@@ -628,16 +664,27 @@ function configuredAgentTypes(
   const customNames = new Set(custom.map((entry) => entry.name.trim().toLowerCase()));
   const builtins = BUILTIN_AGENT_TYPES.filter(
     (type) => !disabled.has(type.name) && !customNames.has(type.name)
-  ).map((type) => ({
-    name: type.name,
-    description: type.description,
-    systemPrompt: type.systemPrompt,
-    tools: type.tools,
-  }));
+  ).map((type) => {
+    // 只有配置了允许主 agent 选择的模型时，'agent_pick' 才生效；否则优雅回退到跟随会话（allowModelOverride = false）
+    const effectiveMode =
+      (type.modelMode ?? 'agent_pick') === 'agent_pick' && hasSubagentModels
+        ? 'agent_pick'
+        : 'follow';
+    return {
+      name: type.name,
+      description: type.description,
+      systemPrompt: type.systemPrompt,
+      tools: type.tools,
+      ...(type.writeScope ? { writeScope: [...type.writeScope] } : {}),
+      allowModelOverride: effectiveMode === 'agent_pick',
+    };
+  });
   const customs = custom.map((entry): AgentTypeSpawnConfig => {
     const resources = resolveAgentTypeResources(entry);
+    const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
+    const effectiveMode = mode === 'agent_pick' && !hasSubagentModels ? 'follow' : mode;
     const bound =
-      entry.providerId && entry.modelId
+      effectiveMode === 'fixed' && entry.providerId && entry.modelId
         ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
         : null;
     return {
@@ -645,6 +692,8 @@ function configuredAgentTypes(
       description: entry.description,
       systemPrompt: entry.systemPrompt,
       tools: entry.tools,
+      ...(entry.writeScope ? { writeScope: [...entry.writeScope] } : {}),
+      allowModelOverride: effectiveMode === 'agent_pick',
       ...(resources.ok && resources.skillPaths.length > 0
         ? { skillPaths: [...resources.skillPaths] }
         : {}),
@@ -811,7 +860,10 @@ function isAgentTypeEntry(value: unknown): value is AgentTypeEntry {
     typeof entry.name === 'string' &&
     typeof entry.description === 'string' &&
     typeof entry.systemPrompt === 'string' &&
-    (entry.tools === 'all' || entry.tools === 'readonly')
+    (entry.tools === 'all' || entry.tools === 'readonly') &&
+    (entry.writeScope === undefined ||
+      (Array.isArray(entry.writeScope) &&
+        entry.writeScope.every((glob) => typeof glob === 'string' && glob.trim() !== '')))
   );
 }
 

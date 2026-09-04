@@ -1,6 +1,12 @@
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, foldTimeline, type TimelineItem, terminalErrorText } from './timeline';
+import {
+  buildTimeline,
+  foldTimeline,
+  isReadOnlyCommand,
+  type TimelineItem,
+  terminalErrorText,
+} from './timeline';
 
 const user = (text: string): ProjectedMessage => ({
   role: 'user',
@@ -143,6 +149,115 @@ describe('buildTimeline', () => {
       { kind: 'thinking', streaming: false },
       { kind: 'text', streaming: true },
     ]);
+    expect(timeline.some((item) => item.kind === 'text' && item.turnEnd)).toBe(false);
+  });
+
+  it('idle 时本轮最后一条正文标 turnEnd，中间步不标', () => {
+    const timeline = buildTimeline(
+      [
+        user('改'),
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '先看' },
+            { type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'read',
+          isError: false,
+          content: [{ type: 'text', text: 'ok' }],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: '结论' }],
+        },
+        user('还没答'),
+      ],
+      false
+    );
+    expect(timeline.filter((item) => item.kind === 'text')).toMatchObject([
+      { text: '先看' },
+      { text: '结论', turnEnd: true },
+    ]);
+    expect(timeline.filter((item) => item.kind === 'text' && item.turnEnd)).toHaveLength(1);
+  });
+
+  it('整段 <thinking> 包裹的 text 变成 thinking 块，标签不入正文', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '<thinking>\n**Analyzing** antigravity.ts\n</thinking>',
+            },
+          ],
+        },
+      ],
+      false
+    );
+    expect(timeline).toEqual([
+      {
+        kind: 'thinking',
+        key: '0-0',
+        text: '**Analyzing** antigravity.ts',
+        streaming: false,
+        durationMs: null,
+      },
+    ]);
+  });
+
+  it('正文中夹着的 <thinking> 拆成 thinking 与 text，工具行不受影响', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '<thinking>\n先 grep\n</thinking>',
+            },
+            { type: 'toolCall', id: 't1', name: 'grep', arguments: { pattern: 'high' } },
+            {
+              type: 'text',
+              text: '前缀<thinking>再读文件</thinking>\n结论',
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'grep',
+          isError: false,
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline).toMatchObject([
+      { kind: 'thinking', text: '先 grep', streaming: false },
+      { kind: 'tool', name: 'grep', state: 'ok' },
+      { kind: 'text', text: '前缀' },
+      { kind: 'thinking', text: '再读文件' },
+      { kind: 'text', text: '结论' },
+    ]);
+  });
+
+  it('流式中未闭合的 <thinking> 当 thinking 跟看，不露开标签', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: '<thinking>\n正在想' }],
+        },
+      ],
+      true
+    );
+    expect(timeline).toMatchObject([{ kind: 'thinking', text: '正在想', streaming: true }]);
   });
 
   it('多 step 轮次：末 step 的 perf 带整轮总耗时 turnMs（首 step 开始→末 step 完成），中间 step 不带', () => {
@@ -406,7 +521,82 @@ describe('terminalErrorText', () => {
   });
 });
 
+describe('isReadOnlyCommand', () => {
+  it.each([
+    'ls -la',
+    'rg -n "foo" src',
+    'grep -r foo . | head -20',
+    'cat package.json',
+    'find . -name "*.ts" | wc -l',
+    'git status && git log --oneline -5',
+    'cd packages/phone && ls src',
+    'FOO=1 rg foo 2>/dev/null',
+    'rg foo 2>&1 | sort | uniq -c',
+    '/usr/bin/tree -L 2',
+    'sed -n 1,20p src/a.ts',
+    'git diff --stat',
+    'git remote -v',
+    'git config --get user.name',
+    'LC_ALL=C sort a.txt',
+    "awk -F: '{print $1}' /etc/passwd",
+    'yq .a f.yml',
+  ])('只读：%s', (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(true);
+  });
+
+  it.each([
+    'rm -rf dist',
+    'ls > out.txt',
+    'cat a >> b',
+    'sed -i "s/a/b/" x',
+    'find . -name "*.log" -delete',
+    'find . -exec rm {} \\;',
+    'git commit -m x',
+    'git checkout -- .',
+    'ls && npm install',
+    'echo $(rm -rf x)',
+    'pnpm test',
+    'xargs rm',
+    '',
+    // 绕过向量
+    'ls & rm -rf x',
+    'cat <(rm -rf x)',
+    'env rm -rf x',
+    'awk \'BEGIN{system("rm -rf x")}\' a.txt',
+    "sed 's/a/b/e' a.txt",
+    'sed --in-place=.bak s/a/b/ x',
+    'yq -i .a=1 f.yml',
+    'sort -o out.txt in.txt',
+    'git log --output=/tmp/x',
+    'find . -execdir rm {} \\;',
+    'find . -fprint /tmp/x',
+    'git config --unset user.name',
+    'git remote remove origin',
+    'GIT_EXTERNAL_DIFF=./evil git diff',
+    'rg foo 2>err.txt',
+    'ls\rrm -rf x',
+  ])('非只读：%s', (cmd) => {
+    expect(isReadOnlyCommand(cmd)).toBe(false);
+  });
+});
+
 describe('foldTimeline', () => {
+  it('compact：只读 bash 进探索组，cat 记作 read、rg 记作 search', () => {
+    const items = [
+      { ...toolItem('a1', 'bash'), summary: 'cat README.md' },
+      { ...toolItem('a2', 'bash'), summary: 'rg -n foo src' },
+      toolItem('a3', 'read'),
+      { ...toolItem('b', 'bash'), summary: 'pnpm test' },
+    ] as TimelineItem[];
+    const folded = foldTimeline(items, false, new Set(), { compact: true });
+    expect(folded.map((i) => (i.kind === 'tool' ? i.summary : i.kind))).toEqual([
+      'tool-group',
+      'pnpm test',
+    ]);
+    const group = folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.stats).toEqual({ commands: 0, reads: 2, searches: 1, others: 0 });
+  });
+
   it('连续 ≥3 条工具收拢为组头，thinking 收进组，统计归类', () => {
     const items = [
       userItem('u0'),
@@ -482,6 +672,67 @@ describe('foldTimeline', () => {
     const groupKey = collapsed[0].key;
     const expanded = foldTimeline(items, false, new Set([groupKey]));
     expect(expanded.map((i) => i.key)).toEqual([groupKey, 't1', 'th', 't2', 't3']);
+  });
+
+  it('compact：running 时最后一轮也折组，running 行钉在组外', () => {
+    const runningTool = { ...toolItem('r', 'read'), state: 'running' } as TimelineItem;
+    const items = [
+      userItem('u0'),
+      toolItem('a1', 'read'),
+      toolItem('a2', 'grep'),
+      toolItem('a3', 'ls'),
+      runningTool,
+    ];
+    const folded = foldTimeline(items, true, new Set(), { compact: true });
+    expect(folded.map((i) => i.kind)).toEqual(['user', 'tool-group', 'tool']);
+    const group = folded[1] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.count).toBe(3);
+    expect(group.stats).toEqual({ commands: 0, reads: 1, searches: 2, others: 0 });
+    expect(folded[2]).toBe(runningTool);
+    // 展开后全量平铺，running 行不重复
+    const expanded = foldTimeline(items, true, new Set([group.key]), { compact: true });
+    expect(expanded.map((i) => i.key)).toEqual(['u0', group.key, 'a1', 'a2', 'a3', 'r']);
+  });
+
+  it('compact 关时 running 最后一轮仍平铺', () => {
+    const items = [userItem('u0'), toolItem('a1'), toolItem('a2'), toolItem('a3')];
+    expect(foldTimeline(items, true, new Set(), { compact: false }).map((i) => i.kind)).toEqual([
+      'user',
+      'tool',
+      'tool',
+      'tool',
+    ]);
+  });
+
+  it('compact：只读工具才进组，bash 打断段并平铺在外', () => {
+    const items = [
+      toolItem('a1', 'read'),
+      toolItem('a2', 'read'),
+      toolItem('a3', 'grep'),
+      toolItem('b', 'bash'),
+      toolItem('a4', 'read'),
+    ];
+    const folded = foldTimeline(items, false, new Set(), { compact: true });
+    expect(folded.map((i) => (i.kind === 'tool' ? i.name : i.kind))).toEqual([
+      'tool-group',
+      'bash',
+      'read',
+    ]);
+    const group = folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.count).toBe(3);
+    expect(group.stats).toEqual({ commands: 0, reads: 2, searches: 1, others: 0 });
+    expect(group.exploring).toBe(false);
+    // 关：沿用旧逻辑，bash 一起收
+    const legacy = foldTimeline(items, false, new Set(), { compact: false });
+    expect(legacy.map((i) => i.kind)).toEqual(['tool-group']);
+    expect((legacy[0] as Extract<TimelineItem, { kind: 'tool-group' }>).count).toBe(5);
+  });
+
+  it('compact：running 行钉组外时组头标 exploring', () => {
+    const running = { ...toolItem('r', 'read'), state: 'running' } as TimelineItem;
+    const items = [toolItem('a1', 'read'), toolItem('a2', 'ls'), toolItem('a3', 'grep'), running];
+    const folded = foldTimeline(items, true, new Set(), { compact: true });
+    expect((folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>).exploring).toBe(true);
   });
 
   it('todo 行不进组，平铺在组头之后', () => {
@@ -589,5 +840,111 @@ describe('工具路径摘要相对化', () => {
         cwd
       )[0]
     ).toMatchObject({ summary: 'pnpm test' });
+  });
+});
+
+describe('compaction 摘要行', () => {
+  it('compactionSummary 消息渲染为 compaction 行，带摘要与压缩前 token 数', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        {
+          role: 'compactionSummary',
+          content: [{ type: 'text', text: 'SUMMARY' }],
+          tokensBefore: 9000,
+        },
+        user('new'),
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-notice',
+    ]);
+    expect(timeline[1]).toMatchObject({
+      kind: 'compaction',
+      summary: 'SUMMARY',
+      tokensBefore: 9000,
+    });
+  });
+
+  it('compaction 行不打断 tool-group 折叠之外的顺序，且不被 foldTimeline 吞掉', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+      ],
+      false
+    );
+    const folded = foldTimeline(timeline, false, new Set());
+    expect(folded.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'text',
+      'compaction-notice',
+    ]);
+  });
+
+  it('压缩进行中时在时间线末尾挂 loading 行，不重复钉摘要提示', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        user('new'),
+      ],
+      false,
+      [],
+      undefined,
+      { compaction: 'running' }
+    );
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-progress',
+    ]);
+    expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-progress', state: 'running' });
+  });
+
+  it('忙碌中排队压缩时末尾挂 queued 行', () => {
+    const timeline = buildTimeline([user('q')], true, [], undefined, { compaction: 'queued' });
+    expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-progress', state: 'queued' });
+  });
+
+  it('压缩完成后若摘要不在末尾，则在底部再钉一条提示', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        {
+          role: 'compactionSummary',
+          content: [{ type: 'text', text: 'SUMMARY' }],
+          tokensBefore: 9000,
+        },
+        user('new'),
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'user',
+      'compaction',
+      'user',
+      'compaction-notice',
+    ]);
+    expect(timeline.at(-1)).toMatchObject({
+      kind: 'compaction-notice',
+      summary: 'SUMMARY',
+      tokensBefore: 9000,
+    });
+  });
+
+  it('摘要已在末尾时不再重复钉提示', () => {
+    const timeline = buildTimeline(
+      [user('old'), { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] }],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction']);
   });
 });

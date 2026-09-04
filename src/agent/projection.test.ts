@@ -149,4 +149,19 @@ describe('projectMessage', () => {
       arguments: { path: 'big.ts', content: `${'a'.repeat(PROJECTED_TEXT_LIMIT)}\n…` },
     });
   });
+
+  it('compactionSummary 消息：summary 投影为 text part，tokensBefore 透出', () => {
+    const projected = projectMessage({
+      role: 'compactionSummary',
+      summary: 'earlier work summarized',
+      tokensBefore: 123456,
+      timestamp: 5,
+    });
+    expect(projected).toEqual({
+      role: 'compactionSummary',
+      content: [{ type: 'text', text: 'earlier work summarized' }],
+      timestamp: 5,
+      tokensBefore: 123456,
+    });
+  });
 });

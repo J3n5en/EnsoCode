@@ -3,6 +3,7 @@ import { resolveChatModel } from '@shared/defaultModel';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
+import { addToast } from '@/components/ui/toast';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
 import { useOpenChangesOnEdit } from '@/hooks/useOpenChangesOnEdit';
 import { useI18n } from '@/i18n';
@@ -20,7 +21,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
-import { ChatFindBar, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
+import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { Composer } from './Composer';
 import { CoworkerTabs } from './CoworkerTabs';
 import { timelineSearchHits } from './chatSearch';
@@ -152,6 +153,10 @@ export function ChatView() {
       name: '/goal',
       description: t('Set a session goal (/goal <objective> · pause · resume · clear)'),
     };
+    const compact = {
+      name: '/compact',
+      description: t('Compact the context now (/compact [summary focus])'),
+    };
     const fromSettings = skills
       .filter((skill) => skill.enabled !== false)
       .map((skill) => ({
@@ -164,11 +169,13 @@ export function ChatView() {
     }));
     const seen = new Set([
       goal.name,
+      compact.name,
       ...fromSettings.map((command) => command.name),
       ...fromProject.map((command) => command.name),
     ]);
     return [
       goal,
+      compact,
       ...fromSettings,
       ...fromProject,
       ...conversation.commands.filter((command) => !seen.has(command.name)),
@@ -189,9 +196,16 @@ export function ChatView() {
         conversation?.messages ?? [],
         running,
         conversation?.customEntries ?? [],
-        toolCwd
+        toolCwd,
+        { compaction: conversation?.compaction }
       ),
-    [conversation?.customEntries, conversation?.messages, running, toolCwd]
+    [
+      conversation?.compaction,
+      conversation?.customEntries,
+      conversation?.messages,
+      running,
+      toolCwd,
+    ]
   );
   useOpenChangesOnEdit(timeline, conversation?.id);
   const findHits = useMemo(
@@ -221,23 +235,44 @@ export function ChatView() {
 
   useEffect(() => {
     const open = () => {
+      const pending = consumePendingFindQuery();
       setFindOpen(true);
+      if (pending) {
+        setFindQuery(pending);
+        setFindIndex(0);
+      }
     };
     window.addEventListener(OPEN_CHAT_FIND_EVENT, open);
     return () => window.removeEventListener(OPEN_CHAT_FIND_EVENT, open);
   }, []);
 
+  const conversationId = conversation?.id;
   useEffect(() => {
+    const pending = consumePendingFindQuery();
     setFindIndex(0);
+    if (pending) {
+      setFindQuery(pending);
+      setFindOpen(true);
+      return;
+    }
+    if (!conversationId) return;
     setFindQuery('');
     setFindOpen(false);
-  }, [conversation?.id]);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!findOpen || findHits.length === 0) return;
     const i = Math.min(findIndex, findHits.length - 1);
     timelineRef.current?.scrollToKey(findHits[i].key);
   }, [findOpen, findIndex, findHits]);
+
+  // 压缩失败（如会话太小无可压）必须给反馈：不然点了按钮/发了 /compact 一点动静都没有
+  useEffect(() => {
+    const error = conversation?.compactionError;
+    if (!error || !conversation) return;
+    addToast({ type: 'error', title: t('Compaction failed'), description: error });
+    useSessionsStore.getState().clearCompactionError(conversation.id);
+  }, [conversation, t]);
 
   const stepFind = useCallback(
     (dir: 1 | -1) => {

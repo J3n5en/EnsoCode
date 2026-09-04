@@ -55,10 +55,7 @@ export function upsertNode(
     );
   }
   const trimmed = label?.trim();
-  return [
-    ...list,
-    { ...device, nodeId: device.pairId, label: trimmed || defaultLabel(list) },
-  ];
+  return [...list, { ...device, nodeId: device.pairId, label: trimmed || defaultLabel(list) }];
 }
 
 /**

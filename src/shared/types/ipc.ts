@@ -15,6 +15,9 @@ export const IPC_CHANNELS = {
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed',
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+  /** main → settings renderer：打开后切分类并闪行 */
+  SETTINGS_DEEP_LINK: 'settings:deep-link',
+  SETTINGS_DEEP_LINK_CONSUME: 'settings:deep-link-consume',
   WINDOW_POPUP_MENU: 'window:popup-menu',
 
   // Local provider scan/import
@@ -23,6 +26,9 @@ export const IPC_CHANNELS = {
   PROVIDERS_LIST_MODELS: 'providers:list-models',
   PROVIDERS_TEST: 'providers:test',
   PROVIDERS_MODEL_META: 'providers:model-meta',
+
+  // Local token usage statistics
+  USAGE_SUMMARY: 'usage:summary',
 
   // OAuth subscription providers (pi builtin)
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
@@ -58,6 +64,7 @@ export const IPC_CHANNELS = {
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */
   AGENT_CHILD_HISTORY_READ: 'agent:child-history-read',
+  AGENT_SUMMARIZE_TITLE: 'agent:summarize-title',
   /** 已启动会话就地换模型；worker 换完回报，Main 据此更新已启动模型记录 */
   AGENT_SET_MODEL: 'agent:set-model',
   AGENT_SET_THINKING: 'agent:set-thinking',
@@ -69,6 +76,9 @@ export const IPC_CHANNELS = {
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
   AGENT_TASK_STOP: 'agent:task-stop',
   AGENT_REWIND: 'agent:rewind',
+  /** 手动压缩会话上下文（/compact 与上下文面板按钮共用） */
+  AGENT_COMPACT: 'agent:compact',
+  AGENT_FORK: 'agent:fork',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',
   AGENT_HIRE_COWORKER: 'agent:hire-coworker',
   AGENT_ASK_RESPOND: 'agent:ask-respond',
@@ -152,6 +162,8 @@ export const IPC_CHANNELS = {
 
   // 右侧面板内嵌浏览器(WebContentsView 叠层)
   BROWSER_SET_VIEWPORT: 'browser:set-viewport',
+  /** 渲染层有模态浮层时，guest 立刻沉到 workbench 之下（避免弹窗被网页挡一帧） */
+  BROWSER_SET_OVERLAY_ACTIVE: 'browser:set-overlay-active',
   BROWSER_NAVIGATE: 'browser:navigate',
   BROWSER_GO_BACK: 'browser:go-back',
   BROWSER_GO_FORWARD: 'browser:go-forward',
@@ -163,6 +175,7 @@ export const IPC_CHANNELS = {
   /** main → renderer:agent 已打开页，请建 Browser 面板 */
   BROWSER_REVEAL: 'browser:reveal',
   BROWSER_RESTORE_TABS: 'browser:restore-tabs',
+  BROWSER_LIST_SEARCHABLE_TABS: 'browser:list-searchable-tabs',
   BROWSER_CLOSE_TAB: 'browser:close-tab',
   /** renderer → main:开关面板内嵌 DevTools */
   BROWSER_SET_DEVTOOLS: 'browser:set-devtools',
@@ -181,6 +194,9 @@ export const IPC_CHANNELS = {
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
   UPDATER_STATUS: 'updater:status',
+
+  // Network proxy
+  PROXY_APPLY: 'proxy:apply',
 
   // Phone second screen (pairing + relay)
   PAIR_START: 'pair:start',
@@ -209,6 +225,8 @@ export const IPC_CHANNELS = {
   NODES_STATUS_CHANGED: 'nodes:status-changed',
   /** main → renderer：解密后的 host 下行帧 */
   NODES_MESSAGE: 'nodes:message',
+
+  WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

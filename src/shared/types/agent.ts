@@ -118,12 +118,16 @@ export interface AgentTypeSpawnConfig {
   description: string;
   systemPrompt: string;
   tools: 'all' | 'readonly';
+  /** 可写路径 glob 白名单；缺省不限 */
+  writeScope?: string[];
   /** 精选注入的 skill 目录（main 已按 id 解析） */
   skillPaths?: string[];
   /** 精选注入的 MCP server（main 已按 id 解析） */
   mcpServers?: McpServerSpawnConfig[];
   /** 绑定模型；缺省 = 跟随父会话 */
   model?: SpawnModelConfig;
+  /** 是否允许主 agent 覆盖模型（'agent_pick' 允许/必须主 agent 选型；固定模型或跟随会话时为 false，不允许自选覆盖） */
+  allowModelOverride?: boolean;
 }
 
 /**
@@ -210,6 +214,37 @@ export interface ProjectAuthority {
 
 export type ProjectAuthorityProjection = ProjectAuthority;
 
+export const CONTEXT_OCCUPANCY_BUCKETS = [
+  'system',
+  'instructions',
+  'skills',
+  'tools',
+  'conversation',
+  'compaction',
+  'projectMemory',
+  'reminders',
+] as const;
+
+export type ContextOccupancyBucketId = (typeof CONTEXT_OCCUPANCY_BUCKETS)[number];
+
+export type ContextOccupancyBuckets = Record<ContextOccupancyBucketId, number>;
+
+export interface ContextOccupancy {
+  buckets: ContextOccupancyBuckets;
+  used: number;
+  estimated: true;
+  compactedMessageCount: number;
+  compactionModelMismatch: boolean;
+  contextWindow?: number;
+  percent?: number;
+  compactionEntryId?: string;
+}
+
+export interface ConversationForkOrigin {
+  conversationId: string;
+  entryId: string;
+}
+
 export interface ConversationAuthority {
   conversationId: string;
   projectId: string;
@@ -218,6 +253,7 @@ export interface ConversationAuthority {
   version: number;
   sessionFile?: string;
   selection?: DefaultModelRef & { revision: number };
+  forkedFrom?: ConversationForkOrigin;
 }
 
 export type ConversationAuthorityProjection = ConversationAuthority;
@@ -252,6 +288,7 @@ export interface CreateConversationAuthorityRequest {
   projectVersion: number;
   /** 手机配对等已有 id：登记为 root，不再由 Main 另发 UUID */
   conversationId?: string;
+  forkedFrom?: ConversationForkOrigin;
 }
 
 export interface ConversationAuthorityRequest {
@@ -463,6 +500,7 @@ export type AgentCommand =
       decision: ApprovalDecision;
     }
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  | { type: 'compact'; identity: SessionIdentity; instructions?: string }
   | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
   | {
       type: 'capability-result';
@@ -486,7 +524,21 @@ export type AgentCommand =
       userIndexFromEnd: number;
       restoreFiles?: boolean;
     }
+  | {
+      type: 'fork';
+      identity: SessionIdentity;
+      targetConversationId: string;
+      entryId?: string;
+      userIndexFromEnd?: number;
+    }
   | { type: 'abort'; identity: SessionIdentity }
+  | {
+      /** 标题总结：一次性补全，不创建会话、不落盘；失败静默（不回事件） */
+      type: 'summarize-title';
+      conversationId: string;
+      text: string;
+      model: SpawnModelConfig;
+    }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
@@ -500,7 +552,9 @@ export type AgentCommand =
   | { type: 'snapshot'; sessionId?: string }
   /** 不可被闲置回收的会话全集（桌面正在查看 + 手机订阅中），每次全量覆盖 */
   | { type: 'pin-sessions'; sessionIds: string[] }
-  | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] };
+  | { type: 'warm-mcp'; servers: McpServerSpawnConfig[] }
+  /** 运行中同步代理 env；null 表示删除该键 */
+  | { type: 'set-proxy-env'; env: Record<string, string | null> };
 
 /** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
@@ -578,6 +632,8 @@ export interface ProjectedMessage {
   toolDurationMs?: number;
   /** subagent 工具 toolResult 的执行元数据 */
   subagentMeta?: { modelId?: string; outputTokens?: number; steps?: number };
+  /** compactionSummary 消息：压缩前的上下文 token 数 */
+  tokensBefore?: number;
 }
 
 export interface SessionSnapshot {
@@ -731,6 +787,23 @@ export type AgentWorkerEvent =
       editorText?: string;
       filesRestored?: boolean;
     }
+  | {
+      type: 'fork-done';
+      identity: SessionIdentity;
+      seq: number;
+      targetConversationId: string;
+      sessionFile?: string;
+      entryId?: string;
+      error?: string;
+    }
+  /** 上下文压缩进度（手动 /compact 与自动压缩共用）。queued = 忙碌中已排队，待本轮收束后执行 */
+  | {
+      type: 'compaction';
+      identity: SessionIdentity;
+      seq: number;
+      state: 'queued' | 'start' | 'end';
+      error?: string;
+    }
   | { type: 'commands'; identity: SessionIdentity; seq: number; commands: SlashCommand[] }
   | {
       type: 'session-meta';
@@ -738,6 +811,7 @@ export type AgentWorkerEvent =
       seq: number;
       sessionFile?: string;
       contextWindow?: number;
+      occupancy?: ContextOccupancy;
     }
   | {
       type: 'approval-request';
@@ -759,6 +833,8 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       seq: number;
       coworker: CoworkerInfo;
+      /** 工具直雇 coworker 自身的会话身份(无 ChildSessionIdentity),Main 据此入索引供用户 tab 直接 prompt */
+      coworkerIdentity?: SessionIdentity;
     }
   | {
       type: 'capability-invoke';
@@ -785,6 +861,12 @@ export type AgentWorkerEvent =
       note: string;
     }
   | { type: 'task-started'; identity: SessionIdentity; seq: number; task: BackgroundTaskInfo }
+  | {
+      /** 标题总结完成：无 identity/seq（不属于任何 worker 会话），渲染层按 conversationId 写回 */
+      type: 'title-generated';
+      conversationId: string;
+      title: string;
+    }
   | {
       type: 'task-output';
       identity: SessionIdentity;
@@ -823,6 +905,28 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
 
 const isSequence = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
+
+export function parseContextOccupancy(value: unknown): ContextOccupancy | null {
+  if (!isRecord(value) || !isRecord(value.buckets) || value.estimated !== true) return null;
+  const buckets = {} as ContextOccupancyBuckets;
+  for (const id of CONTEXT_OCCUPANCY_BUCKETS) {
+    const tokens = value.buckets[id];
+    if (!isSequence(tokens)) return null;
+    buckets[id] = tokens;
+  }
+  if (
+    !isSequence(value.used) ||
+    !isSequence(value.compactedMessageCount) ||
+    typeof value.compactionModelMismatch !== 'boolean' ||
+    (value.contextWindow !== undefined &&
+      !(typeof value.contextWindow === 'number' && value.contextWindow > 0)) ||
+    (value.percent !== undefined && !isSequence(value.percent)) ||
+    (value.compactionEntryId !== undefined && !isNonEmptyString(value.compactionEntryId))
+  ) {
+    return null;
+  }
+  return value as unknown as ContextOccupancy;
+}
 
 const isProductSurfaceId = (value: unknown): value is ProductSurfaceId =>
   typeof value === 'string' && Object.hasOwn(PRODUCT_SURFACE_INVENTORY, value);
@@ -963,6 +1067,7 @@ export function parseConversationAuthority(value: unknown): ConversationAuthorit
       'version',
       'sessionFile',
       'selection',
+      'forkedFrom',
     ]) ||
     !isUuid(value.conversationId) ||
     !isUuid(value.projectId) ||
@@ -980,6 +1085,16 @@ export function parseConversationAuthority(value: unknown): ConversationAuthorit
       !isNonEmptyString(value.selection.providerId) ||
       !isNonEmptyString(value.selection.modelId) ||
       !isSequence(value.selection.revision)
+    ) {
+      return null;
+    }
+  }
+  if (value.forkedFrom !== undefined) {
+    if (
+      !isRecord(value.forkedFrom) ||
+      !hasExactKeys(value.forkedFrom, ['conversationId', 'entryId']) ||
+      !isUuid(value.forkedFrom.conversationId) ||
+      !isNonEmptyString(value.forkedFrom.entryId)
     ) {
       return null;
     }
@@ -1049,13 +1164,29 @@ export function parseCreateConversationAuthorityRequest(
 ): CreateConversationAuthorityRequest | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['requestId', 'projectId', 'projectVersion', 'conversationId']) ||
+    !hasOnlyKeys(value, [
+      'requestId',
+      'projectId',
+      'projectVersion',
+      'conversationId',
+      'forkedFrom',
+    ]) ||
     !isNonEmptyString(value.requestId) ||
     !isUuid(value.projectId) ||
     !isSequence(value.projectVersion) ||
     (value.conversationId !== undefined && !isUuid(value.conversationId))
   ) {
     return null;
+  }
+  if (value.forkedFrom !== undefined) {
+    if (
+      !isRecord(value.forkedFrom) ||
+      !hasExactKeys(value.forkedFrom, ['conversationId', 'entryId']) ||
+      !isUuid(value.forkedFrom.conversationId) ||
+      !isNonEmptyString(value.forkedFrom.entryId)
+    ) {
+      return null;
+    }
   }
   return value as unknown as CreateConversationAuthorityRequest;
 }
@@ -1511,6 +1642,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     }
+    case 'summarize-title':
+      return hasExactKeys(value, ['type', 'conversationId', 'text', 'model']) &&
+        isNonEmptyString(value.conversationId) &&
+        isNonEmptyString(value.text) &&
+        parseSpawnModelConfig(value.model)
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'prompt':
     case 'steer': {
       const images = value.images === undefined ? [] : parseAttachedImages(value.images);
@@ -1591,6 +1729,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         isNonEmptyString(value.taskId)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'compact':
+      return hasOnlyKeys(value, ['type', 'identity', 'instructions']) &&
+        parseAnySessionIdentity(value.identity) &&
+        (value.instructions === undefined || isNonEmptyString(value.instructions))
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'rewind':
       return hasOnlyKeys(value, ['type', 'identity', 'userIndexFromEnd', 'restoreFiles']) &&
         parseAnySessionIdentity(value.identity) &&
@@ -1598,6 +1742,24 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.restoreFiles === undefined || typeof value.restoreFiles === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;
+    case 'fork': {
+      const hasEntry = typeof value.entryId === 'string';
+      const hasIndex = typeof value.userIndexFromEnd === 'number';
+      return hasOnlyKeys(value, [
+        'type',
+        'identity',
+        'targetConversationId',
+        'entryId',
+        'userIndexFromEnd',
+      ]) &&
+        parseAnySessionIdentity(value.identity) &&
+        isUuid(value.targetConversationId) &&
+        (hasEntry
+          ? !hasIndex && isNonEmptyString(value.entryId)
+          : hasIndex && isSequence(value.userIndexFromEnd))
+        ? (value as unknown as AgentCommand)
+        : null;
+    }
     case 'abort':
     case 'abort-retry':
     case 'retry':
@@ -1626,6 +1788,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'set-proxy-env': {
+      if (!hasExactKeys(value, ['type', 'env']) || !isRecord(value.env)) return null;
+      for (const entry of Object.values(value.env)) {
+        if (entry !== null && typeof entry !== 'string') return null;
+      }
+      return value as unknown as AgentCommand;
+    }
     default:
       return null;
   }
@@ -1705,6 +1874,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }
+  if (value.type === 'title-generated') {
+    return hasExactKeys(value, ['type', 'conversationId', 'title']) &&
+      isNonEmptyString(value.conversationId) &&
+      isNonEmptyString(value.title)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
   const identity = parseAnySessionIdentity(value.identity);
   if (!identity || !isSequence(value.seq)) return null;
   switch (value.type) {
@@ -1744,14 +1920,30 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         (value.filesRestored === undefined || typeof value.filesRestored === 'boolean')
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'fork-done':
+      return isUuid(value.targetConversationId) &&
+        (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
+        (value.entryId === undefined || isNonEmptyString(value.entryId)) &&
+        (value.error === undefined || typeof value.error === 'string')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'compaction':
+      return (value.state === 'queued' || value.state === 'start' || value.state === 'end') &&
+        (value.error === undefined || typeof value.error === 'string')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'commands':
       return Array.isArray(value.commands) ? (value as unknown as AgentWorkerEvent) : null;
-    case 'session-meta':
+    case 'session-meta': {
+      const occupancy =
+        value.occupancy === undefined ? undefined : parseContextOccupancy(value.occupancy);
+      if (value.occupancy !== undefined && !occupancy) return null;
       return (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&
         (value.contextWindow === undefined ||
           (typeof value.contextWindow === 'number' && value.contextWindow > 0))
-        ? (value as unknown as AgentWorkerEvent)
+        ? ({ ...value, ...(occupancy ? { occupancy } : {}) } as unknown as AgentWorkerEvent)
         : null;
+    }
     case 'approval-request':
       return isRecord(value.request) && isNonEmptyString(value.request.requestId)
         ? (value as unknown as AgentWorkerEvent)

@@ -14,9 +14,21 @@ export const DEFAULT_BASE_URLS: Readonly<Record<ModelApiKind, string>> = {
   'openai-completions': 'https://api.openai.com/v1',
   'openai-responses': 'https://api.openai.com/v1',
   'anthropic-messages': 'https://api.anthropic.com',
-  'google-generative-ai': 'https://generativelanguage.googleapis.com',
+  // pi 的 Google SDK 在有自定义 baseUrl 时会把 apiVersion 置空，版本号必须写进地址
+  'google-generative-ai': 'https://generativelanguage.googleapis.com/v1beta',
   ollama: 'http://127.0.0.1:11434',
 };
+
+export function withVersionSegment(base: string, segment: string): string {
+  const trimmed = base.replace(/\/+$/, '');
+  return trimmed.endsWith(`/${segment}`) ? trimmed : `${trimmed}/${segment}`;
+}
+
+/** 交给 pi registerProvider 的地址。Google 必须带 /v1beta，否则聊天 404、拉模型却成功。 */
+export function resolvePiProviderBaseUrl(api: ModelApiKind, baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, '') || DEFAULT_BASE_URLS[api];
+  return api === 'google-generative-ai' ? withVersionSegment(base, 'v1beta') : base;
+}
 
 export const STATIC_PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = [
   {
@@ -37,7 +49,7 @@ export const STATIC_PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = [
     id: 'google',
     label: 'Google',
     defaultApi: 'google-generative-ai',
-    defaultBaseUrl: 'https://generativelanguage.googleapis.com',
+    defaultBaseUrl: DEFAULT_BASE_URLS['google-generative-ai'],
     supportsApiKey: true,
   },
   {

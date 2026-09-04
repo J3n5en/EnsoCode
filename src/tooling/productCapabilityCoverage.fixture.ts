@@ -34,11 +34,16 @@ export const SETTINGS_DATA_COVERAGE = {
   statusLineSegments: surfaces('appearance.status-line-segments'),
   loadLocalSkills: surfaces('general.load-local-skills'),
   autoUpdate: surfaces('general.automatic-updates'),
+  proxyMode: surfaces('general.proxy-mode'),
+  customProxyUrl: surfaces('general.custom-proxy-url'),
   openChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
+  compactReadOnlyTools: excluded('Renderer timeline density preference; not an Enso capability.'),
   providers: surfaces('providers.list'),
   defaultModel: surfaces('providers.default-model'),
   defaultReasoningEnabled: surfaces('providers.default-model'),
   defaultThinkingLevel: surfaces('providers.default-model'),
+  titleSummaryEnabled: excluded('Conversation title summary preference; not an Enso capability.'),
+  titleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
   skills: surfaces('skills.list'),
   mcpServers: surfaces('mcp.list'),
   instructions: surfaces('instructions.list'),
@@ -82,12 +87,21 @@ export const SETTINGS_ACTION_COVERAGE = {
   toggleFavoriteTerminalTheme: surfaces('appearance.favorite-terminal-themes'),
   setLoadLocalSkills: surfaces('general.load-local-skills'),
   setAutoUpdate: surfaces('general.automatic-updates'),
+  setProxyMode: surfaces('general.proxy-mode'),
+  setCustomProxyUrl: surfaces('general.custom-proxy-url'),
   setOpenChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
+  setCompactReadOnlyTools: excluded(
+    'Renderer timeline density preference; not an Enso capability.'
+  ),
   setStatusLineSegments: surfaces('appearance.status-line-segments'),
   toggleStatusLineSegment: surfaces('appearance.status-line-segments'),
   setDefaultModel: surfaces('providers.default-model'),
   setDefaultReasoningEnabled: surfaces('providers.default-model'),
   setDefaultThinkingLevel: surfaces('providers.default-model'),
+  setTitleSummaryEnabled: excluded(
+    'Conversation title summary preference; not an Enso capability.'
+  ),
+  setTitleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
   revalidateDefaultModel: surfaces('providers.default-model'),
   addProviders: surfaces('providers.add', 'providers.import-local'),
   updateProvider: surfaces(
@@ -155,6 +169,7 @@ export const BUILTIN_AGENT_TYPE_COVERAGE: Readonly<Record<string, CoverageDispos
   scout: surfaces('agent-types.list', 'team.list-agent-types'),
   worker: surfaces('agent-types.list', 'team.list-agent-types'),
   reviewer: surfaces('agent-types.list', 'team.list-agent-types'),
+  tester: surfaces('agent-types.list', 'team.list-agent-types'),
 };
 
 /** 每条 IPC 单独登记；传输/lifecycle 必须逐项给出排除理由，不按目录 blanket 排除。 */
@@ -172,6 +187,8 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_FULLSCREEN_CHANGED: excluded('Renderer fullscreen-state event transport.'),
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: excluded('macOS title-bar implementation detail.'),
   WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
+  SETTINGS_DEEP_LINK: excluded('Settings window deep-link transport.'),
+  SETTINGS_DEEP_LINK_CONSUME: excluded('Settings window deep-link handshake.'),
   WINDOW_POPUP_MENU: excluded('Native application menu popup; renderer chrome only.'),
   PROVIDERS_SCAN_LOCAL: surfaces('providers.import-local'),
   PROVIDERS_COLLECT_IMPORT: excluded('Second phase of the reviewed provider import flow.'),
@@ -216,6 +233,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_CHILD_HISTORY_READ: excluded(
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
   ),
+  AGENT_SUMMARIZE_TITLE: excluded(
+    'Fire-and-forget conversation title summarization; single LLM completion, no execution rights.'
+  ),
   AGENT_SET_MODEL: surfaces('conversations.set-model'),
   AGENT_SET_THINKING: surfaces('conversations.set-thinking'),
   AGENT_SET_REASONING: surfaces('conversations.set-reasoning'),
@@ -227,6 +247,12 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
   AGENT_REWIND: surfaces('conversations.rewind', 'conversations.rewind-files'),
+  AGENT_COMPACT: excluded(
+    'Desktop context-window maintenance (/compact and the context panel button); renderer-only, not an Enso capability.'
+  ),
+  AGENT_FORK: excluded(
+    'Desktop parallel-session fork; renderer Command/Timeline only, not an Enso capability.'
+  ),
   AGENT_DISMISS_COWORKER: surfaces('team.dismiss-coworker'),
   AGENT_HIRE_COWORKER: surfaces('team.hire-coworker'),
   AGENT_ASK_RESPOND: surfaces('conversations.ask.respond'),
@@ -273,6 +299,7 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_DOWNLOAD_UPDATE: surfaces('updates.download'),
   UPDATER_QUIT_AND_INSTALL: surfaces('updates.install'),
   UPDATER_SET_AUTO_UPDATE_ENABLED: surfaces('general.automatic-updates'),
+  PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
   UPDATER_STATUS: surfaces('updates.status'),
   DIALOG_SELECT_FILE: excluded('Native file picker; user-driven OS dialog.'),
   FILES_LIST_MEDIA: excluded('Renderer media listing for background picker.'),
@@ -309,6 +336,7 @@ export const IPC_PRODUCT_COVERAGE = {
   TERMINAL_DATA: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_EXIT: excluded('Side panel terminal pty transport; renderer UI only.'),
   BROWSER_SET_VIEWPORT: excluded('Side panel browser overlay geometry; renderer UI only.'),
+  BROWSER_SET_OVERLAY_ACTIVE: excluded('Side panel browser overlay guard; renderer UI only.'),
   BROWSER_NAVIGATE: excluded('Side panel browser address bar; renderer UI only.'),
   BROWSER_GO_BACK: excluded('Side panel browser history; renderer UI only.'),
   BROWSER_GO_FORWARD: excluded('Side panel browser history; renderer UI only.'),
@@ -318,6 +346,7 @@ export const IPC_PRODUCT_COVERAGE = {
   BROWSER_STATE: excluded('Side panel browser state push; renderer UI only.'),
   BROWSER_REVEAL: excluded('Side panel browser auto-open; renderer UI only.'),
   BROWSER_RESTORE_TABS: excluded('Side panel browser session restore; renderer UI only.'),
+  BROWSER_LIST_SEARCHABLE_TABS: excluded('Search Anything tab list; renderer UI only.'),
   BROWSER_CLOSE_TAB: excluded('Side panel browser tab close; renderer UI only.'),
   BROWSER_SET_DEVTOOLS: excluded('Side panel browser native DevTools toggle; renderer UI only.'),
   BROWSER_SET_DEVTOOLS_VIEWPORT: excluded(
@@ -337,6 +366,12 @@ export const IPC_PRODUCT_COVERAGE = {
   SSH_CONNECTIONS_TEST: surfaces('projects.ssh-connections.test'),
   SSH_CONNECTIONS_LIST_DIRS: excluded(
     'Remote directory browsing helper for the add-project picker.'
+  ),
+  WORKSPACE_SEARCH_QUERY: excluded(
+    'Desktop workspace search over local session projections; renderer Command Dialog only.'
+  ),
+  USAGE_SUMMARY: excluded(
+    'Read-only local token usage aggregation for the Settings → Usage panel.'
   ),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 

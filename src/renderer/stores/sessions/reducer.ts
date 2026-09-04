@@ -84,6 +84,8 @@ export const emptyProjection: SessionProjection = {
 
 const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
   if (event.type === 'worker-exited' || event.type === 'snapshot') return null;
+  // 标题总结不属于任何 worker 会话（无 identity/seq），在 store 层处理，不进投影
+  if (event.type === 'title-generated') return null;
   if (event.type === 'capability-invoke') return event.child;
   return event.identity;
 };
@@ -154,6 +156,7 @@ export function applyAgentEvent(
   }
 
   const identity = eventIdentity(event);
+  if (event.type === 'title-generated') return state;
   // spawn 拒绝恒以 seq:0 发出（worker 侧此时尚未建会话，没有 seq 计数器），
   // 过不了下面的 (generation, seq) 单调守卫。一并丢弃的后果是 spawn 失败在
   // UI 上完全无声：spawning 被别处清掉、status 停在 idle、error 为空，用户
@@ -244,6 +247,11 @@ export function applyAgentEvent(
           ? current.messages.slice()
           : current.messages.slice(0, firstOptimistic);
       let tail = firstOptimistic === -1 ? [] : current.messages.slice(firstOptimistic);
+      // 正文被冷缓存清空后重新变热，snapshot 回来前的 upsert 以原 index 到达：直接写会
+      // 留下稀疏空洞（.role/.optimistic 读 undefined 崩溃）。丢掉正文、只推进 seq，等 snapshot 整体被覆。
+      if (event.index > authoritative.length) {
+        return { ...current, lastOutputAt: now, lastSeq: event.seq };
+      }
       authoritative[event.index] = event.message;
       // 同文本的 user upsert 到达 = 回显对应的真消息落地，消费掉避免重复
       if (event.message.role === 'user' && tail.length > 0) {

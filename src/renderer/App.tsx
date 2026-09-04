@@ -20,12 +20,13 @@ import { Sidebar } from '@/components/chat/Sidebar';
 import { RemoteNodeView } from '@/components/nodes/RemoteNodeView';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
+import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
-import { effectiveKeybindings, eventToBinding } from '@/lib/keybindings';
+import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
@@ -48,6 +49,7 @@ const MAX_WIDTH = 420;
 export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   useBackgroundImage();
+  const [searchOpen, setSearchOpen] = useState(false);
   useWindowsWindowChrome();
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
@@ -87,7 +89,7 @@ export default function App() {
   useEffect(
     () =>
       window.electronAPI.window.onAgentComposerPrefill((prefill) => {
-        useSessionsStore.getState().prefillAgent(prefill.typeKey);
+        useSessionsStore.getState().prefillAgent(prefill.typeKey, prefill.prompt);
       }),
     []
   );
@@ -121,6 +123,12 @@ export default function App() {
       const current = tabs.indexOf(parent.activeTabId);
       sessions.selectTab(parent.id, tabs[(current + direction + tabs.length) % tabs.length]);
     };
+    const startNewConversation = () => {
+      const sessions = useSessionsStore.getState();
+      const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+      const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
+      if (projectId) void sessions.newConversation(projectId);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
@@ -137,6 +145,7 @@ export default function App() {
           'new-side-tab',
           'close-side-tab',
           'find-in-chat',
+          'search-workspace',
         ].some((key) => pressed === bindings[key as keyof typeof bindings])
       ) {
         return;
@@ -149,10 +158,11 @@ export default function App() {
         void window.electronAPI.window.openSettings();
       } else if (pressed === bindings['new-conversation']) {
         e.preventDefault();
-        const sessions = useSessionsStore.getState();
-        const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
-        const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-        if (projectId) void sessions.newConversation(projectId);
+        startNewConversation();
+      } else if (pressed === bindings['new-side-tab']) {
+        e.preventDefault();
+        if (isEventInSidePanel(e.target)) addSidePanelTerminal();
+        else startNewConversation();
       } else if (pressed === bindings['next-tab']) {
         e.preventDefault();
         cycleTab(1);
@@ -165,9 +175,6 @@ export default function App() {
       } else if (pressed === bindings['toggle-side-panel-fullscreen']) {
         e.preventDefault();
         useSidePanelStore.getState().toggleFullscreen();
-      } else if (pressed === bindings['new-side-tab']) {
-        e.preventDefault();
-        addSidePanelTerminal();
       } else if (pressed === bindings['close-side-tab']) {
         e.preventDefault();
         closeActiveSidePanelTab();
@@ -177,6 +184,9 @@ export default function App() {
       } else if (pressed === bindings['find-in-chat']) {
         e.preventDefault();
         requestOpenChatFind();
+      } else if (pressed === bindings['search-workspace']) {
+        e.preventDefault();
+        setSearchOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -238,6 +248,7 @@ export default function App() {
               width={collapsed ? undefined : width}
               collapsed={collapsed}
               onToggleCollapse={() => setCollapsed((v) => !v)}
+              onOpenSearch={() => setSearchOpen(true)}
             />
             {!collapsed && <ResizeHandle onResize={handleResize} />}
             <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -253,6 +264,7 @@ export default function App() {
         )}
       </div>
       {!onboarded && <Onboarding />}
+      <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

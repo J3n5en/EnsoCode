@@ -12,6 +12,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
   DefaultResourceLoader,
+  estimateTokens,
   ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
@@ -27,6 +28,7 @@ import {
   resolveCustomModelCapabilities,
 } from '@shared/modelCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
+import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import type {
@@ -52,6 +54,7 @@ import type {
   ThinkingLevel,
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry } from '@shared/types/agent';
+import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -64,6 +67,11 @@ import {
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
 import { resolveChildReasoning } from './childReasoning';
+import {
+  collectContextOccupancy,
+  type OccupancyBranchEntry,
+  type OccupancySkill,
+} from './contextOccupancy';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -76,11 +84,13 @@ import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
+import { applyWorkerProxyEnv } from './proxyEnv';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
   type EvictionCandidate,
   selectEvictable,
 } from './sessionEviction';
+import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -90,10 +100,13 @@ import {
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { createSubagentTool, lastAssistantText } from './subagent';
+import { buildTitleUserText, extractTitle, TITLE_SYSTEM_PROMPT } from './titleSummary';
 import { createTodoTool } from './todo';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
+import { transcriptMessages } from './transcript';
+import { withWriteScope } from './writeScope';
 
 /** 子会话产物：实际 session、模型与精确工具集合。 */
 interface ChildSessionResult {
@@ -154,11 +167,21 @@ interface ManagedSession {
   gate: ApprovalGate;
   asks: AskManager;
   pendingTaskReminders: string[];
+  /** 忙碌时收到的手动压缩请求：本轮收束后自动执行（用户选择「排队」而非打断） */
+  pendingCompact?: { instructions?: string };
   subagents: Map<string, SubagentInfo>;
   factory?: SessionFactory;
   parentId?: string;
   coworkerName?: string;
   pendingRole?: string;
+  /** 最近一轮的完整摘要(不含 gate),供 coworker report/wait 取用;由 settleRound 在每轮终态统一记入 */
+  lastRoundSummary?: string;
+  /** 等待本轮终态(idle/failed/销毁)的回调;由 settleRound 统一触发 */
+  roundWaiters: Set<() => void>;
+  /** 父正在 wait 阻塞等本轮;message_main_agent 据此免去冗余上报 */
+  parentWaiting?: boolean;
+  /** 已投递、尚未进入 running 的一轮(send 与 agent_start 之间);wait 据此不把它当空闲 */
+  roundPending?: boolean;
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
@@ -194,6 +217,8 @@ function createSessionResourceLoader(options: {
   cwd: string;
   agentDir: string;
   noSkills: boolean;
+  /** 类型化子代理:不装项目扩展(扩展注册的工具与 systemPrompt 注入是给主会话的,漏进去会让它误以为要再委派) */
+  noExtensions?: boolean;
   skillPaths: string[];
   instruction?: { path: string; content: string };
   /** 远程会话:替换掉本地 cwd 扫描出的 AGENTS.md(cwd 在本机不存在),只用预取的远端文件 */
@@ -203,6 +228,7 @@ function createSessionResourceLoader(options: {
     cwd: options.cwd,
     agentDir: options.agentDir,
     noSkills: options.noSkills,
+    ...(options.noExtensions ? { noExtensions: true } : {}),
     ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
@@ -444,6 +470,7 @@ export class SessionSupervisor {
         child.session.dispose();
       } catch {}
       this.sessions.delete(id);
+      this.settleRound(child);
     }
     managed.coworkers.clear();
     managed.gate.cancelAll();
@@ -486,6 +513,15 @@ export class SessionSupervisor {
     }
     if (command.type === 'pin-sessions') {
       this.pinned = new Set(command.sessionIds);
+      return;
+    }
+    if (command.type === 'summarize-title') {
+      // 标题总结不属于任何会话：旁路串行门；失败静默（截断标题已是可用兑底，不值得报错打扰）
+      void this.summarizeTitle(command).catch(() => {});
+      return;
+    }
+    if (command.type === 'set-proxy-env') {
+      applyWorkerProxyEnv(command.env);
       return;
     }
     const identity =
@@ -685,7 +721,7 @@ export class SessionSupervisor {
       case 'set-model': {
         const managed = this.must(command.identity);
         const runtime = await this.getRuntime();
-        const base = resolveBaseModel(runtime, command.model);
+        const base = await resolveBaseModelOrRefresh(runtime, command.model);
         const next = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
           managed.session.model ? Boolean(managed.session.model.reasoning) : false,
@@ -759,6 +795,67 @@ export class SessionSupervisor {
         this.must(command.identity);
         this.bgTasks.stop(command.taskId);
         return;
+      case 'fork': {
+        const managed = this.must(command.identity);
+        if (managed.status !== 'idle' || managed.childIdentity) {
+          this.options.emit({
+            type: 'fork-done',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            targetConversationId: command.targetConversationId,
+            error: 'source-not-idle',
+          });
+          return;
+        }
+        const entryId = resolveForkLeafId(
+          managed.session.sessionManager.getBranch(),
+          command.entryId
+            ? { entryId: command.entryId }
+            : { userIndexFromEnd: command.userIndexFromEnd ?? 0 }
+        );
+        if (!entryId) {
+          this.options.emit({
+            type: 'fork-done',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            targetConversationId: command.targetConversationId,
+            error: 'anchor-not-found',
+          });
+          return;
+        }
+        const branched = branchSessionFromPersistedFile(
+          managed.session.sessionManager,
+          entryId,
+          (sessionFile) => SessionManager.open(sessionFile)
+        );
+        this.options.emit({
+          type: 'fork-done',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          targetConversationId: command.targetConversationId,
+          entryId,
+          ...(branched.ok ? { sessionFile: branched.sessionFile } : { error: branched.error }),
+        });
+        return;
+      }
+      case 'compact': {
+        const managed = this.must(command.identity);
+        if (managed.status !== 'idle') {
+          // 忙碌时排队：不打断当前轮次，turn 收束后由 runCompaction 接手
+          managed.pendingCompact = command.instructions
+            ? { instructions: command.instructions }
+            : {};
+          this.options.emit({
+            type: 'compaction',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            state: 'queued',
+          });
+          return;
+        }
+        await this.runCompaction(managed, command.instructions);
+        return;
+      }
       case 'rewind': {
         const managed = this.must(command.identity);
         if (managed.status !== 'idle') {
@@ -799,7 +896,7 @@ export class SessionSupervisor {
           }
         }
         const result = await managed.session.navigateTree(target.id);
-        this.reconcileMessages(managed, managed.session.messages as unknown[]);
+        this.reconcileMessages(managed, this.transcript(managed));
         this.options.emit({
           type: 'rewind-done',
           identity: managed.identity,
@@ -865,7 +962,7 @@ export class SessionSupervisor {
     }
     const spawnStart = Date.now();
     const runtime = await this.getRuntime();
-    const baseModel = resolveBaseModel(runtime, model);
+    const baseModel = await resolveBaseModelOrRefresh(runtime, model);
     const piModel = applyReasoningToModel(
       { ...baseModel, compat: baseModel.compat ? { ...baseModel.compat } : undefined },
       reasoningEnabled,
@@ -989,8 +1086,15 @@ export class SessionSupervisor {
           return { command: sshCommand, cwd: process.cwd() };
         }
       : undefined;
-    const buildBaseTools = (toolGate: ApprovalGate, cp?: CheckpointManager): Def[] => {
+    const buildBaseTools = (
+      toolGate: ApprovalGate,
+      cp?: CheckpointManager,
+      writeScope?: readonly string[]
+    ): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
+      // 写范围在审批之外:越界直接拒绝,不占用审批也不落盘
+      const scoped = (kind: 'file-edit' | 'file-write', definition: Def): Def =>
+        withWriteScope(withApproval(toolGate, kind, guarded(definition)), cwd, writeScope);
       return [
         ...readOnlyTools(),
         withApproval(
@@ -1009,22 +1113,16 @@ export class SessionSupervisor {
             )
           )
         ),
-        withApproval(
-          toolGate,
+        scoped(
           'file-edit',
-          guarded(
-            createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
-          )
+          createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
         ),
-        withApproval(
-          toolGate,
+        scoped(
           'file-write',
-          guarded(
-            createWriteToolDefinition(
-              cwd,
-              remoteOps ? { operations: remoteOps.write } : undefined
-            ) as unknown as Def
-          )
+          createWriteToolDefinition(
+            cwd,
+            remoteOps ? { operations: remoteOps.write } : undefined
+          ) as unknown as Def
         ),
       ];
     };
@@ -1053,7 +1151,7 @@ export class SessionSupervisor {
         extraTools = [],
       }) => {
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
-        const base = resolveBaseModel(runtime, selectedModel);
+        const base = await resolveBaseModelOrRefresh(runtime, selectedModel);
         // 条目级推理覆盖（subagent-models）赢过父会话；缺省跟随父
         const childReasoning = resolveChildReasoning(
           selectedModel,
@@ -1117,7 +1215,7 @@ export class SessionSupervisor {
           : [
               ...(resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
                 ? readOnlyTools()
-                : buildBaseTools(childGate)),
+                : buildBaseTools(childGate, undefined, agentType?.writeScope)),
               ...(resolved || agentType ? typeMcpTools : wrapMcpTools(childGate)),
               ...(extraTools as Def[]),
             ];
@@ -1128,6 +1226,7 @@ export class SessionSupervisor {
               cwd,
               agentDir: this.options.agentDir,
               noSkills: resolved || agentType ? true : loadLocalSkills === false,
+              noExtensions: Boolean(resolved || agentType),
               skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
               instruction,
               remoteAgentsFiles,
@@ -1199,27 +1298,34 @@ export class SessionSupervisor {
         });
       },
     });
+    // 模型常把 spawn 与 send/wait 放进同一批并行工具调用:后者按名字等 spawn 落地再解析。
+    // 无 pending 时同步解析,避免多一跳微任务(parentWaiting 等状态位要在调用当刻立起)
+    const pendingSpawns = new Map<string, Promise<CoworkerInfo>>();
+    const withCoworker = <T>(
+      name: string,
+      fn: (info: CoworkerInfo) => T | Promise<T>
+    ): Promise<T> => {
+      const pending = pendingSpawns.get(name);
+      if (!pending) return Promise.resolve(fn(this.mustCoworker(identity, name)));
+      return pending.catch(() => {}).then(() => fn(this.mustCoworker(identity, name)));
+    };
     const coworkerTool = createCoworkerTool({
       agentTypes,
       models: subagentModels,
-      spawn: (name, agentTypeName, modelName) =>
-        this.spawnCoworker(
+      spawn: (name, agentTypeName, modelName) => {
+        const spawning = this.spawnCoworker(
           sessionId,
           `${sessionId}::cw-${slugify(name)}`,
           name,
           agentTypeName,
           modelName
-        ),
-      send: (name, message, opts) => {
-        const parent = this.must(identity);
-        const info = parent.coworkers.get(name);
-        if (!info) {
-          throw new Error(
-            `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
-          );
-        }
-        return this.coworkerSend(info.id, message, opts);
+        );
+        pendingSpawns.set(name, spawning);
+        void spawning.finally(() => pendingSpawns.delete(name)).catch(() => {});
+        return spawning;
       },
+      send: (name, message, opts) =>
+        withCoworker(name, (info) => this.coworkerSend(info.id, message, opts)),
       list: () => {
         const parent = this.must(identity);
         return [...parent.coworkers.values()].map((info) => ({
@@ -1227,12 +1333,19 @@ export class SessionSupervisor {
           status: this.sessions.get(info.id)?.status ?? info.status,
         }));
       },
-      dismiss: async (name) => {
-        const parent = this.must(identity);
-        const info = parent.coworkers.get(name);
-        if (!info) throw new Error(`unknown coworker "${name}"`);
-        await this.dismissCoworker(sessionId, info.id);
-      },
+      dismiss: (name) =>
+        withCoworker(name, async (info) => {
+          await this.dismissCoworker(sessionId, info.id);
+        }),
+      wait: (name, opts) => withCoworker(name, (info) => this.coworkerWait(info.id, opts)),
+      report: (name) =>
+        withCoworker(name, (info) => {
+          const managed = this.sessions.get(info.id);
+          const base = managed?.lastRoundSummary ?? '(no round completed yet)';
+          return managed?.status === 'running' || managed?.roundPending
+            ? `${base}\n\n(a round is in progress — use coworker wait to get its result)`
+            : base;
+        }),
     });
     const askManager = this.createAskManager(identity);
     // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
@@ -1387,6 +1500,7 @@ export class SessionSupervisor {
       gate,
       asks: opts.asks ?? this.createAskManager(identity),
       pendingTaskReminders: [],
+      roundWaiters: new Set(),
       subagents: new Map(),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
@@ -1407,16 +1521,9 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       commands: managed.commands,
     });
-    const contextWindow = positiveContextWindow(session.model);
-    this.options.emit({
-      type: 'session-meta',
-      identity,
-      seq: ++managed.seq,
-      sessionFile: managed.session.sessionFile,
-      ...(contextWindow !== undefined ? { contextWindow } : {}),
-    });
+    this.emitSessionMeta(managed);
     if (opts.resumeFile) {
-      managed.messages = (managed.session.messages as unknown[])
+      managed.messages = this.transcript(managed)
         .map(projectMessage)
         .filter((message): message is ProjectedMessage => message !== null);
       this.options.emit({
@@ -1650,7 +1757,8 @@ export class SessionSupervisor {
         createAskTool(askManager),
         createMessageMainTool(
           (text, urgent) => this.notifier.notify(parentId, text, { urgent }),
-          name
+          name,
+          () => this.sessions.get(coworkerId)?.parentWaiting === true
         ),
       ],
     });
@@ -1668,6 +1776,7 @@ export class SessionSupervisor {
       identity: parent.identity,
       seq: ++parent.seq,
       coworker: info,
+      coworkerIdentity: identity,
     });
     const managed = this.registerManagedSession(identity, session, gate, modelId, {
       parentId,
@@ -1700,6 +1809,7 @@ export class SessionSupervisor {
         managed.session.dispose();
       } catch {}
       this.sessions.delete(coworkerId);
+      this.settleRound(managed);
     }
     let dismissedName = managed?.coworkerName ?? coworkerId.split('::cw-').at(-1) ?? coworkerId;
     for (const [name, info] of parent.coworkers) {
@@ -1738,60 +1848,65 @@ export class SessionSupervisor {
   ): Promise<string> {
     const managed = this.mustCurrent(coworkerId);
     const { signal } = opts;
-    const { promise: done, resolve: resolveDone } = Promise.withResolvers<void>();
-    // 先订阅再启动,防 agent_end 竞态
-    const unsubscribe = managed.session.subscribe((event) => {
-      if (event.type === 'agent_end') resolveDone();
-    });
+    // 先登记等待再启动,防终态竞态;终态由 settleRound 统一判定(含重试耗尽/abort/销毁)
+    const done = this.waitRoundEnd(managed, signal);
+    managed.roundPending = true;
     managed.currentTurnId = randomUUID();
     const start = async () => {
       if (managed.status === 'running') {
         await managed.session.steer(text);
       } else {
-        void managed.session.prompt(consumeRole(managed, text)).catch((error) => {
-          this.failTurn(managed, toErrorMessage(error));
-          resolveDone();
-        });
+        void managed.session
+          .prompt(consumeRole(managed, text))
+          .then(() => {
+            // prompt 已归但未见任何终态事件(不应发生的退化路径):不让 wait 挂死
+            if (managed.status !== 'running' && managed.roundPending) this.settleRound(managed);
+          })
+          .catch((error) => {
+            this.failTurn(managed, toErrorMessage(error));
+          });
       }
     };
-    const onAbort = () => resolveDone();
 
     if (opts.wait) {
-      signal?.addEventListener('abort', onAbort, { once: true });
+      managed.parentWaiting = true;
       try {
         await this.gate.run(coworkerId, start);
         await done;
       } finally {
-        unsubscribe();
-        signal?.removeEventListener('abort', onAbort);
+        managed.parentWaiting = false;
       }
       if (signal?.aborted) {
-        return `(send interrupted — coworker keeps running; use coworker send/list to follow up)`;
+        return `(send interrupted — coworker keeps running; use coworker wait/send to follow up)`;
       }
-      return await this.coworkerRoundSummary(managed, opts.gate);
+      return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
     }
 
     // 非阻塞:投递即返回;轮次完成后组摘要经 notifier 回父(失败立即,成功合并)
     void (async () => {
-      try {
-        await this.gate.run(coworkerId, start);
-        await done;
-      } finally {
-        unsubscribe();
-      }
+      await this.gate.run(coworkerId, start);
+      await done;
       const parentId = managed.parentId;
+      // 父正在 wait 阻塞等这一轮:结果由 wait 内联返回,不再重复通知
+      // (本等待者先于 wait 登记,在 wait 的 finally 复位 parentWaiting 之前运行)
       if (
         !parentId ||
         !this.sessions.has(coworkerId) ||
+        managed.parentWaiting ||
         managed.childMetadata?.dispatchOrigin === 'typed-mention'
       ) {
         return;
       }
       const summary = await this.coworkerRoundSummary(managed, opts.gate);
       const failed = managed.status === 'failed';
+      const label = managed.coworkerName ?? coworkerId;
+      const brief =
+        summary.length > NOTIFY_SUMMARY_LIMIT
+          ? `${summary.slice(0, NOTIFY_SUMMARY_LIMIT)}\n…(truncated — use coworker report "${label}" for the full text)`
+          : summary;
       this.notifier.notify(
         parentId,
-        `Coworker "${managed.coworkerName ?? coworkerId}" finished a round:\n${summary.slice(0, 1500)}`,
+        `Coworker "${label}" finished a round:\n${brief}\n\n${COWORKER_FOLLOW_UP_HINT}`,
         { urgent: failed }
       );
     })().catch(() => {});
@@ -1802,11 +1917,51 @@ export class SessionSupervisor {
     );
   }
 
-  /** 轮次结果摘要:最终文本 + 输出截断/上下文水位警告 + gate 验收结果 */
-  private async coworkerRoundSummary(
-    managed: ManagedSession,
-    gateCommand?: string
+  /**
+   * 阻塞至 coworker 当前轮结束(无论由主 agent 还是用户 tab 触发);空闲则立即返回最近一轮摘要。
+   * 传 gate 时(重)跑验收。父 abort 只提前返回。
+   */
+  private async coworkerWait(
+    coworkerId: string,
+    opts: { signal?: AbortSignal; gate?: string } = {}
   ): Promise<string> {
+    const managed = this.mustCurrent(coworkerId);
+    if (managed.status === 'running' || managed.roundPending) {
+      managed.parentWaiting = true;
+      try {
+        await this.waitRoundEnd(managed, opts.signal);
+      } finally {
+        managed.parentWaiting = false;
+      }
+      if (opts.signal?.aborted) {
+        return '(wait interrupted — coworker keeps running; use coworker wait/send to follow up)';
+      }
+    } else if (!managed.lastRoundSummary) {
+      return '(no round completed yet — coworker is idle)';
+    }
+    return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
+  }
+
+  private mustCoworker(identity: SessionIdentity, name: string): CoworkerInfo {
+    const parent = this.must(identity);
+    const info = parent.coworkers.get(name);
+    if (!info) {
+      throw new Error(
+        `unknown coworker "${name}". Hired: [${[...parent.coworkers.keys()].join(', ')}]`
+      );
+    }
+    return info;
+  }
+
+  private runParentGate(managed: ManagedSession, gateCommand: string): Promise<string> {
+    const parentFactory = this.sessions.get(managed.parentId ?? '')?.factory;
+    return parentFactory
+      ? parentFactory.runGate(gateCommand)
+      : runGateCommand(process.cwd(), gateCommand);
+  }
+
+  /** 轮次结果正文:最终文本 + 输出截断/上下文水位警告(不含 gate,可缓存) */
+  private roundBaseSummary(managed: ManagedSession): string {
     let summary =
       managed.status === 'failed'
         ? '(coworker turn failed — check its tab for details)'
@@ -1830,13 +1985,16 @@ export class SessionSupervisor {
       const pct = Math.round((used / window) * 100);
       summary += `\n\n(coworker context ${pct}% full — have it summarize, or dismiss it soon)`;
     }
-    if (gateCommand) {
-      const parentFactory = this.sessions.get(managed.parentId ?? '')?.factory;
-      summary += `\n\n${await (parentFactory
-        ? parentFactory.runGate(gateCommand)
-        : runGateCommand(process.cwd(), gateCommand))}`;
-    }
     return summary;
+  }
+
+  /** 轮次结果摘要 = 缓存正文(settleRound 记入) + 本次 gate 验收结果 */
+  private async coworkerRoundSummary(
+    managed: ManagedSession,
+    gateCommand?: string
+  ): Promise<string> {
+    const base = managed.lastRoundSummary ?? this.roundBaseSummary(managed);
+    return gateCommand ? `${base}\n\n${await this.runParentGate(managed, gateCommand)}` : base;
   }
 
   private onSessionEvent(
@@ -1941,8 +2099,28 @@ export class SessionSupervisor {
         }
         return;
       }
+      case 'compaction_start':
+        this.options.emit({
+          type: 'compaction',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          state: 'start',
+        });
+        return;
+      case 'compaction_end':
+        // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
+        this.reconcileMessages(managed, this.transcript(managed));
+        this.emitSessionMeta(managed);
+        this.options.emit({
+          type: 'compaction',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          state: 'end',
+          ...(event.errorMessage ? { error: event.errorMessage } : {}),
+        });
+        return;
       case 'agent_end': {
-        this.reconcileMessages(managed, managed.session.messages as unknown[]);
+        this.reconcileMessages(managed, this.transcript(managed));
         // pi 将自动重试瞬态错误（随后 auto_retry_start）：非终态，不 settle、
         // 不发 turn-completed、状态保持 running，否则输入框解锁后又自己跑起来
         if (event.willRetry) {
@@ -1974,12 +2152,18 @@ export class SessionSupervisor {
         managed.currentTurnId = undefined;
         managed.status = 'idle';
         this.emitStatus(managed);
+        this.emitSessionMeta(managed);
         this.options.emit({
           type: 'turn-completed',
           identity: managed.identity,
           seq: ++managed.seq,
           turnId,
         });
+        if (managed.pendingCompact) {
+          const queued = managed.pendingCompact;
+          managed.pendingCompact = undefined;
+          void this.runCompaction(managed, queued.instructions);
+        }
         if (managed.pendingTaskReminders.length > 0) {
           setTimeout(() => {
             if (managed.status !== 'idle' || managed.pendingTaskReminders.length === 0) return;
@@ -2057,6 +2241,14 @@ export class SessionSupervisor {
       index,
       message: decorated,
     });
+  }
+
+  /** 渲染层口径的完整记录：compaction 之前的历史 + pi 当前上下文 */
+  private transcript(managed: ManagedSession): unknown[] {
+    return transcriptMessages(
+      managed.session.sessionManager,
+      managed.session.messages as unknown[]
+    );
   }
 
   private reconcileMessages(managed: ManagedSession, rawMessages: unknown[]): void {
@@ -2137,6 +2329,71 @@ export class SessionSupervisor {
       status: managed.status,
       ...(error ? { error } : {}),
     });
+    if (managed.status !== 'running') this.settleRound(managed);
+  }
+
+  /**
+   * 轮次终态收口(idle/failed/abort/销毁统一经此):coworker 记下本轮摘要供 report/wait,
+   * 唤醒所有等待者。与触发来源(主 agent send / 用户 tab / 重试耗尽)无关。
+   */
+  private settleRound(managed: ManagedSession): void {
+    // 注册时的首次 emitStatus 也走到这里:没跑过任何轮(无 assistant 消息且未失败)不记摘要
+    const ran =
+      managed.status === 'failed' ||
+      (managed.session.messages as { role?: string }[]).some((m) => m.role === 'assistant');
+    if (managed.coworkerName && ran) managed.lastRoundSummary = this.roundBaseSummary(managed);
+    managed.roundPending = false;
+    const waiters = [...managed.roundWaiters];
+    managed.roundWaiters.clear();
+    for (const resolve of waiters) resolve();
+  }
+
+  /** 下一次 settleRound 时 resolve;签号 abort 也 resolve(只提前返回,不杀 coworker) */
+  private waitRoundEnd(managed: ManagedSession, signal?: AbortSignal): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const done = () => {
+      managed.roundWaiters.delete(done);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    managed.roundWaiters.add(done);
+    signal?.addEventListener('abort', done, { once: true });
+    return promise;
+  }
+
+  /** 执行一次手动压缩。进度/收束由 pi 的 compaction_start / compaction_end 事件推给渲染层；
+   *  这里只兵底 compact() 直接抛错（未走到 compaction_end）的情况，否则 UI 会卡在「压缩中」。 */
+  private async runCompaction(managed: ManagedSession, instructions?: string): Promise<void> {
+    try {
+      await managed.session.compact(instructions);
+    } catch (error) {
+      console.error('[compact] failed:', toErrorMessage(error));
+      this.options.emit({
+        type: 'compaction',
+        identity: managed.identity,
+        seq: ++managed.seq,
+        state: 'end',
+        error: toErrorMessage(error),
+      });
+    }
+  }
+
+  private emitSessionMeta(managed: ManagedSession): void {
+    const contextWindow = positiveContextWindow(managed.session.model);
+    let occupancy: ReturnType<typeof collectContextOccupancy> | undefined;
+    try {
+      occupancy = occupancyFromManaged(managed, contextWindow);
+    } catch {
+      occupancy = undefined;
+    }
+    this.options.emit({
+      type: 'session-meta',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      sessionFile: managed.session.sessionFile,
+      ...(occupancy ? { occupancy } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+    });
   }
 
   private snapshotSessions(): SessionSnapshot[] {
@@ -2190,10 +2447,54 @@ export class SessionSupervisor {
     })();
     return this.runtimePromise;
   }
+
+  /** 会话标题总结：一次性补全，不建 AgentSession、不落盘；成功才回事件，失败静默 */
+  private async summarizeTitle(
+    command: Extract<AgentCommand, { type: 'summarize-title' }>
+  ): Promise<void> {
+    const runtime = await this.getRuntime();
+    const model = resolveBaseModel(runtime, command.model);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
+    try {
+      const message = await runtime.completeSimple(
+        model,
+        {
+          systemPrompt: TITLE_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: buildTitleUserText(command.text),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        { signal: controller.signal }
+      );
+      const title = extractTitle(message);
+      if (title) {
+        this.options.emit({
+          type: 'title-generated',
+          conversationId: command.conversationId,
+          title,
+        });
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
+
+/** 标题总结超时：超过就保留截断标题，不重试 */
+const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
+/** 异步通知里的摘要上限;全文经 coworker report 取 */
+const NOTIFY_SUMMARY_LIMIT = 1500;
+/** 一轮结束回父的摘要尾句：阻塞/非阻塞两条路径共用，把「继续 send」写成默认动作 */
+const COWORKER_FOLLOW_UP_HINT =
+  '(follow up with coworker send to verify or steer; dismiss only when its goal is met)';
 
 /** gate 验收:在会话 cwd 跑命令,退出码即结论(比再叫一个模型评审便宜且诚实)。
  * 远程会话传 executor,命令改在远端 cwd 执行 */
@@ -2248,6 +2549,21 @@ function providerKeyFor(model: { api: string; baseUrl: string; apiKey: string })
 }
 
 /**
+ * worker 的 ModelRuntime 按进程常驻，订阅清单只在首次建 runtime 时联网拉一次。之后用户
+ * 才登录 / 后端上新（如 `gemini-3.8-flash-tiered` 这种不在兜底表里的 wire id），Main 侧
+ * 已能选到，worker 这边仍是旧清单 → 未命中时对基础 provider 补一次联网刷新再重试。
+ */
+export async function resolveBaseModelOrRefresh(runtime: ModelRuntime, model: SpawnModelConfig) {
+  try {
+    return resolveBaseModel(runtime, model);
+  } catch (error) {
+    if (!model.oauthAccountKey) throw error;
+    await refreshWorkerProviderModels(runtime, providerIdOfAccountKey(model.oauthAccountKey));
+    return resolveBaseModel(runtime, model);
+  }
+}
+
+/**
  * 解析 spawn 模型：oauth 直取 pi 内置 catalog（凭证由 runtime 从共享 auth.json 解析，
  * 不注册自定义 provider、不覆盖 UA、不读行覆盖——订阅端点保持 pi 原生标识）；
  * apiKey 注册自定义 provider：行覆盖 > 精确 catalog id > 乐观默认。
@@ -2269,7 +2585,7 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
   const contextWindow = resolved.contextWindow ?? 128_000;
   const maxTokens = resolved.maxTokens ?? 32_000;
   runtime.registerProvider(providerId, {
-    baseUrl: model.baseUrl,
+    baseUrl: resolvePiProviderBaseUrl(model.api, model.baseUrl),
     api: model.api,
     apiKey: model.apiKey,
     // 统一伪装为 enso-code 客户端（覆盖 pi 默认的 "pi (darwin ...)"）
@@ -2309,6 +2625,62 @@ const runtimeAdaptiveBlocklist = new Set<string>();
 
 export function supportsAdaptiveThinking(modelId: string): boolean {
   return !ADAPTIVE_UNSUPPORTED.test(modelId) && !runtimeAdaptiveBlocklist.has(modelId);
+}
+
+function occupancyFromManaged(
+  managed: ManagedSession,
+  contextWindow: number | undefined
+): ReturnType<typeof collectContextOccupancy> {
+  const loader = managed.session.resourceLoader as {
+    getAgentsFiles?: () => { agentsFiles?: ReadonlyArray<{ path: string; content: string }> };
+    getSkills?: () => { skills?: OccupancySkill[] };
+  };
+  const sessionManager = managed.session.sessionManager as {
+    buildSessionContext?: () => { messages?: unknown[] };
+    getBranch?: () => OccupancyBranchEntry[];
+  };
+  const branch = sessionManager.getBranch?.() ?? [];
+  return collectContextOccupancy({
+    systemPrompt: managed.session.systemPrompt ?? '',
+    agentsFiles: loader.getAgentsFiles?.().agentsFiles ?? [],
+    skills: loader.getSkills?.().skills ?? [],
+    tools: typeof managed.session.getAllTools === 'function' ? managed.session.getAllTools() : [],
+    contextMessages: sessionManager.buildSessionContext?.().messages ?? [],
+    branch,
+    currentModelFamily: modelFamilyOf(managed.session.model?.id ?? managed.modelId),
+    compactionModelFamily: compactionModelFamilyOf(branch),
+    contextWindow,
+    pendingTaskReminders: managed.pendingTaskReminders,
+    estimateMessageTokens: (message) => {
+      try {
+        return estimateTokens(message as never);
+      } catch {
+        return 0;
+      }
+    },
+  });
+}
+
+function compactionModelFamilyOf(
+  branch: ReadonlyArray<{ type: string; modelId?: string }>
+): string | undefined {
+  let lastModel: string | undefined;
+  for (const entry of branch) {
+    if (entry.type === 'model_change' && typeof entry.modelId === 'string')
+      lastModel = entry.modelId;
+    if (entry.type === 'compaction') return lastModel ? modelFamilyOf(lastModel) : undefined;
+  }
+  return undefined;
+}
+
+function modelFamilyOf(modelId: string): string {
+  const id = modelId.toLowerCase();
+  if (id.includes('claude')) return 'claude';
+  if (id.includes('gpt') || id.includes('o1') || id.includes('o3') || id.includes('o4'))
+    return 'gpt';
+  if (id.includes('gemini')) return 'gemini';
+  const vendor = id.split(/[-/_]/)[0];
+  return vendor || id;
 }
 
 /**

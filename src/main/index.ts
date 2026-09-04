@@ -12,6 +12,7 @@ import {
 } from './services/localImageProtocol';
 import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
+import { getProxyConfig } from './services/proxyConfig';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
@@ -19,7 +20,10 @@ import { createMainWindow, getMainWindow } from './windows/MainWindow';
 // 同机跑两以上实例（如验证节点互连）时可用 ENSO_CDP_PORT 错开。
 if (!app.isPackaged) {
   const cdpPort = process.env.ENSO_CDP_PORT?.trim();
-  app.commandLine.appendSwitch('remote-debugging-port', /^\d+$/.test(cdpPort ?? '') ? cdpPort! : '9222');
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    /^\d+$/.test(cdpPort ?? '') ? cdpPort! : '9222'
+  );
 }
 
 // 自动化可在开发环境显式指定 userData；打包版永不接受环境覆盖。
@@ -70,18 +74,23 @@ if (!gotTheLock) {
     registerIpcHandlers();
     // 协议处理器要赶在窗口加载内容之前注册（local-image:// 资源依赖它）。
     registerLocalImageProtocolHandler();
+    const persisted = readSettings()?.['enso-settings'] as
+      | { state?: { proxyMode?: unknown; customProxyUrl?: unknown; autoUpdate?: boolean } }
+      | undefined;
+    getProxyConfig().initFromConfig(persisted?.state?.proxyMode, persisted?.state?.customProxyUrl);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
     // 内嵌浏览器 guest view 挂主窗口（无头也要 viewport）；窗口重建后 getMainWindow 自动指向新窗
     browserHost.setHostWindow(getMainWindow);
     // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
     setImmediate(() => {
-      // worker 的 env 是 fork 时的快照：打包版先等登录 shell 探测出真实 PATH
-      //（内置 10s 超时，典型远快于此；失败静默用 seed），再起 worker。
+      // worker 的 env 是 fork 时的快照：等系统代理解析后再 fork，
+      // 打包版再等登录 shell 探测出真实 PATH。
+      const ready = getProxyConfig().whenReady();
       if (app.isPackaged && process.platform !== 'win32') {
-        void hydrateShellPath().finally(() => startAgentWorker());
+        void ready.finally(() => hydrateShellPath().finally(() => startAgentWorker()));
       } else {
-        startAgentWorker();
+        void ready.finally(() => startAgentWorker());
       }
       // 手机第二屏：恢复已配对设备的中继连接
       startPairHost();

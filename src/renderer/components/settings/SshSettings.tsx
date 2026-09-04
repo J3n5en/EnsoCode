@@ -105,7 +105,7 @@ export function SshSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4" data-settings-row="ssh.root">
         <div>
           <h2 className="text-lg font-medium">{t('SSH')}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -123,7 +123,11 @@ export function SshSettings() {
           <li className="px-3 py-6 text-sm text-muted-foreground">{t('No SSH connections yet')}</li>
         )}
         {connections.map((connection) => (
-          <li key={connection.id} className="flex items-center gap-2 px-3 py-2">
+          <li
+            key={connection.id}
+            className="flex items-center gap-2 px-3 py-2"
+            data-settings-row={`ssh.${connection.id}`}
+          >
             <button
               type="button"
               className="min-w-0 flex-1 text-left"

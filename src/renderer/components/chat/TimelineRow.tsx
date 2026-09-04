@@ -15,6 +15,7 @@ import {
   History,
   ListTodo,
   LoaderCircle,
+  PackageMinus,
   RefreshCw,
   Sparkles,
   Target,
@@ -35,8 +36,9 @@ import { type TFunction, useI18n } from '@/i18n';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
-import { formatDuration } from '@/stores/sessions/stats';
-import type { TimelineItem } from '@/stores/sessions/timeline';
+import { formatDuration, formatTokens } from '@/stores/sessions/stats';
+import { isReadOnlyTool, type TimelineItem } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
 import { EditDiff } from './EditDiff';
@@ -111,12 +113,23 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.stats.commands === b.stats.commands &&
         a.stats.reads === b.stats.reads &&
         a.stats.searches === b.stats.searches &&
-        a.stats.others === b.stats.others
+        a.stats.others === b.stats.others &&
+        a.exploring === b.exploring
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
+    case 'compaction':
+    case 'compaction-notice':
+      return (
+        (b.kind === 'compaction' || b.kind === 'compaction-notice') &&
+        a.kind === b.kind &&
+        a.summary === b.summary &&
+        a.tokensBefore === b.tokensBefore
+      );
+    case 'compaction-progress':
+      return b.kind === 'compaction-progress' && a.state === b.state;
     case 'session-custom':
       return b.kind === 'session-custom' && a.entry === b.entry;
   }
@@ -419,6 +432,15 @@ function UserText({
   );
 }
 
+/** 精简模式下贴紧排的行：探索组头 / 只读一行 / 夹在其间的思考行（对齐 Cursor 的行距） */
+export function isCompactRow(item: TimelineItem): boolean {
+  return (
+    item.kind === 'tool-group' ||
+    item.kind === 'thinking' ||
+    (item.kind === 'tool' && isReadOnlyTool(item))
+  );
+}
+
 export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
@@ -471,6 +493,11 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
       );
     case 'task-note':
       return <TaskNoteRow item={item} />;
+    case 'compaction':
+    case 'compaction-notice':
+      return <CompactionRow item={item} />;
+    case 'compaction-progress':
+      return <CompactionProgressRow state={item.state} />;
     case 'session-custom':
       return <SessionCustomRow entry={item.entry} />;
   }
@@ -612,6 +639,65 @@ function RetryTurnButton() {
   );
 }
 
+function userIndexFromEndAt(conversation: { messages: { role: string }[] }, messageIndex: number) {
+  if (conversation.messages[messageIndex]?.role !== 'user') return null;
+  // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
+  return conversation.messages.slice(messageIndex + 1).filter((message) => message.role === 'user')
+    .length;
+}
+
+function userIndexFromEndForTurn(
+  conversation: { messages: { role: string }[] },
+  messageIndex: number
+) {
+  for (let i = messageIndex; i >= 0; i--) {
+    if (conversation.messages[i]?.role === 'user') return userIndexFromEndAt(conversation, i);
+  }
+  return null;
+}
+
+function canBranchDisplayedSession(
+  state: ReturnType<typeof useSessionsStore.getState>,
+  host: ReturnType<typeof useChatHost>
+) {
+  if (host && !host.canRewind) return false;
+  const conversation = displayedConversation(state);
+  return Boolean(conversation?.started && !conversation.spawning && conversation.status === 'idle');
+}
+
+const userActionClass =
+  'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground';
+
+/** 分叉入口：与回退并列；仅 idle 且已 spawn 的 root 显示 */
+function ForkButton({ messageIndex }: { messageIndex: number }) {
+  const { t } = useI18n();
+  const host = useChatHost();
+  const canFork = useSessionsStore((state) => {
+    if (!canBranchDisplayedSession(state, host)) return false;
+    const conversation = displayedConversation(state);
+    return Boolean(conversation && !conversation.parentId && !conversation.historyOnly);
+  });
+  if (!canFork) return null;
+  return (
+    <button
+      type="button"
+      className={userActionClass}
+      title={t('Keep this session and start a parallel one from here')}
+      onClick={() => {
+        const state = useSessionsStore.getState();
+        const conversation = displayedConversation(state);
+        if (!conversation) return;
+        const userIndexFromEnd = userIndexFromEndForTurn(conversation, messageIndex);
+        if (userIndexFromEnd === null) return;
+        void state.forkFromMessage(conversation.id, userIndexFromEnd);
+      }}
+    >
+      <GitBranch className="h-3 w-3" />
+      {t('Conversation branch')}
+    </button>
+  );
+}
+
 /** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选,选后再确认 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
@@ -619,23 +705,14 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   /** 待确认的回退(值 = restoreFiles);null = 无 */
   const [pendingRestoreFiles, setPendingRestoreFiles] = useState<boolean | null>(null);
   const host = useChatHost();
-  const canRewind = useSessionsStore((state) => {
-    if (host && !host.canRewind) return false;
-    const conversation = displayedConversation(state);
-    return Boolean(
-      conversation?.started && !conversation.spawning && conversation.status === 'idle'
-    );
-  });
+  const canRewind = useSessionsStore((state) => canBranchDisplayedSession(state, host));
   if (!canRewind) return null;
   const rewind = (restoreFiles: boolean) => {
     const state = useSessionsStore.getState();
     const conversation = displayedConversation(state);
     if (!conversation) return;
-    if (conversation.messages[messageIndex]?.role !== 'user') return;
-    // 从末尾数的 user 序号:worker 侧与 jsonl 分支按尾部对齐(容忍 compaction)
-    const userIndexFromEnd = conversation.messages
-      .slice(messageIndex + 1)
-      .filter((message) => message.role === 'user').length;
+    const userIndexFromEnd = userIndexFromEndAt(conversation, messageIndex);
+    if (userIndexFromEnd === null) return;
     state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
   };
   const options = [
@@ -644,19 +721,21 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
       label: t('Conversation only'),
       desc: t('Rewind to this message'),
       restoreFiles: false,
+      action: () => setPendingRestoreFiles(false),
     },
     {
       icon: History,
       label: t('Conversation + files'),
       desc: t('Rewind and restore files to before this turn'),
       restoreFiles: true,
+      action: () => setPendingRestoreFiles(true),
     },
   ];
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         className={cn(
-          'flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity hover:text-foreground',
+          userActionClass,
           // popover 打开期间保持可见,否则 hover 移开触发按钮会随组隐藏
           open ? 'opacity-100' : 'opacity-0 group-hover/user:opacity-100'
         )}
@@ -672,7 +751,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
             type="button"
             onClick={() => {
               setOpen(false);
-              setPendingRestoreFiles(option.restoreFiles);
+              option.action();
             }}
             className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
           >
@@ -728,6 +807,7 @@ function TextRow({
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <CopyButton text={item.text} />
+          {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
           {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
           {item.perf && <span>· {formatPerf(item.perf, t)}</span>}
         </div>
@@ -877,7 +957,60 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   );
 }
 
-/** 收拢的工具组头：摘要统计 + chevron；点击展开为组内原始行 */
+function CompactionProgressRow({
+  state,
+}: {
+  state: Extract<TimelineItem, { kind: 'compaction-progress' }>['state'];
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <LoaderCircle className="h-3 w-3 animate-spin" />
+      <span>{state === 'queued' ? t('Compacts after this turn') : t('Compacting…')}</span>
+    </div>
+  );
+}
+
+/** compaction 分隔：之上的历史已被压缩出模型上下文；点击展开看模型拿到的摘要 */
+function CompactionRow({
+  item,
+}: {
+  item: Extract<TimelineItem, { kind: 'compaction' | 'compaction-notice' }>;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const label =
+    item.tokensBefore === null
+      ? t('Context compacted')
+      : t('Context compacted ({{tokens}} tokens before)', {
+          tokens: formatTokens(item.tokensBefore),
+        });
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3"
+        title={t('Messages above are no longer in the model context; only this summary is.')}
+      >
+        <span className="h-px flex-1 bg-border" />
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+          <PackageMinus className="h-3 w-3" />
+          {label}
+          <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </button>
+      {expanded && (
+        <pre className="mt-1.5 max-h-80 overflow-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {item.summary || t('(summary unavailable)')}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** 收拢的工具组头：摘要统计 + chevron；点击展开为组内原始行。compact 下对齐 Cursor：Explored / Exploring */
 function ToolGroupRow({
   item,
   onToggle,
@@ -886,6 +1019,7 @@ function ToolGroupRow({
   onToggle?: (key: string) => void;
 }) {
   const { t } = useI18n();
+  const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const parts: string[] = [];
   if (item.stats.commands > 0)
     parts.push(t('ran {{count}} commands', { count: item.stats.commands }));
@@ -893,6 +1027,26 @@ function ToolGroupRow({
   if (item.stats.searches > 0)
     parts.push(t('searched {{count}} times', { count: item.stats.searches }));
   if (item.stats.others > 0) parts.push(t('{{count}} other calls', { count: item.stats.others }));
+  if (compact) {
+    const explored: string[] = [];
+    if (item.stats.reads > 0) explored.push(t('{{count}} files', { count: item.stats.reads }));
+    if (item.stats.searches > 0)
+      explored.push(t('{{count}} searches', { count: item.stats.searches }));
+    return (
+      <button
+        type="button"
+        onClick={() => onToggle?.(item.key)}
+        className={cn(
+          'flex w-full items-baseline gap-1.5 text-left text-sm leading-6 transition-colors hover:text-foreground',
+          item.expanded ? 'text-foreground' : 'text-foreground/70',
+          item.exploring && 'animate-pulse'
+        )}
+      >
+        <span className="shrink-0">{item.exploring ? t('Exploring') : t('Explored')}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{explored.join(', ')}</span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -913,9 +1067,13 @@ function ToolGroupRow({
   );
 }
 
+/** 只读探索工具：开关开时去卡片化为一行（与 timeline.ts 的 SEARCH_TOOLS + read 一致） */
+
 /** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const { t } = useI18n();
+  const compactReadOnly = useSettingsStore((s) => s.compactReadOnlyTools);
+  const compact = compactReadOnly && isReadOnlyTool(item);
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
   const hasWrite = Boolean(item.writeContent);
   const expandable = hasDiff || hasWrite || Boolean(item.output);
@@ -933,25 +1091,30 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
 
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30">
+    <div className={cn(!compact && 'rounded-lg border border-border/60 bg-muted/30')}>
       <div className="flex items-center">
         <button
           type="button"
           disabled={!expandable}
           onClick={() => setExpanded((v) => !v)}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs',
-            expandable && 'cursor-pointer hover:bg-muted/50'
+            'flex min-w-0 flex-1 items-center gap-2 text-left',
+            compact
+              ? 'text-sm leading-6 text-foreground/70 transition-colors hover:text-foreground'
+              : 'px-3 py-1.5 text-xs',
+            expandable && !compact && 'cursor-pointer hover:bg-muted/50',
+            expandable && compact && 'cursor-pointer'
           )}
         >
-          <ToolStateIcon state={item.state} />
-          <span className="shrink-0 font-medium">{item.name}</span>
+          {(!compact || item.state !== 'ok') && <ToolStateIcon state={item.state} />}
+          <span className={cn('shrink-0', !compact && 'font-medium')}>{item.name}</span>
           {item.summary && (
             <>
-              <span className="text-muted-foreground/50">·</span>
+              {!compact && <span className="text-muted-foreground/50">·</span>}
               <span
                 className={cn(
-                  'min-w-0 flex-1 truncate font-mono',
+                  'min-w-0 flex-1 truncate',
+                  compact ? 'font-mono text-[0.8em]' : 'font-mono',
                   item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
                 )}
               >
@@ -1005,7 +1168,14 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         </div>
       )}
       {expanded && !hasDiff && !hasWrite && item.output && (
-        <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
+        <div
+          className={cn(
+            'max-h-96 overflow-auto',
+            compact
+              ? 'mt-1 rounded-lg border border-border/60 bg-muted/30'
+              : 'rounded-b-lg border-t border-border/60'
+          )}
+        >
           {item.name === 'bash' ? (
             <TerminalOutput command={item.summary} output={item.output} />
           ) : item.name === 'read' ? (

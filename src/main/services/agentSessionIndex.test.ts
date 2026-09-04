@@ -202,6 +202,49 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.currentIdentity(parent.sessionId)).toEqual(replacement);
   });
 
+  it('工具直雇 coworker 的 coworker-update 带自身 identity 时入索引,用户 tab 可直接 prompt', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    const coworkerIdentity: SessionIdentity = {
+      sessionId: 'origin::cw-bob',
+      generation: '44444444-4444-4444-8444-444444444444',
+    };
+    expect(
+      sessions.observe({
+        type: 'coworker-update',
+        identity: parent,
+        seq: 1,
+        coworker: { id: 'origin::cw-bob', name: 'bob', status: 'idle', createdAt: 0 },
+        coworkerIdentity,
+      })
+    ).toBe(true);
+    expect(sessions.currentIdentity('origin::cw-bob')).toEqual(coworkerIdentity);
+    expect(sessions.isReady(coworkerIdentity)).toBe(true);
+  });
+
+  it('工具直雇 coworker 被 dismiss 后从索引移除', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    const coworkerIdentity: SessionIdentity = {
+      sessionId: 'origin::cw-bob',
+      generation: '44444444-4444-4444-8444-444444444444',
+    };
+    sessions.observe({
+      type: 'coworker-update',
+      identity: parent,
+      seq: 1,
+      coworker: { id: 'origin::cw-bob', name: 'bob', status: 'idle', createdAt: 0 },
+      coworkerIdentity,
+    });
+    sessions.observe({
+      type: 'coworker-update',
+      identity: parent,
+      seq: 2,
+      coworker: { id: 'origin::cw-bob', name: 'bob', status: 'dismissed', createdAt: 0 },
+    });
+    expect(sessions.currentIdentity('origin::cw-bob')).toBeUndefined();
+  });
+
   it('model-changed 更新已启动模型；旧 generation 的上报不生效', () => {
     // 不更新的后果见 issue #30：改过模型的会话，后续 @Agent 派发会因
     // selection 与已启动模型对不上而被永久拒绝。

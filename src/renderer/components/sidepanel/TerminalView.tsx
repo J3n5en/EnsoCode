@@ -59,7 +59,7 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
 
     const tryAttach = () => {
       if (cancelled) return;
-      if (!wrapper.isConnected || wrapper.clientWidth === 0) {
+      if (!wrapper.isConnected || wrapper.clientWidth === 0 || wrapper.clientHeight === 0) {
         raf = requestAnimationFrame(tryAttach);
         return;
       }

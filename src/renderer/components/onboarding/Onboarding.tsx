@@ -3,6 +3,7 @@ import { resolveChatModel } from '@shared/defaultModel';
 import { Bot, Check, Layers, Plug, Server, Sparkles, Wand2, X } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -36,6 +37,7 @@ const STEPS: StepId[] = [
 /** 首次运行引导：欢迎 → 四类导入 → 完成；每步可跳过，随时可关闭 */
 export function Onboarding() {
   const { t } = useI18n();
+  useOverlayGuard();
   const setOnboarded = useSettingsStore((s) => s.setOnboarded);
   const providers = useSettingsStore((s) => s.providers);
   const skills = useSettingsStore((s) => s.skills);
@@ -118,7 +120,10 @@ export function Onboarding() {
   };
 
   return (
-    <div className="fixed inset-0 z-[45] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[45] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      data-enso-float=""
+    >
       <div className="relative flex w-[32rem] max-w-[90vw] flex-col rounded-2xl border bg-popover p-6 shadow-xl">
         <button
           type="button"

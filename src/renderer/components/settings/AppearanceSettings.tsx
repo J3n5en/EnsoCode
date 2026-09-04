@@ -708,7 +708,7 @@ export function AppearanceSettings() {
   return (
     <div className="space-y-6">
       {/* Theme Mode Section */}
-      <div>
+      <div data-settings-row="appearance.theme">
         <h3 className="text-lg font-medium">{t('Theme mode')}</h3>
         <p className="text-sm text-muted-foreground">{t('Choose interface theme')}</p>
       </div>

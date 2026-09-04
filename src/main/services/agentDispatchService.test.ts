@@ -115,8 +115,17 @@ async function setup(
     agentType?: string;
     resumeFile: string;
   }> = [];
+  const capabilityBindings: ChildSessionIdentity[] = [];
+  const terminatedGenerations: ChildSessionIdentity[] = [];
   let service!: AgentDispatchService;
   service = new AgentDispatchService({
+    registerCapabilityInvocation: (context) => {
+      capabilityBindings.push(context.child);
+      return true;
+    },
+    terminateGeneration: (child) => {
+      terminatedGenerations.push(child);
+    },
     sourceRegistry: bindings,
     sessionIndex: index,
     readStoredOauthCredentialKeys: async () => new Set(),
@@ -218,6 +227,8 @@ async function setup(
     index,
     spawnChildCalls,
     resumeCoworkerCalls,
+    capabilityBindings,
+    terminatedGenerations,
     root,
   };
 }
@@ -365,6 +376,30 @@ describe('AgentDispatchService delta coordination', () => {
         1
       )
     ).resolves.toMatchObject({ accepted: true });
+  });
+
+  it('派发回合结束不撤销能力授权，child 生命周期结束才撤销', async () => {
+    const { service, selectionBindingId, capabilityBindings, terminatedGenerations } =
+      await setup();
+    const result = await service.dispatch(
+      {
+        requestId: 'turn-1',
+        selectionBindingId,
+        typeKey: 'agent:enso',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    expect(result.accepted).toBe(true);
+    if (!result.accepted) return;
+    const child = result.child;
+    expect(capabilityBindings).toHaveLength(1);
+    // 派发轮结束只是本次任务收口；child 会话仍活着，后续轮次的 enso_app 调用必须继续可用
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    expect(terminatedGenerations).toHaveLength(0);
+    // 真正的撤销边界是 child 结束
+    service.observe({ type: 'child-ended', identity: child, seq: 3, reason: 'dismissed' });
+    expect(terminatedGenerations).toEqual([child]);
   });
 
   it('rejects ordinary/locked child when exact spawn proof drifts', async () => {

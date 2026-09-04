@@ -19,7 +19,7 @@ export function KeybindingsSettings() {
   const { t } = useI18n();
   return (
     <div className="space-y-6">
-      <div>
+      <div data-settings-row="shortcuts.root">
         <h3 className="text-lg font-medium">{t('Shortcuts')}</h3>
         <p className="text-sm text-muted-foreground">
           {t('Click a shortcut to rebind it; press Esc to cancel.')}

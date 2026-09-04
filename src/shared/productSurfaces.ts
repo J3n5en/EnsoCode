@@ -35,6 +35,8 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Automatic updates',
   },
+  'general.proxy-mode': { domain: 'general', kind: 'setting', label: 'Proxy mode' },
+  'general.custom-proxy-url': { domain: 'general', kind: 'setting', label: 'Custom proxy URL' },
   'general.keybindings.list': { domain: 'general', kind: 'action', label: 'List keybindings' },
   'general.keybindings.set': { domain: 'general', kind: 'setting', label: 'Set keybinding' },
   'general.keybindings.reset': { domain: 'general', kind: 'setting', label: 'Reset keybinding' },

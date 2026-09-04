@@ -245,6 +245,7 @@ const AGENT_TYPE_FIELDS = {
   description: { type: 'string' },
   systemPrompt: { type: 'string' },
   tools: { type: 'string', enum: ['readonly', 'all'] },
+  modelMode: { type: 'string', enum: ['agent_pick', 'follow', 'fixed'] },
   providerId: { type: 'string', minLength: 1 },
   modelId: { type: 'string', minLength: 1 },
   skillIds: STRING_ID_ARRAY_SCHEMA,
@@ -382,6 +383,19 @@ export const CAPABILITY_CATALOG = {
   'general.automatic-updates': executable(
     'general.automatic-updates',
     reversibleGlobal('Read or change automatic update downloads.', BOOLEAN_VALUE_INPUT_SCHEMA)
+  ),
+  'general.proxy-mode': executable(
+    'general.proxy-mode',
+    reversibleGlobal('Read or change the application network proxy mode.', {
+      type: 'object',
+      properties: { value: { type: 'string', enum: ['system', 'none', 'custom'] } },
+      required: ['value'],
+      additionalProperties: false,
+    })
+  ),
+  'general.custom-proxy-url': executable(
+    'general.custom-proxy-url',
+    reversibleGlobal('Read or change the custom HTTP(S) proxy URL.', STRING_VALUE_INPUT_SCHEMA)
   ),
   'general.keybindings.list': executable(
     'general.keybindings.list',
@@ -1180,6 +1194,8 @@ export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId
   'general.language': true,
   'general.load-local-skills': true,
   'general.automatic-updates': true,
+  'general.proxy-mode': true,
+  'general.custom-proxy-url': true,
   'general.keybindings.list': true,
   'general.keybindings.set': true,
   'general.keybindings.reset': true,

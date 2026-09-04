@@ -100,6 +100,7 @@ const dismissCoworker = vi.fn(
   })
 );
 const hireCoworker = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
+const summarizeTitle = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
 const agentAbort = vi.fn(async (_id: string) => ({ ok: true }));
 const agentRelease = vi.fn(async (_id: string) => ({ ok: true }));
 
@@ -136,6 +137,7 @@ vi.stubGlobal('window', {
       requestSnapshot: vi.fn(async () => ({ ok: true })),
       readChildHistory,
       prompt: agentPrompt,
+      summarizeTitle,
       spawn: vi.fn(async () => ({ ok: true })),
       dismissCoworker,
       hireCoworker,
@@ -952,6 +954,185 @@ describe('typed Agent child projection', () => {
       ).toBeUndefined();
       expect(selectConversation).toHaveBeenCalledWith(
         expect.objectContaining({ conversationId: phoneSessionId })
+      );
+    });
+
+    it('权威版本被抬高后重试激活，不把对话分支标成 history-only', async () => {
+      const branchId = '33333333-3333-4333-8333-333333333333';
+      let snapshotVersion = 1;
+      const liveVersion = 2;
+      sourceRead.mockImplementation(async () => ({
+        projects: sourceProjection.projects,
+        conversations: [
+          ...sourceProjection.conversations.filter(
+            (conversation) => conversation.conversationId !== branchId
+          ),
+          {
+            conversationId: branchId,
+            projectId: 'project',
+            kind: 'root',
+            lifecycle: 'ready',
+            version: snapshotVersion,
+          },
+        ],
+      }));
+      selectConversation.mockImplementation(
+        (request: { conversationId: string; version?: number }) => {
+          if (request.conversationId === branchId && request.version !== liveVersion) {
+            snapshotVersion = liveVersion;
+            return Promise.resolve({
+              accepted: false as const,
+              error: 'Conversation authority is stale or unavailable.',
+            }) as never;
+          }
+          return Promise.resolve({
+            accepted: true as const,
+            value: {
+              conversationId: request.conversationId,
+              projectId: 'project',
+              kind: 'root' as const,
+              lifecycle: 'ready' as const,
+              version: request.version ?? liveVersion,
+            },
+          }) as never;
+        }
+      );
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          [branchId]: {
+            ...state.conversations.parent,
+            id: branchId,
+            title: 'Parent (分支)',
+            started: false,
+            sessionFile: '/tmp/branch.jsonl',
+            forkedFromConversationId: 'parent',
+            forkedFromEntryId: 'leaf-1',
+            parentId: undefined,
+            error: undefined,
+          },
+        },
+        order: [branchId, ...state.order],
+      }));
+
+      selectConversation.mockClear();
+      sessionsModule.useSessionsStore.getState().selectConversation(branchId);
+      await vi.waitFor(() =>
+        expect(
+          selectConversation.mock.calls.filter((call) => call[0]?.conversationId === branchId)
+            .length
+        ).toBeGreaterThanOrEqual(2)
+      );
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[branchId]?.error
+      ).toBeUndefined();
+    });
+
+    it('手机端新建的会话在后台收到首条用户消息时自动生成截断标题并触发标题总结', async () => {
+      const freshPhoneSessionId = '88888888-8888-4888-8888-888888888888';
+      summarizeTitle.mockClear();
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+      // 1. 手机新建会话：adoptPairSession 登记，此时无标题且未在桌面激活（activeId 是 parent，作为冷会话）
+      sessionsModule.useSessionsStore.getState().adoptPairSession({
+        ...pairSession,
+        sessionId: freshPhoneSessionId,
+      });
+      sessionsModule.useSessionsStore.setState({ activeId: 'parent' });
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[freshPhoneSessionId]?.title
+      ).toBe('');
+
+      // 2. 手机端发送首条用户消息，worker 回传 message-upsert 事件
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: freshPhoneSessionId, generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '帮我写个贪吃蛇小游戏\n第二行内容' }],
+        },
+      });
+
+      // 3. 验证冷会话也正确补全了截断标题，且触发了标题总结
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[freshPhoneSessionId]?.title
+      ).toBe('帮我写个贪吃蛇小游戏');
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        freshPhoneSessionId,
+        '帮我写个贪吃蛇小游戏\n第二行内容',
+        expect.objectContaining({ providerId: 'p', modelId: 'm' })
+      );
+
+      // 4. 当 title-generated 到达时，AI 标题覆盖基准截断标题
+      onAgentEvent?.({
+        type: 'title-generated',
+        conversationId: freshPhoneSessionId,
+        title: '贪吃蛇游戏开发',
+      });
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[freshPhoneSessionId]?.title
+      ).toBe('贪吃蛇游戏开发');
+    });
+
+    it('标题总结关闭时冷会话保留截断标题，不调用 summarizeTitle', async () => {
+      const disabledSessionId = '99999999-9999-4999-8999-999999999999';
+      summarizeTitle.mockClear();
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: false });
+
+      sessionsModule.useSessionsStore.getState().adoptPairSession({
+        ...pairSession,
+        sessionId: disabledSessionId,
+      });
+      sessionsModule.useSessionsStore.setState({ activeId: 'parent' });
+
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: disabledSessionId, generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '关闭总结时的标题测试' }],
+        },
+      });
+
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations[disabledSessionId]?.title
+      ).toBe('关闭总结时的标题测试');
+      expect(summarizeTitle).not.toHaveBeenCalled();
+    });
+
+    it('热会话收到首条用户消息时同样补全标题并触发总结', async () => {
+      const hotSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      summarizeTitle.mockClear();
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+
+      sessionsModule.useSessionsStore.getState().adoptPairSession({
+        ...pairSession,
+        sessionId: hotSessionId,
+      });
+      // 设为热会话
+      sessionsModule.useSessionsStore.setState({ activeId: hotSessionId });
+
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: hotSessionId, generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '热会话标题测试\n详细内容' }],
+        },
+      });
+
+      expect(sessionsModule.useSessionsStore.getState().conversations[hotSessionId]?.title).toBe(
+        '热会话标题测试'
+      );
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        hotSessionId,
+        '热会话标题测试\n详细内容',
+        expect.objectContaining({ providerId: 'p', modelId: 'm' })
       );
     });
   });

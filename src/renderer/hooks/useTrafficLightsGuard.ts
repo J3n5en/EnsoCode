@@ -41,7 +41,7 @@ function syncVisibility() {
   const shouldHide = guardCount > 0 && !isFullScreen;
   if (shouldHide === currentlyHidden) return;
   currentlyHidden = shouldHide;
-  window.electronAPI?.window.setTrafficLightsVisible(!shouldHide);
+  window.electronAPI?.window?.setTrafficLightsVisible(!shouldHide);
 }
 
 function initFullScreenListener() {
@@ -49,7 +49,7 @@ function initFullScreenListener() {
   listenerInitialized = true;
 
   window.electronAPI?.window
-    .isFullScreen()
+    ?.isFullScreen()
     .then((fs) => {
       isFullScreen = fs;
       syncVisibility();
@@ -59,21 +59,21 @@ function initFullScreenListener() {
     });
 
   cleanupFullScreenListener =
-    window.electronAPI?.window.onFullScreenChange((fs) => {
+    window.electronAPI?.window?.onFullScreenChange((fs) => {
       isFullScreen = fs;
       syncVisibility();
     }) ?? null;
 }
 
 export function acquireTrafficLightsGuard() {
-  if (window.electronAPI?.env.platform !== 'darwin') return;
+  if (window.electronAPI?.env?.platform !== 'darwin') return;
   initFullScreenListener();
   guardCount++;
   syncVisibility();
 }
 
 export function releaseTrafficLightsGuard() {
-  if (window.electronAPI?.env.platform !== 'darwin') return;
+  if (window.electronAPI?.env?.platform !== 'darwin') return;
   guardCount = Math.max(0, guardCount - 1);
   syncVisibility();
 }
@@ -94,7 +94,7 @@ export function useTrafficLightsGuard(open: boolean) {
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     if (currentlyHidden) {
-      window.electronAPI?.window.setTrafficLightsVisible(true);
+      window.electronAPI?.window?.setTrafficLightsVisible(true);
     }
     resetModuleState();
   });

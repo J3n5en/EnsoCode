@@ -198,6 +198,8 @@ export type HostToPhone =
       /** 桌面选中的终端配色；缺省表示用手机默认 */
       terminal?: TerminalPalette;
       terminalFontFamily?: string;
+      /** 桌面「精简只读工具调用」偏好；缺省（旧桌面）时手机按默认开处理 */
+      compactReadOnlyTools?: boolean;
     }
   | { type: 'agent-event'; event: unknown }
   /** Web Push 能力下发：手机拿 VAPID 公钥才能 pushManager.subscribe */

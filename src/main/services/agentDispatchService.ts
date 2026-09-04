@@ -503,7 +503,9 @@ export class AgentDispatchService {
       terminal,
       ...(receiptSummary ? { receiptSummary } : {}),
     });
-    this.options.terminateGeneration?.(dispatch.child);
+    // 这里只收口「本次派发任务」，不撤销能力授权：child 会话仍活着，用户后续轮次
+    // 还会继续用 enso_app（授权以 child generation 为单位，见 spec/main/services.md）。
+    // 撤销边界只有 child-ended / child-rejected / worker-exited / 窗口关闭。
     this.active.delete(dispatch.child.generation);
     this.prompted.delete(`${dispatch.child.generation}\u0000${dispatch.requestId}`);
   }

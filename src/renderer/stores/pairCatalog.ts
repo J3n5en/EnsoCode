@@ -1,6 +1,8 @@
 import { toPairProjectEntry } from '@enso/pair';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
+import { useOauthCredentialStore } from '@/stores/oauthCredentials';
+import { toPairProviderEntries } from '@/stores/pairCatalogProviders';
 import { useSessionsStore } from '@/stores/sessions';
 import { setPairViewedSession } from '@/stores/sessions/unread';
 import { useSettingsStore } from '@/stores/settings';
@@ -15,7 +17,7 @@ import {
 /**
  * 会话目录同步：会话标题、项目、provider 只存在于 renderer，
  * main 与 worker 都没有，故由此处 debounce 推给 main 供手机端展示。
- * providers 在这里剥掉 apiKey/baseUrl，密钥永不出 main。
+ * providers 与桌面选择器同口径，并剥掉 apiKey/baseUrl/oauthAccountKey，密钥永不出 main。
  */
 
 const DEBOUNCE_MS = 300;
@@ -77,17 +79,11 @@ function buildPayload(): PairCatalogPayload {
 
   const catalog = [...topLevel, ...children].map(toEntry);
 
-  // 只下发可用 provider（启用 + 有 key），且剥掉密钥与 baseUrl
-  const providers = settings.providers
-    .filter((p) => p.enabled && p.apiKey)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      models: p.models
-        .filter((m) => m.enabled !== false)
-        .map((m) => ({ id: m.id, ...(m.label ? { label: m.label } : {}) })),
-    }))
-    .filter((p) => p.models.length > 0);
+  // 与桌面选择器同一套可用口径（启用 + 凭证真实可用 + 启用模型），并剥掉密钥 / 账号 key
+  const providers = toPairProviderEntries(
+    settings.providers,
+    useOauthCredentialStore.getState().snapshot
+  );
 
   return {
     catalog,
@@ -103,6 +99,7 @@ function buildPayload(): PairCatalogPayload {
     // 只下发选中主题解析后的调色板（约几百字节），手机不必打包整份主题库
     terminal: getXtermTheme(settings.terminalTheme),
     terminalFontFamily: settings.terminalFontFamily,
+    compactReadOnlyTools: settings.compactReadOnlyTools,
   };
 }
 
@@ -122,13 +119,17 @@ export function bindPairCatalogSync(): void {
   useSessionsStore.subscribe((state, prev) => {
     if (state.conversations !== prev.conversations || state.order !== prev.order) schedulePush();
   });
+  useOauthCredentialStore.subscribe((state, prev) => {
+    if (state.snapshot !== prev.snapshot) schedulePush();
+  });
   useSettingsStore.subscribe((state, prev) => {
     if (
       state.projects !== prev.projects ||
       state.providers !== prev.providers ||
       state.theme !== prev.theme ||
       state.terminalTheme !== prev.terminalTheme ||
-      state.terminalFontFamily !== prev.terminalFontFamily
+      state.terminalFontFamily !== prev.terminalFontFamily ||
+      state.compactReadOnlyTools !== prev.compactReadOnlyTools
     ) {
       schedulePush();
     }
@@ -143,6 +144,7 @@ export function bindPairCatalogSync(): void {
   });
   // 手机新建的会话登记进桌面列表；不登记的话它的 agent 事件会因「未知会话」被丢弃
   window.electronAPI.pair.onSessionCreated((session) => {
+    setPairViewedSession(session.sessionId);
     useSessionsStore.getState().adoptPairSession(session);
   });
   // 手机改会话模型/推理档位：走桌面选择器同一 store 方法

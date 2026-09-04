@@ -63,6 +63,7 @@ const MAPPED_I18N_KEYS = [
   'Next coworker tab',
   'Previous coworker tab',
   'New terminal tab',
+  'New terminal when the side panel is focused; otherwise new conversation',
   'Close terminal tab',
 ] as const;
 

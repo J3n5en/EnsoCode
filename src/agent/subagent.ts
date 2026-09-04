@@ -1,13 +1,17 @@
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { positiveContextWindow } from '@shared/modelCatalog';
 import type {
   AgentTypeSpawnConfig,
   SpawnModelConfig,
   SubagentInfo,
   SubagentModelOption,
 } from '@shared/types/agent';
+import { runFooter } from './runFooter';
 
 /** 进度事件节流 */
 const UPDATE_INTERVAL_MS = 500;
+/** 异步完成通知里的报告上限 */
+const NOTIFY_LIMIT = 1500;
 
 export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
@@ -66,7 +70,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     .map(
       (type) =>
         `"${type.name}" — ${type.description || 'custom agent'}` +
-        `${type.model ? ` (model: ${type.model.modelId})` : ''}${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
+        `${type.allowModelOverride ? ' [custom model required]' : type.model ? ` (model: ${type.model.modelId})` : ' (follows conversation model)'}` +
+        `${type.tools === 'readonly' ? ' [read-only tools]' : ''}`
     )
     .join('; ');
   const modelNames = deps.models.map((option) => option.name);
@@ -93,21 +98,29 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           },
         }
       : {};
+  const builtinRoleHints: Record<string, string> = {
+    scout: 'scout for recon/reading',
+    worker: 'worker for an isolated code change',
+    reviewer: 'reviewer after a sizeable change',
+  };
+  const roleHints = deps.agentTypes
+    .map((type) => builtinRoleHints[type.name])
+    .filter((hint): hint is string => hint !== undefined);
   return {
     name: 'subagent',
     label: 'Subagent',
     description:
       'Delegate a self-contained task to a subagent that runs in an isolated context with its own tools ' +
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
-      'Use for parallelizable or context-heavy subtasks (research a module, implement an isolated change); ' +
-      'multiple task calls in one message run in parallel. ' +
+      'Default choice for any independent line of work (recon a module, implement an isolated change, verify); ' +
+      'multiple subagent calls in one message run in parallel. ' +
       'The subagent cannot ask you questions — include all needed context in the prompt. ' +
       'Pass wait:false for long tasks to keep working — the final report is delivered to you ' +
       'automatically when it finishes (and the parent abort no longer kills it). ' +
       (deps.agentTypes.length > 0 ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
-      'subagent: delegate a self-contained subtask to a parallel subagent (isolated context); ' +
-      'give it a complete prompt and it returns a final report; ' +
+      'subagent: delegate by default — hand any independent subtask to a subagent (isolated context) ' +
+      'with a complete prompt and get a final report back; ' +
       'multiple subagent calls in one message run in parallel' +
       (deps.agentTypes.length > 0
         ? `; agent_type options: ${deps.agentTypes
@@ -117,6 +130,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       (deps.models.length > 0
         ? '; a model parameter lets you pick a cheaper/stronger model per subtask — see the tool schema for options'
         : ''),
+    promptGuidelines: [
+      'Delegate by default: when a request has 2+ independent lines of work (explore module A / change B / verify C), ' +
+        'dispatch them as parallel subagent calls in the same message instead of doing them serially yourself. ' +
+        'Searching the whole repo yourself before acting is an anti-pattern when a subagent could do the recon',
+      ...(roleHints.length > 0 ? [`Pick agent_type by role: ${roleHints.join('; ')}`] : []),
+    ],
     parameters: {
       type: 'object',
       properties: {
@@ -176,6 +195,11 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       if (modelName && !modelOption) {
         throw new Error(
           `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+        );
+      }
+      if (agentType && agentType.allowModelOverride === false && modelName) {
+        throw new Error(
+          `agent_type "${agentType.name}" does not allow custom model selection (it is locked to ${agentType.model ? agentType.model.modelId : 'conversation model'}).`
         );
       }
       const id = `agent-${++counter}-${Date.now().toString(36)}`;
@@ -246,13 +270,23 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       const onAbort = () => void session.abort();
       if (wait) signal?.addEventListener('abort', onAbort, { once: true });
 
+      let footer = '';
       const run = async (): Promise<string> => {
         const fullPrompt = agentType?.systemPrompt
           ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${prompt}`
           : prompt;
         try {
           await session.prompt(fullPrompt);
-          let result = lastAssistantText(session);
+          let result = lastAssistantText(session) || '(subagent produced no output)';
+          // 脚注先于 gate:工具分布/耗时是子代理自身的事实,gate 是父的验收
+          footer = runFooter({
+            messages: session.messages,
+            label: agentType?.name ?? 'general',
+            modelId: info.modelId ?? deps.modelId,
+            elapsedMs: Date.now() - info.startedAt,
+            contextWindow: positiveContextWindow(session.model),
+          });
+          result += `\n\n${footer}`;
           // gate 验收:退出码说了算,不信子代理自称完成
           if (gate && !(wait && signal?.aborted)) {
             result += `\n\n${await deps.runGate(gate)}`;
@@ -263,7 +297,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           info.currentActivity = '';
           deps.emitUpdate({ ...info });
           if (aborted) throw new Error('Subagent aborted');
-          return result || '(subagent produced no output)';
+          return result;
         } catch (error) {
           info.status = 'failed';
           info.currentActivity = '';
@@ -281,10 +315,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         // 派发即返回;完成后报告经通知回传(失败立即,成功合并投递)
         void run()
           .then((result) => {
-            deps.notify(
-              `Subagent "${info.description}" finished:\n${result.slice(0, 1500)}`,
-              false
-            );
+            // 截断也要保住脚注:它是主 agent 判断该不该信这份报告的依据
+            const brief =
+              result.length > NOTIFY_LIMIT
+                ? `${result.slice(0, NOTIFY_LIMIT)}\n…(truncated)\n${footer}`
+                : result;
+            deps.notify(`Subagent "${info.description}" finished:\n${brief}`, false);
           })
           .catch((error) => {
             deps.notify(

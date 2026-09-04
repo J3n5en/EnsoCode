@@ -1,0 +1,31 @@
+{
+  "id": "workspace-search-context-fork-memory",
+  "name": "workspace-search-context-fork-memory",
+  "title": "工作区搜索 / Inspector / Fork / 项目记忆",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "J3n5en",
+  "assignee": "J3n5en",
+  "createdAt": "2026-09-03",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-03-workspace-search",
+    "09-03-context-inspector",
+    "09-03-session-fork",
+    "09-03-search-anything"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

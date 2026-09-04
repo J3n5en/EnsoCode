@@ -1,5 +1,5 @@
 import { positiveFiniteNumber } from '@shared/modelCatalog';
-import { DEFAULT_BASE_URLS } from '@shared/providerCatalog';
+import { DEFAULT_BASE_URLS, withVersionSegment } from '@shared/providerCatalog';
 import type {
   FetchedModel,
   ListModelsResult,
@@ -11,15 +11,12 @@ import { createSecretSet } from './secretRedactor';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const TIMEOUT_MS = 15000;
+/** 连通性探测上限。1 会让 thinking 模型在思维链阶段直接超限（上游 502）。 */
+const TEST_MAX_OUTPUT_TOKENS = 4096;
 
 export function resolveBase(config: ProviderApiConfig): string {
   const base = config.baseUrl.trim().replace(/\/+$/, '');
   return base || DEFAULT_BASE_URLS[config.api];
-}
-
-/** anthropic：base 已含 /v1 则不重复拼接 */
-export function withVersionSegment(base: string, segment: string): string {
-  return base.endsWith(`/${segment}`) ? base : `${base}/${segment}`;
 }
 
 async function request(url: string, init: RequestInit): Promise<Response> {
@@ -187,13 +184,17 @@ export async function testProvider(
       case 'anthropic-messages':
         url = `${withVersionSegment(base, 'v1')}/messages`;
         headers = { ...headers, 'x-api-key': key, 'anthropic-version': ANTHROPIC_VERSION };
-        body = { model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] };
+        body = {
+          model,
+          max_tokens: TEST_MAX_OUTPUT_TOKENS,
+          messages: [{ role: 'user', content: 'hi' }],
+        };
         break;
       case 'google-generative-ai':
         url = `${withVersionSegment(base, 'v1beta')}/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
         body = {
           contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
-          generationConfig: { maxOutputTokens: 1 },
+          generationConfig: { maxOutputTokens: TEST_MAX_OUTPUT_TOKENS },
         };
         break;
       case 'ollama':
@@ -203,12 +204,16 @@ export async function testProvider(
       case 'openai-responses':
         url = `${base}/responses`;
         headers = { ...headers, Authorization: `Bearer ${key}` };
-        body = { model, input: 'hi', max_output_tokens: 16 };
+        body = { model, input: 'hi', max_output_tokens: TEST_MAX_OUTPUT_TOKENS };
         break;
       default:
         url = `${base}/chat/completions`;
         headers = { ...headers, Authorization: `Bearer ${key}` };
-        body = { model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] };
+        body = {
+          model,
+          max_tokens: TEST_MAX_OUTPUT_TOKENS,
+          messages: [{ role: 'user', content: 'hi' }],
+        };
     }
 
     const response = await request(url, { method: 'POST', headers, body: JSON.stringify(body) });

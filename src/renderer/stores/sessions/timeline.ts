@@ -20,6 +20,8 @@ export type TimelineItem =
       streaming: boolean;
       timestamp?: number;
       perf?: TurnPerf;
+      /** 本轮已结束的最后一条正文：可从这里开平行会话 */
+      turnEnd?: boolean;
     }
   | {
       kind: 'thinking';
@@ -56,10 +58,18 @@ export type TimelineItem =
       /** 组内工具数（不含 edit——它平铺在组外） */
       count: number;
       stats: ToolGroupStats;
+      /** compact 模式下组外仍有 running 的只读行：组头显示 Exploring */
+      exploring: boolean;
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
   | { kind: 'error'; key: string; text: string }
+  /** pi 的 compaction 摘要：之前的历史已被压缩出 LLM 上下文，渲染为分隔行 */
+  | { kind: 'compaction'; key: string; summary: string; tokensBefore: number | null }
+  /** 压缩进行中 / 排队：钉在时间线底部，不依赖占用面板 */
+  | { kind: 'compaction-progress'; key: string; state: 'queued' | 'running' }
+  /** 摘要不在末尾时，底部再钉一条可展开提示 */
+  | { kind: 'compaction-notice'; key: string; summary: string; tokensBefore: number | null }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
@@ -173,6 +183,36 @@ function perfFromTiming(message: ProjectedMessage, turnStartMs?: number): TurnPe
   };
 }
 
+const THINKING_OPEN = '<thinking>';
+const THINKING_CLOSE = '</thinking>';
+
+/** Gemini 无签名思考会降级成 <thinking> 正文；拆成 thinking/text 片段，标签本身丢掉 */
+function splitThinkingTaggedText(text: string): Array<{ kind: 'text' | 'thinking'; text: string }> {
+  const pieces: Array<{ kind: 'text' | 'thinking'; text: string }> = [];
+  const push = (kind: 'text' | 'thinking', raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed) pieces.push({ kind, text: trimmed });
+  };
+  let i = 0;
+  while (i < text.length) {
+    const openAt = text.indexOf(THINKING_OPEN, i);
+    if (openAt === -1) {
+      push('text', text.slice(i));
+      break;
+    }
+    if (openAt > i) push('text', text.slice(i, openAt));
+    const contentStart = openAt + THINKING_OPEN.length;
+    const closeAt = text.indexOf(THINKING_CLOSE, contentStart);
+    if (closeAt === -1) {
+      push('thinking', text.slice(contentStart));
+      break;
+    }
+    push('thinking', text.slice(contentStart, closeAt));
+    i = closeAt + THINKING_CLOSE.length;
+  }
+  return pieces;
+}
+
 /**
  * 把消息投影聚合为渲染时间线：
  * - toolResult 不单独成行，折进对应 toolCall 条目（按 toolCallId 关联）
@@ -251,6 +291,15 @@ function buildMessageTimeline(
       }
       return;
     }
+    if (message.role === 'compactionSummary') {
+      items.push({
+        kind: 'compaction',
+        key: `${messageIndex}`,
+        summary: partText(message),
+        tokensBefore: message.tokensBefore ?? null,
+      });
+      return;
+    }
     if (message.role === 'toolResult') return;
     if (message.role !== 'assistant') return;
 
@@ -270,9 +319,13 @@ function buildMessageTimeline(
       const settled = Boolean(message.stopReason) && message.stopReason !== 'pending';
       const streaming = running && isStreamingPart && !settled;
       switch (part.type) {
-        case 'text':
+        case 'text': {
           // trim：纯空白正文（工具轮的空 text part）不产出——否则显示为幽灵空行
-          if (part.text.trim())
+          if (!part.text.trim()) return;
+          const pieces = splitThinkingTaggedText(part.text);
+          if (pieces.length === 0) return;
+          // 无标签：保持原文（含首尾空白），避免改已有 text 行形态
+          if (pieces.length === 1 && pieces[0].kind === 'text') {
             items.push({
               kind: 'text',
               key,
@@ -280,8 +333,37 @@ function buildMessageTimeline(
               streaming,
               timestamp: message.timestamp,
               perf: perfFromTiming(message, perfTurnStart),
+              ...(isLastStepOfTurn && !streaming ? { turnEnd: true } : {}),
             });
+            return;
+          }
+          pieces.forEach((piece, i) => {
+            const pieceKey = pieces.length === 1 ? key : `${key}-${i}`;
+            const pieceStreaming = streaming && i === pieces.length - 1;
+            if (piece.kind === 'thinking') {
+              items.push({
+                kind: 'thinking',
+                key: pieceKey,
+                text: piece.text,
+                streaming: pieceStreaming,
+                durationMs: null,
+              });
+              return;
+            }
+            items.push({
+              kind: 'text',
+              key: pieceKey,
+              text: piece.text,
+              streaming: pieceStreaming,
+              timestamp: message.timestamp,
+              perf: perfFromTiming(message, perfTurnStart),
+              ...(isLastStepOfTurn && !pieceStreaming && i === pieces.length - 1
+                ? { turnEnd: true }
+                : {}),
+            });
+          });
           return;
+        }
         case 'thinking':
           if (part.text) {
             // 思考耗时：step 起点到首个非 thinking 输出（无则到 step 完成）
@@ -365,36 +447,63 @@ const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage
     : Number.NEGATIVE_INFINITY;
 };
 
+function appendCompactionChrome(
+  items: TimelineItem[],
+  compaction?: 'queued' | 'running'
+): TimelineItem[] {
+  if (compaction) {
+    return [
+      ...items,
+      { kind: 'compaction-progress', key: `compaction:${compaction}`, state: compaction },
+    ];
+  }
+  const lastSummary = items.findLast((item) => item.kind === 'compaction');
+  if (!lastSummary || items.at(-1)?.kind === 'compaction') return items;
+  return [
+    ...items,
+    {
+      kind: 'compaction-notice',
+      key: `compaction-notice:${lastSummary.key}`,
+      summary: lastSummary.summary,
+      tokensBefore: lastSummary.tokensBefore,
+    },
+  ];
+}
+
 /** Messages 与 custom entries 仅在展示层按时间合并；custom entries 从不进入 messages。 */
 export function buildTimeline(
   messages: ProjectedMessage[],
   running: boolean,
   customEntries: readonly AgentSessionCustomEntry[] = [],
-  cwd?: string
+  cwd?: string,
+  options?: { compaction?: 'queued' | 'running' }
 ): TimelineItem[] {
   const messageItems = buildMessageTimeline(messages, running, cwd);
-  if (customEntries.length === 0) return messageItems;
-  return [
-    ...messageItems.map((item, order) => ({
-      item,
-      at: messageItemTime(item, messages),
-      order,
-    })),
-    ...customEntries.map((entry, index) => ({
-      item: {
-        kind: 'session-custom' as const,
-        key:
-          entry.kind === 'capability-receipt'
-            ? `custom:receipt:${entry.receipt.receiptId}`
-            : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
-        entry,
-      },
-      at: customEntryTime(entry),
-      order: messageItems.length + index,
-    })),
-  ]
-    .sort((left, right) => left.at - right.at || left.order - right.order)
-    .map(({ item }) => item);
+  const merged =
+    customEntries.length === 0
+      ? messageItems
+      : [
+          ...messageItems.map((item, order) => ({
+            item,
+            at: messageItemTime(item, messages),
+            order,
+          })),
+          ...customEntries.map((entry, index) => ({
+            item: {
+              kind: 'session-custom' as const,
+              key:
+                entry.kind === 'capability-receipt'
+                  ? `custom:receipt:${entry.receipt.receiptId}`
+                  : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
+              entry,
+            },
+            at: customEntryTime(entry),
+            order: messageItems.length + index,
+          })),
+        ]
+          .sort((left, right) => left.at - right.at || left.order - right.order)
+          .map(({ item }) => item);
+  return appendCompactionChrome(merged, options?.compaction);
 }
 
 /** 折叠门槛：段内非 edit 工具数达到该值才收拢 */
@@ -402,46 +511,222 @@ const FOLD_MIN_TOOLS = 3;
 
 const SEARCH_TOOLS = new Set(['grep', 'find', 'glob', 'ls']);
 
-function classifyTool(name: string, stats: ToolGroupStats): void {
-  if (name === 'bash') stats.commands += 1;
-  else if (name === 'read') stats.reads += 1;
+function classifyTool(
+  name: string,
+  summary: string,
+  stats: ToolGroupStats,
+  compact: boolean
+): void {
+  if (name === 'read') stats.reads += 1;
   else if (SEARCH_TOOLS.has(name)) stats.searches += 1;
-  else stats.others += 1;
+  else if (name === 'bash') {
+    if (!compact || !isReadOnlyCommand(summary)) stats.commands += 1;
+    else if (READ_FILE_PROGRAMS.has(firstProgram(summary))) stats.reads += 1;
+    else stats.searches += 1;
+  } else stats.others += 1;
+}
+
+const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
+
+/** 只读 bash 白名单：段首程序在这里且无写副作用标志才算探索（env/xargs/tee 等能转执行或写文件的不收） */
+const READ_ONLY_PROGRAMS = new Set([
+  'ls',
+  'tree',
+  'pwd',
+  'cd',
+  'cat',
+  'bat',
+  'head',
+  'tail',
+  'wc',
+  'nl',
+  'tac',
+  'less',
+  'more',
+  'rg',
+  'grep',
+  'egrep',
+  'fgrep',
+  'ag',
+  'find',
+  'fd',
+  'fdfind',
+  'which',
+  'type',
+  'file',
+  'stat',
+  'du',
+  'df',
+  'sort',
+  'uniq',
+  'cut',
+  'tr',
+  'awk',
+  'sed',
+  'diff',
+  'jq',
+  'yq',
+  'echo',
+  'printf',
+  'basename',
+  'dirname',
+  'realpath',
+  'readlink',
+  'printenv',
+  'date',
+  'whoami',
+  'uname',
+  'column',
+  'true',
+  'test',
+  '[',
+  'git',
+]);
+const READ_FILE_PROGRAMS = new Set(['cat', 'bat', 'head', 'tail', 'less', 'more', 'nl', 'tac']);
+const GIT_READ_SUBCOMMANDS = new Set([
+  'status',
+  'log',
+  'diff',
+  'show',
+  'blame',
+  'grep',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'describe',
+  'shortlog',
+  'reflog',
+  'cat-file',
+  'name-rev',
+  'remote',
+  'config',
+  'branch',
+  'tag',
+]);
+/** 各程序里会写文件 / 转执行的参数，命中即非只读 */
+const WRITE_FLAGS: Record<string, RegExp> = {
+  sed: /^(-[a-zA-Z]*i|--in-place)|\/[a-zA-Z]*e[a-zA-Z]*['"]?$|^['"]?e\b/,
+  awk: /system\s*\(/,
+  yq: /^(-i|--inplace)$/,
+  sort: /^(-o|--output)/,
+  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fprint0|fls)$/,
+  git: /^--output/,
+};
+/** git 只读子命令里带这些参数就是写：branch -d / tag -a / config --unset / remote add … */
+const GIT_WRITE_ARGS: Record<string, RegExp> = {
+  branch: /^-(d|D|m|M|c|C|u|f|-delete|-move|-copy|-set-upstream-to|-unset-upstream|-force)/,
+  tag: /^-(a|s|d|f|m|F|-annotate|-sign|-delete|-force|-message)/,
+  config: /^(-e|--edit|--unset|--unset-all|--add|--replace-all|--rename-section|--remove-section)$/,
+  remote: /^(add|remove|rm|rename|set-url|set-head|set-branches|prune|update)$/,
+};
+
+function splitEnvPrefix(segment: string): { env: string[]; tokens: string[] } {
+  const tokens = segment.trim().split(/\s+/);
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
+  return { env: tokens.slice(0, i), tokens: tokens.slice(i) };
+}
+
+function firstProgram(segment: string): string {
+  const head = splitEnvPrefix(segment).tokens[0] ?? '';
+  return head.slice(head.lastIndexOf('/') + 1);
+}
+
+/**
+ * 判定一条 bash 命令是否纯只读（ls/rg/cat/git status …），用于精简模式把它当探索折进组。
+ * 只影响展示密度，不参与审批；策略保守：重定向、命令/进程替换、后台 &、写参数、
+ * 未知程序、GIT_* 环境前缀（GIT_EXTERNAL_DIFF 等会转执行）一律判非只读。
+ */
+function hasC0Control(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x1f && code !== 0x0a) return true;
+  }
+  return false;
+}
+
+export function isReadOnlyCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  // 命令替换 / 进程替换 / 反引号可藏任意命令；控制字符（\r 等）可拼接隐藏命令
+  if (/\$\(|<\(|`/.test(trimmed) || hasC0Control(trimmed)) return false;
+  // 去掉无害的 stderr 重定向后，剩余任何 > 都视为写文件
+  const withoutStderr = trimmed.replace(/2>&1|[12]?>\s*\/dev\/null/g, '');
+  if (withoutStderr.includes('>')) return false;
+  // 段分隔：| || && ; & 换行（单个 & 是后台执行，同样开新命令）
+  const segments = withoutStderr.split(/\|\|?|&&?|;|\n/);
+  for (const raw of segments) {
+    const segment = raw.trim();
+    if (!segment) continue;
+    const { env, tokens } = splitEnvPrefix(segment);
+    if (env.some((e) => e.startsWith('GIT_'))) return false;
+    const program = firstProgram(segment);
+    if (!READ_ONLY_PROGRAMS.has(program)) return false;
+    const writeFlag = WRITE_FLAGS[program];
+    if (writeFlag && tokens.slice(1).some((t) => writeFlag.test(t))) return false;
+    if (program === 'git') {
+      const sub = tokens.find((t, i) => i > 0 && !t.startsWith('-'));
+      if (!sub || !GIT_READ_SUBCOMMANDS.has(sub)) return false;
+      const args = tokens.slice(tokens.indexOf(sub) + 1);
+      const writeArg = GIT_WRITE_ARGS[sub];
+      if (writeArg && args.some((t) => writeArg.test(t))) return false;
+      // git config 只读形态：--get/--list/-l；裸 `git config a b` 是写
+      if (
+        sub === 'config' &&
+        !args.some((t) => /^(--get|--get-all|--list|-l|--get-regexp)$/.test(t))
+      )
+        return false;
+    }
+  }
+  return true;
+}
+
+/** 精简模式下按「探索」处理的工具行：只读工具，或只读的 bash 命令 */
+export function isReadOnlyTool(item: { name: string; summary: string }): boolean {
+  return (
+    READ_ONLY_TOOLS.has(item.name) || (item.name === 'bash' && isReadOnlyCommand(item.summary))
+  );
 }
 
 /**
  * 工具行分组折叠（折中方案）：
  * - 段 = 连续的 tool/thinking 行（text/user/error 打断）；thinking 收进段内，门槛只数 tool。
  * - 带 diff 的 edit 行不进组，紧跟组头之后平铺（改动是核心产物，不折）。
- * - running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
+ * - 默认：running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
+ * - compact（对齐 Cursor 的 Explored）：段只收只读工具（read/grep/find/ls/glob），
+ *   bash 等其它工具打断段并平铺；live 也折，running 行钉在组外，组头标 exploring。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
  * 纯函数。
  */
 export function foldTimeline(
   items: TimelineItem[],
   running: boolean,
-  expandedKeys: ReadonlySet<string>
+  expandedKeys: ReadonlySet<string>,
+  options: { compact?: boolean } = {}
 ): TimelineItem[] {
+  const compact = options.compact === true;
   const lastUserIndex = items.findLastIndex((item) => item.kind === 'user');
+  const inSegment = (s: TimelineItem): boolean =>
+    s.kind === 'thinking' || (s.kind === 'tool' && (!compact || isReadOnlyTool(s)));
   const result: TimelineItem[] = [];
   let i = 0;
   while (i < items.length) {
     const item = items[i];
-    if (item.kind !== 'tool' && item.kind !== 'thinking') {
+    if (!inSegment(item)) {
       result.push(item);
       i += 1;
       continue;
     }
     // 收集连续段
     let end = i;
-    while (end < items.length && (items[end].kind === 'tool' || items[end].kind === 'thinking')) {
-      end += 1;
-    }
+    while (end < items.length && inSegment(items[end])) end += 1;
     const segment = items.slice(i, end);
-    const liveSegment = running && lastUserIndex >= 0 && i > lastUserIndex;
-    // 钉住的行不进组：edit 的 diff、write 的内容与 todo 清单都是核心产物，不折进黑盒
+    const liveSegment = !compact && running && lastUserIndex >= 0 && i > lastUserIndex;
+    // 钉住的行不进组：edit 的 diff、write 的内容、todo 清单是核心产物，
+    // running 行是「此刻在跑什么」，都不折进黑盒
     const pinned = (s: TimelineItem): boolean =>
-      s.kind === 'tool' && (s.edits !== null || !!s.writeContent || s.name === 'todo');
+      s.kind === 'tool' &&
+      (s.edits !== null || !!s.writeContent || s.name === 'todo' || s.state === 'running');
     const editRows = segment.filter(pinned);
     const groupRows = segment.filter((s) => !pinned(s));
     const toolCount = groupRows.filter((s) => s.kind === 'tool').length;
@@ -450,7 +735,7 @@ export function foldTimeline(
     } else {
       const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
       for (const row of groupRows) {
-        if (row.kind === 'tool') classifyTool(row.name, stats);
+        if (row.kind === 'tool') classifyTool(row.name, row.summary, stats, compact);
       }
       const key = `group-${segment[0].key}`;
       const expanded = expandedKeys.has(key);
@@ -460,6 +745,7 @@ export function foldTimeline(
         expanded,
         count: toolCount,
         stats,
+        exploring: compact && editRows.some((s) => s.kind === 'tool' && s.state === 'running'),
         children: groupRows,
       });
       // 展开：原始顺序全量平铺；收拢：仅 edit 行（diff）跟在组头后

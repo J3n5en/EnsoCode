@@ -26,7 +26,7 @@ import {
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
-import { app, BrowserWindow, ipcMain, webContents } from 'electron';
+import { app, ipcMain, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
@@ -35,8 +35,10 @@ import {
   abortSession,
   agentTypeRegistrySnapshot,
   appendSessionCustomEntry,
+  compactSession,
   dismissChildSession,
   dismissCoworkerSession,
+  forkSession,
   promptChildSession,
   promptSession,
   releaseParentSession,
@@ -59,6 +61,7 @@ import {
   spawnSession,
   steerSession,
   stopBackgroundTask,
+  summarizeConversationTitle,
 } from '../services/agentHost';
 import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
@@ -73,11 +76,12 @@ import {
 } from '../services/sessionImport';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
-import { sendToAllWindows, sendToWindow } from '../windows/createAppWindow';
+import { titleModelCandidates } from '../services/titleSummary';
+import { sendToAllWindows } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings } from './settings';
-import { sessionWorktree } from './worktree';
+import { sessionWorktree, shareSessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
@@ -349,6 +353,26 @@ export function registerAgentHandlers(): void {
       );
       sourceBindings?.invalidateBindingsForConversation(workerEvent.identity.sessionId);
     }
+    if (workerEvent.type === 'fork-done') {
+      const target = sourceAuthority?.conversation(workerEvent.targetConversationId);
+      if (workerEvent.sessionFile && target) {
+        sourceAuthority?.markReady(
+          workerEvent.targetConversationId,
+          workerEvent.sessionFile,
+          target.selection ?? { providerId: 'unknown', modelId: 'unknown' },
+          workerEvent.entryId
+            ? { conversationId: workerEvent.identity.sessionId, entryId: workerEvent.entryId }
+            : target.forkedFrom
+        );
+        shareSessionWorktree(workerEvent.identity.sessionId, workerEvent.targetConversationId);
+      } else if (target) {
+        sourceAuthority?.removeConversation({
+          requestId: randomUUID(),
+          conversationId: target.conversationId,
+          version: target.version,
+        });
+      }
+    }
     if (workerEvent.type === 'capability-invoke') {
       handleCapabilityInvoke(workerEvent);
       return;
@@ -455,6 +479,53 @@ export function registerAgentHandlers(): void {
     }
     return readChildHistory(conversationId);
   });
+
+  // 标题总结：渲染层只传 conversationId + 首条消息文本；模型与凭证由 Main 从设置自读（回退链：
+  // 独立标题模型 → 全局默认）。失败路径全部静默：保留截断标题即兑底，不影响发消息。
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SUMMARIZE_TITLE,
+    async (_event, request: unknown): Promise<AgentActionResult> => {
+      const record = asRecord(request);
+      const conversationId = record?.conversationId;
+      const text = record?.text;
+      if (!isNonEmptyString(conversationId) || !isNonEmptyString(text)) {
+        return { ok: false, error: 'invalid title summary request' };
+      }
+      // 会话模型是回退链末级：只收 id，凭证照样由 Main 补全；形状坏则当作未传
+      const sessionModelRecord = asRecord(record?.sessionModel);
+      const sessionModel =
+        isNonEmptyString(sessionModelRecord?.providerId) &&
+        isNonEmptyString(sessionModelRecord?.modelId)
+          ? {
+              providerId: sessionModelRecord.providerId,
+              modelId: sessionModelRecord.modelId,
+            }
+          : undefined;
+      const state = (
+        readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
+      )?.state;
+      // 开关以 Main 自读的设置为准，不采信渲染层的调用时机
+      if (state?.titleSummaryEnabled !== true) {
+        return { ok: false, error: 'title summary disabled' };
+      }
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      for (const candidate of titleModelCandidates(state, sessionModel)) {
+        const resolved = resolveModelSelection(
+          candidate.providerId,
+          candidate.modelId,
+          credentialKeys
+        );
+        if (!resolved.ok || !resolved.selection) continue;
+        return summarizeConversationTitle(conversationId, text, resolved.selection.config);
+      }
+      return { ok: false, error: 'no usable title model' };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE, (event, request: unknown) => {
     const parsed = parseParentSourceBindingRequest(request);
@@ -721,6 +792,21 @@ export function registerAgentHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.AGENT_COMPACT,
+    (_event, sessionId: unknown, instructions: unknown): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      if (
+        !identity ||
+        (instructions !== undefined &&
+          (typeof instructions !== 'string' || instructions.trim().length === 0))
+      ) {
+        return { ok: false, error: 'invalid compact request or stale generation' };
+      }
+      return compactSession(identity, instructions as string | undefined);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.AGENT_REWIND,
     (
       _event,
@@ -738,6 +824,37 @@ export function registerAgentHandlers(): void {
         return { ok: false, error: 'invalid rewind or stale generation' };
       }
       return rewindSession(identity, userIndexFromEnd, restoreFiles as boolean | undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_FORK,
+    (
+      _event,
+      sessionId: unknown,
+      targetConversationId: unknown,
+      anchor: unknown
+    ): AgentActionResult => {
+      const identity = exactIdentity(sessionId);
+      const record = asRecord(anchor);
+      const entryId = typeof record?.entryId === 'string' ? record.entryId : undefined;
+      const userIndexFromEnd =
+        typeof record?.userIndexFromEnd === 'number' ? record.userIndexFromEnd : undefined;
+      if (
+        !identity ||
+        typeof targetConversationId !== 'string' ||
+        !/^[0-9a-f-]{36}$/i.test(targetConversationId) ||
+        (entryId
+          ? userIndexFromEnd !== undefined
+          : userIndexFromEnd === undefined || userIndexFromEnd < 0)
+      ) {
+        return { ok: false, error: 'invalid fork or stale generation' };
+      }
+      return forkSession(
+        identity,
+        targetConversationId,
+        entryId ? { entryId } : { userIndexFromEnd: userIndexFromEnd as number }
+      );
     }
   );
 

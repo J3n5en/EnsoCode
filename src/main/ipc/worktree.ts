@@ -36,6 +36,10 @@ export function sessionWorktree(conversationId: string): SessionWorktree | undef
   return ensureRegistry().get(conversationId);
 }
 
+export function shareSessionWorktree(fromConversationId: string, toConversationId: string): void {
+  ensureRegistry().share(fromConversationId, toConversationId);
+}
+
 export type WorktreeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 const fail = (error: unknown): { ok: false; error: string } => ({

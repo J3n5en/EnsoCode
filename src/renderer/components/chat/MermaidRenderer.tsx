@@ -1,5 +1,6 @@
 import { Maximize2, Minimize2, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -91,6 +92,7 @@ export function MermaidRenderer({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  useOverlayGuard(isFullscreen);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
   const svgContentRef = useRef<HTMLDivElement>(null);
@@ -207,10 +209,9 @@ export function MermaidRenderer({
   );
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
-  const handleFullscreenContentClick = useCallback(
-    (e: React.MouseEvent) => e.stopPropagation(),
-    []
-  );
+  const handleFullscreenContentClick = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  }, []);
   const handleFullscreenOverlayClick = useCallback(() => {
     if (!hasDraggedRef.current) handleExitFullscreen();
   }, [handleExitFullscreen]);
@@ -364,11 +365,16 @@ export function MermaidRenderer({
         <div
           className="fixed inset-0 flex select-none flex-col bg-background"
           style={{ zIndex: Z_INDEX.TOAST }}
+          data-enso-float=""
           onClick={handleFullscreenOverlayClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') handleExitFullscreen();
+          }}
         >
           <div
             className="flex shrink-0 items-center justify-between border-b border-border bg-muted/30 px-4 py-2"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             <span className="text-sm font-medium text-muted-foreground">
               {t('Mermaid preview')}
@@ -396,6 +402,7 @@ export function MermaidRenderer({
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
               onClick={handleFullscreenContentClick}
+              onKeyDown={handleFullscreenContentClick}
             >
               <div
                 className="origin-center transition-transform duration-100 ease-out"
