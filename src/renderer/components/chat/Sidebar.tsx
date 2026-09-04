@@ -572,8 +572,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
           )}
           {visiblePinnedIds.length > 0 && (
             <PinnedDropZone data-slot="pinned-section">
-              <div className="flex items-center gap-1.5 px-2 py-2">
-                <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="flex items-center gap-1 px-2 py-2">
+                {/* 与项目行同宽的 chevron 占位,让标题与项目名对齐 */}
+                <span className="h-5 w-5 shrink-0" />
+                <Pin className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="text-sm font-medium">{t('Pinned')}</span>
               </div>
               <div className="flex flex-col gap-y-0.5">
@@ -820,7 +822,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                                   </ContextMenu>
                                 )}
                               {visibleConversations.length === 0 && (
-                                <p className="py-1.5 pl-9 text-xs text-muted-foreground">
+                                <p className="py-1.5 pl-10 text-xs text-muted-foreground">
                                   {t('No conversations yet')}
                                 </p>
                               )}
@@ -1387,8 +1389,11 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       className={cn(
-        'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-4 text-sm transition-colors',
-        active ? 'bg-muted' : 'hover:bg-muted/50'
+        // 会话行:标题对齐到项目名之下(chevron 槽 + 图标宽度),并用弱色与加粗的项目名区分
+        'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-10 text-sm transition-colors',
+        active
+          ? 'bg-muted text-foreground'
+          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
       )}
       onClick={() => {
         if (!renaming) onSelect(id);
