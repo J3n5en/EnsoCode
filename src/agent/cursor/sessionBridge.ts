@@ -1,4 +1,5 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
+import { emptyUsage } from '@shared/providers/piProviderTypes';
 import {
   type CursorBridgeTool,
   type CursorExecDispatchResult,
@@ -302,6 +303,7 @@ function recordToolCallOnAssistant(session: AgentSession, event: SessionEvent): 
   list?.push({
     role: 'assistant',
     content: [toolCall],
+    usage: emptyUsage(),
     timestamp: Date.now(),
   });
 }

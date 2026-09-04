@@ -58,6 +58,7 @@ import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
+import { ensureAssistantUsage } from './assistantUsage';
 import {
   BackgroundTaskManager,
   createTaskTools,
@@ -736,6 +737,7 @@ export class SessionSupervisor {
           agent.state.messages = messages.slice(0, -1);
         }
         if (agent.state.messages.at(-1)?.role === 'assistant') return;
+        ensureAssistantUsage(agent.state.messages as unknown[]);
         managed.currentTurnId = randomUUID();
         void agent.continue().catch((error) => {
           this.failTurn(managed, toErrorMessage(error));
@@ -755,6 +757,7 @@ export class SessionSupervisor {
           command.model.modelId
         );
         await managed.session.setModel(next);
+        ensureAssistantUsage(managed.session.messages as unknown[]);
         managed.modelId = command.model.modelId;
         // 必须回报：Main 的 agentSessionIndex 只认 parent-ready 与本事件，
         // 不回报就会让后续派发的 selection 校验永远对不上（issue #30）。
@@ -1444,6 +1447,7 @@ export class SessionSupervisor {
         : SessionManager.create(cwd, this.options.sessionDir),
     });
     if (isCursorModel(piModel)) attachCursorBridgeToSession(session, customTools, cwd);
+    else ensureAssistantUsage(session.messages as unknown[]);
     console.log(
       `[spawn] ${sessionId.slice(0, 8)} total ${Date.now() - spawnStart}ms` +
         ` (tools ${toolsMs}ms, mcp ${mcpTools.length} tools, cwd ${cwd})`
@@ -2371,6 +2375,7 @@ export class SessionSupervisor {
       return;
     }
     managed.currentTurnId = randomUUID();
+    ensureAssistantUsage(managed.session.messages as unknown[]);
     void managed.session
       .prompt(consumeRole(managed, text), images ? { images } : undefined)
       .catch((error) => {
