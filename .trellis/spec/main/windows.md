@@ -31,6 +31,7 @@ frame: isMac,
 ```
 
 macOS 保留系统红绿灯，Windows/Linux 由渲染层自绘（`components/app/TitleBar.tsx`）。
+最大化后中间按钮改成还原图标（重叠方块），不要一直画单个方块。
 
 Windows 透明主窗口无框后系统不再画圆角和外框。主窗口渲染层用
 `useWindowsWindowChrome` 给 `html` 挂 `enso-win`，`globals.css` 给 `#root`
