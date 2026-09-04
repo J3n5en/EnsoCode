@@ -623,12 +623,14 @@ export function Composer({
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">{toolbar}</div>
-          {effectiveBusy ? (
+          {/* 生成中且输入为空才显示停止；有草稿则保持发送，方便手机点按钮入队 */}
+          {effectiveBusy && !hasContent ? (
             <Button
               variant="outline"
               size="icon"
               className="h-7 w-7 shrink-0 rounded-lg"
               onClick={onAbort}
+              aria-label={t('Stop')}
             >
               <CircleStop className="h-4 w-4" />
             </Button>

@@ -765,6 +765,9 @@ describe('custom entry and snapshot projection', () => {
     };
     expect(parseSafeJournalProjection(safeJournal)).toEqual(safeJournal);
     expect(parseSessionSnapshot(snapshot)).toEqual(snapshot);
+    // 压缩状态要能过白名单：漏了整帧 snapshot 会被判 null 静默丢弃，表现是手机全白
+    const compacted = { ...snapshot, compaction: 'running', compactionNoticeAt: 12 };
+    expect(parseSessionSnapshot(compacted)).toEqual(compacted);
     expect(
       parseSafeJournalRecord({
         type: 'enso-operation',
@@ -866,5 +869,25 @@ describe('browser-invoke / browser-result', () => {
     expect(parseAgentCommand({ ...failed, ok: true })).toBeNull();
     expect(parseAgentCommand({ ...result, requestId: '' })).toBeNull();
     expect(parseAgentCommand({ ...result, extra: 1 })).toBeNull();
+  });
+});
+
+describe('tool-output 事件跨进程边界', () => {
+  const event = {
+    type: 'tool-output',
+    identity: { sessionId: 's1', generation: '11111111-1111-4111-8111-111111111111' },
+    seq: 3,
+    toolCallId: 'call-1',
+    output: 'step 1\nstep 2',
+  };
+
+  it('合法事件原样通过（否则 worker→main 边界会静默丢弃）', () => {
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+  });
+
+  it('脏输入拒绝', () => {
+    expect(parseAgentWorkerEvent({ ...event, toolCallId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, output: 42 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, identity: undefined })).toBeNull();
   });
 });

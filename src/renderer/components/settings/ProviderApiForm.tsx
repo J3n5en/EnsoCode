@@ -38,6 +38,7 @@ export interface ProviderApiFormValue {
 interface ProviderApiFormProps {
   initialValue: ProviderApiFormValue;
   oauth: boolean;
+  oauthAccountKey?: string;
   onCancel: () => void;
   onSave: (value: ProviderApiFormValue) => void;
 }
@@ -45,7 +46,13 @@ interface ProviderApiFormProps {
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
 
 /** 编辑与统一向导共用的 API/模型表单，Fetch/Test 只有这一份实现。 */
-export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: ProviderApiFormProps) {
+export function ProviderApiForm({
+  initialValue,
+  oauth,
+  oauthAccountKey,
+  onCancel,
+  onSave,
+}: ProviderApiFormProps) {
   const { t } = useI18n();
   const [name, setName] = React.useState(initialValue.name);
   const [api, setApi] = React.useState(initialValue.api);
@@ -66,12 +73,13 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
 
   const modelIdKey = models.map((model) => model.id).join('\0');
   React.useEffect(() => {
-    if (oauth || !modelIdKey) return;
+    if (!oauthAccountKey && (oauth || !modelIdKey)) return;
     const queryMeta = window.electronAPI.providers.modelMeta;
     if (typeof queryMeta !== 'function') return;
-    const modelIds = modelIdKey.split('\0');
+    const modelIds = modelIdKey ? modelIdKey.split('\0') : [];
+    if (!oauthAccountKey && modelIds.length === 0) return;
     let cancelled = false;
-    void queryMeta({ modelIds })
+    void queryMeta(oauthAccountKey ? { oauthAccountKey, modelIds } : { modelIds })
       .then((result) => {
         if (cancelled || !result.ok) return;
         const next: Record<string, ModelMeta> = {};
@@ -84,7 +92,7 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
     return () => {
       cancelled = true;
     };
-  }, [oauth, modelIdKey]);
+  }, [oauth, oauthAccountKey, modelIdKey]);
 
   const visibleModels = React.useMemo(() => {
     const keyword = filter.trim().toLowerCase();
@@ -106,6 +114,32 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
   const handleFetchModels = async () => {
     setBusy('fetch');
     setStatus(null);
+    if (oauthAccountKey) {
+      const result = await window.electronAPI.providers.modelMeta({
+        oauthAccountKey,
+        modelIds: [],
+      });
+      setBusy(null);
+      if (!result.ok) {
+        const text = result.error ?? 'Failed';
+        setStatus({ ok: false, text });
+        setErrorDetail(text);
+        return;
+      }
+      const fetched = result.models
+        .filter((meta) => meta.source !== 'unknown')
+        .map((meta) => ({
+          id: meta.modelId,
+          ...(meta.contextWindow !== undefined ? { contextWindow: meta.contextWindow } : {}),
+          ...(meta.maxTokens !== undefined ? { maxTokens: meta.maxTokens } : {}),
+        }));
+      const nextMeta: Record<string, ModelMeta> = {};
+      for (const meta of result.models) nextMeta[meta.modelId] = meta;
+      setCatalogMeta((current) => ({ ...current, ...nextMeta }));
+      setModels((current) => mergeFetchedModels(current, fetched));
+      setStatus({ ok: true, text: t('Fetched {{count}} models', { count: fetched.length }) });
+      return;
+    }
     const result = await window.electronAPI.providers.listModels(apiConfig);
     setBusy(null);
     if (!result.ok) {
@@ -214,7 +248,7 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
                 </span>
               )}
             </FieldLabel>
-            {!oauth && (
+            {(!oauth || oauthAccountKey) && (
               <Button
                 type="button"
                 variant="ghost"

@@ -619,6 +619,10 @@ export const zhTranslations: Record<string, string> = {
   'Run this session on its own git worktree': '让这个会话在独立的 git worktree 里运行',
   'Move to worktree': '切到隔离 worktree',
   'Failed to move to worktree': '切到隔离 worktree 失败',
+  'Main working tree has uncommitted changes': '主工作树有未提交改动',
+  'The new worktree branches off HEAD, so those changes stay in the main working tree and will not follow this session.':
+    '新 worktree 从 HEAD 切出，这些改动会留在主工作树，不会跟随本会话。',
+  'Move anyway': '仍然切换',
   'Clean up worktree': '清理 worktree',
   'Clean up worktree?': '清理 worktree？',
   'Failed to clean up worktree': '清理 worktree 失败',
@@ -676,6 +680,8 @@ export const zhTranslations: Record<string, string> = {
   'Context compacted ({{tokens}} tokens before)': '上下文已压缩（压缩前 {{tokens}} tokens）',
   'Messages above are no longer in the model context; only this summary is.':
     '以上消息已不在模型上下文中，模型只看到这份摘要。',
+  'Latest compaction summary — expand to read what the model kept.':
+    '最近一次压缩摘要，点开可查看模型保留的内容。',
   '(summary unavailable)': '(摘要不可用)',
   Note: '注意',
   Tip: '提示',
@@ -739,6 +745,7 @@ export const zhTranslations: Record<string, string> = {
   Toolset: '工具集',
   'All tools (bash/edit/write)': '全部工具(bash/edit/write)',
   'Read-only (read/grep/find/ls)': '只读(read/grep/find/ls)',
+  Stop: '停止',
   'Stop task': '停止任务',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',

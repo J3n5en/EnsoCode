@@ -66,7 +66,7 @@ import {
   type SessionProjection,
 } from './reducer';
 import { isPairViewed, nextUnread } from './unread';
-import { workspaceFallbackNote, workspaceMigratedNote } from './worktree';
+import { DIRTY_MAIN_TREE, workspaceFallbackNote, workspaceMigratedNote } from './worktree';
 
 const lastViewedAt: Record<string, number> = {};
 let evictTimer: ReturnType<typeof setTimeout> | null = null;
@@ -197,8 +197,12 @@ interface SessionsState {
     options?: { forkedFrom?: { conversationId: string; entryId: string } }
   ): Promise<string | null>;
   /** 会话切到隔离 worktree（composer 选择器/右键菜单入口）。
-   *  fresh（未开聊）直接绑定；已有内容走完整迁移（主树干净检查 + release + 迁移提醒）。返回错误或 null */
-  moveConversationToWorktree(id: string): Promise<string | null>;
+   *  fresh（未开聊）直接绑定；已有内容走完整迁移（主树干净检查 + release + 迁移提醒）。
+   *  主树脏时返回 DIRTY_MAIN_TREE 哨兵等 UI 确认，confirm 后传 allowDirtyMainTree 重试。返回错误或 null */
+  moveConversationToWorktree(
+    id: string,
+    options?: { allowDirtyMainTree?: boolean }
+  ): Promise<string | null>;
   /** 清理 worktree 保留会话：cwd 回退主工作树 + 注入回退提醒。拦截确认在 UI 层 */
   cleanupWorktree(id: string): Promise<string | null>;
   /** resume 发现 worktree 丢失后：从记录分支/基准重建 */
@@ -1089,7 +1093,7 @@ export const useSessionsStore = create<SessionsState>()(
         pendingAgentPrefill: undefined,
         worktreeStatuses: {},
 
-        async moveConversationToWorktree(id) {
+        async moveConversationToWorktree(id, options) {
           const conversation = get().conversations[id];
           if (!conversation) return 'conversation not found';
           if (conversation.worktree) return 'conversation is already isolated';
@@ -1104,12 +1108,12 @@ export const useSessionsStore = create<SessionsState>()(
             !conversation.sessionFile &&
             conversation.messages.length === 0;
           try {
-            if (!fresh) {
+            // 主树脏不是硬错：worktree 从 HEAD 切，脏改动留在主树不会丢；
+            // 仅当这些改动属于本会话时才可能「落下」，无法可靠推断，交给用户二次确认
+            if (!fresh && !options?.allowDirtyMainTree) {
               const clean = await window.electronAPI.worktree.repoClean(conversation.projectId);
               if (!clean.ok) return clean.error;
-              if (!clean.value) {
-                return 'main working tree has uncommitted changes — commit or stash them first';
-              }
+              if (!clean.value) return DIRTY_MAIN_TREE;
             }
             // 运行中/已挂载的 worker 会话：cwd 在 spawn 时就固定了，必须释放后携新 cwd resume。
             // 重读 started：守卫立起前可能有 resume 溠进来把会话复活了

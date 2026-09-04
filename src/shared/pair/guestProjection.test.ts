@@ -329,6 +329,22 @@ describe('compaction 投影', () => {
     expect(out[0].view.compactionNoticeAt).toBe(5);
   });
 
+  it('快照带了压缩状态时以快照为准（手机刷新后重建投影）', () => {
+    const out = applyGuestSnapshot(new Map(), {
+      sessions: [
+        {
+          sessionId: 's1',
+          baseIndex: 0,
+          messages: [msg('a')],
+          compaction: 'running',
+          compactionNoticeAt: 7,
+        },
+      ],
+    });
+    expect(out[0].view.compaction).toBe('running');
+    expect(out[0].view.compactionNoticeAt).toBe(7);
+  });
+
   it('绝对 index 锚点换算成尾窗数组下标（手机只持有尾部消息）', () => {
     // 尾窗只有绝对 index 20..24，锚点 23 → 数组下标 3
     expect(localCompactionNoticeIndex([20, 21, 22, 23, 24], 23)).toBe(3);

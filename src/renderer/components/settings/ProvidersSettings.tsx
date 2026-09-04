@@ -171,10 +171,10 @@ export function ProvidersSettings() {
                     return (
                       <React.Fragment key={provider.id}>
                         <div
-                          className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+                          className="group flex items-start justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
                           data-settings-row={`providers.${provider.id}`}
                         >
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-0 flex-1 overflow-hidden">
                             <div className="flex min-w-0 items-center gap-2">
                               {isSubscription ? (
                                 <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -223,7 +223,7 @@ export function ProvidersSettings() {
                               <SubscriptionUsage accountKey={provider.oauthAccountKey} />
                             )}
                           </div>
-                          <div className="flex shrink-0 items-center gap-1">
+                          <div className="flex shrink-0 items-center gap-1 pt-0.5">
                             <Switch
                               checked={provider.enabled}
                               onCheckedChange={(enabled) =>

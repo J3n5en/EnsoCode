@@ -8,7 +8,12 @@ import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as SettingsModule from '../settings';
 import type * as SessionsModule from './index';
-import { workspaceFallbackNote, workspaceMigratedNote, worktreeHasPendingWork } from './worktree';
+import {
+  DIRTY_MAIN_TREE,
+  workspaceFallbackNote,
+  workspaceMigratedNote,
+  worktreeHasPendingWork,
+} from './worktree';
 
 let sourceProjection: SourceAuthorityProjection = { projects: [], conversations: [] };
 
@@ -233,7 +238,7 @@ async function seedLocalConversation(): Promise<string> {
 }
 
 describe('moveConversationToWorktree（非 fresh：已有对话内容）', () => {
-  it('主工作树脏 → 拒绝并返回错误', async () => {
+  it('主工作树脏 → 返回待确认哨兵，不建 worktree', async () => {
     const id = await seedLocalConversation();
     // 有 sessionFile = 非 fresh，走完整迁移语义（脏检查 + 提醒）
     sessions.useSessionsStore.setState((state) => ({
@@ -244,8 +249,27 @@ describe('moveConversationToWorktree（非 fresh：已有对话内容）', () =>
     }));
     wtRepoClean.mockResolvedValueOnce({ ok: true, value: false } as never);
     const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
-    expect(error).toBeTruthy();
+    expect(error).toBe(DIRTY_MAIN_TREE);
+    expect(wtCreate).not.toHaveBeenCalled();
     expect(sessions.useSessionsStore.getState().conversations[id].worktree).toBeUndefined();
+  });
+
+  it('主工作树脏 + 用户已确认 → 照常从 HEAD 建 worktree（脏改动留在主树）', async () => {
+    const id = await seedLocalConversation();
+    sessions.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        [id]: { ...state.conversations[id], sessionFile: '/tmp/s.jsonl' },
+      },
+    }));
+    const error = await sessions.useSessionsStore
+      .getState()
+      .moveConversationToWorktree(id, { allowDirtyMainTree: true });
+    expect(error).toBeNull();
+    expect(wtRepoClean).not.toHaveBeenCalled(); // 已确认就不必再问
+    const conversation = sessions.useSessionsStore.getState().conversations[id];
+    expect(conversation.worktree?.path).toBe(`/managed/${id}`);
+    expect(conversation.pendingWorkspaceNote).toContain(`/managed/${id}`);
   });
 
   it('干净 → 建 worktree、写迁移提醒；运行中的会话先 release', async () => {

@@ -15,6 +15,11 @@
   **不自动重启**——重启牵出 jsonl 恢复，是独立一刀。
 - pi 的全局目录与会话目录经 `ENSO_AGENT_DATA_DIR` 指到 `userData/agent/`，
   不碰用户的 `~/.pi`。
+- **代理要在 worker 里单独装 dispatcher**：Node `fetch` 不读 `HTTP_PROXY` env，光把 env
+  传进 fork 没用。两条腿缺一不可：worker 入口先 `bootstrapWorkerProxyFromEnv()` 按继承 env
+  自举；main 在 `spawn` 后按 `process.env` 补发一次 `set-proxy-env`（fork 前 `ProxyConfig`
+  下发的命令因 worker 不存在被丢，worker 重启同理）。`sendAgentCommand` 不检查 `workerReady`，
+  凡是「worker 必须知道的状态」都应在 `spawn` 回调里重推，而不是只在状态变化时下发。
 
 worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared 平级，
 只准 import `@shared` 与 pi sdk），协议类型在 `src/shared/types/agent.ts`。

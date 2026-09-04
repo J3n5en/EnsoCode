@@ -979,3 +979,45 @@ describe('compaction 摘要行', () => {
     expect(timeline.map((item) => item.kind)).toEqual(['user']);
   });
 });
+
+describe('buildTimeline 运行中工具的增量输出', () => {
+  const runningBash: ProjectedMessage[] = [
+    user('跑测试'),
+    {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'pnpm test' } }],
+    },
+  ];
+
+  it('running 工具用 toolOutputs 的增量快照填充 output', () => {
+    const timeline = buildTimeline(runningBash, true, [], undefined, {
+      toolOutputs: { t1: 'PASS a\nPASS b' },
+    });
+    expect(timeline[1]).toMatchObject({ kind: 'tool', state: 'running', output: 'PASS a\nPASS b' });
+  });
+
+  it('无增量时 running 工具 output 仍为 null（行不可展开）', () => {
+    const timeline = buildTimeline(runningBash, true);
+    expect(timeline[1]).toMatchObject({ kind: 'tool', state: 'running', output: null });
+  });
+
+  it('真实 toolResult 覆盖残留的增量快照', () => {
+    const timeline = buildTimeline(
+      [
+        ...runningBash,
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'bash',
+          isError: false,
+          content: [{ type: 'text', text: 'final output' }],
+        },
+      ],
+      true,
+      [],
+      undefined,
+      { toolOutputs: { t1: 'PASS a' } }
+    );
+    expect(timeline[1]).toMatchObject({ kind: 'tool', state: 'ok', output: 'final output' });
+  });
+});

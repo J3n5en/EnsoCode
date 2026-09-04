@@ -343,9 +343,11 @@ function SubmenuUsage({ accountKey }: { accountKey: string }) {
   return (
     <div className="-mx-1 -mt-1 mb-1 space-y-1 border-b px-3 py-2">
       {info.windows.map((windowInfo) => (
-        <div key={windowInfo.label} className="flex items-center gap-2 text-[10px]">
-          <span className="w-8 shrink-0 truncate text-muted-foreground">{windowInfo.label}</span>
-          <div className="h-1 min-w-12 flex-1 overflow-hidden rounded-full bg-muted">
+        <div key={windowInfo.label} className="flex min-w-0 items-center gap-2 text-[10px]">
+          <span className="w-8 shrink-0 truncate text-muted-foreground" title={windowInfo.label}>
+            {windowInfo.label}
+          </span>
+          <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-primary/70"
               style={{ width: `${Math.max(0, Math.min(100, windowInfo.usedPercent))}%` }}
@@ -355,7 +357,7 @@ function SubmenuUsage({ accountKey }: { accountKey: string }) {
             {Math.round(windowInfo.usedPercent)}%
           </span>
           {windowInfo.resetsAt !== undefined && (
-            <span className="shrink-0 text-muted-foreground/60">
+            <span className="min-w-0 truncate text-muted-foreground/60">
               {t('Resets {{time}}', {
                 time: new Date(windowInfo.resetsAt).toLocaleString([], {
                   month: 'short',

@@ -653,6 +653,10 @@ export interface SessionSnapshot {
   child?: ChildConversationMetadata;
   customEntries?: AgentSessionCustomEntry[];
   safeJournal?: SafeJournalProjection;
+  /** 压缩进度：重连/刷新后重建投影用（compaction 是瞬时事件，不重放） */
+  compaction?: 'queued' | 'running';
+  /** 压完提示的锚点，**绝对消息 index** 口径（压完那刻 messages.length），不随 baseIndex 平移 */
+  compactionNoticeAt?: number;
 }
 
 /** 会话可用的斜杠命令（pi 的 skills 与 prompt templates），name 含 / 前缀 */
@@ -778,6 +782,14 @@ export type AgentWorkerEvent =
       maxAttempts: number;
       delayMs: number;
       error: string;
+    }
+  /** 工具执行中的输出快照（pi tool_execution_update 节流下发）：工具行运行中即可展开查看 */
+  | {
+      type: 'tool-output';
+      identity: SessionIdentity;
+      seq: number;
+      toolCallId: string;
+      output: string;
     }
   | { type: 'messages-truncated'; identity: SessionIdentity; seq: number; length: number }
   | {
@@ -1525,6 +1537,8 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
       'safeJournal',
       'child',
       'customEntries',
+      'compaction',
+      'compactionNoticeAt',
     ]) ||
     !parseAnySessionIdentity(value.identity) ||
     (value.status !== 'idle' && value.status !== 'running' && value.status !== 'failed') ||
@@ -1966,6 +1980,10 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'goal-signal':
       return (value.kind === 'complete' || value.kind === 'blocked' || value.kind === 'wait') &&
         typeof value.note === 'string'
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'tool-output':
+      return isNonEmptyString(value.toolCallId) && typeof value.output === 'string'
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'task-started':

@@ -175,6 +175,13 @@ interface ManagedSession {
   pendingTaskReminders: string[];
   /** 忙碌时收到的手动压缩请求：本轮收束后自动执行（用户选择「排队」而非打断） */
   pendingCompact?: { instructions?: string };
+  /**
+   * 压缩进度与压完锚点，随快照下发。compaction 是瞬时事件且不重放，
+   * 不存在这里的话 guest（手机刷新）重建投影时拿不到，压完提示会丢。
+   */
+  compaction?: 'queued' | 'running';
+  /** 绝对消息 index 口径：压完那刻 messages.length（须在 reconcileMessages 之后取） */
+  compactionNoticeAt?: number;
   subagents: Map<string, SubagentInfo>;
   factory?: SessionFactory;
   parentId?: string;
@@ -851,6 +858,7 @@ export class SessionSupervisor {
           managed.pendingCompact = command.instructions
             ? { instructions: command.instructions }
             : {};
+          managed.compaction = 'queued';
           this.options.emit({
             type: 'compaction',
             identity: managed.identity,
@@ -2109,6 +2117,29 @@ export class SessionSupervisor {
           managed.toolStartAt.set(event.toolCallId, Date.now());
         }
         return;
+      case 'tool_execution_update': {
+        // pi 已按 BASH_UPDATE_THROTTLE_MS 节流下发全量快照，这里只做投影，不再二次节流
+        const parts: unknown = event.partialResult?.content;
+        if (!Array.isArray(parts)) return;
+        const output = parts
+          .filter(
+            (part): part is { type: 'text'; text: string } =>
+              typeof part === 'object' &&
+              part !== null &&
+              (part as { type?: string }).type === 'text'
+          )
+          .map((part) => part.text)
+          .join('');
+        if (!output) return;
+        this.options.emit({
+          type: 'tool-output',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          toolCallId: event.toolCallId,
+          output,
+        });
+        return;
+      }
       case 'tool_execution_end': {
         const start = managed.toolStartAt.get(event.toolCallId);
         managed.toolStartAt.delete(event.toolCallId);
@@ -2118,6 +2149,7 @@ export class SessionSupervisor {
         return;
       }
       case 'compaction_start':
+        managed.compaction = 'running';
         this.options.emit({
           type: 'compaction',
           identity: managed.identity,
@@ -2128,6 +2160,9 @@ export class SessionSupervisor {
       case 'compaction_end':
         // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
         this.reconcileMessages(managed, this.transcript(managed));
+        managed.compaction = undefined;
+        // 锚点必须在对齐之后取：否则摘要消息未入列，与 guest 事件口径 maxIndex+1 差 1
+        if (!event.errorMessage) managed.compactionNoticeAt = managed.messages.length;
         this.emitSessionMeta(managed);
         this.options.emit({
           type: 'compaction',
@@ -2386,6 +2421,8 @@ export class SessionSupervisor {
       await managed.session.compact(instructions);
     } catch (error) {
       console.error('[compact] failed:', toErrorMessage(error));
+      // 未走到 compaction_end：不清的话快照会让手机永远卡在「压缩中」
+      managed.compaction = undefined;
       this.options.emit({
         type: 'compaction',
         identity: managed.identity,
@@ -2424,6 +2461,10 @@ export class SessionSupervisor {
       ...(managed.asks.snapshot().length > 0 ? { pendingAsks: managed.asks.snapshot() } : {}),
       ...(managed.childMetadata ? { child: managed.childMetadata } : {}),
       ...(managed.customEntries.length > 0 ? { customEntries: managed.customEntries } : {}),
+      ...(managed.compaction ? { compaction: managed.compaction } : {}),
+      ...(managed.compactionNoticeAt !== undefined
+        ? { compactionNoticeAt: managed.compactionNoticeAt }
+        : {}),
     }));
   }
 

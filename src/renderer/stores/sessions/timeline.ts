@@ -222,7 +222,8 @@ function splitThinkingTaggedText(text: string): Array<{ kind: 'text' | 'thinking
 function buildMessageTimeline(
   messages: ProjectedMessage[],
   running: boolean,
-  cwd?: string
+  cwd?: string,
+  toolOutputs?: Record<string, string>
 ): TimelineItem[] {
   const results = new Map<
     string,
@@ -382,12 +383,14 @@ function buildMessageTimeline(
           return;
         case 'toolCall': {
           const result = results.get(part.id);
+          // 未完成时退而用执行中的输出快照（空串不算，否则行会变“可展开但空”）
+          const partial = toolOutputs?.[part.id];
           items.push({
             kind: 'tool',
             key,
             name: part.name,
             summary: summarizeArgs(part.arguments, cwd),
-            output: result ? result.output : null,
+            output: result ? result.output : (partial ?? null) || null,
             state: result
               ? result.isError
                 ? 'error'
@@ -501,9 +504,14 @@ export function buildTimeline(
   running: boolean,
   customEntries: readonly AgentSessionCustomEntry[] = [],
   cwd?: string,
-  options?: { compaction?: 'queued' | 'running'; compactionNoticeAt?: number }
+  options?: {
+    compaction?: 'queued' | 'running';
+    compactionNoticeAt?: number;
+    /** 运行中工具的输出快照（toolCallId → 文本）；真实 toolResult 到位后优先用后者 */
+    toolOutputs?: Record<string, string>;
+  }
 ): TimelineItem[] {
-  const messageItems = buildMessageTimeline(messages, running, cwd);
+  const messageItems = buildMessageTimeline(messages, running, cwd, options?.toolOutputs);
   const merged =
     customEntries.length === 0
       ? messageItems

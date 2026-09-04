@@ -66,6 +66,8 @@ export interface SessionProjection {
   lastOutputAt?: number;
   /** 自动重试中（非终态）：turn-retry 设置，下一个 status/turn-* 事件清除 */
   retry?: { attempt: number; maxAttempts: number; delayMs: number; error: string; at: number };
+  /** 运行中工具的输出快照（toolCallId → 全量文本）；轮次收口即清空，不持久化 */
+  toolOutputs: Record<string, string>;
 }
 
 export const emptyProjection: SessionProjection = {
@@ -80,6 +82,7 @@ export const emptyProjection: SessionProjection = {
   pendingAsks: [],
   backgroundTasks: [],
   subagents: [],
+  toolOutputs: {},
 };
 
 const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
@@ -107,10 +110,12 @@ export function applyAgentEvent(
     rawState.backgroundTasks &&
     rawState.subagents &&
     rawState.customEntries &&
-    rawState.dispatchMainEvents
+    rawState.dispatchMainEvents &&
+    rawState.toolOutputs
       ? rawState
       : {
           ...rawState,
+          toolOutputs: rawState.toolOutputs ?? {},
           customEntries: rawState.customEntries ?? [],
           dispatchMainEvents: rawState.dispatchMainEvents ?? {},
           pendingApprovals: rawState.pendingApprovals ?? [],
@@ -152,6 +157,7 @@ export function applyAgentEvent(
       pendingAsks: snapshot.pendingAsks ?? [],
       backgroundTasks: snapshot.backgroundTasks ?? [],
       subagents: snapshot.subagents ?? [],
+      toolOutputs: {},
     };
   }
 
@@ -336,8 +342,19 @@ export function applyAgentEvent(
         ),
         lastSeq: event.seq,
       };
+    case 'tool-output':
+      return {
+        ...current,
+        toolOutputs: { ...current.toolOutputs, [event.toolCallId]: event.output },
+        lastSeq: event.seq,
+      };
     case 'turn-completed':
-      return { ...settleTiming(current, now), retry: undefined, lastSeq: event.seq };
+      return {
+        ...settleTiming(current, now),
+        retry: undefined,
+        toolOutputs: {},
+        lastSeq: event.seq,
+      };
     case 'messages-truncated':
       return { ...current, messages: current.messages.slice(0, event.length), lastSeq: event.seq };
     case 'commands':
@@ -348,6 +365,7 @@ export function applyAgentEvent(
         status: 'failed',
         error: event.error,
         retry: undefined,
+        toolOutputs: {},
         lastSeq: event.seq,
       };
     case 'session-custom-entry':

@@ -6,7 +6,31 @@ import {
   PROXY_ENV_KEYS,
   parseResolveProxy,
   proxyEnvPatch,
+  proxyEnvPatchFromEnv,
 } from './proxy';
+
+describe('proxyEnvPatchFromEnv', () => {
+  it('从当前 env 快照出完整 patch：缺失的键为 null', () => {
+    expect(
+      proxyEnvPatchFromEnv({ HTTP_PROXY: 'http://a:1', no_proxy: 'localhost', OTHER: 'x' })
+    ).toEqual({
+      http_proxy: null,
+      https_proxy: null,
+      HTTP_PROXY: 'http://a:1',
+      HTTPS_PROXY: null,
+      GRPC_PROXY: null,
+      grpc_proxy: null,
+      no_proxy: 'localhost',
+      NO_PROXY: null,
+    });
+  });
+
+  it('空 env → 全 null，键顺序与 PROXY_ENV_KEYS 一致', () => {
+    const patch = proxyEnvPatchFromEnv({});
+    expect(Object.keys(patch)).toEqual([...PROXY_ENV_KEYS]);
+    expect(Object.values(patch).every((value) => value === null)).toBe(true);
+  });
+});
 
 describe('parseResolveProxy', () => {
   it('maps DIRECT and empty junk to null', () => {
