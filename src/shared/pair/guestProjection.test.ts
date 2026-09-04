@@ -6,6 +6,7 @@ import {
   applyGuestSnapshot,
   emptyGuestView,
   type GuestSessionView,
+  localCompactionNoticeIndex,
   markAllFailed,
 } from './guestProjection';
 
@@ -285,6 +286,56 @@ describe('applyGuestHistory（上滑分页应答）', () => {
   it('空页返回原视图', () => {
     const base = viewWith([[10, 'n10']]);
     expect(applyGuestHistory(base, { baseIndex: 0, messages: [] })).toBe(base);
+  });
+});
+
+describe('compaction 投影', () => {
+  it('queued / start 置压缩进度，end 清掉', () => {
+    const queued = applyGuestEvent(emptyGuestView(), { type: 'compaction', state: 'queued' }).view;
+    expect(queued.compaction).toBe('queued');
+    const running = applyGuestEvent(queued, { type: 'compaction', state: 'start' }).view;
+    expect(running.compaction).toBe('running');
+    const done = applyGuestEvent(running, { type: 'compaction', state: 'end' }).view;
+    expect(done.compaction).toBeUndefined();
+  });
+
+  it('压缩成功时把锚点记在当前最大消息 index 之后（绝对 index 口径）', () => {
+    const base = viewWith([
+      [7, 'a'],
+      [8, 'b'],
+    ]);
+    const done = applyGuestEvent(base, { type: 'compaction', state: 'end' }).view;
+    expect(done.compactionNoticeAt).toBe(9);
+  });
+
+  it('压缩失败时不钉锚点', () => {
+    const base = viewWith([[7, 'a']], { compactionNoticeAt: 3 });
+    const done = applyGuestEvent(base, {
+      type: 'compaction',
+      state: 'end',
+      error: 'Nothing to compact',
+    }).view;
+    expect(done.compactionNoticeAt).toBe(3);
+  });
+
+  it('尾窗快照重连不抹掉已有的压缩状态', () => {
+    const sessions = new Map([
+      ['s1', viewWith([[0, 'a']], { compaction: 'running', compactionNoticeAt: 5 })],
+    ]);
+    const out = applyGuestSnapshot(sessions, {
+      sessions: [{ sessionId: 's1', baseIndex: 0, messages: [msg('a'), msg('b')] }],
+    });
+    expect(out[0].view.compaction).toBe('running');
+    expect(out[0].view.compactionNoticeAt).toBe(5);
+  });
+
+  it('绝对 index 锚点换算成尾窗数组下标（手机只持有尾部消息）', () => {
+    // 尾窗只有绝对 index 20..24，锚点 23 → 数组下标 3
+    expect(localCompactionNoticeIndex([20, 21, 22, 23, 24], 23)).toBe(3);
+    // 锚点比尾窗还新（新消息未到）→ 落在末尾
+    expect(localCompactionNoticeIndex([20, 21], 30)).toBe(2);
+    // 无锚点
+    expect(localCompactionNoticeIndex([20, 21], undefined)).toBeUndefined();
   });
 });
 

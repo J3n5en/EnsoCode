@@ -1,5 +1,5 @@
 import type { CatalogEntry, ProviderEntry } from '@enso/pair';
-import type { GuestSessionView } from '@shared/pair/guestProjection';
+import { type GuestSessionView, localCompactionNoticeIndex } from '@shared/pair/guestProjection';
 import { type AttachedImage, THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
 import type { ModelProvider } from '@shared/types/llm';
 import type { RemoteNodeStatus } from '@shared/types/nodes';
@@ -70,16 +70,22 @@ export function RemoteNodeChat(props: RemoteNodeChatProps) {
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const running = view?.status === 'running';
 
-  const messages = useMemo(
-    () =>
-      view
-        ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message)
-        : [],
+  const entries = useMemo(
+    () => (view ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]) : []),
     [view]
   );
+  const messages = useMemo(() => entries.map(([, message]) => message), [entries]);
   const timeline = useMemo(
-    () => buildTimeline(messages, running, [], entry?.cwd),
-    [messages, running, entry?.cwd]
+    () =>
+      buildTimeline(messages, running, [], entry?.cwd, {
+        compaction: view?.compaction,
+        // 尾窗是稀疏绝对 index，buildTimeline 要的是数组下标
+        compactionNoticeAt: localCompactionNoticeIndex(
+          entries.map(([index]) => index),
+          view?.compactionNoticeAt
+        ),
+      }),
+    [messages, entries, running, entry?.cwd, view?.compaction, view?.compactionNoticeAt]
   );
   // 流式输出按同一 index 覆盖，Virtuoso 的 followOutput 不触发；贴底时补一次单帧贴底
   // biome-ignore lint/correctness/useExhaustiveDependencies: timeline 是触发信号

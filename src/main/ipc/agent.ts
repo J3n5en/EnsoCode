@@ -77,6 +77,7 @@ import {
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { titleModelCandidates } from '../services/titleSummary';
+import { ingestSessionJsonl } from '../services/usage/ledgerStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
@@ -345,6 +346,15 @@ export function registerAgentHandlers(): void {
 
   setAgentEventListener((workerEvent) => {
     dispatchService?.observe(workerEvent);
+    if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
+      const file = agentSessionIndex.sessionFile(workerEvent.identity);
+      if (file) {
+        void ingestSessionJsonl(
+          path.join(app.getPath('userData'), 'agent', 'sessions'),
+          file
+        ).catch(() => {});
+      }
+    }
     if (workerEvent.type === 'parent-ready') {
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,

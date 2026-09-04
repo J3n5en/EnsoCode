@@ -40,8 +40,17 @@ describe('formatCost', () => {
     expect(formatCost(null)).toBe('—');
   });
 
-  it('保留两位小数', () => {
-    expect(formatCost(1911.876)).toBe('$1911.88');
+  it('小于 1000 保留两位小数', () => {
+    expect(formatCost(12.345)).toBe('$12.35');
+  });
+
+  it('千以上用 k 缩写，避免统计卡溢出', () => {
+    expect(formatCost(1911.876)).toBe('$1.9k');
+    expect(formatCost(2312.36)).toBe('$2.3k');
+  });
+
+  it('百万以上用 M', () => {
+    expect(formatCost(1_500_000)).toBe('$1.5M');
   });
 
   it('很小的费用四舍五入为 $0.00', () => {

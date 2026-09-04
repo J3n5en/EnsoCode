@@ -19,10 +19,14 @@ export function formatTokens(tokens: number): string {
   return String(Math.round(tokens));
 }
 
-/** null（无定价）→ '—'；否则 '$1911.88' */
+/** null（无定价）→ '—'；千以上用 k/M 以免统计卡撑破 */
 export function formatCost(cost: number | null): string {
   if (cost === null) return '—';
-  return `$${cost.toFixed(2)}`;
+  const sign = cost < 0 ? '-' : '';
+  const abs = Math.abs(cost);
+  if (abs >= 1_000_000) return `${sign}$${trimOne(abs / 1_000_000)}M`;
+  if (abs >= 1000) return `${sign}$${trimOne(abs / 1000)}k`;
+  return `${sign}$${abs.toFixed(2)}`;
 }
 
 /** 只按小时累加不折天：'9h 51m'；不足 1h 只显示分钟 */

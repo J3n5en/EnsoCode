@@ -18,14 +18,22 @@ const TONE_CLASS: Record<NonNullable<StatCardProps['tone']>, string> = {
 /** 统计卡：标签 + 大号等宽数值 + 右上角 delta。delta 不着色——涨费用是坏事、涨 token 是中性，颜色反而误导。 */
 export function StatCard({ label, value, delta, tone = 'default' }: StatCardProps) {
   return (
-    <div className="rounded-lg border bg-card px-4 py-3">
+    <div className="min-w-0 overflow-hidden rounded-lg border bg-card px-4 py-3">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="min-w-0 text-xs text-muted-foreground">{label}</span>
         {delta && (
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{delta}</span>
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+            {delta}
+          </span>
         )}
       </div>
-      <div className={cn('mt-1 font-mono text-2xl font-semibold tabular-nums', TONE_CLASS[tone])}>
+      <div
+        className={cn(
+          'mt-1 truncate font-mono text-xl font-semibold leading-tight tabular-nums sm:text-2xl',
+          TONE_CLASS[tone]
+        )}
+        title={value}
+      >
         {value}
       </div>
     </div>

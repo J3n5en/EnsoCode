@@ -14,6 +14,7 @@ function dayStart(daysAgo: number): number {
 
 function record(overrides: Partial<UsageRecord> & { ts: number }): UsageRecord {
   return {
+    id: `r-${overrides.ts}`,
     model: 'claude-opus-5',
     provider: 'enso-anthropic',
     project: 'demo',
