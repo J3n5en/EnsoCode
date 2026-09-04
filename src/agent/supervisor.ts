@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   type AgentSession,
   createAgentSession,
-  createBashToolDefinition,
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
@@ -102,6 +101,7 @@ import {
   selectEvictable,
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
+import { createSessionCommandTool } from './sessionShell';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -1169,10 +1169,11 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createBashToolDefinition(
+              createSessionCommandTool({
                 cwd,
-                remoteOps ? { operations: remoteOps.bash } : undefined
-              ) as unknown as Def,
+                remote: Boolean(remoteOps),
+                operations: remoteOps?.bash,
+              }) as unknown as Def,
               this.bgTasks,
               sessionId,
               cwd,

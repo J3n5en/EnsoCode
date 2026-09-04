@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 
 /** 内存缓冲上限（超出截头保尾；磁盘 log 始终全量） */
@@ -68,7 +68,12 @@ export class BackgroundTaskManager {
     private readonly logDir: string
   ) {}
 
-  start(sessionId: string, command: string, cwd: string): string {
+  start(
+    sessionId: string,
+    command: string,
+    cwd: string,
+    spawnOpts?: { file?: string; argsPrefix?: string[] }
+  ): string {
     // 配额：先清理已完成，再满则拒绝并教模型下一步
     if (this.tasks.size >= MAX_TASKS) this.pruneFinished();
     if (this.tasks.size >= MAX_TASKS) {
@@ -79,7 +84,7 @@ export class BackgroundTaskManager {
     }
     const taskId = `task-${++this.counter}-${Date.now().toString(36)}`;
     // detached：独立进程组，kill 时整棵树一起清
-    const child = spawn(command, { shell: true, cwd, env: process.env, detached: true });
+    const child = spawnBackground(command, cwd, spawnOpts);
     const logPath = path.join(this.logDir, `${taskId}.log`);
     let logStream: WriteStream | null = null;
     try {
@@ -252,6 +257,43 @@ const TRAILING_AMP = /(?:^|[^&])&\s*$/;
 /** 前台 bash 默认超时（秒）。background=true 不限。 */
 export const DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC = 10 * 60;
 
+function spawnBackground(
+  command: string,
+  cwd: string,
+  spawnOpts?: { file?: string; argsPrefix?: string[] }
+) {
+  if (spawnOpts?.file) {
+    return spawn(spawnOpts.file, [...(spawnOpts.argsPrefix ?? []), command], {
+      cwd,
+      env: process.env,
+      detached: true,
+    });
+  }
+  return spawn(command, { shell: true, cwd, env: process.env, detached: true });
+}
+
+export type BackgroundLaunch = {
+  command: string;
+  cwd: string;
+  file?: string;
+  argsPrefix?: string[];
+};
+
+export function resolveBackgroundLaunch(
+  toolName: string,
+  command: string,
+  cwd: string,
+  transform?: (command: string, cwd: string) => { command: string; cwd: string },
+  resolvePowerShell?: () => { shell: string; args: string[] }
+): BackgroundLaunch {
+  if (transform) return transform(command, cwd);
+  if (toolName === 'powershell') {
+    const ps = (resolvePowerShell ?? getPowerShellConfig)();
+    return { command, cwd, file: ps.shell, argsPrefix: [...ps.args] };
+  }
+  return { command, cwd };
+}
+
 export function withForegroundBashTimeout(params: unknown): Record<string, unknown> {
   const record =
     params && typeof params === 'object' && !Array.isArray(params)
@@ -300,15 +342,16 @@ export function withBackground(
     ...definition,
     parameters,
     promptSnippet:
-      'bash: run shell commands; pass background=true for long-running commands ' +
+      `${definition.name}: run shell commands; pass background=true for long-running commands ` +
       `(dev servers, watchers, long builds). Foreground default timeout ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s.`,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
       if (record.background && typeof record.command === 'string') {
-        const launch = transform
-          ? transform(record.command, cwd)
-          : { command: record.command, cwd };
-        const taskId = manager.start(sessionId, launch.command, launch.cwd);
+        const launch = resolveBackgroundLaunch(definition.name, record.command, cwd, transform);
+        const taskId = manager.start(sessionId, launch.command, launch.cwd, {
+          file: launch.file,
+          argsPrefix: launch.argsPrefix,
+        });
         return {
           content: [
             {

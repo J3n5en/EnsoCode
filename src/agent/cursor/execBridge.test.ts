@@ -130,6 +130,28 @@ describe('dispatchCursorExec', () => {
     expect(result.toolName).toBe('bash');
     expect(result.events[0]?.toolName).toBe('bash');
   });
+
+  it('会话只注入 powershell(无 bash)时,shell 帧回落派发到 powershell,上报的工具名是 powershell', async () => {
+    const invoked: unknown[] = [];
+    const tools = new Map<string, CursorBridgeTool>([
+      [
+        'powershell',
+        fakeTool('powershell', async (_id, args) => {
+          invoked.push(args);
+          return { content: [{ type: 'text', text: 'ok\n' }] };
+        }),
+      ],
+    ]);
+    const result = await dispatchCursorExec(
+      { type: 'shell', toolCallId: 'call-shell-ps', command: 'Get-ChildItem', cwd: 'C:\\proj' },
+      tools
+    );
+    expect(invoked).toEqual([{ command: 'Get-ChildItem', cwd: 'C:\\proj' }]);
+    expect(result.toolName).toBe('powershell');
+    expect(result.isError).toBe(false);
+    expect(result.events[0]?.toolName).toBe('powershell');
+    expect(result.events[1]?.toolName).toBe('powershell');
+  });
 });
 
 describe('createCursorSessionBridge', () => {
