@@ -908,7 +908,9 @@ function isMcpServerEntry(value: unknown): value is McpServerEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entry = value as Partial<McpServerEntry>;
   return (
+    // 空 id 会让状态落到 serverName 键上，同名 server 互相覆盖
     typeof entry.id === 'string' &&
+    entry.id.length > 0 &&
     typeof entry.name === 'string' &&
     (entry.transport === 'stdio' || entry.transport === 'http' || entry.transport === 'sse')
   );
