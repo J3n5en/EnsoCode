@@ -973,9 +973,10 @@ export const useSessionsStore = create<SessionsState>()(
             event.undelivered &&
             next.messages.length < conversation.messages.length
               ? {
+                  // 追加到队尾：连续多条失败按 FIFO 回流，保持原发送顺序（A,B → [A,B]）
                   queuedMessages: [
-                    toQueuedMessage(conversation.messages.find((m) => m.optimistic)!),
                     ...(conversation.queuedMessages ?? []),
+                    toQueuedMessage(conversation.messages.find((m) => m.optimistic)!),
                   ],
                 }
               : {}),
@@ -1787,6 +1788,12 @@ export const useSessionsStore = create<SessionsState>()(
           // 乐观回显：立即上屏，不等 spawn/prompt 往返。optimistic 标记使其作为
           // 未确认尾巴浮在权威消息之后，同文本 user upsert 到达时被消费；
           // 万一错位由 agent_end 的全量 reconcile 兜底。
+          // coworker 由 worker 侧创建/恢复,永不走 spawn 分支；未恢复时在回显前拦下并显式报错
+          if (!conversation.started && conversation.parentId) {
+            const error = 'coworker not restored yet — resume the conversation first';
+            set((state) => patch(state, id, { draftText: submittedText, status: 'failed', error }));
+            return error;
+          }
           const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, id, {
@@ -1799,10 +1806,6 @@ export const useSessionsStore = create<SessionsState>()(
             })
           );
           if (!conversation.started) {
-            // coworker 由 worker 侧创建/恢复,永不走 spawn 分支
-            if (conversation.parentId) {
-              return 'coworker not restored yet — resume the conversation first';
-            }
             set((state) =>
               patch(state, id, {
                 spawning: true,
