@@ -33,10 +33,13 @@ const MAPPED_I18N_KEYS = [
   'Supervised',
   'Auto-accept edits',
   'Full access',
+  'Assistant approval',
   // ApprovalModePicker.MODE_META.descKey
   'Approve every command and file change',
   'Edits run freely; commands and MCP still ask',
   'Run everything without asking',
+  'A configured model reviews each action first',
+  'Select an assistant approval model in Settings first',
   // StatusLineSettings.PRESET_LABEL_KEYS
   'Minimal',
   'Default',

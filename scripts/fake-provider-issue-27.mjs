@@ -41,13 +41,15 @@ function sse(res, events) {
   res.end();
 }
 
-/** 从 prompt 里取出 `[[tool:name {json}]]` 指令 */
+function messageText(msg) {
+  if (!msg) return '';
+  if (typeof msg.content === 'string') return msg.content;
+  return (msg.content ?? []).map((c) => c?.text ?? '').join('\n');
+}
+
+/** 从整轮 messages 取出 `[[tool:name {json}]]`（不要只看最后一条：host 常会再塞 workflow-state） */
 function parseToolDirectives(messages) {
-  const last = messages?.at(-1);
-  const text =
-    typeof last?.content === 'string'
-      ? last.content
-      : (last?.content ?? []).map((c) => c?.text ?? '').join('\n');
+  const text = (messages ?? []).map(messageText).join('\n');
   const out = [];
   const re = /\[\[tool:([\w-]+)\s*(\{[\s\S]*?\})?\]\]/g;
   let m = re.exec(text);

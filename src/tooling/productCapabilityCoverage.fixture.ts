@@ -53,6 +53,7 @@ export const SETTINGS_DATA_COVERAGE = {
   defaultThinkingLevel: surfaces('providers.default-model'),
   titleSummaryEnabled: excluded('Conversation title summary preference; not an Enso capability.'),
   titleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  approvalReviewer: excluded('Assistant approval reviewer model; desktop settings only.'),
   skills: surfaces('skills.list'),
   mcpServers: surfaces('mcp.list'),
   instructions: surfaces('instructions.list'),
@@ -125,6 +126,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Conversation title summary preference; not an Enso capability.'
   ),
   setTitleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  setApprovalReviewer: excluded('Assistant approval reviewer model; desktop settings only.'),
   revalidateDefaultModel: surfaces('providers.default-model'),
   addProviders: surfaces('providers.add', 'providers.import-local'),
   updateProvider: surfaces(

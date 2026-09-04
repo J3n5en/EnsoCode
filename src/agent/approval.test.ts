@@ -1,13 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import type { ApprovalRequestInfo } from '@shared/types/agent';
+import { describe, expect, it, vi } from 'vitest';
 import { ApprovalGate } from './approval';
 
-const makeGate = (mode: 'supervised' | 'auto-edits' | 'full' = 'supervised') => {
+// 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
+// options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
+//   Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }>
+// mode==='assistant' 且提供 review 时：ask() 先调 review()，auto_allow → 直接 resolve('allow')
+// 不调 onRequest；block → resolve('deny') 不调 onRequest；ask_user 或 review 失败/throw →
+// 降级走原 onRequest 流程；review 进行中 abort 仍要 fail-closed cancel。
+type GateMode = 'supervised' | 'auto-edits' | 'full' | 'assistant';
+type ReviewFn = (
+  info: ApprovalRequestInfo,
+  signal: AbortSignal | undefined
+) => Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }>;
+
+const makeGate = (mode: GateMode = 'supervised', options?: { review?: ReviewFn }) => {
   const requests: string[] = [];
   const resolved: string[] = [];
   const gate = new ApprovalGate(
     mode,
     (info) => requests.push(info.requestId),
-    (id) => resolved.push(id)
+    (id) => resolved.push(id),
+    options
   );
   return { gate, requests, resolved };
 };
@@ -23,6 +37,14 @@ describe('ApprovalGate', () => {
     const sup = makeGate('supervised').gate;
     expect(sup.needsApproval('file-edit', 'edit')).toBe(true);
     expect(sup.needsApproval('command', 'bash')).toBe(true);
+  });
+
+  it('assistant 档 needsApproval 与 supervised 同集合：command/file-edit/file-write/mcp 都要审', () => {
+    const assistant = makeGate('assistant').gate;
+    expect(assistant.needsApproval('command', 'bash')).toBe(true);
+    expect(assistant.needsApproval('file-edit', 'edit')).toBe(true);
+    expect(assistant.needsApproval('file-write', 'write')).toBe(true);
+    expect(assistant.needsApproval('mcp', 'mcp__x__y')).toBe(true);
   });
 
   it('allow / deny 决策解除挂起并回调 resolve', async () => {
@@ -76,5 +98,67 @@ describe('ApprovalGate', () => {
     expect(snapshot).toHaveLength(2);
     expect(snapshot.map((s) => s.kind)).toEqual(['command', 'file-edit']);
     gate.cancelAll();
+  });
+});
+
+describe('ApprovalGate assistant 档代审 (options.review)', () => {
+  it('reviewer 返回 auto_allow：ask() resolve allow，且不调用 onRequest（不弹真人卡）', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'auto_allow' });
+    const { gate, requests } = makeGate('assistant', { review });
+    const result = await gate.ask('bash', 'command', 'ls', undefined);
+    expect(result).toBe('allow');
+    expect(requests).toHaveLength(0);
+    expect(review).toHaveBeenCalledTimes(1);
+  }, 1500);
+
+  it('reviewer 返回 block：resolve block，不弹卡', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'block' });
+    const { gate, requests } = makeGate('assistant', { review });
+    const result = await gate.ask('bash', 'command', 'rm -rf /', undefined);
+    expect(result).toBe('block');
+    expect(requests).toHaveLength(0);
+  }, 1500);
+
+  it('reviewer 返回 ask_user：走 onRequest，respond allow 后 resolve allow', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'ask_user' });
+    const { gate, requests } = makeGate('assistant', { review });
+    const p = gate.ask('bash', 'command', 'ls', undefined);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    gate.respond(requests[0], 'allow');
+    await expect(p).resolves.toBe('allow');
+  });
+
+  it('reviewer throw 时降级走 onRequest', async () => {
+    const review = vi.fn().mockRejectedValue(new Error('reviewer down'));
+    const { gate, requests } = makeGate('assistant', { review });
+    const p = gate.ask('bash', 'command', 'ls', undefined);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    gate.respond(requests[0], 'allow');
+    await expect(p).resolves.toBe('allow');
+  });
+
+  it('reviewer 返回失败映射（非法 decision）时降级走 onRequest', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'not-a-real-decision' } as never);
+    const { gate, requests } = makeGate('assistant', { review });
+    const p = gate.ask('bash', 'command', 'ls', undefined);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    gate.respond(requests[0], 'deny');
+    await expect(p).resolves.toBe('deny');
+  });
+
+  it('abort 在评审进行中仍 cancel（fail-closed）', async () => {
+    let rejectReview: (err: unknown) => void = () => {};
+    const review = vi.fn(
+      () =>
+        new Promise<{ decision: 'auto_allow' | 'ask_user' | 'block' }>((_resolve, reject) => {
+          rejectReview = reject;
+        })
+    );
+    const { gate } = makeGate('assistant', { review });
+    const controller = new AbortController();
+    const p = gate.ask('bash', 'command', 'ls', controller.signal);
+    controller.abort();
+    await expect(p).resolves.toBe('cancel');
+    rejectReview(new Error('late'));
   });
 });

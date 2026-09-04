@@ -1,0 +1,6 @@
+{"file":".trellis/spec/shared/index.md","reason":"跨进程类型、IPC、i18n、parseAgentCommand 白名单"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"档位与 reviewer 跨越 renderer/preload/main/worker"}
+{"file":".trellis/spec/testing.md","reason":"TDD 覆盖范围：门闩与解析器必须先测"}
+{"file":".trellis/tasks/09-05-model-approval/prd.md","reason":"需求与验收"}
+{"file":".trellis/tasks/09-05-model-approval/design.md","reason":"档位语义、协议、评审契约"}
+{"file":".trellis/tasks/09-05-model-approval/implement.md","reason":"执行顺序与回滚"}

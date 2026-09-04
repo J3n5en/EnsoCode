@@ -1,0 +1,4 @@
+{"file":".trellis/spec/shared/index.md","reason":"检查类型与 parse 白名单是否同步"}
+{"file":".trellis/spec/testing.md","reason":"确认逻辑改动有红绿测试，UI 不硬要求单测"}
+{"file":".trellis/tasks/09-05-model-approval/prd.md","reason":"对照验收标准"}
+{"file":".trellis/tasks/09-05-model-approval/design.md","reason":"对照 fail-closed 与档位语义"}

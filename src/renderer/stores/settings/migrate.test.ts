@@ -49,6 +49,7 @@ describe('设置持久化迁移', () => {
       defaultModel: null,
       titleSummaryEnabled: false,
       titleSummaryModel: null,
+      approvalReviewer: null,
     });
   });
 
@@ -79,6 +80,19 @@ describe('设置持久化迁移', () => {
       ...v2,
       titleSummaryEnabled: false,
       titleSummaryModel: null,
+      approvalReviewer: null,
+    });
+  });
+
+  it('v3 → v4 新增助手代审模型缺省未选', () => {
+    const v3 = {
+      theme: 'dark',
+      titleSummaryEnabled: false,
+      titleSummaryModel: null,
+    };
+    expect(migrateSettings(v3, 3)).toEqual({
+      ...v3,
+      approvalReviewer: null,
     });
   });
 
@@ -88,6 +102,7 @@ describe('设置持久化迁移', () => {
       defaultModel: null,
       titleSummaryEnabled: false,
       titleSummaryModel: null,
+      approvalReviewer: null,
     });
   });
 
@@ -104,6 +119,7 @@ describe('设置持久化迁移', () => {
       defaultModel: null,
       titleSummaryEnabled: false,
       titleSummaryModel: null,
+      approvalReviewer: null,
     });
   });
 

@@ -57,6 +57,13 @@ import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
+import {
+  APPROVAL_REVIEW_TIMEOUT_MS,
+  buildApprovalReviewSystemPrompt,
+  buildApprovalReviewUserPrompt,
+  computeApprovalActionHash,
+  normalizeReviewDecision,
+} from './approvalReview';
 import { AskManager, createAskTool } from './ask';
 import { ensureAssistantUsage } from './assistantUsage';
 import {
@@ -411,6 +418,7 @@ export class SessionSupervisor {
   /** 不可回收的会话（桌面正在查看 / 手机订阅），由 Main 全量下发 */
   private pinned: ReadonlySet<string> = new Set();
   private readonly evictionTimer: ReturnType<typeof setInterval>;
+  private approvalReviewer: SpawnModelConfig | undefined;
   /** 父会话通知(合并投递):闲则注入合成提示唤醒,忙则挂 pending 搭下次工具结果 */
   private readonly notifier = new ParentNotifier((sessionId, text) => {
     this.deliverNotification(sessionId, text);
@@ -595,6 +603,10 @@ export class SessionSupervisor {
       applyWorkerProxyEnv(command.env);
       return;
     }
+    if (command.type === 'set-approval-reviewer') {
+      this.approvalReviewer = command.model;
+      return;
+    }
     const identity =
       command.type === 'capability-result'
         ? command.child
@@ -670,6 +682,7 @@ export class SessionSupervisor {
           command.skillPaths,
           command.mcpServers,
           command.approvalMode,
+          command.approvalReviewer,
           command.agentTypes,
           command.disabledTools,
           command.instruction,
@@ -860,6 +873,9 @@ export class SessionSupervisor {
       case 'set-approval-mode':
         this.must(command.identity).gate.mode = command.mode;
         return;
+      case 'set-approval-reviewer':
+        this.approvalReviewer = command.model;
+        return;
       case 'ask-respond':
         this.must(command.identity).asks.respond(command.requestId, command.answer);
         return;
@@ -1044,6 +1060,7 @@ export class SessionSupervisor {
     skillPaths: string[] = [],
     mcpServers: McpServerSpawnConfig[] = [],
     approvalMode: ApprovalMode = 'full',
+    approvalReviewer?: SpawnModelConfig,
     agentTypes: AgentTypeSpawnConfig[] = [],
     disabledTools: string[] = [],
     instruction?: { path: string; content: string },
@@ -1116,6 +1133,7 @@ export class SessionSupervisor {
       mcpServers.length > 0 ? this.mcp.toolsFor(mcpServers, 3000) : Promise.resolve([]),
     ]);
     const toolsMs = Date.now() - toolsStart;
+    if (approvalReviewer) this.approvalReviewer = approvalReviewer;
 
     let managedRef: ManagedSession | undefined;
     const gate = new ApprovalGate(
@@ -1139,6 +1157,9 @@ export class SessionSupervisor {
             requestId,
           });
         }
+      },
+      {
+        review: (info, signal) => this.reviewApproval(info, signal),
       }
     );
     const checkpoints = new CheckpointManager(
@@ -2841,6 +2862,79 @@ export class SessionSupervisor {
       }
     } catch {
       // 记忆失败静默
+    }
+  }
+
+  private async reviewApproval(
+    info: import('@shared/types/agent').ApprovalRequestInfo,
+    signal: AbortSignal | undefined
+  ): Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }> {
+    const reviewer = this.approvalReviewer;
+    if (!reviewer) {
+      return { decision: 'ask_user', rationale: 'No approval reviewer model is configured.' };
+    }
+    const actionHash = computeApprovalActionHash({
+      version: 1,
+      kind: 'enso_tool_permission_review',
+      tool: info.tool,
+      approvalKind: info.kind,
+      summary: info.summary,
+    });
+    const runtime = await this.getRuntime();
+    const model = await resolveBaseModelOrRefresh(runtime, reviewer);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), APPROVAL_REVIEW_TIMEOUT_MS);
+    const onParentAbort = () => controller.abort();
+    signal?.addEventListener('abort', onParentAbort, { once: true });
+    try {
+      if (signal?.aborted) {
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+      const recentMessages =
+        [...this.sessions.values()]
+          .find((session) =>
+            session.gate.snapshot().some((item) => item.requestId === info.requestId)
+          )
+          ?.messages.slice(-8)
+          .map((message) => ({
+            role: message.role,
+            content: message.content
+              .map((part) => (part.type === 'text' ? part.text : ''))
+              .join('\n'),
+          })) ?? [];
+      const message = await runtime.completeSimple(
+        model,
+        {
+          systemPrompt: buildApprovalReviewSystemPrompt(),
+          messages: [
+            {
+              role: 'user',
+              content: buildApprovalReviewUserPrompt({
+                actionHash,
+                tool: info.tool,
+                kind: info.kind,
+                summary: info.summary,
+                recentMessages,
+              }),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        { signal: controller.signal }
+      );
+      const raw = Array.isArray((message as { content?: unknown }).content)
+        ? ((message as { content: Array<{ type?: string; text?: string }> }).content ?? [])
+            .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
+            .join('')
+        : '';
+      return normalizeReviewDecision(raw, actionHash);
+    } catch {
+      return { decision: 'ask_user', rationale: 'Auto-review failed.' };
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onParentAbort);
     }
   }
 

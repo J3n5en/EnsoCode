@@ -10,12 +10,13 @@
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 /**
  * v0 → v1：`ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`。
  * v1 → v2：新增必填 `defaultModel`，旧设置明确迁为 null，不把数组第一项冒充用户选择。
  * v2 → v3：新增标题总结：缺省关闭（不让升级用户静默多烧 token）、无独立模型。
+ * v3 → v4：新增助手代审模型，缺省未选（该档禁用）。
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
@@ -41,6 +42,9 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
 
   if (version < 3) {
     state = { ...state, titleSummaryEnabled: false, titleSummaryModel: null };
+  }
+  if (version < 4) {
+    state = { ...state, approvalReviewer: null };
   }
   return state;
 }

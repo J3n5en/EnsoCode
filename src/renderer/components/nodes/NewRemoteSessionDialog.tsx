@@ -4,8 +4,9 @@ import {
   type ProviderEntry,
   pairProjectListLabel,
 } from '@enso/pair';
+import { defaultApprovalMode } from '@shared/defaultModel';
 import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -26,6 +27,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
+import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
+import { useSettingsStore } from '@/stores/settings';
 
 export interface NewRemoteSessionRequest {
   projectId: string;
@@ -49,6 +52,7 @@ const APPROVAL_KEYS: Record<ApprovalMode, string> = {
   supervised: 'Supervised',
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
+  assistant: 'Assistant approval',
 };
 const LEVEL_KEYS: Record<ThinkingLevel, string> = {
   minimal: 'Min',
@@ -68,11 +72,19 @@ export function NewRemoteSessionDialog({
   onCreate,
 }: Props) {
   const { t } = useI18n();
+  const approvalReviewer = useSettingsStore((state) => state.approvalReviewer);
+  const localProviders = useSettingsStore((state) => state.providers);
+  const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
+  const initialApprovalMode = useMemo(
+    () =>
+      defaultApprovalMode(approvalReviewer, localProviders, oauthCredentialContext(oauthSnapshot)),
+    [approvalReviewer, localProviders, oauthSnapshot]
+  );
   // 目录异步到达：记录用户显式选过的值，取值时对当前列表校验回落
   const [pickedProject, setPickedProject] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode>('full');
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(initialApprovalMode);
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
 
@@ -81,7 +93,8 @@ export function NewRemoteSessionDialog({
     setPickedProject(null);
     setPickedProvider(null);
     setPickedModel(null);
-  }, [open]);
+    setApprovalMode(initialApprovalMode);
+  }, [open, initialApprovalMode]);
 
   const projectId = projects.find((p) => p.id === pickedProject)?.id ?? projects[0]?.id ?? '';
   const provider: ProviderEntry = providers.find((p) => p.id === pickedProvider) ??

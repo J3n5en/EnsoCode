@@ -1,7 +1,7 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
-import { type DefaultModelRef, resolveChatModel } from '@shared/defaultModel';
+import { type DefaultModelRef, defaultApprovalMode, resolveChatModel } from '@shared/defaultModel';
 import type {
   ApprovalMode,
   AttachedImage,
@@ -20,7 +20,6 @@ import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import {
   cleanTitleSummarySource,
   extractRepresentativeTitle,
-  mentionDisplayText,
 } from '@/components/chat/mentionComposer';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
@@ -1394,8 +1393,14 @@ export const useSessionsStore = create<SessionsState>()(
           const id = created.value.conversationId;
           const pendingAgentPrefill = get().pendingAgentPrefill;
           // 新会话应用默认预设；'default'（内置全局）或预设已删除时不写，spawn 时自然回落全局
-          const { defaultPresetId, presets, defaultReasoningEnabled, defaultThinkingLevel } =
-            useSettingsStore.getState();
+          const {
+            defaultPresetId,
+            presets,
+            defaultReasoningEnabled,
+            defaultThinkingLevel,
+            approvalReviewer,
+            providers,
+          } = useSettingsStore.getState();
           const defaultPreset =
             defaultPresetId !== 'default' && presets.some((preset) => preset.id === defaultPresetId)
               ? { presetId: defaultPresetId }
@@ -1410,6 +1415,11 @@ export const useSessionsStore = create<SessionsState>()(
             createdAt: Date.now(),
             reasoningEnabled: defaultReasoningEnabled ?? true,
             thinkingLevel: defaultThinkingLevel ?? 'medium',
+            approvalMode: defaultApprovalMode(
+              approvalReviewer,
+              providers,
+              oauthCredentialContext(useOauthCredentialStore.getState().snapshot)
+            ),
             ...defaultPreset,
             ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
             ...(options?.forkedFrom
@@ -2056,10 +2066,15 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         setApprovalMode(id, mode) {
+          const previous = get().conversations[id]?.approvalMode;
           set((state) => patch(state, id, { approvalMode: mode }));
           const conversation = get().conversations[id];
           if (conversation?.started) {
-            void window.electronAPI.agent.setApprovalMode(id, mode);
+            void window.electronAPI.agent.setApprovalMode(id, mode).then((result) => {
+              if (result && !result.ok) {
+                set((state) => patch(state, id, { approvalMode: previous ?? 'full' }));
+              }
+            });
           }
         },
 

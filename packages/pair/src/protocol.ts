@@ -10,7 +10,7 @@ export interface AttachedImage {
   mimeType: string;
 }
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type ApprovalMode = 'supervised' | 'auto-edits' | 'full';
+export type ApprovalMode = 'supervised' | 'auto-edits' | 'full' | 'assistant';
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
 // ── 中继明文控制帧（中继可见，不加密）──────────────────────────────────

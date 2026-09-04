@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defaultApprovalMode,
   type ModelCredentialContext,
   modelUsability,
   resolveChatModel,
@@ -175,5 +176,18 @@ describe('resolveChatModel', () => {
         credentials: oauthError,
       })
     ).toMatchObject({ source: 'session', providerId: 'session', modelId: 's' });
+  });
+});
+
+describe('defaultApprovalMode', () => {
+  it('代审模型可用 → assistant，未选或不可用 → full', () => {
+    const providers = [provider('p', ['m'])];
+    expect(defaultApprovalMode({ providerId: 'p', modelId: 'm' }, providers, ready())).toBe(
+      'assistant'
+    );
+    expect(defaultApprovalMode(null, providers, ready())).toBe('full');
+    expect(defaultApprovalMode({ providerId: 'p', modelId: 'gone' }, providers, ready())).toBe(
+      'full'
+    );
   });
 });
