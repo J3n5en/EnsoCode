@@ -113,6 +113,11 @@ export interface Conversation extends SessionProjection {
   compaction?: 'queued' | 'running';
   /** 最近一次压缩失败的原文（如「Nothing to compact」），UI 弹完 toast 后清除 */
   compactionError?: string;
+  /**
+   * 压缩结束那一刻的消息数：压完提示按它锚定在时间线中间。
+   * 不能靠「存在 compaction 行」推导，否则提示永远贴底、新消息被顶到它上方。
+   */
+  compactionNoticeAt?: number;
   forkedFromConversationId?: string;
   forkedFromEntryId?: string;
   /** 上次使用的模型，resume 时沿用 */
@@ -819,7 +824,17 @@ export const useSessionsStore = create<SessionsState>()(
                       : event.state === 'start'
                         ? 'running'
                         : undefined,
-                  ...(event.state === 'end' ? { compactionError: event.error } : {}),
+                  ...(event.state === 'end'
+                    ? {
+                        compactionError: event.error,
+                        // 成功才钉提示；失败时消息没变，锚点保持原样
+                        ...(event.error
+                          ? {}
+                          : {
+                              compactionNoticeAt: state.conversations[id].messages?.length ?? 0,
+                            }),
+                      }
+                    : {}),
                 })
               : state
           );

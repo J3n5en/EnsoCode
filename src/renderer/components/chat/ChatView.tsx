@@ -197,10 +197,14 @@ export function ChatView() {
         running,
         conversation?.customEntries ?? [],
         toolCwd,
-        { compaction: conversation?.compaction }
+        {
+          compaction: conversation?.compaction,
+          compactionNoticeAt: conversation?.compactionNoticeAt,
+        }
       ),
     [
       conversation?.compaction,
+      conversation?.compactionNoticeAt,
       conversation?.customEntries,
       conversation?.messages,
       running,

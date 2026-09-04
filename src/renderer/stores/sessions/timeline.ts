@@ -439,34 +439,59 @@ export function terminalErrorText(
 const customEntryTime = (entry: AgentSessionCustomEntry): number =>
   entry.kind === 'capability-receipt' ? entry.receipt.occurredAt : entry.at;
 
-const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage[]): number => {
+/** 行 key 的消息下标（`3` 或 `3-1`）；非消息行（custom/chrome）返回 -1 */
+const messageItemIndex = (item: TimelineItem): number => {
   const separator = item.key.indexOf('-');
   const index = Number.parseInt(separator === -1 ? item.key : item.key.slice(0, separator), 10);
-  return Number.isInteger(index)
+  return Number.isInteger(index) ? index : -1;
+};
+
+const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage[]): number => {
+  const index = messageItemIndex(item);
+  return index >= 0
     ? (messages[index]?.timestamp ?? Number.NEGATIVE_INFINITY)
     : Number.NEGATIVE_INFINITY;
 };
 
+/**
+ * 压完提示锚定在「压缩结束那一刻的消息数」上，而不是算到时间线末尾——
+ * 后者会让提示永远贴底、新消息被顶到它上方。锚点之后的消息一律排它下面。
+ */
+function insertCompactionNotice(items: TimelineItem[], noticeAt: number): TimelineItem[] {
+  const lastSummary = items.findLast((item) => item.kind === 'compaction');
+  if (!lastSummary) return items;
+  let at = items.length;
+  for (let i = 0; i < items.length; i++) {
+    const index = messageItemIndex(items[i]);
+    if (index >= noticeAt) {
+      at = i;
+      break;
+    }
+  }
+  // 锚点比消息还靠后：投影尚未追上或已被回退，宁可不显示
+  if (at === items.length && messageItemIndex(items.at(-1) ?? items[0]) + 1 < noticeAt)
+    return items;
+  // 整段都被压掉：摘要行本身就在锚点位置，不重复
+  if (items[at - 1]?.kind === 'compaction') return items;
+  const notice: TimelineItem = {
+    kind: 'compaction-notice',
+    key: `compaction-notice:${lastSummary.key}`,
+    summary: lastSummary.summary,
+    tokensBefore: lastSummary.tokensBefore,
+  };
+  return [...items.slice(0, at), notice, ...items.slice(at)];
+}
+
 function appendCompactionChrome(
   items: TimelineItem[],
-  compaction?: 'queued' | 'running'
+  compaction?: 'queued' | 'running',
+  noticeAt?: number
 ): TimelineItem[] {
-  if (compaction) {
-    return [
-      ...items,
-      { kind: 'compaction-progress', key: `compaction:${compaction}`, state: compaction },
-    ];
-  }
-  const lastSummary = items.findLast((item) => item.kind === 'compaction');
-  if (!lastSummary || items.at(-1)?.kind === 'compaction') return items;
+  const withNotice = noticeAt === undefined ? items : insertCompactionNotice(items, noticeAt);
+  if (!compaction) return withNotice;
   return [
-    ...items,
-    {
-      kind: 'compaction-notice',
-      key: `compaction-notice:${lastSummary.key}`,
-      summary: lastSummary.summary,
-      tokensBefore: lastSummary.tokensBefore,
-    },
+    ...withNotice,
+    { kind: 'compaction-progress', key: `compaction:${compaction}`, state: compaction },
   ];
 }
 
@@ -476,7 +501,7 @@ export function buildTimeline(
   running: boolean,
   customEntries: readonly AgentSessionCustomEntry[] = [],
   cwd?: string,
-  options?: { compaction?: 'queued' | 'running' }
+  options?: { compaction?: 'queued' | 'running'; compactionNoticeAt?: number }
 ): TimelineItem[] {
   const messageItems = buildMessageTimeline(messages, running, cwd);
   const merged =
@@ -503,7 +528,7 @@ export function buildTimeline(
         ]
           .sort((left, right) => left.at - right.at || left.order - right.order)
           .map(({ item }) => item);
-  return appendCompactionChrome(merged, options?.compaction);
+  return appendCompactionChrome(merged, options?.compaction, options?.compactionNoticeAt);
 }
 
 /** 折叠门槛：段内非 edit 工具数达到该值才收拢 */

@@ -857,12 +857,7 @@ describe('compaction 摘要行', () => {
       ],
       false
     );
-    expect(timeline.map((item) => item.kind)).toEqual([
-      'user',
-      'compaction',
-      'user',
-      'compaction-notice',
-    ]);
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction', 'user']);
     expect(timeline[1]).toMatchObject({
       kind: 'compaction',
       summary: 'SUMMARY',
@@ -880,12 +875,7 @@ describe('compaction 摘要行', () => {
       false
     );
     const folded = foldTimeline(timeline, false, new Set());
-    expect(folded.map((item) => item.kind)).toEqual([
-      'user',
-      'compaction',
-      'text',
-      'compaction-notice',
-    ]);
+    expect(folded.map((item) => item.kind)).toEqual(['user', 'compaction', 'text']);
   });
 
   it('压缩进行中时在时间线末尾挂 loading 行，不重复钉摘要提示', () => {
@@ -914,7 +904,19 @@ describe('compaction 摘要行', () => {
     expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-progress', state: 'queued' });
   });
 
-  it('压缩完成后若摘要不在末尾，则在底部再钉一条提示', () => {
+  it('没有锚点时不钉压完提示（老行为会永远贴底，新消息被顶到提示上方）', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        user('new'),
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction', 'user']);
+  });
+
+  it('压完提示钉在压缩发生那一刻：锚点之前的消息在上，之后的新消息在下', () => {
     const timeline = buildTimeline(
       [
         user('old'),
@@ -923,28 +925,57 @@ describe('compaction 摘要行', () => {
           content: [{ type: 'text', text: 'SUMMARY' }],
           tokensBefore: 9000,
         },
-        user('new'),
+        user('kept'),
+        user('new-after-compact'),
       ],
-      false
+      false,
+      [],
+      undefined,
+      { compactionNoticeAt: 3 }
     );
     expect(timeline.map((item) => item.kind)).toEqual([
       'user',
       'compaction',
       'user',
       'compaction-notice',
+      'user',
     ]);
-    expect(timeline.at(-1)).toMatchObject({
+    expect(timeline[3]).toMatchObject({
       kind: 'compaction-notice',
       summary: 'SUMMARY',
       tokensBefore: 9000,
     });
+    expect(timeline.at(-1)).toMatchObject({ kind: 'user', text: 'new-after-compact' });
   });
 
-  it('摘要已在末尾时不再重复钉提示', () => {
+  it('锚点在末尾（压完还没发新消息）时提示落在最后', () => {
+    const timeline = buildTimeline(
+      [
+        user('old'),
+        { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] },
+        user('kept'),
+      ],
+      false,
+      [],
+      undefined,
+      { compactionNoticeAt: 3 }
+    );
+    expect(timeline.at(-1)).toMatchObject({ kind: 'compaction-notice', summary: 'S' });
+  });
+
+  it('摘要就在锚点位置（整段都被压掉）时不重复钉提示', () => {
     const timeline = buildTimeline(
       [user('old'), { role: 'compactionSummary', content: [{ type: 'text', text: 'S' }] }],
-      false
+      false,
+      [],
+      undefined,
+      { compactionNoticeAt: 2 }
     );
     expect(timeline.map((item) => item.kind)).toEqual(['user', 'compaction']);
+  });
+
+  it('锚点陈旧（消息比锚点少）时不钉提示', () => {
+    const timeline = buildTimeline([user('old')], false, [], undefined, { compactionNoticeAt: 5 });
+    expect(timeline.map((item) => item.kind)).toEqual(['user']);
   });
 });
