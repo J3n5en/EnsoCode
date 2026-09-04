@@ -387,6 +387,15 @@ export const CAPABILITY_CATALOG = {
       BOOLEAN_VALUE_INPUT_SCHEMA
     )
   ),
+  'general.windows-local-shell': executable(
+    'general.windows-local-shell',
+    reversibleGlobal('Read or change the Windows local agent command shell.', {
+      type: 'object',
+      properties: { value: { type: 'string', enum: ['auto', 'powershell', 'bash'] } },
+      required: ['value'],
+      additionalProperties: false,
+    })
+  ),
   'general.automatic-updates': executable(
     'general.automatic-updates',
     reversibleGlobal('Read or change automatic update downloads.', BOOLEAN_VALUE_INPUT_SCHEMA)
@@ -1201,6 +1210,7 @@ export const CAPABILITY_HANDLER_CONTRACT: Readonly<Record<ExecutableCapabilityId
   'general.language': true,
   'general.load-local-skills': true,
   'general.load-harness-assets': true,
+  'general.windows-local-shell': true,
   'general.automatic-updates': true,
   'general.proxy-mode': true,
   'general.custom-proxy-url': true,

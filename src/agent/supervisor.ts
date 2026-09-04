@@ -54,6 +54,7 @@ import type {
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry } from '@shared/types/agent';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
+import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -637,7 +638,8 @@ export class SessionSupervisor {
           command.instruction,
           command.subagentModels,
           command.remote,
-          command.loadHarnessAssets
+          command.loadHarnessAssets,
+          command.windowsLocalShell
         );
         return;
       case 'spawn-child':
@@ -1008,7 +1010,8 @@ export class SessionSupervisor {
     instruction?: { path: string; content: string },
     subagentModels: SubagentModelOption[] = [],
     remote?: AgentRemoteConfig,
-    loadHarnessAssets = false
+    loadHarnessAssets = false,
+    windowsLocalShell?: WindowsLocalShell
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1172,6 +1175,7 @@ export class SessionSupervisor {
               createSessionCommandTool({
                 cwd,
                 remote: Boolean(remoteOps),
+                preference: windowsLocalShell,
                 operations: remoteOps?.bash,
               }) as unknown as Def,
               this.bgTasks,

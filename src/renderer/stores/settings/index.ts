@@ -10,6 +10,7 @@ import {
 } from '@shared/statusLine';
 import type { SourceAuthorityProjection } from '@shared/types/agent';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
+import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -104,6 +105,7 @@ const initialState = {
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   loadHarnessAssets: false,
+  windowsLocalShell: 'auto' as const,
   autoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
@@ -209,6 +211,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),
       setLoadHarnessAssets: (loadHarnessAssets) => set({ loadHarnessAssets }),
+      setWindowsLocalShell: (windowsLocalShell) =>
+        set({ windowsLocalShell: parseWindowsLocalShell(windowsLocalShell) }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
@@ -609,6 +613,10 @@ export const useSettingsStore = create<SettingsState>()(
         const s = state ?? useSettingsStore.getState();
         applySettings(s);
         // 持久化数据可能被外部污染；非法值会让设置弹层渲染 undefined 图标而白屏
+        const windowsLocalShell = parseWindowsLocalShell(s.windowsLocalShell);
+        if (windowsLocalShell !== s.windowsLocalShell) {
+          useSettingsStore.setState({ windowsLocalShell });
+        }
         const segments = normalizeStatusLineSegments(s.statusLineSegments);
         if (
           segments.length !== s.statusLineSegments?.length ||

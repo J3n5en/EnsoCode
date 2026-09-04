@@ -44,6 +44,7 @@ import {
 } from '@shared/types/assets';
 import type { ModelEntry, ModelProvider } from '@shared/types/llm';
 import type { AgentDispatchTask } from '@shared/types/mentions';
+import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import agentWorkerPath from '../../agent/index?modulePath';
@@ -357,6 +358,7 @@ export function spawnSession(
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
     : [];
   const loadHarnessAssets = state?.loadHarnessAssets === true;
+  const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   return sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -367,6 +369,7 @@ export function spawnSession(
     ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
+    ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),

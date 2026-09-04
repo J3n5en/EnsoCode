@@ -193,6 +193,7 @@ describe('searchSettingsEntries', () => {
 describe('buildSettingsCatalog', () => {
   const staticIds = [
     'general.language',
+    'general.windowsLocalShell',
     'general.openChangesOnFileEdit',
     'general.compactReadOnlyTools',
     'general.generationStallTimeout',

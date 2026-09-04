@@ -63,6 +63,12 @@ export const zhTranslations: Record<string, string> = {
   'Already used by "{{label}}"': '已被「{{label}}」占用',
   'Reset to default': '恢复默认',
   Language: '语言',
+  'Windows local command shell': 'Windows 本地命令壳',
+  'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.':
+    '只影响 Windows 本机 agent 命令工具。SSH 与其它平台仍用 bash。下次开会话生效。',
+  'Windows default (PowerShell)': 'Windows 默认（PowerShell）',
+  PowerShell: 'PowerShell',
+  'Git Bash': 'Git Bash',
   Light: '浅色',
   'No favorite themes yet. Click the heart icon to add favorites.':
     '暂无收藏主题。点击爱心图标添加收藏。',

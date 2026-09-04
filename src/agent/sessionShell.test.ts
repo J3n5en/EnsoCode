@@ -14,6 +14,27 @@ describe('resolveSessionShellKind', () => {
     expect(resolveSessionShellKind({ platform: 'darwin' })).toBe('bash');
   });
 
+  it('本地 win32 偏好 bash 时选 bash', () => {
+    expect(resolveSessionShellKind({ platform: 'win32', preference: 'bash' })).toBe('bash');
+  });
+
+  it('本地 win32 偏好 powershell 或 auto 时选 powershell', () => {
+    expect(resolveSessionShellKind({ platform: 'win32', preference: 'auto' })).toBe('powershell');
+    expect(resolveSessionShellKind({ platform: 'win32', preference: 'powershell' })).toBe(
+      'powershell'
+    );
+  });
+
+  it('远程忽略偏好,仍选 bash', () => {
+    expect(
+      resolveSessionShellKind({ platform: 'win32', remote: true, preference: 'powershell' })
+    ).toBe('bash');
+  });
+
+  it('非 win32 强制 powershell 也不生效', () => {
+    expect(resolveSessionShellKind({ platform: 'darwin', preference: 'powershell' })).toBe('bash');
+  });
+
   it('远程且非 win32 也选 bash', () => {
     expect(resolveSessionShellKind({ platform: 'linux', remote: true })).toBe('bash');
   });
@@ -23,6 +44,15 @@ describe('createSessionCommandTool', () => {
   it('本地 win32 建出的工具名为 powershell', () => {
     const tool = createSessionCommandTool({ cwd: '/tmp', platform: 'win32' });
     expect(tool.name).toBe('powershell');
+  });
+
+  it('本地 win32 偏好 bash 时建出 bash', () => {
+    const tool = createSessionCommandTool({
+      cwd: '/tmp',
+      platform: 'win32',
+      preference: 'bash',
+    });
+    expect(tool.name).toBe('bash');
   });
 
   it('远程 win32 建出的工具名仍为 bash', () => {

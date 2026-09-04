@@ -35,6 +35,11 @@ export const PRODUCT_SURFACE_INVENTORY = {
     kind: 'setting',
     label: 'Load project harness assets',
   },
+  'general.windows-local-shell': {
+    domain: 'general',
+    kind: 'setting',
+    label: 'Windows local command shell',
+  },
   'general.automatic-updates': {
     domain: 'general',
     kind: 'setting',
