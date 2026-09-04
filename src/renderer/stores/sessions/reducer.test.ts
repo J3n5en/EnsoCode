@@ -107,6 +107,24 @@ describe('applyAgentEvent', () => {
     expect(next.ended).toBe(true);
   });
 
+  it('parent-ended / worker-exited reset the seq guard: a revived session restarts at seq 1', () => {
+    // worker 每次重建会话 seq 从 0 起；驱逐后 resume 若仍持旧 lastSeq，新会话的所有事件都会被丢
+    const advanced = applyAgentEvent(base, 's1', status(50, 'running'));
+    const ended = applyAgentEvent(advanced, 's1', {
+      type: 'parent-ended',
+      identity: identity(),
+      seq: 51,
+      reason: 'evicted',
+    });
+    const revived = applyAgentEvent(ended, 's1', status(1, 'running'));
+    expect(revived.status).toBe('running');
+    expect(revived.lastSeq).toBe(1);
+
+    const exited = applyAgentEvent(advanced, 's1', { type: 'worker-exited' });
+    const restarted = applyAgentEvent(exited, 's1', status(1, 'running'));
+    expect(restarted.status).toBe('running');
+  });
+
   it('parent-ended does not mark ended (flag is child-only)', () => {
     const next = applyAgentEvent(base, 's1', {
       type: 'parent-ended',

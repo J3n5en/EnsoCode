@@ -141,6 +141,8 @@ export function applyAgentEvent(
   if (event.type === 'worker-exited') {
     return {
       ...settleTiming(state, now),
+      // worker 重建后会话 seq 从 0 重计，保留旧 lastSeq 会把新会话的所有事件当重复丢掉
+      lastSeq: 0,
       status: 'failed',
       error: 'agent worker exited',
       pendingApprovals: [],
@@ -241,7 +243,9 @@ export function applyAgentEvent(
         pendingAsks: [],
         // 只有 child 有「跨重启不复活」语义；父会话 ended 由 source authority 管
         ...(event.type === 'child-ended' ? { ended: true } : {}),
-        lastSeq: event.seq,
+        // ended 是该 worker 会话的最后一条事件；同 generation 重建（驱逐后 resume）seq 从 0 重计，
+        // 不归零则复活后的 status/message 全部被单调守卫丢掉：无 loading、无回复、无报错
+        lastSeq: 0,
       };
     case 'status': {
       const base =

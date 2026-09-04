@@ -300,6 +300,8 @@ export class AgentSessionIndex {
       for (const session of this.sessions.values()) {
         session.alive = false;
         session.ready = false;
+        // worker 重建后会话 seq 从 0 重计；不重置则 parent-ready 被当重复丢弃，索引永远不 ready
+        session.lastSeq = -1;
       }
       this.reservations.clear();
       return true;
@@ -361,6 +363,8 @@ export class AgentSessionIndex {
       current.ready = false;
       current.alive = false;
       current.status = 'failed';
+      // ended/rejected 是该 worker 会话的末事件；同 generation 重建（驱逐后 resume）seq 从 0 重计
+      current.lastSeq = -1;
       this.releaseParentReservations(identity.sessionId);
       return true;
     }
