@@ -152,26 +152,31 @@ export function AccountUsageBlock({ info }: { info: OauthAccountUsage | undefine
   };
 
   return (
-    <div className="mt-1 space-y-1">
-      {info.windows.map((windowInfo) => (
-        <div key={windowInfo.label} className="flex items-center gap-2 text-[11px]">
-          <span className="w-24 shrink-0 truncate text-muted-foreground">{windowInfo.label}</span>
-          <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary/70"
-              style={{ width: `${Math.max(0, Math.min(100, windowInfo.usedPercent))}%` }}
-            />
-          </div>
-          <span className="w-10 shrink-0 text-right text-muted-foreground">
-            {Math.round(windowInfo.usedPercent)}%
-          </span>
-          {resetLabel(windowInfo.resetsAt) && (
-            <span className="w-28 shrink-0 truncate text-right text-muted-foreground/70">
-              {resetLabel(windowInfo.resetsAt)}
+    <div className="mt-1 min-w-0 space-y-1 overflow-hidden">
+      {info.windows.map((windowInfo) => {
+        const reset = resetLabel(windowInfo.resetsAt);
+        return (
+          <div key={windowInfo.label} className="flex min-w-0 items-center gap-2 text-[11px]">
+            <span className="w-24 shrink-0 truncate text-muted-foreground" title={windowInfo.label}>
+              {windowInfo.label}
             </span>
-          )}
-        </div>
-      ))}
+            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary/70"
+                style={{ width: `${Math.max(0, Math.min(100, windowInfo.usedPercent))}%` }}
+              />
+            </div>
+            <span className="w-8 shrink-0 text-right tabular-nums text-muted-foreground">
+              {Math.round(windowInfo.usedPercent)}%
+            </span>
+            {reset && (
+              <span className="min-w-0 truncate text-right text-muted-foreground/70" title={reset}>
+                {reset}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
