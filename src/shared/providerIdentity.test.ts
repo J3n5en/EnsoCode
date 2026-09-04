@@ -73,6 +73,13 @@ describe('unionProviderModels', () => {
       { id: 'grok-4', enabled: true },
     ]);
   });
+
+  it('没有新模型时仍返回新数组，避免调用方误共享容器引用', () => {
+    const current = [{ id: 'grok-3', enabled: true }];
+    const result = unionProviderModels(current, [{ id: 'grok-3', enabled: false }]);
+    expect(result).toEqual(current);
+    expect(result).not.toBe(current);
+  });
 });
 
 describe('applyIncomingProviders', () => {

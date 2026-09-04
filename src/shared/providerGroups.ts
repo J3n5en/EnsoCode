@@ -70,7 +70,6 @@ export function vendorOf(
 ): string {
   if (provider.oauthAccountKey) return providerIdOfAccountKey(provider.oauthAccountKey);
   // 向导选择优先于 hostname：Custom 即使填了官方 URL 也要单独成组。
-  if (provider.catalogId === CUSTOM_VENDOR_ID) return CUSTOM_VENDOR_ID;
   if (provider.catalogId) return provider.catalogId;
 
   let host: string;

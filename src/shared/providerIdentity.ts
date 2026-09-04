@@ -10,15 +10,6 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
 }
 
-/** 向导选中的厂商；导入项没有 catalogId，按 hostname 归组。 */
-function catalogBucket(provider: ProviderIdentityInput): string {
-  if (provider.catalogId) return provider.catalogId;
-  return vendorOf({
-    baseUrl: provider.baseUrl,
-    oauthAccountKey: provider.oauthAccountKey,
-  });
-}
-
 /**
  * 入库去重键。
  *
@@ -28,7 +19,7 @@ function catalogBucket(provider: ProviderIdentityInput): string {
  */
 export function providerDedupeKey(provider: ProviderIdentityInput): string {
   if (provider.oauthAccountKey) return `oauth::${provider.oauthAccountKey}`;
-  return `${normalizeBaseUrl(provider.baseUrl)}::${provider.apiKey.trim()}::${catalogBucket(provider)}`;
+  return `${normalizeBaseUrl(provider.baseUrl)}::${provider.apiKey.trim()}::${vendorOf(provider)}`;
 }
 
 /** 已有模型（含用户覆盖）优先；只把新 id 追加到末尾。 */
@@ -38,7 +29,7 @@ export function unionProviderModels(
 ): ModelEntry[] {
   const known = new Set(current.map((model) => model.id));
   const extra = incoming.filter((model) => !known.has(model.id));
-  return extra.length === 0 ? [...current] : [...current, ...extra];
+  return [...current, ...extra];
 }
 
 /**
