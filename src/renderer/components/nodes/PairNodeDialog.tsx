@@ -30,7 +30,11 @@ const ERROR_KEYS: Record<NodePairError, string> = {
 };
 
 /** 粘贴另一台桌面「设置 → 设备」里复制的配对链接，认领后进入其房间 */
-export function PairNodeDialog({ open, onOpenChange, switchOnSuccess = true }: PairNodeDialogProps) {
+export function PairNodeDialog({
+  open,
+  onOpenChange,
+  switchOnSuccess = true,
+}: PairNodeDialogProps) {
   const { t } = useI18n();
   const [uri, setUri] = useState('');
   const [busy, setBusy] = useState(false);

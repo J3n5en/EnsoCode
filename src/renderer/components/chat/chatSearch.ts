@@ -20,10 +20,12 @@ export function timelineSearchHits(items: readonly TimelineItem[], query: string
     const hay = item.text.toLowerCase();
     let from = 0;
     let nth = 0;
-    while ((from = hay.indexOf(q, from)) !== -1) {
+    for (;;) {
+      const at = hay.indexOf(q, from);
+      if (at === -1) break;
       hits.push({ key: item.key, nth });
       nth += 1;
-      from += q.length;
+      from = at + q.length;
     }
   }
   return hits;

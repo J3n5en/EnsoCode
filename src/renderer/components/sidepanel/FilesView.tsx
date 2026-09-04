@@ -384,7 +384,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                           const keep = doc.rel;
                           const dirtyOthers = docs.some((item) => item.rel !== keep && item.dirty);
                           closeRels(
-                            (path) => path !== keep && !docs.find((item) => item.rel === path)?.dirty
+                            (path) =>
+                              path !== keep && !docs.find((item) => item.rel === path)?.dirty
                           );
                           if (dirtyOthers) setConfirmClose({ kind: 'others', rel: keep });
                         }}

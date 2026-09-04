@@ -26,6 +26,7 @@ export function ConversationTitleEdit({
         className
       )}
       value={draft}
+      // biome-ignore lint/a11y/noAutofocus: 进入编辑态必须立刻聚焦才能改标题
       autoFocus
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

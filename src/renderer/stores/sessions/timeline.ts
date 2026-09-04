@@ -606,11 +606,19 @@ function firstProgram(segment: string): string {
  * 只影响展示密度，不参与审批；策略保守：重定向、命令/进程替换、后台 &、写参数、
  * 未知程序、GIT_* 环境前缀（GIT_EXTERNAL_DIFF 等会转执行）一律判非只读。
  */
+function hasC0Control(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x1f && code !== 0x0a) return true;
+  }
+  return false;
+}
+
 export function isReadOnlyCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
   // 命令替换 / 进程替换 / 反引号可藏任意命令；控制字符（\r 等）可拼接隐藏命令
-  if (/\$\(|<\(|`|[\x00-\x09\x0b-\x1f]/.test(trimmed)) return false;
+  if (/\$\(|<\(|`/.test(trimmed) || hasC0Control(trimmed)) return false;
   // 去掉无害的 stderr 重定向后，剩余任何 > 都视为写文件
   const withoutStderr = trimmed.replace(/2>&1|[12]?>\s*\/dev\/null/g, '');
   if (withoutStderr.includes('>')) return false;

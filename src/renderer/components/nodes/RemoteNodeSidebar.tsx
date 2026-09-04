@@ -1,9 +1,5 @@
 import type { CatalogEntry, ProjectEntry } from '@enso/pair';
-import {
-  orderPinned,
-  orderProjectSessions,
-  sortByActivity,
-} from '@shared/pair/drawerOrder';
+import { orderPinned, orderProjectSessions, sortByActivity } from '@shared/pair/drawerOrder';
 import type { RemoteNodeStatus } from '@shared/types/nodes';
 import { Archive, ChevronDown, ChevronRight, Pin, Search, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';

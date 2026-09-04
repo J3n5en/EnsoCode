@@ -86,7 +86,7 @@ describe('sanitizeUiElementPayload', () => {
 
   it('脏输入：缺字段补空串、非字符串丢弃、超长截断、危险字符净化', () => {
     const out = sanitizeUiElementPayload({
-      label: 'B'.repeat(100) + '"[]\n',
+      label: `${'B'.repeat(100)}"[]\n`,
       path: 123,
       text: 'T'.repeat(300),
       tag: 'button',

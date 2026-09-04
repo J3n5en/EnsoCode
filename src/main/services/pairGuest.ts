@@ -154,7 +154,11 @@ export async function pairNode(inviteUri: string): Promise<NodePairResult> {
     const detail = error instanceof Error ? error.message : String(error);
     // postJson 对 4xx 直接抛业务错误（如已被认领/过期），网络失败抛 fetch 错误
     const businessReject = /relay 4\d\d|not found|expired|claimed|authorized/i.test(detail);
-    return { ok: false, error: businessReject ? 'expired-or-claimed' : 'relay-unreachable', detail };
+    return {
+      ok: false,
+      error: businessReject ? 'expired-or-claimed' : 'relay-unreachable',
+      detail,
+    };
   }
   const device: PairedDevice = {
     pairId: claimed.pairId,
