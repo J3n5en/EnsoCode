@@ -49,6 +49,7 @@ import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import agentWorkerPath from '../../agent/index?modulePath';
 import { readSettings } from '../ipc/settings';
 import { resolveGlobalInstruction } from './instructionStore';
+import { getMcpOAuthStore } from './mcpOAuthStore';
 import { pickSubagentModelRefs } from './subagentModels';
 
 export interface ResolvedModelSelection {
@@ -121,8 +122,7 @@ export function startAgentWorker(): void {
       type: 'set-proxy-env',
       env: proxyEnvPatchFromEnv(process.env),
     } satisfies AgentCommand);
-    const servers = enabledMcpServers();
-    if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
+    pushMcpWarmup();
     pushPinnedSessions(true);
     if (snapshotPending !== false) {
       const command: AgentCommand =
@@ -154,6 +154,13 @@ export function stopAgentWorker(): void {
   worker = null;
   workerReady = false;
   snapshotPending = false;
+}
+
+/** 向存活 worker 重新下发全部启用的 MCP server（带最新 OAuth 凭据）；授权成功后调用即可转 ready */
+export function pushMcpWarmup(): void {
+  if (!worker || !workerReady) return;
+  const servers = enabledMcpServers();
+  if (servers.length > 0) worker.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
 }
 
 export function isAgentWorkerRunning(): boolean {
@@ -806,13 +813,16 @@ function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
 }
 
 function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
+  const oauth = server.transport === 'stdio' ? undefined : getMcpOAuthStore().tokens(server.id);
   return {
+    ...(server.id ? { id: server.id } : {}),
     name: server.name,
     transport: server.transport,
     ...(server.command ? { command: server.command } : {}),
     ...(server.args?.length ? { args: server.args } : {}),
     ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
     ...(server.url ? { url: server.url } : {}),
+    ...(oauth ? { oauth } : {}),
   };
 }
 

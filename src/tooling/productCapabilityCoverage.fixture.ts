@@ -377,6 +377,12 @@ export const IPC_PRODUCT_COVERAGE = {
   SSH_CONNECTIONS_LIST_DIRS: excluded(
     'Remote directory browsing helper for the add-project picker.'
   ),
+  MCP_AUTHORIZE: excluded('Desktop-only MCP OAuth flow; needs system browser and keychain.'),
+  MCP_REVOKE: excluded('Clears locally stored MCP OAuth credentials; Settings panel only.'),
+  MCP_AUTH_STATE: excluded('Read-only MCP authorization flags for the Settings panel.'),
+  MCP_STATUS_EVENT: excluded(
+    'MCP connection status push for the Settings panel; renderer UI only.'
+  ),
   WORKSPACE_SEARCH_QUERY: excluded(
     'Desktop workspace search over local session projections; renderer Command Dialog only.'
   ),

@@ -52,6 +52,7 @@ import type {
   CreateConversationAuthorityRequest,
   CreateProjectAuthorityRequest,
   DispatchMainEvent,
+  McpWorkerEvent,
   ProjectAuthorityProjection,
   RemoveProjectAuthorityRequest,
   RendererAgentEvent,
@@ -452,6 +453,22 @@ const electronAPI = {
       projectId: string
     ): Promise<{ ok: true; value: boolean } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_REPO_CLEAN, projectId),
+  },
+  mcp: {
+    authorize: (serverId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_AUTHORIZE, serverId),
+    revoke: (serverId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_REVOKE, serverId),
+    authState: (): Promise<Record<string, boolean>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_AUTH_STATE),
+    onStatus: (
+      callback: (event: Extract<McpWorkerEvent, { type: 'mcp-status' }>) => void
+    ): (() => void) => {
+      const listener = (_: unknown, event: Extract<McpWorkerEvent, { type: 'mcp-status' }>) =>
+        callback(event);
+      ipcRenderer.on(IPC_CHANNELS.MCP_STATUS_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_STATUS_EVENT, listener);
+    },
   },
   sshConnections: {
     list: (): Promise<SshConnection[]> => ipcRenderer.invoke(IPC_CHANNELS.SSH_CONNECTIONS_LIST),

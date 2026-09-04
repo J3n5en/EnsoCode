@@ -6,6 +6,7 @@ import { registerCapabilityHandlers } from './capabilities';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
 import { registerGitHandlers } from './git';
+import { registerMcpHandlers } from './mcp';
 import { registerNodesHandlers } from './nodes';
 import { registerPairHandlers } from './pair';
 import { registerProjectHandlers } from './projects';
@@ -35,6 +36,7 @@ export function registerIpcHandlers(): void {
   registerFileHandlers();
   registerFilesWorkspaceHandlers();
   registerGitHandlers();
+  registerMcpHandlers();
   registerPairHandlers();
   registerNodesHandlers();
   registerWorktreeHandlers();

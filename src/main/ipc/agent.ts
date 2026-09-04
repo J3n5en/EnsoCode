@@ -65,6 +65,7 @@ import {
 } from '../services/agentHost';
 import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
+import { getMcpOAuthStore } from '../services/mcpOAuthStore';
 import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
@@ -345,6 +346,19 @@ export function registerAgentHandlers(): void {
   });
 
   setAgentEventListener((workerEvent) => {
+    // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
+    if (workerEvent.type === 'mcp-status') {
+      try {
+        sendToAllWindows(IPC_CHANNELS.MCP_STATUS_EVENT, workerEvent);
+      } catch {
+        // renderer 已崩但 webContents 对象还在
+      }
+      return;
+    }
+    if (workerEvent.type === 'mcp-tokens-refreshed') {
+      getMcpOAuthStore().saveTokens(workerEvent.serverId, workerEvent.tokens);
+      return;
+    }
     dispatchService?.observe(workerEvent);
     if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
       const file = agentSessionIndex.sessionFile(workerEvent.identity);

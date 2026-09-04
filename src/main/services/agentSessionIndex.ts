@@ -10,6 +10,7 @@ import type {
   AgentWorkerEvent,
   ChildConversationMetadata,
   CoworkerInfo,
+  McpWorkerEvent,
   ModelRef,
   NodeStatus,
 } from '@shared/types/agent';
@@ -95,7 +96,10 @@ function coworkerView(coworker: CoworkerInfo): TeamOperationSuccess['data']['cow
 }
 
 function identityOf(
-  event: Exclude<AgentWorkerEvent, { type: 'snapshot' } | { type: 'title-generated' }>
+  event: Exclude<
+    AgentWorkerEvent,
+    { type: 'snapshot' } | { type: 'title-generated' } | McpWorkerEvent
+  >
 ): SessionIdentity {
   return 'child' in event ? event.child : event.identity;
 }
@@ -323,8 +327,9 @@ export class AgentSessionIndex {
       return accepted;
     }
 
-    // 标题总结不属于任何 worker 会话（无 identity/seq），不进会话索引
+    // 标题总结与 MCP 旁路事件不属于任何 worker 会话（无 identity/seq），不进会话索引
     if (event.type === 'title-generated') return false;
+    if (event.type === 'mcp-status' || event.type === 'mcp-tokens-refreshed') return false;
 
     const identity = identityOf(event);
     const current = this.sessions.get(identity.sessionId);
