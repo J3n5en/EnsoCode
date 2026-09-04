@@ -18,6 +18,7 @@ import type {
 } from '@shared/types';
 import type { ThinkingLevel } from '@shared/types/agent';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
+import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
 
 export type DefaultModelRevalidation =
@@ -94,6 +95,9 @@ export interface SettingsState {
 
   /** 是否同时加载项目内 .claude/.codex/.cursor 的 skills 与规则文件（.cursorrules、.cursor/rules）；缺省 false */
   loadHarnessAssets: boolean;
+
+  /** Windows 本地 agent 命令壳；auto=本机 PowerShell。SSH/非 Windows 忽略。 */
+  windowsLocalShell: WindowsLocalShell;
 
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
@@ -198,6 +202,7 @@ export interface SettingsState {
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;
+  setWindowsLocalShell: (value: WindowsLocalShell) => void;
   setAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;

@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   type AgentSession,
   createAgentSession,
-  createBashToolDefinition,
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
@@ -55,6 +54,7 @@ import type {
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry } from '@shared/types/agent';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
+import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { version } from '../../package.json';
 import { ApprovalGate, withApproval } from './approval';
 import { AskManager, createAskTool } from './ask';
@@ -102,6 +102,7 @@ import {
   selectEvictable,
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
+import { createSessionCommandTool } from './sessionShell';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -637,7 +638,8 @@ export class SessionSupervisor {
           command.instruction,
           command.subagentModels,
           command.remote,
-          command.loadHarnessAssets
+          command.loadHarnessAssets,
+          command.windowsLocalShell
         );
         return;
       case 'spawn-child':
@@ -1008,7 +1010,8 @@ export class SessionSupervisor {
     instruction?: { path: string; content: string },
     subagentModels: SubagentModelOption[] = [],
     remote?: AgentRemoteConfig,
-    loadHarnessAssets = false
+    loadHarnessAssets = false,
+    windowsLocalShell?: WindowsLocalShell
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1169,10 +1172,12 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createBashToolDefinition(
+              createSessionCommandTool({
                 cwd,
-                remoteOps ? { operations: remoteOps.bash } : undefined
-              ) as unknown as Def,
+                remote: Boolean(remoteOps),
+                preference: windowsLocalShell,
+                operations: remoteOps?.bash,
+              }) as unknown as Def,
               this.bgTasks,
               sessionId,
               cwd,

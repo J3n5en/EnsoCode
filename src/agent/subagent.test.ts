@@ -96,7 +96,7 @@ describe('subagent tool model 参数', () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text.startsWith('report body')).toBe(true);
     expect(text).toContain('read 1');
-    expect(text).toContain('bash 0');
+    expect(text).toContain('shell 0');
     expect(text).toContain('parent-model');
   });
 

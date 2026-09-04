@@ -1,5 +1,5 @@
 /**
- * 子代理运行脚注:把"它到底做了什么"用一行事实压给主 agent —— 工具调用分布(bash 0 一眼看出没跑过验证)、
+ * 子代理运行脚注:把"它到底做了什么"用一行事实压给主 agent —— 工具调用分布(shell 0 一眼看出没跑过命令)、
  * 耗时、是否撞输出上限、上下文占用。全部来自会话本地消息,零额外成本。
  */
 export interface RunFooterInput {
@@ -45,7 +45,7 @@ export function runFooter(input: RunFooterInput): string {
       : [...counts.entries()]
           .sort((a, b) => b[1] - a[1])
           .map(([name, n]) => `${name} ${n}`)
-          .join(', ') + (counts.has('bash') ? '' : ' · bash 0');
+          .join(', ') + (counts.has('bash') || counts.has('powershell') ? '' : ' · shell 0');
   const parts = [input.label, input.modelId, formatElapsed(input.elapsedMs), tools];
   const used = (lastAssistant?.usage?.input ?? 0) + (lastAssistant?.usage?.output ?? 0);
   if (input.contextWindow && used > 0) {

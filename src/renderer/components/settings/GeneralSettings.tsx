@@ -1,5 +1,6 @@
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { UpdateStatus } from '@shared/types/updater';
+import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +45,7 @@ export function GeneralSettings() {
       </div>
 
       <SidePanelSection />
+      <WindowsLocalShellSection />
       <ProxySection />
       <UpdateSection />
     </div>
@@ -112,6 +114,48 @@ function SidePanelSection() {
           </SelectPopup>
         </Select>
       </div>
+    </div>
+  );
+}
+
+function WindowsLocalShellSection() {
+  const { t } = useI18n();
+  const windowsLocalShell = useSettingsStore((s) => s.windowsLocalShell);
+  const setWindowsLocalShell = useSettingsStore((s) => s.setWindowsLocalShell);
+  const labels: Record<WindowsLocalShell, string> = {
+    auto: t('Windows default (PowerShell)'),
+    powershell: t('PowerShell'),
+    bash: t('Git Bash'),
+  };
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="general.windowsLocalShell"
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{t('Windows local command shell')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.'
+          )}
+        </p>
+      </div>
+      <Select
+        items={labels}
+        value={windowsLocalShell}
+        onValueChange={(value) => setWindowsLocalShell(value as WindowsLocalShell)}
+      >
+        <SelectTrigger className="w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {(Object.keys(labels) as WindowsLocalShell[]).map((value) => (
+            <SelectItem key={value} value={value}>
+              {labels[value]}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
     </div>
   );
 }

@@ -11,7 +11,7 @@ import {
 } from './core';
 
 /** 触发快照的写盘工具 */
-const MUTATING_TOOLS = new Set(['write', 'edit', 'bash']);
+const MUTATING_TOOLS = new Set(['write', 'edit', 'bash', 'powershell']);
 
 /**
  * per 顶级会话的 checkpoint 管理:每轮首个写盘工具执行前打一次工作树快照,

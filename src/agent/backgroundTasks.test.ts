@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BackgroundTaskManager,
   DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+  resolveBackgroundLaunch,
   type TaskEvents,
   withBackground,
   withForegroundBashTimeout,
@@ -58,6 +59,54 @@ describe('withForegroundBashTimeout', () => {
       command: 'sleep 999',
       background: true,
     });
+  });
+});
+
+describe('withBackground promptSnippet 跟随工具名', () => {
+  it('包装 powershell 工具时,promptSnippet 以 powershell: 开头而非 bash:', () => {
+    const manager = makeManager().manager;
+    const base = {
+      name: 'powershell',
+      label: 'powershell',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [], details: undefined }),
+    } as unknown as ToolDefinition;
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    expect(wrapped.promptSnippet).toMatch(/^powershell:/);
+  });
+});
+
+describe('resolveBackgroundLaunch', () => {
+  it('给了 transform 时优先用 transform 的结果,不带 file', () => {
+    const result = resolveBackgroundLaunch(
+      'bash',
+      'echo hi',
+      '/srv/app',
+      (command, cwd) => ({ command: `ssh ${command}`, cwd: `${cwd}/x` })
+    );
+    expect(result).toEqual({ command: 'ssh echo hi', cwd: '/srv/app/x' });
+  });
+
+  it('工具名为 powershell 且无 transform 时,带上 resolvePowerShell 给出的 file/argsPrefix', () => {
+    const result = resolveBackgroundLaunch(
+      'powershell',
+      'Get-Process',
+      'C:\\proj',
+      undefined,
+      () => ({ shell: 'pwsh.exe', args: ['-NoProfile', '-Command'] })
+    );
+    expect(result).toEqual({
+      command: 'Get-Process',
+      cwd: 'C:\\proj',
+      file: 'pwsh.exe',
+      argsPrefix: ['-NoProfile', '-Command'],
+    });
+  });
+
+  it('工具名为 bash 且无 transform 时,只回原样 command/cwd', () => {
+    const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp');
+    expect(result).toEqual({ command: 'echo hi', cwd: '/tmp' });
   });
 });
 

@@ -20,6 +20,7 @@ import {
 } from '../capabilities/types';
 import type { DefaultModelRef } from '../defaultModel';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
+import { WINDOWS_LOCAL_SHELLS, type WindowsLocalShell } from '../windowsLocalShell';
 import { MODEL_API_KINDS, type ModelApiKind, type ModelCapabilityOverrides } from './llm';
 import { type AgentDispatchTask, parseAgentDispatchTask } from './mentions';
 
@@ -473,6 +474,8 @@ export type AgentCommand =
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
+      /** Windows 本地命令壳偏好；缺省 auto。远程会话忽略。 */
+      windowsLocalShell?: WindowsLocalShell;
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
     }
@@ -1664,6 +1667,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'agentTypes',
           'subagentModels',
           'disabledTools',
+          'windowsLocalShell',
           'remote',
         ]) ||
         !parseSessionIdentity(value.identity) ||
@@ -1671,6 +1675,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         !parseSpawnModelConfig(value.model) ||
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
         (value.loadHarnessAssets !== undefined && typeof value.loadHarnessAssets !== 'boolean') ||
+        (value.windowsLocalShell !== undefined &&
+          !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(
+            value.windowsLocalShell as string
+          )) ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

@@ -43,6 +43,7 @@ pnpm test:watch    # 监听模式
 | `src/shared/types/agent.test.ts` | agent 命令/事件的收窄（脏输入不崩） |
 | `src/agent/projection.test.ts` | 消息投影白名单（脱敏即白名单克隆） |
 | `src/agent/gate.test.ts` | 操作门：同 key 串行、异 key 并行、抛错不断链 |
+| `src/agent/sessionShell.test.ts` | 本地 win32 用官方 `powershell`，SSH/非 Windows 用 `bash` |
 | `src/renderer/stores/sessions/reducer.test.ts` | 事件归并：seq 守卫、index upsert、截断 |
 
 **暂未覆盖**（有意为之）：React 组件、zustand store、真实网络请求、Electron 窗口行为。

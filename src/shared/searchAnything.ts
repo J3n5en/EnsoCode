@@ -120,6 +120,12 @@ export function searchSettingsEntries(
 const STATIC_CATALOG: SettingsSearchEntry[] = [
   { id: 'general.language', category: 'general', title: 'Language' },
   {
+    id: 'general.windowsLocalShell',
+    category: 'general',
+    title: 'Windows local command shell',
+    description: 'PowerShell or Git Bash for the local Windows agent',
+  },
+  {
     id: 'general.openChangesOnFileEdit',
     category: 'general',
     title: 'Open Changes when files are edited',

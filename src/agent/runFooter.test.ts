@@ -4,7 +4,7 @@ import { runFooter } from './runFooter';
 const call = (name: string) => ({ type: 'toolCall', id: 'c', name, arguments: {} });
 
 describe('runFooter', () => {
-  it('统计各工具调用次数,按次数降序,bash 未用时显式标 0', () => {
+  it('统计各工具调用次数,按次数降序,命令工具未用时用中性的 shell 0 标注', () => {
     const footer = runFooter({
       messages: [
         { role: 'assistant', content: [call('read'), call('grep'), call('read')] },
@@ -16,13 +16,14 @@ describe('runFooter', () => {
       elapsedMs: 133_000,
     });
     expect(footer).toContain('read 2, grep 1');
-    expect(footer).toContain('bash 0');
+    expect(footer).toContain('shell 0');
+    expect(footer).not.toContain('bash 0');
     expect(footer).toContain('2m13s');
     expect(footer).toContain('scout');
     expect(footer).toContain('m');
   });
 
-  it('bash 用过时不重复标 0', () => {
+  it('bash 用过时不再标 shell 0', () => {
     const footer = runFooter({
       messages: [{ role: 'assistant', content: [call('bash')] }],
       label: 'worker',
@@ -30,8 +31,19 @@ describe('runFooter', () => {
       elapsedMs: 900,
     });
     expect(footer).toContain('bash 1');
-    expect(footer).not.toContain('bash 0');
+    expect(footer).not.toContain('shell 0');
     expect(footer).toContain('0.9s');
+  });
+
+  it('powershell 用过时不再标 shell 0', () => {
+    const footer = runFooter({
+      messages: [{ role: 'assistant', content: [call('powershell')] }],
+      label: 'worker',
+      modelId: 'm',
+      elapsedMs: 900,
+    });
+    expect(footer).toContain('powershell 1');
+    expect(footer).not.toContain('shell 0');
   });
 
   it('没有任何工具调用时标 no tool calls', () => {

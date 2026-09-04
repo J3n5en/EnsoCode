@@ -81,12 +81,16 @@ export async function dispatchCursorExec(
   tools: Map<string, CursorBridgeTool>,
   signal?: AbortSignal
 ): Promise<CursorExecDispatchResult> {
-  const toolName = FRAME_TOOL[frame.type];
+  const preferred = FRAME_TOOL[frame.type];
   const toolCallId = frame.toolCallId?.trim() || crypto.randomUUID();
   const args = frameToToolArgs(frame);
+  const tool =
+    frame.type === 'shell'
+      ? (tools.get(preferred) ?? tools.get('powershell') ?? tools.get('bash'))
+      : (tools.get(preferred) ?? tools.get(frame.type));
+  const toolName = tool?.name ?? preferred;
   const toolCall: CursorExecEvent = { type: 'toolCall', toolCallId, toolName, arguments: args };
 
-  const tool = tools.get(toolName) ?? tools.get(frame.type);
   if (!tool) {
     const resultText = `Tool "${toolName}" not available`;
     return {

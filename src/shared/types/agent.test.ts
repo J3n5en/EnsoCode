@@ -266,6 +266,24 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('spawn-parent 携 windowsLocalShell:合法通过,脏值拒绝', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand({ ...base, windowsLocalShell: 'bash' })).toEqual({
+      ...base,
+      windowsLocalShell: 'bash',
+    });
+    expect(parseAgentCommand({ ...base, windowsLocalShell: 'auto' })).toEqual({
+      ...base,
+      windowsLocalShell: 'auto',
+    });
+    expect(parseAgentCommand({ ...base, windowsLocalShell: 'powershell' })).toEqual({
+      ...base,
+      windowsLocalShell: 'powershell',
+    });
+    expect(parseAgentCommand({ ...base, windowsLocalShell: 'pwsh' })).toBeNull();
+    expect(parseAgentCommand({ ...base, windowsLocalShell: true })).toBeNull();
+  });
+
   it('spawn-parent 携 remote:合法通过,坏 shape 拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/srv/app', model };
     const withRemote = { ...base, remote: { host: 'user@dev-box', auth: 'key' } };

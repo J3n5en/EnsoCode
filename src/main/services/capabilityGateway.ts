@@ -182,6 +182,7 @@ function resultSettingField(capabilityId: string): string | null {
     'general.language': 'language',
     'general.load-local-skills': 'loadLocalSkills',
     'general.load-harness-assets': 'loadHarnessAssets',
+    'general.windows-local-shell': 'windowsLocalShell',
     'general.automatic-updates': 'autoUpdate',
     'general.proxy-mode': 'proxyMode',
     'general.custom-proxy-url': 'customProxyUrl',
@@ -641,10 +642,11 @@ export function createCapabilityHandlers(
   const handlers = {
     'general.language': settingValueHandler(services, 'language', stringValue),
     'general.load-local-skills': settingValueHandler(services, 'loadLocalSkills', booleanValue),
-    'general.load-harness-assets': settingValueHandler(
+    'general.load-harness-assets': settingValueHandler(services, 'loadHarnessAssets', booleanValue),
+    'general.windows-local-shell': settingValueHandler(
       services,
-      'loadHarnessAssets',
-      booleanValue
+      'windowsLocalShell',
+      (value) => value === 'auto' || value === 'powershell' || value === 'bash'
     ),
     'general.automatic-updates': settingValueHandler(services, 'autoUpdate', booleanValue),
     'general.proxy-mode': settingValueHandler(
