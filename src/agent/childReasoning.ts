@@ -32,6 +32,24 @@ export function parseModelThinkingRef(raw: string): {
   return { name, thinking: suffix };
 }
 
+/** 统一解析子会话的模型名与思考档；显式 thinking 优先于模型后缀。 */
+export function resolveChildThinkingInput(
+  modelName?: string,
+  thinkingRaw?: string
+): { modelName?: string; thinking?: ChildThinkingLevel } {
+  const parsed = parseModelThinkingRef(modelName ?? '');
+  let thinking = parsed.thinking;
+  if (thinkingRaw) {
+    if (!isChildThinkingLevel(thinkingRaw)) {
+      throw new Error(
+        `unknown thinking "${thinkingRaw}". Available: [${CHILD_THINKING_LEVELS.join(', ')}] or omit to inherit.`
+      );
+    }
+    thinking = thinkingRaw;
+  }
+  return { modelName: parsed.name || undefined, thinking };
+}
+
 export function thinkingToOverride(thinking: ChildThinkingLevel): ChildReasoningOverride {
   if (thinking === 'off') return { reasoning: 'off' };
   return { reasoning: 'on', thinkingLevel: thinking };

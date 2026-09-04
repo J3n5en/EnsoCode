@@ -58,7 +58,7 @@ describe('coworker tool model 参数', () => {
     expect(deps.spawn).toHaveBeenCalledWith('bob', undefined, 'OpenAI/gpt-cheap', undefined);
   });
 
-  it('spawn 解析 model:high 后缀并透传 thinking', async () => {
+  it('spawn 解析 model:high 后缀，显式 thinking 优先', async () => {
     const deps = makeDeps();
     const tool = createCoworkerTool(deps);
     await tool.execute(
@@ -69,6 +69,38 @@ describe('coworker tool model 参数', () => {
       {} as never
     );
     expect(deps.spawn).toHaveBeenCalledWith('bob', undefined, 'OpenAI/gpt-cheap', 'high');
+
+    await tool.execute(
+      't2',
+      {
+        operation: 'spawn',
+        name: 'alice',
+        task: 'do',
+        model: 'OpenAI/gpt-cheap:high',
+        thinking: 'off',
+      },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.spawn).toHaveBeenLastCalledWith('alice', undefined, 'OpenAI/gpt-cheap', 'off');
+  });
+
+  it('spawn 的非法显式 thinking 在创建 coworker 前报错', async () => {
+    const deps = makeDeps();
+    const tool = createCoworkerTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        { operation: 'spawn', name: 'bob', task: 'do', thinking: 'ultra' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(
+      'unknown thinking "ultra". Available: [off, minimal, low, medium, high, xhigh, max] or omit to inherit.'
+    );
+    expect(deps.spawn).not.toHaveBeenCalled();
   });
 
   it('models 为空时 schema 不含 model 参数', () => {

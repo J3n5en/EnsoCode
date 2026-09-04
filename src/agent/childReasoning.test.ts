@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseModelThinkingRef, resolveChildReasoning, thinkingToOverride } from './childReasoning';
+import {
+  parseModelThinkingRef,
+  resolveChildReasoning,
+  resolveChildThinkingInput,
+  thinkingToOverride,
+} from './childReasoning';
 
 describe('resolveChildReasoning', () => {
   it('无覆盖时跟随父会话开关与档位', () => {
@@ -53,6 +58,25 @@ describe('parseModelThinkingRef', () => {
       name: 'OpenAI/gpt-cheap:nope',
     });
     expect(parseModelThinkingRef('OpenAI/gpt-cheap')).toEqual({ name: 'OpenAI/gpt-cheap' });
+  });
+});
+
+describe('resolveChildThinkingInput', () => {
+  it('显式 thinking 赢过模型后缀，空模型名归一为未指定', () => {
+    expect(resolveChildThinkingInput('OpenAI/gpt-cheap:high', 'off')).toEqual({
+      modelName: 'OpenAI/gpt-cheap',
+      thinking: 'off',
+    });
+    expect(resolveChildThinkingInput('   ', 'xhigh')).toEqual({
+      modelName: undefined,
+      thinking: 'xhigh',
+    });
+  });
+
+  it('非法显式 thinking 使用既有精确错误文本', () => {
+    expect(() => resolveChildThinkingInput('OpenAI/gpt-cheap:high', 'ultra')).toThrow(
+      'unknown thinking "ultra". Available: [off, minimal, low, medium, high, xhigh, max] or omit to inherit.'
+    );
   });
 });
 

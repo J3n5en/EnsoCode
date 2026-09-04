@@ -9,8 +9,7 @@ import type {
 import {
   CHILD_THINKING_LEVELS,
   type ChildThinkingLevel,
-  isChildThinkingLevel,
-  parseModelThinkingRef,
+  resolveChildThinkingInput,
 } from './childReasoning';
 import { runFooter } from './runFooter';
 
@@ -211,15 +210,10 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           `unknown agent_type "${agentTypeName}". Available: [${deps.agentTypes.map((t) => t.name).join(', ')}] or omit for general.`
         );
       }
-      const parsed = parseModelThinkingRef(modelName ?? '');
-      const thinking =
-        thinkingRaw && isChildThinkingLevel(thinkingRaw) ? thinkingRaw : parsed.thinking;
-      if (thinkingRaw && !isChildThinkingLevel(thinkingRaw)) {
-        throw new Error(
-          `unknown thinking "${thinkingRaw}". Available: [${CHILD_THINKING_LEVELS.join(', ')}] or omit to inherit.`
-        );
-      }
-      const resolvedModelName = parsed.name || undefined;
+      const { modelName: resolvedModelName, thinking } = resolveChildThinkingInput(
+        modelName,
+        thinkingRaw
+      );
       const modelOption = resolvedModelName
         ? deps.models.find((option) => option.name === resolvedModelName)
         : undefined;
