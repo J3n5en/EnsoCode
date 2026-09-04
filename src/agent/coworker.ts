@@ -55,8 +55,21 @@ const truncateReport = (text: string): string =>
  * coworker 保有自己的完整上下文,可多轮 send 追问;用户在 tab 中旁观并可直接介入。
  */
 export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
-  const typeList = deps.agentTypes.map((type) => type.name).join(', ');
+  const typeList = deps.agentTypes
+    .map(
+      (type) =>
+        type.name +
+        (type.allowModelOverride
+          ? ' [custom model required]'
+          : type.model
+            ? ` (model: ${type.model.modelId})`
+            : ' (follows conversation model)')
+    )
+    .join(', ');
   const modelNames = deps.models.map((option) => option.name);
+  const requiredPickTypes = deps.agentTypes
+    .filter((type) => type.allowModelOverride)
+    .map((type) => type.name);
   const modelList = deps.models
     .map((option) => option.name + (option.description ? ` (${option.description})` : ''))
     .join('; ');
@@ -78,7 +91,8 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
             type: 'string',
             description:
               `Model override for spawn: ${modelList}. ` +
-              'Pick the cheapest model that fits the role; omit to inherit the default. ' +
+              'Pick the cheapest model that fits the role. ' +
+              'Required for agent_type marked [custom model required]; omit only when the type follows the conversation or uses a fixed model. ' +
               'Append :off/:minimal/:low/:medium/:high/:xhigh/:max to set thinking for this coworker.',
           },
         }
@@ -109,7 +123,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       'Verify delegated work with gate:"<command>" (exit code speaks, not the coworker). ' +
       'One coworker per role, reused across rounds; dismiss when its goal is met' +
       (deps.models.length > 0
-        ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — see the tool schema for options'
+        ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — required for [custom model required] types, otherwise omit to inherit'
         : ''),
     promptGuidelines: [
       'Hire a coworker whenever the same thread MAY need a follow-up round: review/verify loops, test-fix loops, ' +
@@ -123,6 +137,11 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         'do not redo its work yourself and do not spawn a second coworker for the same role (reuse the name). ' +
         'When a coworker reaches you via message_main_agent, answer it with send. ' +
         "dismiss only when the role's goal is met or the user says stop",
+      ...(requiredPickTypes.length > 0 && modelNames.length > 0
+        ? [
+            `When spawning an agent_type marked [custom model required] (${requiredPickTypes.join(', ')}), always pass model on the first spawn — omitting it fails, do not retry without model. Available: ${modelNames.join(', ')}`,
+          ]
+        : []),
     ],
     parameters: {
       type: 'object',
@@ -213,7 +232,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
             !deps.models.some((option) => option.name === resolvedModelName)
           ) {
             throw new Error(
-              `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+              `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}].`
             );
           }
           const targetType = agentTypeName
@@ -222,6 +241,11 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           if (targetType && targetType.allowModelOverride === false && resolvedModelName) {
             throw new Error(
               `agent_type "${targetType.name}" does not allow custom model selection (it is locked to ${targetType.model ? targetType.model.modelId : 'conversation model'}).`
+            );
+          }
+          if (targetType?.allowModelOverride && !resolvedModelName) {
+            throw new Error(
+              `agent_type "${targetType.name}" requires a model. Available: [${modelNames.join(', ')}]`
             );
           }
           const info = await deps.spawn(name.trim(), agentTypeName, resolvedModelName, thinking);

@@ -102,7 +102,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
             type: 'string',
             description:
               `Model override for this subagent: ${modelList}. ` +
-              'Pick the cheapest model that fits the subtask; omit to inherit the default. ' +
+              'Pick the cheapest model that fits the subtask. ' +
+              'Required for agent_type marked [custom model required]; omit only when the type follows the conversation or uses a fixed model. ' +
               'Append :off/:minimal/:low/:medium/:high/:xhigh/:max to set thinking for this run.',
           },
         }
@@ -124,6 +125,9 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
   const roleHints = deps.agentTypes
     .map((type) => builtinRoleHints[type.name])
     .filter((hint): hint is string => hint !== undefined);
+  const requiredPickTypes = deps.agentTypes
+    .filter((type) => type.allowModelOverride)
+    .map((type) => type.name);
   return {
     name: 'subagent',
     label: 'Subagent',
@@ -148,13 +152,18 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
             .join(', ')} — pick the cheapest type that fits the subtask`
         : '') +
       (deps.models.length > 0
-        ? '; a model parameter lets you pick a cheaper/stronger model per subtask — see the tool schema for options'
+        ? '; a model parameter lets you pick a cheaper/stronger model per subtask — required for [custom model required] types, otherwise omit to inherit'
         : ''),
     promptGuidelines: [
       'Delegate by default: when a request has 2+ independent lines of work (explore module A / change B / verify C), ' +
         'dispatch them as parallel subagent calls in the same message instead of doing them serially yourself. ' +
         'Searching the whole repo yourself before acting is an anti-pattern when a subagent could do the recon',
       ...(roleHints.length > 0 ? [`Pick agent_type by role: ${roleHints.join('; ')}`] : []),
+      ...(requiredPickTypes.length > 0 && modelNames.length > 0
+        ? [
+            `When using agent_type marked [custom model required] (${requiredPickTypes.join(', ')}), always pass model on the first call — omitting it fails, do not retry without model. Available: ${modelNames.join(', ')}`,
+          ]
+        : []),
     ],
     parameters: {
       type: 'object',
@@ -221,12 +230,17 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         : undefined;
       if (resolvedModelName && !modelOption) {
         throw new Error(
-          `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+          `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}].`
         );
       }
       if (agentType && agentType.allowModelOverride === false && resolvedModelName) {
         throw new Error(
           `agent_type "${agentType.name}" does not allow custom model selection (it is locked to ${agentType.model ? agentType.model.modelId : 'conversation model'}).`
+        );
+      }
+      if (agentType?.allowModelOverride && !resolvedModelName) {
+        throw new Error(
+          `agent_type "${agentType.name}" requires a model. Available: [${modelNames.join(', ')}]`
         );
       }
       const id = `agent-${++counter}-${Date.now().toString(36)}`;

@@ -126,7 +126,7 @@ export interface AgentTypeSpawnConfig {
   mcpServers?: McpServerSpawnConfig[];
   /** 绑定模型；缺省 = 跟随父会话 */
   model?: SpawnModelConfig;
-  /** 是否允许主 agent 覆盖模型（'agent_pick' 允许/必须主 agent 选型；固定模型或跟随会话时为 false，不允许自选覆盖） */
+  /** true = agent_pick：主 agent 必须传 model，禁止继承；false/缺省 = 固定模型或跟随会话，不允许自选覆盖 */
   allowModelOverride?: boolean;
 }
 
