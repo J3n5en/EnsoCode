@@ -15,18 +15,18 @@
 
 | 子任务 | 交付 |
 |---|---|
-| `09-03-workspace-search` | `mod+k` 工作区搜索 + 冷索引 |
-| 未建 | Context Inspector |
-| 未建 | 会话 Fork |
+| `09-03-workspace-search`（已归档） | `mod+k` 工作区搜索 + 冷索引 |
+| `09-03-context-inspector`（已归档） | Context Inspector |
+| `09-03-session-fork`（已归档） | 会话 Fork |
 | 未建 | 项目记忆 + 内置工具开关 `project_memory` |
 
 ## Acceptance Criteria
 
-- [ ] A：`mod+k` 能搜到未打开会话的用户原话并跳转高亮；`mod+f` 不变。
-- [ ] B：状态栏 context 可打开拆账单；压缩会话能看出旧消息已折叠。
-- [ ] C：从中间消息分叉后源线完整、新线可续、重启双线仍在。
+- [x] A：`mod+k` 能搜到未打开会话的用户原话并跳转高亮；`mod+f` 不变。
+- [x] B：状态栏 context 可打开拆账单；压缩会话能看出旧消息已折叠。
+- [x] C：从中间消息分叉后源线完整、新线可续、重启双线仍在。
 - [ ] D：`MEMORY.md` 2200 字硬上限；内置工具关掉则不注入、不注册写工具。
 
 ## Notes
 
-父任务不做实现。先 start / 实现当前子任务 A。
+父任务不做实现。A/B/C 已交付并归档；仅剩 D 项目记忆未建子任务。
