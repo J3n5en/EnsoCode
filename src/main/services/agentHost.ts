@@ -14,6 +14,7 @@ import {
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
 import { type ModelCredentialContext, modelUsability } from '@shared/defaultModel';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
+import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -115,6 +116,11 @@ export function startAgentWorker(): void {
 
   child.once('spawn', () => {
     workerReady = true;
+    // fork 前 ProxyConfig 的 set-proxy-env 因 worker 不存在被丢；spawn 后按 main 当前 env 补发一次
+    child.postMessage({
+      type: 'set-proxy-env',
+      env: proxyEnvPatchFromEnv(process.env),
+    } satisfies AgentCommand);
     const servers = enabledMcpServers();
     if (servers.length > 0) child.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
     pushPinnedSessions(true);
