@@ -34,6 +34,10 @@ export interface McpServerEntry {
   env?: Record<string, string>;
   /** http/sse 用 */
   url?: string;
+  /** 连接 + listTools 超时（秒）；缺省 10 */
+  connectTimeoutSec?: number;
+  /** 单次 callTool 超时（秒）；缺省 120 */
+  callTimeoutSec?: number;
   source: string;
   enabled: boolean;
 }

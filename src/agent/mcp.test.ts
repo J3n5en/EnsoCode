@@ -7,6 +7,7 @@ const clientState = {
   closed: 0,
   connect: vi.fn(async () => {}),
   listTools: vi.fn(async () => ({ tools: [] as { name: string; inputSchema: unknown }[] })),
+  callTool: vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] })),
 };
 
 const transportState = {
@@ -24,6 +25,9 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     }
     listTools() {
       return clientState.listTools();
+    }
+    callTool(...args: unknown[]) {
+      return clientState.callTool(...(args as []));
     }
     close() {
       clientState.closed += 1;
@@ -84,6 +88,7 @@ beforeEach(() => {
   clientState.closed = 0;
   clientState.connect = vi.fn(async () => {});
   clientState.listTools = vi.fn(async () => ({ tools: [] }));
+  clientState.callTool = vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] }));
   transportState.http = [];
   transportState.stdio = [];
 });
@@ -252,6 +257,51 @@ describe('McpManager connection cache', () => {
     expect((authProviderOf(1).tokens() as { access_token: string } | undefined)?.access_token).toBe(
       'fresh'
     );
+  });
+});
+
+describe('McpManager per-server timeouts', () => {
+  it('uses configured connectTimeoutMs for connect', async () => {
+    vi.useFakeTimers();
+    clientState.connect = vi.fn(() => new Promise(() => {}));
+    const { manager, events } = makeManager();
+    const pending = manager.toolsFor([{ ...httpServer, connectTimeoutMs: 50 }]);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(events.some((event) => event.type === 'mcp-status' && event.state === 'error')).toBe(
+      false
+    );
+    await vi.advanceTimersByTimeAsync(2);
+    await pending;
+    const last = events.at(-1);
+    expect(last).toMatchObject({ type: 'mcp-status', state: 'error' });
+    expect((last as { error?: string }).error).toContain('50ms');
+    vi.useRealTimers();
+  });
+
+  it('uses configured callTimeoutMs for callTool', async () => {
+    vi.useFakeTimers();
+    clientState.listTools = vi.fn(async () => ({
+      tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+    }));
+    clientState.callTool = vi.fn(() => new Promise(() => {}));
+    const { manager } = makeManager();
+    const tools = await manager.toolsFor([{ ...httpServer, callTimeoutMs: 80 }]);
+    const pending = tools[0]?.execute('tc-1', {}, undefined, undefined, {} as never);
+    await vi.advanceTimersByTimeAsync(79);
+    let settled = false;
+    void pending?.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    await expect(pending).rejects.toThrow(/80ms/);
+    vi.useRealTimers();
   });
 });
 

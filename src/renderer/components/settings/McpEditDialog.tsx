@@ -1,3 +1,10 @@
+import {
+  DEFAULT_MCP_CALL_TIMEOUT_MS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_MS,
+  MAX_MCP_CALL_TIMEOUT_SEC,
+  MAX_MCP_CONNECT_TIMEOUT_SEC,
+  parseMcpTimeoutSec,
+} from '@shared/mcpTimeout';
 import type { McpServerEntry, McpTransport } from '@shared/types';
 import { MCP_TRANSPORTS } from '@shared/types';
 import * as React from 'react';
@@ -69,6 +76,8 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
   const [argsText, setArgsText] = React.useState('');
   const [envText, setEnvText] = React.useState('');
   const [url, setUrl] = React.useState('');
+  const [connectTimeout, setConnectTimeout] = React.useState('');
+  const [callTimeout, setCallTimeout] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -80,6 +89,8 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
     setArgsText((base?.args ?? []).join('\n'));
     setEnvText(formatEnv(base?.env));
     setUrl(base?.url ?? '');
+    setConnectTimeout(base?.connectTimeoutSec?.toString() ?? '');
+    setCallTimeout(base?.callTimeoutSec?.toString() ?? '');
     setError(null);
   }, [server]);
 
@@ -88,6 +99,10 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
 
   const handleSave = () => {
     if (!server || !canSave) return;
+    const timeouts = {
+      connectTimeoutSec: parseMcpTimeoutSec(connectTimeout, MAX_MCP_CONNECT_TIMEOUT_SEC),
+      callTimeoutSec: parseMcpTimeoutSec(callTimeout, MAX_MCP_CALL_TIMEOUT_SEC),
+    };
     const data =
       transport === 'stdio'
         ? {
@@ -97,6 +112,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
             args: parseLines(argsText),
             env: parseEnv(envText),
             url: undefined,
+            ...timeouts,
           }
         : {
             name: name.trim(),
@@ -105,6 +121,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
             command: undefined,
             args: undefined,
             env: undefined,
+            ...timeouts,
           };
 
     if (creating) {
@@ -195,6 +212,25 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
               />
             </Field>
           )}
+
+          <Field>
+            <FieldLabel>{t('Connection timeout (seconds)')}</FieldLabel>
+            <Input
+              inputMode="numeric"
+              value={connectTimeout}
+              onChange={(e) => setConnectTimeout(e.target.value)}
+              placeholder={String(DEFAULT_MCP_CONNECT_TIMEOUT_MS / 1000)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>{t('Tool call timeout (seconds)')}</FieldLabel>
+            <Input
+              inputMode="numeric"
+              value={callTimeout}
+              onChange={(e) => setCallTimeout(e.target.value)}
+              placeholder={String(DEFAULT_MCP_CALL_TIMEOUT_MS / 1000)}
+            />
+          </Field>
 
           {error && <p className="text-destructive text-xs">{error}</p>}
         </DialogPanel>

@@ -157,6 +157,8 @@ export const MODEL_API_KINDS = [
 - **新增字段一律可选**，或在读取处兜底。例：`ModelEntry.enabled?: boolean`，
   用 `model.enabled !== false` 判断，让老数据（无该字段）默认视为启用
   （见 `src/renderer/components/settings/ProviderEditDialog.tsx` 的 `isEnabled`）。
+  MCP 超时同理：`McpServerEntry.connectTimeoutSec` / `callTimeoutSec` 可选，
+  经 `src/shared/mcpTimeout.ts` 归一成 spawn 毫秒；缺省仍是 10s 连接 / 120s 调用。
 - **重命名字段等于丢数据**。`InstructionEntry.path` 曾改名为 `sourcePath`，
   旧条目在界面上直接变成空路径。真要改名就得写迁移，或接受旧数据失效并说明。
 - 主进程也会直接读这个文件做去重比对

@@ -212,6 +212,10 @@ export interface McpServerSpawnConfig {
   url?: string;
   /** 已授权的 OAuth 凭据（http/sse 远程 server） */
   oauth?: McpOAuthTokens;
+  /** 连接 + listTools；缺省 10s */
+  connectTimeoutMs?: number;
+  /** 单次 callTool；缺省 120s */
+  callTimeoutMs?: number;
 }
 
 export interface ModelRef {
