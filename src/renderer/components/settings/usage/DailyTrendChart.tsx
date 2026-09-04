@@ -31,11 +31,10 @@ export function DailyTrendChart({ daily }: { daily: UsageDailyPoint[] }) {
   const { t } = useI18n();
   const [metric, setMetric] = React.useState<Metric>('tokens');
   const [hover, setHover] = React.useState<number | null>(null);
-  // 缓存默认关：量级通常比输出大两个数量级，叠在一起输出看不见
   const [on, setOn] = React.useState<Record<SeriesId, boolean>>({
     output: true,
     input: true,
-    cache: false,
+    cache: true,
   });
 
   const toggle = (id: SeriesId) => {
