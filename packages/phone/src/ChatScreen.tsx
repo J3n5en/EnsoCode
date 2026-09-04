@@ -1,4 +1,5 @@
 import type { CatalogEntry } from '@enso/pair';
+import { localCompactionNoticeIndex } from '@shared/pair/guestProjection';
 import type { AttachedImage, ProjectedMessage } from '@shared/types/agent';
 import { Bot, ChevronDown, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
@@ -56,12 +57,13 @@ export function ChatScreen(props: Props) {
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const running = view?.status === 'running';
 
-  const messages = useMemo<ProjectedMessage[]>(
-    () =>
-      view
-        ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message)
-        : [],
+  const entries = useMemo(
+    () => (view ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]) : []),
     [view]
+  );
+  const messages = useMemo<ProjectedMessage[]>(
+    () => entries.map(([, message]) => message),
+    [entries]
   );
 
   // 供复用组件内部读取（RunningElapsed 的计时 key；回退在手机端不可用）
@@ -79,8 +81,16 @@ export function ChatScreen(props: Props) {
   );
 
   const timeline = useMemo(
-    () => buildTimeline(messages, running, [], props.cwd),
-    [messages, running, props.cwd]
+    () =>
+      buildTimeline(messages, running, [], props.cwd, {
+        compaction: view?.compaction,
+        // 尾窗是稀疏绝对 index，buildTimeline 要的是数组下标
+        compactionNoticeAt: localCompactionNoticeIndex(
+          entries.map(([index]) => index),
+          view?.compactionNoticeAt
+        ),
+      }),
+    [messages, entries, running, props.cwd, view?.compaction, view?.compactionNoticeAt]
   );
 
   /*

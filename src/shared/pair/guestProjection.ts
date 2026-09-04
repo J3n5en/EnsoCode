@@ -25,6 +25,28 @@ export interface GuestSessionView {
   subagents: SubagentInfo[];
   /** 自动重试中（非终态）：与桌面 SessionProjection.retry 同规则 */
   retry?: RetryInfo;
+  /** 上下文压缩进度：排队中 / 压缩中；与桌面 Conversation.compaction 同语义 */
+  compaction?: 'queued' | 'running';
+  /**
+   * 压完提示的锚点，取**绝对消息 index** 口径（压完那刻 maxIndex + 1）。
+   * 桌面存的是稠密数组长度，guest 侧消息是稀疏尾窗，两者不同源，
+   * 渲染前须经 localCompactionNoticeIndex() 换算成数组下标。
+   */
+  compactionNoticeAt?: number;
+}
+
+/**
+ * 绝对 index 锚点 → 尾窗展开后的数组下标（buildTimeline 的 compactionNoticeAt 是数组下标口径）。
+ * 手机只持有尾部若干条消息，直接把绝对 index 传给 buildTimeline 会被它的「锚点过新」保护吞掉。
+ */
+export function localCompactionNoticeIndex(
+  indices: readonly number[],
+  noticeAt: number | undefined
+): number | undefined {
+  if (noticeAt === undefined) return undefined;
+  let local = 0;
+  for (const index of indices) if (index < noticeAt) local += 1;
+  return local;
 }
 
 export function emptyGuestView(): GuestSessionView {
@@ -94,6 +116,13 @@ export function applyGuestEvent(
     case 'ask-resolved':
       view.asks = view.asks.filter((a) => a.requestId !== event.requestId);
       break;
+    case 'compaction': {
+      const state = event.state as string;
+      view.compaction = state === 'queued' ? 'queued' : state === 'start' ? 'running' : undefined;
+      // host 先对齐消息再发 end，此时 maxIndex 已含摘要消息；失败则消息没变，锚点保持原样
+      if (state === 'end' && !event.error) view.compactionNoticeAt = maxIndex(view.messages) + 1;
+      break;
+    }
   }
   return { view };
 }
@@ -142,6 +171,9 @@ export function applyGuestSnapshot(
         asks: snap.pendingAsks ?? [],
         tasks: snap.backgroundTasks ?? [],
         subagents: snap.subagents ?? [],
+        // 快照不带压缩状态（瞬时事件）：沿用已有投影，重连不把进度/提示抹掉
+        compaction: sessions.get(id)?.compaction,
+        compactionNoticeAt: sessions.get(id)?.compactionNoticeAt,
       },
       lastIndex: base + incoming.length - 1,
     });
