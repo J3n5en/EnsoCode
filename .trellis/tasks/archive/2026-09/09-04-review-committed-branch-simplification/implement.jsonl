@@ -1,0 +1,9 @@
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"Enforce strict boundaries, green-to-green refactor discipline, and full validation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Judge the child-thinking extraction as a narrow domain rule rather than broad premature abstraction."}
+{"file":".trellis/spec/testing.md","reason":"Preserve existing behavioral tests and follow the repository testing contract."}
+{"file":".trellis/spec/shared/index.md","reason":"Shared-layer dependency and structure constraints apply to provider identity and model thinking code."}
+{"file":".trellis/spec/shared/conventions.md","reason":"Naming, rationale comments, Biome, scope, and validation conventions."}
+{"file":".trellis/spec/renderer/index.md","reason":"Renderer-layer boundaries and validation requirements for the thinking controls."}
+{"file":".trellis/spec/renderer/components.md","reason":"Component readability and callback/prop conventions for settings and picker changes."}
+{"file":".trellis/spec/big-question/dedupe-identity.md","reason":"Provider identity and merge semantics that simplification must preserve exactly."}
+{"file":".trellis/tasks/09-04-review-committed-branch-simplification/research/branch-diff-review.md","reason":"Complete 29-path committed-diff review, safe candidates, risks, and exact scope notes."}
