@@ -971,7 +971,11 @@ function CompactionProgressRow({
   );
 }
 
-/** compaction 分隔：之上的历史已被压缩出模型上下文；点击展开看模型拿到的摘要 */
+/**
+ * compaction 分隔：之上的历史已被压缩出模型上下文；点击展开看模型拿到的摘要。
+ * compaction-notice（锚在压缩时刻的提示）**不画分隔线**：它上方还包含仍在
+ * 上下文里的保留段，画成线会被误读成「此线之上都已压出上下文」。
+ */
 function CompactionRow({
   item,
 }: {
@@ -979,6 +983,7 @@ function CompactionRow({
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const divider = item.kind === 'compaction';
   const label =
     item.tokensBefore === null
       ? t('Context compacted')
@@ -990,16 +995,20 @@ function CompactionRow({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-3"
-        title={t('Messages above are no longer in the model context; only this summary is.')}
+        className={cn('flex items-center gap-3', divider && 'w-full')}
+        title={
+          divider
+            ? t('Messages above are no longer in the model context; only this summary is.')
+            : t('Latest compaction summary — expand to read what the model kept.')
+        }
       >
-        <span className="h-px flex-1 bg-border" />
+        {divider && <span className="h-px flex-1 bg-border" />}
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
           <PackageMinus className="h-3 w-3" />
           {label}
           <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
         </span>
-        <span className="h-px flex-1 bg-border" />
+        {divider && <span className="h-px flex-1 bg-border" />}
       </button>
       {expanded && (
         <pre className="mt-1.5 max-h-80 overflow-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">

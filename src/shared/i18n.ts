@@ -676,6 +676,8 @@ export const zhTranslations: Record<string, string> = {
   'Context compacted ({{tokens}} tokens before)': '上下文已压缩（压缩前 {{tokens}} tokens）',
   'Messages above are no longer in the model context; only this summary is.':
     '以上消息已不在模型上下文中，模型只看到这份摘要。',
+  'Latest compaction summary — expand to read what the model kept.':
+    '最近一次压缩摘要，点开可查看模型保留的内容。',
   '(summary unavailable)': '(摘要不可用)',
   Note: '注意',
   Tip: '提示',
