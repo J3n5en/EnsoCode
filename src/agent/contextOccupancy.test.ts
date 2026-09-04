@@ -176,6 +176,73 @@ describe('summarizeContextOccupancy', () => {
   });
 });
 
+describe('summarizeContextOccupancy 的 usedOverride / anchored', () => {
+  const baseInput = {
+    systemText: 'abcd',
+    instructionText: 'abcd',
+    skillTexts: [],
+    toolDefinitionTexts: [],
+    conversationTokens: 10,
+    compactionTokens: 0,
+    compactedMessageCount: 0,
+    projectMemoryText: '',
+    projectMemoryEnabled: true,
+    reminderText: '',
+    currentModelFamily: 'claude',
+  };
+
+  it('提供 usedOverride 时 used 直接采用该值，而非桶之和', () => {
+    const occupancy = summarizeContextOccupancy({
+      ...baseInput,
+      usedOverride: 999,
+      anchored: true,
+    } as Parameters<typeof summarizeContextOccupancy>[0]);
+    expect(occupancy.used).toBe(999);
+  });
+
+  it('提供 usedOverride 时会话桶回填为 usedOverride 减去其余桶之和', () => {
+    // system=1, instructions=1，其余桶为 0，usedOverride=500
+    const occupancy = summarizeContextOccupancy({
+      ...baseInput,
+      usedOverride: 500,
+      anchored: true,
+    } as Parameters<typeof summarizeContextOccupancy>[0]);
+    const otherBuckets = occupancy.buckets.system + occupancy.buckets.instructions;
+    expect(occupancy.buckets.conversation).toBe(Math.max(0, 500 - otherBuckets));
+  });
+
+  it('anchored 为 true 时 estimated 为 false', () => {
+    const occupancy = summarizeContextOccupancy({
+      ...baseInput,
+      usedOverride: 500,
+      anchored: true,
+    } as Parameters<typeof summarizeContextOccupancy>[0]);
+    expect(occupancy.estimated).toBe(false);
+  });
+
+  it('anchored 为 false（或缺省）时 estimated 仍为 true', () => {
+    const withFalse = summarizeContextOccupancy({
+      ...baseInput,
+      usedOverride: 500,
+      anchored: false,
+    } as Parameters<typeof summarizeContextOccupancy>[0]);
+    expect(withFalse.estimated).toBe(true);
+
+    const withoutFlag = summarizeContextOccupancy(baseInput);
+    expect(withoutFlag.estimated).toBe(true);
+    expect(withoutFlag.used).toBe(
+      withoutFlag.buckets.system +
+        withoutFlag.buckets.instructions +
+        withoutFlag.buckets.skills +
+        withoutFlag.buckets.tools +
+        withoutFlag.buckets.conversation +
+        withoutFlag.buckets.compaction +
+        withoutFlag.buckets.projectMemory +
+        withoutFlag.buckets.reminders
+    );
+  });
+});
+
 describe('collectContextOccupancy', () => {
   it('对话走 estimateTokens；压缩摘要单独成桶；折叠条数按 firstKept 之前计', () => {
     const occupancy = collectContextOccupancy({

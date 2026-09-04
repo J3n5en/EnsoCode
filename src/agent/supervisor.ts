@@ -77,6 +77,11 @@ import {
   type OccupancyBranchEntry,
   type OccupancySkill,
 } from './contextOccupancy';
+import {
+  type AnchorMessage,
+  type ContextUsageTracker,
+  ContextUsageTracker as UsageTracker,
+} from './contextUsage';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -201,6 +206,7 @@ interface ManagedSession {
   coworkers: Map<string, CoworkerInfo>;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
+  contextUsage: ContextUsageTracker;
   unsubscribe: () => void;
 }
 
@@ -1578,6 +1584,7 @@ export class SessionSupervisor {
       subagents: new Map(),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
+      contextUsage: new UsageTracker(),
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
       ...(opts.coworkerName ? { coworkerName: opts.coworkerName } : {}),
@@ -2083,7 +2090,9 @@ export class SessionSupervisor {
         managed.currentTurnId ??= randomUUID();
         managed.status = 'running';
         managed.checkpoints?.resetTurn();
+        this.armPendingContextUsage(managed);
         this.emitStatus(managed);
+        this.emitSessionMeta(managed);
         return;
       case 'message_start': {
         const index = managed.messages.length;
@@ -2128,6 +2137,7 @@ export class SessionSupervisor {
         const index = managed.messages.length - 1;
         const timing = managed.timings[index];
         if (timing) timing.completedMs = Date.now();
+        this.stampContextSnapshot(managed, event.message);
         const projected = projectMessage(event.message);
         this.replaceLastMessage(managed, projected);
         if (projected?.role === 'assistant') {
@@ -2140,6 +2150,7 @@ export class SessionSupervisor {
             .join('\\n');
           if (text) managed.safeJournal?.appendAssistantText(text);
         }
+        this.emitSessionMeta(managed);
         return;
       }
       case 'auto_retry_start':
@@ -2210,6 +2221,7 @@ export class SessionSupervisor {
       case 'compaction_end':
         // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
         this.reconcileMessages(managed, this.transcript(managed));
+        this.rebaseContextUsage(managed);
         managed.compaction = undefined;
         // 锚点必须在对齐之后取：否则摘要消息未入列，与 guest 事件口径 maxIndex+1 差 1
         if (!event.errorMessage) managed.compactionNoticeAt = managed.messages.length;
@@ -2255,6 +2267,7 @@ export class SessionSupervisor {
         managed.currentTurnId = undefined;
         managed.status = 'idle';
         this.emitStatus(managed);
+        managed.contextUsage.setPendingSnapshot(undefined);
         this.emitSessionMeta(managed);
         this.options.emit({
           type: 'turn-completed',
@@ -2414,6 +2427,7 @@ export class SessionSupervisor {
   private failTurn(managed: ManagedSession, error: string, undelivered = false): void {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
+    managed.contextUsage.setPendingSnapshot(undefined);
     managed.status = 'failed';
     this.emitStatus(managed, error);
     this.options.emit({
@@ -2485,11 +2499,165 @@ export class SessionSupervisor {
     }
   }
 
+  private estimateSessionMessage(message: unknown): number {
+    try {
+      return estimateTokens(message as never);
+    } catch {
+      return 0;
+    }
+  }
+
+  private occupancyInputs(managed: ManagedSession) {
+    const loader = managed.session.resourceLoader as {
+      getAgentsFiles?: () => { agentsFiles?: ReadonlyArray<{ path: string; content: string }> };
+      getSkills?: () => { skills?: OccupancySkill[] };
+    };
+    const sessionManager = managed.session.sessionManager as {
+      buildSessionContext?: () => { messages?: unknown[] };
+      getBranch?: () => OccupancyBranchEntry[];
+    };
+    return {
+      systemPrompt: managed.session.systemPrompt ?? '',
+      agentsFiles: loader.getAgentsFiles?.().agentsFiles ?? [],
+      skills: loader.getSkills?.().skills ?? [],
+      tools: typeof managed.session.getAllTools === 'function' ? managed.session.getAllTools() : [],
+      contextMessages: sessionManager.buildSessionContext?.().messages ?? [],
+      branch: sessionManager.getBranch?.() ?? [],
+      pendingTaskReminders: managed.pendingTaskReminders,
+    };
+  }
+
+  private currentNonMessageTokens(managed: ManagedSession): {
+    current: number;
+    category: number;
+    compactionIndex: number;
+  } {
+    const occupancy = occupancyFromManaged(managed, undefined, (message) =>
+      this.estimateSessionMessage(message)
+    );
+    const buckets = occupancy.buckets;
+    const category =
+      buckets.system +
+      buckets.instructions +
+      buckets.skills +
+      buckets.tools +
+      buckets.projectMemory +
+      buckets.reminders;
+    const compactionIndex = occupancy.compactionEntryId
+      ? this.occupancyInputs(managed).branch.findIndex(
+          (entry) => entry.id === occupancy.compactionEntryId
+        )
+      : -1;
+    return { current: category + buckets.compaction, category, compactionIndex };
+  }
+
+  private toAnchorMessages(
+    messages: readonly unknown[],
+    tracker?: ContextUsageTracker
+  ): AnchorMessage[] {
+    return messages.map((raw) => {
+      const record = (raw ?? {}) as Record<string, unknown>;
+      const usageRaw = record.usage;
+      const usage =
+        usageRaw && typeof usageRaw === 'object'
+          ? {
+              input: Number((usageRaw as { input?: number }).input ?? 0),
+              output: Number((usageRaw as { output?: number }).output ?? 0),
+              cacheRead: Number((usageRaw as { cacheRead?: number }).cacheRead ?? 0),
+              cacheWrite: Number((usageRaw as { cacheWrite?: number }).cacheWrite ?? 0),
+              ...((usageRaw as { contextTokens?: number }).contextTokens !== undefined
+                ? { contextTokens: Number((usageRaw as { contextTokens?: number }).contextTokens) }
+                : {}),
+              ...((usageRaw as { totalTokens?: number }).totalTokens !== undefined
+                ? { totalTokens: Number((usageRaw as { totalTokens?: number }).totalTokens) }
+                : {}),
+            }
+          : undefined;
+      const timestamp = typeof record.timestamp === 'number' ? record.timestamp : undefined;
+      const message: AnchorMessage = {
+        role: typeof record.role === 'string' ? record.role : '',
+        ...(typeof record.stopReason === 'string' ? { stopReason: record.stopReason } : {}),
+        ...(usage ? { usage } : {}),
+        ...(timestamp !== undefined ? { timestamp } : {}),
+      };
+      const snapshot = tracker?.snapshotFor(message);
+      if (snapshot) message.contextSnapshot = snapshot;
+      return message;
+    });
+  }
+
+  private armPendingContextUsage(managed: ManagedSession): void {
+    const nonMessage = this.currentNonMessageTokens(managed);
+    const contextMessages = this.occupancyInputs(managed).contextMessages;
+    const estimate = (message: unknown) => this.estimateSessionMessage(message);
+    const breakdown = managed.contextUsage.getBreakdown({
+      activeMessages: this.toAnchorMessages(contextMessages, managed.contextUsage),
+      compactionIndex: nonMessage.compactionIndex,
+      currentNonMessageTokens: nonMessage.current,
+      categoryNonMessageTokens: nonMessage.category,
+      estimateMessageTokens: estimate,
+    });
+    managed.contextUsage.setPendingSnapshot({
+      promptTokens: breakdown.usedTokens,
+      nonMessageTokens: nonMessage.current,
+      cutoffCount: contextMessages.length,
+    });
+  }
+
+  private rebaseContextUsage(managed: ManagedSession): void {
+    const nonMessage = this.currentNonMessageTokens(managed);
+    const contextMessages = this.occupancyInputs(managed).contextMessages;
+    const estimate = (message: unknown) => this.estimateSessionMessage(message);
+    const used =
+      nonMessage.current +
+      contextMessages.reduce((sum: number, message) => sum + Math.max(0, estimate(message)), 0);
+    managed.contextUsage.rebaseAfterCompaction({
+      promptTokens: used,
+      nonMessageTokens: nonMessage.current,
+      cutoffCount: contextMessages.length,
+    });
+  }
+
+  private stampContextSnapshot(managed: ManagedSession, raw: unknown): void {
+    const [anchor] = this.toAnchorMessages([raw]);
+    if (!anchor) return;
+    const nonMessage = this.currentNonMessageTokens(managed);
+    managed.contextUsage.stampSettledAnchor(anchor, nonMessage.current);
+  }
+
   private emitSessionMeta(managed: ManagedSession): void {
     const contextWindow = positiveContextWindow(managed.session.model);
     let occupancy: ReturnType<typeof collectContextOccupancy> | undefined;
     try {
-      occupancy = occupancyFromManaged(managed, contextWindow);
+      const baseline = occupancyFromManaged(managed, contextWindow, (message) =>
+        this.estimateSessionMessage(message)
+      );
+      occupancy = baseline;
+      const nonMessage = this.currentNonMessageTokens(managed);
+      const inputs = this.occupancyInputs(managed);
+      const breakdown = managed.contextUsage.getBreakdown({
+        contextWindow,
+        activeMessages: this.toAnchorMessages(inputs.contextMessages, managed.contextUsage),
+        compactionIndex: nonMessage.compactionIndex,
+        currentNonMessageTokens: nonMessage.current,
+        categoryNonMessageTokens: nonMessage.category,
+        estimateMessageTokens: (message) => this.estimateSessionMessage(message),
+      });
+      occupancy = {
+        ...baseline,
+        used: breakdown.usedTokens,
+        estimated: !breakdown.anchored,
+        buckets: {
+          ...baseline.buckets,
+          conversation: Math.max(
+            0,
+            breakdown.usedTokens - (baseline.used - baseline.buckets.conversation)
+          ),
+        },
+        ...(contextWindow !== undefined
+          ? { percent: Math.min(100, Math.round((breakdown.usedTokens / contextWindow) * 100)) }
+          : {}),
+      };
     } catch {
       occupancy = undefined;
     }
@@ -2757,7 +2925,8 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
 
 function occupancyFromManaged(
   managed: ManagedSession,
-  contextWindow: number | undefined
+  contextWindow: number | undefined,
+  estimateMessageTokens?: (message: unknown) => number
 ): ReturnType<typeof collectContextOccupancy> {
   const loader = managed.session.resourceLoader as {
     getAgentsFiles?: () => { agentsFiles?: ReadonlyArray<{ path: string; content: string }> };
@@ -2779,13 +2948,15 @@ function occupancyFromManaged(
     compactionModelFamily: compactionModelFamilyOf(branch),
     contextWindow,
     pendingTaskReminders: managed.pendingTaskReminders,
-    estimateMessageTokens: (message) => {
-      try {
-        return estimateTokens(message as never);
-      } catch {
-        return 0;
-      }
-    },
+    estimateMessageTokens:
+      estimateMessageTokens ??
+      ((message) => {
+        try {
+          return estimateTokens(message as never);
+        } catch {
+          return 0;
+        }
+      }),
   });
 }
 

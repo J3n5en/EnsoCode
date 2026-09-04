@@ -29,6 +29,8 @@ export interface ContextOccupancyInput {
   compactionModelFamily?: string;
   contextWindow?: number;
   compactionEntryId?: string;
+  usedOverride?: number;
+  anchored?: boolean;
 }
 
 function joinLength(texts: readonly string[]): number {
@@ -161,7 +163,13 @@ export function summarizeContextOccupancy(input: ContextOccupancyInput): Context
         : 0,
     reminders: charsToTokens(input.reminderText.length),
   };
-  const used = CONTEXT_OCCUPANCY_BUCKETS.reduce((sum, id) => sum + buckets[id], 0);
+  const bucketSum = CONTEXT_OCCUPANCY_BUCKETS.reduce((sum, id) => sum + buckets[id], 0);
+  const used =
+    input.usedOverride !== undefined ? Math.max(0, Math.round(input.usedOverride)) : bucketSum;
+  if (input.usedOverride !== undefined) {
+    const others = bucketSum - buckets.conversation;
+    buckets.conversation = Math.max(0, used - others);
+  }
   const current = modelFamily(input.currentModelFamily);
   const compacted = modelFamily(input.compactionModelFamily);
   const compactionModelMismatch = Boolean(compacted) && Boolean(current) && compacted !== current;
@@ -169,7 +177,7 @@ export function summarizeContextOccupancy(input: ContextOccupancyInput): Context
   return {
     buckets,
     used,
-    estimated: true,
+    estimated: input.anchored !== true,
     compactedMessageCount: Math.max(0, Math.round(input.compactedMessageCount)),
     compactionModelMismatch,
     ...(window !== undefined ? { contextWindow: window } : {}),

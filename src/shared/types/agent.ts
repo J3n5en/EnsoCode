@@ -256,7 +256,7 @@ export type ContextOccupancyBuckets = Record<ContextOccupancyBucketId, number>;
 export interface ContextOccupancy {
   buckets: ContextOccupancyBuckets;
   used: number;
-  estimated: true;
+  estimated: boolean;
   compactedMessageCount: number;
   compactionModelMismatch: boolean;
   contextWindow?: number;
@@ -993,7 +993,8 @@ export function parseMcpOAuthTokens(value: unknown): McpOAuthTokens | null {
 }
 
 export function parseContextOccupancy(value: unknown): ContextOccupancy | null {
-  if (!isRecord(value) || !isRecord(value.buckets) || value.estimated !== true) return null;
+  if (!isRecord(value) || !isRecord(value.buckets) || typeof value.estimated !== 'boolean')
+    return null;
   const buckets = {} as ContextOccupancyBuckets;
   for (const id of CONTEXT_OCCUPANCY_BUCKETS) {
     const tokens = value.buckets[id];

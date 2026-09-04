@@ -35,6 +35,7 @@ import type { Conversation } from '@/stores/sessions';
 import { computeStats, formatDuration, formatTokens } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextInspector } from './ContextInspector';
+import { contextSegmentUsed } from './contextSegment';
 import { StatusLineSettings } from './StatusLineSettings';
 
 interface StatsLineProps {
@@ -141,18 +142,6 @@ const SEGMENT_ICONS: Record<Exclude<StatusLineSegmentId, 'approval'>, LucideIcon
 const CRITICAL_PERCENT = 90;
 
 // 订阅额度的缓存/去重已提取到 hooks/useAccountUsage，与 ModelPicker/ProvidersSettings 共享同一份缓存
-
-/** 最近一条带非零 usage 的 assistant 消息的整段 prompt+输出 ≈ 当前上下文水位。
- *  流式中的消息 usage 是空对象（投影成全 0），须跳过，否则会话进行中会显示假的 0% 占用。 */
-function latestContextTokens(messages: ProjectedMessage[]): number | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const usage = messages[i].role === 'assistant' ? messages[i].usage : undefined;
-    if (!usage) continue;
-    const total = usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
-    if (total > 0) return total;
-  }
-  return null;
-}
 
 /** agent 当前正在跑的那一段（还没落进 computeStats 的已完成消息里）的实时时长归属：
  *  最后一条 assistant 消息还没 completedMs → 正在等 LLM；已经 completedMs → 正在等工具/下一步。
@@ -339,10 +328,14 @@ function buildSegmentValues(
     };
   }
 
-  const used = latestContextTokens(messages);
+  const used = contextSegmentUsed(conversation.occupancy);
   if (used !== null) {
     const window =
-      conversation.contextWindow && conversation.contextWindow > 0 ? conversation.contextWindow : 0;
+      conversation.occupancy?.contextWindow && conversation.occupancy.contextWindow > 0
+        ? conversation.occupancy.contextWindow
+        : conversation.contextWindow && conversation.contextWindow > 0
+          ? conversation.contextWindow
+          : 0;
     // 窗口未知时不编造百分比：显示已用 tokens，用 `?` 表示窗口未知，而不是拿一个假窗口凑百分比
     if (window > 0) {
       const percent = Math.min(100, Math.round((used / window) * 100));

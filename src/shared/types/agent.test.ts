@@ -592,6 +592,15 @@ describe('generation lifecycle/events', () => {
         ...event,
         occupancy: { ...occupancy, estimated: false },
       })
+    ).toEqual({
+      ...event,
+      occupancy: { ...occupancy, estimated: false },
+    });
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        occupancy: { ...occupancy, estimated: 'yes' },
+      })
     ).toBeNull();
     expect(
       parseAgentWorkerEvent({
