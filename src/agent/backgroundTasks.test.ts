@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
-import { BackgroundTaskManager, type TaskEvents, withBackground } from './backgroundTasks';
+import {
+  BackgroundTaskManager,
+  DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+  type TaskEvents,
+  withBackground,
+  withForegroundBashTimeout,
+} from './backgroundTasks';
 
 const makeManager = () => {
   const notified: string[] = [];
@@ -31,6 +37,29 @@ const until = (pred: () => boolean, ms = 5000) =>
       }
     }, 50);
   });
+
+describe('withForegroundBashTimeout', () => {
+  it('前台未指定 timeout 时填默认秒数', () => {
+    expect(withForegroundBashTimeout({ command: 'sleep 1' })).toEqual({
+      command: 'sleep 1',
+      timeout: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+    });
+  });
+
+  it('模型显式 timeout 保留', () => {
+    expect(withForegroundBashTimeout({ command: 'sleep 1', timeout: 30 })).toEqual({
+      command: 'sleep 1',
+      timeout: 30,
+    });
+  });
+
+  it('background 不注入 timeout', () => {
+    expect(withForegroundBashTimeout({ command: 'sleep 999', background: true })).toEqual({
+      command: 'sleep 999',
+      background: true,
+    });
+  });
+});
 
 describe('withBackground 命令变换(远程会话用)', () => {
   it('传入 transform 时,background 命令经变换后交给 manager', async () => {
@@ -60,6 +89,27 @@ describe('withBackground 命令变换(远程会话用)', () => {
     );
     expect(startCalls[0].command).toBe('ssh h "cd /srv/app && sleep 999"');
     expect(startCalls[0].cwd).toBe(process.cwd());
+  });
+
+  it('前台 execute 注入默认 timeout', async () => {
+    const { manager } = makeManager();
+    const seen: unknown[] = [];
+    const base = {
+      name: 'bash',
+      label: 'bash',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      execute: async (_id: string, params: unknown) => {
+        seen.push(params);
+        return { content: [], details: undefined };
+      },
+    } as unknown as ToolDefinition;
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    await wrapped.execute('t1', { command: 'echo hi' }, undefined, undefined, undefined as never);
+    expect(seen[0]).toEqual({
+      command: 'echo hi',
+      timeout: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+    });
   });
 });
 

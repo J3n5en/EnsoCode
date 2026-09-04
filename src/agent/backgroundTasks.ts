@@ -249,6 +249,21 @@ export class BackgroundTaskManager {
 /** 前台命令尾部 & 检测：引导改用 background 参数 */
 const TRAILING_AMP = /(?:^|[^&])&\s*$/;
 
+/** 前台 bash 默认超时（秒）。background=true 不限。 */
+export const DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC = 10 * 60;
+
+export function withForegroundBashTimeout(params: unknown): Record<string, unknown> {
+  const record =
+    params && typeof params === 'object' && !Array.isArray(params)
+      ? { ...(params as Record<string, unknown>) }
+      : {};
+  if (record.background === true) return record;
+  if (typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0) {
+    return record;
+  }
+  return { ...record, timeout: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC };
+}
+
 /** bash 加 background 能力：background=true 时 detach 运行立即返回 taskId */
 export function withBackground(
   definition: ToolDefinition,
@@ -266,6 +281,12 @@ export function withBackground(
     ...baseParams,
     properties: {
       ...baseParams.properties,
+      timeout: {
+        type: 'number',
+        description:
+          `Timeout in seconds (default ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC} for foreground; ` +
+          'no timeout when background=true)',
+      },
       background: {
         type: 'boolean',
         description:
@@ -280,7 +301,7 @@ export function withBackground(
     parameters,
     promptSnippet:
       'bash: run shell commands; pass background=true for long-running commands ' +
-      '(dev servers, watchers) — you are notified on completion, so do not poll',
+      `(dev servers, watchers, long builds). Foreground default timeout ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s.`,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
       if (record.background && typeof record.command === 'string') {
@@ -306,7 +327,13 @@ export function withBackground(
             'set background: true on this tool instead, which tracks the process and notifies you on completion.'
         );
       }
-      return definition.execute(toolCallId, params, signal, onUpdate, ctx);
+      return definition.execute(
+        toolCallId,
+        withForegroundBashTimeout(params),
+        signal,
+        onUpdate,
+        ctx
+      );
     },
   };
 }
