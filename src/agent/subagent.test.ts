@@ -15,7 +15,7 @@ function fakeSession(reply: string): AgentSession {
   return {
     messages: [{ role: 'assistant', content: [{ type: 'text', text: reply }] }],
     subscribe: () => () => {},
-    prompt: async () => {},
+    prompt: vi.fn(async () => {}),
     abort: async () => {},
     dispose: () => {},
   } as unknown as AgentSession;
@@ -319,5 +319,48 @@ describe('subagent tool model 参数', () => {
         {} as never
       )
     ).rejects.toThrow(/xhigh/);
+  });
+});
+
+describe('subagent structured yield', () => {
+  const schema = {
+    type: 'object',
+    required: ['ok'],
+    properties: { ok: { type: 'boolean' } },
+  };
+
+  it('stores valid JSON and mentions the schema in the child prompt', async () => {
+    const session = fakeSession('{"ok":true}');
+    const storeYield = vi.fn();
+    const deps = makeDeps({ createSubSession: vi.fn(async () => session), storeYield });
+    const tool = createSubagentTool(deps);
+    await tool.execute(
+      't1',
+      { description: 'x', prompt: 'do', schema },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(session.prompt).toHaveBeenCalledWith(expect.stringContaining('"ok"'));
+    expect(storeYield).toHaveBeenCalledWith(expect.stringMatching(/^agent-/), { ok: true });
+  });
+
+  it('nudges then fails if JSON never matches', async () => {
+    const session = {
+      ...fakeSession('nope'),
+      prompt: vi.fn(async () => {}),
+    } as unknown as AgentSession;
+    const deps = makeDeps({ createSubSession: vi.fn(async () => session) });
+    const tool = createSubagentTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        { description: 'x', prompt: 'do', schema },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/structured yield/);
+    expect(session.prompt).toHaveBeenCalledTimes(3);
   });
 });

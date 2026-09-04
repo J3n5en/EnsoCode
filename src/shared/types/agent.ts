@@ -464,6 +464,8 @@ export type AgentCommand =
       loadHarnessAssets?: boolean;
       /** 探后折叠工具 + context 折叠 */
       exploreFoldEnabled?: boolean;
+      /** 会话结束后写入 .enso/learned.md */
+      localMemoryEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1656,6 +1658,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'loadLocalSkills',
           'loadHarnessAssets',
           'exploreFoldEnabled',
+          'localMemoryEnabled',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1671,6 +1674,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
         (value.loadHarnessAssets !== undefined && typeof value.loadHarnessAssets !== 'boolean') ||
         (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
+        (value.localMemoryEnabled !== undefined && typeof value.localMemoryEnabled !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||
