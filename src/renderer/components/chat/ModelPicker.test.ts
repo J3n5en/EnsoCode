@@ -1,12 +1,23 @@
 import type { ModelProvider } from '@shared/types';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelPicker } from './ModelPicker';
 
 interface WrapperProps {
   children?: ReactNode;
 }
+
+interface ClickWrapperProps extends WrapperProps {
+  onClick?: () => void;
+}
+
+const harness = vi.hoisted(() => ({
+  menuItemClicks: [] as Array<() => void>,
+  sliderProps: null as Record<string, unknown> | null,
+  switchProps: null as Record<string, unknown> | null,
+  meta: {} as Record<string, unknown>,
+}));
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -19,16 +30,20 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/stores/modelMeta', () => ({
-  useModelMeta: () => ({}),
+  useModelMeta: () => harness.meta,
 }));
 
 vi.mock('@/components/ui/menu', () => {
   const Wrap = ({ children }: WrapperProps) => createElement('div', null, children);
+  const MenuItem = ({ children, onClick }: ClickWrapperProps) => {
+    if (onClick) harness.menuItemClicks.push(onClick);
+    return createElement('div', null, children);
+  };
   return {
     Menu: Wrap,
     MenuGroup: Wrap,
     MenuGroupLabel: Wrap,
-    MenuItem: Wrap,
+    MenuItem,
     MenuPopup: Wrap,
     MenuSub: Wrap,
     MenuSubPopup: Wrap,
@@ -42,11 +57,17 @@ vi.mock('@/components/ui/badge', () => ({
 }));
 
 vi.mock('@/components/ui/slider', () => ({
-  Slider: () => createElement('i', { 'data-slider': 'true' }),
+  Slider: (props: Record<string, unknown>) => {
+    harness.sliderProps = props;
+    return createElement('i', { 'data-slider': 'true' });
+  },
 }));
 
 vi.mock('@/components/ui/switch', () => ({
-  Switch: () => createElement('i', { 'data-switch': 'true' }),
+  Switch: (props: Record<string, unknown>) => {
+    harness.switchProps = props;
+    return createElement('i', { 'data-switch': 'true' });
+  },
 }));
 
 const providers: ModelProvider[] = [
@@ -72,6 +93,16 @@ const commonProps = {
   onThinkingChange: vi.fn(),
 };
 
+beforeEach(() => {
+  harness.menuItemClicks = [];
+  harness.sliderProps = null;
+  harness.switchProps = null;
+  harness.meta = {};
+  commonProps.onSelect.mockClear();
+  commonProps.onReasoningChange.mockClear();
+  commonProps.onThinkingChange.mockClear();
+});
+
 describe('ModelPicker reasoning controls mode', () => {
   it('keeps reasoning and thinking controls by default for ChatView', () => {
     const html = renderToStaticMarkup(createElement(ModelPicker, commonProps));
@@ -88,5 +119,95 @@ describe('ModelPicker reasoning controls mode', () => {
     expect(html).not.toContain('Reasoning');
     expect(html).not.toContain('data-slider="true"');
     expect(html).not.toContain('data-switch="true"');
+  });
+
+  it('自动钳位缺省复用 change 回调，提供 normalize 回调时与用户操作分流', () => {
+    const onThinkingChange = vi.fn();
+    renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        thinkingLevel: 'max',
+        onThinkingChange,
+      })
+    );
+    harness.menuItemClicks[0]?.();
+    expect(onThinkingChange).toHaveBeenCalledWith('high');
+
+    onThinkingChange.mockClear();
+    harness.menuItemClicks = [];
+    harness.sliderProps = null;
+    harness.switchProps = null;
+    const onReasoningChange = vi.fn();
+    const onReasoningNormalize = vi.fn();
+    const onThinkingNormalize = vi.fn();
+    renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        thinkingLevel: 'max',
+        onReasoningChange,
+        onThinkingChange,
+        onReasoningNormalize,
+        onThinkingNormalize,
+      })
+    );
+    harness.menuItemClicks[0]?.();
+    expect(onThinkingNormalize).toHaveBeenCalledWith('high');
+    expect(onThinkingChange).not.toHaveBeenCalled();
+
+    const switchProps = harness.switchProps as Record<string, unknown> | null;
+    const onCheckedChange = switchProps?.onCheckedChange;
+    if (typeof onCheckedChange === 'function') onCheckedChange(false);
+    expect(onReasoningChange).toHaveBeenCalledWith(false);
+    expect(onReasoningNormalize).not.toHaveBeenCalled();
+
+    const sliderProps = harness.sliderProps as Record<string, unknown> | null;
+    const onValueChange = sliderProps?.onValueChange;
+    if (typeof onValueChange === 'function') onValueChange(1);
+    expect(onThinkingChange).toHaveBeenCalledWith('low');
+  });
+
+  it('只渲染当前模型声明支持的思考档，normalize no-op 时仍显示钳位值', () => {
+    harness.meta = {
+      model: {
+        modelId: 'model',
+        source: 'catalog',
+        reasoning: true,
+        thinkingLevels: ['low', 'high'],
+      },
+    };
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        thinkingLevel: 'max',
+        onThinkingNormalize: () => undefined,
+      })
+    );
+    expect(html).toContain('>Low<');
+    expect(html).toContain('>High<');
+    expect(html).not.toContain('>Min<');
+    expect(html).not.toContain('>Med<');
+    expect(html).not.toContain('>Extra<');
+    expect(html).not.toContain('>Max<');
+  });
+
+  it('模型不支持推理时 normalize no-op 也显示为关闭且隐藏滑杆', () => {
+    harness.meta = {
+      model: {
+        modelId: 'model',
+        source: 'catalog',
+        reasoning: false,
+        thinkingLevels: [],
+      },
+    };
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        onReasoningNormalize: () => undefined,
+      })
+    );
+    const switchProps = harness.switchProps as Record<string, unknown> | null;
+    expect(switchProps?.checked).toBe(false);
+    expect(html).not.toContain('data-slider="true"');
+    expect(html).not.toContain('>Med<');
   });
 });

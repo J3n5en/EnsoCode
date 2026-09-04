@@ -1,22 +1,13 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
-import { clampProjectThinkingLevel, visibleThinkingLevels } from '@shared/modelThinking';
-import type { ModelProvider, ModelThinkingLevelOverride, SubagentModelEntry } from '@shared/types';
+import type { ModelProvider, ModelThinkingLevelOverride } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
 import { Plus, Sparkles, Trash2 } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
-import { useModelMeta } from '@/stores/modelMeta';
 import {
   usableProvidersForOauthSnapshot,
   useOauthCredentialStore,
@@ -26,103 +17,24 @@ import { useSettingsStore } from '@/stores/settings';
 const isModelEnabled = (provider: ModelProvider, modelId: string): boolean =>
   provider.models.some((model) => model.id === modelId && model.enabled !== false);
 
-const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
-  minimal: 'Min',
-  low: 'Low',
-  medium: 'Med',
-  high: 'High',
-  xhigh: 'Extra',
-  max: 'Max',
-};
+// 继承项只做能力适配显示，不落成独立覆盖；只有用户操作才写入。
+const ignoreInheritedNormalization = () => undefined;
 
-const isThinkingLevelOverride = (value: string): value is ModelThinkingLevelOverride =>
-  (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value);
-
-function thinkingSelectValue(entry: SubagentModelEntry): string {
-  if (entry.reasoning === 'off') return 'off';
-  if (entry.thinkingLevel) return entry.thinkingLevel;
-  if (entry.reasoning === 'on') return 'medium';
-  return 'follow';
+function isReasoningOverride(value: unknown): value is 'on' | 'off' {
+  return value === 'on' || value === 'off';
 }
 
-/** 对齐 pi `/thinking`：一档选择器，Follow / Off + 该模型真实支持的档 */
-function ThinkingControls({
-  entry,
-  provider,
-  onPatch,
-  t,
-}: {
-  entry: SubagentModelEntry;
-  provider: ModelProvider | undefined;
-  onPatch: (updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
-  t: (key: string) => string;
-}) {
-  const meta = useModelMeta(provider);
-  const modelMeta = meta[entry.modelId];
-  const visibleLevels = visibleThinkingLevels(modelMeta?.thinkingLevels);
-  const selected = thinkingSelectValue(entry);
-
-  useEffect(() => {
-    if (!modelMeta || entry.reasoning === 'off' || !entry.thinkingLevel) return;
-    if (visibleLevels.includes(entry.thinkingLevel)) return;
-    if (visibleLevels.length === 0) {
-      onPatch({ reasoning: 'off', thinkingLevel: undefined });
-      return;
-    }
-    onPatch({
-      reasoning: 'on',
-      thinkingLevel: clampProjectThinkingLevel(entry.thinkingLevel, visibleLevels),
-    });
-  }, [modelMeta, visibleLevels, entry.reasoning, entry.thinkingLevel, onPatch]);
-
+function isThinkingLevelOverride(value: unknown): value is ModelThinkingLevelOverride {
   return (
-    <Select
-      items={[
-        { value: 'follow', label: t('Follow conversation') },
-        { value: 'off', label: t('Off') },
-        ...visibleLevels.map((level) => ({
-          value: level,
-          label: t(LEVEL_LABEL_KEYS[level]),
-        })),
-      ]}
-      value={
-        selected === 'follow' ||
-        selected === 'off' ||
-        visibleLevels.includes(selected as ModelThinkingLevelOverride)
-          ? selected
-          : (visibleLevels[visibleLevels.length - 1] ?? 'off')
-      }
-      onValueChange={(value) => {
-        if (value === 'off') {
-          onPatch({ reasoning: 'off', thinkingLevel: undefined });
-          return;
-        }
-        if (value && isThinkingLevelOverride(value) && visibleLevels.includes(value)) {
-          onPatch({ reasoning: 'on', thinkingLevel: value });
-          return;
-        }
-        onPatch({ reasoning: undefined, thinkingLevel: undefined });
-      }}
-    >
-      <SelectTrigger
-        size="sm"
-        data-slot="subagent-model-thinking-level"
-        className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
-        title={t('Thinking level')}
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectPopup>
-        <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
-        <SelectItem value="off">{t('Off')}</SelectItem>
-        {visibleLevels.map((level) => (
-          <SelectItem key={level} value={level}>
-            {t(LEVEL_LABEL_KEYS[level])}
-          </SelectItem>
-        ))}
-      </SelectPopup>
-    </Select>
+    typeof value === 'string' &&
+    (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value)
   );
+}
+
+function resolveReasoningEnabled(value: unknown, fallback: boolean): boolean {
+  if (value === 'on') return true;
+  if (value === 'off') return false;
+  return fallback;
 }
 
 /**
@@ -140,6 +52,8 @@ export function SubagentModelsSettings() {
   const updateEntry = useSettingsStore((state) => state.updateSubagentModel);
   const removeEntry = useSettingsStore((state) => state.removeSubagentModel);
   const defaultModel = useSettingsStore((state) => state.defaultModel);
+  const defaultReasoningEnabled = useSettingsStore((state) => state.defaultReasoningEnabled);
+  const defaultThinkingLevel = useSettingsStore((state) => state.defaultThinkingLevel);
   const snapshot = useOauthCredentialStore((state) => state.snapshot);
   const candidates = useMemo(
     () => usableProvidersForOauthSnapshot(providers, snapshot),
@@ -205,20 +119,35 @@ export function SubagentModelsSettings() {
                   providers={candidates}
                   providerId={entry.providerId}
                   modelId={entry.modelId}
-                  reasoningEnabled={false}
-                  thinkingLevel="medium"
-                  showReasoningControls={false}
+                  reasoningEnabled={resolveReasoningEnabled(
+                    entry.reasoning,
+                    defaultReasoningEnabled
+                  )}
+                  thinkingLevel={
+                    isThinkingLevelOverride(entry.thinkingLevel)
+                      ? entry.thinkingLevel
+                      : defaultThinkingLevel
+                  }
                   onSelect={(providerId, modelId) => updateEntry(entry.id, { providerId, modelId })}
-                  onReasoningChange={() => undefined}
-                  onThinkingChange={() => undefined}
+                  onReasoningChange={(reasoningEnabled) =>
+                    updateEntry(entry.id, { reasoning: reasoningEnabled ? 'on' : 'off' })
+                  }
+                  onThinkingChange={(thinkingLevel) => updateEntry(entry.id, { thinkingLevel })}
+                  onReasoningNormalize={
+                    isReasoningOverride(entry.reasoning)
+                      ? (reasoningEnabled) =>
+                          updateEntry(entry.id, {
+                            reasoning: reasoningEnabled ? 'on' : 'off',
+                          })
+                      : ignoreInheritedNormalization
+                  }
+                  onThinkingNormalize={
+                    isThinkingLevelOverride(entry.thinkingLevel)
+                      ? (thinkingLevel) => updateEntry(entry.id, { thinkingLevel })
+                      : ignoreInheritedNormalization
+                  }
                 />
               </div>
-              <ThinkingControls
-                entry={entry}
-                provider={candidates.find((candidate) => candidate.id === entry.providerId)}
-                onPatch={(updates) => updateEntry(entry.id, updates)}
-                t={t}
-              />
               <Input
                 value={entry.description}
                 placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}

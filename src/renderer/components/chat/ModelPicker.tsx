@@ -93,13 +93,16 @@ interface ModelPickerProps {
   modelId: string;
   reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
-  /** 子代理模型清单等场景只复用 provider/account/model 级联，不展示 reasoning/thinking。 */
+  /** 仅需 provider/account/model 级联的场景可隐藏 reasoning/thinking。 */
   showReasoningControls?: boolean;
   /** 仅会话工具行：响应全局「切换模型」快捷键并聚焦搜索框 */
   listenHotkey?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
+  /** 模型能力约束触发的自动归一化；缺省复用用户变更回调。 */
+  onReasoningNormalize?: (enabled: boolean) => void;
+  onThinkingNormalize?: (level: ThinkingLevel) => void;
 }
 
 /**
@@ -392,8 +395,12 @@ export function ModelPicker({
   onSelect,
   onReasoningChange,
   onThinkingChange,
+  onReasoningNormalize,
+  onThinkingNormalize,
 }: ModelPickerProps) {
   const { t } = useI18n();
+  const normalizeReasoning = onReasoningNormalize ?? onReasoningChange;
+  const normalizeThinking = onThinkingNormalize ?? onThinkingChange;
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const openSubmenuIdsRef = useRef(new Set<string>());
@@ -550,49 +557,54 @@ export function ModelPicker({
         thinkingLevel,
         visibleThinkingLevels(meta?.thinkingLevels)
       );
-      if (clamped !== thinkingLevel) onThinkingChange(clamped);
+      if (clamped !== thinkingLevel) normalizeThinking(clamped);
       setOpen(false);
     },
-    [onSelect, metaByProvider, thinkingLevel, onThinkingChange]
+    [onSelect, metaByProvider, thinkingLevel, normalizeThinking]
   );
 
   const currentProviderMeta = useModelMeta(currentProvider);
   const currentModelMeta = currentProviderMeta[modelId];
   const supportedLevels = currentModelMeta?.thinkingLevels;
-  const visibleLevels = visibleThinkingLevels(supportedLevels);
+  const visibleLevels = useMemo(() => visibleThinkingLevels(supportedLevels), [supportedLevels]);
   const reasoningUnsupported =
     currentModelMeta?.reasoning === false || supportedLevels?.length === 0;
-  const levelIndex = Math.max(0, visibleLevels.indexOf(thinkingLevel));
+  const displayedReasoningEnabled = reasoningUnsupported ? false : reasoningEnabled;
+  const displayedThinkingLevel =
+    visibleLevels.length > 0
+      ? clampProjectThinkingLevel(thinkingLevel, visibleLevels)
+      : thinkingLevel;
+  const levelIndex = Math.max(0, visibleLevels.indexOf(displayedThinkingLevel));
 
   /**
    * 归一化 effect：钳位不能只挂在 handleSelectModel 的 onClick 上，两条路径会漏掉——
    * ① 元数据是异步查询，选完模型那一刻可能还没到，到达后没人回头核对当前档是否仍合法；
    * ② 恢复已持久化会话完全不经过 onSelect，会话记忆里的档位可能对新连上的模型早已不支持。
-   * 两种情况都要在 currentModelMeta 到位/变化时补一次回写；回写走会话状态
-   * （onThinkingChange/onReasoningChange 分别对应 setThinking/setReasoning），不能只改本地
-   * 显示，否则重启又变回不支持的值——这也顺带修好了 `reasoning:false` 时 Switch
-   * `checked={true} disabled` 打不开也关不掉的问题（enabled 会被同步拨回 false）。
+   * 两种情况都要在 currentModelMeta 到位/变化时补一次回写；归一化回调缺省仍走会话状态
+   * （分别对应 setThinking/setReasoning），不能只改本地显示，否则重启又变回不支持的值——
+   * 这也顺带修好了 `reasoning:false` 时 Switch `checked={true} disabled` 打不开也关不掉的问题
+   * （enabled 会被同步拨回 false）。
    * 只在「确实不支持」时才回写，`clampProjectThinkingLevel` 对已合法档位是恒等操作，
    * 配合这个判断，每次 meta 到位最多触发一次修正性 setState，不会死循环。
    */
   useEffect(() => {
     if (!currentModelMeta) return;
     if (reasoningUnsupported) {
-      if (reasoningEnabled) onReasoningChange(false);
+      if (reasoningEnabled) normalizeReasoning(false);
       return;
     }
     if (!reasoningEnabled) return;
     if (visibleLevels.includes(thinkingLevel)) return;
     if (visibleLevels.length === 0) return;
-    onThinkingChange(clampProjectThinkingLevel(thinkingLevel, visibleLevels));
+    normalizeThinking(clampProjectThinkingLevel(thinkingLevel, visibleLevels));
   }, [
     currentModelMeta,
     reasoningUnsupported,
     visibleLevels,
     reasoningEnabled,
     thinkingLevel,
-    onReasoningChange,
-    onThinkingChange,
+    normalizeReasoning,
+    normalizeThinking,
   ]);
 
   const handleRootOpenChange = useCallback(
@@ -627,10 +639,10 @@ export function ModelPicker({
         title={current?.label ?? modelId ?? t('Model')}
       >
         <span className="min-w-0 truncate">{current?.label ?? modelId ?? t('Model')}</span>
-        {reasoningEnabled && (
+        {displayedReasoningEnabled && (
           <span className="flex shrink-0 items-center gap-0.5 text-primary">
             <Brain className="h-3 w-3" />
-            {t(LEVEL_LABEL_KEYS[thinkingLevel])}
+            {t(LEVEL_LABEL_KEYS[displayedThinkingLevel])}
           </span>
         )}
         <ChevronDown className="h-3 w-3 shrink-0" />
@@ -775,7 +787,7 @@ export function ModelPicker({
               </span>
               <Switch
                 tabIndex={-1}
-                checked={reasoningEnabled}
+                checked={displayedReasoningEnabled}
                 onCheckedChange={onReasoningChange}
                 disabled={reasoningUnsupported}
               />
@@ -786,17 +798,17 @@ export function ModelPicker({
               </p>
             )}
 
-            {reasoningEnabled && !reasoningUnsupported && visibleLevels.length > 0 && (
+            {displayedReasoningEnabled && visibleLevels.length > 0 && (
               <div className="mt-3">
                 <Slider
                   tabIndex={-1}
                   min={0}
-                  max={Math.max(0, visibleLevels.length - 1)}
+                  max={visibleLevels.length - 1}
                   step={1}
                   value={levelIndex}
                   onValueChange={(value) => {
                     const index = Array.isArray(value) ? value[0] : value;
-                    const target = visibleLevels[index] ?? visibleLevels[0] ?? 'medium';
+                    const target = visibleLevels[index] ?? visibleLevels[0];
                     onThinkingChange(target);
                   }}
                 />
@@ -817,7 +829,7 @@ export function ModelPicker({
                       <span
                         className={cn(
                           'text-[10px] transition-colors',
-                          entry === thinkingLevel
+                          entry === displayedThinkingLevel
                             ? 'font-medium text-primary'
                             : 'text-muted-foreground/70 hover:text-foreground'
                         )}
