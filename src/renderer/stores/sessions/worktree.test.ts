@@ -355,6 +355,17 @@ describe('resumeConversation 的 worktree 校验', () => {
     );
   });
 
+  it('resume spawn 失败后再调 resumeConversation 仍会重试', async () => {
+    const id = await seedResumable();
+    agentSpawn.mockResolvedValueOnce({ ok: false });
+    await sessions.useSessionsStore.getState().resumeConversation(id);
+    expect(sessions.useSessionsStore.getState().conversations[id].status).toBe('failed');
+    agentSpawn.mockResolvedValueOnce({ ok: true });
+    await sessions.useSessionsStore.getState().resumeConversation(id);
+    expect(agentSpawn).toHaveBeenCalledTimes(2);
+    expect(sessions.useSessionsStore.getState().conversations[id].status).not.toBe('failed');
+  });
+
   it('worktree 丢失 → 不 spawn，标记 worktreeMissing', async () => {
     const id = await seedResumable();
     wtStatus.mockResolvedValueOnce({

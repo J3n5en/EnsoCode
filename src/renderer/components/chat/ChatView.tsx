@@ -235,7 +235,7 @@ export function ChatView() {
     // modelResolution 变化代表默认/provider/OAuth 可用性已变化，需重试先前 fail-closed 的恢复。
     void modelResolution;
     // worktreeMissing：resume 已发现 worktree 丢失，等用户选重建/回退，不要重试循环
-    // failed：spawn 被拒 / 发送失败已显式报错，每次 patch 都重试会对永久性错误形成 spawn 循环；由用户重发驱动
+    // failed：自动门不重试，避免永久错误形成 spawn 循环；空态「重试恢复」会再调 resumeConversation
     if (
       parent &&
       !parent.started &&
@@ -383,6 +383,11 @@ export function ChatView() {
         lastOutputAt={conversation.lastOutputAt}
         error={terminalErrorText(conversation.messages, conversation.error)}
         emptyTitle={project?.name ?? 'EnsoCode'}
+        onRetryResume={
+          !conversation.started && conversation.sessionFile && conversation.status === 'failed'
+            ? () => void useSessionsStore.getState().resumeConversation(conversation.id)
+            : undefined
+        }
         searchQuery={findOpen ? findQuery : ''}
         activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
       />

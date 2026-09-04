@@ -805,6 +805,7 @@ export const zhTranslations: Record<string, string> = {
   'Run everything without asking': '所有操作不经确认直接执行',
   'No conversations yet': '暂无对话',
   'Preparing session…': '正在恢复会话…',
+  'Retry resume': '重新恢复',
   Todos: '任务清单',
   '{{count}} tool calls': '{{count}} 个工具调用',
   'ran {{count}} commands': '跑了 {{count}} 条命令',

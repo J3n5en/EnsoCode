@@ -1962,6 +1962,8 @@ export const useSessionsStore = create<SessionsState>()(
                 // IPC 只是命令入队的同步 ack；等该会话首个 worker 事件（status/snapshot）到达再清
                 patch(state, id, {
                   started: true,
+                  status: 'idle',
+                  error: undefined,
                   lastProviderId: providerId,
                   lastModelId: modelId,
                 })
