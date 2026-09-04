@@ -156,11 +156,17 @@ export function stopAgentWorker(): void {
   snapshotPending = false;
 }
 
-/** 向存活 worker 重新下发全部启用的 MCP server（带最新 OAuth 凭据）；授权成功后调用即可转 ready */
-export function pushMcpWarmup(): void {
-  if (!worker || !workerReady) return;
-  const servers = enabledMcpServers();
-  if (servers.length > 0) worker.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
+/**
+ * 向存活 worker 重新下发 MCP server（带最新 OAuth 凭据）。给 serverId 时只下发该条目，
+ * 且不过 enabled/preset 过滤——授权的 server 可能被禁用或只被某 agentType 引用。
+ * 返回是否真的下发了。
+ */
+export function pushMcpWarmup(serverId?: string): boolean {
+  if (!worker || !workerReady) return false;
+  const servers = serverId ? mcpServerById(serverId) : enabledMcpServers();
+  if (servers.length === 0) return false;
+  worker.postMessage({ type: 'warm-mcp', servers } satisfies AgentCommand);
+  return true;
 }
 
 export function isAgentWorkerRunning(): boolean {
@@ -810,6 +816,13 @@ function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
     ? servers.filter((server) => preset.mcpServerIds.includes(server.id))
     : servers.filter((server) => server.enabled !== false);
   return picked.map(toMcpSpawnConfig);
+}
+
+function mcpServerById(serverId: string): McpServerSpawnConfig[] {
+  const state = readSettingsState();
+  const servers = Array.isArray(state?.mcpServers) ? state.mcpServers.filter(isMcpServerEntry) : [];
+  const entry = servers.find((server) => server.id === serverId);
+  return entry ? [toMcpSpawnConfig(entry)] : [];
 }
 
 function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
