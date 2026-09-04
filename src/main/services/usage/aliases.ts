@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { type PricingTable, parseUsageModelPricing } from '@shared/usage/pricing';
 import { app } from 'electron';
 import { readSettings } from '../../ipc/settings';
 import { WorktreeRegistry } from '../worktree/registry';
@@ -38,4 +39,8 @@ export function loadUsageProjectAliases(): UsageProjectAliases {
     projects: readSettingsProjects(),
     worktrees: new WorktreeRegistry(path.join(app.getPath('userData'), 'worktrees.json')).list(),
   });
+}
+
+export function loadUsageModelPricing(): PricingTable {
+  return parseUsageModelPricing(settingsState(readSettings())?.usageModelPricing);
 }

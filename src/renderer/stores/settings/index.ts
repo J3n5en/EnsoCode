@@ -9,6 +9,7 @@ import {
   type StatusLineSegmentId,
 } from '@shared/statusLine';
 import type { SourceAuthorityProjection } from '@shared/types/agent';
+import { parseUsageModelPricing } from '@shared/usage/pricing';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -143,6 +144,7 @@ const initialState = {
   onboarded: false,
   keybindings: {} as Record<string, string>,
   projects: [] as import('@shared/types').Project[],
+  usageModelPricing: {} as import('@shared/usage/pricing').PricingTable,
 };
 interface DefaultModelRevalidationState {
   latest: DefaultModelRevalidation | null;
@@ -577,6 +579,23 @@ export const useSettingsStore = create<SettingsState>()(
         if (!result.accepted) return false;
         set((state) => ({ projects: state.projects.filter((candidate) => candidate.id !== id) }));
         return true;
+      },
+
+      setUsageModelPricing: (modelId, pricing) => {
+        const parsed = parseUsageModelPricing({ [modelId]: pricing });
+        const [id, next] = Object.entries(parsed)[0] ?? [];
+        if (!id || !next) return false;
+        set((state) => ({ usageModelPricing: { ...state.usageModelPricing, [id]: next } }));
+        return true;
+      },
+      removeUsageModelPricing: (modelId) => {
+        const id = modelId.trim();
+        if (!id) return;
+        set((state) => {
+          if (!(id in state.usageModelPricing)) return state;
+          const { [id]: _removed, ...rest } = state.usageModelPricing;
+          return { usageModelPricing: rest };
+        });
       },
     }),
     {

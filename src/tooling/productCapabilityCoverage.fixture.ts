@@ -59,6 +59,9 @@ export const SETTINGS_DATA_COVERAGE = {
   onboarded: surfaces('onboarding.complete'),
   keybindings: surfaces('general.keybindings.list'),
   projects: surfaces('projects.list'),
+  usageModelPricing: excluded(
+    'Local usage cost override for Settings → Usage; desktop-only estimate, not an Enso capability.'
+  ),
   // 背景图属纯外观装饰，目前未开放为面向 Enso 的产品能力（需要时再建 catalog 条目）。
   backgroundImageEnabled: excluded('Appearance-only background decoration.'),
   backgroundSourceType: excluded('Appearance-only background decoration.'),
@@ -145,6 +148,12 @@ export const SETTINGS_ACTION_COVERAGE = {
   resetKeybinding: surfaces('general.keybindings.reset'),
   addProject: surfaces('projects.add'),
   removeProject: surfaces('projects.remove'),
+  setUsageModelPricing: excluded(
+    'Local usage cost override for Settings → Usage; desktop-only estimate, not an Enso capability.'
+  ),
+  removeUsageModelPricing: excluded(
+    'Local usage cost override for Settings → Usage; desktop-only estimate, not an Enso capability.'
+  ),
   setBackgroundImageEnabled: excluded('Appearance-only background decoration.'),
   setBackgroundSourceType: excluded('Appearance-only background decoration.'),
   setBackgroundImagePath: excluded('Appearance-only background decoration.'),

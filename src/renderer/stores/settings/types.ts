@@ -17,6 +17,7 @@ import type {
   SubagentModelEntry,
 } from '@shared/types';
 import type { ThinkingLevel } from '@shared/types/agent';
+import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
 
 export type DefaultModelRevalidation =
@@ -183,6 +184,9 @@ export interface SettingsState {
   // Projects（本地目录引用，作为会话工作目录）
   projects: Project[];
 
+  /** 用量估算覆盖：精确 model id → 四项单价 $/M；缺省 {} */
+  usageModelPricing: PricingTable;
+
   // Setters
   setTheme: (theme: Theme) => void;
   setLanguage: (language: Locale) => void;
@@ -290,4 +294,8 @@ export interface SettingsState {
   /** remote 传入时创建 ssh 远程项目;创建被拒(含远端探测失败)时抛 Error(message 可直接展示) */
   addProject: (path: string, remote?: { sshConnectionId: string }) => Promise<Project | null>;
   removeProject: (id: string) => Promise<boolean>;
+
+  /** 非法条目不写入，返回 false */
+  setUsageModelPricing: (modelId: string, pricing: ModelPricing) => boolean;
+  removeUsageModelPricing: (modelId: string) => void;
 }

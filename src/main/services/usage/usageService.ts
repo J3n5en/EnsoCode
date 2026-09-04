@@ -2,11 +2,11 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { aggregateUsage } from '@shared/usage/aggregate';
 import { mergeUsageSources } from '@shared/usage/ledger';
-import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
+import { type ModelPricing, mergePricingTable, type PricingTable } from '@shared/usage/pricing';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import { app } from 'electron';
 import { getRuntime } from '../oauthProviders';
-import { loadUsageProjectAliases } from './aliases';
+import { loadUsageModelPricing, loadUsageProjectAliases } from './aliases';
 import { loadLedger } from './ledgerStore';
 import { type ParsedSession, parseSessionJsonl } from './parseSession';
 import { applyUsageProjectAliases } from './projectLabel';
@@ -174,7 +174,12 @@ export async function getUsageSummary(days: UsageRangeDays): Promise<UsageSummar
     );
     return {
       ok: true,
-      summary: aggregateUsage(records, activity, pricing, { days, now }),
+      summary: aggregateUsage(
+        records,
+        activity,
+        mergePricingTable(pricing, loadUsageModelPricing()),
+        { days, now }
+      ),
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

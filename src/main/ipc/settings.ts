@@ -57,6 +57,7 @@ export const SETTINGS_STATE_FIELDS = [
   'onboarded',
   'keybindings',
   'projects',
+  'usageModelPricing',
 ] as const;
 
 export type SettingsStateField = (typeof SETTINGS_STATE_FIELDS)[number];

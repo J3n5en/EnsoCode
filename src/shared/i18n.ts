@@ -570,7 +570,7 @@ export const zhTranslations: Record<string, string> = {
   // 用量统计
   Usage: '用量',
   'Token usage across all local sessions; cost is estimated from catalog prices.':
-    '统计本机全部会话的 Token 用量；费用按模型目录单价估算。',
+    '统计本机全部会话的 Token 用量；费用按目录单价估算，可在下方覆盖。',
   Today: '今天',
   '7D': '7 天',
   '30D': '30 天',
@@ -605,6 +605,11 @@ export const zhTranslations: Record<string, string> = {
   '(no project)': '（无项目）',
   'No catalog price for: {{models}}. Their cost is not included.':
     '以下模型无目录单价：{{models}}，其费用未计入。',
+  'Unit prices': '单价',
+  'Override catalog rates ($/M tokens). Exact model id; empty rate is 0.':
+    '覆盖目录单价（$/百万 tokens）。按精确模型 id；空项按 0。',
+  'Model id': '模型 id',
+  'Enter a model id and non-negative rates.': '请填写模型 id 和非负单价。',
   Refresh: '刷新',
   'Saved hosts for remote projects. Passwords stay in the system keychain.':
     '远程项目用的主机。密码保存在系统钥匙串。',

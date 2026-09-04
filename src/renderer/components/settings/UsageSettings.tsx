@@ -14,6 +14,7 @@ import { DailyTrendChart } from './usage/DailyTrendChart';
 import { HourlyHeatmap } from './usage/HourlyHeatmap';
 import { RankingTable } from './usage/RankingTable';
 import { StatCard } from './usage/StatCard';
+import { UsagePricingEditor } from './usage/UsagePricingEditor';
 
 const RANGE_LABEL_KEYS: Record<UsageRangeDays, string> = {
   1: 'Today',
@@ -115,6 +116,7 @@ export function UsageSettings() {
           )}
         </>
       )}
+      <UsagePricingEditor onChanged={() => void load(days)} />
     </div>
   );
 }
