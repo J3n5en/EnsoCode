@@ -1,4 +1,4 @@
-import { CUSTOM_VENDOR_ID } from './providerGroups';
+import { vendorOf } from './providerGroups';
 import type { ModelEntry, ModelProvider } from './types/llm';
 
 export type ProviderIdentityInput = Pick<
@@ -10,17 +10,25 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
 }
 
+/** 向导选中的厂商；导入项没有 catalogId，按 hostname 归组。 */
+function catalogBucket(provider: ProviderIdentityInput): string {
+  if (provider.catalogId) return provider.catalogId;
+  return vendorOf({
+    baseUrl: provider.baseUrl,
+    oauthAccountKey: provider.oauthAccountKey,
+  });
+}
+
 /**
  * 入库去重键。
  *
  * - 订阅：账号 key（同一厂商多账号不能互吞）
- * - API-key：端点 + 钥匙。向导里显式选 Custom 时再加标记——官方 xAI URL
- *   上挂一份自定义模型清单，不能被已有 xAI 条目静默丢掉。
+ * - API-key：端点 + 钥匙 + 厂商桶。从 xAI 向导改到已有 OpenAI 中转 URL
+ *   时必须是另一条（独立供应商）；选 Custom 且 hostname 也是 Custom 才合并进已有行。
  */
 export function providerDedupeKey(provider: ProviderIdentityInput): string {
   if (provider.oauthAccountKey) return `oauth::${provider.oauthAccountKey}`;
-  const endpoint = `${normalizeBaseUrl(provider.baseUrl)}::${provider.apiKey.trim()}`;
-  return provider.catalogId === CUSTOM_VENDOR_ID ? `${endpoint}::custom` : endpoint;
+  return `${normalizeBaseUrl(provider.baseUrl)}::${provider.apiKey.trim()}::${catalogBucket(provider)}`;
 }
 
 /** 已有模型（含用户覆盖）优先；只把新 id 追加到末尾。 */

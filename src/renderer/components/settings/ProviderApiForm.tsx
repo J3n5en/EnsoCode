@@ -1,4 +1,4 @@
-import { mergeFetchedModels } from '@shared/modelEntry';
+import { commitPendingModel, mergeFetchedModels } from '@shared/modelEntry';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import { CircleCheck, CircleX, Eye, EyeOff, ListPlus, Loader2, Plus, Zap } from 'lucide-react';
@@ -384,7 +384,7 @@ export function ProviderApiForm({ initialValue, oauth, onCancel, onSave }: Provi
                 api,
                 apiKey: apiKey.trim(),
                 baseUrl: baseUrl.trim(),
-                models,
+                models: commitPendingModel(models, newModel),
               })
             }
           >

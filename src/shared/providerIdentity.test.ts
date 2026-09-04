@@ -41,7 +41,20 @@ describe('providerDedupeKey', () => {
       catalogId: CUSTOM_VENDOR_ID,
     });
     expect(custom).not.toBe(official);
-    expect(custom).toContain('custom');
+    expect(custom).toContain(CUSTOM_VENDOR_ID);
+  });
+
+  it('xAI 向导改用已有 OpenAI 中转 URL 时与 OpenAI 条目不是同一条', () => {
+    const importedOpenAI = providerDedupeKey({
+      baseUrl: 'https://done.5111online.uk/v1',
+      apiKey: 'sk',
+    });
+    const xaiWizard = providerDedupeKey({
+      baseUrl: 'https://done.5111online.uk/v1',
+      apiKey: 'sk',
+      catalogId: 'xai',
+    });
+    expect(xaiWizard).not.toBe(importedOpenAI);
   });
 });
 
@@ -116,5 +129,52 @@ describe('applyIncomingProviders', () => {
     ]);
     expect(added).toBe(0);
     expect(providers).toEqual(existing);
+  });
+
+  it('从 xAI 向导录入同一中转 URL 的 grok 模型时新增独立供应商，不吞进 OpenAI', () => {
+    const existing = [
+      provider({
+        id: 'openai-relay',
+        name: 'OpenAI',
+        api: 'openai-responses',
+        baseUrl: 'https://done.5111online.uk/v1',
+        models: [{ id: 'gpt-5.6-sol', enabled: true }],
+      }),
+    ];
+    const { providers, added } = applyIncomingProviders(existing, [
+      provider({
+        id: 'xai-relay',
+        name: 'xAI (Grok/X subscription)',
+        catalogId: 'xai',
+        baseUrl: 'https://done.5111online.uk/v1',
+        models: [{ id: 'grok-4.6', enabled: true }],
+      }),
+    ]);
+    expect(added).toBe(1);
+    expect(providers.map((item) => item.id)).toEqual(['openai-relay', 'xai-relay']);
+    expect(providers[1].models.map((model) => model.id)).toEqual(['grok-4.6']);
+  });
+
+  it('选 Custom 且 URL 已在自定义组时把新模型合并进已有行', () => {
+    const existing = [
+      provider({
+        id: 'openai-relay',
+        name: 'OpenAI',
+        baseUrl: 'https://done.5111online.uk/v1',
+        models: [{ id: 'gpt-5.6-sol', enabled: true }],
+      }),
+    ];
+    const { providers, added } = applyIncomingProviders(existing, [
+      provider({
+        id: 'ignored',
+        catalogId: CUSTOM_VENDOR_ID,
+        baseUrl: 'https://done.5111online.uk/v1',
+        models: [{ id: 'grok-4.6', enabled: true }],
+      }),
+    ]);
+    expect(added).toBe(1);
+    expect(providers).toHaveLength(1);
+    expect(providers[0].id).toBe('openai-relay');
+    expect(providers[0].models.map((model) => model.id)).toEqual(['gpt-5.6-sol', 'grok-4.6']);
   });
 });
