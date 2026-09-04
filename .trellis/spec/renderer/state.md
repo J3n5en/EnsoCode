@@ -94,6 +94,14 @@ expect(error).toContain('read-only');
 expect(store.getState().conversations.ended.messages).toHaveLength(before);
 ```
 
+## 乐观回显不算「有正文」
+
+正文冷缓存清空后靠 `snapshot` 补回，门控必须用 `hasAuthoritativeMessages()`，
+不能用 `messages.length === 0`——用户先发一句就会把门关死，之后 worker 的
+`message-upsert` 全部越界丢弃，时间线永久空白（见
+[big-question/optimistic-echo-blocks-snapshot.md](../big-question/optimistic-echo-blocks-snapshot.md)）。
+同理，任何「本地是否已有数据、要不要去拉」的判断都要过滤 `optimistic` 条目。
+
 ## 持久化边界
 
 store 里的一切都会被写进 `settings.json`。因此：

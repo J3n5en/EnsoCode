@@ -15,6 +15,7 @@
 | [pi-auto-retry-willretry.md](pi-auto-retry-willretry.md) | 503 报错解锁输入后 agent 又自己跑起来；resume 回放重复红错 |
 | [worktree-move-races.md](worktree-move-races.md) | 会话切到隔离 worktree 后，文件仍写进主工作树；新命令被 worker 静默丢弃 |
 | [cdp-hidden-window-input.md](cdp-hidden-window-input.md) | CDP 拖拽/点击时好时坏，eval/截图全正常，极易误判为产品 bug |
+| [optimistic-echo-blocks-snapshot.md](optimistic-echo-blocks-snapshot.md) | 冷会话回来先发一句后，聊天区只剩这一句、计时器在走、工具卡不出现；worker 其实在正常干活 |
 
 ## 共同教训
 
