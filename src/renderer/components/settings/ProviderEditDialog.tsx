@@ -31,6 +31,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
               models: provider.models,
             }}
             oauth={Boolean(provider.oauthAccountKey)}
+            oauthAccountKey={provider.oauthAccountKey}
             onCancel={onClose}
             onSave={(value) => {
               updateProvider(
