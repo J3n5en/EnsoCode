@@ -48,6 +48,7 @@ import { app, type UtilityProcess, utilityProcess } from 'electron';
 import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import agentWorkerPath from '../../agent/index?modulePath';
 import { readSettings } from '../ipc/settings';
+import { agentCommandDispatch } from './agentCommandDispatch';
 import { resolveGlobalInstruction } from './instructionStore';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { pickSubagentModelRefs } from './subagentModels';
@@ -185,12 +186,17 @@ export function isAgentWorkerRunning(): boolean {
 }
 
 export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: string } {
-  if (!worker) return { ok: false, error: 'agent worker not running' };
-  if (!workerReady) {
-    commandsPending.push(command);
+  const action = agentCommandDispatch({
+    hasWorker: worker !== null,
+    workerReady,
+    workerExited,
+  });
+  if (action === 'restart-then-queue') startAgentWorker();
+  if (action === 'post' && worker) {
+    worker.postMessage(command);
     return { ok: true };
   }
-  worker.postMessage(command);
+  commandsPending.push(command);
   return { ok: true };
 }
 
@@ -351,8 +357,6 @@ export function spawnSession(
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
     : [];
   const loadHarnessAssets = state?.loadHarnessAssets === true;
-  // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
-  if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
     type: 'spawn-parent',
     identity,
