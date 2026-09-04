@@ -35,7 +35,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
@@ -63,10 +63,11 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { effectiveKeybindings, formatBinding } from '@/lib/keybindings';
+import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   archivedConversationGroups,
@@ -75,6 +76,10 @@ import {
   projectConversationIds,
   staleArchivedConversationIds,
 } from '@/stores/sessions/pinned';
+import {
+  COLLAPSED_SESSION_LIMIT,
+  sessionSwitchSlotIds,
+} from '@/stores/sessions/sessionSwitchSlots';
 import { DIRTY_MAIN_TREE, worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
@@ -85,8 +90,6 @@ import {
   writeSidebarOrder,
 } from '@/stores/settings/sidebarOrderStorage';
 
-/** 每个项目默认露出的会话数,超过折叠进「展开」 */
-const COLLAPSED_SESSION_LIMIT = 5;
 const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
 
 const ICON_BUTTON_CLASS =
@@ -254,6 +257,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
   // 展开显示全部会话的项目(会话级状态,重启回到折叠)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [listQuery, setListQuery] = useState('');
+  const [modHeld, setModHeld] = useState(false);
 
   const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds);
   const archivedIds = archivedConversationIds(order, conversations);
@@ -265,7 +269,32 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
   const searching = listQuery.trim().length > 0;
   const convMatches = (id: string) =>
     matchesQuery(listQuery, [conversations[id]?.title || t('New conversation')]);
+  const switchSlots = sessionSwitchSlotIds({
+    order,
+    conversations,
+    pinnedOrderIds,
+    projectIds: orderedProjects.map((project) => project.id),
+    collapsedProjects,
+    expandedProjects,
+    searching,
+    matches: convMatches,
+    projectMatches: (projectId) => {
+      const project = orderedProjects.find((item) => item.id === projectId);
+      return Boolean(project && matchesQuery(listQuery, [project.name, project.path]));
+    },
+  });
+  const switchSlotsRef = useRef(switchSlots);
+  switchSlotsRef.current = switchSlots;
   const visiblePinnedIds = searching ? pinnedIds.filter(convMatches) : pinnedIds;
+  const visiblePinnedSet = new Set(visiblePinnedIds);
+  const switchHintFor = (id: string, surface: 'pinned' | 'project') => {
+    if (collapsed || !modHeld) return undefined;
+    const index = switchSlots.indexOf(id);
+    if (index < 0) return undefined;
+    const pinnedVisible = visiblePinnedSet.has(id);
+    if (pinnedVisible !== (surface === 'pinned')) return undefined;
+    return formatBinding(`mod+${index + 1}`);
+  };
   const visibleArchivedGroups = searching
     ? archivedGroups
         .map((group) => ({ ...group, ids: group.ids.filter(convMatches) }))
@@ -281,6 +310,39 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     const timer = setInterval(() => setNowTick(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+      const switchMode = mod && !e.shiftKey && !e.altKey;
+      setModHeld(switchMode);
+      if (!switchMode || e.repeat) return;
+      if (useRemoteNodesStore.getState().activeNodeId !== 'local') return;
+      const n = Number(e.key);
+      if (n < 1 || n > 9) return;
+      const id = switchSlotsRef.current[n - 1];
+      if (!id) return;
+      e.preventDefault();
+      selectConversation(id);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+      setModHeld(mod && !e.shiftKey && !e.altKey);
+    };
+    const clear = () => setModHeld(false);
+    const onVis = () => {
+      if (document.hidden) clear();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clear);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clear);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [selectConversation]);
 
   // worktree 徽标状态：挂载 + 窗口聚焦 + 30s 轻量轮询（只查隔离会话，不每帧跑 git）
   useEffect(() => {
@@ -497,6 +559,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                         id={id}
                         conversation={conversations[id]}
                         active={activeId === id}
+                        switchHint={switchHintFor(id, 'pinned')}
                         locale={locale}
                         nowTick={nowTick}
                         hoverTitle={
@@ -650,6 +713,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                                       id={id}
                                       conversation={conversations[id]}
                                       active={activeId === id}
+                                      switchHint={switchHintFor(id, 'project')}
                                       locale={locale}
                                       nowTick={nowTick}
                                       worktreeStatus={
@@ -1222,6 +1286,7 @@ interface ConversationRowProps {
   isolated?: boolean;
   /** 隔离会话的 worktree 状态（徽标：未提交/未合并） */
   worktreeStatus?: WorktreeStatus;
+  switchHint?: string;
   onSelect: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleArchive: (id: string) => void;
@@ -1245,6 +1310,7 @@ function ConversationRow({
   subtitle,
   isolated,
   worktreeStatus,
+  switchHint,
   onSelect,
   onTogglePin,
   onToggleArchive,
@@ -1306,58 +1372,63 @@ function ConversationRow({
           {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
         </span>
       )}
-      {!renaming && (
-        <>
-          <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
-            {formatRelativeTime(
-              conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
-              locale,
-              nowTick
-            )}
+      {!renaming &&
+        (switchHint ? (
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+            {switchHint}
           </span>
-          {!archived && (
+        ) : (
+          <>
+            <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+              {formatRelativeTime(
+                conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
+                locale,
+                nowTick
+              )}
+            </span>
+            {!archived && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTogglePin(id);
+                }}
+                className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
+                title={pinned ? t('Unpin') : t('Pin')}
+              >
+                <PinIcon className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onTogglePin(id);
+                onToggleArchive(id);
               }}
               className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
-              title={pinned ? t('Unpin') : t('Pin')}
+              title={archived ? t('Unarchive') : t('Archive')}
             >
-              <PinIcon className="h-3.5 w-3.5" />
+              {archived ? (
+                <ArchiveRestore className="h-3.5 w-3.5" />
+              ) : (
+                <Archive className="h-3.5 w-3.5" />
+              )}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleArchive(id);
-            }}
-            className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-foreground"
-            title={archived ? t('Unarchive') : t('Archive')}
-          >
-            {archived ? (
-              <ArchiveRestore className="h-3.5 w-3.5" />
-            ) : (
-              <Archive className="h-3.5 w-3.5" />
+            {archived && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(id);
+                }}
+                className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
+                title={t('Delete')}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
             )}
-          </button>
-          {archived && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove(id);
-              }}
-              className="hidden shrink-0 rounded p-0.5 text-muted-foreground group-hover:block hover:text-destructive"
-              title={t('Delete')}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </>
-      )}
+          </>
+        ))}
     </div>
   );
   return (
