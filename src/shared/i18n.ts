@@ -606,10 +606,12 @@ export const zhTranslations: Record<string, string> = {
   'No catalog price for: {{models}}. Their cost is not included.':
     '以下模型无目录单价：{{models}}，其费用未计入。',
   'Unit prices': '单价',
-  'Override catalog rates ($/M tokens). Exact model id; empty rate is 0.':
-    '覆盖目录单价（$/百万 tokens）。按精确模型 id；空项按 0。',
+  'Rates used for cost estimates ($/M tokens).': '费用估算用的单价（$/百万 tokens）。',
+  'Show all': '显示所有',
+  'No matching models': '没有匹配的模型',
   'Model id': '模型 id',
   'Enter a model id and non-negative rates.': '请填写模型 id 和非负单价。',
+  Reset: '重置',
   Refresh: '刷新',
   'Saved hosts for remote projects. Passwords stay in the system keychain.':
     '远程项目用的主机。密码保存在系统钥匙串。',

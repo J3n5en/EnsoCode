@@ -116,7 +116,11 @@ export function UsageSettings() {
           )}
         </>
       )}
-      <UsagePricingEditor onChanged={() => void load(days)} />
+      <UsagePricingEditor
+        models={summary?.byModel ?? []}
+        catalog={summary?.pricing ?? {}}
+        onChanged={() => void load(days)}
+      />
     </div>
   );
 }

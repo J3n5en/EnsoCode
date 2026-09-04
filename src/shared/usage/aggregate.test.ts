@@ -139,6 +139,20 @@ describe('aggregateUsage — byModel', () => {
     const summary = aggregateUsage([], [], {}, { days: 1, now: NOW });
     expect(summary.byModel).toHaveLength(0);
   });
+
+  it('pricing 取解析后的单价，无价为 null；思考档位后缀回落到基础 id', () => {
+    const rates = { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 };
+    const records = [
+      record({ ts: dayStart(0), id: 'a', model: 'priced', input: 1 }),
+      record({ ts: dayStart(0), id: 'b', model: 'priced-max', input: 1 }),
+      record({ ts: dayStart(0), id: 'c', model: 'unpriced', input: 1 }),
+    ];
+    const summary = aggregateUsage(records, [], { priced: rates }, { days: 1, now: NOW });
+    expect(summary.byModel.find((row) => row.model === 'priced')?.pricing).toEqual(rates);
+    expect(summary.byModel.find((row) => row.model === 'priced-max')?.pricing).toEqual(rates);
+    expect(summary.byModel.find((row) => row.model === 'unpriced')?.pricing).toBeNull();
+    expect(summary.pricing).toEqual({ priced: rates });
+  });
 });
 
 describe('aggregateUsage — byProject', () => {

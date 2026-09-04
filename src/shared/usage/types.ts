@@ -1,3 +1,5 @@
+import type { ModelPricing, PricingTable } from './pricing';
+
 /** 用量统计跨进程传输类型。数据源为本应用的 pi session jsonl，费用为 Main 侧按 catalog 估算。 */
 
 export const USAGE_RANGE_DAYS = [1, 7, 30, 90] as const;
@@ -58,6 +60,8 @@ export interface UsageModelRow {
   messages: number;
   /** tokens 占比 0..1 */
   share: number;
+  /** 有效单价 $/M；无价为 null */
+  pricing: ModelPricing | null;
 }
 
 export interface UsageProjectRow {
@@ -83,6 +87,8 @@ export interface UsageSummary {
   byProject: UsageProjectRow[];
   /** 周期内有 token 消耗但无定价的模型 id */
   unpricedModels: string[];
+  /** 本次估算用的有效单价表（catalog + 覆盖） */
+  pricing: PricingTable;
 }
 
 export type UsageSummaryResult = { ok: true; summary: UsageSummary } | { ok: false; error: string };
