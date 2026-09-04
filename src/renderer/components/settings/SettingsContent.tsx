@@ -1,5 +1,6 @@
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import {
+  BarChart3,
   Bot,
   FileText,
   Keyboard,
@@ -29,6 +30,7 @@ import { PresetsSettings } from './PresetsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { SshSettings } from './SshSettings';
+import { UsageSettings } from './UsageSettings';
 
 function flashSettingsRow(rowId: string): void {
   window.requestAnimationFrame(() => {
@@ -79,6 +81,7 @@ export function SettingsContent() {
     { id: 'instructions', icon: FileText, label: t('Instruction Files') },
     { id: 'phone', icon: Smartphone, label: t('Devices') },
     { id: 'ssh', icon: Terminal, label: t('SSH') },
+    { id: 'usage', icon: BarChart3, label: t('Usage') },
   ];
 
   return (
@@ -117,6 +120,7 @@ export function SettingsContent() {
         {activeCategory === 'tools' && <BuiltinToolsSettings />}
         {activeCategory === 'phone' && <DevicesSettings />}
         {activeCategory === 'ssh' && <SshSettings />}
+        {activeCategory === 'usage' && <UsageSettings />}
       </div>
     </div>
   );

@@ -27,6 +27,9 @@ export const IPC_CHANNELS = {
   PROVIDERS_TEST: 'providers:test',
   PROVIDERS_MODEL_META: 'providers:model-meta',
 
+  // Local token usage statistics
+  USAGE_SUMMARY: 'usage:summary',
+
   // OAuth subscription providers (pi builtin)
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
   OAUTH_LOGIN: 'oauth-providers:login',

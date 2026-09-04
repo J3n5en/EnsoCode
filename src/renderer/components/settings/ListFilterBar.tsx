@@ -37,7 +37,14 @@ export function useVisibleSelection(visibleIds: string[]) {
     });
   };
 
-  return { selectedIds, allSelected, someSelected, toggleOne, toggleAll, isSelected: (id: string) => selected.has(id) };
+  return {
+    selectedIds,
+    allSelected,
+    someSelected,
+    toggleOne,
+    toggleAll,
+    isSelected: (id: string) => selected.has(id),
+  };
 }
 
 export function ListFilterBar({

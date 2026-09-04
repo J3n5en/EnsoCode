@@ -90,6 +90,7 @@ import type {
 } from '@shared/types/sidePanel';
 import type { UpdateStatus } from '@shared/types/updater';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
+import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import type {
   WorkspaceSearchQueryRequest,
   WorkspaceSearchQueryResult,
@@ -115,6 +116,11 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, listener);
     },
+  },
+
+  usage: {
+    summary: (days: UsageRangeDays): Promise<UsageSummaryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.USAGE_SUMMARY, days),
   },
 
   providers: {
