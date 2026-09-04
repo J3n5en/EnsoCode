@@ -79,9 +79,7 @@ describe('titleModelCandidates：标题模型 → 全局默认 → 会话模型�
       { providerId: 'default-p', modelId: 'default-m' },
       { providerId: 'session-p', modelId: 'session-m' },
     ]);
-    expect(
-      titleModelCandidates(state(), { providerId: 'title-p', modelId: 'title-m' })
-    ).toEqual([
+    expect(titleModelCandidates(state(), { providerId: 'title-p', modelId: 'title-m' })).toEqual([
       { providerId: 'title-p', modelId: 'title-m' },
       { providerId: 'default-p', modelId: 'default-m' },
     ]);

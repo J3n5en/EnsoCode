@@ -87,10 +87,7 @@ export function RemoteNodeChat(props: RemoteNodeChatProps) {
     if (timelineRef.current?.isAtBottom()) timelineRef.current.pinToBottom();
   }, [timeline]);
 
-  const host = useMemo(
-    () => ({ sessionId, canRewind: false, canRetry: false }),
-    [sessionId]
-  );
+  const host = useMemo(() => ({ sessionId, canRewind: false, canRetry: false }), [sessionId]);
   const providers = useMemo(() => toModelProviders(props.providers), [props.providers]);
   const configurable = entry && !entry.parentId;
 
@@ -112,7 +109,9 @@ export function RemoteNodeChat(props: RemoteNodeChatProps) {
           {entry && (
             <>
               <span className="text-muted-foreground/50">/</span>
-              <span className="min-w-0 truncate text-sm">{entry.title || t('New conversation')}</span>
+              <span className="min-w-0 truncate text-sm">
+                {entry.title || t('New conversation')}
+              </span>
               {entry.projectName && (
                 <span className="truncate font-mono text-muted-foreground text-xs">
                   {entry.projectName}

@@ -220,13 +220,15 @@ async function main() {
     screenshots: { mcpShot, providerShot },
     assertions: {
       mcpTransportIsHttp: mcpSelects.some((s) => s.valueSlot === 'http' || s.text.includes('http')),
-      apiTypeIsAnthropic: providerSelects.some((s) =>
-        (s.valueSlot === 'Anthropic' || s.text.includes('Anthropic')) &&
-        !s.valueSlot.includes('anthropic-messages')
+      apiTypeIsAnthropic: providerSelects.some(
+        (s) =>
+          (s.valueSlot === 'Anthropic' || s.text.includes('Anthropic')) &&
+          !s.valueSlot.includes('anthropic-messages')
       ),
-      testModelIsFriendlyLabel: providerSelects.some((s) =>
-        (s.valueSlot === 'Claude Sonnet 4' || s.text.includes('Claude Sonnet 4')) &&
-        !s.valueSlot.includes('claude-sonnet-4')
+      testModelIsFriendlyLabel: providerSelects.some(
+        (s) =>
+          (s.valueSlot === 'Claude Sonnet 4' || s.text.includes('Claude Sonnet 4')) &&
+          !s.valueSlot.includes('claude-sonnet-4')
       ),
     },
   };

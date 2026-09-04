@@ -210,7 +210,7 @@ export class BackgroundTaskManager {
   /** 终止：SIGTERM 整个进程组，宽限后 SIGKILL */
   stop(taskId: string, byUser = false): boolean {
     const task = this.tasks.get(taskId);
-    if (!task || task.info.status !== 'running') return false;
+    if (task?.info.status !== 'running') return false;
     if (byUser) task.killedByUser = true;
     else task.consumed = true; // 模型自己停的：kill 回执即知情，不再通知
     const pid = task.child.pid;

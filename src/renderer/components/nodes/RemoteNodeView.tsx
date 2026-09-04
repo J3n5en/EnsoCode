@@ -35,7 +35,9 @@ export function RemoteNodeView({ nodeId, sidebarWidth }: RemoteNodeViewProps) {
     return children.length > 0 ? { parent, children } : undefined;
   }, [view.catalog, entry]);
   const session = activeId ? (view.sessions[activeId] ?? null) : null;
-  const hasOlder = Boolean(session && session.messages.size > 0 && Math.min(...session.messages.keys()) > 0);
+  const hasOlder = Boolean(
+    session && session.messages.size > 0 && Math.min(...session.messages.keys()) > 0
+  );
 
   if (!node) return null;
 
