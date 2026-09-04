@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "biome format --write .",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

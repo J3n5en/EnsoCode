@@ -13,6 +13,7 @@ import {
 } from '@shared/builtinAgents';
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
 import { type ModelCredentialContext, modelUsability } from '@shared/defaultModel';
+import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import type {
@@ -857,6 +858,7 @@ function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
     ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
     ...(server.url ? { url: server.url } : {}),
     ...(oauth ? { oauth } : {}),
+    ...mcpTimeoutsForSpawn(server),
   };
 }
 

@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/shared/types.md", "reason": "持久化类型新增字段必须可选；跨进程 spawn 字段要对齐生产/消费"}
+{"file": ".trellis/spec/shared/index.md", "reason": "超时归一化若放 shared，必须无 electron/node/react"}
+{"file": ".trellis/spec/testing.md", "reason": "纯函数与 mcp manager 逻辑走 TDD；UI 不强制单测"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "设置页新文案必须 t() + zhTranslations"}
+{"file": ".trellis/spec/renderer/dialogs.md", "reason": "超时输入加在 McpEditDialog 的 DialogPanel 字段流里"}
+{"file": ".trellis/spec/main/settings-persistence.md", "reason": "可选字段不升 SETTINGS_VERSION；读侧兜底"}
+{"file": ".trellis/spec/guides/pre-implementation-checklist.md", "reason": "跨层改动边界与旧数据"}

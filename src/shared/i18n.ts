@@ -464,6 +464,8 @@ export const zhTranslations: Record<string, string> = {
   'Arguments (one per line)': '参数（每行一条）',
   'Environment variables (KEY=VALUE, one per line)': '环境变量（KEY=VALUE，每行一条）',
   URL: 'URL',
+  'Connection timeout (seconds)': '连接超时（秒）',
+  'Tool call timeout (seconds)': '工具调用超时（秒）',
   'This MCP server already exists': '该 MCP 服务器已存在',
   'Import MCP servers': '导入 MCP 服务器',
   'Scan local AI apps and register the entries you want to reuse.':

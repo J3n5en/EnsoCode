@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/shared/types.md", "reason": "检查可选字段与 spawn 契约有没有漏传"}
+{"file": ".trellis/spec/testing.md", "reason": "确认逻辑有红过的测试，没有只改 UI"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "确认中英文案齐"}
+{"file": ".trellis/spec/main/settings-persistence.md", "reason": "确认没有多余 migrate"}

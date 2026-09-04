@@ -13,6 +13,11 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
+import {
+  DEFAULT_MCP_CALL_TIMEOUT_MS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_MS,
+  mcpTimeoutMsOrDefault,
+} from '@shared/mcpTimeout';
 import type {
   McpConnectionState,
   McpOAuthTokens,
@@ -20,11 +25,6 @@ import type {
   McpWorkerEvent,
 } from '@shared/types/agent';
 import { parseMcpOAuthTokens } from '@shared/types/agent';
-
-/** 连接与 listTools 的整体超时；慢/坏 server 不能卡住 spawn */
-const CONNECT_TIMEOUT_MS = 10_000;
-/** 单次工具调用超时 */
-const CALL_TIMEOUT_MS = 120_000;
 
 interface Connection {
   client: Client;
@@ -250,15 +250,20 @@ export class McpManager {
         ? undefined
         : new WorkerOAuthProvider(server, (event) => this.options.emit(event));
     let tools: Awaited<ReturnType<Client['listTools']>>['tools'];
+    const connectTimeoutMs = mcpTimeoutMsOrDefault(
+      server.connectTimeoutMs,
+      DEFAULT_MCP_CONNECT_TIMEOUT_MS
+    );
+    const callTimeoutMs = mcpTimeoutMsOrDefault(server.callTimeoutMs, DEFAULT_MCP_CALL_TIMEOUT_MS);
     try {
       await withTimeout(
         client.connect(this.createTransport(server, provider)),
-        CONNECT_TIMEOUT_MS,
+        connectTimeoutMs,
         `connect ${server.name}`
       );
       ({ tools } = await withTimeout(
         client.listTools(),
-        CONNECT_TIMEOUT_MS,
+        connectTimeoutMs,
         `listTools ${server.name}`
       ));
     } catch (error) {
@@ -270,7 +275,7 @@ export class McpManager {
     return {
       client,
       provider,
-      tools: tools.map((tool) => this.toToolDefinition(client, server.name, tool)),
+      tools: tools.map((tool) => this.toToolDefinition(client, server.name, tool, callTimeoutMs)),
     };
   }
 
@@ -303,7 +308,8 @@ export class McpManager {
   private toToolDefinition(
     client: Client,
     serverName: string,
-    tool: { name: string; description?: string; inputSchema: unknown }
+    tool: { name: string; description?: string; inputSchema: unknown },
+    callTimeoutMs: number
   ): ToolDefinition {
     const name = `mcp__${slug(serverName)}__${tool.name}`;
     return {
@@ -318,7 +324,7 @@ export class McpManager {
             name: tool.name,
             arguments: (params ?? {}) as Record<string, unknown>,
           }),
-          CALL_TIMEOUT_MS,
+          callTimeoutMs,
           `callTool ${name}`
         );
         const content = (Array.isArray(result.content) ? result.content : []).map(
