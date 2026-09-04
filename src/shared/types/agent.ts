@@ -945,6 +945,11 @@ export type McpWorkerEvent =
   /** SDK 自动 refresh 后回传 Main 持久化 */
   | { type: 'mcp-tokens-refreshed'; serverId: string; tokens: McpOAuthTokens };
 
+export type McpStatusEvent = Extract<McpWorkerEvent, { type: 'mcp-status' }>;
+
+/** Main → 渲染层的 MCP 状态推送：cleared 用于 worker 退出后清残留 */
+export type McpStatusPush = McpStatusEvent | { type: 'mcp-status-cleared' };
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 

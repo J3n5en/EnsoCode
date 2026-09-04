@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const authorize = vi.fn(async (_id: string) => ({ ok: true }) as { ok: boolean; error?: string });
 const revoke = vi.fn(async (_id: string) => ({ ok: true }));
 const authState = vi.fn(async () => ({}) as Record<string, boolean>);
+const statusSnapshot = vi.fn(async () => [] as unknown[]);
 let statusListener: ((event: unknown) => void) | null = null;
 const offStatus = vi.fn();
 
@@ -12,6 +13,7 @@ vi.stubGlobal('window', {
       authorize: (id: string) => authorize(id),
       revoke: (id: string) => revoke(id),
       authState: () => authState(),
+      statusSnapshot: () => statusSnapshot(),
       onStatus: (cb: (event: unknown) => void) => {
         statusListener = cb;
         return offStatus;
@@ -77,6 +79,7 @@ describe('useMcpStatusStore', () => {
     authorize.mockClear();
     revoke.mockClear();
     authState.mockClear();
+    statusSnapshot.mockClear();
     offStatus.mockClear();
     statusListener = null;
     useMcpStatusStore.setState({ statuses: {}, authorized: {}, pending: {} });
@@ -101,6 +104,25 @@ describe('useMcpStatusStore', () => {
 
     unbind();
     expect(offStatus).toHaveBeenCalled();
+  });
+
+  it('bind 先拉一次状态快照（启动后才打开设置页也能看到状态）', async () => {
+    statusSnapshot.mockResolvedValueOnce([
+      { type: 'mcp-status', serverId: 'srv-1', serverName: 'notion', state: 'unauthorized' },
+      { type: 'mcp-status', serverName: 'legacy', state: 'ready', toolCount: 1 },
+    ]);
+    useMcpStatusStore.getState().bind();
+    await vi.waitFor(() =>
+      expect(useMcpStatusStore.getState().statuses['srv-1']).toEqual({ state: 'unauthorized' })
+    );
+    expect(useMcpStatusStore.getState().statuses.legacy).toEqual({ state: 'ready', toolCount: 1 });
+  });
+
+  it('worker 退出的清空事件把状态清干净', () => {
+    useMcpStatusStore.setState({ statuses: { 'srv-1': { state: 'ready', toolCount: 3 } } });
+    useMcpStatusStore.getState().bind();
+    statusListener?.({ type: 'mcp-status-cleared' });
+    expect(useMcpStatusStore.getState().statuses).toEqual({});
   });
 
   it('authorize 成功：期间 pending + connecting，完成后标记已授权', async () => {

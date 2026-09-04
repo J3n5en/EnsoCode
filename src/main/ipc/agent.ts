@@ -11,6 +11,7 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   ChildHistoryResult,
+  McpStatusPush,
   RendererAgentEvent,
   ThinkingLevel,
 } from '@shared/types/agent';
@@ -67,6 +68,7 @@ import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
 import { toStoredTokens } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
+import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
@@ -127,6 +129,14 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   maybeNotify(event);
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
+}
+
+export function pushMcpStatus(push: McpStatusPush): void {
+  try {
+    sendToAllWindows(IPC_CHANNELS.MCP_STATUS_EVENT, push);
+  } catch {
+    // renderer 已崩但 webContents 对象还在
+  }
 }
 
 function exactIdentity(sessionId: unknown): SessionIdentity | ChildSessionIdentity | undefined {
@@ -349,12 +359,14 @@ export function registerAgentHandlers(): void {
   setAgentEventListener((workerEvent) => {
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
-      try {
-        sendToAllWindows(IPC_CHANNELS.MCP_STATUS_EVENT, workerEvent);
-      } catch {
-        // renderer 已崩但 webContents 对象还在
-      }
+      recordMcpStatus(workerEvent);
+      pushMcpStatus(workerEvent);
       return;
+    }
+    if (workerEvent.type === 'worker-exited') {
+      // worker 死后连接全部失效：清掉残留状态，避免设置页长期显示假 ready
+      clearMcpStatuses();
+      pushMcpStatus({ type: 'mcp-status-cleared' });
     }
     if (workerEvent.type === 'mcp-tokens-refreshed') {
       // worker 回传的 token 同样过一道白名单，不直接落盘

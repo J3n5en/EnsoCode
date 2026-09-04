@@ -52,7 +52,8 @@ import type {
   CreateConversationAuthorityRequest,
   CreateProjectAuthorityRequest,
   DispatchMainEvent,
-  McpWorkerEvent,
+  McpStatusEvent,
+  McpStatusPush,
   ProjectAuthorityProjection,
   RemoveProjectAuthorityRequest,
   RendererAgentEvent,
@@ -461,11 +462,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.MCP_REVOKE, serverId),
     authState: (): Promise<Record<string, boolean>> =>
       ipcRenderer.invoke(IPC_CHANNELS.MCP_AUTH_STATE),
-    onStatus: (
-      callback: (event: Extract<McpWorkerEvent, { type: 'mcp-status' }>) => void
-    ): (() => void) => {
-      const listener = (_: unknown, event: Extract<McpWorkerEvent, { type: 'mcp-status' }>) =>
-        callback(event);
+    /** 最近一次连接状态：worker 只在建连那刻上报，晚打开的设置页靠它回填 */
+    statusSnapshot: (): Promise<McpStatusEvent[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_STATUS_SNAPSHOT),
+    onStatus: (callback: (push: McpStatusPush) => void): (() => void) => {
+      const listener = (_: unknown, push: McpStatusPush) => callback(push);
       ipcRenderer.on(IPC_CHANNELS.MCP_STATUS_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_STATUS_EVENT, listener);
     },

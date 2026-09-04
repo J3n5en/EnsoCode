@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   MCP_REVOKE: 'mcp:revoke',
   MCP_AUTH_STATE: 'mcp:auth-state',
   MCP_STATUS_EVENT: 'mcp:status-event',
+  MCP_STATUS_SNAPSHOT: 'mcp:status-snapshot',
 
   // Instruction content (copy-on-write)
   INSTRUCTIONS_READ: 'instructions:read',

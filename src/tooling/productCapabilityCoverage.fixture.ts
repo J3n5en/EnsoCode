@@ -383,6 +383,7 @@ export const IPC_PRODUCT_COVERAGE = {
   MCP_STATUS_EVENT: excluded(
     'MCP connection status push for the Settings panel; renderer UI only.'
   ),
+  MCP_STATUS_SNAPSHOT: excluded('Read-only MCP connection status snapshot for the Settings panel.'),
   WORKSPACE_SEARCH_QUERY: excluded(
     'Desktop workspace search over local session projections; renderer Command Dialog only.'
   ),

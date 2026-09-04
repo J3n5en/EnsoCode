@@ -3,6 +3,7 @@ import { ipcMain } from 'electron';
 import { pushMcpWarmup } from '../services/agentHost';
 import { authorizeMcpServer, revokeMcpServer } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
+import { mcpStatusSnapshot } from '../services/mcpStatusCache';
 import { isMainWebContents } from '../windows/MainWindow';
 import { isSettingsWebContents } from '../windows/SettingsWindow';
 
@@ -29,5 +30,10 @@ export function registerMcpHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_AUTH_STATE, (event) => {
     if (!isTrustedWindow(event.sender.id)) return {};
     return getMcpOAuthStore().authState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_STATUS_SNAPSHOT, (event) => {
+    if (!isTrustedWindow(event.sender.id)) return [];
+    return mcpStatusSnapshot();
   });
 }

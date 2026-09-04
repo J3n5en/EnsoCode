@@ -1,4 +1,4 @@
-import type { McpConnectionState, McpWorkerEvent } from '@shared/types/agent';
+import type { McpConnectionState, McpStatusEvent } from '@shared/types/agent';
 import { create } from 'zustand';
 
 /**
@@ -14,8 +14,6 @@ export interface McpServerStatus {
 
 export type McpStatusMap = Record<string, McpServerStatus>;
 
-type McpStatusEvent = Extract<McpWorkerEvent, { type: 'mcp-status' }>;
-
 export function statusKey(event: { serverId?: string; serverName: string }): string {
   return event.serverId ?? event.serverName;
 }
@@ -30,6 +28,11 @@ export function applyStatusEvent(statuses: McpStatusMap, event: McpStatusEvent):
     ...(event.error ? { error: event.error } : {}),
   };
   return next;
+}
+
+/** 快照回填：Main 侧最近状态，晚打开的设置页据此显示（含授权入口） */
+export function applyStatusSnapshot(events: readonly McpStatusEvent[]): McpStatusMap {
+  return events.reduce<McpStatusMap>((acc, event) => applyStatusEvent(acc, event), {});
 }
 
 export function beginAuthorize(statuses: McpStatusMap, serverId: string): McpStatusMap {
@@ -70,8 +73,16 @@ export const useMcpStatusStore = create<McpStatusState>()((set, get) => ({
       .authState()
       .then((authorized) => set({ authorized }))
       .catch(() => undefined);
-    return window.electronAPI.mcp.onStatus((event) => {
-      set({ statuses: applyStatusEvent(get().statuses, event) });
+    void window.electronAPI.mcp
+      .statusSnapshot()
+      .then((events) => set({ statuses: { ...applyStatusSnapshot(events), ...get().statuses } }))
+      .catch(() => undefined);
+    return window.electronAPI.mcp.onStatus((push) => {
+      if (push.type === 'mcp-status-cleared') {
+        set({ statuses: {} });
+        return;
+      }
+      set({ statuses: applyStatusEvent(get().statuses, push) });
     });
   },
 
