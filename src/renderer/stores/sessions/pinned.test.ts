@@ -134,6 +134,45 @@ describe('archived 与分组的互斥', () => {
   });
 });
 
+describe('项目归档(会话自身 archived 标记不动)', () => {
+  // p1 归档:其全部会话(含 b/d 已单独归档、e 置顶)一并进归档栏;p2 照常
+  const archivedProjects = ['p1'];
+
+  it('归档项目的置顶会话不进置顶栏', () => {
+    expect(pinnedConversationIds(order, withArchived, [], archivedProjects)).toEqual(['c']);
+  });
+
+  it('archivedConversationIds 计入归档项目的全部会话', () => {
+    // p1 全部:a(50) e(40) b(20) d(10)
+    expect(archivedConversationIds(order, withArchived, archivedProjects)).toEqual([
+      'a',
+      'e',
+      'b',
+      'd',
+    ]);
+  });
+
+  it('归档项目整组进归档栏并带 projectArchived 标记,组内含已单独归档的会话', () => {
+    expect(archivedConversationGroups(order, withArchived, ['p2', 'p1'], archivedProjects)).toEqual(
+      [{ projectId: 'p1', ids: ['a', 'e', 'b', 'd'], projectArchived: true }]
+    );
+  });
+
+  it('归档项目里没有会话也占一组(否则无处恢复)', () => {
+    expect(archivedConversationGroups(order, withArchived, ['p2', 'p1'], ['p2', 'p1'])).toEqual([
+      { projectId: 'p2', ids: ['c'], projectArchived: true },
+      { projectId: 'p1', ids: ['a', 'e', 'b', 'd'], projectArchived: true },
+    ]);
+    expect(archivedConversationGroups([], {}, ['p2'], ['p2'])).toEqual([
+      { projectId: 'p2', ids: [], projectArchived: true },
+    ]);
+  });
+
+  it('已删项目残留的归档 id 不占组', () => {
+    expect(archivedConversationGroups(order, conversations, ['p2'], ['gone'])).toEqual([]);
+  });
+});
+
 describe('staleArchivedConversationIds', () => {
   const day = 86_400_000;
   const now = 30 * day;

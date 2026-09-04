@@ -138,6 +138,8 @@ export interface ProjectEntry {
   kind?: 'local' | 'ssh';
   sshConnectionName?: string;
   sshHost?: string;
+  /** 桌面侧栏已归档该项目：其全部会话归到手机归档栏，会话自身 archived 标记不动 */
+  archived?: true;
 }
 /** provider 剥密后下发，只够手机做 provider/model 选择 */
 export interface ProviderEntry {

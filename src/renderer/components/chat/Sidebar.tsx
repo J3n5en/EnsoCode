@@ -84,6 +84,7 @@ import { DIRTY_MAIN_TREE, worktreeHasPendingWork } from '@/stores/sessions/workt
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder, moveProject } from '@/stores/settings/projectOrder';
 import {
+  ARCHIVED_PROJECTS_KEY,
   PINNED_ORDER_KEY,
   PROJECT_ORDER_KEY,
   readSidebarOrder,
@@ -143,6 +144,24 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     readSidebarOrder(PROJECT_ORDER_KEY)
   );
   const orderedProjects = applyProjectOrder(projects, projectOrderIds);
+
+  // 项目归档(项目层标记,存 localStorage):整个项目移到底部 Archived 栏目,
+  // 不碰其下会话的 archived/pinned——恢复后会话分布与归档前完全一致,
+  // 不会把之前单独归档的会话一并“还原”回项目组
+  const [archivedProjectIds, setArchivedProjectIds] = useState<string[]>(() =>
+    readSidebarOrder(ARCHIVED_PROJECTS_KEY)
+  );
+  const toggleArchiveProject = (id: string) => {
+    const next = archivedProjectIds.includes(id)
+      ? archivedProjectIds.filter((entry) => entry !== id)
+      : [...archivedProjectIds, id];
+    setArchivedProjectIds(next);
+    writeSidebarOrder(ARCHIVED_PROJECTS_KEY, next);
+  };
+  const activeProjects = orderedProjects.filter(
+    (project) => !archivedProjectIds.includes(project.id)
+  );
+  const activeProjectIds = activeProjects.map((project) => project.id);
 
   // 置顶组的手动顺序(组内拖拽重排;未收录的新置顶按活跃时间追加)
   const [pinnedOrderIds, setPinnedOrderIds] = useState<string[]>(() =>
@@ -259,12 +278,13 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
   const [listQuery, setListQuery] = useState('');
   const [modHeld, setModHeld] = useState(false);
 
-  const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds);
-  const archivedIds = archivedConversationIds(order, conversations);
+  const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds, archivedProjectIds);
+  const archivedIds = archivedConversationIds(order, conversations, archivedProjectIds);
   const archivedGroups = archivedConversationGroups(
     order,
     conversations,
-    orderedProjects.map((project) => project.id)
+    orderedProjects.map((project) => project.id),
+    archivedProjectIds
   );
   const searching = listQuery.trim().length > 0;
   const convMatches = (id: string) =>
@@ -273,7 +293,8 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     order,
     conversations,
     pinnedOrderIds,
-    projectIds: orderedProjects.map((project) => project.id),
+    projectIds: activeProjectIds,
+    archivedProjectIds,
     collapsedProjects,
     expandedProjects,
     searching,
@@ -295,9 +316,16 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     if (pinnedVisible !== (surface === 'pinned')) return undefined;
     return formatBinding(`mod+${index + 1}`);
   };
+  // 搜索时:归档项目名命中则整组保留(与活动项目一致),否则只留命中的会话
   const visibleArchivedGroups = searching
     ? archivedGroups
-        .map((group) => ({ ...group, ids: group.ids.filter(convMatches) }))
+        .map((group) => {
+          const project = projects.find((item) => item.id === group.projectId);
+          const projectHit =
+            group.projectArchived === true &&
+            Boolean(project && matchesQuery(listQuery, [project.name, project.path]));
+          return projectHit ? group : { ...group, ids: group.ids.filter(convMatches) };
+        })
         .filter((group) => group.ids.length > 0)
     : archivedGroups;
   // 底部「已归档」栏目的折叠态(缺省收起,重启回到收起)
@@ -609,10 +637,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
             </div>
           )}
           <SortableContext
-            items={orderedProjects.map((project) => projectDragId(project.id))}
+            items={activeProjectIds.map((id) => projectDragId(id))}
             strategy={verticalListSortingStrategy}
           >
-            {orderedProjects.map((project) => {
+            {activeProjects.map((project) => {
               const projectConversations = projectConversationIds(order, conversations, project.id);
               const projectHit = matchesQuery(listQuery, [project.name, project.path]);
               const visibleConversations =
@@ -676,6 +704,14 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                           title={t('Import session')}
                         >
                           <HardDriveDownload className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleArchiveProject(project.id)}
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title={t('Archive project')}
+                        >
+                          <Archive className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
@@ -800,7 +836,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
           </SortableContext>
         </div>
 
-        {(searching ? visibleArchivedGroups.length > 0 : archivedIds.length > 0) && (
+        {(searching ? visibleArchivedGroups : archivedGroups).length > 0 && (
           <div data-slot="archived-section" className="shrink-0 border-t p-2">
             {/* 列表在折叠头上方：固定底部向上展开 */}
             <AnimatePresence initial={false}>
@@ -821,35 +857,54 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                       return (
                         <div key={group.projectId}>
                           <div className="group flex items-center gap-1 rounded-md pr-0.5">
-                            <span className="min-w-0 flex-1 truncate px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                            {group.projectArchived && (
+                              <FolderGit2 className="ml-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                            )}
+                            <span
+                              className={cn(
+                                'min-w-0 flex-1 truncate py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase',
+                                group.projectArchived ? 'px-1' : 'px-2'
+                              )}
+                            >
                               {projectName}
                             </span>
                             <span className="shrink-0 text-[10px] text-muted-foreground">
                               {group.ids.length}
                             </span>
-                            <ArchiveCleanupMenu
-                              open={archiveCleanupOpen === group.projectId}
-                              onOpenChange={(open) =>
-                                setArchiveCleanupOpen(open ? group.projectId : null)
-                              }
-                              idsForDays={(days) =>
-                                staleArchivedConversationIds(
-                                  order,
-                                  conversations,
-                                  days,
-                                  Date.now(),
-                                  group.projectId
-                                )
-                              }
-                              onPick={(days, ids) =>
-                                setPendingRemove({
-                                  kind: 'archived',
-                                  days,
-                                  conversationIds: ids,
-                                  projectName,
-                                })
-                              }
-                            />
+                            {group.projectArchived ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleArchiveProject(group.projectId)}
+                                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                title={t('Unarchive project')}
+                              >
+                                <ArchiveRestore className="h-3.5 w-3.5" />
+                              </button>
+                            ) : (
+                              <ArchiveCleanupMenu
+                                open={archiveCleanupOpen === group.projectId}
+                                onOpenChange={(open) =>
+                                  setArchiveCleanupOpen(open ? group.projectId : null)
+                                }
+                                idsForDays={(days) =>
+                                  staleArchivedConversationIds(
+                                    order,
+                                    conversations,
+                                    days,
+                                    Date.now(),
+                                    group.projectId
+                                  )
+                                }
+                                onPick={(days, ids) =>
+                                  setPendingRemove({
+                                    kind: 'archived',
+                                    days,
+                                    conversationIds: ids,
+                                    projectName,
+                                  })
+                                }
+                              />
+                            )}
                           </div>
                           <div className="flex flex-col gap-y-0.5">
                             {group.ids.map((id) => (

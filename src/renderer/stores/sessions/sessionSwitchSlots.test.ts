@@ -51,6 +51,22 @@ describe('sessionSwitchSlotIds', () => {
     ).toEqual(['pin', 'a', 'b']);
   });
 
+  it('归档项目的会话（含置顶）不占槽位', () => {
+    const conversations = {
+      pin: conv('p1', 1, 30, { pinned: true }),
+      a: conv('p1', 2, 20),
+      b: conv('p2', 3, 10),
+    };
+    expect(
+      sessionSwitchSlotIds({
+        order: ['pin', 'a', 'b'],
+        conversations,
+        projectIds: ['p2'],
+        archivedProjectIds: ['p1'],
+      })
+    ).toEqual(['b']);
+  });
+
   it('同一会话只保留第一次出现（Pinned 优先）', () => {
     const conversations = {
       pin: conv('p1', 1, 40, { pinned: true }),

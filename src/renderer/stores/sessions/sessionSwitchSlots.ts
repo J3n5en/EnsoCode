@@ -19,7 +19,9 @@ export function sessionSwitchSlotIds(input: {
   order: readonly string[];
   conversations: Conversations;
   pinnedOrderIds?: readonly string[];
+  /** 未归档项目 id（归档项目不进槽位） */
   projectIds: readonly string[];
+  archivedProjectIds?: readonly string[];
   collapsedProjects?: Record<string, boolean>;
   expandedProjects?: Record<string, boolean>;
   searching?: boolean;
@@ -31,6 +33,7 @@ export function sessionSwitchSlotIds(input: {
     conversations,
     pinnedOrderIds = [],
     projectIds,
+    archivedProjectIds = [],
     collapsedProjects = {},
     expandedProjects = {},
     searching = false,
@@ -46,7 +49,7 @@ export function sessionSwitchSlotIds(input: {
     slots.push(id);
   };
 
-  const pinned = pinnedConversationIds(order, conversations, pinnedOrderIds);
+  const pinned = pinnedConversationIds(order, conversations, pinnedOrderIds, archivedProjectIds);
   for (const id of searching ? pinned.filter(matches) : pinned) push(id);
 
   for (const projectId of projectIds) {

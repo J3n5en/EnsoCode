@@ -2,6 +2,8 @@
  * 侧栏会话分组的排序纯函数。各栏目内按最后活跃时间倒序
  * (最后一条消息 timestamp,无消息回落 createdAt);置顶只改分组内先后。
  * 归档与置顶/项目分组互斥:archived 的会话只出现在「已归档」栏目。
+ * 项目归档(archivedProjectIds)是项目层标记:该项目全部会话整组进「已归档」栏目,
+ * 会话自身的 archived/pinned 标记原样保留,恢复项目后侧栏与归档前完全一致。
  */
 
 interface SidebarConversation {
@@ -62,12 +64,19 @@ export function projectConversationIds(
 export function pinnedConversationIds(
   order: readonly string[],
   conversations: Conversations,
-  manualIds: readonly string[] = []
+  manualIds: readonly string[] = [],
+  archivedProjectIds: readonly string[] = []
 ): string[] {
+  const archivedProjects = new Set(archivedProjectIds);
   const byActivity = sortByActivity(
-    order.filter(
-      (id) => conversations[id]?.pinned === true && conversations[id]?.archived !== true
-    ),
+    order.filter((id) => {
+      const conversation = conversations[id];
+      return (
+        conversation?.pinned === true &&
+        conversation.archived !== true &&
+        !archivedProjects.has(conversation.projectId)
+      );
+    }),
     conversations
   );
   const remaining = new Set(byActivity);
@@ -84,38 +93,61 @@ export function pinnedConversationIds(
   return ordered;
 }
 
-/** 全部归档会话 id(跨项目,按最后活跃时间倒序) */
+/** 全部归档会话 id(跨项目,按最后活跃时间倒序);归档项目的会话全部计入 */
 export function archivedConversationIds(
   order: readonly string[],
-  conversations: Conversations
+  conversations: Conversations,
+  archivedProjectIds: readonly string[] = []
 ): string[] {
+  const archivedProjects = new Set(archivedProjectIds);
   return sortByActivity(
-    order.filter((id) => conversations[id]?.archived === true),
+    order.filter((id) => {
+      const conversation = conversations[id];
+      return conversation?.archived === true || archivedProjects.has(conversation?.projectId ?? '');
+    }),
     conversations
   );
 }
 
-/** 归档会话按项目分组:已知项目按传入顺序,未知项目(已删)追加末尾;组内按活跃时间倒序 */
+export interface ArchivedGroup {
+  projectId: string;
+  ids: string[];
+  /** 整个项目已归档:组内是该项目全部会话(含单独归档的),组头提供「恢复项目」 */
+  projectArchived?: true;
+}
+
+/**
+ * 归档会话按项目分组:已知项目按传入顺序,未知项目(已删)追加末尾;组内按活跃时间倒序。
+ * 归档项目(须仍在 projectIds 中)即使没有会话也占一组,否则无处恢复。
+ */
 export function archivedConversationGroups(
   order: readonly string[],
   conversations: Conversations,
-  projectIds: readonly string[]
-): { projectId: string; ids: string[] }[] {
+  projectIds: readonly string[],
+  archivedProjectIds: readonly string[] = []
+): ArchivedGroup[] {
+  const archivedProjects = new Set(archivedProjectIds);
   const idsByProject = new Map<string, string[]>();
   for (const id of order) {
     const conversation = conversations[id];
-    if (conversation?.archived !== true) continue;
+    if (!conversation) continue;
+    if (conversation.archived !== true && !archivedProjects.has(conversation.projectId)) continue;
     const bucket = idsByProject.get(conversation.projectId);
     if (bucket) bucket.push(id);
     else idsByProject.set(conversation.projectId, [id]);
   }
-  const groups: { projectId: string; ids: string[] }[] = [];
+  const groups: ArchivedGroup[] = [];
   const seen = new Set<string>();
   for (const projectId of projectIds) {
+    const projectArchived = archivedProjects.has(projectId);
     const ids = idsByProject.get(projectId);
-    if (!ids) continue;
+    if (!ids && !projectArchived) continue;
     seen.add(projectId);
-    groups.push({ projectId, ids: sortByActivity(ids, conversations) });
+    groups.push({
+      projectId,
+      ids: sortByActivity(ids ?? [], conversations),
+      ...(projectArchived ? { projectArchived: true } : {}),
+    });
   }
   for (const [projectId, ids] of idsByProject) {
     if (seen.has(projectId)) continue;

@@ -8,6 +8,7 @@ import { setPairViewedSession } from '@/stores/sessions/unread';
 import { useSettingsStore } from '@/stores/settings';
 import { applyProjectOrder } from '@/stores/settings/projectOrder';
 import {
+  ARCHIVED_PROJECTS_KEY,
   PINNED_ORDER_KEY,
   PROJECT_ORDER_KEY,
   readSidebarOrder,
@@ -29,6 +30,7 @@ function buildPayload(): PairCatalogPayload {
   const sessions = useSessionsStore.getState();
   // 与桌面侧栏一致的项目手动顺序（拖拽偏好存 localStorage，不进 settings store）
   const orderedProjects = applyProjectOrder(settings.projects, readSidebarOrder(PROJECT_ORDER_KEY));
+  const archivedProjects = new Set(readSidebarOrder(ARCHIVED_PROJECTS_KEY));
   const projectName = new Map(settings.projects.map((p) => [p.id, p.name]));
   const projectPath = new Map(settings.projects.map((p) => [p.id, p.path]));
 
@@ -89,7 +91,10 @@ function buildPayload(): PairCatalogPayload {
     catalog,
     // 置顶组的手动拖拽顺序：手机置顶栏按它排前，未收录的按活跃倒序
     pinnedOrder: readSidebarOrder(PINNED_ORDER_KEY),
-    projects: orderedProjects.map(toPairProjectEntry),
+    projects: orderedProjects.map((project) => ({
+      ...toPairProjectEntry(project),
+      ...(archivedProjects.has(project.id) ? { archived: true as const } : {}),
+    })),
     providers,
     // 仅 main 侧用于 spawn 反查 cwd，不下发手机
     projectPaths: settings.projects.map((p) => ({ id: p.id, path: p.path })),

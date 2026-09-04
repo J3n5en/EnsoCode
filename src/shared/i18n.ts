@@ -644,6 +644,8 @@ export const zhTranslations: Record<string, string> = {
   'Rebuild worktree': '重建 worktree',
   'Failed to rebuild worktree': '重建 worktree 失败',
   'Remove project': '移除项目',
+  'Archive project': '归档项目',
+  'Unarchive project': '恢复项目',
   'Select or create a conversation': '选择或新建一个对话',
   'Collapse sidebar': '折叠侧边栏',
   'Show {{n}} more': '展开其余 {{n}} 条',

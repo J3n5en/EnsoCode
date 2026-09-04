@@ -132,14 +132,18 @@ export function SessionDrawer({
     return () => clearInterval(timer);
   }, [open]);
 
-  // 与桌面侧栏同语义：归档不进项目组，只进底部栏目；置顶另起一栏且组内靠前
+  // 与桌面侧栏同语义：归档不进项目组，只进底部栏目；置顶另起一栏且组内靠前；
+  // 归档项目整组视为归档（会话自身标记不动，桌面恢复项目后原样回来）
+  const archivedProjects = new Set(projects.filter((p) => p.archived).map((p) => p.id));
+  const isArchived = (c: CatalogEntry) => c.archived || archivedProjects.has(c.projectId);
+  const activeProjects = projects.filter((p) => !p.archived);
   const topLevel = catalog.filter((c) => !c.parentId);
   const pinnedSessions = orderPinned(
-    topLevel.filter((c) => c.pinned && !c.archived),
+    topLevel.filter((c) => c.pinned && !isArchived(c)),
     pinnedOrder
   );
-  const archivedSessions = sortByActivity(topLevel.filter((c) => c.archived));
-  const active = topLevel.filter((c) => !c.archived);
+  const archivedSessions = sortByActivity(topLevel.filter(isArchived));
+  const active = topLevel.filter((c) => !isArchived(c));
 
   // 没有项目归属的会话（项目已删等）单独归到「其他」
   const known = new Set(projects.map((p) => p.id));
@@ -202,7 +206,7 @@ export function SessionDrawer({
             </div>
           )}
 
-          {projects.map((project) => (
+          {activeProjects.map((project) => (
             <ProjectGroup
               key={project.id}
               name={project.name}
