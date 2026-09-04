@@ -2,7 +2,12 @@ import { useEffect } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { useSessionsStore } from '@/stores/sessions';
-import { nextStallWatchAction, shouldAbortStalledGeneration } from '@/stores/sessions/stallTimeout';
+import {
+  hasInFlightToolCalls,
+  hasLiveGenerationWork,
+  nextStallWatchAction,
+  shouldAbortStalledGeneration,
+} from '@/stores/sessions/stallTimeout';
 import { useSettingsStore } from '@/stores/settings';
 
 export function useGenerationStallTimeout(): void {
@@ -21,6 +26,10 @@ export function useGenerationStallTimeout(): void {
         if (conversation.status === 'running' && conversation.lastOutputAt) {
           attempts.delete(conversation.id);
         }
+        const liveCoworker = (conversation.coworkerIds ?? []).some((id) => {
+          const child = sessions.conversations[id];
+          return Boolean(child && (child.spawning || child.status === 'running'));
+        });
         const action = nextStallWatchAction({
           shouldAbort: shouldAbortStalledGeneration({
             status: conversation.status,
@@ -29,6 +38,17 @@ export function useGenerationStallTimeout(): void {
             runStartedAt: conversation.runStartedAt,
             now,
             timeoutMs,
+            hasLiveWork: hasLiveGenerationWork({
+              pendingApprovals: conversation.pendingApprovals.length,
+              pendingAsks: conversation.pendingAsks.length,
+              runningBackgroundTasks: conversation.backgroundTasks.some(
+                (task) => task.status === 'running'
+              ),
+              runningSubagents: conversation.subagents.some((agent) => agent.status === 'running'),
+              hasToolOutput: Object.keys(conversation.toolOutputs).length > 0,
+              liveCoworker,
+              inFlightTools: hasInFlightToolCalls(conversation.messages),
+            }),
           }),
           status: conversation.status,
           spawning: conversation.spawning,

@@ -85,7 +85,7 @@ export interface SessionProjection {
   ended?: boolean;
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
-  /** 最近一次权威 message-upsert 落地时间：运行中计时显示「距上次返回」，随 running 结束清空 */
+  /** 最近一次可见进展时间（消息/工具/子代理/任务/审批提问）：运行中计时显示「距上次返回」，随 running 结束清空 */
   lastOutputAt?: number;
   /** 自动重试中（非终态）：turn-retry 设置，下一个 status/turn-* 事件清除 */
   retry?: { attempt: number; maxAttempts: number; delayMs: number; error: string; at: number };
@@ -319,6 +319,7 @@ export function applyAgentEvent(
         )
           ? current.pendingApprovals
           : [...current.pendingApprovals, event.request],
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     case 'approval-resolved':
@@ -335,6 +336,7 @@ export function applyAgentEvent(
         pendingAsks: current.pendingAsks.some((ask) => ask.requestId === event.ask.requestId)
           ? current.pendingAsks
           : [...current.pendingAsks, event.ask],
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     case 'ask-resolved':
@@ -350,6 +352,7 @@ export function applyAgentEvent(
         subagents: exists
           ? current.subagents.map((agent) => (agent.id === event.agent.id ? event.agent : agent))
           : [...current.subagents, event.agent],
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     }
@@ -359,6 +362,7 @@ export function applyAgentEvent(
         backgroundTasks: current.backgroundTasks.some((task) => task.taskId === event.task.taskId)
           ? current.backgroundTasks
           : [...current.backgroundTasks, event.task],
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     case 'task-output':
@@ -367,6 +371,7 @@ export function applyAgentEvent(
         backgroundTasks: current.backgroundTasks.map((task) =>
           task.taskId === event.taskId ? { ...task, tail: event.tail, status: event.status } : task
         ),
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     case 'task-ended':
@@ -383,6 +388,7 @@ export function applyAgentEvent(
       return {
         ...current,
         toolOutputs: { ...current.toolOutputs, [event.toolCallId]: event.output },
+        lastOutputAt: now,
         lastSeq: event.seq,
       };
     case 'turn-completed':

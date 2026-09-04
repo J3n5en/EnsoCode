@@ -634,6 +634,7 @@ describe('applyAgentEvent tool-output', () => {
     const first = applyAgentEvent(base, 's1', toolOutput(1, 'line 1'));
     const second = applyAgentEvent(first, 's1', toolOutput(2, 'line 1\nline 2'));
     expect(second.toolOutputs).toEqual({ t1: 'line 1\nline 2' });
+    expect(second.lastOutputAt).toBeDefined();
   });
 
   it('轮次收口后清空增量快照，避免残留与无限增长', () => {
