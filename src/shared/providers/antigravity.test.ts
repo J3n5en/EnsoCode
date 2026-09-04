@@ -705,8 +705,10 @@ describe('streamSimple（假 fetch，不发真实网络）', () => {
 });
 
 /**
- * 后端真实模型 id 白名单：用登录账号打 `v1internal:fetchAvailableModels` 拿到的
- * 全部 28 个 id（复跑 `node temp/agy-diag.mjs` 可再核一次）。
+ * 后端真实模型 id 白名单：任务调查中从登录账号的私有
+ * `v1internal:fetchAvailableModels` 清单观察到的全部 31 个 id。
+ * 其中 3.8 Flash 的 low/medium/high 是私有 wire id；公网官方资料只确认模型具备
+ * low/medium/high 能力，不确认这些私有 id。复跑 `node temp/agy-diag.mjs` 可再核一次。
  * 这是防止再凭空造 id 的回归网 —— 逻辑表解析出来的 wire id 必须落在这里面，
  * 否则推理时后端回 `404 Requested entity was not found`。
  */
@@ -735,6 +737,9 @@ const REAL_BACKEND_MODEL_IDS = [
   'gemini-3.7-flash-low',
   'gemini-3.7-flash-medium',
   'gemini-3.7-flash-tiered',
+  'gemini-3.8-flash-high',
+  'gemini-3.8-flash-low',
+  'gemini-3.8-flash-medium',
   'gemini-pro-agent',
   'gpt-oss-120b-medium',
   'tab_flash_lite_preview',
@@ -760,6 +765,18 @@ describe('逻辑 id → wire id 解析', () => {
     );
     expect(resolveAntigravityWireModelId('gemini-3-flash', 'medium')).toBe('gemini-3.5-flash-low');
     expect(resolveAntigravityWireModelId('gemini-3-flash', 'high')).toBe('gemini-3-flash-agent');
+  });
+
+  it('gemini-3.8-flash 路由 low/medium/high，minimal 降档回落到 low，默认档为 low', () => {
+    expect(resolveAntigravityWireModelId('gemini-3.8-flash')).toBe('gemini-3.8-flash-low');
+    expect(resolveAntigravityWireModelId('gemini-3.8-flash', 'low')).toBe('gemini-3.8-flash-low');
+    expect(resolveAntigravityWireModelId('gemini-3.8-flash', 'medium')).toBe(
+      'gemini-3.8-flash-medium'
+    );
+    expect(resolveAntigravityWireModelId('gemini-3.8-flash', 'high')).toBe('gemini-3.8-flash-high');
+    expect(resolveAntigravityWireModelId('gemini-3.8-flash', 'minimal')).toBe(
+      'gemini-3.8-flash-low'
+    );
   });
 
   it('claude-opus-4-5 off 档发裸 id、high 档发 -thinking', () => {
@@ -846,6 +863,34 @@ describe('buildRequest 的 model 字段用解析后的 wire id', () => {
     expect(request.model).toBe('gemini-3-flash-agent');
   });
 
+  it('gemini-3.8-flash 的 minimal 档降档为 low wire 与 LOW thinkingLevel，元数据将 minimal 显式标为 null', () => {
+    const flash38 = ANTIGRAVITY_FALLBACK_MODELS.find((m) => m.id === 'gemini-3.8-flash');
+    expect(flash38).toBeDefined();
+    if (!flash38) throw new Error('gemini-3.8-flash 不在兜底模型列表中');
+
+    // 元数据明确排除 minimal，保留 low/medium/high
+    expect(flash38.thinkingLevelMap?.minimal).toBeNull();
+    expect(flash38.thinkingLevelMap?.low).toBe('LOW');
+    expect(flash38.thinkingLevelMap?.medium).toBe('MEDIUM');
+    expect(flash38.thinkingLevelMap?.high).toBe('HIGH');
+
+    // 请求体下发 minimal 时降档为 low wire + LOW 思考级别
+    const model = {
+      ...flash38,
+      provider: ANTIGRAVITY_PROVIDER_ID,
+      api: flash38.api ?? ('google-antigravity-cca' as const),
+      baseUrl: flash38.baseUrl ?? 'https://daily-cloudcode-pa.googleapis.com',
+    };
+    const request = buildRequest(model, { messages: [] }, 'projects/p', {
+      reasoning: 'minimal',
+    });
+    expect(request.model).toBe('gemini-3.8-flash-low');
+    const generationConfig = request.request.generationConfig as {
+      thinkingConfig?: { thinkingLevel?: string };
+    };
+    expect(generationConfig.thinkingConfig?.thinkingLevel).toBe('LOW');
+  });
+
   it('不给档位时发 requestModelId', () => {
     const request = buildRequest(logicalModel, { messages: [] }, 'projects/p', undefined);
     expect(request.model).toBe('gemini-3.5-flash-extra-low');
@@ -908,14 +953,35 @@ describe('mergeAntigravityModels', () => {
     expect(ids).not.toContain('tab_flash_lite_preview');
   });
 
-  it('喂进后端真实的 28 个 id 时得到逻辑表可用项 + 未归属的新 id', () => {
+  it('动态发现 gemini-3.8-flash-low/medium/high 时只暴露逻辑 gemini-3.8-flash，tiered 仍独立暴露', () => {
+    const discovered = parseAvailableModels({
+      models: {
+        'gemini-3.8-flash-low': { displayName: 'Gemini 3.8 Flash (Low)' },
+        'gemini-3.8-flash-medium': { displayName: 'Gemini 3.8 Flash (Medium)' },
+        'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+        'gemini-3.8-flash-tiered': { displayName: 'Gemini 3.8 Flash Tiered' },
+      },
+    });
+    const ids = mergeAntigravityModels(discovered).map((spec) => spec.id);
+
+    // 暴露逻辑模型 gemini-3.8-flash
+    expect(ids).toContain('gemini-3.8-flash');
+    // wire id low/medium/high 不再裸露
+    expect(ids).not.toContain('gemini-3.8-flash-low');
+    expect(ids).not.toContain('gemini-3.8-flash-medium');
+    expect(ids).not.toContain('gemini-3.8-flash-high');
+    // tiered 保持独立动态条目
+    expect(ids).toContain('gemini-3.8-flash-tiered');
+  });
+
+  it('喂进后端真实的 31 个 id 时得到逻辑表可用项 + 未归属的新 id', () => {
     const models: Record<string, unknown> = {};
     for (const id of REAL_BACKEND_MODEL_IDS) models[id] = {};
     const ids = mergeAntigravityModels(parseAvailableModels({ models })).map((spec) => spec.id);
 
     expect(ids.sort()).toEqual(
       [
-        // 逻辑条目（本账号可用的 14 条）
+        // 逻辑条目（本账号可用的 15 条）
         'claude-opus-4-6',
         'claude-sonnet-4-6',
         'gemini-2.5-flash',
@@ -929,6 +995,7 @@ describe('mergeAntigravityModels', () => {
         'gemini-3.6-flash',
         'gemini-3.7-flash',
         'gemini-3.7-flash-tiered',
+        'gemini-3.8-flash',
         'gpt-oss-120b',
         // 后端有、本地模型表没单独归属的：3.1-pro 的 high 走 gemini-pro-agent，
         // 所以 gemini-3.1-pro-high 是一条独立可选模型

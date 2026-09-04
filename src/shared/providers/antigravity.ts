@@ -11,6 +11,7 @@
  * 不引入额外校验依赖；运行时校验用手写窄化函数完成。
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { type OauthUsageWindow, sanitizeOauthLabel } from '@shared/types';
 import { startOauthCallbackServer } from './callbackServer';
 import {
@@ -746,6 +747,7 @@ export interface AntigravityLogicalModel {
   readonly name: string;
   readonly requestModelId: string;
   readonly effortRouting?: Readonly<Partial<Record<AntigravityEffort, string>>>;
+  readonly thinkingLevelMap?: PiModelSpec['thinkingLevelMap'];
   readonly reasoning: boolean;
   readonly input: readonly ('text' | 'image')[];
   readonly contextWindow: number;
@@ -764,7 +766,7 @@ export interface AntigravityLogicalModel {
  * 注意这里的 `id` 是逻辑 id，**不能直接当请求体的 `model` 发**——后端只认带档位
  * 后缀的 wire id，发裸逻辑 id 会拿到 404 `Requested entity was not found`。
  */
-export const ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] = [
+const GENERATED_ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] = [
   {
     id: 'claude-opus-4-5',
     name: 'Claude Opus 4.5',
@@ -972,6 +974,47 @@ export const ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] = [
     maxTokens: 32_768,
   },
 ];
+
+/**
+ * 本地维护补丁：任务调查已确认这些条目，但生成脚本的数据源尚未收录。
+ * 上游目录补齐后应移回生成表，并删除这里的重复定义。
+ */
+const LOCAL_ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] = [
+  {
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    requestModelId: 'gemini-3.8-flash-low',
+    effortRouting: {
+      low: 'gemini-3.8-flash-low',
+      medium: 'gemini-3.8-flash-medium',
+      high: 'gemini-3.8-flash-high',
+    },
+    thinkingLevelMap: {
+      minimal: null,
+      low: 'LOW',
+      medium: 'MEDIUM',
+      high: 'HIGH',
+    },
+    reasoning: true,
+    input: ['text', 'image'],
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  },
+];
+
+// 保持补丁加入前的展示顺序；生成表不再包含任何手写条目，可继续整段替换。
+const LOCAL_ANTIGRAVITY_INSERT_BEFORE_ID = 'gemini-3.7-flash-tiered';
+const localAntigravityInsertionIndex = GENERATED_ANTIGRAVITY_LOGICAL_MODELS.findIndex(
+  (model) => model.id === LOCAL_ANTIGRAVITY_INSERT_BEFORE_ID
+);
+export const ANTIGRAVITY_LOGICAL_MODELS: readonly AntigravityLogicalModel[] =
+  localAntigravityInsertionIndex < 0
+    ? [...GENERATED_ANTIGRAVITY_LOGICAL_MODELS, ...LOCAL_ANTIGRAVITY_LOGICAL_MODELS]
+    : [
+        ...GENERATED_ANTIGRAVITY_LOGICAL_MODELS.slice(0, localAntigravityInsertionIndex),
+        ...LOCAL_ANTIGRAVITY_LOGICAL_MODELS,
+        ...GENERATED_ANTIGRAVITY_LOGICAL_MODELS.slice(localAntigravityInsertionIndex),
+      ];
 
 /**
  * 每个 wire id 的固定 `generationConfig.maxOutputTokens`（真实客户端抓包值，与思考
@@ -1297,8 +1340,18 @@ export function buildRequest(
 ): CloudCodeAssistRequest {
   const isClaude = model.id.startsWith('claude-');
   const envelope = nextEnvelope(options?.sessionId, isClaude);
-  // 逻辑 id ≠ wire id：后端一个思考档一个模型 id，必须按当前档位解析后再发
-  const wireModelId = resolveAntigravityWireModelId(model.id, options?.reasoning);
+  const requestedLevel = options?.reasoning;
+  const level = requestedLevel
+    ? clampProjectThinkingLevel(
+        requestedLevel,
+        supportedProjectThinkingLevels({
+          reasoning: model.reasoning,
+          thinkingLevelMap: model.thinkingLevelMap,
+        })
+      )
+    : undefined;
+  // 逻辑 id ≠ wire id：后端一个思考档一个模型 id，必须按钳位后的有效档位解析后再发
+  const wireModelId = resolveAntigravityWireModelId(model.id, level);
 
   const generationConfig: Record<string, unknown> = {};
   if (options?.temperature !== undefined) generationConfig.temperature = options.temperature;
@@ -1310,7 +1363,6 @@ export function buildRequest(
     (isClaude ? Math.min(64_000, model.maxTokens) : model.maxTokens);
   generationConfig.maxOutputTokens = Math.min(options?.maxTokens ?? cap, cap);
 
-  const level = options?.reasoning;
   if (model.reasoning && level) {
     const mapped = model.thinkingLevelMap?.[level];
     if (mapped !== null) {
@@ -1751,12 +1803,14 @@ function modelSpec(
   reasoning: boolean,
   contextWindow: number,
   maxTokens: number,
-  image = true
+  image = true,
+  thinkingLevelMap?: PiModelSpec['thinkingLevelMap']
 ): PiModelSpec {
   return {
     id,
     name,
     reasoning,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
     input: image ? ['text', 'image'] : ['text'],
     cost: ZERO_COST,
     contextWindow,
@@ -1784,7 +1838,8 @@ export const ANTIGRAVITY_FALLBACK_MODELS: PiModelSpec[] = ANTIGRAVITY_LOGICAL_MO
       logical.reasoning,
       logical.contextWindow,
       logical.maxTokens,
-      logical.input.includes('image')
+      logical.input.includes('image'),
+      logical.thinkingLevelMap
     )
 );
 
@@ -1809,7 +1864,8 @@ export function mergeAntigravityModels(discovered: PiModelSpec[]): PiModelSpec[]
         logical.reasoning,
         logical.contextWindow,
         logical.maxTokens,
-        logical.input.includes('image')
+        logical.input.includes('image'),
+        logical.thinkingLevelMap
       )
     );
   }
