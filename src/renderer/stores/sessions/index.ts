@@ -53,6 +53,7 @@ import { electronStorage, openPersistWriteGate } from '@/stores/settings/storage
 import { purgeConversationAuthority } from './authorityCleanup';
 import {
   evictColdMessages,
+  hasAuthoritativeMessages,
   isBulkyAgentEvent,
   isMessageCacheHot,
   MESSAGE_CACHE_TTL_MS,
@@ -64,12 +65,22 @@ import {
   applyDispatchEvent,
   emptyProjection,
   type SessionProjection,
+  upsertOutOfRange,
 } from './reducer';
 import { isPairViewed, nextUnread } from './unread';
 import { DIRTY_MAIN_TREE, workspaceFallbackNote, workspaceMigratedNote } from './worktree';
 
 const lastViewedAt: Record<string, number> = {};
 let evictTimer: ReturnType<typeof setTimeout> | null = null;
+/** 正文脱节时向 worker 补要 snapshot 的去抖：同一会话一轮重叠的 upsert 不重复要 */
+const snapshotResyncAt: Record<string, number> = {};
+const SNAPSHOT_RESYNC_DEBOUNCE_MS = 2_000;
+function resyncSnapshot(sessionId: string): void {
+  const now = Date.now();
+  if (now - (snapshotResyncAt[sessionId] ?? 0) < SNAPSHOT_RESYNC_DEBOUNCE_MS) return;
+  snapshotResyncAt[sessionId] = now;
+  void window.electronAPI.agent.requestSnapshot(sessionId);
+}
 
 function viewedFromState(state: {
   activeId: string | null;
@@ -908,6 +919,15 @@ export const useSessionsStore = create<SessionsState>()(
               return patch(state, id, { title: extractedTitle });
             }
             return state;
+          }
+          // 冷缓存清空后用户先发了一句（乐观回显占位），worker 推来的 upsert 带原 index 对不上
+          // 本地权威区：reducer 会丢正文只推 seq，若不补要 snapshot，历史与正在跑的工具卡永远不出现。
+          if (
+            event.type === 'message-upsert' &&
+            conversation.started &&
+            upsertOutOfRange(conversation.messages, event.index)
+          ) {
+            resyncSnapshot(id);
           }
           const next = applyAgentEvent(conversation, id, event);
           // dev：首个 worker 事件即 spawn 完成信号，即使投影未变也要清 spawning（resume loading 依赖它）
@@ -2313,7 +2333,7 @@ useSessionsStore.subscribe((state) => {
     viewed &&
     conversation &&
     (conversation.started || conversation.sessionFile) &&
-    conversation.messages.length === 0 &&
+    !hasAuthoritativeMessages(conversation.messages) &&
     !conversation.spawning
   ) {
     void window.electronAPI.agent.requestSnapshot(viewed);

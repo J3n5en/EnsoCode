@@ -5,6 +5,7 @@ import {
   applyDispatchEvent,
   emptyProjection,
   type SessionProjection,
+  upsertOutOfRange,
 } from './reducer';
 
 const identity = (generation = 'g1') => ({ sessionId: 's1', generation });
@@ -209,6 +210,56 @@ describe('applyAgentEvent', () => {
     expect(next.messages.every((message) => message !== undefined)).toBe(true);
     expect(next.messages).toHaveLength(0);
     expect(next.lastSeq).toBe(7);
+  });
+
+  it('upsert beyond the tail with only an optimistic echo drops body but flags upsertOutOfRange', () => {
+    // 复现：冷会话正文被清空后用户先发了一句（乐观回显 length=1），worker 推来的
+    // assistant upsert 带原 index（一百多）→ 对不上整段丢弃，界面只剩那一句 + 计时器
+    const withEcho: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '怎么又卡住了' }], optimistic: true },
+      ],
+    };
+    expect(upsertOutOfRange(withEcho.messages, 123)).toBe(true);
+    expect(upsertOutOfRange(withEcho.messages, 0)).toBe(false);
+    const next = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 9,
+      index: 123,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'running bash' }] },
+    });
+    expect(next.messages).toEqual(withEcho.messages);
+    expect(next.lastSeq).toBe(9);
+  });
+
+  it('snapshot keeps optimistic echoes the worker has not delivered yet', () => {
+    const withEcho: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'delivered' }], optimistic: true },
+        { role: 'user', content: [{ type: 'text', text: 'in flight' }], optimistic: true },
+      ],
+    };
+    const snapshot: SessionSnapshot = {
+      identity: identity(),
+      status: 'running',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'old' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+        { role: 'user', content: [{ type: 'text', text: 'delivered' }] },
+      ],
+      commands: [],
+    };
+    const next = applyAgentEvent(withEcho, 's1', { type: 'snapshot', sessions: [snapshot] });
+    expect(next.messages.map((m) => (m.content[0] as { text: string }).text)).toEqual([
+      'old',
+      'ok',
+      'delivered',
+      'in flight',
+    ]);
+    expect(next.messages[3]).toHaveProperty('optimistic', true);
   });
 
   it('乐观尾巴不被同 index 的 assistant upsert 覆盖，同文本 user upsert 将其消费', () => {

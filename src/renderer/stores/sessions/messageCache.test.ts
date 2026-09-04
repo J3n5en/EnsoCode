@@ -43,3 +43,12 @@ describe('messageCache', () => {
     expect(isBulkyAgentEvent('status')).toBe(false);
   });
 });
+
+describe('hasAuthoritativeMessages', () => {
+  it('optimistic-only timeline still needs a snapshot', async () => {
+    const { hasAuthoritativeMessages } = await import('./messageCache');
+    expect(hasAuthoritativeMessages([])).toBe(false);
+    expect(hasAuthoritativeMessages([{ optimistic: true }])).toBe(false);
+    expect(hasAuthoritativeMessages([{}, { optimistic: true }])).toBe(true);
+  });
+});

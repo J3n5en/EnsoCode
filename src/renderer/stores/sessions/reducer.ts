@@ -38,6 +38,20 @@ function sameUserText(optimistic: string, delivered: string): boolean {
   return slash[1] === block[1] && (slash[2] ?? '').trim() === (block[4] ?? '').trim();
 }
 
+/** 权威区（乐观尾巴之前的消息）长度 */
+function authoritativeLength(messages: readonly TimelineMessage[]): number {
+  const firstOptimistic = messages.findIndex((message) => message.optimistic);
+  return firstOptimistic === -1 ? messages.length : firstOptimistic;
+}
+
+/**
+ * message-upsert 的 index 是否落在本地权威区之外（会被 reducer 丢正文只推 seq）。
+ * store 层据此判断正文已与 worker 脱节，需重新要 snapshot。
+ */
+export function upsertOutOfRange(messages: readonly TimelineMessage[], index: number): boolean {
+  return index > authoritativeLength(messages);
+}
+
 export interface SessionProjection {
   generation?: string;
   status: NodeStatus;
@@ -144,10 +158,21 @@ export function applyAgentEvent(
     const snapshot = event.sessions.find((candidate) => candidate.identity.sessionId === sessionId);
     if (!snapshot) return state;
     const sameGeneration = state.generation === snapshot.identity.generation;
+    // 乐观回显是 worker 尚未确认的本地尾巴：快照里已有同文本 user 消息的视为已送达消费掉，
+    // 其余（仍在途的 steer/prompt）保留浮在权威消息之后，不能被整段快照抹掉。
+    const delivered = new Set(
+      snapshot.messages.filter((message) => message.role === 'user').map(textOf)
+    );
+    const tail = state.messages.filter(
+      (message) =>
+        message.optimistic &&
+        message.role === 'user' &&
+        ![...delivered].some((text) => sameUserText(textOf(message), text))
+    );
     return {
       generation: snapshot.identity.generation,
       status: snapshot.status,
-      messages: snapshot.messages,
+      messages: tail.length > 0 ? [...snapshot.messages, ...tail] : snapshot.messages,
       customEntries: snapshot.customEntries ?? [],
       commands: snapshot.commands,
       dispatchMainEvents: {},
@@ -247,12 +272,9 @@ export function applyAgentEvent(
       // 乐观回显是未确认的本地尾巴：权威 upsert 只写权威区，尾巴永远浮在后面。
       // running 中 steer 的回显若按裸 index 覆盖，会被当前轮的 assistant 消息
       // 顶掉（用户看到消息凭空消失，轮次结束后又出现）。
-      const firstOptimistic = current.messages.findIndex((message) => message.optimistic);
-      const authoritative =
-        firstOptimistic === -1
-          ? current.messages.slice()
-          : current.messages.slice(0, firstOptimistic);
-      let tail = firstOptimistic === -1 ? [] : current.messages.slice(firstOptimistic);
+      const authoritativeLen = authoritativeLength(current.messages);
+      const authoritative = current.messages.slice(0, authoritativeLen);
+      let tail = current.messages.slice(authoritativeLen);
       // 正文被冷缓存清空后重新变热，snapshot 回来前的 upsert 以原 index 到达：直接写会
       // 留下稀疏空洞（.role/.optimistic 读 undefined 崩溃）。丢掉正文、只推进 seq，等 snapshot 整体被覆。
       if (event.index > authoritative.length) {
