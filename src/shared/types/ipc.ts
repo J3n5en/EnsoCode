@@ -46,6 +46,10 @@ export const IPC_CHANNELS = {
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
   ASSETS_COLLECT_IMPORT: 'assets:collect-import',
   ASSETS_LIST_PROJECT_SKILLS: 'assets:list-project-skills',
+  ASSETS_SKILL_OCCUPANCY: 'assets:skill-occupancy',
+  ASSETS_INSTRUCTION_OCCUPANCY: 'assets:instruction-occupancy',
+  ASSETS_MCP_OCCUPANCY: 'assets:mcp-occupancy',
+  ASSETS_BUILTIN_TOOL_OCCUPANCY: 'assets:builtin-tool-occupancy',
 
   // Instruction content (copy-on-write)
   INSTRUCTIONS_READ: 'instructions:read',

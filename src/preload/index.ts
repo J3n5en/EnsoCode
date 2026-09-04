@@ -12,6 +12,7 @@ import type {
 import type { BrowserSearchTab } from '@shared/searchAnything';
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import type {
+  AssetOccupancyRow,
   CollectedAsset,
   CollectedProvider,
   FilesListResult,
@@ -170,6 +171,14 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_COLLECT_IMPORT, scanId, candidateIds),
     listProjectSkills: (cwd: string): Promise<{ name: string; description: string }[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, cwd),
+    skillOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SKILL_OCCUPANCY, ids),
+    instructionOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_INSTRUCTION_OCCUPANCY, ids),
+    mcpOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_MCP_OCCUPANCY, ids),
+    builtinToolOccupancy: (): Promise<AssetOccupancyRow[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_BUILTIN_TOOL_OCCUPANCY),
   },
 
   instructions: {

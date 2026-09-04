@@ -9,6 +9,12 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { InstructionEditDialog } from './InstructionEditDialog';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
+import {
+  enabledOccupancyTotal,
+  OccupancyEnabledTotal,
+  OccupancyMark,
+  useOccupancyRows,
+} from './OccupancyMark';
 
 const formatBytes = (bytes: number): string =>
   bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
@@ -20,12 +26,23 @@ export function InstructionsSettings() {
   const removeInstruction = useSettingsStore((state) => state.removeInstruction);
   const [importOpen, setImportOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<InstructionEntry | 'new' | null>(null);
+  const instructionIds = instructions.map((instruction) => instruction.id);
+  const occupancy = useOccupancyRows(instructionIds, (ids) =>
+    window.electronAPI.assets.instructionOccupancy(ids)
+  );
+  const enabledTokens = enabledOccupancyTotal(
+    instructions.filter((instruction) => instruction.enabled).map((instruction) => instruction.id),
+    occupancy.rows
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4" data-settings-row="instructions.root">
         <div>
-          <h3 className="font-medium text-lg">{t('Instruction Files')}</h3>
+          <h3 className="font-medium text-lg">
+            {t('Instruction Files')}
+            <OccupancyEnabledTotal tokens={enabledTokens} />
+          </h3>
           <p className="text-muted-foreground text-sm">
             {t('Global CLAUDE.md / AGENTS.md style files from local AI tools')}
           </p>
@@ -86,6 +103,10 @@ export function InstructionsSettings() {
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <OccupancyMark
+                  row={occupancy.rows[instruction.id]}
+                  pending={occupancy.pending && !occupancy.rows[instruction.id]}
+                />
                 <Switch
                   checked={instruction.enabled}
                   onCheckedChange={(enabled) => updateInstruction(instruction.id, { enabled })}

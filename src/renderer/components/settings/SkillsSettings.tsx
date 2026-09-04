@@ -9,6 +9,12 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
+import {
+  enabledOccupancyTotal,
+  OccupancyEnabledTotal,
+  OccupancyMark,
+  useOccupancyRows,
+} from './OccupancyMark';
 
 export function SkillsSettings() {
   const { t } = useI18n();
@@ -26,6 +32,14 @@ export function SkillsSettings() {
   const visibleIds = visible.map((skill) => skill.id);
   const selection = useVisibleSelection(visibleIds);
   const enabledCount = skills.filter((skill) => skill.enabled).length;
+  const skillIds = skills.map((skill) => skill.id);
+  const occupancy = useOccupancyRows(skillIds, (ids) =>
+    window.electronAPI.assets.skillOccupancy(ids)
+  );
+  const enabledTokens = enabledOccupancyTotal(
+    skills.filter((skill) => skill.enabled).map((skill) => skill.id),
+    occupancy.rows
+  );
 
   return (
     <div className="space-y-6">
@@ -49,6 +63,7 @@ export function SkillsSettings() {
                   enabled: enabledCount,
                   total: skills.length,
                 })}
+                <OccupancyEnabledTotal tokens={enabledTokens} />
               </span>
             )}
           </h3>
@@ -115,6 +130,10 @@ export function SkillsSettings() {
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <OccupancyMark
+                      row={occupancy.rows[skill.id]}
+                      pending={occupancy.pending && !occupancy.rows[skill.id]}
+                    />
                     <Switch
                       checked={skill.enabled}
                       onCheckedChange={(enabled) => updateSkill(skill.id, { enabled })}

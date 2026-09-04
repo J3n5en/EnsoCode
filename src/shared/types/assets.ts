@@ -2,6 +2,14 @@ import type { ModelReasoningOverride, ModelThinkingLevelOverride } from './llm';
 
 /** 技能与 MCP 服务器：均以引用方式登记，内容留在源应用目录 */
 
+/** 设置页占用估算行；tokens 为 null 表示未探测或失败 */
+export interface AssetOccupancyRow {
+  id: string;
+  tokens: number | null;
+  error?: string;
+  toolCount?: number;
+}
+
 export interface SkillEntry {
   id: string;
   name: string;

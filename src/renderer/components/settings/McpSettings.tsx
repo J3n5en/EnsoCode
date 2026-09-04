@@ -11,6 +11,12 @@ import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { McpEditDialog } from './McpEditDialog';
+import {
+  enabledOccupancyTotal,
+  OccupancyEnabledTotal,
+  OccupancyMark,
+  useOccupancyRows,
+} from './OccupancyMark';
 
 export function McpSettings() {
   const { t } = useI18n();
@@ -34,6 +40,11 @@ export function McpSettings() {
   const visibleIds = visible.map((server) => server.id);
   const selection = useVisibleSelection(visibleIds);
   const enabledCount = mcpServers.filter((server) => server.enabled).length;
+  const enabledIds = mcpServers.filter((server) => server.enabled).map((server) => server.id);
+  const occupancy = useOccupancyRows(enabledIds, (ids) =>
+    window.electronAPI.assets.mcpOccupancy(ids)
+  );
+  const enabledTokens = enabledOccupancyTotal(enabledIds, occupancy.rows);
 
   return (
     <div className="space-y-6">
@@ -47,6 +58,7 @@ export function McpSettings() {
                   enabled: enabledCount,
                   total: mcpServers.length,
                 })}
+                <OccupancyEnabledTotal tokens={enabledTokens} />
               </span>
             )}
           </h3>
@@ -122,6 +134,10 @@ export function McpSettings() {
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <OccupancyMark
+                      row={occupancy.rows[server.id]}
+                      pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
+                    />
                     <Switch
                       checked={server.enabled}
                       onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}

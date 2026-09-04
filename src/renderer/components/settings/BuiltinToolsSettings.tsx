@@ -6,11 +6,25 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  enabledOccupancyTotal,
+  OccupancyEnabledTotal,
+  OccupancyMark,
+  useOccupancyRows,
+} from './OccupancyMark';
 
 export function BuiltinToolsSettings() {
   const { t } = useI18n();
   const disabled = useSettingsStore((state) => state.disabledBuiltinTools);
   const toggle = useSettingsStore((state) => state.toggleBuiltinTool);
+  const occupancy = useOccupancyRows(
+    BUILTIN_TOOLS.map((tool) => tool.id),
+    () => window.electronAPI.assets.builtinToolOccupancy()
+  );
+  const enabledTokens = enabledOccupancyTotal(
+    BUILTIN_TOOLS.filter((tool) => !disabled.includes(tool.id)).map((tool) => tool.id),
+    occupancy.rows
+  );
   const [cleared, setCleared] = useState<BrowserClearKind | null>(null);
   const clear = async (kind: BrowserClearKind) => {
     await window.electronAPI.browser.clearData(kind);
@@ -21,7 +35,10 @@ export function BuiltinToolsSettings() {
   return (
     <div className="space-y-6">
       <div data-settings-row="tools.root">
-        <h3 className="font-medium text-lg">{t('Built-in tools')}</h3>
+        <h3 className="font-medium text-lg">
+          {t('Built-in tools')}
+          <OccupancyEnabledTotal tokens={enabledTokens} />
+        </h3>
         <p className="text-muted-foreground text-sm">
           {t('Toggle the built-in tools available to agents. All enabled by default.')}
         </p>
@@ -35,6 +52,10 @@ export function BuiltinToolsSettings() {
               <p className="text-sm font-medium">{tool.name}</p>
               <p className="text-muted-foreground text-xs">{t(tool.description)}</p>
             </div>
+            <OccupancyMark
+              row={occupancy.rows[tool.id]}
+              pending={occupancy.pending && !occupancy.rows[tool.id]}
+            />
             <Switch
               checked={!disabled.includes(tool.id)}
               onCheckedChange={(checked) => toggle(tool.id, checked)}

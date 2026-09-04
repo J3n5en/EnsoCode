@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/testing.md", "reason": "quality gate for occupancy tests"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "id-only IPC and no secrets in renderer"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared layer constraints"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "i18n and settings UI conventions"}

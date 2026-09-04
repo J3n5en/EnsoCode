@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/pre-implementation-checklist.md", "reason": "cross-layer boundary before coding"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "IPC + settings window + main probe"}
+{"file": ".trellis/spec/main/index.md", "reason": "main services and ipc checklist"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "three-point IPC chain, id-only paths"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared occupancy helper cannot use node/electron"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "settings UI i18n and preload"}
+{"file": ".trellis/spec/testing.md", "reason": "unit-test occupancy math not React"}

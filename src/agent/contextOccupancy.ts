@@ -1,11 +1,18 @@
 import {
+  charsToTokens,
+  type OccupancySkill,
+  type OccupancyTool,
+  skillOccupancyText,
+  toolOccupancyText,
+} from '@shared/occupancy';
+import {
   CONTEXT_OCCUPANCY_BUCKETS,
   type ContextOccupancy,
   type ContextOccupancyBuckets,
 } from '@shared/types/agent';
 
-export type { ContextOccupancy, ContextOccupancyBuckets };
-export { CONTEXT_OCCUPANCY_BUCKETS };
+export type { ContextOccupancy, ContextOccupancyBuckets, OccupancySkill, OccupancyTool };
+export { CONTEXT_OCCUPANCY_BUCKETS, charsToTokens };
 
 export interface ContextOccupancyInput {
   systemText: string;
@@ -24,29 +31,12 @@ export interface ContextOccupancyInput {
   compactionEntryId?: string;
 }
 
-export function charsToTokens(chars: number): number {
-  if (chars <= 0) return 0;
-  return Math.ceil(chars / 4);
-}
-
 function joinLength(texts: readonly string[]): number {
   return texts.reduce((sum, text) => sum + text.length, 0);
 }
 
 function modelFamily(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
-}
-
-export interface OccupancySkill {
-  name: string;
-  description?: string;
-  content?: string;
-}
-
-export interface OccupancyTool {
-  name: string;
-  description?: string;
-  parameters?: unknown;
 }
 
 export interface OccupancyCompactionEntry {
@@ -112,15 +102,6 @@ function compactedCount(
   return cut >= 0 ? cut : 0;
 }
 
-function toolText(tool: OccupancyTool): string {
-  const params = tool.parameters == null ? '' : JSON.stringify(tool.parameters);
-  return `${tool.name} ${tool.description ?? ''} ${params}`;
-}
-
-function skillText(skill: OccupancySkill): string {
-  return `${skill.name} ${skill.description ?? ''} ${skill.content ?? ''}`;
-}
-
 function defaultEstimate(message: unknown): number {
   const record = (message ?? {}) as Record<string, unknown>;
   const role = typeof record.role === 'string' ? record.role : '';
@@ -151,8 +132,8 @@ export function collectContextOccupancy(input: CollectContextOccupancyInput): Co
   return summarizeContextOccupancy({
     systemText: input.systemPrompt,
     instructionText,
-    skillTexts: input.skills.map(skillText),
-    toolDefinitionTexts: input.tools.map(toolText),
+    skillTexts: input.skills.map(skillOccupancyText),
+    toolDefinitionTexts: input.tools.map(toolOccupancyText),
     conversationTokens,
     compactionTokens: compaction ? charsToTokens(compaction.summary.length) : 0,
     compactedMessageCount: compactedCount(input.branch, compaction),
