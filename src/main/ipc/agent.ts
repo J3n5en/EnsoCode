@@ -65,6 +65,7 @@ import {
 } from '../services/agentHost';
 import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
+import { toStoredTokens } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
 import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -356,7 +357,8 @@ export function registerAgentHandlers(): void {
       return;
     }
     if (workerEvent.type === 'mcp-tokens-refreshed') {
-      getMcpOAuthStore().saveTokens(workerEvent.serverId, workerEvent.tokens);
+      // worker 回传的 token 同样过一道白名单，不直接落盘
+      getMcpOAuthStore().saveTokens(workerEvent.serverId, toStoredTokens(workerEvent.tokens));
       return;
     }
     dispatchService?.observe(workerEvent);

@@ -189,8 +189,16 @@ export interface McpOAuthTokens {
   scope?: string;
 }
 
-/** MCP 连接状态：unauthorized = 需要用户在设置页完成 OAuth 授权 */
-export type McpConnectionState = 'connecting' | 'ready' | 'unauthorized' | 'error';
+/** MCP 连接状态：unauthorized = 需要用户在设置页完成 OAuth 授权；idle = 已授权待连接 */
+export const MCP_CONNECTION_STATES = [
+  'connecting',
+  'ready',
+  'unauthorized',
+  'error',
+  'idle',
+] as const;
+
+export type McpConnectionState = (typeof MCP_CONNECTION_STATES)[number];
 
 /** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 source） */
 export interface McpServerSpawnConfig {
@@ -951,6 +959,22 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
 
 const isSequence = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 0;
+
+/** worker 回传的 token：只认白名单字段，id_token 等敏感内容不进主进程 */
+export function parseMcpOAuthTokens(value: unknown): McpOAuthTokens | null {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['access_token', 'token_type', 'refresh_token', 'expires_in', 'scope']) ||
+    !isNonEmptyString(value.access_token) ||
+    (value.token_type !== undefined && typeof value.token_type !== 'string') ||
+    (value.refresh_token !== undefined && typeof value.refresh_token !== 'string') ||
+    (value.expires_in !== undefined && typeof value.expires_in !== 'number') ||
+    (value.scope !== undefined && typeof value.scope !== 'string')
+  ) {
+    return null;
+  }
+  return value as unknown as McpOAuthTokens;
+}
 
 export function parseContextOccupancy(value: unknown): ContextOccupancy | null {
   if (!isRecord(value) || !isRecord(value.buckets) || value.estimated !== true) return null;
@@ -1925,18 +1949,20 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       : null;
   }
   if (value.type === 'mcp-status') {
-    return isNonEmptyString(value.serverName) &&
-      (value.state === 'connecting' ||
-        value.state === 'ready' ||
-        value.state === 'unauthorized' ||
-        value.state === 'error')
+    // 该事件会广播到全部窗口，字段白名单 + 逐项类型都要卡死
+    return hasOnlyKeys(value, ['type', 'serverId', 'serverName', 'state', 'toolCount', 'error']) &&
+      isNonEmptyString(value.serverName) &&
+      (value.serverId === undefined || isNonEmptyString(value.serverId)) &&
+      (value.toolCount === undefined || isSequence(value.toolCount)) &&
+      (value.error === undefined || typeof value.error === 'string') &&
+      MCP_CONNECTION_STATES.includes(value.state as McpConnectionState)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }
   if (value.type === 'mcp-tokens-refreshed') {
-    return isNonEmptyString(value.serverId) &&
-      isRecord(value.tokens) &&
-      isNonEmptyString(value.tokens.access_token)
+    return hasOnlyKeys(value, ['type', 'serverId', 'tokens']) &&
+      isNonEmptyString(value.serverId) &&
+      parseMcpOAuthTokens(value.tokens)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

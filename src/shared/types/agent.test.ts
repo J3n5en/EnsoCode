@@ -891,3 +891,45 @@ describe('tool-output 事件跨进程边界', () => {
     expect(parseAgentWorkerEvent({ ...event, identity: undefined })).toBeNull();
   });
 });
+
+describe('MCP 旁路事件收窄', () => {
+  const status = {
+    type: 'mcp-status',
+    serverId: 'srv-1',
+    serverName: 'notion',
+    state: 'ready',
+    toolCount: 3,
+  };
+
+  it('合法 mcp-status 通过，脏字段拒绝', () => {
+    expect(parseAgentWorkerEvent(status)).toEqual(status);
+    expect(parseAgentWorkerEvent({ type: 'mcp-status', serverName: 'n', state: 'error' })).toEqual({
+      type: 'mcp-status',
+      serverName: 'n',
+      state: 'error',
+    });
+    expect(parseAgentWorkerEvent({ ...status, serverId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...status, serverId: 42 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...status, toolCount: 'many' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...status, toolCount: -1 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...status, error: 42 })).toBeNull();
+    // 该事件广播到所有窗口：多余字段一律拒绝
+    expect(parseAgentWorkerEvent({ ...status, html: '<script>' })).toBeNull();
+  });
+
+  it('mcp-tokens-refreshed 只接受白名单 token 字段', () => {
+    const event = {
+      type: 'mcp-tokens-refreshed',
+      serverId: 'srv-1',
+      tokens: { access_token: 'a', token_type: 'Bearer', refresh_token: 'r', expires_in: 60 },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({ ...event, tokens: { access_token: 'a', id_token: 'jwt' } })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ ...event, tokens: { access_token: 'a', expires_in: 'x' } })
+    ).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: 1 })).toBeNull();
+  });
+});

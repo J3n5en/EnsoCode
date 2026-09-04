@@ -100,7 +100,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 }
 
 /** 只保留下发 worker 需要的字段，避免把服务端多余内容一起落盘 */
-function toStoredTokens(tokens: OAuthTokens): McpOAuthTokens {
+export function toStoredTokens(tokens: OAuthTokens | McpOAuthTokens): McpOAuthTokens {
   return {
     access_token: tokens.access_token,
     ...(tokens.token_type ? { token_type: tokens.token_type } : {}),
