@@ -518,7 +518,7 @@ async function discoverProject(
     try {
       await onboardUser(accessToken, signal);
     } catch {
-      // 开通失败（含地区限制）不阻断登录，下面走默认 project，与 pi-antigravity 一致。
+      onProgress?.('开通失败或地区不可用，改用回退项目继续登录…');
     }
     onProgress?.('刷新 Cloud Code Assist 项目…');
     payload = await loadCodeAssist(accessToken, signal);
@@ -526,6 +526,7 @@ async function discoverProject(
     if (plan.action === 'use-project') return plan.projectId;
   }
 
+  onProgress?.('未找到可用项目，改用回退项目继续登录…');
   return defaultAntigravityProjectId(email || 'antigravity-default');
 }
 

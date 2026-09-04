@@ -154,6 +154,24 @@ export function SubagentModelsSettings() {
                 className="h-7 flex-1 text-xs"
                 onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
               />
+              {(isReasoningOverride(entry.reasoning) ||
+                isThinkingLevelOverride(entry.thinkingLevel)) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-slot="subagent-model-follow"
+                  className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                  onClick={() =>
+                    updateEntry(entry.id, {
+                      reasoning: undefined,
+                      thinkingLevel: undefined,
+                    })
+                  }
+                >
+                  {t('Follow conversation')}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"

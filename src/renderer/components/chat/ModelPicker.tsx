@@ -32,6 +32,15 @@ export function requestOpenChatModelPicker() {
   window.dispatchEvent(new Event(OPEN_CHAT_MODEL_PICKER_EVENT));
 }
 
+/** catalog 未声明支持集时只改展示，不回写。 */
+export function persistClampedThinkingLevel(
+  level: ThinkingLevel,
+  declared: ThinkingLevel[] | undefined
+): ThinkingLevel | undefined {
+  const next = clampProjectThinkingLevel(level, declared);
+  return next === level ? undefined : next;
+}
+
 /** 档位显示文案的 t() key（不是已翻译文本）；沿用既有英文短词，字典里已配好中文译文 */
 const LEVEL_LABEL_KEYS: Record<ThinkingLevel, string> = {
   minimal: 'Min',
@@ -555,11 +564,8 @@ export function ModelPicker({
       onSelect(targetProviderId, targetModelId);
       // 同一次交互内钳位:目标模型已知的支持档集若不含当前档,自动降到最近支持档并回写
       const meta = metaByProvider[targetProviderId]?.[targetModelId];
-      const clamped = clampProjectThinkingLevel(
-        thinkingLevel,
-        visibleThinkingLevels(meta?.thinkingLevels)
-      );
-      if (clamped !== thinkingLevel) normalizeThinking(clamped);
+      const persisted = persistClampedThinkingLevel(thinkingLevel, meta?.thinkingLevels);
+      if (persisted) normalizeThinking(persisted);
       setOpen(false);
     },
     [onSelect, metaByProvider, thinkingLevel, normalizeThinking]
@@ -596,13 +602,12 @@ export function ModelPicker({
       return;
     }
     if (!reasoningEnabled) return;
-    if (visibleLevels.includes(thinkingLevel)) return;
-    if (visibleLevels.length === 0) return;
-    normalizeThinking(clampProjectThinkingLevel(thinkingLevel, visibleLevels));
+    const persisted = persistClampedThinkingLevel(thinkingLevel, supportedLevels);
+    if (persisted) normalizeThinking(persisted);
   }, [
     currentModelMeta,
     reasoningUnsupported,
-    visibleLevels,
+    supportedLevels,
     reasoningEnabled,
     thinkingLevel,
     normalizeReasoning,

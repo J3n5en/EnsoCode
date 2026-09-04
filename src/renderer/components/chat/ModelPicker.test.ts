@@ -2,7 +2,7 @@ import type { ModelProvider } from '@shared/types';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ModelPicker } from './ModelPicker';
+import { ModelPicker, persistClampedThinkingLevel } from './ModelPicker';
 
 interface WrapperProps {
   children?: ReactNode;
@@ -121,7 +121,7 @@ describe('ModelPicker reasoning controls mode', () => {
     expect(html).not.toContain('data-switch="true"');
   });
 
-  it('自动钳位缺省复用 change 回调，提供 normalize 回调时与用户操作分流', () => {
+  it('未知支持集不回写思考档；用户操作仍走 change 回调', () => {
     const onThinkingChange = vi.fn();
     renderToStaticMarkup(
       createElement(ModelPicker, {
@@ -131,9 +131,8 @@ describe('ModelPicker reasoning controls mode', () => {
       })
     );
     harness.menuItemClicks[0]?.();
-    expect(onThinkingChange).toHaveBeenCalledWith('high');
+    expect(onThinkingChange).not.toHaveBeenCalled();
 
-    onThinkingChange.mockClear();
     harness.menuItemClicks = [];
     harness.sliderProps = null;
     harness.switchProps = null;
@@ -151,7 +150,7 @@ describe('ModelPicker reasoning controls mode', () => {
       })
     );
     harness.menuItemClicks[0]?.();
-    expect(onThinkingNormalize).toHaveBeenCalledWith('high');
+    expect(onThinkingNormalize).not.toHaveBeenCalled();
     expect(onThinkingChange).not.toHaveBeenCalled();
 
     const switchProps = harness.switchProps as Record<string, unknown> | null;
@@ -164,6 +163,12 @@ describe('ModelPicker reasoning controls mode', () => {
     const onValueChange = sliderProps?.onValueChange;
     if (typeof onValueChange === 'function') onValueChange(1);
     expect(onThinkingChange).toHaveBeenCalledWith('low');
+  });
+
+  it('catalog 显式支持集才回写钳位档', () => {
+    expect(persistClampedThinkingLevel('max', undefined)).toBeUndefined();
+    expect(persistClampedThinkingLevel('max', ['low', 'high'])).toBe('high');
+    expect(persistClampedThinkingLevel('high', ['low', 'high'])).toBeUndefined();
   });
 
   it('只渲染当前模型声明支持的思考档，normalize no-op 时仍显示钳位值', () => {

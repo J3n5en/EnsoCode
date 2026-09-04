@@ -19,6 +19,7 @@ const providers: ModelProvider[] = [
 const harness = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   pickerProps: [] as Record<string, unknown>[],
+  followClicks: [] as Array<() => void>,
   updateEntry: vi.fn(),
 }));
 
@@ -47,6 +48,15 @@ vi.mock('@/stores/oauthCredentials', () => ({
       },
     }),
   usableProvidersForOauthSnapshot: (entries: ModelProvider[]) => entries,
+}));
+
+vi.mock('@/components/ui/button', () => ({
+  Button: (props: Record<string, unknown>) => {
+    if (props['data-slot'] === 'subagent-model-follow' && typeof props.onClick === 'function') {
+      harness.followClicks.push(props.onClick as () => void);
+    }
+    return createElement('button', { type: 'button', 'data-slot': props['data-slot'] });
+  },
 }));
 
 vi.mock('@/components/chat/ModelPicker', () => ({
@@ -84,6 +94,7 @@ function renderEntries(entries: SubagentModelEntry[]) {
 
 beforeEach(() => {
   harness.pickerProps = [];
+  harness.followClicks = [];
   harness.updateEntry.mockClear();
 });
 
@@ -158,5 +169,19 @@ describe('SubagentModelsSettings reasoning controls', () => {
       ['configured', { reasoning: 'off' }],
       ['configured', { reasoning: 'on' }],
     ]);
+  });
+
+  it('独立覆盖可复位为跟随会话，继承项不显示复位', () => {
+    renderEntries([entry('follow')]);
+    expect(harness.followClicks).toHaveLength(0);
+
+    harness.pickerProps = [];
+    renderEntries([entry('configured', { reasoning: 'on', thinkingLevel: 'high' })]);
+    expect(harness.followClicks).toHaveLength(1);
+    harness.followClicks[0]?.();
+    expect(harness.updateEntry).toHaveBeenCalledWith('configured', {
+      reasoning: undefined,
+      thinkingLevel: undefined,
+    });
   });
 });
