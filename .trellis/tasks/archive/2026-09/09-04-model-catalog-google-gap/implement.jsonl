@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/testing.md", "reason": "TDD 与回归测试规范"}
+{"file": ".trellis/spec/main/index.md", "reason": "主进程 usage service 规范"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared 纯逻辑与 provider 边界"}
+{"file": ".trellis/tasks/09-04-model-catalog-google-gap/research/verified-conclusion.txt", "reason": "Google 3.8 官方价格与本地目录缺口证据"}

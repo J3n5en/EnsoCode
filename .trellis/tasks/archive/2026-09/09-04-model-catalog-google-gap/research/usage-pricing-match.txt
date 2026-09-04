@@ -1,0 +1,335 @@
+================================================================================
+用量页面模型聚合、单价匹配链路及无单价原因技术调查报告
+================================================================================
+
+一、调查背景与问题陈述
+
+用户在 EnsoCode 设置页“用量 -> 按模型”列表中查看到以下模型：
+1. gemini-3.8-flash-high
+2. gpt-5.6-sol
+3. imported
+
+页面下方出现提示文案：
+“以下模型无目录单价：gemini-3.8-flash-high, imported，其费用未计入。”
+其中 gpt-5.6-sol 正常计入单价与费用，但 gemini-3.8-flash-high 与 imported 提示无单价。
+本调查从用量页面前端组件向后全面追踪：模型名称聚合链路、目录单价查询与匹配机制、无单价根因、测试网证据以及最小修复候选方案。
+
+
+================================================================================
+二、端到端调用链与文件行号证据（File:Line 追踪）
+
+1. 视图层与警告提示
+   - src/renderer/components/settings/UsageSettings.tsx:41-47
+     组件加载时调用 `window.electronAPI.usage.summary(range)` 获取 `UsageSummary`。
+   - src/renderer/components/settings/UsageSettings.tsx:83-95
+     `<RankingTable title={t('By model')} countLabel={t('Messages')} rows={summary.byModel.map(...)} />`
+     按模型渲染排行榜，行 key 为 `row.model`，显示模型名、费用、tokens 和消息数。
+   - src/renderer/components/settings/UsageSettings.tsx:109-115
+     ```tsx
+     {summary.unpricedModels.length > 0 && (
+       <p className="text-xs text-muted-foreground">
+         {t('No catalog price for: {{models}}. Their cost is not included.', {
+           models: summary.unpricedModels.join(', '),
+         })}
+       </p>
+     )}
+     ```
+     当 `summary.unpricedModels` 数组非空时，渲染缺少单价的警告横条。
+   - src/shared/i18n.ts:591-592
+     `'No catalog price for: {{models}}. Their cost is not included.': '以下模型无目录单价：{{models}}，其费用未计入。'`
+
+2. IPC 通信层
+   - src/main/ipc/usage.ts:18-20
+     ```ts
+     ipcMain.handle('usage:summary', async (_event, days: unknown) => {
+       return getUsageSummary(parseDays(days));
+     });
+     ```
+     接收 renderer 发送的 `usage:summary` IPC 请求，转发给 `getUsageSummary`。
+
+3. 业务服务层（会话解析与单价加载）
+   - src/main/services/usage/usageService.ts:140-156
+     `getUsageSummary(days)` 核心执行流：
+     ```ts
+     const [sessions, ledger, pricing] = await Promise.all([
+       loadSessionsOnce(),
+       loadLedger(dir),
+       getPricingTable(),
+     ]);
+     const { records, activity } = mergeUsageSources(sessions, ledger);
+     return {
+       ok: true,
+       summary: aggregateUsage(records, activity, pricing, { days, now: Date.now() }),
+     };
+     ```
+   - src/main/services/usage/usageService.ts:19-21
+     `sessionDir()`: 定位到 `path.join(app.getPath('userData'), 'agent', 'sessions')`。
+   - src/main/services/usage/usageService.ts:46-64
+     `loadSessions(dir)`: 遍历该目录下的所有 `*.jsonl` 文件，按 mtime/size 内存缓存并解析。
+
+4. 会话 JSONL 解析与模型名称提取
+   - src/main/services/usage/parseSession.ts:75-110
+     `parseSessionJsonl(text)` 逐行解析 JSONL：
+     第 87 行：遇到 `message.role === 'assistant'` 且包含 `message.usage` 时记录用量。
+     第 98 行：
+     ```ts
+     model: str(message.model, 'unknown'),
+     provider: str(message.provider, ''),
+     ```
+     直接读取 `message.model`，未进行任何前缀剥除、大小写转换或规范化操作，原始写入 `UsageRecord`。
+
+5. 单价目录（PricingTable）构建与过滤规则
+   - src/main/services/usage/usageService.ts:112-126
+     `getPricingTable()`:
+     ```ts
+     const runtime = await getRuntime();
+     const table = buildPricingTable(runtime.getModels() as readonly CatalogCostModel[]);
+     ```
+     从 `@earendil-works/pi-coding-agent` 的 `ModelRuntime`（`src/main/services/oauthProviders.ts:54-76`）获取全部注册模型列表，包括内置 catalog 和扩展注册的 provider。
+   - src/main/services/usage/usageService.ts:74-87
+     `toPricing(cost)`:
+     ```ts
+     const pick = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+     const pricing = {
+       input: pick(cost.input),
+       output: pick(cost.output),
+       cacheRead: pick(cost.cacheRead),
+       cacheWrite: pick(cost.cacheWrite),
+     };
+     // 订阅计费的 catalog 条目四项全零：当「未定价」处理，否则 UI 会把它显示成误导性的 $0.00
+     const priced = pricing.input || pricing.output || pricing.cacheRead || pricing.cacheWrite;
+     return priced ? pricing : null;
+     ```
+     重要逻辑：四项全为 0 的模型（如订阅制模型、未定价模型）返回 null，不计入单价表。
+   - src/main/services/usage/usageService.ts:93-105
+     `buildPricingTable(models)`:
+     遍历所有模型，仅收录 `toPricing(model.cost)` 返回非 null 的条目。同 ID 优先选择四项全非零单价。
+
+6. 单价匹配与思考档位后缀降级逻辑
+   - src/shared/usage/pricing.ts:15-26
+     ```ts
+     const THINKING_SUFFIX = new RegExp(`-(${THINKING_LEVELS.join('|')})$`);
+
+     export function resolvePricing(model: string, table: PricingTable): ModelPricing | null {
+       const exact = table[model];
+       if (exact) return exact;
+       const base = model.replace(THINKING_SUFFIX, '');
+       return base !== model ? (table[base] ?? null) : null;
+     }
+     ```
+     `THINKING_LEVELS` 来自 `src/shared/types/agent.ts:52`:
+     `['minimal', 'low', 'medium', 'high', 'xhigh', 'max']`
+     查表步骤：
+     (1) 精确查 `table[model]`；
+     (2) 若缺失，检查结尾是否带有思考档位后缀（如 `-high`、`-medium` 等）。若是，剥除后缀得到 `base`，再次查 `table[base]`；
+     (3) 若仍缺失，返回 `null`。
+   - src/shared/usage/pricing.ts:28-40
+     `costOf(record, table)`:
+     调用 `resolvePricing(record.model, table)`。若返回 `null`，直接返回 `null`。
+
+7. 数据聚合与无单价模型收集
+   - src/shared/usage/aggregate.ts:145-167
+     `aggregateUsage(records, activity, pricing, opts)`:
+     ```ts
+     for (const r of current) {
+       const cost = costOf(r, pricing);
+       const tokens = tokensOf(r);
+       ...
+       const modelRow = byModel.get(r.model) ?? {
+         model: r.model,
+         cost: null,
+         tokens: 0,
+         messages: 0,
+         share: 0,
+       };
+       modelRow.tokens += tokens;
+       modelRow.messages += 1;
+       modelRow.cost = addCost(modelRow.cost, cost);
+       byModel.set(r.model, modelRow);
+       if (cost === null) unpriced.add(r.model);
+     ```
+     聚合行为特征：
+     (1) `byModel` 严格按会话里的 `r.model` 原始字符串分组，不聚合同一基底的不同思考档位；
+     (2) 只要某条记录的 `costOf(r, pricing) === null`，其 `r.model` 就会被加入 `unpriced` 集合；
+     (3) 聚合结果返回 `unpricedModels: [...unpriced]`，供 UI 展示警告。
+
+
+================================================================================
+三、无单价模型分别深入分析
+
+--------------------------------------------------------------------------------
+1. 模型：gemini-3.8-flash-high
+--------------------------------------------------------------------------------
+(1) 产生源头：
+    用户配置了 Google Antigravity（Cloud Code Assist）账号。
+    在运行时，`src/shared/providers/antigravity.ts:1839` 调用 `fetchAvailableModels` 向 Google 后端 `v1internal:fetchAvailableModels` 拉取可用模型列表。
+    Google Antigravity 后端在近期部署了 Gemini 3.8 的分档 wire id，包括：
+    - `gemini-3.8-flash-low`
+    - `gemini-3.8-flash-medium`
+    - `gemini-3.8-flash-high`
+    - `gemini-3.8-flash-tiered`
+
+(2) 为什么会以 wire id（`gemini-3.8-flash-high`）原样暴露并写入会话：
+    - 在 `src/shared/providers/antigravity.ts:771-970` 中，硬编码了 `ANTIGRAVITY_LOGICAL_MODELS` 表。
+      该表收录了 `gemini-3.6-flash`、`gemini-3.7-flash`、`gemini-3.7-flash-tiered` 等，但未包含 `gemini-3.8-flash`。
+    - 在 `src/shared/providers/antigravity.ts:1800-1826` 的 `mergeAntigravityModels` 中：
+      对于声明在 `ANTIGRAVITY_LOGICAL_MODELS` 的条目（如 3.7），其对应的 `gemini-3.7-flash-low`、`gemini-3.7-flash-high` 会被 logical model 认领（claimed），用户在模型选择器里只能看到逻辑模型名 `gemini-3.7-flash`；
+      但对于未在逻辑模型表中声明的 wire id（如 `gemini-3.8-flash-high`），`claimed.has(spec.id)` 为 false，直接进入 `merged.push(spec)`，作为裸模型选项暴露给用户。
+    - 用户选择 `gemini-3.8-flash-high` 发起会话，pi agent 会话管理器记录 assistant 消息时，`message.model` 即为 `"gemini-3.8-flash-high"`。
+
+(3) 查价匹配链路与失败根因：
+    - 步骤 1：精确查找 `table['gemini-3.8-flash-high']` -> 未命中。
+    - 步骤 2：思考档位剥除：
+      `gemini-3.8-flash-high` 匹配 `THINKING_SUFFIX`（结尾为 `-high`）。
+      剥除后得到 `base = 'gemini-3.8-flash'`。
+    - 步骤 3：基底查找 `table['gemini-3.8-flash']` -> 仍未命中！
+      失败根因有二：
+      a. Antigravity 本身是订阅制提供商，其注册时所有模型 `cost: ZERO_COST`（`src/shared/providers/antigravity.ts:1737, 1760`），被 `toPricing` 过滤排除，不向 `PricingTable` 贡献任何条目；
+      b. 官方按量计费目录依赖 `@earendil-works/pi-ai@0.84.3` 的内置数据（`node_modules/@earendil-works/pi-ai/dist/providers/data/google.json` 与 `google-vertex.json`）。该数据在生成时，Google 官方公开 API 最高仅到 `gemini-3.7-flash`，完全没有 `gemini-3.8-flash` 条目。
+    - 最终 `resolvePricing` 返回 `null`，导致 `costOf` 返回 `null`，被加入 `unpricedModels`。
+
+--------------------------------------------------------------------------------
+2. 模型：imported
+--------------------------------------------------------------------------------
+(1) 产生源头：
+    用户使用了本地第三方会话导入功能（如从 ChatGPT/Claude 等导出会话导入到本机）。
+    在 `src/main/services/sessionImport/piJsonl.ts:34-35` 中：
+    ```ts
+    const payload =
+      message.role === 'user'
+        ? { role: 'user', content: message.text, timestamp: messageTimestamp }
+        : {
+            role: 'assistant',
+            content: [{ type: 'text', text: message.text }],
+            api: 'anthropic-messages',
+            provider: 'imported',
+            model: 'imported',
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: 'stop',
+            timestamp: messageTimestamp,
+          };
+    ```
+    当外部消息无模型与用量信息时，assistant 消息被赋予假模型名 `model: 'imported'`，且 token 四项均为 0。
+
+(2) 查价匹配链路与失败根因：
+    - `src/main/services/usage/parseSession.ts:87-98` 在解析该导入会话时，检测到 `message.role === 'assistant'` 且 `usage` 字段存在，于是生成了 `UsageRecord`，其 `model` 字段为 `'imported'`，tokens 为 0。
+    - `src/shared/usage/pricing.ts:28-40` 的 `costOf(record, table)` 中：
+      第一行即执行 `const p = resolvePricing(record.model, table); if (!p) return null;`。
+      `'imported'` 显然不是任何真实模型，未在任何 catalog 中存在，也不带思考档位后缀，因此 `p` 为 `null`。
+      注意：即便该记录的所有 token 字段均为 0，`costOf` 也在单价缺失时直接返回 `null`，而不是返回 0！
+    - `src/shared/usage/aggregate.ts:158`：
+      `if (cost === null) unpriced.add(r.model);`
+      将 `'imported'` 作为缺失单价的模型放入 `unpricedModels`。
+    - 前端 UI 错误地把外部导入的标记 `'imported'` 当成了缺少定价的 LLM 模型展示给用户。
+
+--------------------------------------------------------------------------------
+3. 对比：gpt-5.6-sol 为何有单价且正常计费
+--------------------------------------------------------------------------------
+- 在 `@earendil-works/pi-ai` 内置 catalog（`dist/providers/data/openai.json`）中包含：
+  ```json
+  "gpt-5.6-sol": {
+    "id": "gpt-5.6-sol",
+    "name": "GPT-5.6 Sol",
+    "api": "openai-responses",
+    "provider": "openai",
+    "cost": { "input": 5, "output": 30, "cacheRead": 0.5, "cacheWrite": 6.25 }
+  }
+  ```
+- 经 `toPricing` 提取有效非零单价后存入 `PricingTable['gpt-5.6-sol']`。
+- `resolvePricing('gpt-5.6-sol', table)` 精确命中，`costOf` 算出有效数值，因此不在 `unpricedModels` 中。
+
+
+================================================================================
+四、现有测试网与模型别名/规范化逻辑检查
+
+1. 单价匹配测试与思考档位后缀测试
+   - 文件：`src/shared/usage/pricing.test.ts:50-74`
+     该测试套件专门验证“思考档位后缀兜底”：
+     - `grok-4.6-fast-max` 剥除 `-max` 命中 `grok-4.6-fast`（第 58 行）；
+     - `gemini-3.8-flash-high` 剥除 `-high` 后因 `gemini-3.8-flash` 不在表中，断言返回 `null`（第 69 行）：
+       ```ts
+       it('剥掉后缀仍查不到则返回 null', () => {
+         expect(costOf({ model: 'gemini-3.8-flash-high', ...tokens }, table)).toBeNull();
+       });
+       ```
+     这说明 `gemini-3.8-flash-high` 本身就是开发者用来测试“剥除思考后缀后在目录中仍查无此模型返回 null”的明确用例。
+
+2. 模型规范化与别名机制检查
+   - `src/shared/modelCatalog.ts:39`:
+     ```ts
+     /** 精确 model id 查找。OAuth meta 与自定义 spawn 共用；禁止前缀 / 品牌猜测。 */
+     export function findCatalogModelById<T extends { id: string }>(
+       catalog: readonly T[],
+       modelId: string
+     ): T | undefined {
+       return catalog.find((entry) => entry.id === modelId);
+     }
+     ```
+     系统规范明文禁止“前缀 / 品牌猜测”。除 `resolvePricing` 中针对思考档位后缀的特定正则剔除外，整个用量体系不存在任何自动别名或模糊匹配逻辑。
+
+3. Antigravity 中的逻辑模型与 wire id 测试
+   - 文件：`src/shared/providers/antigravity.test.ts:708-745`
+     `REAL_BACKEND_MODEL_IDS` 记录了通过 `v1internal:fetchAvailableModels` 拿到的真实 wire id。
+     包含 `gemini-3.6-flash-high`、`gemini-3.7-flash-high` 等。
+   - 文件：`src/shared/providers/antigravity.ts:1881`
+     代码注释明文警示：“已发现的、兜底表里没有的 wire id（如 gemini-3.8-flash-tiered）冲掉，推理时报 model not found”。
+     证明系统已知 Google 后端已推送 3.8 相关的分档 wire id，但因静态逻辑表未收录，导致其作为裸 wire id 浮出到界面。
+
+
+================================================================================
+五、最小修复候选方案（仅供评估，不实施代码修改）
+
+针对当前现象，存在不同层面的最小修复路径，视产品诉求而定：
+
+候选方案 A：用量统计层排除虚拟模型与全 0 token 记录（解决 `imported` 问题）
+- 适用问题：`imported` 误报无目录单价。
+- 修改位置：
+  1. `src/main/services/usage/parseSession.ts:87`:
+     若 `message.model === 'imported'` 或 `message.provider === 'imported'`，不生成 `UsageRecord`；
+     或者：
+  2. `src/shared/usage/aggregate.ts:158`:
+     仅当 `cost === null && tokensOf(r) > 0 && r.model !== 'imported'` 时才将 `r.model` 加入 `unpriced`。
+- 优点：极简、高安全，彻底消除第三方导入会话对单价警告的干扰。
+
+候选方案 B：在 Antigravity 提供商中补齐 `gemini-3.8-flash` 逻辑模型定义
+- 适用问题：避免暴露裸 wire id `gemini-3.8-flash-high`，将其折叠收拢为逻辑模型 `gemini-3.8-flash`。
+- 修改位置：`src/shared/providers/antigravity.ts:ANTIGRAVITY_LOGICAL_MODELS`
+  仿照 `gemini-3.7-flash` 添加：
+  ```ts
+  {
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    requestModelId: 'gemini-3.8-flash-low',
+    effortRouting: {
+      minimal: 'gemini-3.8-flash-low',
+      low: 'gemini-3.8-flash-low',
+      medium: 'gemini-3.8-flash-medium',
+      high: 'gemini-3.8-flash-high',
+    },
+    reasoning: true,
+    input: ['text', 'image'],
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  }
+  ```
+- 效果：用户端选择器将显示规范名称 `Gemini 3.8 Flash`，按档位路由，不再出现散乱的 wire id。
+- 待确认：即使收拢为 `gemini-3.8-flash`，因为 Google 官方未发布按量计费版 3.8 且 Antigravity 为订阅制，该模型在用量页仍无 API 单价。
+
+候选方案 C：用量页面对“订阅制模型（Subscription Included）”做属性区分，而非粗暴归为“缺失单价”
+- 适用问题：解决所有通过 Antigravity / Cursor 等包月订阅产生的会话在用量页提示“无目录单价”的体验割裂。
+- 修改位置：`src/shared/usage/aggregate.ts` 与 `src/main/services/usage/parseSession.ts`
+  - 在 `UsageRecord` 中保留 `provider`；
+  - 若 `record.provider === 'google-antigravity'` 或 `'cursor'`，用量聚合识别其为订阅模型（Subscription Included），不计入 token 费用，也不将其塞入 `unpricedModels` 触发警告；
+  - 警告横条仅提示真正属于 API Key 计费却查无定价的模型。
+- 优点：符合真实商业模式（订阅用户本就按月付费，不消耗 token 目录余额），逻辑自洽。
+
+候选方案 D：等待上游 `@earendil-works/pi-ai` 升级发布
+- 适用问题：若 Google 官方未来正式发布公开 API 的 Gemini 3.8，上游 pi-ai 会在 `google.json` 中收录官方定价。通过升级依赖包即可自然获得单价。
+================================================================================

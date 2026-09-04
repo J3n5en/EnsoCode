@@ -1,0 +1,197 @@
+================================================================================
+Google 官方 Gemini 模型调研报告（模型 ID、生命周期、定价与命名区分）
+访问日期: 2026-09-04
+================================================================================
+
+一、核心调查结论摘要
+--------------------------------------------------------------------------------
+1. 是否存在官方 gemini-3.8-flash-high：
+   明确不存在。Google 官方无论在 Gemini Developer API、Google AI Studio，还是 Google Cloud Vertex AI 中，均没有名为 "gemini-3.8-flash-high" 的模型 ID。
+
+2. 最接近且对应的官方名称：
+   官方标准模型 ID 为 "gemini-3.8-flash"（Display Name: Gemini 3.8 Flash）。
+   后缀 "-high" 并非模型名的一部分，而是其思考/推理配置档位（Thinking Effort / Reasoning Level = "high"）。在官方 API 中通过参数 thinking_config.thinking_budget 或 effort="high" 控制，模型 ID 本身保持为 "gemini-3.8-flash"。
+
+3. 官方当前状态与生命周期（截至 2026-09-04）：
+   - 模型状态：Generally Available (GA) / Stable（稳定版）
+   - 发布日期：2026-09-02 UTC
+   - 退休/弃用日期：未公布退休日期（No retirement date announced）
+   - 替换模型：无（当前最新旗舰 Flash 模型）
+   - 输入上下文窗口：1,048,576 tokens (1M)
+   - 最大输出 tokens：65,536 tokens (64K)
+   - 思考支持：支持 low、medium、high 档位；官方文档明确注明 minimal 档不支持（会报错）。
+
+4. 官方定价（标准 Pay-as-you-go）：
+   - 2026年12月31日前（优惠期 / Introductory pricing）：
+     * 输入单价 (Input): $0.75 / 1,000,000 tokens
+     * 输出单价 (Output, 包含思考 tokens): $3.75 / 1,000,000 tokens
+     * 上下文缓存读取 (Context cache read): $0.075 / 1,000,000 tokens
+     * 上下文缓存存储 (Context cache storage): $0.50 / 1,000,000 tokens/小时
+   - 2027年1月1日起（标准期 / Standard pricing）：
+     * 输入单价 (Input): $1.50 / 1,000,000 tokens
+     * 输出单价 (Output, 包含思考 tokens): $7.50 / 1,000,000 tokens
+     * 上下文缓存读取 (Context cache read): $0.15 / 1,000,000 tokens
+     * 上下文缓存存储 (Context cache storage): $1.00 / 1,000,000 tokens/小时
+   - 批量 / 弹性推理（Batch / Flex API）：
+     * 2026-12-31 前：输入 $0.375 / 1M，输出 $1.875 / 1M，缓存读取 $0.0375 / 1M
+     * 2027-01-01 起：输入 $0.75 / 1M，输出 $3.75 / 1M，缓存读取 $0.075 / 1M
+
+
+二、官方数据来源记录（URL、页面标题、访问日期、抓取事实）
+--------------------------------------------------------------------------------
+1. Google AI for Developers - Gemini 3.8 Flash 模型规格页
+   - URL: https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
+   - 页面标题: Gemini 3.8 Flash | Gemini API | Google AI for Developers
+   - 访问日期: 2026-09-04
+   - 抓取事实:
+     * Model code: gemini-3.8-flash
+     * Status: Stable
+     * Update: September 2026 (Last updated 2026-09-02 UTC)
+     * Token limits: Input 1,048,576 / Output 65,536
+     * Thinking: Supported (low, medium, high). Note: minimal is not supported and returns an error.
+     * Supported inputs: Text, Image, Video, Audio, PDF; Output: Text.
+
+2. Google AI for Developers - Gemini Developer API 定价页
+   - URL: https://ai.google.dev/pricing
+   - 页面标题: Gemini Developer API pricing | Gemini API | Google AI for Developers
+   - 访问日期: 2026-09-04
+   - 抓取事实:
+     * Gemini 3.8 Flash (gemini-3.8-flash)
+     * Standard Free Tier: Free of charge
+     * Standard Paid Tier (through Dec 31, 2026):
+       - Input: $0.75 / 1M tokens
+       - Output (including thinking tokens): $3.75 / 1M tokens
+       - Context caching: $0.075 / 1M tokens
+     * Standard Paid Tier (starting Jan 1, 2027):
+       - Input: $1.50 / 1M tokens
+       - Output (including thinking tokens): $7.50 / 1M tokens
+       - Context caching: $0.15 / 1M tokens
+     * Batch / Flex Tier:
+       - Input: $0.375 / 1M (through 2026-12-31), $0.75 / 1M (from 2027-01-01)
+       - Output: $1.875 / 1M (through 2026-12-31), $3.75 / 1M (from 2027-01-01)
+
+3. Google Cloud Vertex AI - 模型概览与模型清单
+   - URL: https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models
+   - 页面标题: Models | Vertex AI Agent Platform | Google Cloud
+   - 访问日期: 2026-09-04
+   - 抓取事实:
+     * Featured / Generally available Gemini models 包含 Gemini 3.8 Flash、Gemini 3.7 Flash、Gemini 3.6 Flash、Gemini 3.5 Flash、Gemini 3.5 Flash-Lite。
+     * 官方说明："Gemini 3.8 Flash: Our most intelligent workhorse model yet, built for long-horizon coding and autonomous agents."
+
+4. Google Cloud Vertex AI - 模型版本管理与生命周期
+   - URL: https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versioning
+   - 页面标题: Model versioning and lifecycle | Generative AI on Vertex AI | Google Cloud
+   - 访问日期: 2026-09-04
+   - 抓取事实:
+     * 模型生命周期表格明细：
+       - Model ID: gemini-3.8-flash
+       - Release date: September 2, 2026
+       - Retirement date: No retirement date announced
+       - Replacement model: 无
+       - Model ID: gemini-3.7-flash
+       - Release date: August 13, 2026
+       - Retirement date: No retirement date announced
+       - Model ID: gemini-3.6-flash
+       - Release date: July 21, 2026
+       - Retirement date: No retirement date announced
+
+5. Google Cloud Vertex AI - 定价页
+   - URL: https://cloud.google.com/vertex-ai/generative-ai/pricing
+   - 页面标题: Pricing for Generative AI on Vertex AI | Google Cloud
+   - 访问日期: 2026-09-04
+   - 抓取事实:
+     * "Gemini 3.8 Flash, Gemini 3.7 Flash, Gemini 3.6 Flash, and CodeMender using these models are offered with introductory pricing of $0.75 / $3.75 per 1M tokens input / output through December 31, 2026. Starting January 1, 2027, standard pricing of $1.5 / $7.5 per 1M tokens input / output will apply."
+     * Global pricing: Input $0.75 / 1M, Output $3.75 / 1M, Context caching $0.075 / 1M (through Dec 31, 2026).
+
+
+三、官方当前公开 Gemini 系列模型 ID 盘点（截至 2026-09-04）
+--------------------------------------------------------------------------------
+1. Gemini 3 稳定版（Stable / Generally Available）：
+   - gemini-3.8-flash (最新发布, 2026-09-02)
+   - gemini-3.7-flash (2026-08-13)
+   - gemini-3.6-flash (2026-07-21)
+   - gemini-3.5-flash
+   - gemini-3.5-flash-lite
+   - gemini-3.1-flash-lite
+   - gemini-3.1-flash-image
+   - gemini-3.1-flash-lite-image
+   - gemini-3-pro-image
+   - gemini-3.5-transcribe
+
+2. Gemini 3 预览版（Preview）：
+   - gemini-3.1-pro-preview
+   - gemini-3-flash-preview
+   - gemini-3.5-live-translate-preview
+   - gemini-3.1-flash-live-preview
+   - gemini-3.1-flash-tts-preview
+
+3. Gemini 2.x 维护/稳定版：
+   - gemini-2.5-pro
+   - gemini-2.5-flash
+   - gemini-2.5-flash-lite
+   - gemini-2.0-flash
+   - gemini-2.0-flash-lite
+
+
+四、三类模型标识的严格界定与区分
+--------------------------------------------------------------------------------
+在 EnsoCode、上游 SDK、Google 原生服务及各类中转路由中，存在三种层级的模型字符串，必须严格区分：
+
+1. 官方模型 ID (Official Model IDs):
+   - 定义：Google 官方开放 API 端点直接接收的标准模型标识符。
+   - 适用环境：Google AI Studio API (generativelanguage.googleapis.com) 与 Vertex AI (aiplatform.googleapis.com)。
+   - 典型示例：
+     * gemini-3.8-flash
+     * gemini-3.7-flash
+     * gemini-3.6-flash
+     * gemini-2.5-flash
+     * gemini-2.5-pro
+   - 特征：不含推理档位后缀（如 -high, -low）。思考能力通过请求体中的 thinking_config 字段单独控制。
+   - 定价属性：在官方定价表中有明确列出的 input / output / cacheRead / cacheWrite 费率。
+
+2. 内部 Wire ID / 专用别名 (Internal Wire IDs & Provider Aliases):
+   - 定义：Google 内部产品线（如 Cloud Code Assist / daily-cloudcode-pa.googleapis.com，即 EnsoCode 中的 google-antigravity provider）在私有协议层使用的底层路由 ID。
+   - 产生机制：Cloud Code Assist 协议将用户选择的“逻辑模型”与“思考档位 (effort)”合并编码为一个具体的后端服务 ID（Wire ID），或者由后端根据客户端版本下发动态条目。
+   - 典型示例（已在 Antigravity 实现中确认）：
+     * gemini-3.8-flash-tiered
+     * gemini-3.8-flash-high (当 gemini-3.8-flash 开启 high 档思考时生成的 wire 标识)
+     * gemini-3.7-flash-high / gemini-3.7-flash-medium / gemini-3.7-flash-low
+     * gemini-3.6-flash-high / gemini-3.6-flash-low
+     * gemini-3.5-flash-extra-low / gemini-3.5-flash-low
+     * gemini-3-flash-agent
+     * gemini-3.1-pro-low / gemini-3.1-pro-high / gemini-pro-agent
+   - 特征：此类 ID 不对 Google 开发者开放公网 API，无独立官方定价页；但在 EnsoCode 的 Antigravity provider 中会作为实际请求的 requestModelId 发送，并可能作为 session 用量记录的 model 字段落盘。
+
+3. 第三方路由名 (Third-Party Routing Names):
+   - 定义：第三方聚合网关、代理中转站（例如 OpenRouter、LiteLLM、企业内部 AI Gateway）为了简化调用，直接将思考预算、上下文窗口或厂商后缀编码在模型名称中。
+   - 典型示例：
+     * google/gemini-3.8-flash:thinking-high
+     * gemini-3.8-flash-high
+     * google/gemini-3.8-flash-online
+     * gemini-3.8-flash-1m
+   - 特征：中转服务会在网关侧将该后缀剥除，还原为官方 ID "gemini-3.8-flash"，并将后缀转化为 official request parameter (thinking_config)。
+
+
+五、截图中 gemini-3.8-flash-high 无目录单价根因链路分析
+--------------------------------------------------------------------------------
+1. 用量记录产生链路：
+   用户在 EnsoCode 中使用 Google Antigravity 或第三方配置时，选择了 Gemini 3.8 Flash 并开启高思考档位（high），或者后端协议返回了带档位的 wire id，导致会话记录中的 model 字段被持久化为字符串 "gemini-3.8-flash-high"。
+
+2. 定价查询机制（src/shared/usage/pricing.ts）：
+   EnsoCode 在计算费用时调用 resolvePricing(model, table)：
+   (a) 首先查 table['gemini-3.8-flash-high']，由于任何官方目录均无此条目，精确匹配未命中。
+   (b) 剥离结尾的思考档位后缀（-high 正好匹配 THINKING_SUFFIX 正则中的 high 档），得到基础模型 ID "gemini-3.8-flash"。
+   (c) 查询 table['gemini-3.8-flash']。
+
+3. 目录缺失根因（关键原因）：
+   EnsoCode 的定价表来源于 runtime.getModels()，底层依赖 @earendil-works/pi-ai（当前版本 0.84.3）。
+   查看 pi-ai 的预置数据源（node_modules/@earendil-works/pi-ai/dist/providers/data/google.json 和 google-vertex.json）：
+   - 该目录生成时仅收录了截至 2026 年 8 月中旬的模型（最新到 gemini-3.7-flash）。
+   - gemini-3.8-flash 是 2026-09-02 刚刚发布的全新模型，尚未进入 pi-ai 0.84.3 的静态 JSON 目录。
+   - 因此 table['gemini-3.8-flash'] 同样为 undefined！
+   - resolvePricing 最终返回 null，前端页面因此提示“无目录单价，费用未计入”。
+
+4. 验证对比：
+   若模型为 gemini-3.7-flash-high，剥离 -high 后查 table['gemini-3.7-flash']，由于 gemini-3.7-flash 存在于 google.json（单价 input: 0.75, output: 3.75, cacheRead: 0.075），即可成功匹配并计费。
+   因此，gemini-3.8-flash-high 匹配失败的本质是：“剥离后缀逻辑完全正常，但基础模型 gemini-3.8-flash 在上游静态模型目录中因发布时间较新而缺失”。
+================================================================================

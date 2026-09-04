@@ -1,0 +1,205 @@
+================================================================================
+本地模型目录与价格目录结构、Google 最新模型缺失原因调查报告
+================================================================================
+
+一、核心结论摘要
+
+1. “模型目录”与“价格目录”是否为同一个概念？
+   结论：它们不是同一个概念，但依赖同一个底层数据源。
+   - “模型目录”（Model Catalog）：指系统运行时通过 runtime.getModels() 获取的全量模型实体定义。包含模型标识（id）、展示名称（name）、API 协议类型（api）、所属提供商（provider）、推理能力（reasoning）、思考档位映射（thinkingLevelMap）、上下文窗口（contextWindow）、最大输出（maxTokens）以及计费费率（cost）等全方位元数据。
+   - “价格目录”（Pricing Table）：指专用于用量核算与费用计算的内存单价映射表（Record<string, ModelPricing>）。它是由 usageService.ts 的 buildPricingTable 函数从“模型目录”中抽取具有非零有效 cost 字段的模型衍生生成的纯单价表。
+   - 区别与联系：
+     a. 数据源相同：价格目录派生自模型目录中的 model.cost。
+     b. 覆盖范围不同：所有按月包月/订阅制模型（如 google-antigravity、cursor）在模型目录中 cost 均为全 0，会在生成价格目录时被显式过滤排除；未在官方/代理 API 提供商清单中配置有效 cost 的模型不会进入价格目录。
+     c. 查询逻辑不同：价格目录在查表时会通过正则表达式剥离思考档位后缀（如 -high、-medium）再次回退查找基底模型，而模型目录的精确反查默认按严格 id 匹配。
+
+2. 截图中各模型无单价 / 有单价的原因：
+   - gemini-3.8-flash-high：
+     链路：通过 Google Antigravity 扩展提供商（或 Cloud Code Assist 动态模型发现）产生的会话，记录在 JSONL 中的模型 id 为 gemini-3.8-flash-high。
+     根因：
+     (1) 剥离思考档位后缀 -high 后基底模型为 gemini-3.8-flash；
+     (2) 底层内置模型目录（node_modules/@earendil-works/pi-ai）中收录的 Google 官方按量计费模型最高只到 gemini-3.7-flash，完全不存在 gemini-3.8-flash 条目；
+     (3) Antigravity 属于订阅提供商，在注册时所有模型均硬编码为 ZERO_COST，被 toPricing 函数直接过滤，不向价格表提供单价；
+     (4) 最终 resolvePricing 查无单价返回 null，被 aggregateUsage 归入 unpricedModels 并由 UI 提示。
+   - gpt-5.6-sol：
+     在 azure-openai-responses、cloudflare-ai-gateway、github-copilot、openai、openai-codex、opencode 等多个官方/中转提供商的模型目录中均有收录，且带有有效非零 cost 费率（如 input: 5, output: 30 $/M tokens），因此能正常计费，不会报缺少单价。
+   - imported：
+     来自第三方会话导入功能（src/main/services/sessionImport/piJsonl.ts:35）。当导入外部会话未指定原始模型名称时，代码默认将 model 写入为 "imported"。该字符串并非真实模型 ID，模型目录与价格目录中均无对应项，因此被正确识别为无单价模型。
+
+
+================================================================================
+二、核心文件、行号与逻辑证据
+
+1. 模型目录的定义与运行时装载
+   - src/main/services/oauthProviders.ts:53-85
+     getRuntime() 函数：动态加载 @earendil-works/pi-coding-agent 的 ModelRuntime，创建实例并加载默认内置 catalog。
+     第 64 行：runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig()) 注册 Antigravity 提供商。
+     第 69 行：loadCursorProvider(runtime) 注册 Cursor 提供商。
+   - src/main/services/modelMeta.ts:20-95
+     queryModelMeta() 函数：按订阅账号或裸 modelId 查询 runtime.getModels()，为 UI 提供 contextWindow、maxTokens、reasoning、thinkingLevelMap 等元数据。
+
+2. 价格目录的生成与缓存机制
+   - src/main/services/usage/usageService.ts:72-87
+     toPricing(cost)：校验 cost 对象，提取 input、output、cacheRead、cacheWrite。
+     第 83 行显式注释：“订阅计费的 catalog 条目四项全零：当「未定价」处理，否则 UI 会把它显示成误导性的 $0.00”。四项全 0 的条目返回 null。
+   - src/main/services/usage/usageService.ts:92-104
+     buildPricingTable(models)：纯函数。遍历 models（来自 runtime.getModels()），对每个条目调用 toPricing。仅保留有单价的条目，同 id 优先选择四项单价均非零的配置。
+   - src/main/services/usage/usageService.ts:111-131
+     getPricingTable()：调用 buildPricingTable(runtime.getModels())，并设置 10 分钟 TTL 内存缓存。
+
+3. 单价匹配与思考档位后缀兜底
+   - src/shared/usage/pricing.ts:14-25
+     resolvePricing(model, table)：先尝试 table[model] 精确匹配；未命中时使用 THINKING_SUFFIX 正则（-(off|minimal|low|medium|high|xhigh|max)$）剥除思考档位后缀，再查 table[base]。
+   - src/shared/usage/pricing.ts:27-40
+     costOf(record, table)：若 resolvePricing 返回 null 则返回 null；否则按 (input*p.input + output*p.output + cacheRead*p.cacheRead + cacheWrite*p.cacheWrite)/1,000,000 计算金额。
+
+4. 用量汇总与无单价模型提示
+   - src/shared/usage/aggregate.ts:121-190
+     aggregateUsage(...)：遍历会话中的用量记录，当 costOf(r, pricing) 返回 null 时，将模型名称加入 unpriced 集合（第 158 行：if (cost === null) unpriced.add(r.model);）。最终在返回对象中包含 unpricedModels: [...unpriced]。
+   - src/renderer/components/settings/UsageSettings.tsx:110-115
+     前端用量设置组件：当 summary.unpricedModels.length > 0 时，展示警告文案：“以下模型无目录单价：{{models}}，其费用未计入。”
+
+5. 导入会话产生 "imported" 虚拟模型
+   - src/main/services/sessionImport/piJsonl.ts:25-45
+     从外部导入会话记录时，assistant 消息硬编码为：
+     provider: 'imported',
+     model: 'imported',
+     导致用量解析器将其作为真实模型统计，查无单价。
+
+6. Antigravity 订阅提供商的模型与单价定义
+   - src/shared/providers/antigravity.ts:740-970
+     ANTIGRAVITY_LOGICAL_MODELS：定义逻辑模型（gemini-2.5-flash, gemini-2.5-pro, gemini-3-flash, gemini-3.1-pro, gemini-3.5-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.7-flash-tiered 等）。
+   - src/shared/providers/antigravity.ts:1740-1765
+     ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }。
+     Antigravity 模型规格通过 modelSpec() 生成，所有模型 cost 均为 ZERO_COST。
+   - src/shared/providers/antigravity.ts:1780-1860
+     parseAvailableModels() 与 mergeAntigravityModels()：动态拉取后端 Cloud Code Assist 的 wire id。若后端返回了未在逻辑表中声明的新 wire id（如实验性模型），会作为 fallback 原始暴露。
+   - src/shared/providers/antigravity.ts:1881
+     代码注释明文记录：“已发现的、兜底表里没有的 wire id（如 gemini-3.8-flash-tiered）冲掉，推理时报 model not found”。证明 Google 内部存在以 3.8 命名的实验/分档 wire id。
+
+7. 测试文件证据
+   - src/shared/usage/pricing.test.ts:50-74
+     测试用例 costOf — 思考档位后缀兜底：
+     第 69 行：expect(costOf({ model: 'gemini-3.8-flash-high', ...tokens }, table)).toBeNull();
+     直接印证了 gemini-3.8-flash-high 属于已知测试样本，预期无单价返回 null。
+   - src/shared/providers/antigravity.test.ts:718-740
+     列举了 Antigravity 目前支持与识别的全部 Gemini wire id 清单，涵盖 2.5、3、3.1、3.5、3.6、3.7 系列。
+
+
+================================================================================
+三、模型目录全量提供商与模型条目盘点
+
+通过 runtime.getModels() 反射统计，当前内置静态目录共包含 39 个 Provider，共计 1312 个模型条目。
+各 Provider 条目数统计如下：
+- amazon-bedrock: 118
+- ant-ling: 3
+- anthropic: 13
+- azure-openai-responses: 38
+- baseten: 17
+- cerebras: 2
+- cloudflare-ai-gateway: 57
+- cloudflare-workers-ai: 16
+- deepseek: 2
+- fireworks: 23
+- github-copilot: 33
+- google: 22
+- google-vertex: 13
+- groq: 6
+- huggingface: 67
+- kimi-coding: 4
+- minimax: 3
+- minimax-cn: 3
+- mistral: 31
+- moonshotai: 10
+- moonshotai-cn: 10
+- nvidia: 32
+- openai: 38
+- openai-codex: 7
+- opencode: 61
+- opencode-go: 23
+- openrouter: 351
+- qwen-token-plan: 17
+- qwen-token-plan-cn: 17
+- qwen-token-plan-individual: 8
+- together: 19
+- vercel-ai-gateway: 222
+- xai: 4
+- xiaomi: 3
+- xiaomi-token-plan-ams: 2
+- xiaomi-token-plan-cn: 2
+- xiaomi-token-plan-sgp: 2
+- zai: 5
+- zai-coding-cn: 8
+
+另有 2 个动态/扩展 Provider：
+- google-antigravity（通过 OAuth 订阅动态注册，cost 为全 0）
+- cursor（通过 @rahularya01/pi-cursor 动态注册，cost 为全 0）
+
+
+================================================================================
+四、Google / Gemini 相关目录条目全量盘点
+
+1. 官方 Google 提供商（provider: "google"，共 22 个模型）：
+   数据来源文件：node_modules/@earendil-works/pi-ai/dist/providers/data/google.json
+   - deep-research-max-preview-04-2026: cost { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 }
+   - deep-research-preview-04-2026: cost { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 }
+   - gemini-2.5-computer-use-preview-10-2025: cost { input: 1.25, output: 10, cacheRead: 0, cacheWrite: 0 }
+   - gemini-2.5-flash: cost { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 }
+   - gemini-2.5-flash-lite: cost { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0 }
+   - gemini-2.5-pro: cost { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 }
+   - gemini-3-flash-preview: cost { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0 }
+   - gemini-3.1-flash-lite: cost { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0 }
+   - gemini-3.1-flash-lite-image: cost { input: 0.25, output: 30, cacheRead: 0, cacheWrite: 0 }
+   - gemini-3.1-flash-lite-preview: cost { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0 }
+   - gemini-3.1-flash-live-preview: cost { input: 0.75, output: 4.5, cacheRead: 0, cacheWrite: 0 }
+   - gemini-3.1-pro-preview: cost { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 }
+   - gemini-3.1-pro-preview-customtools: cost { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 }
+   - gemini-3.5-flash: cost { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 }
+   - gemini-3.5-flash-lite: cost { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 }
+   - gemini-3.6-flash: cost { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 }
+   - gemini-3.7-flash: cost { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 }
+   - gemini-flash-latest: cost { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 }
+   - gemini-flash-lite-latest: cost { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0 }
+   - gemini-robotics-er-1.6-preview: cost { input: 1, output: 5, cacheRead: 0, cacheWrite: 0 }
+   - gemma-4-26b-a4b-it: cost { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+   - gemma-4-31b-it: cost { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+
+2. 官方 Google Vertex 提供商（provider: "google-vertex"，共 13 个模型）：
+   数据来源文件：node_modules/@earendil-works/pi-ai/dist/providers/data/google-vertex.json
+   收录：gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-3.1-pro-preview, gemini-3.1-pro-preview-customtools, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.6-flash, gemini-3.7-flash, gemini-flash-latest, gemini-flash-lite-latest。
+
+3. 第三方路由中收录的 Gemini 模型：
+   - github-copilot: gemini-3.1-pro-preview, gemini-3.5-flash, gemini-3.6-flash, gemini-3.7-flash
+   - opencode: gemini-3-flash, gemini-3.1-pro, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.6-flash, gemini-3.7-flash
+   - openrouter: google/gemini-2.5-flash, google/gemini-2.5-flash-lite, google/gemini-2.5-pro, google/gemini-3-flash-preview, google/gemini-3.1-flash-lite, google/gemini-3.1-pro-preview, google/gemini-3.5-flash, google/gemini-3.6-flash, google/gemini-3.7-flash 等 25 项
+   - vercel-ai-gateway: google/gemini-2.5-flash, google/gemini-3-flash, google/gemini-3.1-pro-preview, google/gemini-3.5-flash, google/gemini-3.6-flash, google/gemini-3.7-flash 等 10 项
+
+4. Google Antigravity 订阅提供商（provider: "google-antigravity"）：
+   逻辑模型：gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro, gemini-3-flash, gemini-3-pro, gemini-3.1-flash-image, gemini-3.1-flash-lite, gemini-3.1-pro, gemini-3.5-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.7-flash-tiered。
+   所有模型在本地注册时均为 ZERO_COST。
+
+
+================================================================================
+五、Google 官方模型命名、价格与当前本地目录差异对比
+
+1. 官方 API 模型命名规律：
+   - 官方公开 API 模型通常采用标准主版本号与次版本号组合，如 gemini-2.5-flash、gemini-2.5-pro、gemini-3-flash-preview、gemini-3.1-pro-preview 等。
+   - 包含思考模式（Thinking）的官方模型，在标准 API 下通常是通过请求参数中的 thinking_config 启用，或以专有预览后缀区分，而非直接在模型 ID 后面拼接 -high、-low。
+   - 带 -high、-medium、-low、-tiered、-agent 等后缀的名称，是 Google 内部 Cloud Code Assist（即 Antigravity 后端）使用的专有路由名称（wire id），或是部分聚合中转站为了映射思考强度档位而人为拼装的别名。
+
+2. 为什么当前本地目录中没有 gemini-3.8-flash？
+   - 数据来源层：本地模型目录的静态生成源为 @earendil-works/pi-ai 包（版本 0.84.3）。在该版本打包发布时，Google 官方对外公开的模型和预设清单中最高只发布到了 gemini-3.7-flash。
+   - Google 已于 2026-09-02 正式发布按量计费的 gemini-3.8-flash，并公布初次体验价；但该发布时间晚于本地 pi-ai 0.84.3 和 npm 最新 0.84.4 的发布时间，因此两个版本的静态目录都还未收录。
+   - Antigravity 运行中动态通过 fetchAvailableModels 获取到了带 thinking 档位的 gemini-3.8 wire id（如 gemini-3.8-flash-high），因此它出现在会话记录中；但 Antigravity 条目为 0 单价且会被价格目录过滤，而静态公开 API 目录又尚未同步 3.8，导致价格目录中无对应单价。
+
+
+================================================================================
+六、最小方案建议与用户确认事项（不修改产品代码）
+
+1. 关于 gemini-3.8-flash-high：
+   - 若用户期望计入估算费用：可使用 Google 已公布的 gemini-3.8-flash 初次体验价（截至 2026-12-31 输入 $0.75/M、输出 $3.75/M）作为本地补充价格；npm 当前最新 pi-ai 0.84.4 同样早于 3.8 发布，单纯升级仍不能补齐。
+   - 若用户仅希望避免无单价警告打扰：可以在用量页面针对订阅提供商（如 google-antigravity、cursor）产生的纯订阅记录进行标识区分（例如标为“订阅包含”而非“缺失单价”）。
+
+2. 关于 imported：
+   - PRD 明确要求“不为 imported 这类非模型 ID 猜测价格”。
+   - 建议在未来代码改动中，对历史导入会话（model === 'imported'）在用量 UI 上做特殊标记或静默归类为“外部导入（无用量明细）”，避免将其当作缺失单价的真实模型展示在警告条中。
