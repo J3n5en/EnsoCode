@@ -2009,7 +2009,9 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'turn-completed':
       return isNonEmptyString(value.turnId) ? (value as unknown as AgentWorkerEvent) : null;
     case 'turn-failed':
-      return isNonEmptyString(value.turnId) && isNonEmptyString(value.error)
+      return isNonEmptyString(value.turnId) &&
+        isNonEmptyString(value.error) &&
+        (value.undelivered === undefined || value.undelivered === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'turn-retry':

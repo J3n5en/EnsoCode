@@ -489,6 +489,17 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentWorkerEvent({ ...event, conversationId: undefined })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
   });
+
+  it('turn-failed 的 undelivered 只接受 true/缺省', () => {
+    const event = { type: 'turn-failed', identity: parent, seq: 3, turnId: 't', error: 'stuck' };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, undelivered: true })).toEqual({
+      ...event,
+      undelivered: true,
+    });
+    expect(parseAgentWorkerEvent({ ...event, undelivered: 'yes' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, undelivered: false })).toBeNull();
+  });
 });
 
 describe('generation lifecycle/events', () => {
