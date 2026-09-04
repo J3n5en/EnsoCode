@@ -53,6 +53,14 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.observe(ready(1))).toBe(true);
     expect(sessions.isReady(parent)).toBe(true);
 
+    // 会话已跑过（lastSeq 高）后 worker 拒绝（恒为 seq 0）：不得被单调守卫当重复丢掉
+    expect(
+      sessions.observe({ type: 'parent-rejected', identity: parent, seq: 0, reason: 'gone' })
+    ).toBe(true);
+    expect(sessions.isReady(parent)).toBe(false);
+    sessions.prepareParent(parent);
+    expect(sessions.observe(ready(1))).toBe(true);
+
     sessions.observe({ type: 'worker-exited' });
     expect(sessions.isReady(parent)).toBe(false);
     sessions.prepareParent(parent);

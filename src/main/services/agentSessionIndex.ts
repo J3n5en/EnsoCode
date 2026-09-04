@@ -336,7 +336,8 @@ export class AgentSessionIndex {
     const identity = identityOf(event);
     const current = this.sessions.get(identity.sessionId);
     if (current && !isSameGeneration(current.identity, identity)) return false;
-    if (current) {
+    // 拒绝恒以 seq:0 发出（也可能针对已跑过的同代会话），不过单调守卫
+    if (current && event.type !== 'parent-rejected') {
       if (event.seq <= current.lastSeq) return false;
       current.lastSeq = event.seq;
     }
