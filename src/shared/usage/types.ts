@@ -8,6 +8,8 @@ export function isUsageRangeDays(value: unknown): value is UsageRangeDays {
 }
 
 export interface UsageRecord {
+  /** jsonl 行 id；fork 复制同一行时全局只计一次 */
+  id: string;
   /** assistant 消息时间戳（ms） */
   ts: number;
   model: string;

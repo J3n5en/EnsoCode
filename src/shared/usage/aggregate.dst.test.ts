@@ -31,6 +31,7 @@ describe.skipIf(!dstActive)('aggregateUsage — 跨夏令时的日边界（Ameri
     const summary = aggregateUsage(
       [
         {
+          id: 'e1',
           ts,
           model: 'claude-opus-5',
           provider: 'enso-anthropic',

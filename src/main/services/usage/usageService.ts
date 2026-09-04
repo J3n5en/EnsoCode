@@ -1,10 +1,12 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { aggregateUsage, type SessionActivity } from '@shared/usage/aggregate';
+import { aggregateUsage } from '@shared/usage/aggregate';
+import { mergeUsageSources } from '@shared/usage/ledger';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
-import type { UsageRangeDays, UsageRecord, UsageSummaryResult } from '@shared/usage/types';
+import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import { app } from 'electron';
 import { getRuntime } from '../oauthProviders';
+import { loadLedger } from './ledgerStore';
 import { type ParsedSession, parseSessionJsonl } from './parseSession';
 
 interface CacheEntry {
@@ -138,13 +140,13 @@ function loadSessionsOnce(): Promise<ParsedSession[]> {
 
 export async function getUsageSummary(days: UsageRangeDays): Promise<UsageSummaryResult> {
   try {
-    const [sessions, pricing] = await Promise.all([loadSessionsOnce(), getPricingTable()]);
-    const records: UsageRecord[] = [];
-    const activity: SessionActivity[] = [];
-    for (const session of sessions) {
-      records.push(...session.records);
-      activity.push({ sessionId: session.sessionId, spans: session.spans });
-    }
+    const dir = sessionDir();
+    const [sessions, ledger, pricing] = await Promise.all([
+      loadSessionsOnce(),
+      loadLedger(dir),
+      getPricingTable(),
+    ]);
+    const { records, activity } = mergeUsageSources(sessions, ledger);
     return {
       ok: true,
       summary: aggregateUsage(records, activity, pricing, { days, now: Date.now() }),

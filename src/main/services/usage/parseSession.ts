@@ -93,6 +93,7 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
     const u = usage as Record<string, unknown>;
     const key = typeof e.id === 'string' ? e.id : `#${anonymous++}`;
     records.set(key, {
+      id: key,
       ts,
       model: str(message.model, 'unknown'),
       provider: str(message.provider, ''),
