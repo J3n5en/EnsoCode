@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/main/services.md", "reason": "检查 main services 层实现是否合规"}
+{"file": ".trellis/spec/testing.md", "reason": "检查测试覆盖与 Red-Green 纪律"}

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/main/services.md", "reason": "agentHost / proxyConfig 所在 main services 层约定"}
+{"file": ".trellis/spec/shared/conventions.md", "reason": "共享层与 agent 命令协议约定"}
+{"file": ".trellis/spec/testing.md", "reason": "TDD 与单测覆盖范围"}
