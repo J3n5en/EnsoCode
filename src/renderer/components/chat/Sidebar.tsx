@@ -1440,6 +1440,12 @@ function ConversationRow({
           </span>
         ) : (
           <>
+            {pinned && !archived && (
+              <Pin
+                className="h-3 w-3 shrink-0 text-muted-foreground/70 group-hover:hidden"
+                aria-hidden
+              />
+            )}
             <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
               {formatRelativeTime(
                 conversation.messages.at(-1)?.timestamp ?? conversation.createdAt,
