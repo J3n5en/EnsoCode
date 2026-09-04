@@ -41,6 +41,9 @@
 - [ ] 新增的用户可见英文文案，是否已在 `src/shared/i18n.ts` 补上中文？
 - [ ] 改动的类型是否会被持久化进 `settings.json`？若是，考虑旧数据的兼容（见 [types.md](types.md) 的"持久化类型"一节）。
 - [ ] 是否误在 shared 里引入了 `electron` / `node:*` / React 依赖？（`providers/` 是唯一例外，见上）
+- [ ] 新增 `AgentWorkerEvent` / `AgentCommand` 分支时，是否同步登记了 `parseAgentWorkerEvent` /
+      `parseAgentCommand` 的白名单？漏登记 = 运行时静默丢弃，typecheck 与单测都抓不到
+      （见 [types.md](types.md)）。
 
 ## 详细规范
 

@@ -51,6 +51,32 @@ src/agent/supervisor.ts         settingsModelRef()   ← 消费（缺了就抛�
 字段如果是消费端必需的，就在接口上写成**必填**并在解析器里强制校验，
 不要留成可选；typecheck 会把遗漏的构造点（含测试夹具）全部报出来。
 
+## 新增 AgentWorkerEvent 分支必须登记白名单
+
+事件方向（worker→main）也有一个闭集校验器：`parseAgentWorkerEvent`，
+在 `src/main/services/agentHost.ts` 的 `child.on('message')` 里把关。
+它是 `switch (value.type)` + `default: return null` —— **未登记的 type 全部静默丢弃**。
+
+给 `AgentWorkerEvent` 加一个分支时，四处都要动：
+
+```
+src/shared/types/agent.ts   AgentWorkerEvent 联合      ← 类型
+src/shared/types/agent.ts   parseAgentWorkerEvent      ← 白名单（漏了事件到不了 renderer）
+src/agent/supervisor.ts     this.options.emit(...)     ← 生产
+src/renderer/stores/sessions/reducer.ts                ← 消费
+```
+
+曾经发生：工具实时输出 `tool-output` 事件类型加了、生产加了、消费加了、
+typecheck 全绿、单测全绿，**唯独白名单没加**，运行时什么都不发生。
+因为 TypeScript 管不到 `parseAgentWorkerEvent` 的分支完备性（入参是 `unknown`），
+只有跑起来才暴露，而且没有任何报错或日志。
+
+新增分支时**同时**在 `src/shared/types/agent.test.ts` 补一条往返用例
+（合法事件原样通过 + 脏输入拒绝），它能在单测层就复现这个故障。
+
+手机端（pair）是否下发是独立决定：需要的话还要进 `pairPolicy.ts` 的
+`SESSION_SCOPED` 与 `guestProjection.ts` 的投影分支；不需要就在 PRD 里写成非目标。
+
 ## 解析失败不得静默丢弃
 
 进程间消息入口拿不到合法命令时，**必须留下可观测痕迹**：
