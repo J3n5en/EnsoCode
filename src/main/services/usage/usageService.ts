@@ -106,20 +106,38 @@ export function buildPricingTable(models: readonly CatalogCostModel[]): PricingT
   return table;
 }
 
+/**
+ * Gemini 3.8 Flash 单价核验于 2026-09-04：
+ * https://ai.google.dev/gemini-api/docs/latest-model 与 https://ai.google.dev/pricing。
+ * 促销价截至 2026-12-31；上游目录补齐后优先上游，并可删除本地补丁。
+ * `cacheWrite: 0` 是 PricingTable 无法表达按 token/小时的存储费而未估算，不代表免费。
+ */
+const GEMINI_3_8_STANDARD_PRICE_START = Date.UTC(2027, 0, 1);
+
+/** 补齐上游目录尚未收录的官方单价；同 ID 已有价格时始终以上游为准。 */
+export function supplementPricingTable(table: PricingTable, now = Date.now()): PricingTable {
+  if (table['gemini-3.8-flash']) return table;
+  const pricing =
+    now < GEMINI_3_8_STANDARD_PRICE_START
+      ? { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 }
+      : { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 };
+  return { ...table, 'gemini-3.8-flash': pricing };
+}
+
 const PRICING_TTL_MS = 10 * 60 * 1000;
 let pricingCache: { table: PricingTable; loadedAt: number } | null = null;
 let pricingInflight: Promise<PricingTable> | null = null;
 
-/** catalog 单价表；失败回空表且不缓存，成功结果 10 分钟内复用（运行中新增 provider 可刷新到）。 */
-function getPricingTable(): Promise<PricingTable> {
-  if (pricingCache && Date.now() - pricingCache.loadedAt < PRICING_TTL_MS) {
-    return Promise.resolve(pricingCache.table);
+/** catalog 原始单价表进程内复用；本地日期价格由每个调用者按自己的时间快照补充。 */
+function getPricingTable(now: number): Promise<PricingTable> {
+  if (pricingCache && now - pricingCache.loadedAt < PRICING_TTL_MS) {
+    return Promise.resolve(supplementPricingTable(pricingCache.table, now));
   }
   pricingInflight ??= (async () => {
     try {
       const runtime = await getRuntime();
       const table = buildPricingTable(runtime.getModels() as readonly CatalogCostModel[]);
-      pricingCache = { table, loadedAt: Date.now() };
+      pricingCache = { table, loadedAt: now };
       return table;
     } catch {
       return {};
@@ -127,7 +145,7 @@ function getPricingTable(): Promise<PricingTable> {
       pricingInflight = null;
     }
   })();
-  return pricingInflight;
+  return pricingInflight.then((table) => supplementPricingTable(table, now));
 }
 
 let sessionsInflight: Promise<ParsedSession[]> | null = null;
@@ -141,12 +159,13 @@ function loadSessionsOnce(): Promise<ParsedSession[]> {
 }
 
 export async function getUsageSummary(days: UsageRangeDays): Promise<UsageSummaryResult> {
+  const now = Date.now();
   try {
     const dir = sessionDir();
     const [sessions, ledger, pricing] = await Promise.all([
       loadSessionsOnce(),
       loadLedger(dir),
-      getPricingTable(),
+      getPricingTable(now),
     ]);
     const aliases = loadUsageProjectAliases();
     const { records, activity } = mergeUsageSources(
@@ -155,7 +174,7 @@ export async function getUsageSummary(days: UsageRangeDays): Promise<UsageSummar
     );
     return {
       ok: true,
-      summary: aggregateUsage(records, activity, pricing, { days, now: Date.now() }),
+      summary: aggregateUsage(records, activity, pricing, { days, now }),
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

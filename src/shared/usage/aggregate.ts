@@ -161,7 +161,7 @@ export function aggregateUsage(
     modelRow.messages += 1;
     modelRow.cost = addCost(modelRow.cost, cost);
     byModel.set(r.model, modelRow);
-    if (cost === null) unpriced.add(r.model);
+    if (cost === null && tokens > 0) unpriced.add(r.model);
 
     const projectRow = byProject.get(r.project) ?? {
       project: r.project,

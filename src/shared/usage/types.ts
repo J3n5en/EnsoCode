@@ -81,7 +81,7 @@ export interface UsageSummary {
   heatmap: number[][];
   byModel: UsageModelRow[];
   byProject: UsageProjectRow[];
-  /** 出现过但无定价的模型 id */
+  /** 周期内有 token 消耗但无定价的模型 id */
   unpricedModels: string[];
 }
 

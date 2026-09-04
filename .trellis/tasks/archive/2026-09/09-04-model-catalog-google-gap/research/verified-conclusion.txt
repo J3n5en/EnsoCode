@@ -1,0 +1,74 @@
+核验结论（主会话复核）
+核验日期：2026-09-04
+
+一、Google 官方现状
+1. Google 官方已经发布 Gemini 3.8 Flash，正式模型 ID 是 gemini-3.8-flash，状态为 GA / Stable。
+2. gemini-3.8-flash-high 不是 Google Gemini 公网 API 的正式模型 ID；-high 表示思考档位。本地会话已实际观察到 gemini-3.8-flash-high。gemini-3.8-flash-low 与 gemini-3.8-flash-medium 的私有 wire 映射来自任务调查记录的私有 fetchAvailableModels 模型清单及其与同名档位的路由关系；公网官方资料只确认 gemini-3.8-flash 支持 low / medium / high 能力，不公开或确认这些 Cloud Code Assist 私有 wire ID，它们也不是公网官方模型 ID。
+3. 官方模型页：https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
+   页面显示：1,048,576 输入 token、65,536 输出 token、支持 low/medium/high，minimal 不支持；最后更新 2026-09-02 UTC。
+4. 官方 latest-model 页面：https://ai.google.dev/gemini-api/docs/latest-model
+   页面显示：截至 2026-12-31 的初次体验价为输入 $0.75/M、输出 $3.75/M；2027-01-01 起为输入 $1.50/M、输出 $7.50/M。
+
+二、本地模型目录现状
+1. EnsoCode 依赖 @earendil-works/pi-coding-agent 0.84.3，间接使用 @earendil-works/pi-ai 0.84.3。
+2. 该静态模型目录包含 39 个 provider、1312 个模型条目；另有运行时动态注册的 google-antigravity 和 cursor。
+3. google provider 有 22 个条目；google-vertex 有 13 个条目。
+4. google / google-vertex 最新只到 gemini-3.7-flash，没有 gemini-3.8-flash。
+5. npm 当前最新 @earendil-works/pi-ai / pi-coding-agent 是 0.84.4，发布时间 2026-08-28；主会话直接检查了 0.84.4 tarball，其 Google 静态目录仍只到 gemini-3.7-flash。Gemini 3.8 Flash 于 2026-09-02 发布，所以单纯从 0.84.3 升到 0.84.4 也不会补上 3.8。
+
+三、Google 静态目录的当前条目
+Google provider（22）：
+deep-research-max-preview-04-2026
+deep-research-preview-04-2026
+gemini-2.5-computer-use-preview-10-2025
+gemini-2.5-flash
+gemini-2.5-flash-lite
+gemini-2.5-pro
+gemini-3-flash-preview
+gemini-3.1-flash-lite
+gemini-3.1-flash-lite-image
+gemini-3.1-flash-lite-preview
+gemini-3.1-flash-live-preview
+gemini-3.1-pro-preview
+gemini-3.1-pro-preview-customtools
+gemini-3.5-flash
+gemini-3.5-flash-lite
+gemini-3.6-flash
+gemini-3.7-flash
+gemini-flash-latest
+gemini-flash-lite-latest
+gemini-robotics-er-1.6-preview
+gemma-4-26b-a4b-it
+gemma-4-31b-it
+
+Google Vertex provider（13）：
+gemini-2.5-flash
+gemini-2.5-flash-lite
+gemini-2.5-pro
+gemini-3-flash-preview
+gemini-3.1-flash-lite
+gemini-3.1-pro-preview
+gemini-3.1-pro-preview-customtools
+gemini-3.5-flash
+gemini-3.5-flash-lite
+gemini-3.6-flash
+gemini-3.7-flash
+gemini-flash-latest
+gemini-flash-lite-latest
+
+四、截图中没有价格的直接原因
+1. 用量页的价格表来自 runtime.getModels()，buildPricingTable 只保留非零 cost 条目。
+2. gemini-3.8-flash-high 先精确查价失败，再剥掉 -high，回退查询 gemini-3.8-flash。
+3. 本地 pi-ai 0.84.3 与 npm 最新 0.84.4 都没有 gemini-3.8-flash，所以第二次查询仍失败。
+4. google-antigravity 动态条目全部使用 ZERO_COST；usageService 为避免把订阅模型误显示成免费 API，主动过滤全零价格，因此动态发现也不会补价格。
+5. 最终 aggregateUsage 把该模型加入 unpricedModels，UI 显示“无目录单价”。
+
+五、imported 的原因
+imported 不是模型。外部会话导入时，缺少真实模型信息的 assistant 消息被写成 provider/model 都为 imported，token 全为 0；聚合层仍把它当模型查价，因此出现在无单价提示中。这属于独立的数据清理/展示问题。
+
+六、最小修复方向
+A. 为用量价格表增加经官方核验的本地补充价格条目 gemini-3.8-flash，使现有 -high 后缀回退自动生效；未来上游目录包含同 ID 后，应由上游有效价格优先或移除补丁。
+B. 在 Antigravity 逻辑模型表中补 gemini-3.8-flash，把 low/medium/high wire id 收拢为一个逻辑模型，避免裸 wire id 出现在模型选择与会话记录中。
+C. 从用量警告中排除 imported 这类零 token 虚拟模型。
+
+A 解决截图中的费用缺失；B 解决模型目录/选择器命名与档位归一；C 解决 imported 噪声。三者是不同问题，实施时应分别测试与提交。
