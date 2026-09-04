@@ -180,14 +180,30 @@ export interface CoworkerInfo {
   createdAt: number;
 }
 
-/** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 id/source） */
+/** MCP OAuth 凭据（Main 加密持有，spawn 时下发；worker 只读用并可 refresh） */
+export interface McpOAuthTokens {
+  access_token: string;
+  token_type?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+}
+
+/** MCP 连接状态：unauthorized = 需要用户在设置页完成 OAuth 授权 */
+export type McpConnectionState = 'connecting' | 'ready' | 'unauthorized' | 'error';
+
+/** spawn 下发的 MCP server 配置（McpServerEntry 的运行子集，不带 source） */
 export interface McpServerSpawnConfig {
+  /** 对应 McpServerEntry.id：状态回报与 token 归属的关联键 */
+  id?: string;
   name: string;
   transport: 'stdio' | 'http' | 'sse';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  /** 已授权的 OAuth 凭据（http/sse 远程 server） */
+  oauth?: McpOAuthTokens;
 }
 
 export interface ModelRef {
@@ -752,7 +768,7 @@ export type RendererChildLifecycleEvent =
 
 /** Renderer 收到统一普通+child事件流；exact profile proof 只在 worker→Main 边界。 */
 export type RendererAgentEvent =
-  | Exclude<AgentWorkerEvent, ChildLifecycleEvent>
+  | Exclude<AgentWorkerEvent, ChildLifecycleEvent | McpWorkerEvent>
   | RendererChildLifecycleEvent
   | { type: 'worker-exited' };
 
@@ -903,7 +919,23 @@ export type AgentWorkerEvent =
       seq: number;
       entry: AgentSessionCustomEntry;
     }
+  | McpWorkerEvent
   | { type: 'snapshot'; sessions: SessionSnapshot[]; partial?: boolean };
+
+/** MCP 连接旁路事件：无 identity/seq，不属于任何会话，Main 走独立 IPC 通道转发 */
+export type McpWorkerEvent =
+  | {
+      type: 'mcp-status';
+      /** 与 McpServerEntry.id 对应；旧配置缺省时按 serverName 关联 */
+      serverId?: string;
+      serverName: string;
+      state: McpConnectionState;
+      /** state=ready 时的工具数 */
+      toolCount?: number;
+      error?: string;
+    }
+  /** SDK 自动 refresh 后回传 Main 持久化 */
+  | { type: 'mcp-tokens-refreshed'; serverId: string; tokens: McpOAuthTokens };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -1889,6 +1921,22 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       isNonEmptyString(value.requestId) &&
       isProductSurfaceId(value.capabilityId) &&
       Object.hasOwn(value, 'params')
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'mcp-status') {
+    return isNonEmptyString(value.serverName) &&
+      (value.state === 'connecting' ||
+        value.state === 'ready' ||
+        value.state === 'unauthorized' ||
+        value.state === 'error')
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'mcp-tokens-refreshed') {
+    return isNonEmptyString(value.serverId) &&
+      isRecord(value.tokens) &&
+      isNonEmptyString(value.tokens.access_token)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

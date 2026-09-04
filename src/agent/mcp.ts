@@ -1,9 +1,24 @@
+import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import {
+  type OAuthClientProvider,
+  UnauthorizedError,
+} from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { McpServerSpawnConfig } from '@shared/types/agent';
+import type {
+  OAuthClientInformationFull,
+  OAuthClientMetadata,
+  OAuthTokens,
+} from '@modelcontextprotocol/sdk/shared/auth.js';
+import type {
+  McpConnectionState,
+  McpOAuthTokens,
+  McpServerSpawnConfig,
+  McpWorkerEvent,
+} from '@shared/types/agent';
 
 /** 连接与 listTools 的整体超时；慢/坏 server 不能卡住 spawn */
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -14,6 +29,96 @@ interface Connection {
   client: Client;
   tools: ToolDefinition[];
 }
+
+export interface McpManagerOptions {
+  emit(event: McpWorkerEvent): void;
+}
+
+/** worker 内不做交互授权：需要跳浏览器时抛此错，由 connect 归一成 unauthorized 上报 */
+class InteractiveAuthRequiredError extends Error {
+  constructor() {
+    super('interactive authorization required');
+  }
+}
+
+/**
+ * worker 侧 OAuth 提供方：token 由 Main 下发，只负责读用与 SDK 自动 refresh 回传。
+ * DCR 结果、code verifier 只留内存——本期不做 worker 内交互授权，重启重来即可。
+ */
+class WorkerOAuthProvider implements OAuthClientProvider {
+  private tokenState: McpOAuthTokens | undefined;
+  private clientInfo: OAuthClientInformationFull | undefined;
+  private verifier: string | undefined;
+
+  constructor(
+    private readonly server: McpServerSpawnConfig,
+    private readonly emit: (event: McpWorkerEvent) => void
+  ) {
+    this.tokenState = server.oauth;
+  }
+
+  get redirectUrl(): undefined {
+    return undefined;
+  }
+
+  get clientMetadata(): OAuthClientMetadata {
+    return {
+      client_name: 'enso-code',
+      redirect_uris: [],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+    };
+  }
+
+  clientInformation(): OAuthClientInformationFull | undefined {
+    return this.clientInfo;
+  }
+
+  saveClientInformation(info: OAuthClientInformationFull): void {
+    this.clientInfo = info;
+  }
+
+  tokens(): OAuthTokens | undefined {
+    if (!this.tokenState) return undefined;
+    return { ...this.tokenState, token_type: this.tokenState.token_type ?? 'Bearer' };
+  }
+
+  saveTokens(tokens: OAuthTokens): void {
+    this.tokenState = tokens;
+    if (this.server.id) {
+      this.emit({ type: 'mcp-tokens-refreshed', serverId: this.server.id, tokens });
+    }
+  }
+
+  redirectToAuthorization(): never {
+    throw new InteractiveAuthRequiredError();
+  }
+
+  saveCodeVerifier(codeVerifier: string): void {
+    this.verifier = codeVerifier;
+  }
+
+  codeVerifier(): string {
+    if (!this.verifier) throw new InteractiveAuthRequiredError();
+    return this.verifier;
+  }
+}
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** 401 / SDK UnauthorizedError / 哨兵错误都归为「需要用户去设置页授权」 */
+const isUnauthorized = (error: unknown): boolean =>
+  error instanceof UnauthorizedError ||
+  error instanceof InteractiveAuthRequiredError ||
+  /\b401\b|unauthorized/i.test(errorMessage(error));
+
+/** token 指纹：token 明文不进缓存 key，只用 hash 前缀判断「是否换了 token」 */
+export const oauthFingerprint = (tokens: McpOAuthTokens | undefined): string =>
+  tokens?.access_token
+    ? createHash('sha256').update(tokens.access_token).digest('hex').slice(0, 16)
+    : '';
 
 const slug = (name: string): string => name.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '');
 
@@ -40,6 +145,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export class McpManager {
   private readonly connections = new Map<string, Promise<Connection | null>>();
 
+  constructor(private readonly options: McpManagerOptions = { emit: () => {} }) {}
+
   /**
    * 为一组 server 配置解析工具列表；单个 server 失败只跳过并留痕，不抛。
    * budgetMs：spawn 场景的等待预算——超时的 server 本次不注入，连接在后台继续
@@ -60,17 +167,24 @@ export class McpManager {
   }
 
   private connectionFor(server: McpServerSpawnConfig): Promise<Connection | null> {
-    const key = JSON.stringify([
+    // key 含 token 指纹：换/撤 token 必须重建连接，否则新凭据永不生效、旧连接一直可用
+    const identity = JSON.stringify([
+      server.id,
       server.transport,
       server.command,
       server.args,
       server.env,
       server.url,
     ]);
+    const key = `${identity}#${oauthFingerprint(server.oauth)}`;
+    this.closeStaleConnections(identity, key);
     let pending = this.connections.get(key);
     if (!pending) {
       pending = this.connect(server).catch((error) => {
         console.error(`[mcp] connect failed for "${server.name}":`, error);
+        this.emitStatus(server, isUnauthorized(error) ? 'unauthorized' : 'error', {
+          error: errorMessage(error),
+        });
         // 失败结果不缓存：下次 spawn 重试
         this.connections.delete(key);
         return null;
@@ -80,18 +194,50 @@ export class McpManager {
     return pending;
   }
 
+  /** 同一 server 的旧 token 连接：换 token 后立即下线，避免撤销/过期凭据继续可用 */
+  private closeStaleConnections(identity: string, key: string): void {
+    for (const [existing, pending] of this.connections) {
+      if (existing === key || !existing.startsWith(`${identity}#`)) continue;
+      this.connections.delete(existing);
+      void pending.then((connection) => connection?.client.close().catch(() => {}));
+    }
+  }
+
+  private emitStatus(
+    server: McpServerSpawnConfig,
+    state: McpConnectionState,
+    extra?: { toolCount?: number; error?: string }
+  ): void {
+    this.options.emit({
+      type: 'mcp-status',
+      ...(server.id ? { serverId: server.id } : {}),
+      serverName: server.name,
+      state,
+      ...extra,
+    });
+  }
+
   private async connect(server: McpServerSpawnConfig): Promise<Connection> {
+    this.emitStatus(server, 'connecting');
     const client = new Client({ name: 'enso-code', version: '0.1.0' });
-    await withTimeout(
-      client.connect(this.createTransport(server)),
-      CONNECT_TIMEOUT_MS,
-      `connect ${server.name}`
-    );
-    const { tools } = await withTimeout(
-      client.listTools(),
-      CONNECT_TIMEOUT_MS,
-      `listTools ${server.name}`
-    );
+    let tools: Awaited<ReturnType<Client['listTools']>>['tools'];
+    try {
+      await withTimeout(
+        client.connect(this.createTransport(server)),
+        CONNECT_TIMEOUT_MS,
+        `connect ${server.name}`
+      );
+      ({ tools } = await withTimeout(
+        client.listTools(),
+        CONNECT_TIMEOUT_MS,
+        `listTools ${server.name}`
+      ));
+    } catch (error) {
+      // 不 close 的话 stdio 子进程会随每次重试累积
+      await client.close().catch(() => {});
+      throw error;
+    }
+    this.emitStatus(server, 'ready', { toolCount: tools.length });
     return {
       client,
       tools: tools.map((tool) => this.toToolDefinition(client, server.name, tool)),
@@ -111,11 +257,15 @@ export class McpManager {
       }
       case 'http': {
         if (!server.url) throw new Error('http server missing url');
-        return new StreamableHTTPClientTransport(new URL(server.url));
+        return new StreamableHTTPClientTransport(new URL(server.url), {
+          authProvider: new WorkerOAuthProvider(server, (event) => this.options.emit(event)),
+        });
       }
       case 'sse': {
         if (!server.url) throw new Error('sse server missing url');
-        return new SSEClientTransport(new URL(server.url));
+        return new SSEClientTransport(new URL(server.url), {
+          authProvider: new WorkerOAuthProvider(server, (event) => this.options.emit(event)),
+        });
       }
       default:
         throw new Error(`unknown transport: ${server.transport}`);

@@ -51,6 +51,12 @@ export const IPC_CHANNELS = {
   ASSETS_MCP_OCCUPANCY: 'assets:mcp-occupancy',
   ASSETS_BUILTIN_TOOL_OCCUPANCY: 'assets:builtin-tool-occupancy',
 
+  // MCP OAuth 授权与连接状态
+  MCP_AUTHORIZE: 'mcp:authorize',
+  MCP_REVOKE: 'mcp:revoke',
+  MCP_AUTH_STATE: 'mcp:auth-state',
+  MCP_STATUS_EVENT: 'mcp:status-event',
+
   // Instruction content (copy-on-write)
   INSTRUCTIONS_READ: 'instructions:read',
   INSTRUCTIONS_WRITE: 'instructions:write',

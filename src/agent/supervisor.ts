@@ -360,7 +360,7 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
 export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly gate = new OperationGate();
-  private readonly mcp = new McpManager();
+  private readonly mcp = new McpManager({ emit: (event) => this.options.emit(event) });
   private readonly bgTasks: BackgroundTaskManager;
   private runtimePromise: Promise<ModelRuntime> | null = null;
   /** 不可回收的会话（桌面正在查看 / 手机订阅），由 Main 全量下发 */

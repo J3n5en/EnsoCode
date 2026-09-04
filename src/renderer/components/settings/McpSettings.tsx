@@ -1,5 +1,14 @@
 import type { McpServerEntry } from '@shared/types';
-import { HardDriveDownload, Pencil, Plug, Plus, Trash2 } from 'lucide-react';
+import {
+  HardDriveDownload,
+  Loader2,
+  Pencil,
+  Plug,
+  Plus,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+} from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { type McpServerStatus, useMcpStatusStore } from '@/stores/mcpStatus';
 import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
@@ -18,12 +28,48 @@ import {
   useOccupancyRows,
 } from './OccupancyMark';
 
+function McpStatusBadge({ status }: { status: McpServerStatus }) {
+  const { t } = useI18n();
+  if (status.state === 'connecting') {
+    return (
+      <Badge variant="outline" className="shrink-0 animate-pulse text-[11px] text-muted-foreground">
+        {t('Connecting')}
+      </Badge>
+    );
+  }
+  if (status.state === 'ready') {
+    return (
+      <Badge variant="success" className="shrink-0 text-[11px]">
+        {t('{{count}} tools', { count: status.toolCount ?? 0 })}
+      </Badge>
+    );
+  }
+  if (status.state === 'unauthorized') {
+    return (
+      <Badge variant="warning" className="shrink-0 text-[11px]">
+        {t('Not authorized')}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="error" className="shrink-0 text-[11px]" title={status.error}>
+      {t('Connection failed')}
+    </Badge>
+  );
+}
+
 export function McpSettings() {
   const { t } = useI18n();
   const mcpServers = useSettingsStore((state) => state.mcpServers);
   const updateMcpServer = useSettingsStore((state) => state.updateMcpServer);
   const setMcpServersEnabled = useSettingsStore((state) => state.setMcpServersEnabled);
   const removeMcpServer = useSettingsStore((state) => state.removeMcpServer);
+  const statuses = useMcpStatusStore((state) => state.statuses);
+  const authorizedMap = useMcpStatusStore((state) => state.authorized);
+  const pending = useMcpStatusStore((state) => state.pending);
+  const authorize = useMcpStatusStore((state) => state.authorize);
+  const revoke = useMcpStatusStore((state) => state.revoke);
+  React.useEffect(() => useMcpStatusStore.getState().bind(), []);
   const [importOpen, setImportOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<McpServerEntry | 'new' | null>(null);
   const [query, setQuery] = React.useState('');
@@ -104,63 +150,96 @@ export function McpSettings() {
             <p className="px-3 py-6 text-center text-muted-foreground text-xs">{t('No results')}</p>
           ) : (
             <div className="space-y-1">
-              {visible.map((server) => (
-                <div
-                  key={server.id}
-                  className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-                  data-settings-row={`mcp.${server.id}`}
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Checkbox
-                      checked={selection.isSelected(server.id)}
-                      onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
-                    />
-                    <span
-                      className={cn(
-                        'shrink-0 font-medium text-sm',
-                        !server.enabled && 'text-muted-foreground line-through'
+              {visible.map((server) => {
+                // 事件可能缺 serverId（旧配置），按名字兜底
+                const status = statuses[server.id] ?? statuses[server.name];
+                const authorizing = pending[server.id] === true;
+                return (
+                  <div
+                    key={server.id}
+                    className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+                    data-settings-row={`mcp.${server.id}`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Checkbox
+                        checked={selection.isSelected(server.id)}
+                        onCheckedChange={(checked) => selection.toggleOne(server.id, checked)}
+                      />
+                      <span
+                        className={cn(
+                          'shrink-0 font-medium text-sm',
+                          !server.enabled && 'text-muted-foreground line-through'
+                        )}
+                      >
+                        {server.name}
+                      </span>
+                      <Badge variant="outline" className="shrink-0 text-[11px]">
+                        {server.transport}
+                      </Badge>
+                      <Badge variant="secondary" className="shrink-0 text-[11px]">
+                        {server.source}
+                      </Badge>
+                      {status && <McpStatusBadge status={status} />}
+                      <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
+                        {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {status?.state === 'unauthorized' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7"
+                          disabled={authorizing}
+                          onClick={() => void authorize(server.id)}
+                        >
+                          {authorizing ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          {authorizing ? t('Authorizing') : t('Authorize')}
+                        </Button>
                       )}
-                    >
-                      {server.name}
-                    </span>
-                    <Badge variant="outline" className="shrink-0 text-[11px]">
-                      {server.transport}
-                    </Badge>
-                    <Badge variant="secondary" className="shrink-0 text-[11px]">
-                      {server.source}
-                    </Badge>
-                    <span className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-                      {server.url ?? [server.command, ...(server.args ?? [])].join(' ')}
-                    </span>
+                      {authorizedMap[server.id] === true && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={t('Revoke authorization')}
+                          className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={() => void revoke(server.id)}
+                        >
+                          <ShieldOff className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <OccupancyMark
+                        row={occupancy.rows[server.id]}
+                        pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
+                      />
+                      <Switch
+                        checked={server.enabled}
+                        onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() => setEditing(server)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                        onClick={() => removeMcpServer(server.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <OccupancyMark
-                      row={occupancy.rows[server.id]}
-                      pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
-                    />
-                    <Switch
-                      checked={server.enabled}
-                      onCheckedChange={(enabled) => updateMcpServer(server.id, { enabled })}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                      onClick={() => setEditing(server)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                      onClick={() => removeMcpServer(server.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
