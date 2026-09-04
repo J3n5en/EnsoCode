@@ -798,6 +798,8 @@ export type AgentWorkerEvent =
       seq: number;
       turnId: string;
       error: string;
+      /** 消息从未提交给 pi（僵尸轮超时等）：renderer 应收回乐观回显并把文本退回输入框 */
+      undelivered?: true;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */

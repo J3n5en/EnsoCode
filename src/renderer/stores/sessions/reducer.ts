@@ -204,6 +204,8 @@ export function applyAgentEvent(
     return {
       ...settleTiming(state, now),
       generation: undefined,
+      // 重试可能复用同 generation，worker seq 从 0 重计
+      lastSeq: 0,
       status: 'failed',
       error: event.reason,
       pendingApprovals: [],
@@ -388,6 +390,10 @@ export function applyAgentEvent(
     case 'turn-failed':
       return {
         ...settleTiming(current, now),
+        // 从未提交给 pi 的消息：乐观尾巴不会被任何 upsert 确认，留着就是“看起来发出去了”的假象
+        ...(event.undelivered && current.messages.at(-1)?.optimistic
+          ? { messages: current.messages.slice(0, -1) }
+          : {}),
         status: 'failed',
         error: event.error,
         retry: undefined,

@@ -732,7 +732,8 @@ export class SessionSupervisor {
         ) {
           this.failTurn(
             managed,
-            'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.'
+            'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
+            true
           );
           return;
         }
@@ -2410,7 +2411,7 @@ export class SessionSupervisor {
       });
   }
 
-  private failTurn(managed: ManagedSession, error: string): void {
+  private failTurn(managed: ManagedSession, error: string, undelivered = false): void {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
     managed.status = 'failed';
@@ -2421,6 +2422,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       error,
+      ...(undelivered ? { undelivered: true } : {}),
     });
   }
 

@@ -954,6 +954,12 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
+            // 未提交的消息被 reducer 收回乐观回显：文本退回输入框，用户不用重敲
+            ...(event.type === 'turn-failed' &&
+            event.undelivered &&
+            next.messages.length < conversation.messages.length
+              ? { draftText: userMessageRawText(conversation.messages.at(-1)!) || undefined }
+              : {}),
             ...(event.type === 'parent-ready'
               ? {
                   started: true,
