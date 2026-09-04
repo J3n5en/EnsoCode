@@ -235,7 +235,14 @@ export function ChatView() {
     // modelResolution 变化代表默认/provider/OAuth 可用性已变化，需重试先前 fail-closed 的恢复。
     void modelResolution;
     // worktreeMissing：resume 已发现 worktree 丢失，等用户选重建/回退，不要重试循环
-    if (parent && !parent.started && parent.sessionFile && !parent.worktreeMissing) {
+    // failed：spawn 被拒 / 发送失败已显式报错，每次 patch 都重试会对永久性错误形成 spawn 循环；由用户重发驱动
+    if (
+      parent &&
+      !parent.started &&
+      parent.sessionFile &&
+      !parent.worktreeMissing &&
+      parent.status !== 'failed'
+    ) {
       void useSessionsStore.getState().resumeConversation(parent.id);
     }
   }, [modelResolution, parent]);

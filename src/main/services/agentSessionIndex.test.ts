@@ -35,6 +35,39 @@ function readyChild(child: ChildSessionIdentity) {
 }
 
 describe('AgentSessionIndex generation and reservation authority', () => {
+  it('accepts a revived session restarting at seq 1 after parent-ended or worker-exited', () => {
+    const ready = (seq: number) => ({
+      type: 'parent-ready' as const,
+      identity: parent,
+      seq,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'pv', modelId: 'm' },
+    });
+    const sessions = index();
+    sessions.prepareParent(parent);
+    expect(sessions.observe(ready(40))).toBe(true);
+    sessions.observe({ type: 'parent-ended', identity: parent, seq: 41, reason: 'evicted' });
+    expect(sessions.isReady(parent)).toBe(false);
+    // 同 generation 重新 spawn：worker seq 从 0 起
+    sessions.prepareParent(parent);
+    expect(sessions.observe(ready(1))).toBe(true);
+    expect(sessions.isReady(parent)).toBe(true);
+
+    // 会话已跑过（lastSeq 高）后 worker 拒绝（恒为 seq 0）：不得被单调守卫当重复丢掉
+    expect(
+      sessions.observe({ type: 'parent-rejected', identity: parent, seq: 0, reason: 'gone' })
+    ).toBe(true);
+    expect(sessions.isReady(parent)).toBe(false);
+    sessions.prepareParent(parent);
+    expect(sessions.observe(ready(1))).toBe(true);
+
+    sessions.observe({ type: 'worker-exited' });
+    expect(sessions.isReady(parent)).toBe(false);
+    sessions.prepareParent(parent);
+    expect(sessions.observe(ready(1))).toBe(true);
+    expect(sessions.isReady(parent)).toBe(true);
+  });
+
   it('generates a fresh id, generation, and unique instance name for every mention', () => {
     const sessions = index();
     sessions.prepareParent(parent);

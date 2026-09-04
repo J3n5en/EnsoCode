@@ -107,6 +107,88 @@ describe('applyAgentEvent', () => {
     expect(next.ended).toBe(true);
   });
 
+  it('parent-ended / worker-exited reset the seq guard: a revived session restarts at seq 1', () => {
+    // worker 每次重建会话 seq 从 0 起；驱逐后 resume 若仍持旧 lastSeq，新会话的所有事件都会被丢
+    const advanced = applyAgentEvent(base, 's1', status(50, 'running'));
+    const ended = applyAgentEvent(advanced, 's1', {
+      type: 'parent-ended',
+      identity: identity(),
+      seq: 51,
+      reason: 'evicted',
+    });
+    const revived = applyAgentEvent(ended, 's1', status(1, 'running'));
+    expect(revived.status).toBe('running');
+    expect(revived.lastSeq).toBe(1);
+
+    const exited = applyAgentEvent(advanced, 's1', { type: 'worker-exited' });
+    const restarted = applyAgentEvent(exited, 's1', status(1, 'running'));
+    expect(restarted.status).toBe('running');
+  });
+
+  it('parent-rejected resets the seq guard so a same-generation retry starting at seq 1 is accepted', () => {
+    const advanced = applyAgentEvent(base, 's1', status(50, 'running'));
+    const rejected = applyAgentEvent(advanced, 's1', {
+      type: 'parent-rejected',
+      identity: identity(),
+      seq: 0,
+      reason: 'gone',
+    });
+    expect(rejected.status).toBe('failed');
+    const revived = applyAgentEvent(rejected, 's1', status(1, 'running'));
+    expect(revived.status).toBe('running');
+  });
+
+  it('turn-failed with undelivered drops the unconfirmed optimistic tail', () => {
+    const withOptimistic: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'first' }], timestamp: 1 },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'never sent' }],
+          timestamp: 2,
+          optimistic: true,
+        },
+      ],
+    };
+    const next = applyAgentEvent(withOptimistic, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 1,
+      turnId: 't',
+      error: 'stuck',
+      undelivered: true,
+    });
+    expect(next.status).toBe('failed');
+    expect(next.messages).toHaveLength(1);
+    // 并发两条未确认：worker 按序失败，先收回最早一条（A）而非尾部（B）
+    const twoPending: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'A' }], timestamp: 1, optimistic: true },
+        { role: 'user', content: [{ type: 'text', text: 'B' }], timestamp: 2, optimistic: true },
+      ],
+    };
+    const afterFirst = applyAgentEvent(twoPending, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 1,
+      turnId: 't',
+      error: 'stuck',
+      undelivered: true,
+    });
+    expect(afterFirst.messages.map((m) => (m.content[0] as { text: string }).text)).toEqual(['B']);
+    // 普通 turn-failed（消息已送达）不动时间线
+    const plain = applyAgentEvent(withOptimistic, 's1', {
+      type: 'turn-failed',
+      identity: identity(),
+      seq: 1,
+      turnId: 't',
+      error: 'boom',
+    });
+    expect(plain.messages).toHaveLength(2);
+  });
+
   it('parent-ended does not mark ended (flag is child-only)', () => {
     const next = applyAgentEvent(base, 's1', {
       type: 'parent-ended',

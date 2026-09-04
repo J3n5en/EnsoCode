@@ -593,7 +593,20 @@ export class SessionSupervisor {
           return;
         }
         const managed = this.sessions.get(identity.sessionId);
-        if (!managed || !isSameGeneration(managed.identity, identity)) return;
+        if (!managed || !isSameGeneration(managed.identity, identity)) {
+          // 会话已不在 worker（驱逐 / 释放 / 换代）而 renderer 仍认为 started：静默丢弃会让
+          // 后续每次发送都绕过 spawn 直发到空会话。按拒绝回流，让 renderer 清 started 并报错。
+          if (command.type === 'prompt' || command.type === 'steer') {
+            // 命令类型声明为 SessionIdentity，但 coworker tab 发来的是完整 ChildSessionIdentity
+            const target = command.identity as SessionIdentity | ChildSessionIdentity;
+            this.options.emit(
+              'parent' in target
+                ? { type: 'child-rejected', identity: target, seq: 0, reason: message }
+                : { type: 'parent-rejected', identity: target, seq: 0, reason: message }
+            );
+          }
+          return;
+        }
         managed.status = 'failed';
         this.emitStatus(managed, message);
       });
@@ -702,11 +715,26 @@ export class SessionSupervisor {
       case 'prompt': {
         const managed = this.must(command.identity);
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
-        // 桌面投影可能已 idle，但 pi 仍 isStreaming（漏事件 / abort 收尾）。
-        // 这时再 prompt() 会抛 AgentBusyError，乐观消息随后被对账清掉。
-        const live = managed.session.isStreaming || managed.status === 'running';
-        if (live && !(await this.interruptRetryIfAny(managed))) {
+        if (await this.interruptRetryIfAny(managed)) {
+          this.promptFresh(managed, command.text, images);
+          return;
+        }
+        if (managed.status === 'running') {
           await managed.session.steer(command.text, images);
+          return;
+        }
+        // 投影已 idle 但 pi 仍 isStreaming：要么 agent_end 尚未回流，要么是 abort 后工具不响应
+        // 信号的僵尸轮。steer 进僵尸轮永远无人投递（无 loading、无回复、无报错），
+        // 故限时等空闲后走新轮；超时按失败收口，绝不静默。
+        if (
+          managed.session.isStreaming &&
+          !(await waitIdleBounded(managed.session, ZOMBIE_TURN_WAIT_MS))
+        ) {
+          this.failTurn(
+            managed,
+            'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
+            true
+          );
           return;
         }
         this.promptFresh(managed, command.text, images);
@@ -2383,7 +2411,7 @@ export class SessionSupervisor {
       });
   }
 
-  private failTurn(managed: ManagedSession, error: string): void {
+  private failTurn(managed: ManagedSession, error: string, undelivered = false): void {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
     managed.status = 'failed';
@@ -2394,6 +2422,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       error,
+      ...(undelivered ? { undelivered: true } : {}),
     });
   }
 
@@ -2572,6 +2601,23 @@ const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
+/** 投影 idle 但 pi 仍 streaming 时，等它真正空闲的上限；超时视为僵尸轮 */
+const ZOMBIE_TURN_WAIT_MS = 5_000;
+
+/** 限时等 pi 空闲；true = 已空闲，false = 超时仍在跑 */
+export function waitIdleBounded(
+  session: Pick<AgentSession, 'waitForIdle'>,
+  ms: number
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    session.waitForIdle().then(done, done);
+  });
+}
 /** 异步通知里的摘要上限;全文经 coworker report 取 */
 const NOTIFY_SUMMARY_LIMIT = 1500;
 /** 一轮结束回父的摘要尾句：阻塞/非阻塞两条路径共用，把「继续 send」写成默认动作 */

@@ -65,6 +65,7 @@ import {
   applyDispatchEvent,
   emptyProjection,
   type SessionProjection,
+  type TimelineMessage,
   upsertOutOfRange,
 } from './reducer';
 import { isPairViewed, nextUnread } from './unread';
@@ -299,6 +300,18 @@ interface SessionsState {
   pauseGoal(conversationId: string): void;
   resumeGoal(conversationId: string): void;
   clearGoal(conversationId: string): void;
+}
+
+/** 未投递成功的乐观消息回队：文本 + 图片都不丢 */
+function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
+  const images = message.content.flatMap((part) =>
+    part.type === 'image' ? [{ data: part.data, mimeType: part.mimeType }] : []
+  );
+  return {
+    id: crypto.randomUUID(),
+    text: userMessageRawText(message),
+    ...(images.length > 0 ? { images } : {}),
+  };
 }
 
 function userMessageRawText(message: ProjectedMessage): string {
@@ -954,6 +967,19 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
+            // 未提交的消息被 reducer 收回乐观回显（最早一条）：连同图片回到队首，
+            // 多条连续失败也不互相覆盖；队列区可编辑/删除/立即发送
+            ...(event.type === 'turn-failed' &&
+            event.undelivered &&
+            next.messages.length < conversation.messages.length
+              ? {
+                  // 追加到队尾：连续多条失败按 FIFO 回流，保持原发送顺序（A,B → [A,B]）
+                  queuedMessages: [
+                    ...(conversation.queuedMessages ?? []),
+                    toQueuedMessage(conversation.messages.find((m) => m.optimistic)!),
+                  ],
+                }
+              : {}),
             ...(event.type === 'parent-ready'
               ? {
                   started: true,
@@ -993,6 +1019,80 @@ export const useSessionsStore = create<SessionsState>()(
           continueGoal(id);
         }
       });
+
+      /**
+       * prompt/steer 统一投递：静默失败就是「发了没反应只能重启」。失败时收回乐观回显、
+       * 文本退回输入框、显式报错，并清 started 让下次发送重新 spawn（worker 退出 /
+       * generation 过期都靠这条路自愈）。返回错误文案，成功为 null。
+       */
+      async function deliver(
+        id: string,
+        text: string,
+        images: AttachedImage[] | undefined,
+        mode: 'prompt' | 'steer',
+        /** 投递失败时按 deliveryId 收回的乐观回显，及内容退回何处 */
+        rollback: {
+          deliveryId: string;
+          restore:
+            | { kind: 'draft'; text: string }
+            | { kind: 'queue'; item: QueuedMessage }
+            | { kind: 'goal' };
+        }
+      ): Promise<string | null> {
+        const result =
+          mode === 'steer'
+            ? await window.electronAPI.agent.steer(id, text, images)
+            : await window.electronAPI.agent.prompt(id, text, images);
+        if (result.ok) return null;
+        const error = result.error ?? 'send failed';
+        const { restore } = rollback;
+        set((state) => {
+          const current = state.conversations[id];
+          if (!current) return state;
+          return patch(state, id, {
+            messages: current.messages.filter(
+              (message) => message.deliveryId !== rollback.deliveryId
+            ),
+            // 纯文本退回输入框；带图片的连同附件回队首，不丢附件
+            ...(restore.kind === 'draft' && !images?.length ? { draftText: restore.text } : {}),
+            ...(restore.kind === 'queue' || (restore.kind === 'draft' && images?.length)
+              ? {
+                  queuedMessages: [
+                    restore.kind === 'queue'
+                      ? restore.item
+                      : { id: crypto.randomUUID(), text: restore.text, images },
+                    ...(current.queuedMessages ?? []),
+                  ],
+                }
+              : {}),
+            // goal 内部指令不进输入框：暂停并标注原因，由用户重新 resume
+            ...(restore.kind === 'goal' && current.goal
+              ? { goal: { ...current.goal, status: 'paused' as const, note: error } }
+              : {}),
+            started: false,
+            status: 'failed',
+            error,
+          });
+        });
+        return error;
+      }
+
+      function optimisticUserMessage(
+        text: string,
+        images: AttachedImage[] | undefined,
+        deliveryId: string
+      ): TimelineMessage {
+        return {
+          role: 'user',
+          content: [
+            ...(text ? [{ type: 'text' as const, text }] : []),
+            ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
+          ],
+          timestamp: Date.now(),
+          optimistic: true,
+          deliveryId,
+        };
+      }
 
       /** goal 续跑:轮次收束且空闲、无排队消息/挂起项时,自动注入一条继续指令(带安全限制) */
       function continueGoal(id: string): void {
@@ -1058,20 +1158,16 @@ export const useSessionsStore = create<SessionsState>()(
           'Continue working toward it. If it is genuinely done, call goal_complete with evidence; ' +
           'if you cannot proceed without the user, call goal_blocked; if waiting on something ' +
           'external, call goal_wait. Otherwise take the next concrete step now.\n</goal-continuation>';
+        const deliveryId = crypto.randomUUID();
         set((state) =>
           patch(state, id, {
             messages: [
               ...state.conversations[id].messages,
-              {
-                role: 'user',
-                content: [{ type: 'text' as const, text }],
-                timestamp: Date.now(),
-                optimistic: true,
-              },
+              optimisticUserMessage(text, undefined, deliveryId),
             ],
           })
         );
-        void window.electronAPI.agent.prompt(id, text, undefined);
+        void deliver(id, text, undefined, 'prompt', { deliveryId, restore: { kind: 'goal' } });
       }
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
@@ -1086,24 +1182,20 @@ export const useSessionsStore = create<SessionsState>()(
         ) {
           return;
         }
+        const deliveryId = crypto.randomUUID();
         set((state) =>
           patch(state, id, {
             queuedMessages: rest,
             messages: [
               ...state.conversations[id].messages,
-              {
-                role: 'user',
-                content: [
-                  ...(next.text ? [{ type: 'text' as const, text: next.text }] : []),
-                  ...(next.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                ],
-                timestamp: Date.now(),
-                optimistic: true,
-              },
+              optimisticUserMessage(next.text, next.images, deliveryId),
             ],
           })
         );
-        void window.electronAPI.agent.prompt(id, next.text, next.images);
+        void deliver(id, next.text, next.images, 'prompt', {
+          deliveryId,
+          restore: { kind: 'queue', item: next },
+        });
       }
 
       return {
@@ -1629,6 +1721,7 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async send(text, target, images) {
+          const submittedText = text;
           const activeId = get().activeId;
           if (!activeId) return 'no conversation';
           const activeTab = get().conversations[activeId]?.activeTabId;
@@ -1695,29 +1788,37 @@ export const useSessionsStore = create<SessionsState>()(
           // 乐观回显：立即上屏，不等 spawn/prompt 往返。optimistic 标记使其作为
           // 未确认尾巴浮在权威消息之后，同文本 user upsert 到达时被消费；
           // 万一错位由 agent_end 的全量 reconcile 兜底。
+          // coworker 由 worker 侧创建/恢复,永不走 spawn 分支；未恢复时在回显前拦下并显式报错
+          if (!conversation.started && conversation.parentId) {
+            const error = 'coworker not restored yet — resume the conversation first';
+            set((state) =>
+              patch(state, id, {
+                status: 'failed',
+                error,
+                ...(images?.length
+                  ? {
+                      queuedMessages: [
+                        { id: crypto.randomUUID(), text: submittedText, images },
+                        ...(state.conversations[id].queuedMessages ?? []),
+                      ],
+                    }
+                  : { draftText: submittedText }),
+              })
+            );
+            return error;
+          }
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, id, {
               // 用户主动发新消息：上一次停止的抑制标记到此失效
               abortRequested: false,
               messages: [
                 ...state.conversations[id].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(text ? [{ type: 'text' as const, text }] : []),
-                    ...(images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(text, images, deliveryId),
               ],
             })
           );
           if (!conversation.started) {
-            // coworker 由 worker 侧创建/恢复,永不走 spawn 分支
-            if (conversation.parentId) {
-              return 'coworker not restored yet — resume the conversation first';
-            }
             set((state) =>
               patch(state, id, {
                 spawning: true,
@@ -1742,8 +1843,24 @@ export const useSessionsStore = create<SessionsState>()(
               approvalMode: conversation.approvalMode ?? 'full',
             });
             if (!result.ok) {
+              // 与 deliver 失败同口径：收回回显、原文退回输入框，不留“看起来发出去了”的假象
               set((state) =>
-                patch(state, id, { spawning: false, status: 'failed', error: result.error })
+                patch(state, id, {
+                  spawning: false,
+                  status: 'failed',
+                  error: result.error,
+                  messages: state.conversations[id].messages.filter(
+                    (message) => message.deliveryId !== deliveryId
+                  ),
+                  ...(images?.length
+                    ? {
+                        queuedMessages: [
+                          { id: crypto.randomUUID(), text: submittedText, images },
+                          ...(state.conversations[id].queuedMessages ?? []),
+                        ],
+                      }
+                    : { draftText: submittedText }),
+                })
               );
               return result.error ?? 'spawn failed';
             }
@@ -1772,12 +1889,14 @@ export const useSessionsStore = create<SessionsState>()(
               }
             }
           }
-          const action =
-            get().conversations[id]?.status === 'running'
-              ? window.electronAPI.agent.steer(id, text, images)
-              : window.electronAPI.agent.prompt(id, text, images);
-          const result = await action;
-          return result.ok ? null : (result.error ?? 'send failed');
+          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文
+          return deliver(
+            id,
+            text,
+            images,
+            get().conversations[id]?.status === 'running' ? 'steer' : 'prompt',
+            { deliveryId, restore: { kind: 'draft', text: submittedText } }
+          );
         },
 
         async resumeConversation(id) {
@@ -1977,20 +2096,19 @@ export const useSessionsStore = create<SessionsState>()(
           // kickoff:目标说明 + 终止工具指引;后续每轮收束由 continueGoal 续跑
           if (conversation.started && conversation.status === 'idle') {
             const kickoff = startGoalPrompt(text.trim());
+            const deliveryId = crypto.randomUUID();
             set((state) =>
               patch(state, conversationId, {
                 messages: [
                   ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [{ type: 'text' as const, text: kickoff }],
-                    timestamp: Date.now(),
-                    optimistic: true,
-                  },
+                  optimisticUserMessage(kickoff, undefined, deliveryId),
                 ],
               })
             );
-            void window.electronAPI.agent.prompt(conversationId, kickoff, undefined);
+            void deliver(conversationId, kickoff, undefined, 'prompt', {
+              deliveryId,
+              restore: { kind: 'goal' },
+            });
           }
         },
 
@@ -2022,19 +2140,19 @@ export const useSessionsStore = create<SessionsState>()(
             const text =
               `<goal-continuation>\nSession goal resumed: ${goal.text}\n` +
               'Continue working toward it (goal_complete / goal_blocked / goal_wait to stop).\n</goal-continuation>';
+            const deliveryId = crypto.randomUUID();
             set((state) =>
               patch(state, conversationId, {
                 messages: [
                   ...state.conversations[conversationId].messages,
-                  {
-                    role: 'user',
-                    content: [{ type: 'text' as const, text }],
-                    timestamp: Date.now(),
-                  },
+                  optimisticUserMessage(text, undefined, deliveryId),
                 ],
               })
             );
-            void window.electronAPI.agent.prompt(conversationId, text, undefined);
+            void deliver(conversationId, text, undefined, 'prompt', {
+              deliveryId,
+              restore: { kind: 'goal' },
+            });
           }
         },
 
@@ -2154,6 +2272,7 @@ export const useSessionsStore = create<SessionsState>()(
           // 出队并乐观回显。optimistic 标记使其浮在权威消息之后：running 时 steer
           // 要到下一个循环边界才送达，期间当前轮的 assistant upsert 若按裸 index
           // 覆盖会把回显顶掉（消息凭空消失，轮次结束后又出现）。
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
@@ -2161,24 +2280,15 @@ export const useSessionsStore = create<SessionsState>()(
               ),
               messages: [
                 ...state.conversations[conversationId].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(item.text, item.images, deliveryId),
               ],
             })
           );
-          if (running) {
-            // steer 插入当前轮
-            void window.electronAPI.agent.steer(conversationId, item.text, item.images);
-          } else {
-            void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
-          }
+          // running 时 steer 插入当前轮
+          void deliver(conversationId, item.text, item.images, running ? 'steer' : 'prompt', {
+            deliveryId,
+            restore: { kind: 'queue', item },
+          });
         },
 
         async interruptAndSendQueued(conversationId, messageId) {
@@ -2214,6 +2324,7 @@ export const useSessionsStore = create<SessionsState>()(
             const timer = setTimeout(done, 10_000);
           });
           if (!get().conversations[conversationId]?.started) return;
+          const deliveryId = crypto.randomUUID();
           set((state) =>
             patch(state, conversationId, {
               queuedMessages: (state.conversations[conversationId]?.queuedMessages ?? []).filter(
@@ -2221,19 +2332,14 @@ export const useSessionsStore = create<SessionsState>()(
               ),
               messages: [
                 ...state.conversations[conversationId].messages,
-                {
-                  role: 'user',
-                  content: [
-                    ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
-                    ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image })),
-                  ],
-                  timestamp: Date.now(),
-                  optimistic: true,
-                },
+                optimisticUserMessage(item.text, item.images, deliveryId),
               ],
             })
           );
-          void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
+          void deliver(conversationId, item.text, item.images, 'prompt', {
+            deliveryId,
+            restore: { kind: 'queue', item },
+          });
         },
 
         async hireCoworker(parentId, name, agentType) {

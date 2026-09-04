@@ -300,6 +300,8 @@ export class AgentSessionIndex {
       for (const session of this.sessions.values()) {
         session.alive = false;
         session.ready = false;
+        // worker 重建后会话 seq 从 0 重计；不重置则 parent-ready 被当重复丢弃，索引永远不 ready
+        session.lastSeq = -1;
       }
       this.reservations.clear();
       return true;
@@ -334,7 +336,8 @@ export class AgentSessionIndex {
     const identity = identityOf(event);
     const current = this.sessions.get(identity.sessionId);
     if (current && !isSameGeneration(current.identity, identity)) return false;
-    if (current) {
+    // 拒绝恒以 seq:0 发出（也可能针对已跑过的同代会话），不过单调守卫
+    if (current && event.type !== 'parent-rejected') {
       if (event.seq <= current.lastSeq) return false;
       current.lastSeq = event.seq;
     }
@@ -361,6 +364,8 @@ export class AgentSessionIndex {
       current.ready = false;
       current.alive = false;
       current.status = 'failed';
+      // ended/rejected 是该 worker 会话的末事件；同 generation 重建（驱逐后 resume）seq 从 0 重计
+      current.lastSeq = -1;
       this.releaseParentReservations(identity.sessionId);
       return true;
     }

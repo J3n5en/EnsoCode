@@ -17,7 +17,16 @@ import {
  * 时间线消息：乐观回显（本地先上屏、worker 尚未确认）带 optimistic 标记，
  * 只允许出现在数组尾部（权威消息之后）。
  */
-export type TimelineMessage = ProjectedMessage & { optimistic?: boolean };
+export type TimelineMessage = ProjectedMessage & {
+  optimistic?: boolean;
+  /** 本地投递标识：投递失败时按它精确收回，不误删并发的另一条乐观消息 */
+  deliveryId?: string;
+};
+
+function dropOldestOptimistic(messages: readonly TimelineMessage[]): TimelineMessage[] {
+  const index = messages.findIndex((message) => message.optimistic);
+  return index < 0 ? [...messages] : messages.filter((_, position) => position !== index);
+}
 
 function textOf(message: ProjectedMessage): string {
   return message.content
@@ -141,6 +150,8 @@ export function applyAgentEvent(
   if (event.type === 'worker-exited') {
     return {
       ...settleTiming(state, now),
+      // worker 重建后会话 seq 从 0 重计，保留旧 lastSeq 会把新会话的所有事件当重复丢掉
+      lastSeq: 0,
       status: 'failed',
       error: 'agent worker exited',
       pendingApprovals: [],
@@ -202,6 +213,8 @@ export function applyAgentEvent(
     return {
       ...settleTiming(state, now),
       generation: undefined,
+      // 重试可能复用同 generation，worker seq 从 0 重计
+      lastSeq: 0,
       status: 'failed',
       error: event.reason,
       pendingApprovals: [],
@@ -241,7 +254,9 @@ export function applyAgentEvent(
         pendingAsks: [],
         // 只有 child 有「跨重启不复活」语义；父会话 ended 由 source authority 管
         ...(event.type === 'child-ended' ? { ended: true } : {}),
-        lastSeq: event.seq,
+        // ended 是该 worker 会话的最后一条事件；同 generation 重建（驱逐后 resume）seq 从 0 重计，
+        // 不归零则复活后的 status/message 全部被单调守卫丢掉：无 loading、无回复、无报错
+        lastSeq: 0,
       };
     case 'status': {
       const base =
@@ -384,6 +399,9 @@ export function applyAgentEvent(
     case 'turn-failed':
       return {
         ...settleTiming(current, now),
+        // 从未提交给 pi 的消息：乐观回显不会被任何 upsert 确认，留着就是“看起来发出去了”的假象。
+        // worker 按会话串行处理 prompt，失败回流与发送同序：收回最早一条未确认消息，而非尾部
+        ...(event.undelivered ? { messages: dropOldestOptimistic(current.messages) } : {}),
         status: 'failed',
         error: event.error,
         retry: undefined,

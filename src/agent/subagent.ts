@@ -130,15 +130,17 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
     description:
       'Delegate a self-contained task to a subagent that runs in an isolated context with its own tools ' +
       '(read/bash/edit/write/MCP). Returns the subagent final report as the tool result. ' +
-      'Default choice for any independent line of work (recon a module, implement an isolated change, verify); ' +
+      'Default choice for ONE-SHOT independent work (recon a module, implement an isolated change); ' +
       'multiple subagent calls in one message run in parallel. ' +
+      'If the result will be acted on and re-checked (review → fix → re-review, test → fix → retest), ' +
+      'use coworker instead — a subagent is disposed after its report and cannot see your fix. ' +
       'The subagent cannot ask you questions — include all needed context in the prompt. ' +
       'Pass wait:false for long tasks to keep working — the final report is delivered to you ' +
       'automatically when it finishes (and the parent abort no longer kills it). ' +
       (deps.agentTypes.length > 0 ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
-      'subagent: delegate by default — hand any independent subtask to a subagent (isolated context) ' +
-      'with a complete prompt and get a final report back; ' +
+      'subagent: delegate one-shot subtasks by default — hand any independent subtask to a subagent (isolated context) ' +
+      'with a complete prompt and get a final report back; anything that may loop (review/verify → fix → re-check) goes to coworker; ' +
       'multiple subagent calls in one message run in parallel' +
       (deps.agentTypes.length > 0
         ? `; agent_type options: ${deps.agentTypes
