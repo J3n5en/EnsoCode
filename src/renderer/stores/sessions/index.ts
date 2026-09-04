@@ -1629,6 +1629,7 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async send(text, target, images) {
+          const submittedText = text;
           const activeId = get().activeId;
           if (!activeId) return 'no conversation';
           const activeTab = get().conversations[activeId]?.activeTabId;
@@ -1777,7 +1778,24 @@ export const useSessionsStore = create<SessionsState>()(
               ? window.electronAPI.agent.steer(id, text, images)
               : window.electronAPI.agent.prompt(id, text, images);
           const result = await action;
-          return result.ok ? null : (result.error ?? 'send failed');
+          if (result.ok) return null;
+          // 静默失败就是「发了没反应只能重启」：收回乐观回显、文本退回输入框、显式报错；
+          // 并清 started 让下次发送重新 spawn（worker 退出 / generation 过期都靠这条路自愈）。
+          const error = result.error ?? 'send failed';
+          set((state) => {
+            const current = state.conversations[id];
+            if (!current) return state;
+            const messages = [...current.messages];
+            if (messages.at(-1)?.optimistic) messages.pop();
+            return patch(state, id, {
+              messages,
+              draftText: submittedText,
+              started: false,
+              status: 'failed',
+              error,
+            });
+          });
+          return error;
         },
 
         async resumeConversation(id) {
