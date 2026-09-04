@@ -60,6 +60,11 @@ export function isValidProxyUrl(url: string): boolean {
   }
 }
 
+/** 把当前进程 env 里的代理键快照成完整 patch（缺失键为 null，便于接收方删除旧值）。 */
+export function proxyEnvPatchFromEnv(env: Record<string, string | undefined>): ProxyEnvPatch {
+  return Object.fromEntries(PROXY_ENV_KEYS.map((key) => [key, env[key] ?? null])) as ProxyEnvPatch;
+}
+
 export function proxyEnvPatch(proxyUrl: string | null, noProxy: string): ProxyEnvPatch {
   if (!proxyUrl) {
     return Object.fromEntries(PROXY_ENV_KEYS.map((key) => [key, null])) as ProxyEnvPatch;
