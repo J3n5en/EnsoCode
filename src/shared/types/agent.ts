@@ -1982,6 +1982,10 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         typeof value.note === 'string'
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'tool-output':
+      return isNonEmptyString(value.toolCallId) && typeof value.output === 'string'
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'task-started':
       return isRecord(value.task) ? (value as unknown as AgentWorkerEvent) : null;
     case 'task-output':

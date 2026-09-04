@@ -871,3 +871,23 @@ describe('browser-invoke / browser-result', () => {
     expect(parseAgentCommand({ ...result, extra: 1 })).toBeNull();
   });
 });
+
+describe('tool-output 事件跨进程边界', () => {
+  const event = {
+    type: 'tool-output',
+    identity: { sessionId: 's1', generation: '11111111-1111-4111-8111-111111111111' },
+    seq: 3,
+    toolCallId: 'call-1',
+    output: 'step 1\nstep 2',
+  };
+
+  it('合法事件原样通过（否则 worker→main 边界会静默丢弃）', () => {
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+  });
+
+  it('脏输入拒绝', () => {
+    expect(parseAgentWorkerEvent({ ...event, toolCallId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, output: 42 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, identity: undefined })).toBeNull();
+  });
+});
