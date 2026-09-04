@@ -27,6 +27,7 @@ function makeDeps(overrides: Partial<CoworkerToolDeps> = {}): CoworkerToolDeps {
     dismiss: vi.fn(async () => {}),
     wait: vi.fn(async () => 'waited'),
     report: vi.fn(() => 'full'),
+    message: vi.fn(async () => 'peer-ok'),
     ...overrides,
   };
 }
@@ -306,7 +307,24 @@ describe('coworker tool wait/report 操作', () => {
     const tool = createCoworkerTool(makeDeps());
     const properties = (tool.parameters as { properties: { operation: { enum: string[] } } })
       .properties;
-    expect(properties.operation.enum).toEqual(expect.arrayContaining(['wait', 'report']));
+    expect(properties.operation.enum).toEqual(
+      expect.arrayContaining(['wait', 'report', 'message'])
+    );
+  });
+
+  it('operation=message 投递给 deps.message，不走 send', async () => {
+    const deps = makeDeps();
+    const tool = createCoworkerTool(deps);
+    const result = await tool.execute(
+      't1',
+      { operation: 'message', name: 'alice', to: 'bob', text: 'ping' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.message).toHaveBeenCalledWith('alice', 'bob', 'ping');
+    expect(deps.send).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toBe('peer-ok');
   });
 
   it('promptSnippet 提到 wait,并劝阻 sleep/poll', () => {

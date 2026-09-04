@@ -68,6 +68,7 @@ export function snapshotBuiltinOccupancyTools(input?: {
           dismiss: async () => {},
           wait: async () => '',
           report: () => '',
+          message: async () => '',
         })
       ),
     ],
