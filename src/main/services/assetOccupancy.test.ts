@@ -149,4 +149,62 @@ describe('occupancyForMcp', () => {
     ]);
     expect(listTools.mock.calls.map((call) => call[0].name)).toEqual(['on', 'bad']);
   });
+
+  it('空工具列表当未探测，不显示 0', async () => {
+    const rows = await occupancyForMcp(
+      ['empty'],
+      [
+        {
+          id: 'empty',
+          name: 'empty',
+          transport: 'stdio',
+          command: 'echo',
+          source: 'test',
+          enabled: true,
+        },
+      ],
+      async () => []
+    );
+    expect(rows).toEqual([{ id: 'empty', tokens: null, toolCount: 0 }]);
+  });
+
+  it('已启用 server 并行探测', async () => {
+    let started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const listTools = vi.fn(async () => {
+      started += 1;
+      await gate;
+      return [{ name: 't', description: 'd' }];
+    });
+    const pending = occupancyForMcp(
+      ['a', 'b'],
+      [
+        {
+          id: 'a',
+          name: 'a',
+          transport: 'stdio',
+          command: 'echo',
+          source: 'test',
+          enabled: true,
+        },
+        {
+          id: 'b',
+          name: 'b',
+          transport: 'stdio',
+          command: 'echo',
+          source: 'test',
+          enabled: true,
+        },
+      ],
+      listTools
+    );
+    await vi.waitFor(() => expect(started).toBe(2));
+    release();
+    const rows = await pending;
+    expect(rows.map((row) => row.id)).toEqual(['a', 'b']);
+    expect(rows.every((row) => row.tokens != null)).toBe(true);
+  });
 });

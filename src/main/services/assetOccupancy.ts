@@ -60,25 +60,23 @@ export async function occupancyForMcp(
   listTools: (server: McpServerEntry) => Promise<OccupancyTool[]>
 ): Promise<AssetOccupancyRow[]> {
   const byId = new Map(catalog.map((entry) => [entry.id, entry]));
-  const rows: AssetOccupancyRow[] = [];
-  for (const id of ids) {
-    const server = byId.get(id);
-    if (!server?.enabled) {
-      rows.push({ id, tokens: null });
-      continue;
-    }
-    try {
-      const tools = await listTools(server);
-      rows.push({ id, tokens: estimateToolsTotal(tools), toolCount: tools.length });
-    } catch (error) {
-      rows.push({
-        id,
-        tokens: null,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return rows;
+  return Promise.all(
+    ids.map(async (id): Promise<AssetOccupancyRow> => {
+      const server = byId.get(id);
+      if (!server?.enabled) return { id, tokens: null };
+      try {
+        const tools = await listTools(server);
+        if (tools.length === 0) return { id, tokens: null, toolCount: 0 };
+        return { id, tokens: estimateToolsTotal(tools), toolCount: tools.length };
+      } catch (error) {
+        return {
+          id,
+          tokens: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })
+  );
 }
 
 export function occupancyForBuiltinTools(
