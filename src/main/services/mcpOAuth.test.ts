@@ -79,11 +79,27 @@ describe('McpOAuthClientProvider', () => {
 
 function fakeCallbackServer(code: string | (() => Promise<string>)) {
   const close = vi.fn();
+  const waitForCode = vi.fn(() => (typeof code === 'string' ? Promise.resolve(code) : code()));
+  return {
+    close,
+    waitForCode,
+    start: vi.fn(async () => ({
+      redirectUri: 'http://127.0.0.1:5000/cb',
+      waitForCode,
+      close,
+    })),
+  };
+}
+
+/** 真实回调服务器的行为：close() 会 reject 内部 promise */
+function rejectingCallbackServer() {
+  const { promise, reject } = Promise.withResolvers<string>();
+  const close = vi.fn(() => reject(new Error('回调服务器已关闭')));
   return {
     close,
     start: vi.fn(async () => ({
       redirectUri: 'http://127.0.0.1:5000/cb',
-      waitForCode: () => (typeof code === 'string' ? Promise.resolve(code) : code()),
+      waitForCode: () => promise,
       close,
     })),
   };
@@ -185,6 +201,32 @@ describe('authorizeMcpServer', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('discovery failed');
     expect(server.close).toHaveBeenCalled();
+  });
+
+  it('首轮即 AUTHORIZED 也预挂回调 handler，close 不产生无人接管的 rejection', async () => {
+    const server = rejectingCallbackServer();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const result = await authorizeMcpServer('s1', {
+        store: newStore(),
+        resolveServer: () => ({
+          id: 's1',
+          name: 'notion',
+          transport: 'http',
+          url: 'https://mcp.test/mcp',
+        }),
+        startCallbackServer: server.start as never,
+        auth: vi.fn(async () => 'AUTHORIZED' as const) as never,
+        openExternal: vi.fn(),
+      });
+      expect(result).toEqual({ ok: true });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 
   it('同一 server 并发授权复用同一条流程', async () => {

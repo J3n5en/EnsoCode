@@ -190,6 +190,10 @@ async function runAuthorize(
     return { ok: false, error: message(error) };
   }
 
+  // close() 会 reject 内部 promise：预挂 handler，否则不走 REDIRECT 分支时会出现无人接管的 rejection
+  const codePromise = callback.waitForCode();
+  codePromise.catch(() => {});
+
   try {
     const provider = new McpOAuthClientProvider({
       serverId,
@@ -202,7 +206,7 @@ async function runAuthorize(
     // 首轮：SDK 完成 discovery/DCR，需要交互时经 redirectToAuthorization 打开浏览器
     let result = await deps.auth(provider, { serverUrl });
     if (result === 'REDIRECT') {
-      const code = await callback.waitForCode();
+      const code = await codePromise;
       result = await deps.auth(provider, { serverUrl, authorizationCode: code });
     }
     if (result !== 'AUTHORIZED') return { ok: false, error: '授权未完成。' };
