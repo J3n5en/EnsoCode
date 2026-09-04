@@ -25,6 +25,8 @@ function makeDeps(overrides: Partial<CoworkerToolDeps> = {}): CoworkerToolDeps {
     send: vi.fn(async () => 'ok'),
     list: vi.fn(() => []),
     dismiss: vi.fn(async () => {}),
+    wait: vi.fn(async () => 'waited'),
+    report: vi.fn(() => 'full'),
     ...overrides,
   };
 }
@@ -122,5 +124,95 @@ describe('coworker tool model 参数', () => {
         {} as never
       )
     ).rejects.toThrow(/does not allow custom model selection/i);
+  });
+});
+
+describe('coworker tool wait/report 操作', () => {
+  it('wait 操作路由到 deps.wait,透传 name 与 gate', async () => {
+    const deps = makeDeps();
+    const tool = createCoworkerTool(deps);
+    const result = await tool.execute(
+      't1',
+      { operation: 'wait', name: 'bob', gate: 'pnpm test' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.wait).toHaveBeenCalledWith('bob', expect.objectContaining({ gate: 'pnpm test' }));
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toMatch(/waited/);
+  });
+
+  it('report 操作路由到 deps.report,只传 name', async () => {
+    const deps = makeDeps();
+    const tool = createCoworkerTool(deps);
+    const result = await tool.execute(
+      't1',
+      { operation: 'report', name: 'bob' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.report).toHaveBeenCalledWith('bob');
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toMatch(/full/);
+  });
+
+  it('wait 缺 name 报错', async () => {
+    const tool = createCoworkerTool(makeDeps());
+    await expect(
+      tool.execute('t1', { operation: 'wait' }, undefined, undefined, {} as never)
+    ).rejects.toThrow(/name/i);
+  });
+
+  it('report 缺 name 报错', async () => {
+    const tool = createCoworkerTool(makeDeps());
+    await expect(
+      tool.execute('t1', { operation: 'report' }, undefined, undefined, {} as never)
+    ).rejects.toThrow(/name/i);
+  });
+
+  it('report 结果超 20000 字截断,尾注为 …(truncated at 20000 chars)', async () => {
+    const longText = 'a'.repeat(20050);
+    const deps = makeDeps({ report: vi.fn(() => longText) });
+    const tool = createCoworkerTool(deps);
+    const result = await tool.execute(
+      't1',
+      { operation: 'report', name: 'bob' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    const text = (result.content[0] as { text: string }).text;
+    expect(text.length).toBeLessThan(longText.length);
+    expect(text).toMatch(/…\(truncated at 20000 chars\)/);
+  });
+
+  it('send 结果超上限截断时,尾注提示用 coworker report 取全文', async () => {
+    const longText = 'b'.repeat(5000);
+    const deps = makeDeps({ send: vi.fn(async () => longText) });
+    const tool = createCoworkerTool(deps);
+    const result = await tool.execute(
+      't1',
+      { operation: 'send', name: 'bob', message: 'hi', wait: true },
+      undefined,
+      undefined,
+      {} as never
+    );
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toMatch(/coworker report/);
+  });
+
+  it('schema 的 operation enum 含 wait 与 report', () => {
+    const tool = createCoworkerTool(makeDeps());
+    const properties = (tool.parameters as { properties: { operation: { enum: string[] } } })
+      .properties;
+    expect(properties.operation.enum).toEqual(expect.arrayContaining(['wait', 'report']));
+  });
+
+  it('promptSnippet 提到 wait,并劝阻 sleep/poll', () => {
+    const snippet = createCoworkerTool(makeDeps()).promptSnippet ?? '';
+    expect(snippet).toMatch(/\bwait\b/);
+    expect(snippet).toMatch(/sleep|poll/i);
   });
 });

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-09-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~406 | Active |
+| `journal-1.md` | ~447 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-09-04 | Coworker protocol: wait/report, parent-waiting message_main_agent, tester agent type + writeScope | `b2054a5`, `db0beaa`, `871296d`, `e16c96d`, `90b5ccb`, `60cdd83`, `ebd3594`, `5b11c3f`, `25b59f7` | `enso/3085e88f` |
 | 13 | 2026-09-04 | Usage statistics dashboard (Settings → Usage) | `9766e4f` | `enso/3085e88f` |
 | 12 | 2026-09-03 | 对话分支副本分叉与 B/C 归档 | `32dec92`, `e128a5f`, `503b342` | `dev` |
 | 11 | 2026-09-03 | 归档已落地的侧栏全屏与系统代理 | `fdf809f`, `8dfd539`, `ee00e8b`, `b837b84` | `dev` |

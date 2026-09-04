@@ -20,7 +20,8 @@ pnpm test:watch    # 监听模式
 测试不能证明任何东西。
 
 逻辑面大的改动（跨模块、协议 / 解析器类）**强烈推荐** coworker 角色分离：
-测试先行者只写失败测试，实现者不许改测试文件；以 `pnpm test` 退出码验收。
+测试先行者用 `agent_type: tester`（只能写测试文件），实现者在红灯到手前不动手、
+不许改测试文件；以 `pnpm test` 退出码验收。
 小纯函数（测试 < 50 行或用例 < 10）inline 即可。详见
 [动手前检查清单 §1.5](guides/pre-implementation-checklist.md) 与 `AGENTS.md`。
 

@@ -112,7 +112,10 @@ function isAgentTypeEntry(value: unknown): value is AgentTypeEntry {
       typeof entry.name === 'string' &&
       typeof entry.description === 'string' &&
       typeof entry.systemPrompt === 'string' &&
-      (entry.tools === 'all' || entry.tools === 'readonly')
+      (entry.tools === 'all' || entry.tools === 'readonly') &&
+      (entry.writeScope === undefined ||
+        (Array.isArray(entry.writeScope) &&
+          entry.writeScope.every((glob) => typeof glob === 'string' && glob.trim() !== '')))
   );
 }
 export class AgentSessionIndex {
@@ -411,8 +414,27 @@ export class AgentSessionIndex {
       return true;
     }
     if (event.type === 'coworker-update') {
-      if (event.coworker.status === 'dismissed') current.coworkers.delete(event.coworker.id);
-      else current.coworkers.set(event.coworker.id, { ...event.coworker });
+      if (event.coworker.status === 'dismissed') {
+        current.coworkers.delete(event.coworker.id);
+        // typed child 由 child-ended 收口;这里只清工具直雇的裸身份
+        const indexed = this.sessions.get(event.coworker.id);
+        if (indexed && !('parent' in indexed.identity)) this.sessions.delete(event.coworker.id);
+      } else {
+        current.coworkers.set(event.coworker.id, { ...event.coworker });
+        // 工具直雇 coworker 没有 child-ready,靠这里入索引,否则用户 tab 的 prompt 会被 exactIdentity 拒掉
+        if (event.coworkerIdentity) {
+          this.sessions.set(event.coworker.id, {
+            identity: event.coworkerIdentity,
+            started: true,
+            ready: true,
+            alive: true,
+            status: 'idle',
+            lastSeq: -1,
+            ...(event.coworker.sessionFile ? { sessionFile: event.coworker.sessionFile } : {}),
+            coworkers: new Map(),
+          });
+        }
+      }
       return true;
     }
     return true;

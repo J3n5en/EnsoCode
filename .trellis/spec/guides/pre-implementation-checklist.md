@@ -19,8 +19,9 @@
 可单测的逻辑改动本身仍走 [testing.md](../testing.md) 的 Red-Green。
 **逻辑面大的改动**（跨模块、用例多、协议 / 解析器 / 路径与 watch 这类）强烈推荐用 coworker 拆成两个脑子，防「红造假」和「绿自证」：
 
-- **测试先行者**（coworker）：只读 PRD 与接口契约，产出失败测试并确认红灯；不许写实现。
-- **实现者**（主会话或另一 coworker）：只许改实现，不许改测试文件让灯变绿。
+- **测试先行者**（coworker，`agent_type: tester`）：只读 PRD 与接口契约，产出失败测试并确认红灯；tester 的 edit/write 被工具层限制在测试文件。
+- **实现者**（主会话或另一 coworker）：红灯到手前不开写（否则 tester 会读到实现）；只许改实现，不许改测试文件让灯变绿。
+- 等待用 `coworker wait {name}`（不要 sleep 轮询）；回报截断用 `coworker report {name}` 取全文。
 - 验收看 `gate: "pnpm test"` 的退出码，不采信文字汇报。
 
 小改动直接主会话 inline Red-Green：测试文件预计 < 50 行，或用例 < 10 个。
