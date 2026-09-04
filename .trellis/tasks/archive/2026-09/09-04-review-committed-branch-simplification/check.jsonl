@@ -1,0 +1,8 @@
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"Verify scope boundaries, full gates, and no adjacent fixes were included."}
+{"file":".trellis/spec/testing.md","reason":"Verify focused and full tests satisfy the repository contract."}
+{"file":".trellis/spec/shared/index.md","reason":"Check shared-layer dependency rules and behavior contracts."}
+{"file":".trellis/spec/shared/conventions.md","reason":"Check naming, comments, formatting, lint, and final validation."}
+{"file":".trellis/spec/renderer/index.md","reason":"Check renderer boundaries and UI behavior preservation."}
+{"file":".trellis/spec/renderer/components.md","reason":"Check component clarity without over-combining concerns."}
+{"file":".trellis/spec/big-question/dedupe-identity.md","reason":"Check provider dedupe dimensions, ordering, and merge behavior remain unchanged."}
+{"file":".trellis/tasks/09-04-review-committed-branch-simplification/research/branch-diff-review.md","reason":"Cross-check all 29 paths, risky exclusions, and exact changed-line scope."}

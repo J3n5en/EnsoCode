@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from '@shared/types/agent';
+import { THINKING_LEVELS } from '@shared/types/agent';
 import type { ModelReasoningOverride, ModelThinkingLevelOverride } from '@shared/types/llm';
 
 export interface ChildReasoningOverride {
@@ -6,8 +7,56 @@ export interface ChildReasoningOverride {
   thinkingLevel?: ModelThinkingLevelOverride;
 }
 
+/** 对齐 pi `/thinking`：off 关闭推理，其余为努力档。 */
+export const CHILD_THINKING_LEVELS = ['off', ...THINKING_LEVELS] as const;
+export type ChildThinkingLevel = (typeof CHILD_THINKING_LEVELS)[number];
+
+export function isChildThinkingLevel(value: string): value is ChildThinkingLevel {
+  return (CHILD_THINKING_LEVELS as readonly string[]).includes(value);
+}
+
 /**
- * 子会话推理决策：条目级覆盖（subagent-models）赢过父会话；
+ * 解析 `provider/model:high` 这种 pi 思考后缀。非法后缀原样当模型名，避免误切。
+ */
+export function parseModelThinkingRef(raw: string): {
+  name: string;
+  thinking?: ChildThinkingLevel;
+} {
+  const trimmed = raw.trim();
+  const colon = trimmed.lastIndexOf(':');
+  if (colon <= 0) return { name: trimmed };
+  const suffix = trimmed.slice(colon + 1).toLowerCase();
+  if (!isChildThinkingLevel(suffix)) return { name: trimmed };
+  const name = trimmed.slice(0, colon).trim();
+  if (!name) return { name: trimmed };
+  return { name, thinking: suffix };
+}
+
+/** 统一解析子会话的模型名与思考档；显式 thinking 优先于模型后缀。 */
+export function resolveChildThinkingInput(
+  modelName?: string,
+  thinkingRaw?: string
+): { modelName?: string; thinking?: ChildThinkingLevel } {
+  const parsed = parseModelThinkingRef(modelName ?? '');
+  let thinking = parsed.thinking;
+  if (thinkingRaw) {
+    if (!isChildThinkingLevel(thinkingRaw)) {
+      throw new Error(
+        `unknown thinking "${thinkingRaw}". Available: [${CHILD_THINKING_LEVELS.join(', ')}] or omit to inherit.`
+      );
+    }
+    thinking = thinkingRaw;
+  }
+  return { modelName: parsed.name || undefined, thinking };
+}
+
+export function thinkingToOverride(thinking: ChildThinkingLevel): ChildReasoningOverride {
+  if (thinking === 'off') return { reasoning: 'off' };
+  return { reasoning: 'on', thinkingLevel: thinking };
+}
+
+/**
+ * 子会话推理决策：派发 thinking / 条目级覆盖赢过父会话；
  * 缺省 = 跟随父。关闭时档位恒为 'off'（pi 不发 thinking）。
  */
 export function resolveChildReasoning(

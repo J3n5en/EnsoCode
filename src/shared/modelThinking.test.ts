@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from './modelThinking';
+import {
+  clampProjectThinkingLevel,
+  supportedProjectThinkingLevels,
+  visibleThinkingLevels,
+} from './modelThinking';
 
 describe('supportedProjectThinkingLevels', () => {
   it('reasoning:false 明确不支持任何项目档', () => {
@@ -43,6 +47,27 @@ describe('supportedProjectThinkingLevels', () => {
         thinkingLevelMap: { medium: null, max: 'max' },
       })
     ).toEqual(['minimal', 'low', 'high', 'max']);
+  });
+});
+
+describe('visibleThinkingLevels', () => {
+  it('未知时不展示必须显式声明的 xhigh/max', () => {
+    expect(visibleThinkingLevels(undefined)).toEqual(['minimal', 'low', 'medium', 'high']);
+  });
+
+  it('已知支持集只渲染这些档，空数组表示没有任何思考档', () => {
+    expect(visibleThinkingLevels(['low', 'medium', 'high'])).toEqual(['low', 'medium', 'high']);
+    expect(visibleThinkingLevels([])).toEqual([]);
+  });
+
+  it('catalog 显式声明 max 时才出现 max', () => {
+    expect(visibleThinkingLevels(['minimal', 'low', 'medium', 'high', 'max'])).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'max',
+    ]);
   });
 });
 

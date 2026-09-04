@@ -43,6 +43,17 @@ export function supportedProjectThinkingLevels(model: ThinkingCapableModel): Thi
 }
 
 /**
+ * 选择器里真正渲染的档。已知支持集就只展示这些；未知时按 pi 默认四档
+ * （xhigh/max 必须显式声明，Grok 这类没有极高/max 的模型不能出现这两档）。
+ */
+export function visibleThinkingLevels(supported: ThinkingLevel[] | undefined): ThinkingLevel[] {
+  if (supported !== undefined) {
+    return THINKING_LEVELS.filter((level) => supported.includes(level));
+  }
+  return supportedProjectThinkingLevels({ reasoning: true });
+}
+
+/**
  * 与 pi clampThinkingLevel 同向的降级：先向上、再向下、兜底第一个可用。
  * `supported === undefined` 表示未知，原样返回 level。
  */

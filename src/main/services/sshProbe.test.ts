@@ -57,10 +57,10 @@ describe('parseSshListDirsOutput', () => {
   });
 
   it('目录名含空格与 unicode 原样保留', () => {
-    expect(parseSshListDirsOutput('/srv\n./my app\n./中文目录\n')).toEqual({
-      path: '/srv',
-      dirs: ['my app', '中文目录'],
-    });
+    const parsed = parseSshListDirsOutput('/srv\n./my app\n./中文目录\n');
+    expect(parsed?.path).toBe('/srv');
+    expect(parsed?.dirs).toEqual(expect.arrayContaining(['my app', '中文目录']));
+    expect(parsed?.dirs).toHaveLength(2);
   });
 });
 

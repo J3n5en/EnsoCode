@@ -53,6 +53,12 @@ export interface ModelProvider {
   /** 从哪个本地应用导入（手动创建时为空） */
   importedFrom?: string;
   /**
+   * 向导选中的厂商目录 id。`__custom` 必须保留：用户按「自定义」录入、
+   * baseUrl 却撞上官方 hostname（如 api.x.ai）时，不能再按 URL 并进 xAI 组，
+   * 否则自定义模型清单会被静默吞掉、设置页也看不到这条自定义供应商。
+   */
+  catalogId?: string;
+  /**
    * 订阅账号 key（见 `oauthProviders.ts` 的多账号模型）；存在即订阅条目，apiKey/baseUrl 为空。
    * 同一厂商的多个账号各占一条 ModelProvider，key 分别是 `anthropic`、`anthropic#2`…
    */

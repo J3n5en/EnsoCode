@@ -1,18 +1,11 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
-import type { ModelProvider, ModelThinkingLevelOverride, SubagentModelEntry } from '@shared/types';
+import type { ModelProvider, ModelThinkingLevelOverride } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
 import { Plus, Sparkles, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
@@ -24,90 +17,24 @@ import { useSettingsStore } from '@/stores/settings';
 const isModelEnabled = (provider: ModelProvider, modelId: string): boolean =>
   provider.models.some((model) => model.id === modelId && model.enabled !== false);
 
-const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
-  minimal: 'Min',
-  low: 'Low',
-  medium: 'Med',
-  high: 'High',
-  xhigh: 'Extra',
-  max: 'Max',
-};
+// 继承项只做能力适配显示，不落成独立覆盖；只有用户操作才写入。
+const ignoreInheritedNormalization = () => undefined;
 
-const isThinkingLevelOverride = (value: string): value is ModelThinkingLevelOverride =>
-  (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value);
+function isReasoningOverride(value: unknown): value is 'on' | 'off' {
+  return value === 'on' || value === 'off';
+}
 
-/** 推理三态（跟随会话/开/关）+ 开启时的档位，内联在条目行里 */
-function ReasoningControls({
-  entry,
-  onPatch,
-  t,
-}: {
-  entry: SubagentModelEntry;
-  onPatch: (updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
-  t: (key: string) => string;
-}) {
+function isThinkingLevelOverride(value: unknown): value is ModelThinkingLevelOverride {
   return (
-    <>
-      <Select
-        items={[
-          { value: 'follow', label: t('Follow conversation') },
-          { value: 'on', label: t('On') },
-          { value: 'off', label: t('Off') },
-        ]}
-        value={entry.reasoning ?? 'follow'}
-        onValueChange={(value) => {
-          const reasoning = value === 'on' || value === 'off' ? value : undefined;
-          onPatch({ reasoning, ...(reasoning === 'on' ? {} : { thinkingLevel: undefined }) });
-        }}
-      >
-        <SelectTrigger
-          size="sm"
-          data-slot="subagent-model-reasoning"
-          className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
-          <SelectItem value="on">{t('On')}</SelectItem>
-          <SelectItem value="off">{t('Off')}</SelectItem>
-        </SelectPopup>
-      </Select>
-      {entry.reasoning === 'on' && (
-        <Select
-          items={[
-            { value: 'follow', label: t('Follow conversation') },
-            ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
-              value: level,
-              label: t(LEVEL_LABEL_KEYS[level]),
-            })),
-          ]}
-          value={entry.thinkingLevel ?? 'follow'}
-          onValueChange={(value) => {
-            onPatch({
-              thinkingLevel: value && isThinkingLevelOverride(value) ? value : undefined,
-            });
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            data-slot="subagent-model-thinking-level"
-            className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
-            {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
-              <SelectItem key={level} value={level}>
-                {t(LEVEL_LABEL_KEYS[level])}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      )}
-    </>
+    typeof value === 'string' &&
+    (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value)
   );
+}
+
+function resolveReasoningEnabled(value: unknown, fallback: boolean): boolean {
+  if (value === 'on') return true;
+  if (value === 'off') return false;
+  return fallback;
 }
 
 /**
@@ -125,6 +52,8 @@ export function SubagentModelsSettings() {
   const updateEntry = useSettingsStore((state) => state.updateSubagentModel);
   const removeEntry = useSettingsStore((state) => state.removeSubagentModel);
   const defaultModel = useSettingsStore((state) => state.defaultModel);
+  const defaultReasoningEnabled = useSettingsStore((state) => state.defaultReasoningEnabled);
+  const defaultThinkingLevel = useSettingsStore((state) => state.defaultThinkingLevel);
   const snapshot = useOauthCredentialStore((state) => state.snapshot);
   const candidates = useMemo(
     () => usableProvidersForOauthSnapshot(providers, snapshot),
@@ -190,25 +119,59 @@ export function SubagentModelsSettings() {
                   providers={candidates}
                   providerId={entry.providerId}
                   modelId={entry.modelId}
-                  reasoningEnabled={false}
-                  thinkingLevel="medium"
-                  showReasoningControls={false}
+                  reasoningEnabled={resolveReasoningEnabled(
+                    entry.reasoning,
+                    defaultReasoningEnabled
+                  )}
+                  thinkingLevel={
+                    isThinkingLevelOverride(entry.thinkingLevel)
+                      ? entry.thinkingLevel
+                      : defaultThinkingLevel
+                  }
                   onSelect={(providerId, modelId) => updateEntry(entry.id, { providerId, modelId })}
-                  onReasoningChange={() => undefined}
-                  onThinkingChange={() => undefined}
+                  onReasoningChange={(reasoningEnabled) =>
+                    updateEntry(entry.id, { reasoning: reasoningEnabled ? 'on' : 'off' })
+                  }
+                  onThinkingChange={(thinkingLevel) => updateEntry(entry.id, { thinkingLevel })}
+                  onReasoningNormalize={
+                    isReasoningOverride(entry.reasoning)
+                      ? (reasoningEnabled) =>
+                          updateEntry(entry.id, {
+                            reasoning: reasoningEnabled ? 'on' : 'off',
+                          })
+                      : ignoreInheritedNormalization
+                  }
+                  onThinkingNormalize={
+                    isThinkingLevelOverride(entry.thinkingLevel)
+                      ? (thinkingLevel) => updateEntry(entry.id, { thinkingLevel })
+                      : ignoreInheritedNormalization
+                  }
                 />
               </div>
-              <ReasoningControls
-                entry={entry}
-                onPatch={(updates) => updateEntry(entry.id, updates)}
-                t={t}
-              />
               <Input
                 value={entry.description}
                 placeholder={t('When to use it, e.g. cheap and fast for simple subtasks')}
                 className="h-7 flex-1 text-xs"
                 onChange={(event) => updateEntry(entry.id, { description: event.target.value })}
               />
+              {(isReasoningOverride(entry.reasoning) ||
+                isThinkingLevelOverride(entry.thinkingLevel)) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-slot="subagent-model-follow"
+                  className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                  onClick={() =>
+                    updateEntry(entry.id, {
+                      reasoning: undefined,
+                      thinkingLevel: undefined,
+                    })
+                  }
+                >
+                  {t('Follow conversation')}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"

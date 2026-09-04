@@ -6,6 +6,11 @@ import type {
   SubagentInfo,
   SubagentModelOption,
 } from '@shared/types/agent';
+import {
+  CHILD_THINKING_LEVELS,
+  type ChildThinkingLevel,
+  resolveChildThinkingInput,
+} from './childReasoning';
 import { runFooter } from './runFooter';
 
 /** 进度事件节流 */
@@ -17,7 +22,8 @@ export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
   createSubSession(
     agentType?: AgentTypeSpawnConfig,
-    modelOverride?: SpawnModelConfig
+    modelOverride?: SpawnModelConfig,
+    thinking?: ChildThinkingLevel
   ): Promise<AgentSession>;
   /** 父会话模型 id（general 类型展示用） */
   modelId: string;
@@ -78,6 +84,17 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
   const modelList = deps.models
     .map((option) => option.name + (option.description ? ` (${option.description})` : ''))
     .join('; ');
+  const thinkingParam = {
+    thinking: {
+      type: 'string',
+      enum: [...CHILD_THINKING_LEVELS],
+      description:
+        'Thinking effort for this run, same as /thinking ' +
+        `(${CHILD_THINKING_LEVELS.join('/')}). ` +
+        'Omit to use the selected model preset or inherit the conversation. ' +
+        'You can also append a suffix on model, e.g. OpenAI/gpt-cheap:high.',
+    },
+  };
   const modelParam =
     deps.models.length > 0
       ? {
@@ -85,7 +102,8 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
             type: 'string',
             description:
               `Model override for this subagent: ${modelList}. ` +
-              'Pick the cheapest model that fits the subtask; omit to inherit the default.',
+              'Pick the cheapest model that fits the subtask; omit to inherit the default. ' +
+              'Append :off/:minimal/:low/:medium/:high/:xhigh/:max to set thinking for this run.',
           },
         }
       : {};
@@ -141,6 +159,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       properties: {
         ...typeParam,
         ...modelParam,
+        ...thinkingParam,
         description: {
           type: 'string',
           description: 'Short (3-8 words) label of the subtask, shown in the UI',
@@ -170,6 +189,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         prompt = '',
         agent_type: agentTypeName,
         model: modelName,
+        thinking: thinkingRaw,
         gate,
         wait = true,
       } = params as {
@@ -177,6 +197,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         prompt?: string;
         agent_type?: string;
         model?: string;
+        thinking?: string;
         gate?: string;
         wait?: boolean;
       };
@@ -189,15 +210,19 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           `unknown agent_type "${agentTypeName}". Available: [${deps.agentTypes.map((t) => t.name).join(', ')}] or omit for general.`
         );
       }
-      const modelOption = modelName
-        ? deps.models.find((option) => option.name === modelName)
+      const { modelName: resolvedModelName, thinking } = resolveChildThinkingInput(
+        modelName,
+        thinkingRaw
+      );
+      const modelOption = resolvedModelName
+        ? deps.models.find((option) => option.name === resolvedModelName)
         : undefined;
-      if (modelName && !modelOption) {
+      if (resolvedModelName && !modelOption) {
         throw new Error(
-          `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+          `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
         );
       }
-      if (agentType && agentType.allowModelOverride === false && modelName) {
+      if (agentType && agentType.allowModelOverride === false && resolvedModelName) {
         throw new Error(
           `agent_type "${agentType.name}" does not allow custom model selection (it is locked to ${agentType.model ? agentType.model.modelId : 'conversation model'}).`
         );
@@ -216,7 +241,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       };
       deps.emitUpdate({ ...info });
 
-      const session = await deps.createSubSession(agentType, modelOption?.config);
+      const session = await deps.createSubSession(agentType, modelOption?.config, thinking);
       let dirty = false;
       const timer = setInterval(() => {
         if (!dirty) return;

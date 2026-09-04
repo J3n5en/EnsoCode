@@ -28,6 +28,9 @@ vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/enso-model-refresh', getName: () => 'enso-code', on: () => {} },
   shell: { openExternal: vi.fn(async () => {}) },
 }));
+vi.mock('./proxyConfig', () => ({
+  getProxyConfig: () => ({ whenReady: async () => true }),
+}));
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRuntime: { create: vi.fn(async () => mocks.runtime) },

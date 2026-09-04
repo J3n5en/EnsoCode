@@ -222,7 +222,7 @@ export interface SettingsState {
   toggleStatusLineSegment: (id: StatusLineSegmentId, enabled: boolean) => void;
 
   // Provider actions
-  /** 按 baseUrl+apiKey 指纹（订阅条目按 oauthAccountKey）与现有项去重，返回实际新增数量 */
+  /** 按端点指纹去重（Custom 单独计）；撞车合并模型。返回新增或合并成功的条数 */
   addProviders: (providers: ModelProvider[]) => number;
   updateProvider: (id: string, updates: Partial<Omit<ModelProvider, 'id'>>) => void;
   removeProvider: (id: string) => void;

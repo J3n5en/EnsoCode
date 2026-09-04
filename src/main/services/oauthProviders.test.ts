@@ -22,6 +22,9 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => electronMocks.windows },
   shell: { openExternal: electronMocks.openExternal },
 }));
+vi.mock('./proxyConfig', () => ({
+  getProxyConfig: () => ({ whenReady: async () => true }),
+}));
 
 /** 造一个可解码的 JWT（只有 payload 有意义，签名不校验） */
 function fakeJwt(payload: Record<string, unknown>): string {

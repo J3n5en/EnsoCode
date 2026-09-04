@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { mergeFetchedModels } from './modelEntry';
+import { commitPendingModel, mergeFetchedModels } from './modelEntry';
 import type { ModelEntry } from './types';
+
+describe('commitPendingModel', () => {
+  it('把未点 + 的输入框模型并进清单', () => {
+    expect(commitPendingModel([], 'grok-4.6')).toEqual([{ id: 'grok-4.6', enabled: true }]);
+  });
+
+  it('空白或已有 id 不重复追加', () => {
+    const current = [{ id: 'grok-4.6', enabled: true }];
+    expect(commitPendingModel(current, '  ')).toEqual(current);
+    expect(commitPendingModel(current, 'grok-4.6')).toEqual(current);
+  });
+});
 
 describe('mergeFetchedModels', () => {
   it('新模型追加为启用条目并携带元数据', () => {

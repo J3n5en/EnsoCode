@@ -34,6 +34,13 @@ export function modelRowBadge(
   return 'default';
 }
 
+/** 保存时把「添加模型 ID」输入框里还没点 + 的内容一并提交，避免只填了 ID 就点保存被当成空清单。 */
+export function commitPendingModel(models: readonly ModelEntry[], pending: string): ModelEntry[] {
+  const id = pending.trim();
+  if (!id || models.some((model) => model.id === id)) return [...models];
+  return [...models, { id, enabled: true }];
+}
+
 /**
  * 拉取结果并入已有模型列表（Fetch Models 按钮的唯一合并逻辑）：
  * - 新模型追加到末尾，默认启用，携带拉到的 contextWindow/maxTokens；

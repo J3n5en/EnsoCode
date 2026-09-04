@@ -474,6 +474,10 @@ async function runOauthLogin(
   const emit = (event: OauthLoginEvent) => emitOauthEvent(login, sender, event);
   emit({ type: 'progress', message: 'Starting login...' });
   try {
+    // Node fetch 走 undici dispatcher；代理解析完再打 Google，否则会按本机出口 IP 被判地区不可用。
+    // 动态 import：避免 oauthProviders → proxyConfig → agentHost 把 worker 入口拖进无关测试。
+    const { getProxyConfig } = await import('./proxyConfig');
+    await getProxyConfig().whenReady();
     runtime = await getRuntime();
     const base = providerId.includes('#') ? undefined : runtime.getProvider(providerId);
     if (!base?.auth.oauth) {

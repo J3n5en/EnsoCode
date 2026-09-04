@@ -1,8 +1,8 @@
 import { resolveCustomModelView } from '@shared/modelCatalog';
-import { clampProjectThinkingLevel } from '@shared/modelThinking';
+import { clampProjectThinkingLevel, visibleThinkingLevels } from '@shared/modelThinking';
 import { CUSTOM_VENDOR_ID, groupProviders } from '@shared/providerGroups';
 import type { ModelEntry, ModelMeta, ModelProvider, OauthProviderInfo } from '@shared/types';
-import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import type { ThinkingLevel } from '@shared/types/agent';
 import { BadgeCheck, Brain, Check, ChevronDown, KeyRound } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,15 @@ export const OPEN_CHAT_MODEL_PICKER_EVENT = 'enso:open-chat-model-picker';
 
 export function requestOpenChatModelPicker() {
   window.dispatchEvent(new Event(OPEN_CHAT_MODEL_PICKER_EVENT));
+}
+
+/** catalog 未声明支持集时只改展示，不回写。 */
+export function persistClampedThinkingLevel(
+  level: ThinkingLevel,
+  declared: ThinkingLevel[] | undefined
+): ThinkingLevel | undefined {
+  const next = clampProjectThinkingLevel(level, declared);
+  return next === level ? undefined : next;
 }
 
 /** 档位显示文案的 t() key（不是已翻译文本）；沿用既有英文短词，字典里已配好中文译文 */
@@ -93,13 +102,16 @@ interface ModelPickerProps {
   modelId: string;
   reasoningEnabled: boolean;
   thinkingLevel: ThinkingLevel;
-  /** 子代理模型清单等场景只复用 provider/account/model 级联，不展示 reasoning/thinking。 */
+  /** 仅需 provider/account/model 级联的场景可隐藏 reasoning/thinking。 */
   showReasoningControls?: boolean;
   /** 仅会话工具行：响应全局「切换模型」快捷键并聚焦搜索框 */
   listenHotkey?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
+  /** 模型能力约束触发的自动归一化；缺省复用用户变更回调。 */
+  onReasoningNormalize?: (enabled: boolean) => void;
+  onThinkingNormalize?: (level: ThinkingLevel) => void;
 }
 
 /**
@@ -394,8 +406,12 @@ export function ModelPicker({
   onSelect,
   onReasoningChange,
   onThinkingChange,
+  onReasoningNormalize,
+  onThinkingNormalize,
 }: ModelPickerProps) {
   const { t } = useI18n();
+  const normalizeReasoning = onReasoningNormalize ?? onReasoningChange;
+  const normalizeThinking = onThinkingNormalize ?? onThinkingChange;
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const openSubmenuIdsRef = useRef(new Set<string>());
@@ -548,48 +564,54 @@ export function ModelPicker({
       onSelect(targetProviderId, targetModelId);
       // 同一次交互内钳位:目标模型已知的支持档集若不含当前档,自动降到最近支持档并回写
       const meta = metaByProvider[targetProviderId]?.[targetModelId];
-      const clamped = clampProjectThinkingLevel(thinkingLevel, meta?.thinkingLevels);
-      if (clamped !== thinkingLevel) onThinkingChange(clamped);
+      const persisted = persistClampedThinkingLevel(thinkingLevel, meta?.thinkingLevels);
+      if (persisted) normalizeThinking(persisted);
       setOpen(false);
     },
-    [onSelect, metaByProvider, thinkingLevel, onThinkingChange]
+    [onSelect, metaByProvider, thinkingLevel, normalizeThinking]
   );
 
   const currentProviderMeta = useModelMeta(currentProvider);
   const currentModelMeta = currentProviderMeta[modelId];
   const supportedLevels = currentModelMeta?.thinkingLevels;
+  const visibleLevels = useMemo(() => visibleThinkingLevels(supportedLevels), [supportedLevels]);
   const reasoningUnsupported =
     currentModelMeta?.reasoning === false || supportedLevels?.length === 0;
-  const levelIndex = Math.max(0, THINKING_LEVELS.indexOf(thinkingLevel));
+  const displayedReasoningEnabled = reasoningUnsupported ? false : reasoningEnabled;
+  const displayedThinkingLevel =
+    visibleLevels.length > 0
+      ? clampProjectThinkingLevel(thinkingLevel, visibleLevels)
+      : thinkingLevel;
+  const levelIndex = Math.max(0, visibleLevels.indexOf(displayedThinkingLevel));
 
   /**
    * 归一化 effect：钳位不能只挂在 handleSelectModel 的 onClick 上，两条路径会漏掉——
    * ① 元数据是异步查询，选完模型那一刻可能还没到，到达后没人回头核对当前档是否仍合法；
    * ② 恢复已持久化会话完全不经过 onSelect，会话记忆里的档位可能对新连上的模型早已不支持。
-   * 两种情况都要在 currentModelMeta 到位/变化时补一次回写；回写走会话状态
-   * （onThinkingChange/onReasoningChange 分别对应 setThinking/setReasoning），不能只改本地
-   * 显示，否则重启又变回不支持的值——这也顺带修好了 `reasoning:false` 时 Switch
-   * `checked={true} disabled` 打不开也关不掉的问题（enabled 会被同步拨回 false）。
+   * 两种情况都要在 currentModelMeta 到位/变化时补一次回写；归一化回调缺省仍走会话状态
+   * （分别对应 setThinking/setReasoning），不能只改本地显示，否则重启又变回不支持的值——
+   * 这也顺带修好了 `reasoning:false` 时 Switch `checked={true} disabled` 打不开也关不掉的问题
+   * （enabled 会被同步拨回 false）。
    * 只在「确实不支持」时才回写，`clampProjectThinkingLevel` 对已合法档位是恒等操作，
    * 配合这个判断，每次 meta 到位最多触发一次修正性 setState，不会死循环。
    */
   useEffect(() => {
-    if (!currentModelMeta) return; // 未知 = 不加限制，不回写
+    if (!currentModelMeta) return;
     if (reasoningUnsupported) {
-      if (reasoningEnabled) onReasoningChange(false);
+      if (reasoningEnabled) normalizeReasoning(false);
       return;
     }
-    if (!reasoningEnabled || supportedLevels === undefined) return;
-    if (supportedLevels.includes(thinkingLevel)) return;
-    onThinkingChange(clampProjectThinkingLevel(thinkingLevel, supportedLevels));
+    if (!reasoningEnabled) return;
+    const persisted = persistClampedThinkingLevel(thinkingLevel, supportedLevels);
+    if (persisted) normalizeThinking(persisted);
   }, [
     currentModelMeta,
     reasoningUnsupported,
     supportedLevels,
     reasoningEnabled,
     thinkingLevel,
-    onReasoningChange,
-    onThinkingChange,
+    normalizeReasoning,
+    normalizeThinking,
   ]);
 
   const handleRootOpenChange = useCallback(
@@ -624,10 +646,10 @@ export function ModelPicker({
         title={current?.label ?? modelId ?? t('Model')}
       >
         <span className="min-w-0 truncate">{current?.label ?? modelId ?? t('Model')}</span>
-        {reasoningEnabled && (
+        {displayedReasoningEnabled && (
           <span className="flex shrink-0 items-center gap-0.5 text-primary">
             <Brain className="h-3 w-3" />
-            {t(LEVEL_LABEL_KEYS[thinkingLevel])}
+            {t(LEVEL_LABEL_KEYS[displayedThinkingLevel])}
           </span>
         )}
         <ChevronDown className="h-3 w-3 shrink-0" />
@@ -772,7 +794,7 @@ export function ModelPicker({
               </span>
               <Switch
                 tabIndex={-1}
-                checked={reasoningEnabled}
+                checked={displayedReasoningEnabled}
                 onCheckedChange={onReasoningChange}
                 disabled={reasoningUnsupported}
               />
@@ -783,54 +805,46 @@ export function ModelPicker({
               </p>
             )}
 
-            {reasoningEnabled && !reasoningUnsupported && (
+            {displayedReasoningEnabled && visibleLevels.length > 0 && (
               <div className="mt-3">
                 <Slider
                   tabIndex={-1}
                   min={0}
-                  max={THINKING_LEVELS.length - 1}
+                  max={visibleLevels.length - 1}
                   step={1}
                   value={levelIndex}
                   onValueChange={(value) => {
                     const index = Array.isArray(value) ? value[0] : value;
-                    const target = THINKING_LEVELS[index] ?? 'medium';
-                    onThinkingChange(clampProjectThinkingLevel(target, supportedLevels));
+                    const target = visibleLevels[index] ?? visibleLevels[0];
+                    onThinkingChange(target);
                   }}
                 />
                 <div className="mt-1 flex justify-between gap-0">
-                  {THINKING_LEVELS.map((entry, index) => {
-                    const disabled =
-                      supportedLevels !== undefined && !supportedLevels.includes(entry);
-                    return (
-                      <button
-                        key={entry}
-                        type="button"
-                        tabIndex={-1}
-                        disabled={disabled}
-                        onClick={disabled ? undefined : () => onThinkingChange(entry)}
+                  {visibleLevels.map((entry, index) => (
+                    <button
+                      key={entry}
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => onThinkingChange(entry)}
+                      className={cn(
+                        'flex min-w-0 flex-1 flex-col items-center gap-0',
+                        index === 0 && 'items-start',
+                        index === visibleLevels.length - 1 && 'items-end'
+                      )}
+                    >
+                      <span className="h-1.5 w-px bg-muted-foreground/40" />
+                      <span
                         className={cn(
-                          'flex min-w-0 flex-1 flex-col items-center gap-0',
-                          index === 0 && 'items-start',
-                          index === THINKING_LEVELS.length - 1 && 'items-end',
-                          disabled && 'cursor-not-allowed'
+                          'text-[10px] transition-colors',
+                          entry === displayedThinkingLevel
+                            ? 'font-medium text-primary'
+                            : 'text-muted-foreground/70 hover:text-foreground'
                         )}
                       >
-                        <span className="h-1.5 w-px bg-muted-foreground/40" />
-                        <span
-                          className={cn(
-                            'text-[10px] transition-colors',
-                            entry === thinkingLevel
-                              ? 'font-medium text-primary'
-                              : disabled
-                                ? 'text-muted-foreground/30'
-                                : 'text-muted-foreground/70 hover:text-foreground'
-                          )}
-                        >
-                          {t(LEVEL_LABEL_KEYS[entry])}
-                        </span>
-                      </button>
-                    );
-                  })}
+                        {t(LEVEL_LABEL_KEYS[entry])}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
