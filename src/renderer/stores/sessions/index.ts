@@ -302,6 +302,18 @@ interface SessionsState {
   clearGoal(conversationId: string): void;
 }
 
+/** 未投递成功的乐观消息回队：文本 + 图片都不丢 */
+function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
+  const images = message.content.flatMap((part) =>
+    part.type === 'image' ? [{ data: part.data, mimeType: part.mimeType }] : []
+  );
+  return {
+    id: crypto.randomUUID(),
+    text: userMessageRawText(message),
+    ...(images.length > 0 ? { images } : {}),
+  };
+}
+
 function userMessageRawText(message: ProjectedMessage): string {
   if (message.role !== 'user') return '';
   return message.content
@@ -955,14 +967,16 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
-            // 未提交的消息被 reducer 收回乐观回显（最早一条）：文本退回输入框，用户不用重敲
+            // 未提交的消息被 reducer 收回乐观回显（最早一条）：连同图片回到队首，
+            // 多条连续失败也不互相覆盖；队列区可编辑/删除/立即发送
             ...(event.type === 'turn-failed' &&
             event.undelivered &&
             next.messages.length < conversation.messages.length
               ? {
-                  draftText:
-                    userMessageRawText(conversation.messages.find((m) => m.optimistic)!) ||
-                    undefined,
+                  queuedMessages: [
+                    toQueuedMessage(conversation.messages.find((m) => m.optimistic)!),
+                    ...(conversation.queuedMessages ?? []),
+                  ],
                 }
               : {}),
             ...(event.type === 'parent-ready'
@@ -1038,10 +1052,17 @@ export const useSessionsStore = create<SessionsState>()(
             messages: current.messages.filter(
               (message) => message.deliveryId !== rollback.deliveryId
             ),
-            ...(restore.kind === 'draft' ? { draftText: restore.text } : {}),
-            // 排队消息连同图片回到队首，不丢附件不乱序
-            ...(restore.kind === 'queue'
-              ? { queuedMessages: [restore.item, ...(current.queuedMessages ?? [])] }
+            // 纯文本退回输入框；带图片的连同附件回队首，不丢附件
+            ...(restore.kind === 'draft' && !images?.length ? { draftText: restore.text } : {}),
+            ...(restore.kind === 'queue' || (restore.kind === 'draft' && images?.length)
+              ? {
+                  queuedMessages: [
+                    restore.kind === 'queue'
+                      ? restore.item
+                      : { id: crypto.randomUUID(), text: restore.text, images },
+                    ...(current.queuedMessages ?? []),
+                  ],
+                }
               : {}),
             // goal 内部指令不进输入框：暂停并标注原因，由用户重新 resume
             ...(restore.kind === 'goal' && current.goal
@@ -1815,7 +1836,14 @@ export const useSessionsStore = create<SessionsState>()(
                   messages: state.conversations[id].messages.filter(
                     (message) => message.deliveryId !== deliveryId
                   ),
-                  draftText: submittedText,
+                  ...(images?.length
+                    ? {
+                        queuedMessages: [
+                          { id: crypto.randomUUID(), text: submittedText, images },
+                          ...(state.conversations[id].queuedMessages ?? []),
+                        ],
+                      }
+                    : { draftText: submittedText }),
                 })
               );
               return result.error ?? 'spawn failed';
