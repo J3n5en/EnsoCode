@@ -1,5 +1,11 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentTypeSpawnConfig, CoworkerInfo, SubagentModelOption } from '@shared/types/agent';
+import {
+  CHILD_THINKING_LEVELS,
+  type ChildThinkingLevel,
+  isChildThinkingLevel,
+  parseModelThinkingRef,
+} from './childReasoning';
 
 /** 回传主 agent 的结果上限;全文经 report 操作可取 */
 const RESULT_LIMIT = 4000;
@@ -18,8 +24,13 @@ export interface CoworkerToolDeps {
   agentTypes: AgentTypeSpawnConfig[];
   /** 模型中心勾选的子代理可选模型（空 = 不暴露 model 参数） */
   models: SubagentModelOption[];
-  /** 雇佣:创建持久子会话并登记(不发首条消息)。modelName 仅 spawn 时生效 */
-  spawn(name: string, agentTypeName?: string, modelName?: string): Promise<CoworkerInfo>;
+  /** 雇佣:创建持久子会话并登记(不发首条消息)。modelName / thinking 仅 spawn 时生效 */
+  spawn(
+    name: string,
+    agentTypeName?: string,
+    modelName?: string,
+    thinking?: ChildThinkingLevel
+  ): Promise<CoworkerInfo>;
   /** 发消息。wait=false 时立即返回投递回执,轮次完成后自动通知主 agent */
   send(name: string, message: string, opts?: CoworkerSendOptions): Promise<string>;
   list(): CoworkerInfo[];
@@ -50,6 +61,17 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
   const modelList = deps.models
     .map((option) => option.name + (option.description ? ` (${option.description})` : ''))
     .join('; ');
+  const thinkingParam = {
+    thinking: {
+      type: 'string',
+      enum: [...CHILD_THINKING_LEVELS],
+      description:
+        'Thinking effort for spawn, same as /thinking ' +
+        `(${CHILD_THINKING_LEVELS.join('/')}). ` +
+        'Omit to use the selected model preset or inherit the conversation. ' +
+        'You can also append a suffix on model, e.g. OpenAI/gpt-cheap:high.',
+    },
+  };
   const modelParam =
     deps.models.length > 0
       ? {
@@ -57,7 +79,8 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
             type: 'string',
             description:
               `Model override for spawn: ${modelList}. ` +
-              'Pick the cheapest model that fits the role; omit to inherit the default.',
+              'Pick the cheapest model that fits the role; omit to inherit the default. ' +
+              'Append :off/:minimal/:low/:medium/:high/:xhigh/:max to set thinking for this coworker.',
           },
         }
       : {};
@@ -118,6 +141,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
           description: `Agent type for spawn${typeList ? ` (${typeList})` : ''}; omit for general`,
         },
         ...modelParam,
+        ...thinkingParam,
         task: {
           type: 'string',
           description: 'First-round task for spawn (role + first step); continue with send',
@@ -144,6 +168,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         name = '',
         agent_type: agentTypeName,
         model: modelName,
+        thinking: thinkingRaw,
         task = '',
         message = '',
         wait = false,
@@ -153,6 +178,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         name?: string;
         agent_type?: string;
         model?: string;
+        thinking?: string;
         task?: string;
         message?: string;
         wait?: boolean;
@@ -176,20 +202,32 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
               `unknown agent_type "${agentTypeName}". Available: [${typeList}] or omit for general.`
             );
           }
-          if (modelName && !deps.models.some((option) => option.name === modelName)) {
+          const parsed = parseModelThinkingRef(modelName ?? '');
+          const thinking =
+            thinkingRaw && isChildThinkingLevel(thinkingRaw) ? thinkingRaw : parsed.thinking;
+          if (thinkingRaw && !isChildThinkingLevel(thinkingRaw)) {
             throw new Error(
-              `unknown model "${modelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
+              `unknown thinking "${thinkingRaw}". Available: [${CHILD_THINKING_LEVELS.join(', ')}] or omit to inherit.`
+            );
+          }
+          const resolvedModelName = parsed.name || undefined;
+          if (
+            resolvedModelName &&
+            !deps.models.some((option) => option.name === resolvedModelName)
+          ) {
+            throw new Error(
+              `unknown model "${resolvedModelName}". Available: [${modelNames.join(', ')}] or omit to inherit.`
             );
           }
           const targetType = agentTypeName
             ? deps.agentTypes.find((type) => type.name === agentTypeName)
             : undefined;
-          if (targetType && targetType.allowModelOverride === false && modelName) {
+          if (targetType && targetType.allowModelOverride === false && resolvedModelName) {
             throw new Error(
               `agent_type "${targetType.name}" does not allow custom model selection (it is locked to ${targetType.model ? targetType.model.modelId : 'conversation model'}).`
             );
           }
-          const info = await deps.spawn(name.trim(), agentTypeName, modelName);
+          const info = await deps.spawn(name.trim(), agentTypeName, resolvedModelName, thinking);
           // 角色提示由 supervisor 的 pendingRole 机制在首条前缀注入
           const result = await deps.send(info.name, task, sendOptions);
           return text(

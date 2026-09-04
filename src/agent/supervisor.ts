@@ -66,7 +66,11 @@ import {
 } from './backgroundTasks';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
-import { resolveChildReasoning } from './childReasoning';
+import {
+  type ChildThinkingLevel,
+  resolveChildReasoning,
+  thinkingToOverride,
+} from './childReasoning';
 import {
   collectContextOccupancy,
   type OccupancyBranchEntry,
@@ -132,6 +136,8 @@ interface SessionFactory {
     resolved?: ResolvedAgentTypeSpawnConfig;
     /** 主 agent 显式指定的模型,优先于 resolved/agentType 绑定模型 */
     modelOverride?: SpawnModelConfig;
+    /** 派发时 /thinking 档位，赢过模型条目预设 */
+    thinkingOverride?: ChildThinkingLevel;
     identity?: ChildSessionIdentity;
     gate: ApprovalGate;
     askManager?: AskManager;
@@ -1144,6 +1150,7 @@ export class SessionSupervisor {
         agentType,
         resolved,
         modelOverride,
+        thinkingOverride,
         identity: childIdentity,
         gate: childGate,
         askManager,
@@ -1152,9 +1159,9 @@ export class SessionSupervisor {
       }) => {
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
         const base = await resolveBaseModelOrRefresh(runtime, selectedModel);
-        // 条目级推理覆盖（subagent-models）赢过父会话；缺省跟随父
+        // 派发 thinking 赢过条目预设，再赢过父会话；缺省跟随父
         const childReasoning = resolveChildReasoning(
-          selectedModel,
+          thinkingOverride ? thinkingToOverride(thinkingOverride) : selectedModel,
           reasoningEnabled,
           thinkingLevel
         );
@@ -1282,8 +1289,15 @@ export class SessionSupervisor {
       modelId: model.modelId,
       agentTypes,
       models: subagentModels,
-      createSubSession: async (agentType, modelOverride) =>
-        (await factory.createChildSession({ agentType, modelOverride, gate })).session,
+      createSubSession: async (agentType, modelOverride, thinking) =>
+        (
+          await factory.createChildSession({
+            agentType,
+            modelOverride,
+            thinkingOverride: thinking,
+            gate,
+          })
+        ).session,
       runGate: (gateCommand) => runGateCommand(cwd, gateCommand, sshExecutor),
       notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
       emitUpdate: (agent) => {
@@ -1312,13 +1326,15 @@ export class SessionSupervisor {
     const coworkerTool = createCoworkerTool({
       agentTypes,
       models: subagentModels,
-      spawn: (name, agentTypeName, modelName) => {
+      spawn: (name, agentTypeName, modelName, thinking) => {
         const spawning = this.spawnCoworker(
           sessionId,
           `${sessionId}::cw-${slugify(name)}`,
           name,
           agentTypeName,
-          modelName
+          modelName,
+          undefined,
+          thinking
         );
         pendingSpawns.set(name, spawning);
         void spawning.finally(() => pendingSpawns.delete(name)).catch(() => {});
@@ -1701,7 +1717,8 @@ export class SessionSupervisor {
     name: string,
     agentTypeName?: string,
     modelName?: string,
-    resumeFile?: string
+    resumeFile?: string,
+    thinking?: ChildThinkingLevel
   ): Promise<CoworkerInfo> {
     const parent = this.mustCurrent(parentId);
     const factory = parent.factory;
@@ -1751,6 +1768,7 @@ export class SessionSupervisor {
     const { session, modelId, toolIds } = await factory.createChildSession({
       agentType,
       modelOverride,
+      thinkingOverride: thinking,
       gate,
       resumeFile,
       extraTools: [

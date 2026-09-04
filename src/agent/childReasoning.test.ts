@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveChildReasoning } from './childReasoning';
+import { parseModelThinkingRef, resolveChildReasoning, thinkingToOverride } from './childReasoning';
 
 describe('resolveChildReasoning', () => {
   it('无覆盖时跟随父会话开关与档位', () => {
@@ -36,5 +36,29 @@ describe('resolveChildReasoning', () => {
       enabled: false,
       level: 'off',
     });
+  });
+});
+
+describe('parseModelThinkingRef', () => {
+  it('解析 pi 风格 thinking 后缀，非法后缀保持原名', () => {
+    expect(parseModelThinkingRef('OpenAI/gpt-cheap:high')).toEqual({
+      name: 'OpenAI/gpt-cheap',
+      thinking: 'high',
+    });
+    expect(parseModelThinkingRef('OpenAI/gpt-cheap:off')).toEqual({
+      name: 'OpenAI/gpt-cheap',
+      thinking: 'off',
+    });
+    expect(parseModelThinkingRef('OpenAI/gpt-cheap:nope')).toEqual({
+      name: 'OpenAI/gpt-cheap:nope',
+    });
+    expect(parseModelThinkingRef('OpenAI/gpt-cheap')).toEqual({ name: 'OpenAI/gpt-cheap' });
+  });
+});
+
+describe('thinkingToOverride', () => {
+  it('off 关推理，其余开推理并钉死档位', () => {
+    expect(thinkingToOverride('off')).toEqual({ reasoning: 'off' });
+    expect(thinkingToOverride('xhigh')).toEqual({ reasoning: 'on', thinkingLevel: 'xhigh' });
   });
 });

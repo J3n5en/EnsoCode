@@ -55,7 +55,20 @@ describe('coworker tool model 参数', () => {
       undefined,
       {} as never
     );
-    expect(deps.spawn).toHaveBeenCalledWith('bob', undefined, 'OpenAI/gpt-cheap');
+    expect(deps.spawn).toHaveBeenCalledWith('bob', undefined, 'OpenAI/gpt-cheap', undefined);
+  });
+
+  it('spawn 解析 model:high 后缀并透传 thinking', async () => {
+    const deps = makeDeps();
+    const tool = createCoworkerTool(deps);
+    await tool.execute(
+      't1',
+      { operation: 'spawn', name: 'bob', task: 'do', model: 'OpenAI/gpt-cheap:high' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.spawn).toHaveBeenCalledWith('bob', undefined, 'OpenAI/gpt-cheap', 'high');
   });
 
   it('models 为空时 schema 不含 model 参数', () => {

@@ -36,8 +36,15 @@ const LEVEL_LABEL_KEYS: Record<ModelThinkingLevelOverride, string> = {
 const isThinkingLevelOverride = (value: string): value is ModelThinkingLevelOverride =>
   (MODEL_THINKING_LEVEL_OVERRIDES as readonly string[]).includes(value);
 
-/** 推理三态（跟随会话/开/关）+ 开启时的档位，内联在条目行里 */
-function ReasoningControls({
+function thinkingSelectValue(entry: SubagentModelEntry): string {
+  if (entry.reasoning === 'off') return 'off';
+  if (entry.thinkingLevel) return entry.thinkingLevel;
+  if (entry.reasoning === 'on') return 'medium';
+  return 'follow';
+}
+
+/** 对齐 pi `/thinking`：一档选择器，Follow / Off / Min…Max */
+function ThinkingControls({
   entry,
   onPatch,
   t,
@@ -47,66 +54,46 @@ function ReasoningControls({
   t: (key: string) => string;
 }) {
   return (
-    <>
-      <Select
-        items={[
-          { value: 'follow', label: t('Follow conversation') },
-          { value: 'on', label: t('On') },
-          { value: 'off', label: t('Off') },
-        ]}
-        value={entry.reasoning ?? 'follow'}
-        onValueChange={(value) => {
-          const reasoning = value === 'on' || value === 'off' ? value : undefined;
-          onPatch({ reasoning, ...(reasoning === 'on' ? {} : { thinkingLevel: undefined }) });
-        }}
+    <Select
+      items={[
+        { value: 'follow', label: t('Follow conversation') },
+        { value: 'off', label: t('Off') },
+        ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
+          value: level,
+          label: t(LEVEL_LABEL_KEYS[level]),
+        })),
+      ]}
+      value={thinkingSelectValue(entry)}
+      onValueChange={(value) => {
+        if (value === 'off') {
+          onPatch({ reasoning: 'off', thinkingLevel: undefined });
+          return;
+        }
+        if (value && isThinkingLevelOverride(value)) {
+          onPatch({ reasoning: 'on', thinkingLevel: value });
+          return;
+        }
+        onPatch({ reasoning: undefined, thinkingLevel: undefined });
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        data-slot="subagent-model-thinking-level"
+        className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
+        title={t('Thinking level')}
       >
-        <SelectTrigger
-          size="sm"
-          data-slot="subagent-model-reasoning"
-          className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup>
-          <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
-          <SelectItem value="on">{t('On')}</SelectItem>
-          <SelectItem value="off">{t('Off')}</SelectItem>
-        </SelectPopup>
-      </Select>
-      {entry.reasoning === 'on' && (
-        <Select
-          items={[
-            { value: 'follow', label: t('Follow conversation') },
-            ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
-              value: level,
-              label: t(LEVEL_LABEL_KEYS[level]),
-            })),
-          ]}
-          value={entry.thinkingLevel ?? 'follow'}
-          onValueChange={(value) => {
-            onPatch({
-              thinkingLevel: value && isThinkingLevelOverride(value) ? value : undefined,
-            });
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            data-slot="subagent-model-thinking-level"
-            className="h-7 min-h-7 w-auto min-w-0 shrink-0 text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
-            {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
-              <SelectItem key={level} value={level}>
-                {t(LEVEL_LABEL_KEYS[level])}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      )}
-    </>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectPopup>
+        <SelectItem value="follow">{t('Follow conversation')}</SelectItem>
+        <SelectItem value="off">{t('Off')}</SelectItem>
+        {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
+          <SelectItem key={level} value={level}>
+            {t(LEVEL_LABEL_KEYS[level])}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
   );
 }
 
@@ -198,7 +185,7 @@ export function SubagentModelsSettings() {
                   onThinkingChange={() => undefined}
                 />
               </div>
-              <ReasoningControls
+              <ThinkingControls
                 entry={entry}
                 onPatch={(updates) => updateEntry(entry.id, updates)}
                 t={t}

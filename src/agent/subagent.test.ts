@@ -58,7 +58,7 @@ describe('subagent tool model 参数', () => {
       undefined,
       {} as never
     );
-    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, cheapConfig);
+    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, cheapConfig, undefined);
     expect((result.details as { modelId?: string }).modelId).toBe('gpt-cheap');
     const emitted = (deps.emitUpdate as ReturnType<typeof vi.fn>).mock.calls.map(
       ([info]) => info.modelId
@@ -70,7 +70,7 @@ describe('subagent tool model 参数', () => {
     const deps = makeDeps();
     const tool = createSubagentTool(deps);
     await tool.execute('t1', { description: 'x', prompt: 'do' }, undefined, undefined, {} as never);
-    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined);
+    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined, undefined);
   });
 
   it('报告末尾附运行脚注:工具调用统计与模型', async () => {
@@ -212,8 +212,58 @@ describe('subagent tool model 参数', () => {
     );
     expect(deps.createSubSession).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'scout' }),
-      cheapConfig
+      cheapConfig,
+      undefined
     );
     expect((result.details as { modelId?: string }).modelId).toBe('gpt-cheap');
+  });
+
+  it('model 后缀 :high 解析为模型 + thinking，thinking 参数优先', async () => {
+    const deps = makeDeps();
+    const tool = createSubagentTool(deps);
+    await tool.execute(
+      't1',
+      { description: 'x', prompt: 'do', model: 'OpenAI/gpt-cheap:high' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, cheapConfig, 'high');
+
+    await tool.execute(
+      't2',
+      {
+        description: 'x',
+        prompt: 'do',
+        model: 'OpenAI/gpt-cheap:high',
+        thinking: 'off',
+      },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.createSubSession).toHaveBeenLastCalledWith(undefined, cheapConfig, 'off');
+  });
+
+  it('仅 thinking 参数时不改模型，非法档位报错', async () => {
+    const deps = makeDeps();
+    const tool = createSubagentTool(deps);
+    await tool.execute(
+      't1',
+      { description: 'x', prompt: 'do', thinking: 'xhigh' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined, 'xhigh');
+    await expect(
+      tool.execute(
+        't2',
+        { description: 'x', prompt: 'do', thinking: 'ultra' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/xhigh/);
   });
 });
