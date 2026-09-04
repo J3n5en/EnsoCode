@@ -73,6 +73,33 @@ describe('subagent tool model 参数', () => {
     expect(deps.createSubSession).toHaveBeenCalledWith(undefined, undefined);
   });
 
+  it('报告末尾附运行脚注:工具调用统计与模型', async () => {
+    const session = {
+      ...fakeSession('report body'),
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'c1', name: 'read', arguments: {} }],
+        },
+        { role: 'assistant', content: [{ type: 'text', text: 'report body' }] },
+      ],
+    } as unknown as AgentSession;
+    const deps = makeDeps({ createSubSession: vi.fn(async () => session) });
+    const tool = createSubagentTool(deps);
+    const result = await tool.execute(
+      't1',
+      { description: 'x', prompt: 'do' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    const text = (result.content[0] as { text: string }).text;
+    expect(text.startsWith('report body')).toBe(true);
+    expect(text).toContain('read 1');
+    expect(text).toContain('bash 0');
+    expect(text).toContain('parent-model');
+  });
+
   it('model 参数说明携带用户写的选型描述', () => {
     const tool = createSubagentTool(makeDeps());
     const properties = (tool.parameters as { properties: Record<string, { description?: string }> })

@@ -1,13 +1,17 @@
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { positiveContextWindow } from '@shared/modelCatalog';
 import type {
   AgentTypeSpawnConfig,
   SpawnModelConfig,
   SubagentInfo,
   SubagentModelOption,
 } from '@shared/types/agent';
+import { runFooter } from './runFooter';
 
 /** 进度事件节流 */
 const UPDATE_INTERVAL_MS = 500;
+/** 异步完成通知里的报告上限 */
+const NOTIFY_LIMIT = 1500;
 
 export interface SubagentDeps {
   /** 创建子会话（supervisor 闭包：复用父的 runtime/model/工具组装,不含 task/todo） */
@@ -266,13 +270,23 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
       const onAbort = () => void session.abort();
       if (wait) signal?.addEventListener('abort', onAbort, { once: true });
 
+      let footer = '';
       const run = async (): Promise<string> => {
         const fullPrompt = agentType?.systemPrompt
           ? `<role>\n${agentType.systemPrompt}\n</role>\n\n${prompt}`
           : prompt;
         try {
           await session.prompt(fullPrompt);
-          let result = lastAssistantText(session);
+          let result = lastAssistantText(session) || '(subagent produced no output)';
+          // 脚注先于 gate:工具分布/耗时是子代理自身的事实,gate 是父的验收
+          footer = runFooter({
+            messages: session.messages,
+            label: agentType?.name ?? 'general',
+            modelId: info.modelId ?? deps.modelId,
+            elapsedMs: Date.now() - info.startedAt,
+            contextWindow: positiveContextWindow(session.model),
+          });
+          result += `\n\n${footer}`;
           // gate 验收:退出码说了算,不信子代理自称完成
           if (gate && !(wait && signal?.aborted)) {
             result += `\n\n${await deps.runGate(gate)}`;
@@ -283,7 +297,7 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
           info.currentActivity = '';
           deps.emitUpdate({ ...info });
           if (aborted) throw new Error('Subagent aborted');
-          return result || '(subagent produced no output)';
+          return result;
         } catch (error) {
           info.status = 'failed';
           info.currentActivity = '';
@@ -301,10 +315,12 @@ export function createSubagentTool(deps: SubagentDeps): ToolDefinition {
         // 派发即返回;完成后报告经通知回传(失败立即,成功合并投递)
         void run()
           .then((result) => {
-            deps.notify(
-              `Subagent "${info.description}" finished:\n${result.slice(0, 1500)}`,
-              false
-            );
+            // 截断也要保住脚注:它是主 agent 判断该不该信这份报告的依据
+            const brief =
+              result.length > NOTIFY_LIMIT
+                ? `${result.slice(0, NOTIFY_LIMIT)}\n…(truncated)\n${footer}`
+                : result;
+            deps.notify(`Subagent "${info.description}" finished:\n${brief}`, false);
           })
           .catch((error) => {
             deps.notify(
