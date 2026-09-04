@@ -194,8 +194,11 @@ async function runAuthorize(
   const codePromise = callback.waitForCode();
   codePromise.catch(() => {});
 
+  // 重新授权前清掉失效 token（否则 SDK 先走 refresh，invalid_grant 直接抛错）；
+  // 用户中途取消时再放回去，避免把原本可用的凭据弄没
+  const previousTokens = deps.store.tokens(serverId);
+  let authorized = false;
   try {
-    // 失效的旧 token 会让 SDK 先走 refresh 并在 invalid_grant 上直接抛错，重新授权前先清掉
     deps.store.clearTokens(serverId);
     const provider = new McpOAuthClientProvider({
       serverId,
@@ -212,11 +215,15 @@ async function runAuthorize(
       result = await deps.auth(provider, { serverUrl, authorizationCode: code });
     }
     if (result !== 'AUTHORIZED') return { ok: false, error: '授权未完成。' };
+    authorized = true;
     deps.onAuthorized?.(serverId);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: message(error) };
   } finally {
+    if (!authorized && previousTokens && !deps.store.tokens(serverId)) {
+      deps.store.saveTokens(serverId, previousTokens);
+    }
     callback.close();
   }
 }

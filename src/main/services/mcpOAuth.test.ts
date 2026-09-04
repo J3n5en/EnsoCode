@@ -162,6 +162,26 @@ describe('authorizeMcpServer', () => {
     expect(server.close).toHaveBeenCalled();
   });
 
+  it('授权未完成时回滚旧凭据，不把原本可用的 token 弄没', async () => {
+    const store = newStore();
+    store.saveTokens('s1', { access_token: 'old', refresh_token: 'r-old' });
+    const server = fakeCallbackServer(() => Promise.reject(new Error('用户关了浏览器')));
+    const result = await authorizeMcpServer('s1', {
+      store,
+      resolveServer: () => ({
+        id: 's1',
+        name: 'notion',
+        transport: 'http',
+        url: 'https://mcp.test/mcp',
+      }),
+      startCallbackServer: server.start as never,
+      auth: (async () => 'REDIRECT') as never,
+      openExternal: vi.fn(),
+    });
+    expect(result.ok).toBe(false);
+    expect(store.tokens('s1')).toEqual({ access_token: 'old', refresh_token: 'r-old' });
+  });
+
   it('首轮即 AUTHORIZED 时不等待回调', async () => {
     const server = fakeCallbackServer(() => Promise.reject(new Error('不该等待')));
     const auth = vi.fn(async () => 'AUTHORIZED' as const);
