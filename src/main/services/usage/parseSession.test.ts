@@ -80,6 +80,18 @@ describe('parseSessionJsonl — session 头', () => {
     const parsed = parseSessionJsonl(text);
     expect(parsed?.sessionId).toBe('01a065a9');
     expect(parsed?.project).toBe('enso-code');
+    expect(parsed?.cwd).toBe('/Users/x/project/enso-code');
+  });
+
+  it('worktree cwd 解析时仍用叶子目录名，归并留给别名层', () => {
+    const text = jsonl([
+      sessionHeader({
+        cwd: '/Users/x/Library/Application Support/enso-code/worktrees/proj-uuid/3085e88f',
+      }),
+    ]);
+    const parsed = parseSessionJsonl(text);
+    expect(parsed?.project).toBe('3085e88f');
+    expect(parsed?.cwd).toContain('/worktrees/proj-uuid/3085e88f');
   });
 
   it('cwd 为 windows 反斜杠路径时也能取到 basename', () => {

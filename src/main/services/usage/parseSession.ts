@@ -4,6 +4,8 @@ import type { UsageRecord } from '@shared/usage/types';
 export interface ParsedSession {
   sessionId: string;
   project: string;
+  /** session 头 cwd，用量按项目归并时用来识别 worktree */
+  cwd?: string;
   records: UsageRecord[];
   /** 每轮 [user ts, 该轮最后一条 assistant/toolResult ts]，单轮上限 6h */
   spans: ActivitySpan[];
@@ -43,6 +45,7 @@ function entryTs(entry: Record<string, unknown>, message: Record<string, unknown
 export function parseSessionJsonl(text: string): ParsedSession | null {
   let sessionId: string | null = null;
   let project = '';
+  let cwd = '';
   const records = new Map<string, UsageRecord>();
   let userMessages = 0;
   const spans: ActivitySpan[] = [];
@@ -71,7 +74,10 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
 
     if (e.type === 'session') {
       if (typeof e.id === 'string') sessionId = e.id;
-      if (e.cwd !== undefined) project = basename(e.cwd);
+      if (typeof e.cwd === 'string') {
+        cwd = e.cwd;
+        project = basename(e.cwd);
+      }
       continue;
     }
     if (e.type !== 'message' || !e.message || typeof e.message !== 'object') continue;
@@ -115,5 +121,13 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
     r.project = project;
   }
   const activeMs = spans.reduce((sum, span) => sum + (span.end - span.start), 0);
-  return { sessionId, project, records: [...records.values()], spans, activeMs, userMessages };
+  return {
+    sessionId,
+    project,
+    ...(cwd ? { cwd } : {}),
+    records: [...records.values()],
+    spans,
+    activeMs,
+    userMessages,
+  };
 }

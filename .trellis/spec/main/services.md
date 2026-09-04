@@ -192,3 +192,18 @@ function isRegisteredSource(id: string, sourcePath: string): boolean { ... }
   hover 遮罩与「接管」按钮画在 renderer（见 windows.md 层级一节）。
 - 浏览器工具 `executionMode: 'sequential'`：navigate 会清 ref，并行必假 stale。
 - 回合结束（`turn-completed` / `turn-failed`）关未锁且用户没在看的 tab；`parent-ended` 强关。
+
+## 用量「按项目」不能用 cwd basename
+
+`parseSessionJsonl` 从 session 头 `cwd` 取叶子目录名当 `project`。Enso 隔离 worktree 的路径是
+`userData/worktrees/<projectId>/<8 位会话短 id>`，叶子名会变成 `3085e88f` 这类 hash，
+设置页「按项目」就会把同一仓库拆成多个条目。
+
+正确身份是**主项目名**，不是当前工作目录名：
+
+- 解析层仍保留 basename + `cwd`（jsonl 事实）
+- 归并在 `usage/projectLabel.ts`：用 settings 项目 + `worktrees.json` 按 cwd / 叶子名 / `worktrees/<projectId>/…` 映射
+- `ingestSessionJsonl` 与 `getUsageSummary` 都走同一套别名，旧账本只剩短 id 也能并回去
+
+Wrong：`project = basename(cwd)` 直接进聚合。
+Correct：`usageProjectLabel(basename, cwd, aliases)` 后再 `aggregateUsage`。

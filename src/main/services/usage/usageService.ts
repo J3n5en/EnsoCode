@@ -6,8 +6,10 @@ import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import { app } from 'electron';
 import { getRuntime } from '../oauthProviders';
+import { loadUsageProjectAliases } from './aliases';
 import { loadLedger } from './ledgerStore';
 import { type ParsedSession, parseSessionJsonl } from './parseSession';
+import { applyUsageProjectAliases } from './projectLabel';
 
 interface CacheEntry {
   mtimeMs: number;
@@ -146,7 +148,11 @@ export async function getUsageSummary(days: UsageRangeDays): Promise<UsageSummar
       loadLedger(dir),
       getPricingTable(),
     ]);
-    const { records, activity } = mergeUsageSources(sessions, ledger);
+    const aliases = loadUsageProjectAliases();
+    const { records, activity } = mergeUsageSources(
+      sessions.map((session) => applyUsageProjectAliases(session, aliases)),
+      ledger.map((session) => applyUsageProjectAliases(session, aliases))
+    );
     return {
       ok: true,
       summary: aggregateUsage(records, activity, pricing, { days, now: Date.now() }),

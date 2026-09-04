@@ -1,6 +1,8 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { loadUsageProjectAliases } from './aliases';
 import { type ParsedSession, parseSessionJsonl } from './parseSession';
+import { applyUsageProjectAliases } from './projectLabel';
 
 export function usageLedgerDir(sessionDir: string): string {
   return path.join(path.dirname(sessionDir), 'usage-ledger');
@@ -28,7 +30,12 @@ export async function ingestSessionJsonl(sessionDir: string, sessionFile: string
     return;
   }
   const parsed = parseSessionJsonl(text);
-  if (parsed) await writeLedgerSnapshot(sessionDir, parsed);
+  if (parsed) {
+    await writeLedgerSnapshot(
+      sessionDir,
+      applyUsageProjectAliases(parsed, loadUsageProjectAliases())
+    );
+  }
 }
 
 export async function loadLedger(sessionDir: string): Promise<ParsedSession[]> {
@@ -49,6 +56,7 @@ export async function loadLedger(sessionDir: string): Promise<ParsedSession[]> {
       sessions.push({
         sessionId: value.sessionId,
         project: typeof value.project === 'string' ? value.project : '',
+        ...(typeof value.cwd === 'string' && value.cwd ? { cwd: value.cwd } : {}),
         records: value.records,
         spans: Array.isArray(value.spans) ? value.spans : [],
         activeMs: typeof value.activeMs === 'number' ? value.activeMs : 0,
