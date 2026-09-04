@@ -52,8 +52,10 @@ import {
   isSecureStorageAvailable,
   loadDevices,
   loadRelayUrl,
+  renameDevice as renameInList,
   saveDevices,
   saveRelayUrl,
+  upsertDevice,
 } from './pairStore';
 import {
   buildPushPayload,
@@ -320,7 +322,7 @@ function pollPairing(): void {
           relayUrl: session.relayUrl,
           pairedAt: Date.now(),
         };
-        saveDevices([...loadDevices().filter((d) => d.pairId !== device.pairId), device]);
+        saveDevices(upsertDevice(loadDevices(), device));
         pairingSession = null;
         pairingInviteUri = null;
         pairingExpiresAt = null;
@@ -334,6 +336,18 @@ function pollPairing(): void {
     pairingTimer = setTimeout(() => void tick(), 800);
   };
   void tick();
+}
+
+export function renameDevice(pairId: string, deviceName: string): { ok: boolean; error?: string } {
+  const list = loadDevices();
+  if (!list.some((d) => d.pairId === pairId)) return { ok: false, error: 'device not found' };
+  const next = renameInList(list, pairId, deviceName);
+  saveDevices(next);
+  const conn = connections.get(pairId);
+  const renamed = next.find((d) => d.pairId === pairId);
+  if (conn && renamed) conn.device = renamed;
+  notifyStatus();
+  return { ok: true };
 }
 
 export async function revokeDevice(pairId: string): Promise<void> {

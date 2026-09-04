@@ -207,39 +207,7 @@ function AllowConnectionsSection() {
         ) : (
           <div className="space-y-1">
             {devices.map((device) => (
-              <div
-                key={device.pairId}
-                className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className={cn(
-                      'h-2 w-2 shrink-0 rounded-full',
-                      device.phoneOnline
-                        ? 'bg-emerald-500'
-                        : device.connected
-                          ? 'bg-amber-500'
-                          : 'bg-muted-foreground/40'
-                    )}
-                  />
-                  <span className="truncate font-medium text-sm">{device.deviceName}</span>
-                  <span className="shrink-0 text-muted-foreground text-xs">
-                    {device.phoneOnline
-                      ? t('Online')
-                      : device.connected
-                        ? t('Waiting for device')
-                        : t('Offline')}
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                  onClick={() => void window.electronAPI.pair.revoke(device.pairId)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+              <PairedDeviceRow key={device.pairId} device={device} />
             ))}
           </div>
         )}
@@ -307,6 +275,79 @@ function ConnectToNodesSection() {
       </div>
 
       <PairNodeDialog open={pairOpen} onOpenChange={setPairOpen} switchOnSuccess={false} />
+    </div>
+  );
+}
+
+function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) {
+  const { t } = useI18n();
+  const [draft, setDraft] = React.useState<string | null>(null);
+
+  const commit = async () => {
+    if (draft === null) return;
+    if (draft.trim() && draft.trim() !== device.deviceName) {
+      await window.electronAPI.pair.rename(device.pairId, draft);
+    }
+    setDraft(null);
+  };
+
+  return (
+    <div className="group flex items-center justify-between gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/50">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span
+          className={cn(
+            'h-2 w-2 shrink-0 rounded-full',
+            device.phoneOnline
+              ? 'bg-emerald-500'
+              : device.connected
+                ? 'bg-amber-500'
+                : 'bg-muted-foreground/40'
+          )}
+        />
+        {draft === null ? (
+          <>
+            <span className="truncate font-medium text-sm">{device.deviceName}</span>
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {device.phoneOnline
+                ? t('Online')
+                : device.connected
+                  ? t('Waiting for device')
+                  : t('Offline')}
+            </span>
+          </>
+        ) : (
+          <Input
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commit();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+            className="h-7 text-sm"
+          />
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground"
+          title={t('Rename')}
+          onClick={() => setDraft(device.deviceName)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          onClick={() => void window.electronAPI.pair.revoke(device.pairId)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }

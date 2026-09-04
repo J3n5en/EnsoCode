@@ -22,6 +22,27 @@ export function isSecureStorageAvailable(): boolean {
 
 let cache: PairedDevice[] | null = null;
 
+/** 新增或按 pairId 更新凭据；更新时保留自定义名与列表位置 */
+export function upsertDevice(list: readonly PairedDevice[], device: PairedDevice): PairedDevice[] {
+  const existing = list.find((d) => d.pairId === device.pairId);
+  if (existing) {
+    return list.map((d) =>
+      d.pairId === device.pairId ? { ...device, deviceName: d.deviceName } : d
+    );
+  }
+  return [...list, device];
+}
+
+export function renameDevice(
+  list: readonly PairedDevice[],
+  pairId: string,
+  deviceName: string
+): PairedDevice[] {
+  const trimmed = deviceName.trim();
+  if (!trimmed) return [...list];
+  return list.map((d) => (d.pairId === pairId ? { ...d, deviceName: trimmed } : d));
+}
+
 export function loadDevices(): PairedDevice[] {
   if (cache) return cache;
   try {

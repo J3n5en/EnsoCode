@@ -10,6 +10,7 @@ import { ipcMain } from 'electron';
 import {
   cancelPairing,
   getPairStatus,
+  renameDevice,
   revokeDevice,
   setPairQueueActionListener,
   setPairResumeListener,
@@ -55,6 +56,12 @@ export function registerPairHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.PAIR_REVOKE, async (_event, pairId: unknown) => {
     if (typeof pairId === 'string' && pairId) await revokeDevice(pairId);
+  });
+  ipcMain.handle(IPC_CHANNELS.PAIR_RENAME, (_event, pairId: unknown, deviceName: unknown) => {
+    if (typeof pairId !== 'string' || !pairId || typeof deviceName !== 'string') {
+      return { ok: false, error: 'invalid arguments' };
+    }
+    return renameDevice(pairId, deviceName);
   });
   ipcMain.handle(IPC_CHANNELS.PAIR_STATUS, () => getPairStatus());
   ipcMain.handle(IPC_CHANNELS.PAIR_SET_RELAY, (_event, url: unknown) => {
