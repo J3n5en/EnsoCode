@@ -1000,6 +1000,39 @@ export const useSessionsStore = create<SessionsState>()(
         }
       });
 
+      /**
+       * prompt/steer 统一投递：静默失败就是「发了没反应只能重启」。失败时收回乐观回显、
+       * 文本退回输入框、显式报错，并清 started 让下次发送重新 spawn（worker 退出 /
+       * generation 过期都靠这条路自愈）。返回错误文案，成功为 null。
+       */
+      async function deliver(
+        id: string,
+        text: string,
+        images: AttachedImage[] | undefined,
+        mode: 'prompt' | 'steer'
+      ): Promise<string | null> {
+        const result =
+          mode === 'steer'
+            ? await window.electronAPI.agent.steer(id, text, images)
+            : await window.electronAPI.agent.prompt(id, text, images);
+        if (result.ok) return null;
+        const error = result.error ?? 'send failed';
+        set((state) => {
+          const current = state.conversations[id];
+          if (!current) return state;
+          const messages = [...current.messages];
+          if (messages.at(-1)?.optimistic) messages.pop();
+          return patch(state, id, {
+            messages,
+            draftText: text,
+            started: false,
+            status: 'failed',
+            error,
+          });
+        });
+        return error;
+      }
+
       /** goal 续跑:轮次收束且空闲、无排队消息/挂起项时,自动注入一条继续指令(带安全限制) */
       function continueGoal(id: string): void {
         const conversation = get().conversations[id];
@@ -1077,7 +1110,7 @@ export const useSessionsStore = create<SessionsState>()(
             ],
           })
         );
-        void window.electronAPI.agent.prompt(id, text, undefined);
+        void deliver(id, text, undefined, 'prompt');
       }
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
@@ -1109,7 +1142,7 @@ export const useSessionsStore = create<SessionsState>()(
             ],
           })
         );
-        void window.electronAPI.agent.prompt(id, next.text, next.images);
+        void deliver(id, next.text, next.images, 'prompt');
       }
 
       return {
@@ -1779,29 +1812,17 @@ export const useSessionsStore = create<SessionsState>()(
               }
             }
           }
-          const action =
-            get().conversations[id]?.status === 'running'
-              ? window.electronAPI.agent.steer(id, text, images)
-              : window.electronAPI.agent.prompt(id, text, images);
-          const result = await action;
-          if (result.ok) return null;
-          // 静默失败就是「发了没反应只能重启」：收回乐观回显、文本退回输入框、显式报错；
-          // 并清 started 让下次发送重新 spawn（worker 退出 / generation 过期都靠这条路自愈）。
-          const error = result.error ?? 'send failed';
-          set((state) => {
-            const current = state.conversations[id];
-            if (!current) return state;
-            const messages = [...current.messages];
-            if (messages.at(-1)?.optimistic) messages.pop();
-            return patch(state, id, {
-              messages,
-              draftText: submittedText,
-              started: false,
-              status: 'failed',
-              error,
-            });
-          });
-          return error;
+          const failure = await deliver(
+            id,
+            text,
+            images,
+            get().conversations[id]?.status === 'running' ? 'steer' : 'prompt'
+          );
+          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文
+          if (failure && text !== submittedText) {
+            set((state) => patch(state, id, { draftText: submittedText }));
+          }
+          return failure;
         },
 
         async resumeConversation(id) {
@@ -2014,7 +2035,7 @@ export const useSessionsStore = create<SessionsState>()(
                 ],
               })
             );
-            void window.electronAPI.agent.prompt(conversationId, kickoff, undefined);
+            void deliver(conversationId, kickoff, undefined, 'prompt');
           }
         },
 
@@ -2058,7 +2079,7 @@ export const useSessionsStore = create<SessionsState>()(
                 ],
               })
             );
-            void window.electronAPI.agent.prompt(conversationId, text, undefined);
+            void deliver(conversationId, text, undefined, 'prompt');
           }
         },
 
@@ -2197,12 +2218,8 @@ export const useSessionsStore = create<SessionsState>()(
               ],
             })
           );
-          if (running) {
-            // steer 插入当前轮
-            void window.electronAPI.agent.steer(conversationId, item.text, item.images);
-          } else {
-            void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
-          }
+          // running 时 steer 插入当前轮
+          void deliver(conversationId, item.text, item.images, running ? 'steer' : 'prompt');
         },
 
         async interruptAndSendQueued(conversationId, messageId) {
@@ -2257,7 +2274,7 @@ export const useSessionsStore = create<SessionsState>()(
               ],
             })
           );
-          void window.electronAPI.agent.prompt(conversationId, item.text, item.images);
+          void deliver(conversationId, item.text, item.images, 'prompt');
         },
 
         async hireCoworker(parentId, name, agentType) {
