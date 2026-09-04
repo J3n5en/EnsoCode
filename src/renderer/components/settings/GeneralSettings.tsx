@@ -26,10 +26,7 @@ export function GeneralSettings() {
         <p className="text-sm text-muted-foreground">{t('General application settings')}</p>
       </div>
 
-      <div
-        className="grid grid-cols-[140px_1fr] items-center gap-4"
-        data-settings-row="general.language"
-      >
+      <div className="flex items-center gap-3" data-settings-row="general.language">
         <span className="text-sm font-medium">{t('Language')}</span>
         <Select
           items={{ en: 'English', zh: '简体中文' }}
@@ -187,7 +184,7 @@ function ProxySection() {
           {t('Used by model requests, the built-in browser, and agent tools')}
         </p>
       </div>
-      <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+      <div className="flex items-center gap-3">
         <span className="text-sm font-medium">{t('Proxy mode')}</span>
         <Select
           items={{
