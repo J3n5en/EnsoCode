@@ -470,3 +470,21 @@ Reviewed the tester coworker's session jsonl, then fixed the protocol gaps it ex
 ### Status
 
 [OK] **Completed**
+
+## 09-04 MCP OAuth 授权与连接状态可见（09-04-mcp-oauth-status）
+
+用户报「手动加的 Notion MCP 不生效」。排查确认 Manual 条目入链正常，
+真因是 `https://mcp.notion.com/mcp` 返回 401 + `www-authenticate: Bearer realm="OAuth"`，
+而 worker 建 transport 时没有 authProvider，失败只 `console.error`，UI 零反馈。
+
+落地：main 编排 OAuth（DCR+PKCE+loopback 回调，token 经 safeStorage 加密落盘）、
+worker 只消费 token 并自动 refresh、状态经独立 IPC 通道（不污染 sessions store）到设置页。
+
+两轮独立 reviewer 抓到的关键坑（都属于「测试全绿但真场景必踩」）：
+- token 白名单用 `hasOnlyKeys` 拒绝含 `id_token` 的 refresh 结果 → 刷新后的 token 永不落盘。
+  白名单应当**裁剪**而不是整条判负。
+- 缓存 key 含 token 指纹 + 换 token 就 close 旧连接 → 已跑会话的工具闭包捕获着那个 client，
+  token 刷新（常态）会直接弄坏它们。改为原地 `updateTokens`，只有撤销才下线重建。
+- 授权前无条件 `clearTokens`，用户中途取消就把原本可用的凭据弄没 → 失败路径回滚。
+
+遗留：真实 Notion 端到端授权未验证（需要用户账号）；授权只对新建会话生效（工具集 spawn 时定格）。
