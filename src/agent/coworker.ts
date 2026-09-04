@@ -102,7 +102,7 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
       (typeList ? ` Available agent types: ${typeList}.` : ''),
     promptSnippet:
       'coworker: hire a persistent named agent (own tab, own accumulating context, multi-round by design). ' +
-      'Use subagent for one-shot subtasks; use coworker whenever follow-up rounds are likely or the user ' +
+      'Use subagent for one-shot subtasks; use coworker whenever follow-up rounds are possible or the user ' +
       'should watch and join, then keep steering it with send. ' +
       'spawn/send are async by default — you get notified on completion; when idle use wait {name} ' +
       'instead of sleep/poll, and report {name} for the untruncated last result. ' +
@@ -112,8 +112,11 @@ export function createCoworkerTool(deps: CoworkerToolDeps): ToolDefinition {
         ? '. A model parameter on spawn lets you pick a cheaper/stronger model per role — see the tool schema for options'
         : ''),
     promptGuidelines: [
-      'Hire a coworker when a line of work will need follow-up rounds (implement then verify then fix), ' +
-        'when you want to keep steering the same accumulated context, or when the user should watch and join. ' +
+      'Hire a coworker whenever the same thread MAY need a follow-up round: review/verify loops, test-fix loops, ' +
+        'requests phrased like "check it, fix whatever it finds, check again" (看看有没有问题、有问题再改再审), ' +
+        'or when the user should watch and join. Spawn it in the FIRST round, not after a subagent already reported. ' +
+        'When in doubt choose coworker: an unused coworker costs one dismiss, while a chained one-shot subagent ' +
+        'must re-read everything and forgets the previous round. ' +
         'Prefer it over redoing multi-step work yourself or chaining one-shot subagents for the same thread',
       'A coworker is multi-round by default: give it the role and the first step in spawn, then steer with send. ' +
         'A "finished a round" notice is not completion — reply with send to verify, correct, or ask for evidence; ' +
