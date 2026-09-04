@@ -217,6 +217,8 @@ function createSessionResourceLoader(options: {
   cwd: string;
   agentDir: string;
   noSkills: boolean;
+  /** 类型化子代理:不装项目扩展(扩展注册的工具与 systemPrompt 注入是给主会话的,漏进去会让它误以为要再委派) */
+  noExtensions?: boolean;
   skillPaths: string[];
   instruction?: { path: string; content: string };
   /** 远程会话:替换掉本地 cwd 扫描出的 AGENTS.md(cwd 在本机不存在),只用预取的远端文件 */
@@ -226,6 +228,7 @@ function createSessionResourceLoader(options: {
     cwd: options.cwd,
     agentDir: options.agentDir,
     noSkills: options.noSkills,
+    ...(options.noExtensions ? { noExtensions: true } : {}),
     ...(options.skillPaths.length > 0 ? { additionalSkillPaths: options.skillPaths } : {}),
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
@@ -1223,6 +1226,7 @@ export class SessionSupervisor {
               cwd,
               agentDir: this.options.agentDir,
               noSkills: resolved || agentType ? true : loadLocalSkills === false,
+              noExtensions: Boolean(resolved || agentType),
               skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
               instruction,
               remoteAgentsFiles,

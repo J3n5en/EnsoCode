@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   managers: [] as Array<Record<string, unknown>>,
   mcpToolsFor: vi.fn(),
   createAgentSession: vi.fn(),
+  loaderOptions: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('./cursor/loadProvider', () => ({
@@ -24,6 +25,9 @@ vi.mock('./mcp', () => ({
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   const original = await importOriginal<Record<string, unknown>>();
   class Loader {
+    constructor(options: Record<string, unknown>) {
+      mocks.loaderOptions.push(options);
+    }
     async reload() {}
     getSkills() {
       return { skills: [] };
@@ -192,6 +196,7 @@ describe('SessionSupervisor coworker wait/report', () => {
   beforeEach(() => {
     mocks.sessions.length = 0;
     mocks.managers.length = 0;
+    mocks.loaderOptions.length = 0;
     mocks.createAgentSession.mockReset();
     rmSync('/tmp/sessions', { recursive: true, force: true });
     mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
@@ -503,5 +508,49 @@ describe('SessionSupervisor coworker wait/report', () => {
       )
     );
     expect(text).toMatch(/in progress/);
+  });
+
+  it('类型化 coworker 的资源加载器不装项目扩展(noExtensions),主会话与 general 子代理照常装', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: '/tmp/sessions',
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      agentTypes: [
+        { name: 'scout', description: 'recon', systemPrompt: 'look', tools: 'readonly' },
+      ],
+    });
+    await settle();
+    expect(mocks.loaderOptions[0]?.noExtensions).not.toBe(true);
+    const parentOptions = mocks.createAgentSession.mock.calls[0][0] as {
+      customTools: CoworkerToolLike[];
+    };
+    const coworkerTool = parentOptions.customTools.find(
+      (tool) => (tool as unknown as { name: string }).name === 'coworker'
+    ) as unknown as CoworkerToolLike;
+    await coworkerTool.execute(
+      't1',
+      { operation: 'spawn', name: 'eyes', agent_type: 'scout', task: 'look around' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    expect(mocks.loaderOptions[1]?.noExtensions).toBe(true);
+    await coworkerTool.execute(
+      't2',
+      { operation: 'spawn', name: 'plain', task: 'general helper' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    expect(mocks.loaderOptions[2]?.noExtensions).not.toBe(true);
   });
 });
