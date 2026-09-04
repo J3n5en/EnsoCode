@@ -6,6 +6,7 @@ import {
   type AgentSession,
   createAgentSession,
   createBashToolDefinition,
+  createEditToolDefinition,
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
@@ -80,7 +81,6 @@ import {
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
-import { createLenientEditTool } from './editTool';
 import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
 import { EnsoSafeJournal } from './ensoSafeJournal';
 import { OperationGate } from './gate';
@@ -1176,7 +1176,10 @@ export class SessionSupervisor {
         ),
         scoped(
           'file-edit',
-          createLenientEditTool(cwd, remoteOps ? { operations: remoteOps.edit } : undefined)
+          createEditToolDefinition(
+            cwd,
+            remoteOps ? { operations: remoteOps.edit } : undefined
+          ) as unknown as Def
         ),
         scoped(
           'file-write',
