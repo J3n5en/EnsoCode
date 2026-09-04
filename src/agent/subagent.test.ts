@@ -136,6 +136,35 @@ describe('subagent tool model 参数', () => {
     expect(createSubagentTool(makeDeps()).promptGuidelines?.join('\n')).not.toMatch(/scout/);
   });
 
+  it('存在必须自选的 agent_type 时，guidelines 提前要求带 model，避免漏填重试', () => {
+    const text =
+      createSubagentTool(
+        makeDeps({
+          agentTypes: [
+            {
+              name: 'scout',
+              description: 'recon',
+              systemPrompt: '',
+              tools: 'readonly',
+              allowModelOverride: true,
+            },
+          ],
+        })
+      ).promptGuidelines?.join('\n') ?? '';
+    expect(text).toMatch(/\[custom model required\]/);
+    expect(text).toMatch(/always pass model/i);
+    expect(text).toMatch(/OpenAI\/gpt-cheap/);
+    expect(
+      createSubagentTool(
+        makeDeps({
+          agentTypes: [
+            { name: 'scout', description: 'recon', systemPrompt: '', tools: 'readonly' },
+          ],
+        })
+      ).promptGuidelines?.join('\n')
+    ).not.toMatch(/always pass model/i);
+  });
+
   it('类型选型按类型逐个拼接，关掉一个不影响其余', () => {
     const text = createSubagentTool(
       makeDeps({
@@ -183,6 +212,31 @@ describe('subagent tool model 参数', () => {
         {} as never
       )
     ).rejects.toThrow(/does not allow custom model selection/i);
+  });
+
+  it('当 agent_type 设为必须自选（allowModelOverride === true）时，不填 model 拒绝继承', async () => {
+    const deps = makeDeps({
+      agentTypes: [
+        {
+          name: 'scout',
+          description: 'scout',
+          systemPrompt: '',
+          tools: 'readonly',
+          allowModelOverride: true,
+        },
+      ],
+    });
+    const tool = createSubagentTool(deps);
+    await expect(
+      tool.execute(
+        't1',
+        { description: 'x', prompt: 'do', agent_type: 'scout' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/requires a model/i);
+    expect(deps.createSubSession).not.toHaveBeenCalled();
   });
 
   it('当 agent_type 设为必须自选（allowModelOverride === true）时，允许指定 model', async () => {
