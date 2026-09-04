@@ -1,4 +1,5 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { conversationDotTone } from '@shared/conversationDotTone';
 import { resolveChatModel } from '@shared/defaultModel';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -338,7 +339,10 @@ export function ChatView() {
                   {parent?.worktree ? ` · ${parent.worktree.branch}` : ''}
                 </span>
               )}
-              <StatusDot status={conversation.spawning ? 'running' : conversation.status} />
+              <StatusDot
+                status={conversation.spawning ? 'running' : conversation.status}
+                pendingAskCount={(conversation.pendingAsks ?? []).length}
+              />
             </div>
           }
         />
@@ -554,16 +558,18 @@ const ENSO_PREFILL_CANDIDATE: AgentTypeMentionCandidate = {
   canEdit: false,
 };
 
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status, pendingAskCount = 0 }: { status: string; pendingAskCount?: number }) {
+  const tone = conversationDotTone({ status, pendingAskCount });
   return (
     <span
       className={cn(
         'h-2 w-2 rounded-full',
-        status === 'running' && 'animate-pulse bg-blue-500',
-        status === 'failed' && 'bg-destructive',
-        status === 'idle' && 'bg-muted-foreground/30'
+        tone === 'running' && 'animate-pulse bg-blue-500',
+        tone === 'failed' && 'bg-destructive',
+        tone === 'waiting' && 'animate-pulse bg-green-500',
+        tone === 'idle' && 'bg-muted-foreground/30'
       )}
-      title={status}
+      title={tone === 'waiting' ? 'waiting' : status}
     />
   );
 }

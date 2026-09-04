@@ -8,6 +8,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { conversationDotTone } from '@shared/conversationDotTone';
 import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -1560,19 +1561,28 @@ function WorktreeBadge({ status }: { status?: WorktreeStatus }) {
 function ConversationDot({
   conversation,
 }: {
-  conversation: { status: string; spawning: boolean; unread?: boolean };
+  conversation: {
+    status: string;
+    spawning: boolean;
+    unread?: boolean;
+    pendingAsks?: { requestId: string }[];
+  };
 }) {
-  const running = conversation.status === 'running' || conversation.spawning;
-  const failed = !running && conversation.status === 'failed';
-  const unread = !running && !failed && conversation.unread === true;
+  const tone = conversationDotTone({
+    status: conversation.status,
+    spawning: conversation.spawning,
+    unread: conversation.unread,
+    pendingAskCount: conversation.pendingAsks?.length ?? 0,
+  });
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        running && 'animate-pulse bg-blue-500',
-        failed && 'bg-destructive',
-        unread && 'bg-green-500',
-        !running && !failed && !unread && 'bg-muted-foreground/30'
+        tone === 'running' && 'animate-pulse bg-blue-500',
+        tone === 'failed' && 'bg-destructive',
+        tone === 'waiting' && 'animate-pulse bg-green-500',
+        tone === 'unread' && 'bg-green-500',
+        tone === 'idle' && 'bg-muted-foreground/30'
       )}
     />
   );
