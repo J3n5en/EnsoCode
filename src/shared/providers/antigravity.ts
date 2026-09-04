@@ -10,7 +10,7 @@
  *
  * 不引入额外校验依赖；运行时校验用手写窄化函数完成。
  */
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type OauthUsageWindow, sanitizeOauthLabel } from '@shared/types';
 import { startOauthCallbackServer } from './callbackServer';
 import {
@@ -53,6 +53,7 @@ const CALLBACK_PATH = '/oauth-callback';
 
 /** 后两个 scope 是 Antigravity 专有，缺了拿不到 Cloud Code Assist 权限 */
 const SCOPES = [
+  'https://www.googleapis.com/auth/aicode',
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -66,7 +67,12 @@ const USERINFO_URL = 'https://www.googleapis.com/oauth2/v1/userinfo?alt=json';
 
 export const ANTIGRAVITY_PRIMARY_ENDPOINT = 'https://daily-cloudcode-pa.googleapis.com';
 export const ANTIGRAVITY_SANDBOX_ENDPOINT = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
-const ENDPOINTS = [ANTIGRAVITY_PRIMARY_ENDPOINT, ANTIGRAVITY_SANDBOX_ENDPOINT];
+export const ANTIGRAVITY_PROD_ENDPOINT = 'https://cloudcode-pa.googleapis.com';
+const ENDPOINTS = [
+  ANTIGRAVITY_PRIMARY_ENDPOINT,
+  ANTIGRAVITY_SANDBOX_ENDPOINT,
+  ANTIGRAVITY_PROD_ENDPOINT,
+];
 
 const FREE_TIER_ID = 'free-tier';
 const ONBOARD_TIMEOUT_MS = 30_000;
@@ -75,7 +81,11 @@ const REQUEST_TIMEOUT_MS = 30_000;
 /** 刷新提前量：access token 的 expires 落库时就减掉，pi 到点自然调 refreshToken */
 const REFRESH_SKEW_MS = 60_000;
 /** Cloud Code Assist 控制面请求的固定 metadata */
-const LOAD_CODE_ASSIST_METADATA = { ideType: 'ANTIGRAVITY' };
+const LOAD_CODE_ASSIST_METADATA = {
+  ideType: 'ANTIGRAVITY',
+  platform: 'PLATFORM_UNSPECIFIED',
+  pluginType: 'GEMINI',
+};
 
 // ---- User-Agent（后端按客户端版本门控模型，版本必须像真客户端）----
 
@@ -359,12 +369,69 @@ async function loadCodeAssist(
   return payload;
 }
 
-function assertFreeTierEligible(payload: LoadCodeAssistResponse): void {
-  if (payload.allowedTiers?.some((tier) => tier.id === FREE_TIER_ID)) return;
-  const blocked = payload.ineligibleTiers?.find((tier) => tier.tierId === FREE_TIER_ID);
-  if (!blocked?.reasonMessage) return;
-  const validation = blocked.validationUrl ? `\n${blocked.validationUrl}` : '';
-  throw new Error(`${blocked.reasonMessage}${validation}`);
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** 从 loadCodeAssist / listProjects 响应里抠 project id，字段名跟 pi-antigravity 对齐。 */
+export function extractAntigravityProjectId(data: unknown): string | undefined {
+  const record = asRecord(data);
+  if (!record) return undefined;
+  const direct =
+    record.antigravityProjectId ??
+    record.projectId ??
+    record.backendProjectId ??
+    record.userDefinedCloudaicompanionProject ??
+    record.cloudaicompanionProject ??
+    record.project;
+  const directId = optionalString(direct);
+  if (directId) return directId;
+  const nestedId = optionalString(asRecord(direct)?.id);
+  if (nestedId) return nestedId;
+  for (const key of ['projects', 'projectIds', 'cloudaicompanionProjects']) {
+    const value = record[key];
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      const fromItem = extractAntigravityProjectId(item);
+      if (fromItem) return fromItem;
+      const itemId = optionalString(item) ?? optionalString(asRecord(item)?.id);
+      if (itemId) return itemId;
+    }
+  }
+  return undefined;
+}
+
+export type AntigravityProjectDiscoveryPlan =
+  | { action: 'use-project'; projectId: string }
+  | { action: 'onboard' }
+  | { action: 'fallback-default' };
+
+/**
+ * 登录时要不要 onboard。地区不可用时 Google 会把 free-tier 放进 ineligibleTiers，
+ * 但账号往往已经有 project（pi-antigravity 也是这样活下来的）——这时绝不能把
+ * reasonMessage 原样抛到向导上阻断登录。
+ */
+export function planAntigravityProjectDiscovery(payload: unknown): AntigravityProjectDiscoveryPlan {
+  const projectId = extractAntigravityProjectId(payload);
+  if (projectId) return { action: 'use-project', projectId };
+  const record = asRecord(payload) ?? {};
+  const allowed = Array.isArray(record.allowedTiers) ? record.allowedTiers : [];
+  const freeAllowed = allowed.some((tier) => asRecord(tier)?.id === FREE_TIER_ID);
+  if (freeAllowed && (record.currentTier === undefined || record.currentTier === null)) {
+    return { action: 'onboard' };
+  }
+  return { action: 'fallback-default' };
+}
+
+/** 发现失败时的稳定 fallback，算法对齐 pi-antigravity，同一邮箱得到同一 id。 */
+export function defaultAntigravityProjectId(seed = 'antigravity-default'): string {
+  const bytes = createHash('sha1').update(`antigravity:${seed}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 interface OnboardOperation {
@@ -438,20 +505,28 @@ async function onboardUser(accessToken: string, signal: AbortSignal | undefined)
 async function discoverProject(
   accessToken: string,
   onProgress: ((message: string) => void) | undefined,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  email?: string
 ): Promise<string> {
   onProgress?.('检查 Cloud Code Assist 账号状态…');
-  const initial = await loadCodeAssist(accessToken, signal);
-  assertFreeTierEligible(initial);
-  if (initial.currentTier === undefined || initial.currentTier === null) {
+  let payload = await loadCodeAssist(accessToken, signal);
+  let plan = planAntigravityProjectDiscovery(payload);
+  if (plan.action === 'use-project') return plan.projectId;
+
+  if (plan.action === 'onboard') {
     onProgress?.('开通 Antigravity 免费层…');
-    await onboardUser(accessToken, signal);
+    try {
+      await onboardUser(accessToken, signal);
+    } catch {
+      // 开通失败（含地区限制）不阻断登录，下面走默认 project，与 pi-antigravity 一致。
+    }
+    onProgress?.('刷新 Cloud Code Assist 项目…');
+    payload = await loadCodeAssist(accessToken, signal);
+    plan = planAntigravityProjectDiscovery(payload);
+    if (plan.action === 'use-project') return plan.projectId;
   }
-  onProgress?.('刷新 Cloud Code Assist 项目…');
-  const refreshed = await loadCodeAssist(accessToken, signal);
-  const projectId = refreshed.cloudaicompanionProject ?? initial.cloudaicompanionProject;
-  if (!projectId) throw new Error('loadCodeAssist 没有返回 cloudaicompanionProject');
-  return projectId;
+
+  return defaultAntigravityProjectId(email || 'antigravity-default');
 }
 
 // ---- 登录 / 刷新 ----
@@ -529,7 +604,7 @@ async function login(callbacks: PiLoginCallbacks): Promise<PiOauthCredentials> {
   if (!refresh) throw new Error('Google 没有返回 refresh_token，请重试并确认勾选了离线访问');
 
   const email = await fetchUserEmail(access, signal);
-  const projectId = await discoverProject(access, callbacks.onProgress, signal);
+  const projectId = await discoverProject(access, callbacks.onProgress, signal, email);
 
   const credentials: AntigravityCredentials = {
     access,

@@ -9,6 +9,8 @@ import {
   antigravityProviderConfig,
   antigravityWireIds,
   buildRequest,
+  defaultAntigravityProjectId,
+  extractAntigravityProjectId,
   isAccessTokenExpired,
   iterateSseJson,
   mergeAntigravityModels,
@@ -17,6 +19,7 @@ import {
   parseAntigravityManifestVersion,
   parseAvailableModels,
   parseUsageWindows,
+  planAntigravityProjectDiscovery,
   resolveAntigravityWireModelId,
   sanitizeUpstreamBody,
 } from './antigravity';
@@ -54,6 +57,64 @@ describe('凭证过期判定', () => {
   it('缺失或非法的 expires 保守视为过期', () => {
     expect(isAccessTokenExpired(undefined, 0)).toBe(true);
     expect(isAccessTokenExpired(Number.NaN, 0)).toBe(true);
+  });
+});
+
+describe('Antigravity 项目发现', () => {
+  it('从 loadCodeAssist 的多种字段取出已有 project', () => {
+    expect(extractAntigravityProjectId({ cloudaicompanionProject: 'proj-1' })).toBe('proj-1');
+    expect(extractAntigravityProjectId({ projectId: 'proj-2' })).toBe('proj-2');
+    expect(
+      extractAntigravityProjectId({
+        cloudaicompanionProjects: [{ id: 'nested-1' }],
+      })
+    ).toBe('nested-1');
+  });
+
+  it('已有 project 时即使 free-tier 地区不可用也不阻断', () => {
+    expect(
+      planAntigravityProjectDiscovery({
+        cloudaicompanionProject: 'proj-1',
+        ineligibleTiers: [
+          {
+            tierId: 'free-tier',
+            reasonMessage:
+              'Your current account is not eligible for Antigravity, because it is not currently available in your location.',
+          },
+        ],
+      })
+    ).toEqual({ action: 'use-project', projectId: 'proj-1' });
+  });
+
+  it('没有 project 且地区不可用时退回默认 project，而不是抛错', () => {
+    expect(
+      planAntigravityProjectDiscovery({
+        allowedTiers: [],
+        ineligibleTiers: [
+          {
+            tierId: 'free-tier',
+            reasonMessage:
+              'Your current account is not eligible for Antigravity, because it is not currently available in your location.',
+          },
+        ],
+      })
+    ).toEqual({ action: 'fallback-default' });
+  });
+
+  it('明确允许 free-tier 且尚未开通时才走 onboard', () => {
+    expect(
+      planAntigravityProjectDiscovery({
+        allowedTiers: [{ id: 'free-tier' }],
+      })
+    ).toEqual({ action: 'onboard' });
+  });
+
+  it('默认 project 对同一邮箱稳定，便于与 pi-antigravity 对齐', () => {
+    const a = defaultAntigravityProjectId('user@example.com');
+    const b = defaultAntigravityProjectId('user@example.com');
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(defaultAntigravityProjectId('other@example.com')).not.toBe(a);
   });
 });
 
