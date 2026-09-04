@@ -745,6 +745,7 @@ export const zhTranslations: Record<string, string> = {
   Toolset: '工具集',
   'All tools (bash/edit/write)': '全部工具(bash/edit/write)',
   'Read-only (read/grep/find/ls)': '只读(read/grep/find/ls)',
+  Stop: '停止',
   'Stop task': '停止任务',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',
