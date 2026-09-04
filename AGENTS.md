@@ -45,8 +45,15 @@ TDD 纪律最容易坏在两处：「红」造假（测试和实现同一个脑�
   tester 类型的 edit/write 被硬限制在 `*.test.ts` / `*.spec.ts` / `test/**`，写不了实现；
 - **实现者**（主会话或另一 coworker）：只许改实现，不许动测试文件让灯变绿；
   **红灯到手前不要开写实现**，否则 tester 能读到实现，红灯就不独立了；
-- 验收用 `gate: "pnpm test"`，以退出码为准，不采信文字汇报；
+- 验收看 `gate` 退出码，不采信文字汇报；
 - 等 coworker 用 `coworker wait {name}`，不要 `sleep` 轮询；回报被截断时用 `coworker report {name}` 取全文。
+
+**调度（一轮结束 ≠ 角色结束）**：`spawn` 只派第一刀切片，禁止把整份 implement.md
+一次性塞进 tester。切片沿用 inline 门槛：这一刀测试预计 < 50 行或用例 < 10 个；超了就拆，
+下一刀 `send` 同一 coworker，不要再 spawn 第二个 tester。`wait` 必须带本刀测试的 `gate`
+（例如 `pnpm exec vitest run src/foo.test.ts`）：红灯看非 0。实现变绿后另跑同一命令期望 0，
+再 `send` 做绿后审计（测试没被改、失败原因曾经是缺功能）或下一刀红灯。角色目标完成才
+`dismiss`，不要 spawn 完一轮就当 one-shot 丢掉。
 
 小的纯函数改动不必拉 coworker，inline Red-Green 即可——判断标准：
 测试文件预计 < 50 行，或用例 < 10 个，直接 inline。

@@ -98,6 +98,8 @@ export const BUILTIN_AGENT_TYPES: Omit<AgentTypeEntry, 'id'>[] = [
       'Never write or edit implementation files — only test files (the toolset enforces this). ' +
       'Read specs, type contracts and existing tests; avoid reading the implementation body of the module ' +
       'under test so the tests stay independent of it. ' +
+      'Do only the slice in this turn — do not expand to adjacent modules or the rest of the PRD. ' +
+      'After the slice is red for the right reason, stop and wait for the parent to send the next slice or a green audit. ' +
       'Report the test files, case counts, and the exact failure reasons.',
     tools: 'all',
     writeScope: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx', 'test/**'],

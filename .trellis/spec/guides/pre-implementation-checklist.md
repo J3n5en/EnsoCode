@@ -21,8 +21,9 @@
 
 - **测试先行者**（coworker，`agent_type: tester`）：只读 PRD 与接口契约，产出失败测试并确认红灯；tester 的 edit/write 被工具层限制在测试文件。
 - **实现者**（主会话或另一 coworker）：红灯到手前不开写（否则 tester 会读到实现）；只许改实现，不许改测试文件让灯变绿。
-- 等待用 `coworker wait {name}`（不要 sleep 轮询）；回报截断用 `coworker report {name}` 取全文。
-- 验收看 `gate: "pnpm test"` 的退出码，不采信文字汇报。
+- **一刀一停**：`spawn` 只派第一刀（< 50 行或 < 10 例）；整份 PRD / implement.md 禁止一次塞完。后续切片和绿后审计用 `send` 同一 coworker，不要再雇第二个 tester。
+- 等待用 `coworker wait {name}`（不要 sleep 轮询），且必须带本刀测试的 `gate`；红灯看非 0，绿灯另跑同一命令期望 0。回报截断用 `coworker report {name}` 取全文。
+- 验收看 `gate` 退出码，不采信文字汇报。角色目标完成才 `dismiss`。
 
 小改动直接主会话 inline Red-Green：测试文件预计 < 50 行，或用例 < 10 个。
 完整约定见仓库根 `AGENTS.md`「TDD 的角色分离」。跳过时在动手前用一句话说理由（例如「单测不足 10 个、inline」），不要默默省掉。
