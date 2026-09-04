@@ -877,6 +877,11 @@ export const zhTranslations: Record<string, string> = {
     '{{skills}} 个技能 · {{mcp}} 个 MCP · {{instruction}} 份指令',
   'Let the agent auto-discover skills under .agents/skills and .pi/skills':
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
+  'Explore fold': '探后折叠',
+  'Let the agent mark exploratory reads and keep only a short report in later model context. Timeline stays intact.':
+    '让模型在探仓库前打点，探完只把报告留在后续模型上下文里；时间线仍完整。',
+  'After a turn, extract short facts into .enso/learned.md for later sessions.':
+    '每轮结束后把短要点写入 .enso/learned.md，下次会话自动带上。',
   'Load project harness assets': '加载项目内其它工具目录',
   'Also load skills from .claude/.codex/.cursor and rule files (.cursorrules, .cursor/rules, .claude/rules) in the project':
     '同时加载项目内 .claude/.codex/.cursor 下的 skills，以及规则文件（.cursorrules、.cursor/rules、.claude/rules）',

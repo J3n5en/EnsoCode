@@ -106,6 +106,8 @@ const initialState = {
   loadLocalSkills: true,
   loadHarnessAssets: false,
   windowsLocalShell: 'auto' as const,
+  exploreFoldEnabled: false,
+  localMemoryEnabled: true,
   autoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
@@ -213,6 +215,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLoadHarnessAssets: (loadHarnessAssets) => set({ loadHarnessAssets }),
       setWindowsLocalShell: (windowsLocalShell) =>
         set({ windowsLocalShell: parseWindowsLocalShell(windowsLocalShell) }),
+      setExploreFoldEnabled: (exploreFoldEnabled) => set({ exploreFoldEnabled }),
+      setLocalMemoryEnabled: (localMemoryEnabled) => set({ localMemoryEnabled }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),

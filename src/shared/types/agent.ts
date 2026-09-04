@@ -467,6 +467,10 @@ export type AgentCommand =
       loadLocalSkills?: boolean;
       /** 同时加载项目内 .claude/.codex/.cursor 的 skills 与规则文件（.cursorrules、.cursor/rules） */
       loadHarnessAssets?: boolean;
+      /** 探后折叠工具 + context 折叠 */
+      exploreFoldEnabled?: boolean;
+      /** 会话结束后写入 .enso/learned.md */
+      localMemoryEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1660,6 +1664,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'thinkingLevel',
           'loadLocalSkills',
           'loadHarnessAssets',
+          'exploreFoldEnabled',
+          'localMemoryEnabled',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1679,6 +1685,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(
             value.windowsLocalShell as string
           )) ||
+        (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
+        (value.localMemoryEnabled !== undefined && typeof value.localMemoryEnabled !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

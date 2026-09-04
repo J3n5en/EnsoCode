@@ -17,6 +17,8 @@ export function BuiltinToolsSettings() {
   const { t } = useI18n();
   const disabled = useSettingsStore((state) => state.disabledBuiltinTools);
   const toggle = useSettingsStore((state) => state.toggleBuiltinTool);
+  const exploreFoldEnabled = useSettingsStore((state) => state.exploreFoldEnabled);
+  const setExploreFoldEnabled = useSettingsStore((state) => state.setExploreFoldEnabled);
   const occupancy = useOccupancyRows(
     BUILTIN_TOOLS.map((tool) => tool.id),
     () => window.electronAPI.assets.builtinToolOccupancy()
@@ -62,6 +64,18 @@ export function BuiltinToolsSettings() {
             />
           </div>
         ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+        <div>
+          <p className="font-medium text-sm">{t('Explore fold')}</p>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'Let the agent mark exploratory reads and keep only a short report in later model context. Timeline stays intact.'
+            )}
+          </p>
+        </div>
+        <Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />
       </div>
 
       <div className="rounded-md border px-3 py-2.5">

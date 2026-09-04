@@ -99,6 +99,12 @@ export interface SettingsState {
   /** Windows 本地 agent 命令壳；auto=本机 PowerShell。SSH/非 Windows 忽略。 */
   windowsLocalShell: WindowsLocalShell;
 
+  /** 探后折叠：模型可 explore_mark / explore_fold；缺省关 */
+  exploreFoldEnabled: boolean;
+
+  /** 会话结束后写入项目 .enso/learned.md；缺省开 */
+  localMemoryEnabled: boolean;
+
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
 
@@ -203,6 +209,8 @@ export interface SettingsState {
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;
   setWindowsLocalShell: (value: WindowsLocalShell) => void;
+  setExploreFoldEnabled: (value: boolean) => void;
+  setLocalMemoryEnabled: (value: boolean) => void;
   setAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;

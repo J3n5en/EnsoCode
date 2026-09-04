@@ -1,4 +1,6 @@
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -59,6 +61,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
       return [...this.models.values()];
     },
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
+    completeSimple: vi.fn(async () => ({ content: [] })),
   };
   return {
     ...original,
@@ -127,12 +130,21 @@ async function settle(): Promise<void> {
   await promise;
 }
 
+async function waitFor(events: AgentWorkerEvent[], type: AgentWorkerEvent['type']): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    if (events.some((event) => event.type === type)) return;
+    await settle();
+  }
+  throw new Error(`timed out waiting for ${type}`);
+}
+
 describe('SessionSupervisor deterministic child lifecycle', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.sessions.length = 0;
     mocks.managers.length = 0;
     mocks.createAgentSession.mockReset();
-    rmSync('/tmp/sessions', { recursive: true, force: true });
+    rmSync(path.join(tmpdir(), 'enso-dispatch-sessions'), { recursive: true, force: true });
     mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
     mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
       session: session(options),
@@ -144,7 +156,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -152,7 +164,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await waitFor(events, 'parent-ready');
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'parent-ready',
@@ -183,7 +195,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         lockedProfileId: 'enso-locked-v1',
       },
     });
-    await settle();
+    await waitFor(events, 'child-ready');
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'child-ready',
@@ -206,7 +218,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     };
     supervisor.handleCommand(prompt);
     supervisor.handleCommand(prompt);
-    await settle();
+    for (let i = 0; i < 20 && childSession.prompt.mock.calls.length === 0; i++) {
+      await settle();
+    }
     expect(childSession.prompt).toHaveBeenCalledOnce();
     expect(childSession.prompt).toHaveBeenCalledWith(
       '<role>\nlocked\n</role>\n\nchild-only task',
@@ -220,7 +234,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -265,7 +279,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: vi.fn(),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -329,7 +343,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: vi.fn(),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -357,7 +371,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       const supervisor = new SessionSupervisor({
         emit: (event) => events.push(event),
         agentDir: '/tmp/agent',
-        sessionDir: '/tmp/sessions',
+        sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
       });
       supervisor.handleCommand({
         type: 'spawn-parent',
@@ -390,7 +404,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hello' });
     await settle();
@@ -413,7 +427,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -458,7 +472,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -551,7 +565,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',
@@ -604,7 +618,7 @@ describe('SessionSupervisor idle eviction', () => {
     mocks.sessions.length = 0;
     mocks.managers.length = 0;
     mocks.createAgentSession.mockReset();
-    rmSync('/tmp/sessions', { recursive: true, force: true });
+    rmSync(path.join(tmpdir(), 'enso-dispatch-sessions'), { recursive: true, force: true });
     mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
     mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
       session: session(options),
@@ -617,7 +631,7 @@ describe('SessionSupervisor idle eviction', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     const other = { sessionId: 'other', generation: '44444444-4444-4444-8444-444444444444' };
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
@@ -643,7 +657,7 @@ describe('SessionSupervisor idle eviction', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
     await settle();

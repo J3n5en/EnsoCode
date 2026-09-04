@@ -65,6 +65,7 @@ import {
   withBackground,
   withTaskReminders,
 } from './backgroundTasks';
+import { withBashInterception } from './bashInterceptor';
 import { CheckpointManager, withCheckpoint } from './checkpoint/manager';
 import { createRemoteCheckpointHost } from './checkpoint/remoteHost';
 import {
@@ -88,9 +89,17 @@ import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBrid
 import { createNormalizedEditTool } from './editTool';
 import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
 import { EnsoSafeJournal } from './ensoSafeJournal';
+import { createExploreFoldState, createExploreFoldTools } from './exploreFold';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
+import {
+  appendLearnedFile,
+  buildMemoryUserText,
+  extractLearnedNotes,
+  LOCAL_MEMORY_SYSTEM_PROMPT,
+  readLearnedFile,
+} from './localMemory';
 import { McpManager } from './mcp';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
@@ -111,6 +120,12 @@ import {
 } from './ssh/executor';
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
+import {
+  appendYieldJson,
+  parseJsonFromAssistant,
+  validateAgainstSchema,
+  withAgentRead,
+} from './structuredYield';
 import { createSubagentTool, lastAssistantText } from './subagent';
 import { buildTitleUserText, extractTitle, TITLE_SYSTEM_PROMPT } from './titleSummary';
 import { createTodoTool } from './todo';
@@ -205,6 +220,10 @@ interface ManagedSession {
   roundPending?: boolean;
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
+  pendingYieldSchema?: unknown;
+  localMemoryEnabled?: boolean;
+  memoryCwd?: string;
+  memoryModel?: SpawnModelConfig;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
   contextUsage: ContextUsageTracker;
@@ -223,7 +242,7 @@ export interface SupervisorOptions {
 function sessionAgentsFilesOverride(
   agentDir: string,
   instruction?: { path: string; content: string },
-  harnessRuleFiles: Array<{ path: string; content: string }> = []
+  extraFiles: Array<{ path: string; content: string }> = []
 ) {
   const resolvedAgentDir = path.resolve(agentDir);
   return (current: { agentsFiles: Array<{ path: string; content: string }> }) => ({
@@ -232,7 +251,7 @@ function sessionAgentsFilesOverride(
       ...current.agentsFiles.filter(
         (file) => path.resolve(path.dirname(file.path)) !== resolvedAgentDir
       ),
-      ...harnessRuleFiles,
+      ...extraFiles,
     ],
   });
 }
@@ -249,6 +268,8 @@ function createSessionResourceLoader(options: {
   remoteAgentsFiles?: Array<{ path: string; content: string }>;
   /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
   loadHarnessAssets?: boolean;
+  exploreFold?: ReturnType<typeof createExploreFoldState>;
+  learnedFile?: { path: string; content: string };
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -260,6 +281,23 @@ function createSessionResourceLoader(options: {
     noSkills: options.noSkills,
     ...(options.noExtensions ? { noExtensions: true } : {}),
     ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+    ...(options.exploreFold
+      ? {
+          extensionFactories: [
+            {
+              name: 'explore-fold',
+              hidden: true,
+              factory: (pi) => {
+                pi.on('context', (event) => ({
+                  messages: options.exploreFold!.apply(
+                    event.messages as never
+                  ) as typeof event.messages,
+                }));
+              },
+            },
+          ],
+        }
+      : {}),
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
           agentsFiles: [
@@ -267,11 +305,10 @@ function createSessionResourceLoader(options: {
             ...(options.remoteAgentsFiles ?? []),
           ],
         })
-      : sessionAgentsFilesOverride(
-          options.agentDir,
-          options.instruction,
-          harness ? readHarnessRuleFiles(options.cwd) : []
-        ),
+      : sessionAgentsFilesOverride(options.agentDir, options.instruction, [
+          ...(harness ? readHarnessRuleFiles(options.cwd) : []),
+          ...(options.learnedFile ? [options.learnedFile] : []),
+        ]),
   });
 }
 
@@ -639,7 +676,9 @@ export class SessionSupervisor {
           command.subagentModels,
           command.remote,
           command.loadHarnessAssets,
-          command.windowsLocalShell
+          command.windowsLocalShell,
+          command.exploreFoldEnabled,
+          command.localMemoryEnabled
         );
         return;
       case 'spawn-child':
@@ -1011,7 +1050,9 @@ export class SessionSupervisor {
     subagentModels: SubagentModelOption[] = [],
     remote?: AgentRemoteConfig,
     loadHarnessAssets = false,
-    windowsLocalShell?: WindowsLocalShell
+    windowsLocalShell?: WindowsLocalShell,
+    exploreFoldEnabled = false,
+    localMemoryEnabled = true
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1056,6 +1097,8 @@ export class SessionSupervisor {
           )
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
+    const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
+    const learnedFile = localMemoryEnabled && !remoteAgentsFiles ? readLearnedFile(cwd) : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -1064,6 +1107,8 @@ export class SessionSupervisor {
       instruction,
       remoteAgentsFiles,
       loadHarnessAssets,
+      exploreFold,
+      learnedFile,
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
@@ -1117,16 +1162,20 @@ export class SessionSupervisor {
     const takePendingReminders = () => managedRef?.pendingTaskReminders.splice(0) ?? [];
     // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
     // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
+    const structuredById = new Map<string, unknown>();
+    const wrapRead = (definition: Def): Def => withAgentRead(definition, () => structuredById);
     const readOnlyTools = (): Def[] =>
       remoteOps && sshExecutor
         ? [
-            createReadToolDefinition(cwd, { operations: remoteOps.read }) as unknown as Def,
+            wrapRead(
+              createReadToolDefinition(cwd, { operations: remoteOps.read }) as unknown as Def
+            ),
             createRemoteGrepToolDefinition(cwd, sshExecutor) as unknown as Def,
             createFindToolDefinition(cwd, { operations: remoteOps.find }) as unknown as Def,
             createLsToolDefinition(cwd, { operations: remoteOps.ls }) as unknown as Def,
           ]
         : [
-            createReadToolDefinition(cwd) as unknown as Def,
+            wrapRead(createReadToolDefinition(cwd) as unknown as Def),
             createGrepToolDefinition(cwd) as unknown as Def,
             createFindToolDefinition(cwd) as unknown as Def,
             createLsToolDefinition(cwd) as unknown as Def,
@@ -1172,12 +1221,14 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createSessionCommandTool({
-                cwd,
-                remote: Boolean(remoteOps),
-                preference: windowsLocalShell,
-                operations: remoteOps?.bash,
-              }) as unknown as Def,
+              withBashInterception(
+                createSessionCommandTool({
+                  cwd,
+                  remote: Boolean(remoteOps),
+                  preference: windowsLocalShell,
+                  operations: remoteOps?.bash,
+                }) as unknown as Def
+              ),
               this.bgTasks,
               sessionId,
               cwd,
@@ -1368,6 +1419,9 @@ export class SessionSupervisor {
         ).session,
       runGate: (gateCommand) => runGateCommand(cwd, gateCommand, sshExecutor),
       notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
+      storeYield: (id, value) => {
+        structuredById.set(id, value);
+      },
       emitUpdate: (agent) => {
         const managed = managedRef ?? this.sessions.get(sessionId);
         if (!managed) return;
@@ -1410,6 +1464,12 @@ export class SessionSupervisor {
       },
       send: (name, message, opts) =>
         withCoworker(name, (info) => this.coworkerSend(info.id, message, opts)),
+      message: (from, to, text) =>
+        withCoworker(from, () => {
+          const target = this.mustCoworker(identity, to);
+          this.notifier.notify(target.id, `Message from coworker "${from}":\n${text}`);
+          return `(delivered to coworker "${to}" — async; any reply arrives later, continue your own work)`;
+        }),
       list: () => {
         const parent = this.must(identity);
         return [...parent.coworkers.values()].map((info) => ({
@@ -1456,6 +1516,7 @@ export class SessionSupervisor {
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
       ...(toolEnabled('subagent') ? [taskTool] : []),
       ...(toolEnabled('coworker') ? [coworkerTool] : []),
+      ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
       ...(toolEnabled('background_tasks') ? createTaskTools(this.bgTasks) : []),
       ...(toolEnabled('goal')
         ? createGoalTools((kind, note) => {
@@ -1498,6 +1559,9 @@ export class SessionSupervisor {
       factory,
       toolIds: customTools.map((tool) => tool.name),
       checkpoints,
+      ...(localMemoryEnabled && !remote
+        ? { localMemoryEnabled: true, memoryCwd: cwd, memoryModel: model }
+        : {}),
     });
     managedRef.browser = browser;
     this.options.emit({
@@ -1551,6 +1615,9 @@ export class SessionSupervisor {
       resumeFile?: string;
       asks?: AskManager;
       checkpoints?: CheckpointManager;
+      localMemoryEnabled?: boolean;
+      memoryCwd?: string;
+      memoryModel?: SpawnModelConfig;
       ensoApp?: EnsoAppInvoker;
       toolIds?: string[];
       proofToolIds?: string[];
@@ -1587,6 +1654,9 @@ export class SessionSupervisor {
       pendingTaskReminders: [],
       roundWaiters: new Set(),
       subagents: new Map(),
+      ...(opts.localMemoryEnabled
+        ? { localMemoryEnabled: true, memoryCwd: opts.memoryCwd, memoryModel: opts.memoryModel }
+        : {}),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
       contextUsage: new UsageTracker(),
@@ -1932,9 +2002,10 @@ export class SessionSupervisor {
   private async coworkerSend(
     coworkerId: string,
     text: string,
-    opts: { signal?: AbortSignal; wait?: boolean; gate?: string } = {}
+    opts: { signal?: AbortSignal; wait?: boolean; gate?: string; schema?: unknown } = {}
   ): Promise<string> {
     const managed = this.mustCurrent(coworkerId);
+    if (opts.schema) managed.pendingYieldSchema = opts.schema;
     const { signal } = opts;
     // 先登记等待再启动,防终态竞态;终态由 settleRound 统一判定(含重试耗尽/abort/销毁)
     const done = this.waitRoundEnd(managed, signal);
@@ -2280,6 +2351,7 @@ export class SessionSupervisor {
           seq: ++managed.seq,
           turnId,
         });
+        void this.maybeLearnFromTurn(managed);
         if (managed.pendingCompact) {
           const queued = managed.pendingCompact;
           managed.pendingCompact = undefined;
@@ -2465,7 +2537,17 @@ export class SessionSupervisor {
     const ran =
       managed.status === 'failed' ||
       (managed.session.messages as { role?: string }[]).some((m) => m.role === 'assistant');
-    if (managed.coworkerName && ran) managed.lastRoundSummary = this.roundBaseSummary(managed);
+    if (managed.coworkerName && ran) {
+      managed.lastRoundSummary = this.roundBaseSummary(managed);
+      const schema = managed.pendingYieldSchema;
+      managed.pendingYieldSchema = undefined;
+      if (schema && typeof schema === 'object') {
+        const parsed = parseJsonFromAssistant(lastAssistantText(managed.session));
+        if (parsed !== undefined && validateAgainstSchema(parsed, schema).ok) {
+          managed.lastRoundSummary = appendYieldJson(managed.lastRoundSummary, parsed);
+        }
+      }
+    }
     managed.roundPending = false;
     const waiters = [...managed.roundWaiters];
     managed.roundWaiters.clear();
@@ -2730,6 +2812,36 @@ export class SessionSupervisor {
       return initializeWorkerRuntime(runtime);
     })();
     return this.runtimePromise;
+  }
+
+  private async maybeLearnFromTurn(managed: ManagedSession): Promise<void> {
+    if (!managed.localMemoryEnabled || !managed.memoryCwd || !managed.memoryModel) return;
+    if (managed.coworkerName || managed.childIdentity) return;
+    const userText = buildMemoryUserText(
+      managed.session.messages as Array<{ role?: string; content?: unknown }>
+    );
+    if (!userText.trim()) return;
+    try {
+      const runtime = await this.getRuntime();
+      const model = await resolveBaseModelOrRefresh(runtime, managed.memoryModel);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
+      try {
+        const message = await runtime.completeSimple(
+          model,
+          {
+            systemPrompt: LOCAL_MEMORY_SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
+          },
+          { signal: controller.signal }
+        );
+        appendLearnedFile(managed.memoryCwd, extractLearnedNotes(message));
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // 记忆失败静默
+    }
   }
 
   /** 会话标题总结：一次性补全，不建 AgentSession、不落盘；成功才回事件，失败静默 */

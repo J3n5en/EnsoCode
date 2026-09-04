@@ -1,4 +1,6 @@
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AgentWorkerEvent, SessionIdentity } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,6 +65,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
       return [...this.models.values()];
     },
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
+    completeSimple: vi.fn(async () => ({ content: [] })),
   };
   return {
     ...original,
@@ -143,7 +146,7 @@ async function spawnParentAndCoworker(events: AgentWorkerEvent[]) {
   const supervisor = new SessionSupervisor({
     emit: (event) => events.push(event),
     agentDir: '/tmp/agent',
-    sessionDir: '/tmp/sessions',
+    sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
   });
   supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
   await settle();
@@ -198,7 +201,7 @@ describe('SessionSupervisor coworker wait/report', () => {
     mocks.managers.length = 0;
     mocks.loaderOptions.length = 0;
     mocks.createAgentSession.mockReset();
-    rmSync('/tmp/sessions', { recursive: true, force: true });
+    rmSync(path.join(tmpdir(), 'enso-cw-sessions'), { recursive: true, force: true });
     mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
     mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
       session: session(options),
@@ -244,6 +247,37 @@ describe('SessionSupervisor coworker wait/report', () => {
       )
     );
     expect(text).toMatch(/no round completed yet/);
+  });
+
+  it('operation=message 经 notifier 投递：idle 唤醒，不走 send/steer', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const { coworkerTool, coworkerSession } = await spawnParentAndCoworker(events);
+    await coworkerTool.execute(
+      't-alice',
+      { operation: 'spawn', name: 'alice', task: 'second hire' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    coworkerSession.prompt.mockClear();
+    coworkerSession.steer.mockClear();
+
+    const text = await textOf(
+      coworkerTool.execute(
+        't-msg',
+        { operation: 'message', name: 'alice', to: 'bob', text: 'ping from alice' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    );
+    expect(text).toMatch(/delivered to coworker "bob"/);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(coworkerSession.steer).not.toHaveBeenCalled();
+    expect(coworkerSession.prompt).toHaveBeenCalledWith(
+      expect.stringContaining('Message from coworker "alice":\nping from alice')
+    );
   });
 
   it('running 期间 wait 阻塞,agent_end(willRetry=false) 后以最后一条 assistant 文本resolve', async () => {
@@ -412,7 +446,7 @@ describe('SessionSupervisor coworker wait/report', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
     });
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
     await settle();
@@ -515,7 +549,7 @@ describe('SessionSupervisor coworker wait/report', () => {
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
       agentDir: '/tmp/agent',
-      sessionDir: '/tmp/sessions',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
     });
     supervisor.handleCommand({
       type: 'spawn-parent',

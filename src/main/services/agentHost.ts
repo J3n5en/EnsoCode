@@ -360,6 +360,10 @@ export function spawnSession(
     : [];
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
+  const exploreFoldEnabled = state?.exploreFoldEnabled === true;
+  const localMemoryEnabled = state?.localMemoryEnabled !== false;
+  // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
+  if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -371,6 +375,8 @@ export function spawnSession(
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
+    ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
+    ...(localMemoryEnabled ? {} : { localMemoryEnabled: false }),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
