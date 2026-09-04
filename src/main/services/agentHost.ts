@@ -78,6 +78,10 @@ let workerReady = false;
 let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
 /** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
 let snapshotPending: false | true | string = false;
+/** worker 已 fork 未 spawn 窗口内到达的命令：postMessage 不保证送达，spawn 后按序补发 */
+let commandsPending: AgentCommand[] = [];
+/** worker 曾启动后退出：spawn 时可按需重建（首次启动前不行，要等 env/PATH 探测） */
+let workerExited = false;
 /** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
 const pinnedBySource = new Map<string, readonly string[]>();
 let lastPinnedKey = '';
@@ -114,6 +118,7 @@ export function startAgentWorker(): void {
     },
   });
   worker = child;
+  workerExited = false;
 
   child.once('spawn', () => {
     workerReady = true;
@@ -132,6 +137,9 @@ export function startAgentWorker(): void {
       snapshotPending = false;
       child.postMessage(command);
     }
+    const queued = commandsPending;
+    commandsPending = [];
+    for (const command of queued) child.postMessage(command);
   });
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
@@ -144,6 +152,7 @@ export function startAgentWorker(): void {
     if (worker === child) {
       worker = null;
       workerReady = false;
+      workerExited = true;
     }
     onEvent?.({ type: 'worker-exited' });
   });
@@ -154,6 +163,8 @@ export function stopAgentWorker(): void {
   worker = null;
   workerReady = false;
   snapshotPending = false;
+  commandsPending = [];
+  workerExited = false;
 }
 
 /**
@@ -175,6 +186,10 @@ export function isAgentWorkerRunning(): boolean {
 
 export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: string } {
   if (!worker) return { ok: false, error: 'agent worker not running' };
+  if (!workerReady) {
+    commandsPending.push(command);
+    return { ok: true };
+  }
   worker.postMessage(command);
   return { ok: true };
 }
@@ -336,6 +351,8 @@ export function spawnSession(
     ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
     : [];
   const loadHarnessAssets = state?.loadHarnessAssets === true;
+  // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
+  if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
     type: 'spawn-parent',
     identity,
