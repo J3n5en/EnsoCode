@@ -24,6 +24,7 @@ import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
+import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
 import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
@@ -49,6 +50,7 @@ export default function App() {
   const onboarded = useSettingsStore((s) => s.onboarded);
   useBackgroundImage();
   const [searchOpen, setSearchOpen] = useState(false);
+  useWindowsWindowChrome();
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(saved) && saved >= MIN_WIDTH ? Math.min(saved, MAX_WIDTH) : 280;

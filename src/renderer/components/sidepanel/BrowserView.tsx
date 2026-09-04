@@ -334,7 +334,7 @@ export function BrowserView({
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
       )}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col" data-slot="browser-native-stack">
         <div
           ref={hostRef}
           className={cn(

@@ -133,6 +133,40 @@
     background: transparent;
   }
 
+  /*
+   * Windows 无框窗口没有系统圆角和 1px 外框。只在 win32 挂 enso-win，
+   * 最大化/全屏时再挂 enso-win-flush 贴齐屏幕。html 保持透明，圆角外露桌面。
+   */
+  html.enso-main-shell.enso-win #root {
+    height: 100vh;
+  }
+
+  html.enso-main-shell.enso-win:not(.enso-win-pending):not(.enso-win-flush) #root {
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  html.enso-main-shell.enso-win:not(.enso-win-pending):not(.enso-win-flush) #root::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    border: 1px solid color-mix(in oklch, var(--foreground) 22%, transparent);
+    border-radius: 8px;
+    pointer-events: none;
+  }
+
+  /*
+   * Browser guest/devtools 是独立原生 WebContentsView，叠在 renderer 之上时不受
+   * #root 的 overflow 和伪元素 z-index 约束。普通窗口给其布局容器留出右描边和
+   * 底部圆角区；最大化/全屏时 flush class 会自动取消。
+   */
+  html.enso-main-shell.enso-win:not(.enso-win-pending):not(.enso-win-flush)
+    [data-slot='browser-native-stack'] {
+    padding-right: 1px;
+    padding-bottom: 8px;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
