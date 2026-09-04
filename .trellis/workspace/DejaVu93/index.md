@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-09-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~30 | Active |
+| `journal-1.md` | ~53 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-09-04 | 补齐 Gemini 3.8 模型目录与用量价格 | `5b853ea`, `e0fdfba`, `c2624b3` | `fix/model-catalog-google-38` |
 | 1 | 2026-09-04 | Review and simplify provider/thinking branch | `7480f2e`, `cd0e38d`, `87841f3` | `fix/provider-thinking-antigravity` |
 <!-- @@@/auto:session-history -->
 
