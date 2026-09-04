@@ -46,11 +46,11 @@ describe('providerDedupeKey', () => {
 
   it('xAI 向导改用已有 OpenAI 中转 URL 时与 OpenAI 条目不是同一条', () => {
     const importedOpenAI = providerDedupeKey({
-      baseUrl: 'https://done.5111online.uk/v1',
+      baseUrl: 'https://relay.example.com/v1',
       apiKey: 'sk',
     });
     const xaiWizard = providerDedupeKey({
-      baseUrl: 'https://done.5111online.uk/v1',
+      baseUrl: 'https://relay.example.com/v1',
       apiKey: 'sk',
       catalogId: 'xai',
     });
@@ -144,7 +144,7 @@ describe('applyIncomingProviders', () => {
         id: 'openai-relay',
         name: 'OpenAI',
         api: 'openai-responses',
-        baseUrl: 'https://done.5111online.uk/v1',
+        baseUrl: 'https://relay.example.com/v1',
         models: [{ id: 'gpt-5.6-sol', enabled: true }],
       }),
     ];
@@ -153,7 +153,7 @@ describe('applyIncomingProviders', () => {
         id: 'xai-relay',
         name: 'xAI (Grok/X subscription)',
         catalogId: 'xai',
-        baseUrl: 'https://done.5111online.uk/v1',
+        baseUrl: 'https://relay.example.com/v1',
         models: [{ id: 'grok-4.6', enabled: true }],
       }),
     ]);
@@ -167,7 +167,7 @@ describe('applyIncomingProviders', () => {
       provider({
         id: 'openai-relay',
         name: 'OpenAI',
-        baseUrl: 'https://done.5111online.uk/v1',
+        baseUrl: 'https://relay.example.com/v1',
         models: [{ id: 'gpt-5.6-sol', enabled: true }],
       }),
     ];
@@ -175,7 +175,7 @@ describe('applyIncomingProviders', () => {
       provider({
         id: 'ignored',
         catalogId: CUSTOM_VENDOR_ID,
-        baseUrl: 'https://done.5111online.uk/v1',
+        baseUrl: 'https://relay.example.com/v1',
         models: [{ id: 'grok-4.6', enabled: true }],
       }),
     ]);
