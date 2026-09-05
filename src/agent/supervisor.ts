@@ -100,6 +100,7 @@ import { createExploreFoldState, createExploreFoldTools } from './exploreFold';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
+import { createLearnTool } from './learn';
 import {
   appendLearnedFile,
   buildMemoryUserText,
@@ -1538,6 +1539,9 @@ export class SessionSupervisor {
       ...buildCoreTools(),
       ...(browser
         ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
+        : []),
+      ...(localMemoryEnabled && !remote
+        ? [createLearnTool({ agentDir: this.options.agentDir, cwd })]
         : []),
       ...(toolEnabled('todo') ? [createTodoTool()] : []),
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
