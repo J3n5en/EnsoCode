@@ -148,12 +148,14 @@ describe('hasLiveGenerationWork', () => {
 });
 
 describe('hasInFlightToolCalls', () => {
+  const bashCall = { type: 'toolCall', id: 't1', name: 'bash' };
+  const coworkerCall = { type: 'toolCall', id: 't1', name: 'coworker' };
   it('末轮 assistant 有未完成的 bash / coworker 调用', () => {
     expect(
       hasInFlightToolCalls([
         {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 't1', name: 'bash' }],
+          content: [bashCall],
         },
       ])
     ).toBe(true);
@@ -161,7 +163,7 @@ describe('hasInFlightToolCalls', () => {
       hasInFlightToolCalls([
         {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 't1', name: 'coworker' }],
+          content: [coworkerCall],
         },
       ])
     ).toBe(true);
@@ -172,7 +174,7 @@ describe('hasInFlightToolCalls', () => {
       hasInFlightToolCalls([
         {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 't1', name: 'bash' }],
+          content: [bashCall],
         },
         { role: 'toolResult', toolCallId: 't1' },
       ])
@@ -184,7 +186,7 @@ describe('hasInFlightToolCalls', () => {
       hasInFlightToolCalls([
         {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 't1', name: 'bash' }],
+          content: [bashCall],
         },
         { role: 'user' },
         {
