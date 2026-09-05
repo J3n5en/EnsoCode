@@ -27,7 +27,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| 字段 | `smartCompactEnabled: boolean` |
+| 字段 | `smartCompactEnabled: boolean`；`smartCompactModel: DefaultModelRef \| null` |
+| 模型 | `null` = 跟随会话模型。选定后 spawn 写入扩展 `summaryModel`（`oauthAccountKey/modelId` 或 worker 注册 id） |
 | 默认 | `false` |
 | UI | `GeneralSettings` 新一行（agent 行为，不是时间线密度） |
 | 主进程读 | `SETTINGS_STATE_FIELDS` |

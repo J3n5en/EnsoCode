@@ -476,6 +476,8 @@ export type AgentCommand =
       exploreFoldEnabled?: boolean;
       /** 父会话加载 pi-smart-compact 作为 compact 摘要后端 */
       smartCompactEnabled?: boolean;
+      /** 独立摘要模型；缺省跟随当前会话模型 */
+      smartCompactSummaryModel?: SpawnModelConfig;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1674,6 +1676,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'loadHarnessAssets',
           'exploreFoldEnabled',
           'smartCompactEnabled',
+          'smartCompactSummaryModel',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1697,6 +1700,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
         (value.smartCompactEnabled !== undefined &&
           typeof value.smartCompactEnabled !== 'boolean') ||
+        (value.smartCompactSummaryModel !== undefined &&
+          parseSpawnModelConfig(value.smartCompactSummaryModel) === null) ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

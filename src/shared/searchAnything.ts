@@ -140,7 +140,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     category: 'general',
     title: 'Verified smart compaction',
     description:
-      'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.',
+      'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session. Choose a dedicated summary model or follow the session model.',
   },
   {
     id: 'general.generationStallTimeout',

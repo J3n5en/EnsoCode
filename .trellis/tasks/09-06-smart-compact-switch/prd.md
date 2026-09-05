@@ -7,6 +7,7 @@
 ## Requirements
 
 - 设置中有一项开关，**默认关闭**。关闭时不加载该扩展，不改 compact 路径。
+- 打开后可另选摘要模型；未选则跟随当前会话模型。分段/验证跟随合成模型。
 - 打开后仅影响**父会话**的 compact 摘要；子代理 / coworker / Enso locked 会话不加载。
 - `/compact` 与宿主自动 compact 共用同一条路径：扩展挂在 `session_before_compact`，真正改会话仍由 Pi `session.compact()` 完成。
 - 扩展失败、验证不过、超时、包加载失败：回退原生 compact，会话不卡死、不丢消息。

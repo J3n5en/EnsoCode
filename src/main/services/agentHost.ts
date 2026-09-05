@@ -385,6 +385,18 @@ export function spawnSession(
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
   const smartCompactEnabled = state?.smartCompactEnabled === true;
+  const smartCompactRef = asModelRef(state?.smartCompactModel);
+  const smartCompactSummary =
+    smartCompactEnabled && smartCompactRef
+      ? resolveModelSelection(
+          smartCompactRef.providerId,
+          smartCompactRef.modelId,
+          authenticatedAccountKeys
+        )
+      : undefined;
+  const smartCompactSummaryModel = smartCompactSummary?.ok
+    ? smartCompactSummary.selection.config
+    : undefined;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
@@ -400,6 +412,7 @@ export function spawnSession(
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     ...(smartCompactEnabled ? { smartCompactEnabled: true } : {}),
+    ...(smartCompactSummaryModel ? { smartCompactSummaryModel } : {}),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),

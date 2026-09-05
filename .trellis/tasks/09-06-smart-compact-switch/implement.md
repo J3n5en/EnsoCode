@@ -22,7 +22,7 @@
    `agentHost` 读设置写入 `spawn-parent`。
 
 6. **设置层**  
-   types / initialState / setter / `SETTINGS_STATE_FIELDS` / capability coverage / GeneralSettings 开关 / i18n 中英。
+   types / initialState / setter / `SETTINGS_STATE_FIELDS` / capability coverage / `SmartCompactPicker`（开关 + 模型）/ i18n 中英。
 
 7. **依赖**  
    `pnpm add pi-smart-compact`（与当前 `@earendil-works/pi-coding-agent` 对齐）。

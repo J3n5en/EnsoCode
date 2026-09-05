@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENSO_SMART_COMPACT_CONFIG,
+  formatSmartCompactSummaryModel,
   mergeSmartCompactSettings,
   resolveSmartCompactExtensionPath,
 } from './smartCompact';
@@ -18,6 +19,33 @@ describe('resolveSmartCompactExtensionPath', () => {
         throw new Error('Cannot find module');
       })
     ).toBeUndefined();
+  });
+});
+
+describe('formatSmartCompactSummaryModel', () => {
+  it('订阅走 oauthAccountKey/modelId', () => {
+    expect(
+      formatSmartCompactSummaryModel({
+        api: 'anthropic-messages',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'k',
+        modelId: 'claude-sonnet-4',
+        settingsProviderId: 'anthropic-1',
+        oauthAccountKey: 'anthropic',
+      })
+    ).toBe('anthropic/claude-sonnet-4');
+  });
+
+  it('自定义 API 走 worker 注册 id', () => {
+    expect(
+      formatSmartCompactSummaryModel({
+        api: 'openai-completions',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        modelId: 'gpt-4.1',
+        settingsProviderId: 'openai-entry',
+      })
+    ).toMatch(/^enso-[0-9a-f]+-[0-9a-f]+\/gpt-4\.1$/);
   });
 });
 
@@ -42,5 +70,26 @@ describe('mergeSmartCompactSettings', () => {
     expect(mergeSmartCompactSettings(null)).toEqual({
       smartCompact: { ...ENSO_SMART_COMPACT_CONFIG },
     });
+  });
+
+  it('传入路由时写 summaryModel，清掉旧路由', () => {
+    const withRoute = mergeSmartCompactSettings(
+      { smartCompact: { extra: 1 } },
+      { summaryModel: 'anthropic/claude-sonnet-4' }
+    );
+    expect(withRoute.smartCompact).toMatchObject({
+      extra: 1,
+      ...ENSO_SMART_COMPACT_CONFIG,
+      summaryModel: 'anthropic/claude-sonnet-4',
+    });
+    const cleared = mergeSmartCompactSettings(
+      { smartCompact: { extra: 1, summaryModel: 'old/model' } },
+      { summaryModel: null }
+    );
+    expect(cleared.smartCompact).toMatchObject({
+      extra: 1,
+      ...ENSO_SMART_COMPACT_CONFIG,
+    });
+    expect((cleared.smartCompact as Record<string, unknown>).summaryModel).toBeUndefined();
   });
 });

@@ -132,6 +132,10 @@ export const zhTranslations: Record<string, string> = {
   'Verified smart compaction': '验证式智能压缩',
   'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.':
     '长会话 compact 时先用可验证摘要；失败回退默认压缩。可能更慢、更费 token。下一个会话生效。',
+  'Follows the session model': '跟随当前会话模型',
+  'Follow session model': '改跟会话模型',
+  'Selected model is unavailable — falls back to the session model.':
+    '所选模型已不可用——将回退到当前会话模型。',
   'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running':
     'read/grep/find/ls 显示为单行，agent 运行中也折叠连续的工具调用',
   'Stop if no output': '无输出则停止',
