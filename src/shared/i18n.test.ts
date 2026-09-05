@@ -69,6 +69,10 @@ const MAPPED_I18N_KEYS = [
   'New terminal tab',
   'New terminal when the side panel is focused; otherwise new conversation',
   'Close terminal tab',
+  // fileTreeMenu.revealLabel()：按平台返回其一，t() 的实参不是字面量
+  'Reveal in Finder',
+  'Open Containing Folder',
+  'Reveal in File Explorer',
 ] as const;
 
 const MODEL_CENTER_ENSO_I18N_KEYS = [

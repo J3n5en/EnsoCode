@@ -47,6 +47,7 @@ import type {
 import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
 import { getWorkbenchView } from '../windows/createAppWindow';
+import { assertBrowserUrl, resolveLocalCwdForBrowser } from './browserFileRoot';
 
 /**
  * 内嵌浏览器宿主：guest 页只活在 Main。独立 persist session，与编辑器 defaultSession 切开。
@@ -232,6 +233,7 @@ export class BrowserHost {
         at: Date.now(),
       });
     }
+    if (tab && state.url.startsWith('file:')) this.forgetTab(tab.id);
     for (const listener of this.stateListeners) listener(sessionId, tab?.id ?? '', state);
   }
 
@@ -409,12 +411,23 @@ export class BrowserHost {
     });
   }
 
+  private fileRootFor(sessionId: string): string | undefined {
+    return resolveLocalCwdForBrowser(sessionId) ?? undefined;
+  }
+
+  private allowUrl(raw: string, sessionId: string): URL {
+    return assertBrowserUrl(raw, this.fileRootFor(sessionId));
+  }
+
   /** 面板地址栏 / 按钮 */
   async userNavigate(tabId: string, sessionId: string, raw: string): Promise<void> {
-    if (!this.tabs.has(tabId)) this.createTab(sessionId, tabId);
+    const existing = this.tabs.get(tabId);
+    if (existing && existing.ownerSessionId !== sessionId)
+      throw new Error('Browser tab owner mismatch.');
+    if (!existing) this.createTab(sessionId, tabId);
     this.currentBySession.set(sessionId, tabId);
     this.userTabs.add(tabId);
-    const url = assertAllowedUrl(raw);
+    const url = this.allowUrl(raw, sessionId);
     const tab = this.tabs.get(tabId);
     if (!tab) return;
     tab.lastSnapshot = undefined;
@@ -429,19 +442,35 @@ export class BrowserHost {
   goBack(tabId: string): void {
     const tab = this.tabs.get(tabId);
     if (tab?.view.webContents.navigationHistory.canGoBack()) {
-      tab.view.webContents.navigationHistory.goBack();
+      const history = tab.view.webContents.navigationHistory;
+      const entry = history.getEntryAtIndex(history.getActiveIndex() - 1);
+      if (!entry || !this.canNavigate(tab, entry.url)) return;
+      history.goBack();
     }
   }
 
   goForward(tabId: string): void {
     const tab = this.tabs.get(tabId);
     if (tab?.view.webContents.navigationHistory.canGoForward()) {
-      tab.view.webContents.navigationHistory.goForward();
+      const history = tab.view.webContents.navigationHistory;
+      const entry = history.getEntryAtIndex(history.getActiveIndex() + 1);
+      if (!entry || !this.canNavigate(tab, entry.url)) return;
+      history.goForward();
+    }
+  }
+
+  private canNavigate(tab: Tab, raw: string): boolean {
+    try {
+      this.allowUrl(raw, tab.ownerSessionId);
+      return true;
+    } catch {
+      return false;
     }
   }
 
   reload(tabId: string): void {
-    this.tabs.get(tabId)?.view.webContents.reload();
+    const tab = this.tabs.get(tabId);
+    if (tab && this.canNavigate(tab, tab.view.webContents.getURL())) tab.view.webContents.reload();
   }
 
   async closeTab(tabId: string): Promise<void> {
@@ -615,6 +644,22 @@ export class BrowserHost {
       );
       this.guestSession.setPermissionCheckHandler(
         (_wc, permission) => permission === 'clipboard-sanitized-write'
+      );
+      // Also covers frames, subresources, reload and network-backed history loads.
+      this.guestSession.webRequest.onBeforeRequest(
+        { urls: ['file://*/*'] },
+        (details, callback) => {
+          const tab = [...this.tabs.values()].find(
+            (entry) => entry.view.webContents.id === details.webContentsId
+          );
+          try {
+            if (!tab) throw new Error('Unknown file request owner');
+            this.allowUrl(details.url, tab.ownerSessionId);
+            callback({ cancel: false });
+          } catch {
+            callback({ cancel: true });
+          }
+        }
       );
     }
     return this.guestSession;
@@ -978,18 +1023,25 @@ export class BrowserHost {
     // 页内链接 / 重定向也过同一道 URL 门
     const guard = (event: { preventDefault(): void }, url: string) => {
       try {
-        assertAllowedUrl(url);
+        this.allowUrl(url, sessionId);
       } catch {
         event.preventDefault();
       }
     };
     contents.on('will-navigate', guard);
+    contents.on('will-frame-navigate', (event) => guard(event, event.url));
     contents.on('will-redirect', guard);
     contents.on('page-favicon-updated', (_event, urls) => {
       tab.favicon = pickFaviconUrl(urls);
       push();
     });
+    let wasFilePage = false;
     contents.on('did-navigate', () => {
+      const isFilePage = contents.getURL().startsWith('file:');
+      // File entries must never be restored from Chromium's back/forward cache after
+      // a workspace or symlink changes. HTTP-only browsing keeps its history.
+      if (wasFilePage || isFilePage) contents.navigationHistory.clear();
+      wasFilePage = isFilePage;
       tab.lastSnapshot = undefined;
       tab.favicon = null;
       push();
@@ -1006,7 +1058,7 @@ export class BrowserHost {
     // window.open / target=_blank：本 tab 内导航，不弹系统浏览器
     contents.setWindowOpenHandler(({ url }) => {
       try {
-        void contents.loadURL(assertAllowedUrl(url).href);
+        void contents.loadURL(this.allowUrl(url, sessionId).href).catch(() => {});
       } catch {}
       return { action: 'deny' };
     });
@@ -1150,6 +1202,7 @@ export class BrowserHost {
           at: seen,
         });
       }
+      if (state.url.startsWith('file:')) continue;
       await this.destroyTab(tab, { keepPersist: true });
     }
     if (this.tabs.size === 0 && this.idleTimer) {

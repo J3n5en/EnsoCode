@@ -151,10 +151,22 @@ export const IPC_CHANNELS = {
   FILES_LIST_MEDIA: 'files:list-media',
   FILES_LIST_DIR: 'files:list-dir',
   FILES_READ_REL: 'files:read-rel',
+  /** Markdown 预览相对图片：返回 data URL，不开放任意文件读取 */
+  FILES_READ_IMAGE: 'files:read-image',
+  /** Markdown 预览远程图片：主进程带 SSRF 防护代理读取，返回 data URL */
+  FILES_FETCH_REMOTE_IMAGE: 'files:fetch-remote-image',
   FILES_WRITE: 'files:write',
   FILES_WATCH_START: 'files:watch-start',
   FILES_WATCH_STOP: 'files:watch-stop',
   FILES_WATCH_EVENT: 'files:watch-event',
+  FILES_MKDIR: 'files:mkdir',
+  FILES_CREATE: 'files:create-file',
+  FILES_RENAME: 'files:rename',
+  FILES_REMOVE: 'files:remove',
+  FILES_ABS: 'files:abs-path',
+  FILES_COPY_PATH: 'files:copy-path',
+  FILES_COPY_FILE: 'files:copy-file',
+  FILES_REVEAL: 'files:reveal',
 
   GIT_DIFF_HEAD: 'git:diff-head',
 

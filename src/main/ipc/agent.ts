@@ -66,6 +66,7 @@ import {
   stopBackgroundTask,
   summarizeConversationTitle,
 } from '../services/agentHost';
+import { pickBrowserFileRoot, setBrowserFileRootResolver } from '../services/browserFileRoot';
 import { browserHost } from '../services/browserHost';
 import { searchFiles } from '../services/fileSearch';
 import { toStoredTokens } from '../services/mcpOAuth';
@@ -325,6 +326,21 @@ export function registerAgentHandlers(): void {
     onChanged: (projection) => {
       sendToAllWindows(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED, projection);
     },
+  });
+  setBrowserFileRootResolver((conversationId) => {
+    const conversation = sourceAuthority?.conversation(conversationId);
+    const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+    const cwd = pickBrowserFileRoot({
+      conversation,
+      project,
+      worktree: sessionWorktree(conversationId),
+    });
+    if (!cwd) return null;
+    try {
+      return statSync(cwd).isDirectory() ? cwd : null;
+    } catch {
+      return null;
+    }
   });
   sourceBindings = new ActiveConversationRegistry({
     authority: sourceAuthority,

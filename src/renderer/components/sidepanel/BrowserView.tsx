@@ -85,7 +85,8 @@ export function BrowserView({
   const devtoolsOpenRef = useRef(false);
   devtoolsOpenRef.current = state.devtoolsOpen;
   // host 透明、真正露出网页时才挖壁纸；空白占位/加载中保留壁纸垫底
-  const showsPage = state.url.startsWith('http') && !state.loading;
+  const showsPage =
+    (state.url.startsWith('http') || state.url.startsWith('file:')) && !state.loading;
   const showsPageRef = useRef(false);
   showsPageRef.current = showsPage;
   const lastHole = useRef<Rect | null>(null);

@@ -17,6 +17,6 @@ export default defineConfig({
   test: {
     // 主进程逻辑跑在 node 环境；渲染层若日后加测试再按目录覆盖
     environment: 'node',
-    include: ['src/**/*.test.ts', 'packages/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'packages/**/*.test.ts'],
   },
 });

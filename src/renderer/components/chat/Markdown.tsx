@@ -70,7 +70,8 @@ const FILE_PATH_RE =
 
 const REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts];
 
-const MarkdownCtx = createContext<{
+/** 导出给 Files 面板 Markdown 预览复用（`filePreviewMarkdown.tsx`），聊天渲染路径不受影响 */
+export const MarkdownCtx = createContext<{
   text: string;
   streaming: boolean;
   searchQuery: string;
@@ -78,7 +79,7 @@ const MarkdownCtx = createContext<{
 }>({ text: '', streaming: false, searchQuery: '', activeNth: -1 });
 
 /** 模块级稳定引用：react-markdown 按组件类型协调子树，内联对象每帧都会拆掉 CodeBlock */
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
   p: ({ children }) => {
     const { searchQuery, activeNth } = useContext(MarkdownCtx);
     return (
