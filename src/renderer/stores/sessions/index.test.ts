@@ -13,6 +13,7 @@ let onCapabilityAsk: ((request: CapabilityAskRequest) => void) | undefined;
 let onAgentEvent: ((event: RendererAgentEvent) => void) | undefined;
 let onDispatchEvent: ((event: DispatchMainEvent) => void) | undefined;
 let sourceProjection: SourceAuthorityProjection = { projects: [], conversations: [] };
+let nextConversationId = 'parent';
 const agentPrompt = vi.fn(async () => ({ ok: true }));
 const dispatch = vi.fn();
 const registerModelSelection = vi.fn(async () => ({
@@ -47,7 +48,7 @@ const selectConversation = vi.fn(async (request: { conversationId: string }) => 
 const createConversation = vi.fn(
   async (request?: { projectId?: string; conversationId?: string }) => {
     const value = {
-      conversationId: request?.conversationId ?? 'parent',
+      conversationId: request?.conversationId ?? nextConversationId,
       projectId: request?.projectId ?? 'project',
       kind: 'root' as const,
       lifecycle: 'draft' as const,
@@ -236,6 +237,7 @@ describe('typed Agent child projection', () => {
     createConversation.mockClear();
     updateConversationSelection.mockClear();
     readChildHistory.mockClear();
+    nextConversationId = 'parent';
     sourceProjection = {
       projects: [
         {
@@ -257,6 +259,33 @@ describe('typed Agent child projection', () => {
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
     });
     await seedParent();
+  });
+
+  it('已归档的空会话不会被新建会话复用', async () => {
+    nextConversationId = 'archived-empty';
+    const archivedId = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(archivedId).toBe('archived-empty');
+
+    sessionsModule.useSessionsStore.getState().toggleArchiveConversation(archivedId!);
+    sessionsModule.useSessionsStore.getState().selectConversation('parent');
+    nextConversationId = 'fresh-empty';
+
+    const createdId = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(createdId).toBe('fresh-empty');
+    const conversations = sessionsModule.useSessionsStore.getState().conversations;
+    expect(conversations[createdId!].archived).not.toBe(true);
+    expect(conversations[archivedId!].archived).toBe(true);
+  });
+
+  it('未归档的空会话仍会被新建会话复用', async () => {
+    nextConversationId = 'reusable-empty';
+    const emptyId = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    sessionsModule.useSessionsStore.getState().selectConversation('parent');
+    createConversation.mockClear();
+
+    const reusedId = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(reusedId).toBe(emptyId);
+    expect(createConversation).not.toHaveBeenCalled();
   });
 
   it('worker snapshot 恢复命令但会话持久化不保存命令列表', async () => {

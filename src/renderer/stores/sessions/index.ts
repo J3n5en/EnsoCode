@@ -1368,6 +1368,7 @@ export const useSessionsStore = create<SessionsState>()(
                   activeConversationIds.has(id) &&
                   conversation.projectId === projectId &&
                   !conversation.started &&
+                  conversation.archived !== true &&
                   !conversation.sessionFile &&
                   conversation.messages.length === 0 &&
                   !conversation.title
