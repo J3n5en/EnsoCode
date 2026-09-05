@@ -50,6 +50,7 @@ describe('设置持久化迁移', () => {
       titleSummaryEnabled: false,
       titleSummaryModel: null,
       approvalReviewer: null,
+      lastApprovalMode: null,
     });
   });
 
@@ -81,6 +82,7 @@ describe('设置持久化迁移', () => {
       titleSummaryEnabled: false,
       titleSummaryModel: null,
       approvalReviewer: null,
+      lastApprovalMode: null,
     });
   });
 
@@ -93,6 +95,15 @@ describe('设置持久化迁移', () => {
     expect(migrateSettings(v3, 3)).toEqual({
       ...v3,
       approvalReviewer: null,
+      lastApprovalMode: null,
+    });
+  });
+
+  it('v4 → v5 补 lastApprovalMode 缺省未选，不冒充用户上次档', () => {
+    const v4 = { theme: 'dark', approvalReviewer: { providerId: 'p', modelId: 'm' } };
+    expect(migrateSettings(v4, 4)).toEqual({
+      ...v4,
+      lastApprovalMode: null,
     });
   });
 
@@ -103,6 +114,7 @@ describe('设置持久化迁移', () => {
       titleSummaryEnabled: false,
       titleSummaryModel: null,
       approvalReviewer: null,
+      lastApprovalMode: null,
     });
   });
 
@@ -120,6 +132,7 @@ describe('设置持久化迁移', () => {
       titleSummaryEnabled: false,
       titleSummaryModel: null,
       approvalReviewer: null,
+      lastApprovalMode: null,
     });
   });
 

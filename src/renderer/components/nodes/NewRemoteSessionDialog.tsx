@@ -73,12 +73,18 @@ export function NewRemoteSessionDialog({
 }: Props) {
   const { t } = useI18n();
   const approvalReviewer = useSettingsStore((state) => state.approvalReviewer);
+  const lastApprovalMode = useSettingsStore((state) => state.lastApprovalMode);
   const localProviders = useSettingsStore((state) => state.providers);
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
   const initialApprovalMode = useMemo(
     () =>
-      defaultApprovalMode(approvalReviewer, localProviders, oauthCredentialContext(oauthSnapshot)),
-    [approvalReviewer, localProviders, oauthSnapshot]
+      defaultApprovalMode(
+        approvalReviewer,
+        localProviders,
+        oauthCredentialContext(oauthSnapshot),
+        lastApprovalMode
+      ),
+    [approvalReviewer, lastApprovalMode, localProviders, oauthSnapshot]
   );
   // 目录异步到达：记录用户显式选过的值，取值时对当前列表校验回落
   const [pickedProject, setPickedProject] = useState<string | null>(null);
@@ -105,6 +111,7 @@ export function NewRemoteSessionDialog({
 
   const create = () => {
     if (!canCreate) return;
+    useSettingsStore.getState().setLastApprovalMode(approvalMode);
     onCreate({
       projectId,
       providerId: provider.id,

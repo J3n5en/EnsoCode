@@ -16,7 +16,7 @@ import type {
   SkillEntry,
   SubagentModelEntry,
 } from '@shared/types';
-import type { ThinkingLevel } from '@shared/types/agent';
+import type { ApprovalMode, ThinkingLevel } from '@shared/types/agent';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import type { OauthCredentialSnapshot } from '@/stores/oauthCredentials';
@@ -163,6 +163,8 @@ export interface SettingsState {
   titleSummaryModel: DefaultModelRef | null;
   /** 助手代审模型；null = 该档不可用 */
   approvalReviewer: DefaultModelRef | null;
+  /** 上次选的审批档；null = 新会话仍按代审可用性默认 */
+  lastApprovalMode: ApprovalMode | null;
   /** 新会话默认是否开启推理；缺省 true */
   defaultReasoningEnabled: boolean;
   /** 新会话默认思考深度；缺省 medium */
@@ -257,6 +259,7 @@ export interface SettingsState {
   /** 设置标题总结独立模型；null = 回到跟随全局默认 */
   setTitleSummaryModel: (model: DefaultModelRef | null) => void;
   setApprovalReviewer: (model: DefaultModelRef | null) => void;
+  setLastApprovalMode: (mode: ApprovalMode) => void;
   // Skill actions
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;

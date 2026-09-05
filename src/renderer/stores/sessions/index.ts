@@ -1410,6 +1410,7 @@ export const useSessionsStore = create<SessionsState>()(
             defaultReasoningEnabled,
             defaultThinkingLevel,
             approvalReviewer,
+            lastApprovalMode,
             providers,
           } = useSettingsStore.getState();
           const defaultPreset =
@@ -1429,7 +1430,8 @@ export const useSessionsStore = create<SessionsState>()(
             approvalMode: defaultApprovalMode(
               approvalReviewer,
               providers,
-              oauthCredentialContext(useOauthCredentialStore.getState().snapshot)
+              oauthCredentialContext(useOauthCredentialStore.getState().snapshot),
+              lastApprovalMode
             ),
             ...defaultPreset,
             ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
@@ -2079,11 +2081,13 @@ export const useSessionsStore = create<SessionsState>()(
         setApprovalMode(id, mode) {
           const previous = get().conversations[id]?.approvalMode;
           set((state) => patch(state, id, { approvalMode: mode }));
+          useSettingsStore.getState().setLastApprovalMode(mode);
           const conversation = get().conversations[id];
           if (conversation?.started) {
             void window.electronAPI.agent.setApprovalMode(id, mode).then((result) => {
               if (result && !result.ok) {
                 set((state) => patch(state, id, { approvalMode: previous ?? 'full' }));
+                if (previous) useSettingsStore.getState().setLastApprovalMode(previous);
               }
             });
           }
