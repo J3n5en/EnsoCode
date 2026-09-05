@@ -974,6 +974,8 @@ export const zhTranslations: Record<string, string> = {
   'Merging now…': '正在合并…',
   'Memory merged.': '记忆已合并。',
   'Nothing new to merge.': '没有新内容可合并。',
+  'Extracting {{current}}/{{total}}': '抽取 {{current}}/{{total}}',
+  'Consolidating {{current}}/{{total}}': '合并 {{current}}/{{total}}',
   'Write the working summary…': '写工作摘要…',
   'A durable lesson': '一条可复用的要点',
   'Add lesson': '加一条',

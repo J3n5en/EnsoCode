@@ -2915,6 +2915,7 @@ export class SessionSupervisor {
     currentThreadId?: string;
     model: SpawnModelConfig;
     phase2Model?: SpawnModelConfig;
+    onProgress?: (progress: { phase: 'stage1' | 'phase2'; current: number; total: number }) => void;
   }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
     const runtime = await this.getRuntime();
     const sessionModel = await resolveBaseModelOrRefresh(runtime, opts.model);
@@ -2930,6 +2931,7 @@ export class SessionSupervisor {
       currentThreadId: opts.currentThreadId,
       nowSec: Math.floor(Date.now() / 1000),
       workerToken: `memory-${process.pid}`,
+      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
       completeSimple: async ({ systemPrompt, userText, phase }) => {
         const controller = new AbortController();
         const timer = setTimeout(
@@ -2992,6 +2994,13 @@ export class SessionSupervisor {
           currentThreadId: command.currentThreadId,
           model: command.model,
           ...(command.phase2Model ? { phase2Model: command.phase2Model } : {}),
+          onProgress: (progress) => {
+            this.options.emit({
+              type: 'memory-pipeline-progress',
+              requestId: command.requestId,
+              ...progress,
+            });
+          },
         })
       );
       this.options.emit({

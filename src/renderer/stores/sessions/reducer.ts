@@ -111,7 +111,13 @@ export const emptyProjection: SessionProjection = {
 const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
   if (event.type === 'worker-exited' || event.type === 'snapshot') return null;
   // 标题总结不属于任何 worker 会话（无 identity/seq），在 store 层处理，不进投影
-  if (event.type === 'title-generated' || event.type === 'memory-pipeline-done') return null;
+  if (
+    event.type === 'title-generated' ||
+    event.type === 'memory-pipeline-done' ||
+    event.type === 'memory-pipeline-progress'
+  ) {
+    return null;
+  }
   if (event.type === 'capability-invoke') return event.child;
   return event.identity;
 };
@@ -198,7 +204,13 @@ export function applyAgentEvent(
   }
 
   const identity = eventIdentity(event);
-  if (event.type === 'title-generated' || event.type === 'memory-pipeline-done') return state;
+  if (
+    event.type === 'title-generated' ||
+    event.type === 'memory-pipeline-done' ||
+    event.type === 'memory-pipeline-progress'
+  ) {
+    return state;
+  }
   // spawn 拒绝恒以 seq:0 发出（worker 侧此时尚未建会话，没有 seq 计数器），
   // 过不了下面的 (generation, seq) 单调守卫。一并丢弃的后果是 spawn 失败在
   // UI 上完全无声：spawning 被别处清掉、status 停在 idle、error 为空，用户

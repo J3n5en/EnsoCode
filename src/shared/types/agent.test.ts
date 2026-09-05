@@ -531,6 +531,27 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
   });
 
+  it('memory-pipeline-progress 事件完整往返；脏输入不崩', () => {
+    const event = {
+      type: 'memory-pipeline-progress',
+      requestId: RECEIPT_ID,
+      phase: 'stage1',
+      current: 1,
+      total: 3,
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, phase: 'phase2', current: 2, total: 3 })).toEqual({
+      ...event,
+      phase: 'phase2',
+      current: 2,
+      total: 3,
+    });
+    expect(parseAgentWorkerEvent({ ...event, requestId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, phase: 'done' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, current: -1 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: 1 })).toBeNull();
+  });
+
   it('memory-pipeline-done 事件完整往返；脏输入不崩', () => {
     const event = {
       type: 'memory-pipeline-done',

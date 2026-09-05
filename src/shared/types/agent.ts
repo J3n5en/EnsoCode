@@ -750,6 +750,8 @@ export interface AgentActionResult {
   error?: string;
   /** 项目记忆 GUI 快照 */
   snapshot?: import('../memorySnapshot').MemorySnapshot;
+  /** 立刻合并：worker 进度/完成事件按这个 id 对齐 */
+  requestId?: string;
 }
 
 export type ParentLifecycleEvent =
@@ -937,6 +939,13 @@ export type AgentWorkerEvent =
       type: 'title-generated';
       conversationId: string;
       title: string;
+    }
+  | {
+      type: 'memory-pipeline-progress';
+      requestId: string;
+      phase: 'stage1' | 'phase2';
+      current: number;
+      total: number;
     }
   | {
       type: 'memory-pipeline-done';
@@ -2062,6 +2071,17 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'conversationId', 'title']) &&
       isNonEmptyString(value.conversationId) &&
       isNonEmptyString(value.title)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'memory-pipeline-progress') {
+    return hasExactKeys(value, ['type', 'requestId', 'phase', 'current', 'total']) &&
+      isNonEmptyString(value.requestId) &&
+      (value.phase === 'stage1' || value.phase === 'phase2') &&
+      isSequence(value.current) &&
+      isSequence(value.total) &&
+      value.total > 0 &&
+      value.current <= value.total
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

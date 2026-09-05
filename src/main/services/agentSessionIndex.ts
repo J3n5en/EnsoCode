@@ -101,6 +101,7 @@ function identityOf(
     | { type: 'snapshot' }
     | { type: 'title-generated' }
     | { type: 'memory-pipeline-done' }
+    | { type: 'memory-pipeline-progress' }
     | McpWorkerEvent
   >
 ): SessionIdentity {
@@ -333,7 +334,13 @@ export class AgentSessionIndex {
     }
 
     // 标题总结与 MCP 旁路事件不属于任何 worker 会话（无 identity/seq），不进会话索引
-    if (event.type === 'title-generated' || event.type === 'memory-pipeline-done') return false;
+    if (
+      event.type === 'title-generated' ||
+      event.type === 'memory-pipeline-done' ||
+      event.type === 'memory-pipeline-progress'
+    ) {
+      return false;
+    }
     if (event.type === 'mcp-status' || event.type === 'mcp-tokens-refreshed') return false;
 
     const identity = identityOf(event);

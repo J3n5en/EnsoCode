@@ -1,8 +1,9 @@
 import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import type { MemorySnapshot } from '@shared/memorySnapshot';
 import { Brain, Layers, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -25,9 +26,10 @@ function basename(cwd: string): string {
 
 function phaseCopy(
   t: (key: string) => string,
-  snapshot: MemorySnapshot
+  snapshot: MemorySnapshot,
+  merging: boolean
 ): { label: string; className: string } {
-  if (snapshot.phase2Status === 'running') {
+  if (merging) {
     return { label: t('Merging…'), className: 'text-info' };
   }
   if (snapshot.hasMemoryMd) {
@@ -45,6 +47,12 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
   const [summaryDraft, setSummaryDraft] = useState('');
   const [learnedDraft, setLearnedDraft] = useState<{ id: string; text: string }[]>([]);
   const enabled = useSettingsStore((s) => s.localMemoryEnabled !== false);
+  const requestId = useSessionsStore((s) => s.memoryMergeRequests?.[conversationId]);
+  const progress = useSessionsStore((s) =>
+    requestId ? s.memoryMergeProgress?.[requestId] : undefined
+  );
+  const merging = Boolean(requestId);
+  const wasMerging = useRef(false);
 
   const applySnapshot = (next: MemorySnapshot) => {
     setSnapshot(next);
@@ -95,7 +103,26 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
     };
   }, [open, enabled, conversationId]);
 
-  const phase = snapshot ? phaseCopy(t, snapshot) : null;
+  const phase = snapshot ? phaseCopy(t, snapshot, merging) : null;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: applySnapshot is local and always current
+  useEffect(() => {
+    if (merging) {
+      wasMerging.current = true;
+      return;
+    }
+    if (!wasMerging.current || !open) {
+      wasMerging.current = false;
+      return;
+    }
+    wasMerging.current = false;
+    void useSessionsStore
+      .getState()
+      .memory(conversationId, 'view')
+      .then((result) => {
+        if (result.ok) applySnapshot(result.snapshot);
+      });
+  }, [open, merging, conversationId]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -103,7 +130,7 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
         disabled={!enabled}
         className={cn(
           'shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40',
-          snapshot?.phase2Status === 'running' && 'text-info'
+          merging && 'text-info'
         )}
         title={t('Project memory')}
         aria-label={t('Project memory')}
@@ -132,7 +159,29 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
           </div>
 
           {error && <p className="text-[11px] text-destructive">{error}</p>}
-          {snapshot?.notice && !error && (
+          {merging && progress && (
+            <div className="space-y-1">
+              <Progress
+                value={Math.round((progress.current / Math.max(progress.total, 1)) * 100)}
+                className="gap-1"
+              />
+              <p className="text-[10px] text-muted-foreground tabular-nums">
+                {progress.phase === 'stage1'
+                  ? t('Extracting {{current}}/{{total}}', {
+                      current: progress.current,
+                      total: progress.total,
+                    })
+                  : t('Consolidating {{current}}/{{total}}', {
+                      current: progress.current,
+                      total: progress.total,
+                    })}
+              </p>
+            </div>
+          )}
+          {merging && !progress && (
+            <p className="text-[11px] text-muted-foreground">{t('Merging now…')}</p>
+          )}
+          {snapshot?.notice && !error && !merging && (
             <p className="text-[11px] text-muted-foreground">{t(snapshot.notice)}</p>
           )}
 
@@ -200,12 +249,12 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
           <div className="flex items-center justify-between gap-2 pt-0.5">
             <button
               type="button"
-              disabled={busy || snapshot?.phase2Status === 'running'}
+              disabled={busy || merging}
               className="inline-flex items-center gap-1 text-[11px] text-foreground/90 hover:text-foreground disabled:cursor-default disabled:text-muted-foreground"
               onClick={() => void run('enqueue')}
             >
               <Layers className="h-3 w-3" />
-              {snapshot?.phase2Status === 'running' ? t('Merging…') : t('Merge now')}
+              {merging ? t('Merging…') : t('Merge now')}
             </button>
             <div className="flex items-center gap-2">
               <button

@@ -12,6 +12,12 @@ export type MemoryCompleteSimple = (input: {
   phase: 1 | 2;
 }) => Promise<string>;
 
+export type MemoryPipelineProgress = {
+  phase: 'stage1' | 'phase2';
+  current: number;
+  total: number;
+};
+
 export type Stage1Artifact = {
   threadId: string;
   sourceUpdatedAt: number;
@@ -66,6 +72,7 @@ export async function runMemoryPipeline(opts: {
   nowSec: number;
   workerToken: string;
   completeSimple: MemoryCompleteSimple;
+  onProgress?: (progress: MemoryPipelineProgress) => void;
 }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
   const threads = await listMemoryThreads(opts.sessionDir, { cwd: opts.cwd });
   const candidates = selectStageOneCandidates(threads, {
@@ -73,6 +80,16 @@ export async function runMemoryPipeline(opts: {
     currentThreadId: opts.currentThreadId,
   });
   let jobs = await loadJobs(opts.memoryRoot);
+  const claimable = candidates.filter(
+    (thread) =>
+      claimStage1(jobs, thread, {
+        nowSec: opts.nowSec,
+        leaseSeconds: 120,
+        workerToken: opts.workerToken,
+      }).claimed
+  );
+  const total = Math.max(1, claimable.length + 1);
+  opts.onProgress?.({ phase: 'stage1', current: 0, total });
   let artifacts = await loadArtifacts(opts.memoryRoot);
   let stage1Claimed = 0;
   let produced = false;
@@ -111,6 +128,7 @@ export async function runMemoryPipeline(opts: {
       jobs = done;
       await saveJobs(opts.memoryRoot, jobs);
     }
+    opts.onProgress?.({ phase: 'stage1', current: stage1Claimed, total });
     if (!parsed || !isUsableStage1(parsed)) continue;
     produced = true;
     artifacts = upsertArtifact(artifacts, {
@@ -122,10 +140,14 @@ export async function runMemoryPipeline(opts: {
   }
 
   const forced = jobs.global.dirty === true;
-  if (!produced && !forced) return { stage1Claimed, phase2Ran: false };
+  if (!produced && !forced) {
+    opts.onProgress?.({ phase: 'phase2', current: total, total });
+    return { stage1Claimed, phase2Ran: false };
+  }
   if (forced && artifacts.length === 0) {
     jobs = { ...jobs, global: { ...jobs.global, dirty: undefined, status: 'done' } };
     await saveJobs(opts.memoryRoot, jobs);
+    opts.onProgress?.({ phase: 'phase2', current: total, total });
     return { stage1Claimed, phase2Ran: false };
   }
 
@@ -139,9 +161,13 @@ export async function runMemoryPipeline(opts: {
     workerToken: opts.workerToken,
     newWatermark,
   });
-  if (!phase2.claimed) return { stage1Claimed, phase2Ran: false };
+  if (!phase2.claimed) {
+    opts.onProgress?.({ phase: 'phase2', current: total, total });
+    return { stage1Claimed, phase2Ran: false };
+  }
   jobs = phase2.state;
   await saveJobs(opts.memoryRoot, jobs);
+  opts.onProgress?.({ phase: 'phase2', current: stage1Claimed, total });
 
   const forGlobal = [...artifacts]
     .sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt)
@@ -169,6 +195,7 @@ export async function runMemoryPipeline(opts: {
   });
   const parsed = parsePhaseTwoResponse(text);
   if (!parsed?.memory_md.trim() || !parsed.memory_summary.trim()) {
+    opts.onProgress?.({ phase: 'phase2', current: total, total });
     return { stage1Claimed, phase2Ran: false };
   }
   await applyConsolidation(opts.memoryRoot, parsed);
@@ -180,5 +207,6 @@ export async function runMemoryPipeline(opts: {
     },
   };
   await saveJobs(opts.memoryRoot, jobs);
+  opts.onProgress?.({ phase: 'phase2', current: total, total });
   return { stage1Claimed, phase2Ran: true };
 }

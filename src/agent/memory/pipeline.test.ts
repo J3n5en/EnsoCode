@@ -78,6 +78,26 @@ describe('runMemoryPipeline', () => {
     expect(result).toEqual({ stage1Claimed: 0, phase2Ran: false });
   });
 
+  it('reports stage1 then phase2 progress against claimed threads plus one merge slot', async () => {
+    const onProgress = vi.fn();
+    const opts = baseOpts({ onProgress });
+    writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
+    const completeSimple = vi
+      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .mockResolvedValueOnce(STAGE1_VALID)
+      .mockResolvedValueOnce(PHASE2_VALID);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    expect(onProgress.mock.calls.map((call) => call[0])).toEqual([
+      { phase: 'stage1', current: 0, total: 2 },
+      { phase: 'stage1', current: 1, total: 2 },
+      { phase: 'phase2', current: 1, total: 2 },
+      { phase: 'phase2', current: 2, total: 2 },
+    ]);
+  });
+
   it('claims one idle same-cwd parent thread, calls phase 1 with thread id + persistable text, and skips writing MEMORY.md when stage1 output is empty', async () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-empty', userText: 'fix login bug' });

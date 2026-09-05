@@ -197,6 +197,13 @@ interface SendTarget {
 
 interface SessionsState {
   conversations: Record<string, Conversation>;
+  /** 项目记忆立刻合并的阶段进度（按 requestId，不进会话投影） */
+  memoryMergeProgress: Record<
+    string,
+    { phase: 'stage1' | 'phase2'; current: number; total: number }
+  >;
+  /** conversationId → 进行中的合并 requestId */
+  memoryMergeRequests: Record<string, string>;
   /** 新的在前 */
   order: string[];
   activeId: string | null;
@@ -715,7 +722,30 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
-        if (event.type === 'memory-pipeline-done') return;
+        if (event.type === 'memory-pipeline-progress') {
+          set((state) => ({
+            ...state,
+            memoryMergeProgress: {
+              ...state.memoryMergeProgress,
+              [event.requestId]: {
+                phase: event.phase,
+                current: event.current,
+                total: event.total,
+              },
+            },
+          }));
+          return;
+        }
+        if (event.type === 'memory-pipeline-done') {
+          set((state) => {
+            const { [event.requestId]: _done, ...progress } = state.memoryMergeProgress;
+            const requests = Object.fromEntries(
+              Object.entries(state.memoryMergeRequests).filter(([, id]) => id !== event.requestId)
+            );
+            return { ...state, memoryMergeProgress: progress, memoryMergeRequests: requests };
+          });
+          return;
+        }
 
         if (event.type === 'title-generated') {
           const baseline = pendingTitleBaselines.get(event.conversationId);
@@ -1224,6 +1254,8 @@ export const useSessionsStore = create<SessionsState>()(
         activeId: null,
         pendingAgentPrefill: undefined,
         worktreeStatuses: {},
+        memoryMergeProgress: {},
+        memoryMergeRequests: {},
 
         async moveConversationToWorktree(id, options) {
           const conversation = get().conversations[id];
@@ -2292,6 +2324,25 @@ export const useSessionsStore = create<SessionsState>()(
           );
           if (!result.ok || !result.snapshot) {
             return { ok: false, error: result.error ?? 'memory command failed' };
+          }
+          if (action === 'enqueue' && result.requestId) {
+            set((state) => ({
+              ...state,
+              memoryMergeRequests: {
+                ...state.memoryMergeRequests,
+                [conversationId]: result.requestId as string,
+              },
+              memoryMergeProgress: {
+                ...state.memoryMergeProgress,
+                [result.requestId as string]: state.memoryMergeProgress[
+                  result.requestId as string
+                ] ?? {
+                  phase: 'stage1',
+                  current: 0,
+                  total: 1,
+                },
+              },
+            }));
           }
           return { ok: true, snapshot: result.snapshot };
         },

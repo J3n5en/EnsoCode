@@ -30,7 +30,7 @@ import {
 } from '@shared/types/mentions';
 import { app, ipcMain, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
-import { loadMemorySnapshot, runMemorySlash } from '../../agent/memory/slash';
+import { runMemorySlash } from '../../agent/memory/slash';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
 import {
@@ -932,22 +932,16 @@ export function registerAgentHandlers(): void {
       );
       const phase2 =
         phase2Ref && resolveModelSelection(phase2Ref.providerId, phase2Ref.modelId, credentialKeys);
-      const ran = await requestMemoryPipeline({
-        requestId: randomUUID(),
+      const requestId = randomUUID();
+      const started = requestMemoryPipeline({
+        requestId,
         cwd: projectCwd,
         currentThreadId: isNonEmptyString(sessionId) ? sessionId : undefined,
         model: model.selection.config,
         ...(phase2?.ok ? { phase2Model: phase2.selection.config } : {}),
       });
-      if (!ran.ok) return { ok: false, error: ran.error ?? 'Memory merge failed.' };
-      return {
-        ok: true,
-        snapshot: await loadMemorySnapshot(
-          agentDir,
-          projectCwd,
-          ran.phase2Ran ? 'Memory merged.' : 'Nothing new to merge.'
-        ),
-      };
+      if (!started.ok) return { ok: false, error: started.error ?? 'worker unavailable' };
+      return { ok: true, snapshot: result.snapshot, requestId };
     }
   );
 

@@ -154,7 +154,6 @@ export function startAgentWorker(): void {
     const event = parseAgentWorkerEvent(raw);
     if (event) {
       resolveReleaseWaiters(event);
-      resolveMemoryPipelineWaiters(event);
       onEvent?.(event);
     }
   });
@@ -597,50 +596,21 @@ export function summarizeConversationTitle(
   return sendAgentCommand({ type: 'summarize-title', conversationId, text, model });
 }
 
-const memoryPipelineWaiters = new Map<
-  string,
-  (event: Extract<AgentWorkerEvent, { type: 'memory-pipeline-done' }>) => void
->();
-
-function resolveMemoryPipelineWaiters(event: AgentWorkerEvent): void {
-  if (event.type !== 'memory-pipeline-done') return;
-  const resolve = memoryPipelineWaiters.get(event.requestId);
-  if (!resolve) return;
-  memoryPipelineWaiters.delete(event.requestId);
-  resolve(event);
-}
-
 export function requestMemoryPipeline(opts: {
   requestId: string;
   cwd: string;
   currentThreadId?: string;
   model: SpawnModelConfig;
   phase2Model?: SpawnModelConfig;
-}): Promise<{ ok: boolean; error?: string; stage1Claimed?: number; phase2Ran?: boolean }> {
+}): { ok: boolean; error?: string } {
   if (!worker) startAgentWorker();
-  const posted = sendAgentCommand({
+  return sendAgentCommand({
     type: 'run-memory-pipeline',
     requestId: opts.requestId,
     cwd: opts.cwd,
     ...(opts.currentThreadId ? { currentThreadId: opts.currentThreadId } : {}),
     model: opts.model,
     ...(opts.phase2Model ? { phase2Model: opts.phase2Model } : {}),
-  });
-  if (!posted.ok)
-    return Promise.resolve({ ok: false, error: posted.error ?? 'worker unavailable' });
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      memoryPipelineWaiters.delete(opts.requestId);
-      resolve({ ok: false, error: 'Memory merge timed out.' });
-    }, 200_000);
-    memoryPipelineWaiters.set(opts.requestId, (event) => {
-      clearTimeout(timer);
-      resolve(
-        event.ok
-          ? { ok: true, stage1Claimed: event.stage1Claimed, phase2Ran: event.phase2Ran }
-          : { ok: false, error: event.error ?? 'Memory merge failed.' }
-      );
-    });
   });
 }
 
