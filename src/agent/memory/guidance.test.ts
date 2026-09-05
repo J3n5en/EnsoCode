@@ -5,12 +5,18 @@ describe('buildMemoryGuidance', () => {
   it('always includes the heading and core rules, even when both inputs are empty', () => {
     const text = buildMemoryGuidance({});
     expect(text).toMatch(/Memory Guidance/);
-    expect(text).toContain('memory://root/memory_summary.md');
     expect(text).toContain('memory://root/MEMORY.md');
     expect(text.toLowerCase()).toContain('stale');
     expect(text.toLowerCase()).toMatch(/never sufficient/);
     expect(text).not.toMatch(/Memory summary:/);
     expect(text).not.toMatch(/Learned lessons/);
+  });
+
+  it('不再要求先读 memory_summary.md（已内联），改为按需读 MEMORY.md 对应章节', () => {
+    const text = buildMemoryGuidance({});
+    expect(text).not.toMatch(/memory_summary\.md`\s*first/i);
+    expect(text.toLowerCase()).toContain('already loaded');
+    expect(text).toMatch(/read `?memory:\/\/root\/MEMORY\.md`?/);
   });
 
   it('includes a "Memory summary:" section with the provided text', () => {
