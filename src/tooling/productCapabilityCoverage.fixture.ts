@@ -286,7 +286,6 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   AGENT_DISMISS_COWORKER: surfaces('team.dismiss-coworker'),
   AGENT_HIRE_COWORKER: surfaces('team.hire-coworker'),
-  AGENT_MEMORY: excluded('Memory slash/tool transport; not a Files panel capability.'),
   AGENT_ASK_RESPOND: surfaces('conversations.ask.respond'),
   AGENT_RELEASE: surfaces('conversations.worktree.release'),
   WORKTREE_CREATE: surfaces('conversations.worktree.create'),
