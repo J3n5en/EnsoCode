@@ -113,6 +113,7 @@ import {
 } from './localMemory';
 import { McpManager } from './mcp';
 import { runMemoryPipeline } from './memory/pipeline';
+import { createMemoryCompleteSimple } from './memory/runner';
 import { resolveMemoryUri } from './memory/sanitize';
 import { loadSessionMemoryInjection, shouldRunMemoryStartup } from './memory/startup';
 import { createMessageCoworkerTool } from './messageCoworker';
@@ -2922,8 +2923,6 @@ export class SessionSupervisor {
     const phase2Model = opts.phase2Model
       ? await resolveBaseModelOrRefresh(runtime, opts.phase2Model).catch(() => sessionModel)
       : sessionModel;
-    const phase1TimeoutMs = 60_000;
-    const phase2TimeoutMs = 120_000;
     return runMemoryPipeline({
       memoryRoot: getMemoryRoot(this.options.agentDir, opts.cwd),
       sessionDir: this.options.sessionDir,
@@ -2932,30 +2931,7 @@ export class SessionSupervisor {
       nowSec: Math.floor(Date.now() / 1000),
       workerToken: `memory-${process.pid}`,
       ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
-      completeSimple: async ({ systemPrompt, userText, phase }) => {
-        const controller = new AbortController();
-        const timer = setTimeout(
-          () => controller.abort(),
-          phase === 1 ? phase1TimeoutMs : phase2TimeoutMs
-        );
-        try {
-          const message = await runtime.completeSimple(
-            phase === 2 ? phase2Model : sessionModel,
-            {
-              systemPrompt,
-              messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
-            },
-            { signal: controller.signal }
-          );
-          return Array.isArray((message as { content?: unknown }).content)
-            ? ((message as { content: Array<{ type?: string; text?: string }> }).content ?? [])
-                .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
-                .join('')
-            : '';
-        } finally {
-          clearTimeout(timer);
-        }
-      },
+      completeSimple: createMemoryCompleteSimple({ runtime, sessionModel, phase2Model }),
     });
   }
 
