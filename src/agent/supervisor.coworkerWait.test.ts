@@ -124,6 +124,13 @@ async function settle(): Promise<void> {
   await promise;
 }
 
+/** spawn 链路里的 mock 异步跳数会变（provider 刷新等），settle() 一次不一定够，轮询等它落地。 */
+async function settleUntil(check: () => boolean, tries = 20): Promise<void> {
+  for (let i = 0; i < tries && !check(); i++) {
+    await settle();
+  }
+}
+
 interface CoworkerToolLike {
   execute(
     id: string,
@@ -149,7 +156,7 @@ async function spawnParentAndCoworker(events: AgentWorkerEvent[]) {
     sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
   });
   supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
-  await settle();
+  await settleUntil(() => mocks.createAgentSession.mock.calls.length > 0);
   const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
   const parentOptions = mocks.createAgentSession.mock.calls[0][0] as {
     customTools: CoworkerToolLike[];
@@ -485,7 +492,7 @@ describe('SessionSupervisor coworker wait/report', () => {
       sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
     });
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
-    await settle();
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 0);
     const parentOptions = mocks.createAgentSession.mock.calls[0][0] as {
       customTools: CoworkerToolLike[];
     };
@@ -596,7 +603,7 @@ describe('SessionSupervisor coworker wait/report', () => {
         { name: 'scout', description: 'recon', systemPrompt: 'look', tools: 'readonly' },
       ],
     });
-    await settle();
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 0);
     expect(mocks.loaderOptions[0]?.noExtensions).not.toBe(true);
     const parentOptions = mocks.createAgentSession.mock.calls[0][0] as {
       customTools: CoworkerToolLike[];

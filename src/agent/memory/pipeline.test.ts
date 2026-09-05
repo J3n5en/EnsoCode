@@ -81,7 +81,7 @@ describe('runMemoryPipeline', () => {
   it('claims one idle same-cwd parent thread, calls phase 1 with thread id + persistable text, and skips writing MEMORY.md when stage1 output is empty', async () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-empty', userText: 'fix login bug' });
-    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     opts.completeSimple = completeSimple;
 
     const result = await runMemoryPipeline(opts);
@@ -100,7 +100,7 @@ describe('runMemoryPipeline', () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -139,7 +139,7 @@ describe('runMemoryPipeline', () => {
 
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -151,7 +151,7 @@ describe('runMemoryPipeline', () => {
   });
 
   it('skips the current thread id and only runs phase 1 for the other thread', async () => {
-    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     const opts = baseOpts({ currentThreadId: 'thread-current', completeSimple });
     writeParentSession(opts.sessionDir, { id: 'thread-current', userText: 'current session text' });
     writeParentSession(opts.sessionDir, { id: 'thread-other', userText: 'other session text' });
@@ -169,7 +169,7 @@ describe('runMemoryPipeline', () => {
     const opts = baseOpts();
     const huge = 'x'.repeat(20_000);
     writeParentSession(opts.sessionDir, { id: 'thread-huge', userText: huge });
-    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     opts.completeSimple = completeSimple;
 
     await runMemoryPipeline(opts);

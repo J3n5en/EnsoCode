@@ -39,7 +39,7 @@ export function hasLiveGenerationWork(input: {
 
 type StallMessage = {
   role?: string;
-  content?: ReadonlyArray<{ type?: string; id?: string }>;
+  content?: ReadonlyArray<{ type?: string; id?: string; name?: string }>;
   toolCallId?: string;
 };
 
