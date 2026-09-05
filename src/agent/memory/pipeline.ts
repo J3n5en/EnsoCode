@@ -27,7 +27,7 @@ export type Stage1Artifact = {
 };
 
 const ARTIFACTS_FILE = 'stage1_outputs.json';
-const PHASE1_INPUT_TOKEN_LIMIT = 4000;
+const PHASE1_INPUT_TOKEN_LIMIT = 12_000;
 const PHASE2_RAW_TOKEN_LIMIT = 20_000;
 const PER_ARTIFACT_RAW_CHARS = 6_000;
 const MAX_RAW_MEMORIES_FOR_GLOBAL = 200;

@@ -186,9 +186,9 @@ describe('runMemoryPipeline', () => {
     expect(result.stage1Claimed).toBe(1);
   });
 
-  it('truncates stage-one payload around a 4000-token budget', async () => {
+  it('truncates stage-one payload around a 12000-token budget', async () => {
     const opts = baseOpts();
-    const huge = 'x'.repeat(20_000);
+    const huge = 'x'.repeat(50_000);
     writeParentSession(opts.sessionDir, { id: 'thread-huge', userText: huge });
     const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     opts.completeSimple = completeSimple;
