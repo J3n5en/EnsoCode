@@ -29,10 +29,13 @@ export type Stage1Artifact = {
 const ARTIFACTS_FILE = 'stage1_outputs.json';
 const PHASE1_INPUT_TOKEN_LIMIT = 12_000;
 const PHASE2_RAW_TOKEN_LIMIT = 20_000;
+const PHASE2_SUMMARY_TOKEN_LIMIT = 12_000;
 const PER_ARTIFACT_RAW_CHARS = 6_000;
 const MAX_RAW_MEMORIES_FOR_GLOBAL = 200;
 const PRIOR_MD_TOKEN_LIMIT = 10_000;
 const PRIOR_SUMMARY_TOKEN_LIMIT = 2_000;
+/** 低于此宽度的剩余预算不值得再塑一个 block，直接停止。 */
+const MIN_BLOCK_CHARS = 200;
 
 /** OMP `truncateByApproxTokens`: 1 token ≈ 4 chars, keep 60% head + 40% tail. */
 export function truncateByApproxTokens(text: string, tokenLimit: number): string {
@@ -44,9 +47,7 @@ export function truncateByApproxTokens(text: string, tokenLimit: number): string
   return `${text.slice(0, head)}\n\n...[truncated]...\n\n${text.slice(-tail)}`;
 }
 
-/**
- * 按时间倒序优先保留最新线程的 raw_memory，超预算的旧线程降级为仅 summary，保证每个线程至少有 summary 出现。
- */
+/** 按头尾各保留一部分截断 raw_memory，中间插入截断标记。 */
 function capRawMemory(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const marker = '\n...[truncated]...\n';
@@ -58,22 +59,50 @@ function capRawMemory(text: string, maxChars: number): string {
 
 export function buildPhaseTwoCorpus(
   artifacts: Stage1Artifact[],
-  opts: { rawTokenLimit: number; perArtifactRawChars: number }
+  opts: {
+    rawTokenLimit: number;
+    perArtifactRawChars: number;
+    summaryTokenLimit: number;
+    maxRawCandidates: number;
+  }
 ): { raw: string; summaries: string } {
   const sorted = [...artifacts].sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt);
+
+  // raw: 仅在最新 maxRawCandidates 个中按预算逐个塑入，每个 block 根据剩余预算动态收紩，
+  // 保证最新的艺术品也能在预算不足时被裁剪而不是直接跳过。
   const rawCharBudget = opts.rawTokenLimit * 4;
+  const rawCandidates = sorted.slice(0, opts.maxRawCandidates);
   const rawBlocks: string[] = [];
   let usedChars = 0;
-  for (const row of sorted) {
-    const cappedRaw = capRawMemory(row.raw_memory.trim(), opts.perArtifactRawChars);
-    if (usedChars + cappedRaw.length > rawCharBudget) continue;
-    rawBlocks.push(`## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n${cappedRaw}\n`);
-    usedChars += cappedRaw.length;
+  for (const row of rawCandidates) {
+    const rawMemory = row.raw_memory.trim();
+    if (!rawMemory) continue;
+    const remaining = rawCharBudget - usedChars;
+    if (remaining <= MIN_BLOCK_CHARS) break;
+    const header = `## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n`;
+    const footer = '\n';
+    const available = remaining - header.length - footer.length;
+    if (available <= 0) break;
+    const cap = Math.min(opts.perArtifactRawChars, available);
+    const cappedRaw = capRawMemory(rawMemory, cap);
+    const block = `${header}${cappedRaw}${footer}`;
+    rawBlocks.push(block);
+    usedChars += block.length;
   }
-  const summaries = sorted
-    .map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`)
-    .join('\n\n');
-  return { raw: rawBlocks.join('\n'), summaries };
+
+  // summaries: 新到旧遍历全部 artifacts，超预算就停止——等价于从最旧的开始丢弃。
+  const summaryCharBudget = opts.summaryTokenLimit * 4;
+  const summaryBlocks: string[] = [];
+  let summaryChars = 0;
+  for (const row of sorted) {
+    const block = `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`;
+    const additional = summaryBlocks.length ? block.length + 2 : block.length;
+    if (summaryChars + additional > summaryCharBudget) break;
+    summaryBlocks.push(block);
+    summaryChars += additional;
+  }
+
+  return { raw: rawBlocks.join('\n'), summaries: summaryBlocks.join('\n\n') };
 }
 
 async function loadPriorMemory(
@@ -224,12 +253,11 @@ export async function runMemoryPipeline(opts: {
   await saveJobs(opts.memoryRoot, jobs);
   opts.onProgress?.({ phase: 'phase2', current: stage1Claimed, total });
 
-  const forGlobal = [...artifacts]
-    .sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt)
-    .slice(0, MAX_RAW_MEMORIES_FOR_GLOBAL);
-  const { raw, summaries } = buildPhaseTwoCorpus(forGlobal, {
+  const { raw, summaries } = buildPhaseTwoCorpus(artifacts, {
     rawTokenLimit: PHASE2_RAW_TOKEN_LIMIT,
     perArtifactRawChars: PER_ARTIFACT_RAW_CHARS,
+    summaryTokenLimit: PHASE2_SUMMARY_TOKEN_LIMIT,
+    maxRawCandidates: MAX_RAW_MEMORIES_FOR_GLOBAL,
   });
   const prior = await loadPriorMemory(opts.memoryRoot);
   const text = await opts.completeSimple({

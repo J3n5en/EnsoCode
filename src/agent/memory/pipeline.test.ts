@@ -188,7 +188,7 @@ describe('runMemoryPipeline', () => {
 
   it('truncates stage-one payload around a 12000-token budget', async () => {
     const opts = baseOpts();
-    const huge = 'x'.repeat(50_000);
+    const huge = 'x'.repeat(60_000);
     writeParentSession(opts.sessionDir, { id: 'thread-huge', userText: huge });
     const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     opts.completeSimple = completeSimple;
@@ -197,7 +197,9 @@ describe('runMemoryPipeline', () => {
 
     const userText = completeSimple.mock.calls[0][0].userText;
     expect(userText).toContain('...[truncated]...');
-    expect(userText.length).toBeLessThan(huge.length);
+    // 12000 tokens ≈ 48000 chars + marker，且明显高于旧的 4000-token（16000 字符）上限。
+    expect(userText.length).toBeGreaterThan(16_000);
+    expect(userText.length).toBeLessThanOrEqual(48_300);
   });
 });
 
@@ -212,6 +214,8 @@ describe('buildPhaseTwoCorpus', () => {
     };
   }
 
+  const GENEROUS = { summaryTokenLimit: 12_000, maxRawCandidates: 200 };
+
   it('当 raw 预算不足以容纳所有线程时，保留最新线程的 raw、最旧线程仅保留摘要', () => {
     const artifacts = [
       artifact('thread-oldest', 1_000, 8_000),
@@ -222,6 +226,7 @@ describe('buildPhaseTwoCorpus', () => {
     const { raw, summaries } = buildPhaseTwoCorpus(artifacts, {
       rawTokenLimit: 3_000,
       perArtifactRawChars: 6_000,
+      ...GENEROUS,
     });
 
     expect(raw).toContain('thread-newest');
@@ -233,16 +238,118 @@ describe('buildPhaseTwoCorpus', () => {
     expect(summaries).toContain('thread-newest');
   });
 
+  it('raw 中的线程按新到旧排列', () => {
+    const artifacts = [
+      artifact('thread-oldest', 1_000, 500),
+      artifact('thread-newest', 3_000, 500),
+      artifact('thread-mid', 2_000, 500),
+    ];
+
+    const { raw } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+      ...GENEROUS,
+    });
+
+    const newestIdx = raw.indexOf('thread-newest');
+    const midIdx = raw.indexOf('thread-mid');
+    const oldestIdx = raw.indexOf('thread-oldest');
+    expect(newestIdx).toBeGreaterThanOrEqual(0);
+    expect(newestIdx).toBeLessThan(midIdx);
+    expect(midIdx).toBeLessThan(oldestIdx);
+  });
+
   it('单个 artifact 的 raw_memory 超过配额时按 per-artifact 上限截断', () => {
     const artifacts = [artifact('thread-a', 1_000, 10_000)];
 
     const { raw } = buildPhaseTwoCorpus(artifacts, {
       rawTokenLimit: 20_000,
       perArtifactRawChars: 6_000,
+      ...GENEROUS,
     });
 
     const block = raw.split('## thread-a')[1] ?? '';
     expect(block.length).toBeLessThanOrEqual(6_200);
+  });
+
+  it('单个 artifact 的 raw_memory 超过总预算时被裁剪而不是被跳过', () => {
+    const artifacts = [artifact('thread-a', 1_000, 10_000)];
+
+    const { raw } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 1_000, // 4000 字符总预算，小于 perArtifactRawChars
+      perArtifactRawChars: 6_000,
+      ...GENEROUS,
+    });
+
+    expect(raw).toContain('thread-a');
+    expect(raw.length).toBeGreaterThan(0);
+    expect(raw.length).toBeLessThanOrEqual(4_100);
+  });
+
+  it('raw_memory 为空的 artifact 不出现在 raw 中，仅出现在 summaries 中', () => {
+    const empty: Stage1Artifact = {
+      threadId: 'thread-empty',
+      sourceUpdatedAt: 5_000,
+      rollout_summary: 'summary for thread-empty',
+      rollout_slug: null,
+      raw_memory: '',
+    };
+    const artifacts = [empty, artifact('thread-a', 1_000, 500)];
+
+    const { raw, summaries } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+      ...GENEROUS,
+    });
+
+    expect(raw).not.toContain('thread-empty');
+    expect(summaries).toContain('thread-empty');
+  });
+
+  it('raw 候选数超过 maxRawCandidates 时，超出的线程仍出现在 summaries 中', () => {
+    const artifacts = [
+      artifact('thread-oldest', 1_000, 500),
+      artifact('thread-newest', 2_000, 500),
+    ];
+
+    const { raw, summaries } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+      summaryTokenLimit: 12_000,
+      maxRawCandidates: 1,
+    });
+
+    expect(raw).toContain('thread-newest');
+    expect(raw).not.toContain('thread-oldest');
+    expect(summaries).toContain('thread-newest');
+    expect(summaries).toContain('thread-oldest');
+  });
+
+  it('summaries 超出预算时从最旧的开始丢弃，保留最新', () => {
+    const artifacts = [artifact('thread-oldest', 1_000, 10), artifact('thread-newest', 2_000, 10)];
+    artifacts[0].rollout_summary = 's'.repeat(3_000);
+    artifacts[1].rollout_summary = 's'.repeat(3_000);
+
+    const { summaries } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+      summaryTokenLimit: 1_000, // 4000 字符，容不下两条 3000 字符的摘要
+      maxRawCandidates: 200,
+    });
+
+    expect(summaries).toContain('thread-newest');
+    expect(summaries).not.toContain('thread-oldest');
+  });
+
+  it('没有 artifacts 时 raw 与 summaries 均为空字符串', () => {
+    const { raw, summaries } = buildPhaseTwoCorpus([], {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+      ...GENEROUS,
+    });
+
+    expect(raw).toBe('');
+    expect(summaries).toBe('');
   });
 });
 
@@ -265,6 +372,43 @@ describe('runMemoryPipeline prior memory', () => {
     expect(phase2UserText).toContain('Prior memory');
     expect(phase2UserText).toContain('user prefers pnpm');
     expect(phase2UserText).toContain('Prior summary line');
+  });
+
+  it('仅存在 memory_summary.md（MEMORY.md 缺失）时，仍视为有 prior memory', async () => {
+    const opts = baseOpts();
+    mkdirSync(opts.memoryRoot, { recursive: true });
+    writeFileSync(path.join(opts.memoryRoot, 'memory_summary.md'), 'Only summary exists\n');
+    writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
+    const completeSimple = vi
+      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .mockResolvedValueOnce(STAGE1_VALID)
+      .mockResolvedValueOnce(PHASE2_VALID);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const phase2UserText = completeSimple.mock.calls[1][0].userText;
+    expect(phase2UserText).toContain('Prior memory');
+    expect(phase2UserText).toContain('Only summary exists');
+  });
+
+  it('MEMORY.md 超过预算时被截断，userText 含截断标记且短于原文', async () => {
+    const opts = baseOpts();
+    mkdirSync(opts.memoryRoot, { recursive: true });
+    const hugePrior = 'p'.repeat(45_000);
+    writeFileSync(path.join(opts.memoryRoot, 'MEMORY.md'), hugePrior);
+    writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
+    const completeSimple = vi
+      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .mockResolvedValueOnce(STAGE1_VALID)
+      .mockResolvedValueOnce(PHASE2_VALID);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const phase2UserText = completeSimple.mock.calls[1][0].userText;
+    expect(phase2UserText).toContain('...[truncated]...');
+    expect(phase2UserText.length).toBeLessThan(hugePrior.length);
   });
 
   it('无现有 MEMORY.md/memory_summary.md 时，phase 2 userText 不包含 Prior memory 段', async () => {
