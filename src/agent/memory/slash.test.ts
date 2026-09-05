@@ -20,7 +20,7 @@ describe('runMemorySlash', () => {
       localMemoryEnabled: true,
     });
     expect(viewed.ok).toBe(true);
-    if (viewed.ok) expect(viewed.text).toContain('keep this');
+    if (viewed.ok) expect(viewed.snapshot.summary).toContain('keep this');
 
     const queued = await runMemorySlash({
       action: 'enqueue',

@@ -290,7 +290,10 @@ interface SessionsState {
   memory(
     conversationId: string,
     action: MemoryCommandAction
-  ): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+  ): Promise<
+    | { ok: true; snapshot: import('@shared/memorySnapshot').MemorySnapshot }
+    | { ok: false; error: string }
+  >;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
@@ -2281,8 +2284,10 @@ export const useSessionsStore = create<SessionsState>()(
             cwd,
             project?.kind === 'ssh'
           );
-          if (!result.ok) return { ok: false, error: result.error ?? 'memory command failed' };
-          return { ok: true, text: result.text ?? '' };
+          if (!result.ok || !result.snapshot) {
+            return { ok: false, error: result.error ?? 'memory command failed' };
+          }
+          return { ok: true, snapshot: result.snapshot };
         },
 
         clearCompactionError(conversationId) {

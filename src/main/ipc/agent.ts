@@ -859,7 +859,9 @@ export function registerAgentHandlers(): void {
         localMemoryEnabled: settings?.localMemoryEnabled !== false,
         remote: remote === true,
       });
-      return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error };
+      return result.ok
+        ? { ok: true, snapshot: result.snapshot }
+        : { ok: false, error: result.error };
     }
   );
 
