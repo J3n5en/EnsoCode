@@ -29,7 +29,7 @@ export type Stage1Artifact = {
 const ARTIFACTS_FILE = 'stage1_outputs.json';
 const PHASE1_INPUT_TOKEN_LIMIT = 4000;
 const PHASE2_RAW_TOKEN_LIMIT = 20_000;
-const PHASE2_SUMMARY_TOKEN_LIMIT = 12_000;
+const PER_ARTIFACT_RAW_CHARS = 6_000;
 const MAX_RAW_MEMORIES_FOR_GLOBAL = 200;
 
 /** OMP `truncateByApproxTokens`: 1 token ≈ 4 chars, keep 60% head + 40% tail. */
@@ -40,6 +40,38 @@ export function truncateByApproxTokens(text: string, tokenLimit: number): string
   const head = Math.floor(maxChars * 0.6);
   const tail = maxChars - head;
   return `${text.slice(0, head)}\n\n...[truncated]...\n\n${text.slice(-tail)}`;
+}
+
+/**
+ * 按时间倒序优先保留最新线程的 raw_memory，超预算的旧线程降级为仅 summary，保证每个线程至少有 summary 出现。
+ */
+function capRawMemory(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const marker = '\n...[truncated]...\n';
+  const avail = Math.max(0, maxChars - marker.length);
+  const head = Math.floor(avail * 0.6);
+  const tail = avail - head;
+  return `${text.slice(0, head)}${marker}${text.slice(-tail)}`;
+}
+
+export function buildPhaseTwoCorpus(
+  artifacts: Stage1Artifact[],
+  opts: { rawTokenLimit: number; perArtifactRawChars: number }
+): { raw: string; summaries: string } {
+  const sorted = [...artifacts].sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt);
+  const rawCharBudget = opts.rawTokenLimit * 4;
+  const rawBlocks: string[] = [];
+  let usedChars = 0;
+  for (const row of sorted) {
+    const cappedRaw = capRawMemory(row.raw_memory.trim(), opts.perArtifactRawChars);
+    if (usedChars + cappedRaw.length > rawCharBudget) continue;
+    rawBlocks.push(`## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n${cappedRaw}\n`);
+    usedChars += cappedRaw.length;
+  }
+  const summaries = sorted
+    .map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`)
+    .join('\n\n');
+  return { raw: rawBlocks.join('\n'), summaries };
 }
 
 async function loadArtifacts(memoryRoot: string): Promise<Stage1Artifact[]> {
@@ -172,19 +204,10 @@ export async function runMemoryPipeline(opts: {
   const forGlobal = [...artifacts]
     .sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt)
     .slice(0, MAX_RAW_MEMORIES_FOR_GLOBAL);
-  const raw = truncateByApproxTokens(
-    forGlobal
-      .map(
-        (row) =>
-          `## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n${row.raw_memory.trim()}\n`
-      )
-      .join('\n'),
-    PHASE2_RAW_TOKEN_LIMIT
-  );
-  const summaries = truncateByApproxTokens(
-    forGlobal.map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`).join('\n\n'),
-    PHASE2_SUMMARY_TOKEN_LIMIT
-  );
+  const { raw, summaries } = buildPhaseTwoCorpus(forGlobal, {
+    rawTokenLimit: PHASE2_RAW_TOKEN_LIMIT,
+    perArtifactRawChars: PER_ARTIFACT_RAW_CHARS,
+  });
   const text = await opts.completeSimple({
     phase: 2,
     systemPrompt: CONSOLIDATION_SYSTEM,

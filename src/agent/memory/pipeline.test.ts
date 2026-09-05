@@ -9,7 +9,8 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
+import { buildPhaseTwoCorpus, type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
+import type { Stage1Artifact } from './pipeline';
 
 const CWD = '/Users/me/proj';
 const NOW_SEC = 1_800_000_000;
@@ -197,5 +198,50 @@ describe('runMemoryPipeline', () => {
     const userText = completeSimple.mock.calls[0][0].userText;
     expect(userText).toContain('...[truncated]...');
     expect(userText.length).toBeLessThan(huge.length);
+  });
+});
+
+describe('buildPhaseTwoCorpus', () => {
+  function artifact(id: string, sourceUpdatedAt: number, rawLen: number): Stage1Artifact {
+    return {
+      threadId: id,
+      sourceUpdatedAt,
+      rollout_summary: `summary for ${id}`,
+      rollout_slug: null,
+      raw_memory: 'r'.repeat(rawLen),
+    };
+  }
+
+  it('当 raw 预算不足以容纳所有线程时，保留最新线程的 raw、最旧线程仅保留摘要', () => {
+    const artifacts = [
+      artifact('thread-oldest', 1_000, 8_000),
+      artifact('thread-mid', 2_000, 8_000),
+      artifact('thread-newest', 3_000, 8_000),
+    ];
+
+    const { raw, summaries } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 3_000,
+      perArtifactRawChars: 6_000,
+    });
+
+    expect(raw).toContain('thread-newest');
+    expect(raw).toContain('thread-mid');
+    expect(raw).not.toContain('thread-oldest');
+
+    expect(summaries).toContain('thread-oldest');
+    expect(summaries).toContain('thread-mid');
+    expect(summaries).toContain('thread-newest');
+  });
+
+  it('单个 artifact 的 raw_memory 超过配额时按 per-artifact 上限截断', () => {
+    const artifacts = [artifact('thread-a', 1_000, 10_000)];
+
+    const { raw } = buildPhaseTwoCorpus(artifacts, {
+      rawTokenLimit: 20_000,
+      perArtifactRawChars: 6_000,
+    });
+
+    const block = raw.split('## thread-a')[1] ?? '';
+    expect(block.length).toBeLessThanOrEqual(6_200);
   });
 });
