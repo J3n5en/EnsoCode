@@ -107,6 +107,7 @@ const initialState = {
   loadHarnessAssets: false,
   windowsLocalShell: 'auto' as const,
   exploreFoldEnabled: false,
+  smartCompactEnabled: false,
   autoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
@@ -217,6 +218,7 @@ export const useSettingsStore = create<SettingsState>()(
       setWindowsLocalShell: (windowsLocalShell) =>
         set({ windowsLocalShell: parseWindowsLocalShell(windowsLocalShell) }),
       setExploreFoldEnabled: (exploreFoldEnabled) => set({ exploreFoldEnabled }),
+      setSmartCompactEnabled: (smartCompactEnabled) => set({ smartCompactEnabled }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),

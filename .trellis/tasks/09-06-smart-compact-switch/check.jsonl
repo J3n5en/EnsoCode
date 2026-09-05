@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/testing.md", "reason": "只审可单测逻辑与协议收窄，不要求 UI 单测"}
+{"file": ".trellis/spec/main/settings-persistence.md", "reason": "新设置项是否进 SETTINGS_STATE_FIELDS"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "可见文案与中文条目"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "spawn 白名单与 host 读设置是否对齐"}

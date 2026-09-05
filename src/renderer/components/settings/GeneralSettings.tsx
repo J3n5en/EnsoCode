@@ -45,6 +45,7 @@ export function GeneralSettings() {
       </div>
 
       <SidePanelSection />
+      <SmartCompactSection />
       <WindowsLocalShellSection />
       <ProxySection />
       <UpdateSection />
@@ -157,6 +158,23 @@ function WindowsLocalShellSection() {
         </SelectPopup>
       </Select>
     </div>
+  );
+}
+
+function SmartCompactSection() {
+  const { t } = useI18n();
+  const smartCompactEnabled = useSettingsStore((s) => s.smartCompactEnabled);
+  const setSmartCompactEnabled = useSettingsStore((s) => s.setSmartCompactEnabled);
+  return (
+    <SwitchRow
+      rowId="general.smartCompactEnabled"
+      title={t('Verified smart compaction')}
+      description={t(
+        'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.'
+      )}
+      checked={smartCompactEnabled}
+      onChange={setSmartCompactEnabled}
+    />
   );
 }
 

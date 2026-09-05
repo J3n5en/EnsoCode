@@ -474,6 +474,8 @@ export type AgentCommand =
       loadHarnessAssets?: boolean;
       /** 探后折叠工具 + context 折叠 */
       exploreFoldEnabled?: boolean;
+      /** 父会话加载 pi-smart-compact 作为 compact 摘要后端 */
+      smartCompactEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
@@ -1671,6 +1673,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'loadLocalSkills',
           'loadHarnessAssets',
           'exploreFoldEnabled',
+          'smartCompactEnabled',
           'skillPaths',
           'mcpServers',
           'instruction',
@@ -1692,6 +1695,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.windowsLocalShell as string
           )) ||
         (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
+        (value.smartCompactEnabled !== undefined &&
+          typeof value.smartCompactEnabled !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||

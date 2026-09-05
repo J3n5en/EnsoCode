@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/testing.md", "reason": "TDD 范围与同目录测试约定"}
+{"file": ".trellis/spec/guides/pre-implementation-checklist.md", "reason": "跨层改动边界与 inline TDD 门槛"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "设置 → spawn 命令 → worker 的跨进程链路"}
+{"file": ".trellis/spec/main/settings-persistence.md", "reason": "settings.json 字段与主进程可读列表"}
+{"file": ".trellis/spec/renderer/state.md", "reason": "SettingsState 加字段的完整步骤"}
+{"file": ".trellis/spec/renderer/i18n.md", "reason": "开关文案必须 t() 且补中文"}
+{"file": ".trellis/spec/shared/index.md", "reason": "agent 命令类型属于 shared，worker 只引 @shared"}

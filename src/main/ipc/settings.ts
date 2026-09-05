@@ -40,6 +40,7 @@ export const SETTINGS_STATE_FIELDS = [
   'loadHarnessAssets',
   'windowsLocalShell',
   'exploreFoldEnabled',
+  'smartCompactEnabled',
   'autoUpdate',
   'proxyMode',
   'customProxyUrl',

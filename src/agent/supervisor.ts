@@ -113,6 +113,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { persistEnsoSmartCompactSettings, resolveSmartCompactExtensionPath } from './smartCompact';
 import {
   createSshExecutor,
   resolveSshControlPath,
@@ -267,6 +268,8 @@ function createSessionResourceLoader(options: {
   /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
   loadHarnessAssets?: boolean;
   exploreFold?: ReturnType<typeof createExploreFoldState>;
+  /** 仅父会话：加载 pi-smart-compact 作为 compact 摘要后端 */
+  smartCompactEnabled?: boolean;
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -277,6 +280,12 @@ function createSessionResourceLoader(options: {
     agentDir: options.agentDir,
     noSkills: options.noSkills,
     ...(options.noExtensions ? { noExtensions: true } : {}),
+    ...(!options.noExtensions && options.smartCompactEnabled
+      ? (() => {
+          const extensionPath = resolveSmartCompactExtensionPath();
+          return extensionPath ? { additionalExtensionPaths: [extensionPath] } : {};
+        })()
+      : {}),
     ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
     ...(options.exploreFold
       ? {
@@ -679,7 +688,8 @@ export class SessionSupervisor {
           command.remote,
           command.loadHarnessAssets,
           command.windowsLocalShell,
-          command.exploreFoldEnabled
+          command.exploreFoldEnabled,
+          command.smartCompactEnabled
         );
         return;
       case 'spawn-child':
@@ -1056,7 +1066,8 @@ export class SessionSupervisor {
     remote?: AgentRemoteConfig,
     loadHarnessAssets = false,
     windowsLocalShell?: WindowsLocalShell,
-    exploreFoldEnabled = false
+    exploreFoldEnabled = false,
+    smartCompactEnabled = false
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1102,6 +1113,13 @@ export class SessionSupervisor {
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
     const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
+    if (smartCompactEnabled) {
+      try {
+        persistEnsoSmartCompactSettings();
+      } catch (error) {
+        console.warn('[smart-compact] failed to merge host settings', error);
+      }
+    }
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -1111,6 +1129,7 @@ export class SessionSupervisor {
       remoteAgentsFiles,
       loadHarnessAssets,
       exploreFold,
+      ...(smartCompactEnabled ? { smartCompactEnabled: true } : {}),
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([

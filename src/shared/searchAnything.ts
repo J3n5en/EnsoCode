@@ -136,6 +136,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Compact read-only tool calls',
   },
   {
+    id: 'general.smartCompactEnabled',
+    category: 'general',
+    title: 'Verified smart compaction',
+    description:
+      'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.',
+  },
+  {
     id: 'general.generationStallTimeout',
     category: 'general',
     title: 'Stop if no output',

@@ -100,6 +100,9 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
+      pi-smart-compact:
+        specifier: ^9.6.2
+        version: 9.6.2(@earendil-works/pi-ai@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3))(@earendil-works/pi-tui@0.85.1)(typebox@1.3.7)
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -4149,6 +4152,15 @@ packages:
   pe-library@0.4.1:
     resolution: {integrity: sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw==}
     engines: {node: '>=12', npm: '>=6'}
+
+  pi-smart-compact@9.6.2:
+    resolution: {integrity: sha512-XTNf9qkX7R2XTAo7HL0uweQbJQVRsOL4iZcSds53+rJ3KnBmlmEZWdjTPnoAPffwnHt3wwFmnlg10FjqDLkuwg==}
+    engines: {node: '>=22.19.0'}
+    peerDependencies:
+      '@earendil-works/pi-ai': '*'
+      '@earendil-works/pi-coding-agent': '*'
+      '@earendil-works/pi-tui': '*'
+      typebox: '*'
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -9070,6 +9082,13 @@ snapshots:
   pathe@2.0.3: {}
 
   pe-library@0.4.1: {}
+
+  pi-smart-compact@9.6.2(@earendil-works/pi-ai@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3))(@earendil-works/pi-tui@0.85.1)(typebox@1.3.7):
+    dependencies:
+      '@earendil-works/pi-ai': 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+      '@earendil-works/pi-coding-agent': 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+      '@earendil-works/pi-tui': 0.85.1
+      typebox: 1.3.7
 
   picocolors@1.1.1: {}
 
