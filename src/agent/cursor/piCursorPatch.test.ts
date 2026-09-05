@@ -12,4 +12,12 @@ describe('pi-cursor pnpm patch', () => {
     expect(bundle).toContain('__ensoCursorHandleInteraction');
     expect(bundle).toContain('__ensoCursorHandleExec');
   });
+
+  it('retries Connect not_found by rotating the Cursor conversation id', () => {
+    const require = createRequire(import.meta.url);
+    const bundle = readFileSync(require.resolve('@rahularya01/pi-cursor'), 'utf8');
+    expect(bundle).toMatch(/\\bnot_found\\b/);
+    expect(bundle).toContain('kind==="conversation_not_found"');
+    expect(bundle).toContain('kind:"conversation_not_found"');
+  });
 });
