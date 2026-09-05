@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/main/ipc.md", "reason": "新通道三点式与路径穿越"}
+{"file": ".trellis/spec/testing.md", "reason": "url 策略默认行为不得变松"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "i18n t()、现有 UI 组件复用"}
+{"file": ".trellis/spec/renderer/components.md", "reason": "ContextMenu 走 ui 封装"}
+{"file": ".trellis/tasks/09-05-sidebar-file-context-menu/prd.md", "reason": "对照菜单范围与验收"}
