@@ -1,9 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { runMemoryPipeline, type MemoryCompleteSimple } from './pipeline';
+import { type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
 
 const CWD = '/Users/me/proj';
 const NOW_SEC = 1_800_000_000;
@@ -20,7 +26,10 @@ function writeParentSession(
   const file = path.join(dir, `${opts.id}.jsonl`);
   const rows = [
     { type: 'session', id: opts.id, cwd: opts.cwd ?? CWD },
-    { type: 'message', message: { role: 'user', content: [{ type: 'text', text: opts.userText }] } },
+    {
+      type: 'message',
+      message: { role: 'user', content: [{ type: 'text', text: opts.userText }] },
+    },
   ];
   writeFileSync(file, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
   const mtime = NOW_SEC - (opts.idleSec ?? IDLE_SEC);
@@ -72,7 +81,7 @@ describe('runMemoryPipeline', () => {
   it('claims one idle same-cwd parent thread, calls phase 1 with thread id + persistable text, and skips writing MEMORY.md when stage1 output is empty', async () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-empty', userText: 'fix login bug' });
-    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     opts.completeSimple = completeSimple;
 
     const result = await runMemoryPipeline(opts);
@@ -91,7 +100,7 @@ describe('runMemoryPipeline', () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -130,7 +139,7 @@ describe('runMemoryPipeline', () => {
 
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -142,7 +151,7 @@ describe('runMemoryPipeline', () => {
   });
 
   it('skips the current thread id and only runs phase 1 for the other thread', async () => {
-    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
     const opts = baseOpts({ currentThreadId: 'thread-current', completeSimple });
     writeParentSession(opts.sessionDir, { id: 'thread-current', userText: 'current session text' });
     writeParentSession(opts.sessionDir, { id: 'thread-other', userText: 'other session text' });
@@ -154,5 +163,19 @@ describe('runMemoryPipeline', () => {
     expect(call.userText).toContain('thread-other');
     expect(call.userText).not.toContain('thread-current');
     expect(result.stage1Claimed).toBe(1);
+  });
+
+  it('truncates stage-one payload around a 4000-token budget', async () => {
+    const opts = baseOpts();
+    const huge = 'x'.repeat(20_000);
+    writeParentSession(opts.sessionDir, { id: 'thread-huge', userText: huge });
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_EMPTY);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const userText = completeSimple.mock.calls[0][0].userText;
+    expect(userText).toContain('...[truncated]...');
+    expect(userText.length).toBeLessThan(huge.length);
   });
 });

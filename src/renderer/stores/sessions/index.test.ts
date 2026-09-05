@@ -1318,6 +1318,36 @@ describe('typed Agent child projection', () => {
     expect(agentPrompt).not.toHaveBeenCalled();
   });
 
+  it('压缩进行中发送消息入队，不立刻 prompt', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          compaction: 'running',
+          queuedMessages: [],
+        },
+      },
+      activeId: 'parent',
+    }));
+    agentPrompt.mockClear();
+
+    const error = await sessionsModule.useSessionsStore
+      .getState()
+      .send('during compact', { providerId: 'p', modelId: 'm', cwd: '/workspace' });
+
+    expect(error).toBeNull();
+    expect(agentPrompt).not.toHaveBeenCalled();
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conversation.queuedMessages).toEqual([
+      expect.objectContaining({ text: 'during compact' }),
+    ]);
+    expect(conversation.messages.some((message) => message.optimistic)).toBe(false);
+  });
+
   it('上下文压缩成功结束后自动投递排队消息', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

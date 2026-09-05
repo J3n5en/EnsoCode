@@ -1,4 +1,6 @@
-export type MemoryCommandAction = 'view' | 'stats' | 'diagnose' | 'clear' | 'enqueue';
+export type MemoryCommandAction = 'view' | 'stats' | 'diagnose' | 'clear' | 'enqueue' | 'save';
+
+export type MemorySavePatch = { summary: string; learned: string[] };
 
 export type MemoryCommand = { action: MemoryCommandAction };
 

@@ -105,7 +105,7 @@ describe('createLearnTool (OMP-aligned)', () => {
       undefined,
       {} as never
     );
-    expect(result.isError).toBe(true);
+    expect((result as { isError?: boolean }).isError).toBe(true);
     expect(readFileSync(path.join(getMemoryRoot(dir, cwd), 'learned.md'), 'utf8')).toContain(
       'Keep this lesson.'
     );

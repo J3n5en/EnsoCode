@@ -739,8 +739,8 @@ export interface AgentSpawnRequest {
 export interface AgentActionResult {
   ok: boolean;
   error?: string;
-  /** `/memory` 等应用级命令的回显正文 */
-  text?: string;
+  /** 项目记忆 GUI 快照 */
+  snapshot?: import('../memorySnapshot').MemorySnapshot;
 }
 
 export type ParentLifecycleEvent =

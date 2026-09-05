@@ -1,7 +1,8 @@
+import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { createMessageCoworkerTool } from './messageCoworker';
 
-function textOf(result: { content: Array<{ text?: string }> }): string {
+function textOf(result: AgentToolResult<unknown>): string {
   return (result.content[0] as { text: string }).text;
 }
 

@@ -138,6 +138,13 @@ async function waitFor(events: AgentWorkerEvent[], type: AgentWorkerEvent['type'
   throw new Error(`timed out waiting for ${type}`);
 }
 
+/** spawn 链路里的 mock 异步跳数会变（provider 刷新等），settle() 一次不一定够，轮询等它落地。 */
+async function settleUntil(check: () => boolean, tries = 20): Promise<void> {
+  for (let i = 0; i < tries && !check(); i++) {
+    await settle();
+  }
+}
+
 describe('SessionSupervisor deterministic child lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -242,7 +249,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await waitFor(events, 'parent-ready');
     const entry = {
       kind: 'agent-dispatch' as const,
       child: {
@@ -287,7 +294,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await settleUntil(() => mocks.sessions.length > 0);
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
     supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'ordinary coding task' });
     await settle();
@@ -351,7 +358,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await settleUntil(() => mocks.sessions.length > 0);
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
     parentSession.isStreaming = true;
     parentSession.waitForIdle = vi.fn(async () => {
@@ -379,7 +386,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         cwd: '/workspace',
         model,
       });
-      await settle();
+      await waitFor(events, 'parent-ready');
       const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
       parentSession.isStreaming = true;
       parentSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
@@ -480,7 +487,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await waitFor(events, 'parent-ready');
 
     // 用 resume 灌满 5 个（上限）：若容量对 resume 不豁免，第 6 个就进不来
     for (const name of ['a', 'b', 'c', 'd', 'e']) {
@@ -492,7 +499,14 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         resumeFile: `/tmp/coworker-${name}.jsonl`,
       });
     }
-    await settle();
+    await settleUntil(
+      () =>
+        events.filter(
+          (event) =>
+            event.type === 'coworker-update' &&
+            (event as { coworker: { status: string } }).coworker.status !== 'dismissed'
+        ).length >= 5
+    );
     const resumed = events.filter(
       (event) =>
         event.type === 'coworker-update' &&
@@ -573,7 +587,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       cwd: '/workspace',
       model,
     });
-    await settle();
+    await waitFor(events, 'parent-ready');
     const identity = {
       sessionId: 'parent::cw-mcp',
       generation: '66666666-6666-4666-8666-666666666666',
@@ -601,7 +615,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         systemPromptHash: 'mcp-hash',
       },
     });
-    await settle();
+    await waitFor(events, 'child-rejected');
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'child-rejected',
@@ -636,7 +650,7 @@ describe('SessionSupervisor idle eviction', () => {
     const other = { sessionId: 'other', generation: '44444444-4444-4444-8444-444444444444' };
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
     supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/w', model });
-    await settle();
+    await settleUntil(() => events.filter((event) => event.type === 'parent-ready').length >= 2);
     supervisor.handleCommand({ type: 'pin-sessions', sessionIds: ['other'] });
 
     await vi.advanceTimersByTimeAsync(31 * 60_000);
@@ -660,7 +674,7 @@ describe('SessionSupervisor idle eviction', () => {
       sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
     });
     supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
-    await settle();
+    await waitFor(events, 'parent-ready');
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
 
     await vi.advanceTimersByTimeAsync(20 * 60_000);

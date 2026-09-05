@@ -25,8 +25,12 @@ export function CodeBlock({
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
+    if (streaming) {
+      setHtml(null);
+      return;
+    }
     let alive = true;
-    codeToHtml(code, language ?? guessLanguage(code), !streaming).then((out) => {
+    codeToHtml(code, language ?? guessLanguage(code), true).then((out) => {
       if (alive) setHtml(out);
     });
     return () => {

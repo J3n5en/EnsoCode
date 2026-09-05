@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export type Stage1JobStatus = 'idle' | 'running' | 'done' | 'failed';
+/** global（phase2 合并）任务的状态：与 stage1 语义不同，从不进入 'failed'（失败静默吞错，等 lease 过期重认领）。 */
+export type GlobalJobStatus = 'idle' | 'running' | 'done';
 
 export type Stage1Job = {
   status: Stage1JobStatus;
@@ -18,7 +20,7 @@ export type MemoryJobsState = {
     watermark: number;
     leaseUntil?: number;
     ownershipToken?: string;
-    status?: Stage1JobStatus;
+    status?: GlobalJobStatus;
     /** `/memory enqueue`：下次启动即使没有新 Phase 1 也跑合并 */
     dirty?: boolean;
   };

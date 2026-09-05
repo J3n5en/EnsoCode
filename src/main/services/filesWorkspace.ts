@@ -1,12 +1,20 @@
 import {
+  existsSync,
   type FSWatcher,
   watch as fsWatch,
+  lstatSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { sniffImageMime } from '@shared/imageSniff';
+import { PREVIEW_IMAGE_MAX_BYTES } from '@shared/markdownPreviewImage';
 
 export const IGNORED_DIR_NAMES = new Set([
   'node_modules',
@@ -32,11 +40,107 @@ export interface DirEntry {
 }
 
 export function resolveUnderCwd(cwd: string, rel: string | undefined): string | null {
+  if (
+    rel &&
+    (path.isAbsolute(rel) || path.win32.isAbsolute(rel) || rel.includes('\\') || rel.includes('\0'))
+  )
+    return null;
   const root = path.resolve(cwd);
   const target = rel == null || rel === '' || rel === '.' ? root : path.resolve(root, rel);
   const relative = path.relative(root, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+    return null;
   return target;
+}
+
+export function resolveLocalUnderCwd(cwd: string, rel: string | undefined): string | null {
+  const abs = resolveUnderCwd(cwd, rel);
+  if (!abs) return null;
+  try {
+    const root = realpathSync(cwd);
+    let existing = abs;
+    while (true) {
+      try {
+        lstatSync(existing);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+        const parent = path.dirname(existing);
+        if (parent === existing) return null;
+        existing = parent;
+      }
+    }
+    const relative = path.relative(root, realpathSync(existing));
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      return null;
+    return abs;
+  } catch {
+    return null;
+  }
+}
+
+/** 单层文件/目录名：禁止分隔符与 `.` / `..` */
+export function assertEntryName(name: string): boolean {
+  if (!name || name === '.' || name === '..') return false;
+  if (name.includes('/') || name.includes('\\') || name.includes('\0')) return false;
+  return true;
+}
+
+export type FilesMutateError = 'invalid-path' | 'invalid-name' | 'exists' | 'unavailable';
+
+export function joinUnderCwd(
+  cwd: string,
+  parentRel: string | undefined,
+  name: string
+): string | null {
+  if (!assertEntryName(name)) return null;
+  const parent = resolveLocalUnderCwd(cwd, parentRel);
+  if (!parent) return null;
+  return resolveLocalUnderCwd(cwd, parentRel ? `${parentRel}/${name}` : name);
+}
+
+export function createLocalFile(abs: string): FilesMutateError | null {
+  try {
+    if (existsSync(abs)) return 'exists';
+    writeFileSync(abs, '', { flag: 'wx' });
+    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
+    return 'unavailable';
+  }
+}
+
+export function createLocalDir(abs: string): FilesMutateError | null {
+  try {
+    if (existsSync(abs)) return 'exists';
+    mkdirSync(abs);
+    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
+    return 'unavailable';
+  }
+}
+
+export function renameLocal(fromAbs: string, toAbs: string): FilesMutateError | null {
+  try {
+    if (!existsSync(fromAbs)) return 'unavailable';
+    if (lstatSync(toAbs, { throwIfNoEntry: false })) return 'exists';
+    renameSync(fromAbs, toAbs);
+    return null;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+export function removeLocal(abs: string, cwd: string): FilesMutateError | null {
+  if (path.resolve(abs) === path.resolve(cwd)) return 'invalid-path';
+  try {
+    if (!existsSync(abs)) return 'unavailable';
+    rmSync(abs, { recursive: true, force: false });
+    return null;
+  } catch {
+    return 'unavailable';
+  }
 }
 
 export class RefCountWatchers {
@@ -108,6 +212,27 @@ export function readLocalFile(
     const buf = readFileSync(abs);
     if (buf.includes(0)) return { ok: false, error: 'binary' };
     return { ok: true, content: buf.toString('utf8') };
+  } catch {
+    return { ok: false, error: 'unavailable' };
+  }
+}
+
+/** Files 面板 Markdown 预览的图片读取：按 mime 编码为 data URL，越限拒绝 */
+export function readLocalImage(
+  abs: string,
+  mime: string,
+  maxBytes: number = PREVIEW_IMAGE_MAX_BYTES
+):
+  | { ok: true; dataUrl: string }
+  | { ok: false; error: 'too-large' | 'unavailable' | 'unsupported' } {
+  try {
+    const stat = statSync(abs);
+    if (!stat.isFile()) return { ok: false, error: 'unavailable' };
+    if (stat.size > maxBytes) return { ok: false, error: 'too-large' };
+    const buf = readFileSync(abs);
+    // 不信任扩展名/声明的 mime：内容魔数必须与它匹配，防把 SVG/HTML 改个 `.png` 后缀当位图混过去
+    if (sniffImageMime(buf) !== mime) return { ok: false, error: 'unsupported' };
+    return { ok: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
   } catch {
     return { ok: false, error: 'unavailable' };
   }

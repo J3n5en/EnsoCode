@@ -15,7 +15,11 @@ import type {
   AssetOccupancyRow,
   CollectedAsset,
   CollectedProvider,
+  FilesAbsResult,
+  FilesFetchRemoteImageResult,
   FilesListResult,
+  FilesMutateResult,
+  FilesReadImageResult,
   FilesReadRelResult,
   FilesWatchEvent,
   FilesWatchResult,
@@ -234,6 +238,19 @@ const electronAPI = {
       projectId: string;
       rel: string;
     }): Promise<FilesReadRelResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_REL, request),
+    /** Markdown 预览相对图片：主进程按工作区边界解析后返回 data URL */
+    readImage: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesReadImageResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ_IMAGE, request),
+    /** Markdown 预览远程图片：主进程带 SSRF 防护代理读取，返回 data URL */
+    fetchRemoteImage: (request: {
+      conversationId: string;
+      projectId: string;
+      url: string;
+    }): Promise<FilesFetchRemoteImageResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_FETCH_REMOTE_IMAGE, request),
     write: (request: {
       conversationId: string;
       projectId: string;
@@ -255,6 +272,50 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.FILES_WATCH_EVENT, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.FILES_WATCH_EVENT, listener);
     },
+    mkdir: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+      name: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_MKDIR, request),
+    createFile: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+      name: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_CREATE, request),
+    rename: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+      name: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_RENAME, request),
+    remove: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_REMOVE, request),
+    absPath: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+    }): Promise<FilesAbsResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_ABS, request),
+    copyPath: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+      mode: 'absolute' | 'relative';
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_COPY_PATH, request),
+    copyFile: (request: {
+      conversationId: string;
+      projectId: string;
+      rel: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_COPY_FILE, request),
+    reveal: (request: {
+      conversationId: string;
+      projectId: string;
+      rel?: string;
+    }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_REVEAL, request),
   },
 
   files: {
@@ -377,11 +438,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_COMPACT, sessionId, instructions),
     memory: (
       sessionId: string,
-      action: 'view' | 'stats' | 'diagnose' | 'clear' | 'enqueue',
+      action: 'view' | 'stats' | 'diagnose' | 'clear' | 'enqueue' | 'save',
       cwd: string,
-      remote?: boolean
+      remote?: boolean,
+      patch?: { summary: string; learned: string[] }
     ): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_MEMORY, sessionId, action, cwd, remote),
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_MEMORY, sessionId, action, cwd, remote, patch),
     /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；结果经 rewind-done 事件回来。
      *  restoreFiles 同时把工作树还原到该轮首个写操作前(无快照静默降级) */
     rewind: (

@@ -20,7 +20,7 @@ describe('runMemorySlash', () => {
       localMemoryEnabled: true,
     });
     expect(viewed.ok).toBe(true);
-    if (viewed.ok) expect(viewed.text).toContain('keep this');
+    if (viewed.ok) expect(viewed.snapshot.summary).toContain('keep this');
 
     const queued = await runMemorySlash({
       action: 'enqueue',
@@ -58,5 +58,21 @@ describe('runMemorySlash', () => {
       remote: true,
     });
     expect(remote).toMatchObject({ ok: false });
+  });
+
+  it('save writes summary and learned, then returns the snapshot', async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), 'enso-slash-'));
+    const cwd = '/Users/me/proj';
+    const saved = await runMemorySlash({
+      action: 'save',
+      agentDir,
+      cwd,
+      localMemoryEnabled: true,
+      patch: { summary: '  keep the auth middleware  ', learned: ['use learn for durable facts'] },
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(saved.snapshot.summary).toBe('keep the auth middleware');
+    expect(saved.snapshot.learned).toEqual(['use learn for durable facts']);
   });
 });

@@ -21,6 +21,20 @@ export type Stage1Artifact = {
 };
 
 const ARTIFACTS_FILE = 'stage1_outputs.json';
+const PHASE1_INPUT_TOKEN_LIMIT = 4000;
+const PHASE2_RAW_TOKEN_LIMIT = 20_000;
+const PHASE2_SUMMARY_TOKEN_LIMIT = 12_000;
+const MAX_RAW_MEMORIES_FOR_GLOBAL = 200;
+
+/** OMP `truncateByApproxTokens`: 1 token ≈ 4 chars, keep 60% head + 40% tail. */
+export function truncateByApproxTokens(text: string, tokenLimit: number): string {
+  if (tokenLimit <= 0) return '';
+  const maxChars = tokenLimit * 4;
+  if (text.length <= maxChars) return text;
+  const head = Math.floor(maxChars * 0.6);
+  const tail = maxChars - head;
+  return `${text.slice(0, head)}\n\n...[truncated]...\n\n${text.slice(-tail)}`;
+}
 
 async function loadArtifacts(memoryRoot: string): Promise<Stage1Artifact[]> {
   try {
@@ -83,7 +97,10 @@ export async function runMemoryPipeline(opts: {
     const text = await opts.completeSimple({
       phase: 1,
       systemPrompt: STAGE_ONE_SYSTEM,
-      userText: stageOneUser(thread.threadId, JSON.stringify(items)),
+      userText: stageOneUser(
+        thread.threadId,
+        truncateByApproxTokens(JSON.stringify(items), PHASE1_INPUT_TOKEN_LIMIT)
+      ),
     });
     const parsed = parseStageOneResponse(text);
     const done = markStage1Done(jobs, thread.threadId, {
@@ -126,15 +143,22 @@ export async function runMemoryPipeline(opts: {
   jobs = phase2.state;
   await saveJobs(opts.memoryRoot, jobs);
 
-  const raw = artifacts
-    .map(
-      (row) =>
-        `## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n${row.raw_memory.trim()}\n`
-    )
-    .join('\n');
-  const summaries = artifacts
-    .map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`)
-    .join('\n\n');
+  const forGlobal = [...artifacts]
+    .sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt)
+    .slice(0, MAX_RAW_MEMORIES_FOR_GLOBAL);
+  const raw = truncateByApproxTokens(
+    forGlobal
+      .map(
+        (row) =>
+          `## ${row.threadId}\nupdated_at: ${row.sourceUpdatedAt}\n\n${row.raw_memory.trim()}\n`
+      )
+      .join('\n'),
+    PHASE2_RAW_TOKEN_LIMIT
+  );
+  const summaries = truncateByApproxTokens(
+    forGlobal.map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`).join('\n\n'),
+    PHASE2_SUMMARY_TOKEN_LIMIT
+  );
   const text = await opts.completeSimple({
     phase: 2,
     systemPrompt: CONSOLIDATION_SYSTEM,

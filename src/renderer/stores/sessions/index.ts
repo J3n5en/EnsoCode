@@ -2,7 +2,7 @@ import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, defaultApprovalMode, resolveChatModel } from '@shared/defaultModel';
-import { type MemoryCommandAction, parseMemoryCommand } from '@shared/memoryCommand';
+import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import type {
   ApprovalMode,
   AttachedImage,
@@ -287,7 +287,14 @@ interface SessionsState {
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
   compact(conversationId: string, instructions?: string): void;
-  memory(conversationId: string, action: MemoryCommandAction): Promise<string | null>;
+  memory(
+    conversationId: string,
+    action: MemoryCommandAction,
+    patch?: MemorySavePatch
+  ): Promise<
+    | { ok: true; snapshot: import('@shared/memorySnapshot').MemorySnapshot }
+    | { ok: false; error: string }
+  >;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
@@ -1763,10 +1770,7 @@ export const useSessionsStore = create<SessionsState>()(
             get().compact(id, compactCommand.instructions);
             return null;
           }
-          const memoryCommand = parseMemoryCommand(text);
-          if (memoryCommand) {
-            return get().memory(id, memoryCommand.action);
-          }
+
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -1800,8 +1804,12 @@ export const useSessionsStore = create<SessionsState>()(
             text = `${workspaceNote}\n\n${text}`;
             set((state) => patch(state, id, { pendingWorkspaceNote: undefined }));
           }
-          // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
-          if (conversation.started && conversation.status === 'running') {
+          // agent 干活或压缩中消息进队列(不打断);收束后自动投递。压缩时 status 仍是 idle，
+          // 立刻 prompt 会撞上 isStreaming 僵尸轮报错。
+          if (
+            conversation.started &&
+            (conversation.status === 'running' || conversation.compaction)
+          ) {
             const queuedId = crypto.randomUUID();
             set((state) =>
               patch(state, id, {
@@ -2265,40 +2273,25 @@ export const useSessionsStore = create<SessionsState>()(
           void window.electronAPI.agent.compact(conversationId, instructions);
         },
 
-        async memory(conversationId, action) {
+        async memory(conversationId, action, patch) {
           const conversation = get().conversations[conversationId];
-          if (!conversation) return 'no conversation';
+          if (!conversation) return { ok: false, error: 'no conversation' };
           const project = useSettingsStore
             .getState()
             .projects.find((p) => p.id === conversation.projectId);
           const cwd = conversation.worktree?.path ?? project?.path;
-          if (!cwd) return 'memory command needs a project path';
+          if (!cwd) return { ok: false, error: 'memory command needs a project path' };
           const result = await window.electronAPI.agent.memory(
             conversationId,
             action,
             cwd,
-            project?.kind === 'ssh'
+            project?.kind === 'ssh',
+            patch
           );
-          if (!result.ok) return result.error ?? 'memory command failed';
-          const now = Date.now();
-          set((state) =>
-            patch(state, conversationId, {
-              messages: [
-                ...state.conversations[conversationId].messages,
-                {
-                  role: 'user',
-                  content: [{ type: 'text', text: `/memory ${action}` }],
-                  timestamp: now,
-                },
-                {
-                  role: 'assistant',
-                  content: [{ type: 'text', text: result.text ?? '' }],
-                  timestamp: now + 1,
-                },
-              ],
-            })
-          );
-          return null;
+          if (!result.ok || !result.snapshot) {
+            return { ok: false, error: result.error ?? 'memory command failed' };
+          }
+          return { ok: true, snapshot: result.snapshot };
         },
 
         clearCompactionError(conversationId) {
@@ -2341,6 +2334,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation || !item) return;
+          if (conversation.compaction) return;
           const running = conversation.status === 'running';
           // 出队并乐观回显。optimistic 标记使其浮在权威消息之后：running 时 steer
           // 要到下一个循环边界才送达，期间当前轮的 assistant upsert 若按裸 index

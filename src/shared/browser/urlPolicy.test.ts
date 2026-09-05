@@ -26,6 +26,38 @@ describe('assertAllowedUrl', () => {
     }
   });
 
+  it('fileRoot 下允许工作区内 file://，仍拒绝逃出与其它协议', () => {
+    const fileRoot = '/repo';
+    const inside = assertAllowedUrl('file:///repo/docs/INSTALL.md', { fileRoot });
+    expect(inside.protocol).toBe('file:');
+    expect(inside.pathname.endsWith('/repo/docs/INSTALL.md')).toBe(true);
+    expect(() => assertAllowedUrl('file:///etc/passwd', { fileRoot })).toThrow(/not allowed/i);
+    expect(() => assertAllowedUrl('file:///repo/../etc/passwd', { fileRoot })).toThrow(
+      /not allowed/i
+    );
+    expect(() => assertAllowedUrl('javascript:alert(1)', { fileRoot })).toThrow(/not allowed/i);
+    expect(assertAllowedUrl('https://example.com', { fileRoot }).hostname).toBe('example.com');
+  });
+
+  it('拒绝非绝对根、编码分隔符、NUL 和远端 file 主机', () => {
+    for (const [raw, fileRoot] of [
+      ['file:///repo/a', ''],
+      ['file:///repo/a', 'repo'],
+      ['file:///repo/a%00.html', '/repo'],
+      ['file:///repo/a%2fb', '/repo'],
+      ['file:///repo/a%5cb', '/repo'],
+      ['file://remote/repo/a', '/repo'],
+    ])
+      expect(() => assertAllowedUrl(raw, { fileRoot })).toThrow(/not allowed/i);
+  });
+
+  it('支持 Windows 工作区路径及编码文件名', () => {
+    expect(assertAllowedUrl('file:///C:/repo/a%20b.html', { fileRoot: 'C:\\repo' }).protocol).toBe(
+      'file:'
+    );
+    expect(() => assertAllowedUrl('file:///D:/repo/a', { fileRoot: 'C:\\repo' })).toThrow();
+  });
+
   it('rejects garbage', () => {
     expect(() => assertAllowedUrl('')).toThrow();
     expect(() => assertAllowedUrl('   ')).toThrow();

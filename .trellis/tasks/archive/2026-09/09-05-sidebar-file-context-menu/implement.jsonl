@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/main/index.md", "reason": "Main/IPC/service 分层与写盘前检查"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "三点式通道 + 渲染层不得传磁盘路径"}
+{"file": ".trellis/spec/testing.md", "reason": "路径/URL 纯函数 TDD 与 tmpdir fixture"}
+{"file": ".trellis/spec/shared/conventions.md", "reason": "命名、Biome、中文注释约定"}
+{"file": ".trellis/tasks/09-05-sidebar-file-context-menu/design.md", "reason": "file:// 门、IPC 合同、刷新策略"}

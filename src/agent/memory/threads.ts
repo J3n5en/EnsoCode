@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { StageOneCandidate } from './stageOne';
 
 export type PersistableMemoryMessage = {
-  role: 'user' | 'assistant' | 'toolResult';
+  role: 'system' | 'developer' | 'user' | 'assistant' | 'toolResult';
   text: string;
   toolName?: string;
 };
@@ -100,16 +100,24 @@ export function extractPersistableMessages(payload: string): PersistableMemoryMe
     if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') continue;
     const message = entry.message as Record<string, unknown>;
     const role = message.role;
-    if (role !== 'user' && role !== 'assistant' && role !== 'toolResult') continue;
-    const text = textFromContent(message.content);
-    if (!text) continue;
-    if (role === 'toolResult') {
-      if (text.length > 32_000) continue;
-      const toolName = typeof message.toolName === 'string' ? message.toolName : undefined;
-      out.push({ role, text, ...(toolName ? { toolName } : {}) });
+    if (role === 'system' || role === 'developer' || role === 'user' || role === 'assistant') {
+      const text = textFromContent(message.content);
+      if (!text) continue;
+      out.push({ role, text });
       continue;
     }
-    out.push({ role, text });
+    if (role !== 'toolResult') continue;
+    const text = textFromContent(message.content);
+    const toolName = typeof message.toolName === 'string' ? message.toolName : undefined;
+    if (
+      !toolName ||
+      !['bash', 'eval', 'read', 'grep'].includes(toolName) ||
+      !text ||
+      text.length > 32_000
+    ) {
+      continue;
+    }
+    out.push({ role, text, toolName });
   }
   return out;
 }
