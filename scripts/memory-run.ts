@@ -4,7 +4,7 @@
  *   npx tsx scripts/memory-run.ts [--cwd <project>] [--out <dir>] [--provider <settingsProviderId>]
  *       [--model <modelId>] [--phase2-model <modelId>] [--data-dir <userData>]
  *       [--limit <n>] [--idle-hours <h>] [--max-age-days <d>] [--reuse-artifacts] [--seed-prior]
- *       [--phase2-only] [--dev]
+ *       [--concurrency <n>=4] [--phase2-only] [--dev]
  *
  * 默认写到 <cwd>/.enso/memory-debug/ 而不是真实记忆根，避免污染；
  * --reuse-artifacts 复制真实根的 stage1_outputs.json（只重跑 phase 2 时用），
@@ -137,6 +137,7 @@ async function main() {
     workerToken: `cli-${process.pid}`,
     completeSimple: traced(createMemoryCompleteSimple({ runtime, sessionModel, phase2Model })),
     onProgress: (p) => console.log(`[${p.phase}] ${p.current}/${p.total}`),
+    stageOneConcurrency: Number(arg('concurrency') ?? 4),
     stageOneSelect: {
       maxRolloutsPerStartup: Number(arg('limit') ?? (flag('phase2-only') ? 0 : 64)),
       minRolloutIdleHours: Number(arg('idle-hours') ?? 12),

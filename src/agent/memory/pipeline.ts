@@ -5,6 +5,7 @@ import { applyConsolidation, parsePhaseTwoResponse } from './phaseTwo';
 import { CONSOLIDATION_SYSTEM, consolidationUser, STAGE_ONE_SYSTEM, stageOneUser } from './prompts';
 import {
   parseStageOneResponse,
+  type StageOneCandidate,
   type StageOneOutput,
   type StageOneSelectOptions,
   selectStageOneCandidates,
@@ -164,6 +165,8 @@ export async function runMemoryPipeline(opts: {
   onProgress?: (progress: MemoryPipelineProgress) => void;
   /** 调试用：覆盖 stage 1 候选筛选阈值（idle / age / 每次上限） */
   stageOneSelect?: Omit<StageOneSelectOptions, 'nowSec' | 'currentThreadId'>;
+  /** stage 1 模型调用并发数（jobs / artifacts 落盘仍按批串行），缺省 1 */
+  stageOneConcurrency?: number;
 }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
   const threads = await listMemoryThreads(opts.sessionDir, { cwd: opts.cwd });
   const candidates = selectStageOneCandidates(threads, {
@@ -186,21 +189,13 @@ export async function runMemoryPipeline(opts: {
   let stage1Claimed = 0;
   let produced = false;
 
-  for (const thread of candidates) {
-    const claim = claimStage1(jobs, thread, {
-      nowSec: opts.nowSec,
-      leaseSeconds: 120,
-      workerToken: opts.workerToken,
-    });
-    if (!claim.claimed || !claim.token) continue;
-    jobs = claim.state;
-    await saveJobs(opts.memoryRoot, jobs);
-    stage1Claimed += 1;
+  const concurrency = Math.max(1, Math.floor(opts.stageOneConcurrency ?? 1));
+  const extractOne = async (thread: StageOneCandidate): Promise<StageOneOutput | undefined> => {
     let payload = '';
     try {
       payload = await readFile(thread.sessionFile, 'utf8');
     } catch {
-      continue;
+      return undefined;
     }
     const items = extractPersistableMessages(payload);
     const text = await opts.completeSimple({
@@ -211,24 +206,44 @@ export async function runMemoryPipeline(opts: {
         truncateByApproxTokens(JSON.stringify(items), PHASE1_INPUT_TOKEN_LIMIT)
       ),
     });
-    const parsed = parseStageOneResponse(text);
-    const done = markStage1Done(jobs, thread.threadId, {
-      token: claim.token,
-      watermark: thread.updatedAtSec,
-    });
-    if (done) {
-      jobs = done;
-      await saveJobs(opts.memoryRoot, jobs);
+    return parseStageOneResponse(text);
+  };
+
+  for (let i = 0; i < candidates.length; i += concurrency) {
+    // 批内：先串行 claim + 落盘，再并行调模型，最后串行 markDone / 写 artifacts
+    const batch: Array<{ thread: StageOneCandidate; token: string }> = [];
+    for (const thread of candidates.slice(i, i + concurrency)) {
+      const claim = claimStage1(jobs, thread, {
+        nowSec: opts.nowSec,
+        leaseSeconds: 120,
+        workerToken: opts.workerToken,
+      });
+      if (!claim.claimed || !claim.token) continue;
+      jobs = claim.state;
+      batch.push({ thread, token: claim.token });
     }
+    if (batch.length === 0) continue;
+    await saveJobs(opts.memoryRoot, jobs);
+    stage1Claimed += batch.length;
+    const results = await Promise.all(batch.map(({ thread }) => extractOne(thread)));
+    for (const [index, { thread, token }] of batch.entries()) {
+      const parsed = results[index];
+      const done = markStage1Done(jobs, thread.threadId, {
+        token,
+        watermark: thread.updatedAtSec,
+      });
+      if (done) jobs = done;
+      if (!parsed || !isUsableStage1(parsed)) continue;
+      produced = true;
+      artifacts = upsertArtifact(artifacts, {
+        threadId: thread.threadId,
+        sourceUpdatedAt: thread.updatedAtSec,
+        ...parsed,
+      });
+    }
+    await saveJobs(opts.memoryRoot, jobs);
+    if (produced) await saveArtifacts(opts.memoryRoot, artifacts);
     opts.onProgress?.({ phase: 'stage1', current: stage1Claimed, total });
-    if (!parsed || !isUsableStage1(parsed)) continue;
-    produced = true;
-    artifacts = upsertArtifact(artifacts, {
-      threadId: thread.threadId,
-      sourceUpdatedAt: thread.updatedAtSec,
-      ...parsed,
-    });
-    await saveArtifacts(opts.memoryRoot, artifacts);
   }
 
   const forced = jobs.global.dirty === true;

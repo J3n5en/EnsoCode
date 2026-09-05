@@ -427,6 +427,34 @@ describe('runMemoryPipeline prior memory', () => {
   });
 });
 
+describe('runMemoryPipeline stage 1 并发', () => {
+  it('stageOneConcurrency=2 时同时有两个线程在调模型，且每个线程都产出 artifact', async () => {
+    const opts = baseOpts();
+    for (const id of ['t1', 't2', 't3', 't4']) {
+      writeParentSession(opts.sessionDir, { id, userText: `work on ${id}` });
+    }
+    let inFlight = 0;
+    let maxInFlight = 0;
+    opts.completeSimple = vi.fn<MemoryCompleteSimple>(async ({ phase }) => {
+      if (phase === 2) return PHASE2_VALID;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return STAGE1_VALID;
+    });
+
+    const result = await runMemoryPipeline({ ...opts, stageOneConcurrency: 2 });
+
+    expect(result.stage1Claimed).toBe(4);
+    expect(maxInFlight).toBe(2);
+    const artifacts = JSON.parse(
+      readFileSync(path.join(opts.memoryRoot, 'stage1_outputs.json'), 'utf8')
+    ) as Array<{ threadId: string }>;
+    expect(artifacts.map((a) => a.threadId).sort()).toEqual(['t1', 't2', 't3', 't4']);
+  });
+});
+
 describe('runMemoryPipeline phase 2 失败', () => {
   function seedForcedPhase2(memoryRoot: string) {
     mkdirSync(memoryRoot, { recursive: true });
