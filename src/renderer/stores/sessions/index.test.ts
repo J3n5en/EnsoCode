@@ -259,6 +259,109 @@ describe('typed Agent child projection', () => {
     await seedParent();
   });
 
+  it('worker snapshot 恢复命令但会话持久化不保存命令列表', async () => {
+    const commands = [{ name: 'review', description: '检查当前改动' }];
+    onAgentEvent?.({
+      type: 'snapshot',
+      partial: true,
+      sessions: [
+        {
+          identity: { sessionId: 'parent', generation: 'command-generation' },
+          status: 'idle',
+          messages: [],
+          commands,
+        },
+      ],
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.commands).toEqual(
+      commands
+    );
+    const storage = sessionsModule.useSessionsStore.persist.getOptions().storage!;
+    await storage.getItem('enso-conversations');
+    const calls = vi.mocked(window.electronAPI.settings.writeKey).mock.calls;
+    const saved = calls.filter(([name]) => name === 'enso-conversations').at(-1)?.[1];
+    expect(saved).toMatchObject({ state: { conversations: { parent: { commands: [] } } } });
+  });
+
+  it('冷会话已有标题时连续后台消息不触发持久化', async () => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        cold: { ...state.conversations.parent, id: 'cold', title: '后台会话' },
+      },
+    }));
+    const storage = store.persist.getOptions().storage!;
+    await storage.getItem('enso-conversations');
+    const write = vi.spyOn(storage, 'setItem');
+    const before = store.getState().conversations.cold;
+    for (let seq = 1; seq <= 100; seq++) {
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: 'cold', generation: 'g1' },
+        seq,
+        index: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: `片段 ${seq}` }] },
+      });
+    }
+    expect(store.getState().conversations.cold).toBe(before);
+    expect(write.mock.calls.length).toBe(0);
+    write.mockRestore();
+  });
+
+  it('冷会话无标题时助手消息与空用户消息也不触发持久化', async () => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        untitled: { ...state.conversations.parent, id: 'untitled', title: '' },
+      },
+    }));
+    const storage = store.persist.getOptions().storage!;
+    await storage.getItem('enso-conversations');
+    const write = vi.spyOn(storage, 'setItem');
+    for (const role of ['assistant', 'user'] as const) {
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: 'untitled', generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: { role, content: [{ type: 'text', text: '' }] },
+      });
+    }
+    expect(write.mock.calls.length).toBe(0);
+    write.mockRestore();
+  });
+
+  it('会话 store 连续更新合并在 IPC 之前，并保存最终元数据', async () => {
+    const store = sessionsModule.useSessionsStore;
+    const storage = store.persist.getOptions().storage!;
+    await storage.getItem('enso-conversations');
+    const writeKey = vi.mocked(window.electronAPI.settings.writeKey);
+    writeKey.mockClear();
+    let finish!: (value: boolean) => void;
+    writeKey.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      })
+    );
+    for (let index = 0; index <= 600; index++) {
+      store.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, title: `标题 ${index}` },
+        },
+      }));
+    }
+    expect(writeKey.mock.calls.length).toBe(1);
+    finish(true);
+    await storage.getItem('enso-conversations');
+    expect(writeKey.mock.calls.length).toBe(2);
+    expect(writeKey.mock.calls.at(-1)?.[1]).toMatchObject({
+      state: { conversations: { parent: { title: '标题 600' } } },
+    });
+  });
+
   it('parent-rejected clears started and lands failed so retry can spawn again', () => {
     // spawn IPC ack 后 store 乐观置 started:true；若 rejected 到达时不清回 false，
     // 重发会走 prompt 分支打到 worker 里不存在的会话，重试彻底无声。
