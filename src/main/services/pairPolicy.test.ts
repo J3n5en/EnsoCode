@@ -293,6 +293,26 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
     expect(session.messages.at(-1)).toEqual({ role: 'user', text: 'm199' });
   });
 
+  it('去掉 commands，手机不用斜杠命令列表', () => {
+    const out = narrowSnapshot(
+      {
+        type: 'snapshot',
+        sessions: [
+          {
+            sessionId: 'a',
+            messages: [{ text: 'hi' }],
+            commands: [{ name: '/x', description: 'd' }],
+          },
+        ],
+      },
+      'a'
+    );
+    const session = out?.sessions[0] as { messages: unknown[]; commands?: unknown };
+    expect(session).toBeDefined();
+    expect(session).not.toHaveProperty('commands');
+    expect(session.messages).toEqual([{ text: 'hi' }]);
+  });
+
   it('短对话不裁剪，baseIndex 为 0', () => {
     const messages = [{ text: 'a' }, { text: 'b' }];
     const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');

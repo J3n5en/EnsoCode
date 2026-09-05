@@ -22,6 +22,13 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
+import {
+  catalogSyncFingerprint,
+  changedMetaChannels,
+  type PairMetaFingerprints,
+  pairJsonFingerprint,
+  shouldRelayPairSnapshot,
+} from '@shared/pair/metaSync';
 import type {
   AgentSpawnRequest,
   ApprovalDecision,
@@ -90,6 +97,10 @@ interface Connection {
   sinceIndex?: number;
   /** 待应答的 history 分页请求（beforeIndex）；下一个 snapshot 事件到达时切片发回 */
   pendingHistory?: number;
+  /** 手机 subscribe 已点名会话快照；桌面自发 snapshot 不转 */
+  pendingSnapshot?: boolean;
+  /** 已下发 meta 各通道指纹；相同内容不重发 */
+  sentMeta?: PairMetaFingerprints;
   phoneOnline: boolean;
   /** 手机页面可见性（presence 帧上报）：锁屏/切后台时 socket 半开不会 close，推送据此门控 */
   phoneVisible: boolean;
@@ -463,7 +474,10 @@ function connect(conn: Connection): void {
           conn.phoneOnline = true;
           conn.phoneVisible = true;
           conn.subscribedId = null;
-          // 手机进房即推目录（它也会发 snapshot，但 main 侧缓存可能更早就绪）
+          conn.pendingSnapshot = undefined;
+          conn.pendingHistory = undefined;
+          conn.sentMeta = undefined;
+          // 手机进房即推目录（它也会发 snapshot，指纹相同则不重发）
           void sendMeta(conn);
           notifyStatus();
         } else if (control.type === 'peer-left') {
@@ -564,12 +578,17 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       conn.pendingHistory = undefined;
       // 历史会话在 worker 里没有投影，先请渲染层恢复（与桌面点开会话同路径），
       // 再要快照；已启动的会话 resume 会自行忽略。
-      if (command.sessionId) onResumeRequest?.(command.sessionId);
-      requestSnapshot();
+      if (command.sessionId) {
+        conn.pendingSnapshot = true;
+        onResumeRequest?.(command.sessionId);
+        requestSnapshot(command.sessionId);
+      } else {
+        conn.pendingSnapshot = undefined;
+      }
       break;
     case 'snapshot':
+      // 只要目录/外观；会话正文走 subscribe
       void sendMeta(conn);
-      requestSnapshot();
       break;
     case 'set-model': {
       const check = checkSetModel(command, whitelist);
@@ -597,7 +616,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       // 只服务当前订阅会话：其它会话的正文本就不该下发
       if (command.sessionId !== conn.subscribedId) return;
       conn.pendingHistory = command.beforeIndex;
-      requestSnapshot();
+      requestSnapshot(command.sessionId);
       break;
     case 'push-subscribe':
       setPushSubscription(conn.device.pairId, command.subscription);
@@ -667,20 +686,32 @@ async function send(conn: Connection, message: HostToPhone): Promise<void> {
 }
 
 async function sendMeta(conn: Connection): Promise<void> {
-  await send(conn, { type: 'catalog', entries: catalog, pinnedOrder });
-  await send(conn, { type: 'projects', projects });
-  await send(conn, { type: 'providers', providers });
-  await send(conn, {
-    type: 'appearance',
+  const appearance = {
+    type: 'appearance' as const,
     theme,
     ...(terminal ? { terminal } : {}),
     ...(terminalFontFamily ? { terminalFontFamily } : {}),
     compactReadOnlyTools,
-  });
-  // Web Push 能力下发：手机拿公钥才能 pushManager.subscribe
-  await send(conn, { type: 'push-config', vapidPublicKey: getVapidPublicKey() });
-  // 桌面 guest 用作默认节点名；手机忽略
-  await send(conn, { type: 'host-info', hostname: os.hostname(), appVersion: app.getVersion() });
+  };
+  const vapidPublicKey = getVapidPublicKey();
+  const hostInfo = { hostname: os.hostname(), appVersion: app.getVersion() };
+  const next: PairMetaFingerprints = {
+    catalog: catalogSyncFingerprint(catalog, pinnedOrder),
+    projects: pairJsonFingerprint(projects),
+    providers: pairJsonFingerprint(providers),
+    appearance: pairJsonFingerprint(appearance),
+    pushConfig: pairJsonFingerprint(vapidPublicKey),
+    hostInfo: pairJsonFingerprint(hostInfo),
+  };
+  const changed = new Set(changedMetaChannels(conn.sentMeta, next));
+  if (changed.size === 0) return;
+  if (changed.has('catalog')) await send(conn, { type: 'catalog', entries: catalog, pinnedOrder });
+  if (changed.has('projects')) await send(conn, { type: 'projects', projects });
+  if (changed.has('providers')) await send(conn, { type: 'providers', providers });
+  if (changed.has('appearance')) await send(conn, appearance);
+  if (changed.has('pushConfig')) await send(conn, { type: 'push-config', vapidPublicKey });
+  if (changed.has('hostInfo')) await send(conn, { type: 'host-info', ...hostInfo });
+  conn.sentMeta = { ...conn.sentMeta, ...next };
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
@@ -718,6 +749,7 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
           messages?: unknown[];
         }[];
       };
+      if (!shouldRelayPairSnapshot(conn)) continue;
       // 有挂起的分页请求：切 beforeIndex 之前的一页发回，不重复发尾窗
       if (conn.pendingHistory !== undefined && conn.subscribedId) {
         const session = full.sessions?.find(
@@ -740,6 +772,7 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
         // 尾窗已覆盖手机所有已知内容，续传游标完成使命；继续拿它过滤会在
         // 截断/压缩后把新消息当旧消息丢掉，手机就「卡住」直到重开
         conn.sinceIndex = undefined;
+        conn.pendingSnapshot = undefined;
         void send(conn, { type: 'agent-event', event: narrowed });
       }
       continue;

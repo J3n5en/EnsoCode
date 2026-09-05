@@ -208,6 +208,8 @@ interface SnapshotSession {
   sessionId?: string;
   identity?: { sessionId?: string; generation?: string };
   messages?: unknown[];
+  /** worker 带 skills 描述；下发手机前剥掉 */
+  commands?: unknown;
 }
 
 /** worker 事件的会话归属：新格式在 identity.sessionId，旧格式在顶层 sessionId */
@@ -245,7 +247,9 @@ export function narrowSnapshot(
     .filter((s) => sessionIdOf(s) === subscribedId)
     .map((s) => {
       // 手机端按扁平 sessionId 消费（线上 PWA 不随桌面版同步发布），归一化补上
-      const base = { ...s, sessionId: subscribedId };
+      // commands（skills 描述）手机不用，原样展开会把尾窗帧撑到几十 KB
+      const { commands: _commands, ...rest } = s;
+      const base = { ...rest, sessionId: subscribedId };
       if (!Array.isArray(s.messages)) return { ...base, baseIndex: 0 };
       const tail = takeTail(s.messages, s.messages.length);
       return { ...base, messages: tail.messages, baseIndex: tail.baseIndex };

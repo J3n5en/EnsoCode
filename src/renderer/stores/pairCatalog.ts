@@ -1,4 +1,5 @@
 import { toPairProjectEntry } from '@enso/pair';
+import { catalogSyncFingerprint, pairJsonFingerprint } from '@shared/pair/metaSync';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -24,6 +25,7 @@ import {
 const DEBOUNCE_MS = 300;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let bound = false;
+let lastPushFingerprint: string | null = null;
 
 function buildPayload(): PairCatalogPayload {
   const settings = useSettingsStore.getState();
@@ -108,11 +110,28 @@ function buildPayload(): PairCatalogPayload {
   };
 }
 
+function catalogPushFingerprint(payload: PairCatalogPayload): string {
+  return pairJsonFingerprint({
+    catalog: catalogSyncFingerprint(payload.catalog, payload.pinnedOrder ?? []),
+    projects: payload.projects,
+    providers: payload.providers,
+    projectPaths: payload.projectPaths,
+    theme: payload.theme,
+    terminal: payload.terminal,
+    terminalFontFamily: payload.terminalFontFamily,
+    compactReadOnlyTools: payload.compactReadOnlyTools,
+  });
+}
+
 function schedulePush(): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    window.electronAPI.pair.pushCatalog(buildPayload());
+    const payload = buildPayload();
+    const fingerprint = catalogPushFingerprint(payload);
+    if (fingerprint === lastPushFingerprint) return;
+    lastPushFingerprint = fingerprint;
+    window.electronAPI.pair.pushCatalog(payload);
   }, DEBOUNCE_MS);
 }
 
