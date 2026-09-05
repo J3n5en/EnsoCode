@@ -1,7 +1,78 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const LEARNED_RELATIVE_PATH = path.join('.enso', 'learned.md');
+export const LEARNED_FILE_NAME = 'learned.md';
+export const MEMORIES_DIR_NAME = 'memories';
+
+export function encodeProjectPath(cwd: string): string {
+  return `--${cwd.replace(/^[\\/]/, '').replace(/[\\/:]/g, '-')}--`;
+}
+
+export function getMemoryRoot(agentDir: string, cwd: string): string {
+  return path.join(agentDir, MEMORIES_DIR_NAME, encodeProjectPath(cwd));
+}
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+export type LearnedLessonInput = { content: string; context?: string };
+export type LearnedLessonResult = { stored: 0 | 1; message: string };
+
+const learnedWriteChains = new Map<string, Promise<unknown>>();
+
+export async function saveLearnedLesson(
+  agentDir: string,
+  cwd: string,
+  input: LearnedLessonInput
+): Promise<LearnedLessonResult> {
+  const content = collapseWhitespace(input.content);
+  if (!content) {
+    return { stored: 0, message: 'Empty lesson; nothing stored.' };
+  }
+  const context = input.context ? collapseWhitespace(input.context) : '';
+  const line = context ? `- ${content} _(context: ${context})_` : `- ${content}`;
+  const filePath = path.join(getMemoryRoot(agentDir, cwd), LEARNED_FILE_NAME);
+  const run = (learnedWriteChains.get(filePath) ?? Promise.resolve()).then(() =>
+    appendLearnedLine(filePath, line)
+  );
+  const guarded = run.catch(() => {});
+  learnedWriteChains.set(filePath, guarded);
+  try {
+    await run;
+  } finally {
+    if (learnedWriteChains.get(filePath) === guarded) learnedWriteChains.delete(filePath);
+  }
+  return { stored: 1, message: `Lesson saved to ${LEARNED_FILE_NAME}.` };
+}
+
+async function appendLearnedLine(filePath: string, line: string): Promise<void> {
+  let existing = '';
+  try {
+    existing = await readFile(filePath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  const lines = existing.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const isLesson = (l: string) => l.trimStart().startsWith('- ');
+  const out = lines.filter((l) => !(isLesson(l) && l.trim() === line));
+  const firstBullet = out.findIndex(isLesson);
+  if (firstBullet === -1) out.push(line);
+  else out.splice(firstBullet, 0, line);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${out.join('\n')}\n`, 'utf8');
+}
+
+export async function readLearnedLessons(memoryRoot: string): Promise<string> {
+  try {
+    return (await readFile(path.join(memoryRoot, LEARNED_FILE_NAME), 'utf8')).trim();
+  } catch {
+    return '';
+  }
+}
 export const LOCAL_MEMORY_SYSTEM_PROMPT = [
   'Extract durable project facts from this coding session.',
   'Rules:',
