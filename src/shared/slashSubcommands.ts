@@ -6,17 +6,8 @@ const GOAL: SlashSubcommand[] = [
   { name: 'clear', aliases: [], description: 'Clear the session goal' },
 ];
 
-const MEMORY: SlashSubcommand[] = [
-  { name: 'view', aliases: [], description: 'Show the current memory injection' },
-  { name: 'stats', aliases: [], description: 'File counts and Phase 2 watermark' },
-  { name: 'diagnose', aliases: [], description: 'Enabled flag, cwd, and dirty state' },
-  { name: 'clear', aliases: ['reset'], description: 'Delete this project memory root' },
-  { name: 'enqueue', aliases: ['rebuild'], description: 'Queue consolidation for next spawn' },
-];
-
 const BY_SLASH: Record<string, SlashSubcommand[]> = {
   '/goal': GOAL,
-  '/memory': MEMORY,
 };
 
 export function slashSubcommandQuery(slash: string | null, editorText: string): string | null {

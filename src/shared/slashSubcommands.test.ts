@@ -7,26 +7,16 @@ describe('slashSubcommandQuery', () => {
   });
 
   it('uses the first token and hides after a second word', () => {
-    expect(slashSubcommandQuery('/memory', '')).toBe('');
-    expect(slashSubcommandQuery('/memory', 'vie')).toBe('vie');
-    expect(slashSubcommandQuery('/memory', 'view extra')).toBeNull();
+    expect(slashSubcommandQuery('/goal', '')).toBe('');
+    expect(slashSubcommandQuery('/goal', 'pau')).toBe('pau');
+    expect(slashSubcommandQuery('/goal', 'pause extra')).toBeNull();
   });
 });
 
 describe('filterSlashSubcommands', () => {
-  it('lists memory and goal verbs; aliases match the canonical name', () => {
-    expect(filterSlashSubcommands('/memory', '').map((row) => row.name)).toEqual([
-      'view',
-      'stats',
-      'diagnose',
-      'clear',
-      'enqueue',
-    ]);
-    expect(filterSlashSubcommands('/memory', 're').map((row) => row.name)).toEqual([
-      'clear',
-      'enqueue',
-    ]);
+  it('lists goal verbs; unknown slashes stay empty', () => {
     expect(filterSlashSubcommands('/goal', 'p').map((row) => row.name)).toEqual(['pause']);
+    expect(filterSlashSubcommands('/memory', '')).toEqual([]);
     expect(filterSlashSubcommands('/compact', '')).toEqual([]);
   });
 });
