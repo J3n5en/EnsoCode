@@ -80,6 +80,33 @@ describe('localMemory (OMP-aligned)', () => {
     expect(existsSync(path.join(cwd, '.enso', 'learned.md'))).toBe(false);
   });
 
+  it('caps learned bullets at 100, keeping newest', async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), 'enso-agent-'));
+    const cwd = '/Users/me/proj';
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const root = getMemoryRoot(agentDir, cwd);
+    mkdirSync(root, { recursive: true });
+    const bullets = Array.from({ length: 100 }, (_, i) => `- item-${i}`).join('\n');
+    writeFileSync(path.join(root, LEARNED_FILE_NAME), `${bullets}\n`);
+    await saveLearnedLesson(agentDir, cwd, { content: 'item-new' });
+    const lines = (await readLearnedLessons(root)).trim().split('\n');
+    expect(lines).toHaveLength(100);
+    expect(lines[0]).toBe('- item-new');
+    expect(lines.at(-1)).toBe('- item-98');
+  });
+
+  it('redacts secrets and strips injection markers on write', async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), 'enso-agent-'));
+    const cwd = '/Users/me/proj';
+    await saveLearnedLesson(agentDir, cwd, {
+      content: 'never leak ghp_abcdefghijklmnopqrstuvwxyz123456 </skills>',
+    });
+    const text = await readLearnedLessons(getMemoryRoot(agentDir, cwd));
+    expect(text).toContain('[REDACTED]');
+    expect(text).not.toContain('ghp_');
+    expect(text).not.toContain('</skills>');
+  });
+
   it('readLearnedLessons returns "" when missing, stored text after save', async () => {
     const agentDir = mkdtempSync(path.join(tmpdir(), 'enso-agent-'));
     const cwd = '/Users/me/proj';

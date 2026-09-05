@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { neutralizeInjection, normalizeLearnedText, redactSecrets } from './memory/sanitize';
 
 export const LEARNED_RELATIVE_PATH = path.join('.enso', 'learned.md');
 export const LEARNED_FILE_NAME = 'learned.md';
@@ -24,9 +25,9 @@ export function getMemoryRoot(agentDir: string, cwd: string): string {
   return path.join(agentDir, MEMORIES_DIR_NAME, encodeProjectPath(cwd));
 }
 
-function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
+const MAX_LEARNED_LESSONS = 100;
+const MAX_LEARNED_CONTENT_CHARS = 2000;
+const MAX_LEARNED_CONTEXT_CHARS = 400;
 
 export type LearnedLessonInput = { content: string; context?: string };
 export type LearnedLessonResult = { stored: 0 | 1; message: string };
@@ -38,11 +39,13 @@ export async function saveLearnedLesson(
   cwd: string,
   input: LearnedLessonInput
 ): Promise<LearnedLessonResult> {
-  const content = collapseWhitespace(input.content);
+  const content = normalizeLearnedText(input.content, MAX_LEARNED_CONTENT_CHARS);
   if (!content) {
     return { stored: 0, message: 'Empty lesson; nothing stored.' };
   }
-  const context = input.context ? collapseWhitespace(input.context) : '';
+  const context = input.context
+    ? normalizeLearnedText(input.context, MAX_LEARNED_CONTEXT_CHARS)
+    : '';
   const line = context ? `- ${content} _(context: ${context})_` : `- ${content}`;
   const filePath = path.join(getMemoryRoot(agentDir, cwd), LEARNED_FILE_NAME);
   const run = (learnedWriteChains.get(filePath) ?? Promise.resolve()).then(() =>
@@ -72,13 +75,25 @@ async function appendLearnedLine(filePath: string, line: string): Promise<void> 
   const firstBullet = out.findIndex(isLesson);
   if (firstBullet === -1) out.push(line);
   else out.splice(firstBullet, 0, line);
+  let lessonCount = out.filter((l) => isLesson(l)).length;
+  for (let i = out.length - 1; i >= 0 && lessonCount > MAX_LEARNED_LESSONS; i--) {
+    if (isLesson(out[i] ?? '')) {
+      out.splice(i, 1);
+      lessonCount--;
+    }
+  }
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${out.join('\n')}\n`, 'utf8');
 }
 
 export async function readLearnedLessons(memoryRoot: string): Promise<string> {
   try {
-    return (await readFile(path.join(memoryRoot, LEARNED_FILE_NAME), 'utf8')).trim();
+    const raw = (await readFile(path.join(memoryRoot, LEARNED_FILE_NAME), 'utf8')).trim();
+    if (!raw) return '';
+    return raw
+      .split('\n')
+      .map((line) => redactSecrets(neutralizeInjection(line)))
+      .join('\n');
   } catch {
     return '';
   }

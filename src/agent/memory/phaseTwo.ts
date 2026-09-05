@@ -1,5 +1,6 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { redactSecrets, sanitizeSkillName } from './sanitize';
 
 export type PhaseTwoSkill = { name: string; content: string };
 
@@ -55,20 +56,30 @@ export async function applyConsolidation(
   output: PhaseTwoOutput
 ): Promise<void> {
   await mkdir(memoryRoot, { recursive: true });
-  await writeFile(path.join(memoryRoot, 'MEMORY.md'), `${output.memory_md.trim()}\n`, 'utf8');
+  await writeFile(
+    path.join(memoryRoot, 'MEMORY.md'),
+    `${redactSecrets(output.memory_md).trim()}\n`,
+    'utf8'
+  );
   await writeFile(
     path.join(memoryRoot, 'memory_summary.md'),
-    `${output.memory_summary.trim()}\n`,
+    `${redactSecrets(output.memory_summary).trim()}\n`,
     'utf8'
   );
   const skillsDir = path.join(memoryRoot, 'skills');
   await mkdir(skillsDir, { recursive: true });
   const keep = new Set<string>();
   for (const skill of output.skills) {
-    keep.add(skill.name);
-    const dir = path.join(skillsDir, skill.name);
+    let name = skill.name;
+    try {
+      name = sanitizeSkillName(skill.name);
+    } catch {
+      continue;
+    }
+    keep.add(name);
+    const dir = path.join(skillsDir, name);
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, 'SKILL.md'), skill.content, 'utf8');
+    await writeFile(path.join(dir, 'SKILL.md'), redactSecrets(skill.content), 'utf8');
   }
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
