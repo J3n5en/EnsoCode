@@ -14,9 +14,10 @@ describe('slashSubcommandQuery', () => {
 });
 
 describe('filterSlashSubcommands', () => {
-  it('lists goal verbs; unknown slashes stay empty', () => {
-    expect(filterSlashSubcommands('/goal', 'p').map((row) => row.name)).toEqual(['pause']);
+  it('移除记忆命令建议，保留目标子命令', () => {
     expect(filterSlashSubcommands('/memory', '')).toEqual([]);
+    expect(filterSlashSubcommands('/memory', 're')).toEqual([]);
+    expect(filterSlashSubcommands('/goal', 'p').map((row) => row.name)).toEqual(['pause']);
     expect(filterSlashSubcommands('/compact', '')).toEqual([]);
   });
 });

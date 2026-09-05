@@ -100,22 +100,7 @@ import { createExploreFoldState, createExploreFoldTools } from './exploreFold';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
-import { createLearnTool } from './learn';
-import {
-  appendLearnedFile,
-  buildMemoryUserText,
-  extractLearnedNotes,
-  getMemoryRoot,
-  LOCAL_MEMORY_SYSTEM_PROMPT,
-  readLearnedFile,
-  shouldInjectProjectLearnedFile,
-  shouldLearnFromTurn,
-} from './localMemory';
 import { McpManager } from './mcp';
-import { runMemoryPipeline } from './memory/pipeline';
-import { createMemoryCompleteSimple } from './memory/runner';
-import { resolveMemoryUri } from './memory/sanitize';
-import { loadSessionMemoryInjection, shouldRunMemoryStartup } from './memory/startup';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
@@ -237,10 +222,6 @@ interface ManagedSession {
   checkpoints?: CheckpointManager;
   coworkers: Map<string, CoworkerInfo>;
   pendingYieldSchema?: unknown;
-  localMemoryEnabled?: boolean;
-  memoryCwd?: string;
-  memoryModel?: SpawnModelConfig;
-  memoryPhase2Model?: SpawnModelConfig;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
   contextUsage: ContextUsageTracker;
@@ -286,7 +267,6 @@ function createSessionResourceLoader(options: {
   /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
   loadHarnessAssets?: boolean;
   exploreFold?: ReturnType<typeof createExploreFoldState>;
-  learnedFile?: { path: string; content: string };
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -324,7 +304,6 @@ function createSessionResourceLoader(options: {
         })
       : sessionAgentsFilesOverride(options.agentDir, options.instruction, [
           ...(harness ? readHarnessRuleFiles(options.cwd) : []),
-          ...(options.learnedFile ? [options.learnedFile] : []),
         ]),
   });
 }
@@ -609,10 +588,6 @@ export class SessionSupervisor {
       void this.summarizeTitle(command).catch(() => {});
       return;
     }
-    if (command.type === 'run-memory-pipeline') {
-      void this.runMemoryPipelineCommand(command).catch(() => {});
-      return;
-    }
     if (command.type === 'set-proxy-env') {
       applyWorkerProxyEnv(command.env);
       return;
@@ -704,9 +679,7 @@ export class SessionSupervisor {
           command.remote,
           command.loadHarnessAssets,
           command.windowsLocalShell,
-          command.exploreFoldEnabled,
-          command.localMemoryEnabled,
-          command.memoryPhase2Model
+          command.exploreFoldEnabled
         );
         return;
       case 'spawn-child':
@@ -1083,9 +1056,7 @@ export class SessionSupervisor {
     remote?: AgentRemoteConfig,
     loadHarnessAssets = false,
     windowsLocalShell?: WindowsLocalShell,
-    exploreFoldEnabled = false,
-    localMemoryEnabled = true,
-    memoryPhase2Model?: SpawnModelConfig
+    exploreFoldEnabled = false
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1131,12 +1102,6 @@ export class SessionSupervisor {
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
     const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
-    const learnedFile =
-      localMemoryEnabled && !remoteAgentsFiles
-        ? shouldInjectProjectLearnedFile()
-          ? readLearnedFile(cwd)
-          : await loadSessionMemoryInjection(this.options.agentDir, cwd)
-        : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -1146,7 +1111,6 @@ export class SessionSupervisor {
       remoteAgentsFiles,
       loadHarnessAssets,
       exploreFold,
-      learnedFile,
     });
     const toolsStart = Date.now();
     const [, mcpTools] = await Promise.all([
@@ -1205,12 +1169,7 @@ export class SessionSupervisor {
     // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
     // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
     const structuredById = new Map<string, unknown>();
-    const wrapRead = (definition: Def): Def =>
-      withAgentRead(
-        definition,
-        () => structuredById,
-        (filePath) => resolveMemoryUri(filePath, getMemoryRoot(this.options.agentDir, cwd))
-      );
+    const wrapRead = (definition: Def): Def => withAgentRead(definition, () => structuredById);
     const readOnlyTools = (): Def[] =>
       remoteOps && sshExecutor
         ? [
@@ -1559,9 +1518,6 @@ export class SessionSupervisor {
       ...(browser
         ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
         : []),
-      ...(localMemoryEnabled && !remote
-        ? [createLearnTool({ agentDir: this.options.agentDir, cwd, skillPaths })]
-        : []),
       ...(toolEnabled('todo') ? [createTodoTool()] : []),
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
       ...(toolEnabled('subagent') ? [taskTool] : []),
@@ -1609,14 +1565,6 @@ export class SessionSupervisor {
       factory,
       toolIds: customTools.map((tool) => tool.name),
       checkpoints,
-      ...(localMemoryEnabled && !remote
-        ? {
-            localMemoryEnabled: true,
-            memoryCwd: cwd,
-            memoryModel: model,
-            ...(memoryPhase2Model ? { memoryPhase2Model } : {}),
-          }
-        : {}),
     });
     managedRef.browser = browser;
     this.options.emit({
@@ -1626,14 +1574,6 @@ export class SessionSupervisor {
       sessionFile: requiredSessionFile(session),
       model: settingsModelRef(model),
     });
-    if (
-      shouldRunMemoryStartup({
-        localMemoryEnabled,
-        remote: Boolean(remote),
-      })
-    ) {
-      void this.runMemoryStartup(managedRef);
-    }
     checkpoints?.cleanupOldSessions();
   }
 
@@ -1678,10 +1618,6 @@ export class SessionSupervisor {
       resumeFile?: string;
       asks?: AskManager;
       checkpoints?: CheckpointManager;
-      localMemoryEnabled?: boolean;
-      memoryCwd?: string;
-      memoryModel?: SpawnModelConfig;
-      memoryPhase2Model?: SpawnModelConfig;
       ensoApp?: EnsoAppInvoker;
       toolIds?: string[];
       proofToolIds?: string[];
@@ -1718,14 +1654,6 @@ export class SessionSupervisor {
       pendingTaskReminders: [],
       roundWaiters: new Set(),
       subagents: new Map(),
-      ...(opts.localMemoryEnabled
-        ? {
-            localMemoryEnabled: true,
-            memoryCwd: opts.memoryCwd,
-            memoryModel: opts.memoryModel,
-            memoryPhase2Model: opts.memoryPhase2Model,
-          }
-        : {}),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
       contextUsage: new UsageTracker(),
@@ -2437,7 +2365,6 @@ export class SessionSupervisor {
           seq: ++managed.seq,
           turnId,
         });
-        void this.maybeLearnFromTurn(managed);
         if (managed.pendingCompact) {
           const queued = managed.pendingCompact;
           managed.pendingCompact = undefined;
@@ -2898,133 +2825,6 @@ export class SessionSupervisor {
       return initializeWorkerRuntime(runtime);
     })();
     return this.runtimePromise;
-  }
-
-  private memoryPipelineChain: Promise<void> = Promise.resolve();
-
-  private enqueueMemoryPipeline<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.memoryPipelineChain.then(fn, fn);
-    this.memoryPipelineChain = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
-  }
-
-  private async executeMemoryPipeline(opts: {
-    cwd: string;
-    currentThreadId?: string;
-    model: SpawnModelConfig;
-    phase2Model?: SpawnModelConfig;
-    onProgress?: (progress: { phase: 'stage1' | 'phase2'; current: number; total: number }) => void;
-  }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
-    const runtime = await this.getRuntime();
-    const sessionModel = await resolveBaseModelOrRefresh(runtime, opts.model);
-    const phase2Model = opts.phase2Model
-      ? await resolveBaseModelOrRefresh(runtime, opts.phase2Model).catch(() => sessionModel)
-      : sessionModel;
-    return runMemoryPipeline({
-      memoryRoot: getMemoryRoot(this.options.agentDir, opts.cwd),
-      sessionDir: this.options.sessionDir,
-      cwd: opts.cwd,
-      currentThreadId: opts.currentThreadId,
-      nowSec: Math.floor(Date.now() / 1000),
-      workerToken: `memory-${process.pid}`,
-      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
-      completeSimple: createMemoryCompleteSimple({ runtime, sessionModel, phase2Model }),
-    });
-  }
-
-  private async runMemoryStartup(managed: ManagedSession): Promise<void> {
-    if (
-      !shouldRunMemoryStartup({
-        localMemoryEnabled: Boolean(managed.localMemoryEnabled),
-        coworker: Boolean(managed.coworkerName),
-        child: Boolean(managed.childIdentity),
-      })
-    ) {
-      return;
-    }
-    if (!managed.memoryCwd || !managed.memoryModel) return;
-    try {
-      await this.enqueueMemoryPipeline(() =>
-        this.executeMemoryPipeline({
-          cwd: managed.memoryCwd as string,
-          currentThreadId: managed.identity.sessionId,
-          model: managed.memoryModel as SpawnModelConfig,
-          ...(managed.memoryPhase2Model ? { phase2Model: managed.memoryPhase2Model } : {}),
-        })
-      );
-    } catch {
-      // 记忆维护失败静默
-    }
-  }
-
-  private async runMemoryPipelineCommand(
-    command: Extract<AgentCommand, { type: 'run-memory-pipeline' }>
-  ): Promise<void> {
-    try {
-      const result = await this.enqueueMemoryPipeline(() =>
-        this.executeMemoryPipeline({
-          cwd: command.cwd,
-          currentThreadId: command.currentThreadId,
-          model: command.model,
-          ...(command.phase2Model ? { phase2Model: command.phase2Model } : {}),
-          onProgress: (progress) => {
-            this.options.emit({
-              type: 'memory-pipeline-progress',
-              requestId: command.requestId,
-              ...progress,
-            });
-          },
-        })
-      );
-      this.options.emit({
-        type: 'memory-pipeline-done',
-        requestId: command.requestId,
-        ok: true,
-        stage1Claimed: result.stage1Claimed,
-        phase2Ran: result.phase2Ran,
-      });
-    } catch (error) {
-      this.options.emit({
-        type: 'memory-pipeline-done',
-        requestId: command.requestId,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  private async maybeLearnFromTurn(managed: ManagedSession): Promise<void> {
-    if (!shouldLearnFromTurn()) return;
-    if (!managed.localMemoryEnabled || !managed.memoryCwd || !managed.memoryModel) return;
-    if (managed.coworkerName || managed.childIdentity) return;
-    const userText = buildMemoryUserText(
-      managed.session.messages as Array<{ role?: string; content?: unknown }>
-    );
-    if (!userText.trim()) return;
-    try {
-      const runtime = await this.getRuntime();
-      const model = await resolveBaseModelOrRefresh(runtime, managed.memoryModel);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
-      try {
-        const message = await runtime.completeSimple(
-          model,
-          {
-            systemPrompt: LOCAL_MEMORY_SYSTEM_PROMPT,
-            messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
-          },
-          { signal: controller.signal }
-        );
-        appendLearnedFile(managed.memoryCwd, extractLearnedNotes(message));
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch {
-      // 记忆失败静默
-    }
   }
 
   private async reviewApproval(

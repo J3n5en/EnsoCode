@@ -26,8 +26,6 @@ export function SkillsSettings() {
   const setLoadLocalSkills = useSettingsStore((state) => state.setLoadLocalSkills);
   const loadHarnessAssets = useSettingsStore((state) => state.loadHarnessAssets);
   const setLoadHarnessAssets = useSettingsStore((state) => state.setLoadHarnessAssets);
-  const localMemoryEnabled = useSettingsStore((state) => state.localMemoryEnabled);
-  const setLocalMemoryEnabled = useSettingsStore((state) => state.setLocalMemoryEnabled);
   const [importOpen, setImportOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const visible = skills.filter((skill) =>
@@ -67,16 +65,6 @@ export function SkillsSettings() {
           </p>
         </div>
         <Switch checked={loadHarnessAssets} onCheckedChange={setLoadHarnessAssets} />
-      </div>
-
-      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
-        <div>
-          <p className="font-medium text-sm">{t('Project memory')}</p>
-          <p className="text-muted-foreground text-xs">
-            {t('Capture lessons with learn; idle sessions merge into MEMORY.md after startup.')}
-          </p>
-        </div>
-        <Switch checked={localMemoryEnabled} onCheckedChange={setLocalMemoryEnabled} />
       </div>
 
       <div className="flex items-end justify-between gap-4" data-settings-row="skills.root">

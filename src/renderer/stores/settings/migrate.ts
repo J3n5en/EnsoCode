@@ -10,7 +10,7 @@
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 7;
 
 /**
  * v0 → v1：`ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`。
@@ -18,6 +18,7 @@ export const SETTINGS_VERSION = 5;
  * v2 → v3：新增标题总结：缺省关闭（不让升级用户静默多烧 token）、无独立模型。
  * v3 → v4：新增助手代审模型，缺省未选（该档禁用）。
  * v4 → v5：记住上次审批档；缺省未选，新会话仍走代审可用性默认。
+ * v5/v6 → v7：移除项目记忆配置，兼容曾保存独立记忆模型的开发版。
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
@@ -49,6 +50,10 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   }
   if (version < 5) {
     state = { ...state, lastApprovalMode: null };
+  }
+  if (version < 7) {
+    const { localMemoryEnabled, memoryModel, memoryConcurrency, ...rest } = state;
+    state = rest;
   }
   return state;
 }

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
-import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
@@ -30,7 +29,6 @@ import {
 } from '@shared/types/mentions';
 import { app, ipcMain, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
-import { runMemorySlash } from '../../agent/memory/slash';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
 import {
@@ -45,7 +43,6 @@ import {
   promptChildSession,
   promptSession,
   releaseParentSession,
-  requestMemoryPipeline,
   requestSnapshot,
   resolveAgentTypeSpawnConfig,
   resolveModelSelection,
@@ -94,14 +91,6 @@ import { sessionWorktree, shareSessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
-
-function parseMemoryPatch(value: unknown): MemorySavePatch | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const data = value as Record<string, unknown>;
-  if (typeof data.summary !== 'string' || !Array.isArray(data.learned)) return undefined;
-  if (!data.learned.every((line) => typeof line === 'string')) return undefined;
-  return { summary: data.summary, learned: data.learned as string[] };
-}
 
 const isValidImages = (value: unknown): value is { data: string; mimeType: string }[] | undefined =>
   value === undefined ||
@@ -857,91 +846,6 @@ export function registerAgentHandlers(): void {
         mode as ApprovalMode,
         await readStoredOauthCredentialKeys()
       );
-    }
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.AGENT_MEMORY,
-    async (
-      _event,
-      sessionId: unknown,
-      action: unknown,
-      cwd: unknown,
-      remote: unknown,
-      patch: unknown
-    ): Promise<AgentActionResult> => {
-      const allowed: MemoryCommandAction[] = [
-        'view',
-        'stats',
-        'diagnose',
-        'clear',
-        'enqueue',
-        'save',
-      ];
-      if (!isNonEmptyString(sessionId) || !allowed.includes(action as MemoryCommandAction)) {
-        return { ok: false, error: 'invalid memory command' };
-      }
-      if (typeof cwd !== 'string' || !cwd.trim()) {
-        return { ok: false, error: 'memory command needs a project path' };
-      }
-      const settings = readSettings();
-      const agentDir = path.join(app.getPath('userData'), 'agent', 'pi-agent');
-      const projectCwd = cwd.trim();
-      const result = await runMemorySlash({
-        action: action as MemoryCommandAction,
-        agentDir,
-        cwd: projectCwd,
-        localMemoryEnabled: settings?.localMemoryEnabled !== false,
-        remote: remote === true,
-        patch: parseMemoryPatch(patch),
-      });
-      if (!result.ok) return { ok: false, error: result.error };
-      if (action !== 'enqueue') return { ok: true, snapshot: result.snapshot };
-      const state = (settings?.['enso-settings'] as { state?: Record<string, unknown> } | undefined)
-        ?.state;
-      const identity = exactIdentity(sessionId);
-      const indexed = identity ? agentSessionIndex.model(identity) : undefined;
-      const sessionModel =
-        indexed?.providerId && indexed.modelId
-          ? { providerId: indexed.providerId, modelId: indexed.modelId }
-          : undefined;
-      let credentialKeys: ReadonlySet<string>;
-      try {
-        credentialKeys = await readStoredOauthCredentialKeys();
-      } catch {
-        return { ok: false, error: 'model credentials unavailable' };
-      }
-      const candidates = titleModelCandidates(state, sessionModel);
-      let model: ReturnType<typeof resolveModelSelection> | undefined;
-      for (const candidate of candidates) {
-        const resolved = resolveModelSelection(
-          candidate.providerId,
-          candidate.modelId,
-          credentialKeys
-        );
-        if (resolved.ok) {
-          model = resolved;
-          break;
-        }
-      }
-      if (!model?.ok) return { ok: false, error: 'no usable memory model' };
-      const phase2Ref = candidates.find(
-        (ref) =>
-          ref.providerId !== model.selection.ref.providerId ||
-          ref.modelId !== model.selection.ref.modelId
-      );
-      const phase2 =
-        phase2Ref && resolveModelSelection(phase2Ref.providerId, phase2Ref.modelId, credentialKeys);
-      const requestId = randomUUID();
-      const started = requestMemoryPipeline({
-        requestId,
-        cwd: projectCwd,
-        currentThreadId: isNonEmptyString(sessionId) ? sessionId : undefined,
-        model: model.selection.config,
-        ...(phase2?.ok ? { phase2Model: phase2.selection.config } : {}),
-      });
-      if (!started.ok) return { ok: false, error: started.error ?? 'worker unavailable' };
-      return { ok: true, snapshot: result.snapshot, requestId };
     }
   );
 

@@ -2,7 +2,6 @@ import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, defaultApprovalMode, resolveChatModel } from '@shared/defaultModel';
-import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import type {
   ApprovalMode,
   AttachedImage,
@@ -197,13 +196,6 @@ interface SendTarget {
 
 interface SessionsState {
   conversations: Record<string, Conversation>;
-  /** 项目记忆立刻合并的阶段进度（按 requestId，不进会话投影） */
-  memoryMergeProgress: Record<
-    string,
-    { phase: 'stage1' | 'phase2'; current: number; total: number }
-  >;
-  /** conversationId → 进行中的合并 requestId */
-  memoryMergeRequests: Record<string, string>;
   /** 新的在前 */
   order: string[];
   activeId: string | null;
@@ -294,14 +286,6 @@ interface SessionsState {
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
   compact(conversationId: string, instructions?: string): void;
-  memory(
-    conversationId: string,
-    action: MemoryCommandAction,
-    patch?: MemorySavePatch
-  ): Promise<
-    | { ok: true; snapshot: import('@shared/memorySnapshot').MemorySnapshot }
-    | { ok: false; error: string }
-  >;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
@@ -718,31 +702,6 @@ export const useSessionsStore = create<SessionsState>()(
                 },
               },
             };
-          });
-          return;
-        }
-
-        if (event.type === 'memory-pipeline-progress') {
-          set((state) => ({
-            ...state,
-            memoryMergeProgress: {
-              ...state.memoryMergeProgress,
-              [event.requestId]: {
-                phase: event.phase,
-                current: event.current,
-                total: event.total,
-              },
-            },
-          }));
-          return;
-        }
-        if (event.type === 'memory-pipeline-done') {
-          set((state) => {
-            const { [event.requestId]: _done, ...progress } = state.memoryMergeProgress;
-            const requests = Object.fromEntries(
-              Object.entries(state.memoryMergeRequests).filter(([, id]) => id !== event.requestId)
-            );
-            return { ...state, memoryMergeProgress: progress, memoryMergeRequests: requests };
           });
           return;
         }
@@ -1254,8 +1213,6 @@ export const useSessionsStore = create<SessionsState>()(
         activeId: null,
         pendingAgentPrefill: undefined,
         worktreeStatuses: {},
-        memoryMergeProgress: {},
-        memoryMergeRequests: {},
 
         async moveConversationToWorktree(id, options) {
           const conversation = get().conversations[id];
@@ -1804,7 +1761,6 @@ export const useSessionsStore = create<SessionsState>()(
             get().compact(id, compactCommand.instructions);
             return null;
           }
-
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -2305,46 +2261,6 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           if (!conversation?.started || conversation.compaction) return;
           void window.electronAPI.agent.compact(conversationId, instructions);
-        },
-
-        async memory(conversationId, action, patch) {
-          const conversation = get().conversations[conversationId];
-          if (!conversation) return { ok: false, error: 'no conversation' };
-          const project = useSettingsStore
-            .getState()
-            .projects.find((p) => p.id === conversation.projectId);
-          const cwd = conversation.worktree?.path ?? project?.path;
-          if (!cwd) return { ok: false, error: 'memory command needs a project path' };
-          const result = await window.electronAPI.agent.memory(
-            conversationId,
-            action,
-            cwd,
-            project?.kind === 'ssh',
-            patch
-          );
-          if (!result.ok || !result.snapshot) {
-            return { ok: false, error: result.error ?? 'memory command failed' };
-          }
-          if (action === 'enqueue' && result.requestId) {
-            set((state) => ({
-              ...state,
-              memoryMergeRequests: {
-                ...state.memoryMergeRequests,
-                [conversationId]: result.requestId as string,
-              },
-              memoryMergeProgress: {
-                ...state.memoryMergeProgress,
-                [result.requestId as string]: state.memoryMergeProgress[
-                  result.requestId as string
-                ] ?? {
-                  phase: 'stage1',
-                  current: 0,
-                  total: 1,
-                },
-              },
-            }));
-          }
-          return { ok: true, snapshot: result.snapshot };
         },
 
         clearCompactionError(conversationId) {

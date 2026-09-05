@@ -346,26 +346,6 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...command, subagentModels: 'nope' })).toBeNull();
   });
 
-  it('spawn-parent 携 memoryPhase2Model:合法通过,坏 shape 拒绝', () => {
-    const command = {
-      type: 'spawn-parent' as const,
-      identity: parent,
-      cwd: '/repo',
-      model,
-      memoryPhase2Model: model,
-    };
-    expect(parseAgentCommand(command)).toEqual(command);
-    expect(
-      parseAgentCommand({
-        type: 'spawn-parent',
-        identity: parent,
-        cwd: '/repo',
-        model,
-        memoryPhase2Model: { api: 'openai-completions' },
-      })
-    ).toBeNull();
-  });
-
   it('spawn model 缺 settingsProviderId 必须拒绝：worker 回报 ready 模型身份要用它', () => {
     // 生产端 spawnModelConfig() 恒发该字段，worker 的 settingsModelRef() 缺了就抛错。
     // 解析器若放行，命令会在 worker 入口被静默丢弃 → Main 只能等 ready 握手超时。
@@ -494,6 +474,33 @@ describe('parent/child commands', () => {
   });
 });
 
+describe('removed project memory protocol', () => {
+  it('拒绝旧记忆管线命令与进度事件', () => {
+    expect(
+      parseAgentCommand({ type: 'run-memory-pipeline', requestId: RECEIPT_ID, cwd: '/repo', model })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ type: 'memory-pipeline-done', requestId: RECEIPT_ID, ok: true })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        type: 'memory-pipeline-progress',
+        requestId: RECEIPT_ID,
+        phase: 'stage1',
+        current: 1,
+        total: 1,
+      })
+    ).toBeNull();
+  });
+
+  it('父会话正常启动，但不再接受旧记忆配置字段', () => {
+    const command = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, localMemoryEnabled: true })).toBeNull();
+    expect(parseAgentCommand({ ...command, memoryPhase2Model: model })).toBeNull();
+  });
+});
+
 describe('标题总结命令与事件', () => {
   const summarize = {
     type: 'summarize-title',
@@ -513,67 +520,6 @@ describe('标题总结命令与事件', () => {
   it('summarize-title 的 model 缺 settingsProviderId 拒绝（与 spawn 同约束）', () => {
     const { settingsProviderId: _omitted, ...rest } = model;
     expect(parseAgentCommand({ ...summarize, model: rest })).toBeNull();
-  });
-
-  it('run-memory-pipeline 命令完整往返；缺字段或空值拒绝', () => {
-    const command = {
-      type: 'run-memory-pipeline',
-      requestId: RECEIPT_ID,
-      cwd: '/Users/me/proj',
-      currentThreadId: 'conversation-1',
-      model,
-      phase2Model: model,
-    };
-    expect(parseAgentCommand(command)).toEqual(command);
-    expect(parseAgentCommand({ ...command, requestId: '' })).toBeNull();
-    expect(parseAgentCommand({ ...command, cwd: '' })).toBeNull();
-    expect(parseAgentCommand({ ...command, model: undefined })).toBeNull();
-    expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
-  });
-
-  it('memory-pipeline-progress 事件完整往返；脏输入不崩', () => {
-    const event = {
-      type: 'memory-pipeline-progress',
-      requestId: RECEIPT_ID,
-      phase: 'stage1',
-      current: 1,
-      total: 3,
-    };
-    expect(parseAgentWorkerEvent(event)).toEqual(event);
-    expect(parseAgentWorkerEvent({ ...event, phase: 'phase2', current: 2, total: 3 })).toEqual({
-      ...event,
-      phase: 'phase2',
-      current: 2,
-      total: 3,
-    });
-    expect(parseAgentWorkerEvent({ ...event, requestId: '' })).toBeNull();
-    expect(parseAgentWorkerEvent({ ...event, phase: 'done' })).toBeNull();
-    expect(parseAgentWorkerEvent({ ...event, current: -1 })).toBeNull();
-    expect(parseAgentWorkerEvent({ ...event, extra: 1 })).toBeNull();
-  });
-
-  it('memory-pipeline-done 事件完整往返；脏输入不崩', () => {
-    const event = {
-      type: 'memory-pipeline-done',
-      requestId: RECEIPT_ID,
-      ok: true,
-    };
-    expect(parseAgentWorkerEvent(event)).toEqual(event);
-    expect(
-      parseAgentWorkerEvent({
-        type: 'memory-pipeline-done',
-        requestId: RECEIPT_ID,
-        ok: false,
-        error: 'no model',
-      })
-    ).toEqual({
-      type: 'memory-pipeline-done',
-      requestId: RECEIPT_ID,
-      ok: false,
-      error: 'no model',
-    });
-    expect(parseAgentWorkerEvent({ ...event, requestId: '' })).toBeNull();
-    expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
   });
 
   it('title-generated 事件完整往返；脏输入不崩', () => {

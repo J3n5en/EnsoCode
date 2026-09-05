@@ -38,9 +38,6 @@ export const SETTINGS_DATA_COVERAGE = {
   exploreFoldEnabled: excluded(
     'Explore-fold is a desktop session preference, not an Enso capability.'
   ),
-  localMemoryEnabled: excluded(
-    'Local learned.md memory is a desktop session preference, not an Enso capability.'
-  ),
   autoUpdate: surfaces('general.automatic-updates'),
   proxyMode: surfaces('general.proxy-mode'),
   customProxyUrl: surfaces('general.custom-proxy-url'),
@@ -104,9 +101,6 @@ export const SETTINGS_ACTION_COVERAGE = {
   setWindowsLocalShell: surfaces('general.windows-local-shell'),
   setExploreFoldEnabled: excluded(
     'Explore-fold is a desktop session preference, not an Enso capability.'
-  ),
-  setLocalMemoryEnabled: excluded(
-    'Local learned.md memory is a desktop session preference, not an Enso capability.'
   ),
   setAutoUpdate: surfaces('general.automatic-updates'),
   setProxyMode: surfaces('general.proxy-mode'),

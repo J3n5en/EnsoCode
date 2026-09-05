@@ -254,6 +254,7 @@ export const CONTEXT_OCCUPANCY_BUCKETS = [
   'tools',
   'conversation',
   'compaction',
+  // Retained for persisted context-occupancy snapshots; project memory has been removed.
   'projectMemory',
   'reminders',
 ] as const;
@@ -473,16 +474,12 @@ export type AgentCommand =
       loadHarnessAssets?: boolean;
       /** 探后折叠工具 + context 折叠 */
       exploreFoldEnabled?: boolean;
-      /** learn + 启动两阶段合并；关则不注册 learn、不注入、不跑管线 */
-      localMemoryEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
       instruction?: { path: string; content: string };
       approvalMode?: ApprovalMode;
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
-      /** Phase 2 合并用标题总结模型；缺则回落会话模型 */
-      memoryPhase2Model?: SpawnModelConfig;
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
@@ -584,15 +581,6 @@ export type AgentCommand =
       conversationId: string;
       text: string;
       model: SpawnModelConfig;
-    }
-  | {
-      /** 项目记忆：立刻跑两阶段管线，不绑会话身份 */
-      type: 'run-memory-pipeline';
-      requestId: string;
-      cwd: string;
-      currentThreadId?: string;
-      model: SpawnModelConfig;
-      phase2Model?: SpawnModelConfig;
     }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
@@ -748,10 +736,6 @@ export interface AgentSpawnRequest {
 export interface AgentActionResult {
   ok: boolean;
   error?: string;
-  /** 项目记忆 GUI 快照 */
-  snapshot?: import('../memorySnapshot').MemorySnapshot;
-  /** 立刻合并：worker 进度/完成事件按这个 id 对齐 */
-  requestId?: string;
 }
 
 export type ParentLifecycleEvent =
@@ -939,21 +923,6 @@ export type AgentWorkerEvent =
       type: 'title-generated';
       conversationId: string;
       title: string;
-    }
-  | {
-      type: 'memory-pipeline-progress';
-      requestId: string;
-      phase: 'stage1' | 'phase2';
-      current: number;
-      total: number;
-    }
-  | {
-      type: 'memory-pipeline-done';
-      requestId: string;
-      ok: boolean;
-      error?: string;
-      stage1Claimed?: number;
-      phase2Ran?: boolean;
     }
   | {
       type: 'task-output';
@@ -1702,13 +1671,11 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'loadLocalSkills',
           'loadHarnessAssets',
           'exploreFoldEnabled',
-          'localMemoryEnabled',
           'skillPaths',
           'mcpServers',
           'instruction',
           'approvalMode',
           'approvalReviewer',
-          'memoryPhase2Model',
           'agentTypes',
           'subagentModels',
           'disabledTools',
@@ -1725,15 +1692,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.windowsLocalShell as string
           )) ||
         (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
-        (value.localMemoryEnabled !== undefined && typeof value.localMemoryEnabled !== 'boolean') ||
         (value.remote !== undefined && parseAgentRemoteConfig(value.remote) === null) ||
         (value.subagentModels !== undefined &&
           (!Array.isArray(value.subagentModels) ||
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
-          parseSpawnModelConfig(value.approvalReviewer) === null) ||
-        (value.memoryPhase2Model !== undefined &&
-          parseSpawnModelConfig(value.memoryPhase2Model) === null)
+          parseSpawnModelConfig(value.approvalReviewer) === null)
       ) {
         return null;
       }
@@ -1801,22 +1765,6 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         isNonEmptyString(value.conversationId) &&
         isNonEmptyString(value.text) &&
         parseSpawnModelConfig(value.model)
-        ? (value as unknown as AgentCommand)
-        : null;
-    case 'run-memory-pipeline':
-      return hasOnlyKeys(value, [
-        'type',
-        'requestId',
-        'cwd',
-        'currentThreadId',
-        'model',
-        'phase2Model',
-      ]) &&
-        isNonEmptyString(value.requestId) &&
-        isNonEmptyString(value.cwd) &&
-        (value.currentThreadId === undefined || isNonEmptyString(value.currentThreadId)) &&
-        parseSpawnModelConfig(value.model) &&
-        (value.phase2Model === undefined || parseSpawnModelConfig(value.phase2Model))
         ? (value as unknown as AgentCommand)
         : null;
     case 'prompt':
@@ -2073,30 +2021,6 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       isNonEmptyString(value.title)
       ? (value as unknown as AgentWorkerEvent)
       : null;
-  }
-  if (value.type === 'memory-pipeline-progress') {
-    return hasExactKeys(value, ['type', 'requestId', 'phase', 'current', 'total']) &&
-      isNonEmptyString(value.requestId) &&
-      (value.phase === 'stage1' || value.phase === 'phase2') &&
-      isSequence(value.current) &&
-      isSequence(value.total) &&
-      value.total > 0 &&
-      value.current <= value.total
-      ? (value as unknown as AgentWorkerEvent)
-      : null;
-  }
-  if (value.type === 'memory-pipeline-done') {
-    if (
-      !hasOnlyKeys(value, ['type', 'requestId', 'ok', 'error', 'stage1Claimed', 'phase2Ran']) ||
-      !isNonEmptyString(value.requestId) ||
-      typeof value.ok !== 'boolean' ||
-      (value.stage1Claimed !== undefined && !isSequence(value.stage1Claimed)) ||
-      (value.phase2Ran !== undefined && typeof value.phase2Ran !== 'boolean')
-    ) {
-      return null;
-    }
-    const shapeOk = value.ok ? value.error === undefined : isNonEmptyString(value.error);
-    return shapeOk ? (value as unknown as AgentWorkerEvent) : null;
   }
   const identity = parseAnySessionIdentity(value.identity);
   if (!identity || !isSequence(value.seq)) return null;

@@ -107,6 +107,24 @@ describe('设置持久化迁移', () => {
     });
   });
 
+  it.each([5, 6])('v%s 移除记忆配置，保留模型、审批与其它设置且不修改输入', (version) => {
+    const preserved = {
+      theme: 'dark',
+      providers: [legacyProvider],
+      lastApprovalMode: 'full',
+      customFutureKey: { kept: true },
+    };
+    const previous = {
+      ...preserved,
+      localMemoryEnabled: true,
+      memoryModel: { providerId: 'p', modelId: 'm' },
+      memoryConcurrency: 4,
+    };
+    expect(SETTINGS_VERSION).toBeGreaterThan(6);
+    expect(migrateSettings(previous, version)).toEqual(preserved);
+    expect(previous.localMemoryEnabled).toBe(true);
+  });
+
   it('v0 数据一路迁到当前版本，标题总结字段同样补齐', () => {
     const migrated = migrateSettings({ providers: [legacyProvider] }, 0) as Record<string, unknown>;
     expect(migrated).toMatchObject({

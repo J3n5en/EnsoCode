@@ -3,14 +3,13 @@ import { useI18n } from '@/i18n';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatTokens } from '@/stores/sessions/stats';
 
-const BUCKET_LABELS: Record<ContextOccupancyBucketId, string> = {
+const BUCKET_LABELS: Record<Exclude<ContextOccupancyBucketId, 'projectMemory'>, string> = {
   system: 'System prompt',
   instructions: 'Enabled instructions',
   skills: 'Enabled skills',
   tools: 'Tool definitions',
   conversation: 'Conversation',
   compaction: 'Compaction summary',
-  projectMemory: 'Project memory',
   reminders: 'Reminders',
 };
 
@@ -92,7 +91,7 @@ export function ContextInspector({
         </div>
       )}
       <ul className="flex flex-col gap-1">
-        {(Object.keys(BUCKET_LABELS) as ContextOccupancyBucketId[]).map((id) => {
+        {(Object.keys(BUCKET_LABELS) as (keyof typeof BUCKET_LABELS)[]).map((id) => {
           const tokens = occupancy.buckets[id];
           const share = occupancy.used > 0 ? Math.round((tokens / occupancy.used) * 100) : 0;
           return (

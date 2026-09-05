@@ -28,7 +28,6 @@ import { CoworkerTabs } from './CoworkerTabs';
 import { timelineSearchHits } from './chatSearch';
 import { routeComposerPayload } from './composerRouting';
 import { GoalBar } from './GoalBar';
-import { MemoryPopover } from './MemoryPopover';
 import { MessageQueue } from './MessageQueue';
 import { CHAT_COL, MessageTimeline, type MessageTimelineHandle } from './MessageTimeline';
 import { ModelPicker } from './ModelPicker';
@@ -159,7 +158,6 @@ export function ChatView() {
       name: '/compact',
       description: t('Compact the context now (/compact [summary focus])'),
     };
-
     const fromSettings = skills
       .filter((skill) => skill.enabled !== false)
       .map((skill) => ({
@@ -350,7 +348,6 @@ export function ChatView() {
                   {parent?.worktree ? ` · ${parent.worktree.branch}` : ''}
                 </span>
               )}
-              <MemoryPopover conversationId={parent.id} />
               <StatusDot
                 status={conversation.spawning ? 'running' : conversation.status}
                 pendingAskCount={(conversation.pendingAsks ?? []).length}

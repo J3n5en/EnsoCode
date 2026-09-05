@@ -58,7 +58,6 @@ import { agentCommandDispatch } from './agentCommandDispatch';
 import { resolveGlobalInstruction } from './instructionStore';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { pickSubagentModelRefs } from './subagentModels';
-import { titleModelCandidates } from './titleSummary';
 
 export interface ResolvedModelSelection {
   ref: ModelRef;
@@ -385,17 +384,6 @@ export function spawnSession(
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
-  const localMemoryEnabled = state?.localMemoryEnabled !== false;
-  const phase2Ref = titleModelCandidates(state ?? undefined, {
-    providerId: request.providerId,
-    modelId: request.modelId,
-  })[0];
-  const phase2Resolved =
-    phase2Ref &&
-    (phase2Ref.providerId !== request.providerId || phase2Ref.modelId !== request.modelId)
-      ? resolveModelSelection(phase2Ref.providerId, phase2Ref.modelId, authenticatedAccountKeys)
-      : undefined;
-  const memoryPhase2Model = phase2Resolved?.ok ? phase2Resolved.selection.config : undefined;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   return sendAgentCommand({
@@ -410,12 +398,10 @@ export function spawnSession(
     ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
-    ...(localMemoryEnabled ? {} : { localMemoryEnabled: false }),
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
     ...(approvalReviewerConfig ? { approvalReviewer: approvalReviewerConfig } : {}),
-    ...(memoryPhase2Model ? { memoryPhase2Model } : {}),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
     ...(subagentModels.length > 0 ? { subagentModels } : {}),
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
@@ -594,24 +580,6 @@ export function summarizeConversationTitle(
   model: SpawnModelConfig
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'summarize-title', conversationId, text, model });
-}
-
-export function requestMemoryPipeline(opts: {
-  requestId: string;
-  cwd: string;
-  currentThreadId?: string;
-  model: SpawnModelConfig;
-  phase2Model?: SpawnModelConfig;
-}): { ok: boolean; error?: string } {
-  if (!worker) startAgentWorker();
-  return sendAgentCommand({
-    type: 'run-memory-pipeline',
-    requestId: opts.requestId,
-    cwd: opts.cwd,
-    ...(opts.currentThreadId ? { currentThreadId: opts.currentThreadId } : {}),
-    model: opts.model,
-    ...(opts.phase2Model ? { phase2Model: opts.phase2Model } : {}),
-  });
 }
 
 export function abortSession(identity: SessionIdentity): { ok: boolean; error?: string } {
