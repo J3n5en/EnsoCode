@@ -76,6 +76,15 @@ export async function listMemoryThreads(
   return out;
 }
 
+const TOOL_RESULT_CHAR_CAP = 1_500;
+const TOOL_RESULT_HEAD = 900;
+const TOOL_RESULT_TAIL = 600;
+
+function capToolResultText(text: string): string {
+  if (text.length <= TOOL_RESULT_CHAR_CAP) return text;
+  return `${text.slice(0, TOOL_RESULT_HEAD)}\n…[tool output truncated]…\n${text.slice(-TOOL_RESULT_TAIL)}`;
+}
+
 function textFromContent(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -109,15 +118,10 @@ export function extractPersistableMessages(payload: string): PersistableMemoryMe
     if (role !== 'toolResult') continue;
     const text = textFromContent(message.content);
     const toolName = typeof message.toolName === 'string' ? message.toolName : undefined;
-    if (
-      !toolName ||
-      !['bash', 'eval', 'read', 'grep'].includes(toolName) ||
-      !text ||
-      text.length > 32_000
-    ) {
+    if (!toolName || !['bash', 'eval', 'read', 'grep'].includes(toolName) || !text) {
       continue;
     }
-    out.push({ role, text, toolName });
+    out.push({ role, text: capToolResultText(text), toolName });
   }
   return out;
 }

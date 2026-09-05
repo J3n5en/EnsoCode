@@ -48,7 +48,7 @@ describe('listMemoryThreads', () => {
 });
 
 describe('extractPersistableMessages', () => {
-  it('keeps user/assistant text and small tool results; drops images and oversized tools', () => {
+  it('keeps user/assistant text and small tool results; drops images', () => {
     const payload = [
       { type: 'session', id: 't' },
       {
@@ -69,14 +69,6 @@ describe('extractPersistableMessages', () => {
       },
       {
         type: 'message',
-        message: {
-          role: 'toolResult',
-          toolName: 'read',
-          content: [{ type: 'text', text: 'x'.repeat(32_001) }],
-        },
-      },
-      {
-        type: 'message',
         message: { role: 'user', content: [{ type: 'image', data: 'abc' }] },
       },
     ]
@@ -88,6 +80,43 @@ describe('extractPersistableMessages', () => {
       { role: 'assistant', text: 'ok' },
       { role: 'toolResult', toolName: 'read', text: 'file body' },
     ]);
+  });
+
+  it('caps oversized read tool result to head+tail with a truncation marker instead of dropping it', () => {
+    const head = 'H'.repeat(900);
+    const tail = 'T'.repeat(600);
+    const huge = `${head}${'x'.repeat(30_000)}${tail}`;
+    const payload = JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolName: 'read',
+        content: [{ type: 'text', text: huge }],
+      },
+    });
+
+    const [result] = extractPersistableMessages(payload);
+
+    expect(result.text.length).toBeLessThanOrEqual(1_600);
+    expect(result.text).toContain('truncated');
+    expect(result.text.startsWith(head)).toBe(true);
+    expect(result.text.endsWith(tail)).toBe(true);
+  });
+
+  it('leaves a ~1k tool result untouched', () => {
+    const body = 'y'.repeat(1_000);
+    const payload = JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolName: 'bash',
+        content: [{ type: 'text', text: body }],
+      },
+    });
+
+    const [result] = extractPersistableMessages(payload);
+
+    expect(result.text).toBe(body);
   });
 
   it('keeps only bash/eval/read/grep tool results, matching OMP', () => {
