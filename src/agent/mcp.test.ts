@@ -60,7 +60,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   },
 }));
 
-const { McpManager, oauthFingerprint } = await import('./mcp');
+const { isRetriableMcpConnectionError, McpManager, oauthFingerprint } = await import('./mcp');
 
 const httpServer: McpServerSpawnConfig = {
   id: 'srv-1',
@@ -315,5 +315,72 @@ describe('McpManager stdio', () => {
     expect(transportState.stdio[0]).toMatchObject({ command: 'node', args: ['x.js'] });
     expect(transportState.stdio[0]).not.toHaveProperty('authProvider');
     expect(events.at(-1)).toMatchObject({ state: 'ready', toolCount: 0 });
+  });
+});
+
+describe('isRetriableMcpConnectionError', () => {
+  it('treats stale transport and common network drops as retriable', () => {
+    expect(isRetriableMcpConnectionError(new Error('Not connected'))).toBe(true);
+    expect(isRetriableMcpConnectionError(new Error('transport closed'))).toBe(true);
+    expect(isRetriableMcpConnectionError(new Error('HTTP 404: session gone'))).toBe(true);
+    expect(isRetriableMcpConnectionError(new Error('ECONNRESET'))).toBe(true);
+  });
+
+  it('does not treat business or auth failures as retriable', () => {
+    expect(isRetriableMcpConnectionError(new Error('tool exploded'))).toBe(false);
+    expect(isRetriableMcpConnectionError(new Error('401 unauthorized'))).toBe(false);
+    expect(isRetriableMcpConnectionError('Not connected')).toBe(false);
+  });
+});
+
+describe('McpManager call retry', () => {
+  it('reconnects once after Not connected and retries the same tool', async () => {
+    clientState.listTools = vi.fn(async () => ({
+      tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+    }));
+    clientState.callTool = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Not connected'))
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'recovered' }] });
+    const { manager } = makeManager();
+    const tools = await manager.toolsFor([httpServer]);
+    expect(clientState.instances).toBe(1);
+    const result = await tools[0]?.execute('tc-1', { q: 'x' }, undefined, undefined, {} as never);
+    expect(result?.content).toEqual([{ type: 'text', text: 'recovered' }]);
+    expect(clientState.instances).toBe(2);
+    expect(clientState.closed).toBe(1);
+    expect(clientState.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reconnect on a business tool error', async () => {
+    clientState.listTools = vi.fn(async () => ({
+      tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+    }));
+    clientState.callTool = vi.fn(async () => {
+      throw new Error('query failed');
+    });
+    const { manager } = makeManager();
+    const tools = await manager.toolsFor([httpServer]);
+    await expect(tools[0]?.execute('tc-1', {}, undefined, undefined, {} as never)).rejects.toThrow(
+      /query failed/
+    );
+    expect(clientState.instances).toBe(1);
+    expect(clientState.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a stale call only once', async () => {
+    clientState.listTools = vi.fn(async () => ({
+      tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+    }));
+    clientState.callTool = vi.fn(async () => {
+      throw new Error('transport closed');
+    });
+    const { manager } = makeManager();
+    const tools = await manager.toolsFor([httpServer]);
+    await expect(tools[0]?.execute('tc-1', {}, undefined, undefined, {} as never)).rejects.toThrow(
+      /transport closed/
+    );
+    expect(clientState.instances).toBe(2);
+    expect(clientState.callTool).toHaveBeenCalledTimes(2);
   });
 });
