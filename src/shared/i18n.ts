@@ -130,8 +130,8 @@ export const zhTranslations: Record<string, string> = {
   'Open in side panel': '在侧栏打开',
   'Compact read-only tool calls': '精简只读工具调用',
   'Verified smart compaction': '验证式智能压缩',
-  'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.':
-    '长会话 compact 时先用可验证摘要；失败回退默认压缩。可能更慢、更费 token。下一个会话生效。',
+  'Use a verified summary for long-session compact. Built into Enso — no extra install. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.':
+    '长会话 compact 时先用可验证摘要；已内置，无需另装。失败回退默认压缩。可能更慢、更费 token。下一个会话生效。',
   'Follows the session model': '跟随当前会话模型',
   'Follow session model': '改跟会话模型',
   'Selected model is unavailable — falls back to the session model.':

@@ -18,7 +18,7 @@
 
 ## Constraints
 
-- 不内嵌或 fork EESV 流水线；以 npm 包 `pi-smart-compact` 为扩展加载。
+- 不内嵌或 fork EESV 流水线；把 npm 包 `pi-smart-compact` 作为 Enso 依赖打进应用，打开开关即可用，用户不必 `pi install`。
 - 不绕过 Pi 自己 apply compact（不自己改 session 消息）。
 - 设置持久化走现有 `settings.json` / zustand persist，字段加入主进程可读列表。
 - 新增 `spawn-parent` 字段必须进 `parseAgentCommand` 白名单，否则 worker 会丢命令。

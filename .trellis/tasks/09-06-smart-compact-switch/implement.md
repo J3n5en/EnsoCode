@@ -25,7 +25,7 @@
    types / initialState / setter / `SETTINGS_STATE_FIELDS` / capability coverage / `SmartCompactPicker`（开关 + 模型）/ i18n 中英。
 
 7. **依赖**  
-   `pnpm add pi-smart-compact`（与当前 `@earendil-works/pi-coding-agent` 对齐）。
+   `pnpm add pi-smart-compact`，并在 `electron-builder.yml` 显式拷进安装包（与 pi-cursor 同类），用户无需 `pi install`。
 
 8. **验证**  
    `pnpm exec vitest run src/shared/types/agent.test.ts src/agent/smartCompact.test.ts`  

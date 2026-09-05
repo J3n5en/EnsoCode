@@ -20,6 +20,10 @@ describe('resolveSmartCompactExtensionPath', () => {
       })
     ).toBeUndefined();
   });
+
+  it('默认解析器能找到 Enso 内置依赖', () => {
+    expect(resolveSmartCompactExtensionPath()).toMatch(/pi-smart-compact/);
+  });
 });
 
 describe('formatSmartCompactSummaryModel', () => {

@@ -45,7 +45,7 @@ export function SmartCompactPicker() {
           <h4 className="font-medium text-sm">{t('Verified smart compaction')}</h4>
           <p className="mt-0.5 text-muted-foreground text-xs">
             {t(
-              'Use a verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.'
+              'Use a verified summary for long-session compact. Built into Enso — no extra install. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.'
             )}
           </p>
         </div>
