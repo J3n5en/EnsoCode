@@ -112,8 +112,7 @@ import {
   shouldLearnFromTurn,
 } from './localMemory';
 import { McpManager } from './mcp';
-import { loadJobs } from './memory/jobs';
-import { selectStageOneCandidates } from './memory/stageOne';
+import { runMemoryPipeline } from './memory/pipeline';
 import { loadSessionMemoryInjection, shouldRunMemoryStartup } from './memory/startup';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
@@ -2886,13 +2885,43 @@ export class SessionSupervisor {
     ) {
       return;
     }
-    if (!managed.memoryCwd) return;
+    if (!managed.memoryCwd || !managed.memoryModel) return;
     try {
-      const root = getMemoryRoot(this.options.agentDir, managed.memoryCwd);
-      await loadJobs(root);
-      selectStageOneCandidates([], {
-        nowSec: Math.floor(Date.now() / 1000),
+      const runtime = await this.getRuntime();
+      const sessionModel = await resolveBaseModelOrRefresh(runtime, managed.memoryModel);
+      const phase1TimeoutMs = 60_000;
+      const phase2TimeoutMs = 120_000;
+      await runMemoryPipeline({
+        memoryRoot: getMemoryRoot(this.options.agentDir, managed.memoryCwd),
+        sessionDir: this.options.sessionDir,
+        cwd: managed.memoryCwd,
         currentThreadId: managed.identity.sessionId,
+        nowSec: Math.floor(Date.now() / 1000),
+        workerToken: `memory-${process.pid}`,
+        completeSimple: async ({ systemPrompt, userText, phase }) => {
+          const controller = new AbortController();
+          const timer = setTimeout(
+            () => controller.abort(),
+            phase === 1 ? phase1TimeoutMs : phase2TimeoutMs
+          );
+          try {
+            const message = await runtime.completeSimple(
+              sessionModel,
+              {
+                systemPrompt,
+                messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
+              },
+              { signal: controller.signal }
+            );
+            return Array.isArray((message as { content?: unknown }).content)
+              ? ((message as { content: Array<{ type?: string; text?: string }> }).content ?? [])
+                  .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
+                  .join('')
+              : '';
+          } finally {
+            clearTimeout(timer);
+          }
+        },
       });
     } catch {
       // 记忆维护失败静默
