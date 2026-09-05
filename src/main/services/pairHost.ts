@@ -28,6 +28,8 @@ import {
   type PairMetaFingerprints,
   pairJsonFingerprint,
   shouldRelayPairSnapshot,
+  slimCatalogForPhone,
+  slimProjectsForPhone,
 } from '@shared/pair/metaSync';
 import type {
   AgentSpawnRequest,
@@ -585,6 +587,8 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       } else {
         conn.pendingSnapshot = undefined;
       }
+      // 切换订阅后目录要重裁（cwd/排队只挂当前会话）
+      void sendMeta(conn);
       break;
     case 'snapshot':
       // 只要目录/外观；会话正文走 subscribe
@@ -695,9 +699,11 @@ async function sendMeta(conn: Connection): Promise<void> {
   };
   const vapidPublicKey = getVapidPublicKey();
   const hostInfo = { hostname: os.hostname(), appVersion: app.getVersion() };
+  const catalogEntries = slimCatalogForPhone(catalog, conn.subscribedId);
+  const projectEntries = slimProjectsForPhone(projects);
   const next: PairMetaFingerprints = {
-    catalog: catalogSyncFingerprint(catalog, pinnedOrder),
-    projects: pairJsonFingerprint(projects),
+    catalog: catalogSyncFingerprint(catalogEntries, pinnedOrder),
+    projects: pairJsonFingerprint(projectEntries),
     providers: pairJsonFingerprint(providers),
     appearance: pairJsonFingerprint(appearance),
     pushConfig: pairJsonFingerprint(vapidPublicKey),
@@ -705,8 +711,10 @@ async function sendMeta(conn: Connection): Promise<void> {
   };
   const changed = new Set(changedMetaChannels(conn.sentMeta, next));
   if (changed.size === 0) return;
-  if (changed.has('catalog')) await send(conn, { type: 'catalog', entries: catalog, pinnedOrder });
-  if (changed.has('projects')) await send(conn, { type: 'projects', projects });
+  if (changed.has('catalog')) {
+    await send(conn, { type: 'catalog', entries: catalogEntries, pinnedOrder });
+  }
+  if (changed.has('projects')) await send(conn, { type: 'projects', projects: projectEntries });
   if (changed.has('providers')) await send(conn, { type: 'providers', providers });
   if (changed.has('appearance')) await send(conn, appearance);
   if (changed.has('pushConfig')) await send(conn, { type: 'push-config', vapidPublicKey });

@@ -4,6 +4,8 @@ import {
   changedMetaChannels,
   pairJsonFingerprint,
   shouldRelayPairSnapshot,
+  slimCatalogForPhone,
+  slimProjectsForPhone,
 } from './metaSync';
 
 describe('catalogSyncFingerprint', () => {
@@ -55,6 +57,45 @@ describe('pairJsonFingerprint', () => {
   it('同结构同指纹', () => {
     expect(pairJsonFingerprint({ a: 1 })).toBe(pairJsonFingerprint({ a: 1 }));
     expect(pairJsonFingerprint({ a: 1 })).not.toBe(pairJsonFingerprint({ a: 2 }));
+  });
+});
+
+describe('slimCatalogForPhone', () => {
+  const fat = {
+    id: 's1',
+    title: 't',
+    projectId: 'p',
+    projectName: 'app',
+    status: 'idle',
+    cwd: '/very/long/path/to/app',
+    queued: [{ id: 'q', text: 'later' }],
+    providerId: 'prov',
+    modelId: 'm',
+    reasoningEnabled: true,
+    thinkingLevel: 'high' as const,
+  };
+
+  it('未订阅时剥掉 cwd/排队/模型，只留抽屉字段', () => {
+    expect(slimCatalogForPhone([fat], null)).toEqual([
+      { id: 's1', title: 't', projectId: 'p', status: 'idle' },
+    ]);
+  });
+
+  it('当前订阅会话保留聊天所需字段', () => {
+    expect(slimCatalogForPhone([fat, { ...fat, id: 's2' }], 's1')).toEqual([
+      fat,
+      { id: 's2', title: 't', projectId: 'p', status: 'idle' },
+    ]);
+  });
+});
+
+describe('slimProjectsForPhone', () => {
+  it('不下发本机 path，手机 spawn 只传 projectId', () => {
+    expect(
+      slimProjectsForPhone([
+        { id: 'p', name: 'app', path: '/Users/me/app', kind: 'local' as const },
+      ])
+    ).toEqual([{ id: 'p', name: 'app', kind: 'local' }]);
   });
 });
 
