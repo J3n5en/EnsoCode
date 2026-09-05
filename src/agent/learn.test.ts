@@ -60,4 +60,55 @@ describe('createLearnTool (OMP-aligned)', () => {
     await tool.execute('t3', { memory: 'alpha' } as never, undefined, undefined, {} as never);
     expect(existsSync(path.join(realCwd, '.enso', 'learned.md'))).toBe(false);
   });
+
+  it('writes an optional managed skill after the lesson', async () => {
+    const dir = agentDir();
+    const tool = createLearnTool({ agentDir: dir, cwd });
+    const result = await tool.execute(
+      't4',
+      {
+        memory: 'Retry auth after 401.',
+        skill: {
+          action: 'create',
+          name: 'login-fix',
+          description: 'How we retry auth',
+          body: 'Check the null token first.',
+        },
+      } as never,
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect((result.content[0] as { text: string }).text).toMatch(/Managed skill/);
+    expect(existsSync(path.join(dir, 'managed-skills', 'login-fix', 'SKILL.md'))).toBe(true);
+  });
+
+  it('keeps the lesson when skill name is shadowed by authored skills', async () => {
+    const dir = agentDir();
+    const tool = createLearnTool({
+      agentDir: dir,
+      cwd,
+      skillPaths: ['/users/skills/login-fix'],
+    });
+    const result = await tool.execute(
+      't5',
+      {
+        memory: 'Keep this lesson.',
+        skill: {
+          action: 'create',
+          name: 'login-fix',
+          description: 'dup',
+          body: 'body',
+        },
+      } as never,
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(result.isError).toBe(true);
+    expect(readFileSync(path.join(getMemoryRoot(dir, cwd), 'learned.md'), 'utf8')).toContain(
+      'Keep this lesson.'
+    );
+    expect(existsSync(path.join(dir, 'managed-skills', 'login-fix'))).toBe(false);
+  });
 });
