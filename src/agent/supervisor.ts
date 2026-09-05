@@ -108,6 +108,7 @@ import {
   readLearnedFile,
 } from './localMemory';
 import { McpManager } from './mcp';
+import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
@@ -1812,6 +1813,7 @@ export class SessionSupervisor {
                 (text, urgent) => this.notifier.notify(identity.parent.sessionId, text, { urgent }),
                 identity.instanceName
               ),
+              this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
             ],
           }),
     });
@@ -1939,6 +1941,7 @@ export class SessionSupervisor {
           name,
           () => this.sessions.get(coworkerId)?.parentWaiting === true
         ),
+        this.createPeerMessageTool(parentId, name),
       ],
     });
     const info: CoworkerInfo = {
@@ -2120,6 +2123,21 @@ export class SessionSupervisor {
       return '(no round completed yet — coworker is idle)';
     }
     return `${await this.coworkerRoundSummary(managed, opts.gate)}\n\n${COWORKER_FOLLOW_UP_HINT}`;
+  }
+
+  private createPeerMessageTool(parentId: string, from: string) {
+    return createMessageCoworkerTool({
+      from,
+      peers: () => {
+        const parent = this.sessions.get(parentId);
+        if (!parent) return [];
+        return [...parent.coworkers.keys()].filter((name) => name !== from);
+      },
+      notify: (to, text) => {
+        const target = this.sessions.get(parentId)?.coworkers.get(to);
+        if (target) this.notifier.notify(target.id, text);
+      },
+    });
   }
 
   private mustCoworker(identity: SessionIdentity, name: string): CoworkerInfo {

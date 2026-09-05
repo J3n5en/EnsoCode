@@ -330,8 +330,18 @@ export function resolveAgentTypeSpawnConfig(
     expectedModel: selectedModel.ref,
     expectedToolIds:
       definition.tools === 'readonly'
-        ? ['read', 'grep', 'find', 'ls', 'message_main_agent']
-        : ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'message_main_agent'],
+        ? ['read', 'grep', 'find', 'ls', 'message_main_agent', 'message_coworker']
+        : [
+            'read',
+            'grep',
+            'find',
+            'ls',
+            'bash',
+            'edit',
+            'write',
+            'message_main_agent',
+            'message_coworker',
+          ],
   };
 }
 

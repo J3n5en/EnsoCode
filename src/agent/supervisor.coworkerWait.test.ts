@@ -280,6 +280,42 @@ describe('SessionSupervisor coworker wait/report', () => {
     );
   });
 
+  it('message_coworker 直投对方会话，不 prompt 父会话', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const { coworkerSession, coworkerTool } = await spawnParentAndCoworker(events);
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    await coworkerTool.execute(
+      't-alice',
+      { operation: 'spawn', name: 'alice', task: 'second hire' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    const aliceOptions = mocks.createAgentSession.mock.calls[2][0] as {
+      customTools: Array<{
+        name: string;
+        execute(
+          id: string,
+          params: Record<string, unknown>,
+          signal?: AbortSignal
+        ): Promise<{ content: Array<{ type: string; text: string }> }>;
+      }>;
+    };
+    const peerTool = aliceOptions.customTools.find((tool) => tool.name === 'message_coworker');
+    expect(peerTool).toBeDefined();
+    await vi.advanceTimersByTimeAsync(200);
+    coworkerSession.prompt.mockClear();
+    parentSession.prompt.mockClear();
+    const text = await textOf(peerTool!.execute('t-peer', { to: 'bob', text: 'lock is yours' }));
+    expect(text).toMatch(/delivered to coworker "bob"/);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(coworkerSession.prompt).toHaveBeenCalledWith(
+      expect.stringContaining('Message from coworker "alice":\nlock is yours')
+    );
+    expect(parentSession.prompt).not.toHaveBeenCalled();
+  });
+
   it('running 期间 wait 阻塞,agent_end(willRetry=false) 后以最后一条 assistant 文本resolve', async () => {
     const events: AgentWorkerEvent[] = [];
     const { coworkerTool, coworkerSession } = await spawnParentAndCoworker(events);
