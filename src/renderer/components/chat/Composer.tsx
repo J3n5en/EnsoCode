@@ -1,5 +1,6 @@
 import { useDroppable } from '@dnd-kit/core';
 import { unbindImages } from '@shared/browser/designMode';
+import { filterSlashSubcommands, slashSubcommandQuery } from '@shared/slashSubcommands';
 import type { AttachedImage, SlashCommand } from '@shared/types/agent';
 import type {
   AgentTypeMentionCandidate,
@@ -228,12 +229,20 @@ export function Composer({
     window.setTimeout(() => editorRef.current?.focus(), 0);
   }, [injectedDraft]);
 
+  const subQuery = slashSubcommandQuery(slash, editorPlain.replaceAll('\uFFFC', ''));
   const slashResults =
     slashQuery === null
       ? []
       : commands
           .filter((command) => command.name.toLowerCase().includes(slashQuery.toLowerCase()))
           .slice(0, 10);
+  const subResults =
+    slashQuery === null && subQuery !== null ? filterSlashSubcommands(slash, subQuery) : [];
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight when the filter token changes
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [slashQuery, subQuery]);
 
   useEffect(() => {
     const item = slashListRef.current?.children[activeIndex] as HTMLElement | undefined;
@@ -257,7 +266,9 @@ export function Composer({
       ? 'mention'
       : slashQuery !== null && slashResults.length > 0
         ? 'slash'
-        : null;
+        : subResults.length > 0
+          ? 'slash-sub'
+          : null;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 光标移动、picker 挂载、flyout 打开都要重测宽高
   useLayoutEffect(() => {
@@ -285,7 +296,12 @@ export function Composer({
     window.addEventListener('resize', sync);
     return () => window.removeEventListener('resize', sync);
   }, [mentionQuery, editorPlain, openFolderId, popupKind]);
-  const popupLength = popupKind === 'mention' ? mentionItems.length : slashResults.length;
+  const popupLength =
+    popupKind === 'mention'
+      ? mentionItems.length
+      : popupKind === 'slash-sub'
+        ? subResults.length
+        : slashResults.length;
 
   const pickActive = useCallback(() => {
     if (popupKind === 'mention') {
@@ -302,6 +318,10 @@ export function Composer({
       editorRef.current?.consumeToken('/');
       setSlashQuery(null);
       setSlash(item.name);
+    } else if (popupKind === 'slash-sub') {
+      const item = subResults[activeIndex];
+      if (!item) return;
+      editorRef.current?.setSegments([{ type: 'text', text: item.name }]);
     }
   }, [
     activeIndex,
@@ -312,6 +332,7 @@ export function Composer({
     pickMention,
     popupKind,
     slashResults,
+    subResults,
   ]);
 
   const content = editorPlain.replaceAll('\uFFFC', '').trim();
@@ -451,14 +472,14 @@ export function Composer({
           flyoutSide={popupLayout.flyoutSide}
         />
       )}
-      {popupKind === 'slash' && (
+      {(popupKind === 'slash' || popupKind === 'slash-sub') && (
         <div
           ref={slashListRef}
           role="listbox"
           aria-label={t('Command suggestions')}
           className="absolute bottom-full left-0 z-10 mb-1.5 max-h-64 w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
         >
-          {slashResults.map((item, index) => (
+          {(popupKind === 'slash' ? slashResults : subResults).map((item, index) => (
             <button
               key={item.name}
               type="button"
@@ -466,9 +487,13 @@ export function Composer({
               aria-selected={index === activeIndex}
               onClick={() => {
                 setActiveIndex(index);
-                editorRef.current?.consumeToken('/');
-                setSlashQuery(null);
-                setSlash(item.name);
+                if (popupKind === 'slash') {
+                  editorRef.current?.consumeToken('/');
+                  setSlashQuery(null);
+                  setSlash(item.name);
+                } else {
+                  editorRef.current?.setSegments([{ type: 'text', text: item.name }]);
+                }
               }}
               onMouseMove={() => setActiveIndex(index)}
               className={cn(
@@ -480,7 +505,7 @@ export function Composer({
               <SlashSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="shrink-0 font-mono font-medium">{item.name}</span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                {item.description}
+                {t(item.description)}
               </span>
             </button>
           ))}
