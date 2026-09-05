@@ -3,7 +3,12 @@ import path from 'node:path';
 import { claimStage1, loadJobs, markStage1Done, saveJobs, tryClaimPhase2 } from './jobs';
 import { applyConsolidation, parsePhaseTwoResponse } from './phaseTwo';
 import { CONSOLIDATION_SYSTEM, consolidationUser, STAGE_ONE_SYSTEM, stageOneUser } from './prompts';
-import { parseStageOneResponse, type StageOneOutput, selectStageOneCandidates } from './stageOne';
+import {
+  parseStageOneResponse,
+  type StageOneOutput,
+  type StageOneSelectOptions,
+  selectStageOneCandidates,
+} from './stageOne';
 import { extractPersistableMessages, listMemoryThreads } from './threads';
 
 export type MemoryCompleteSimple = (input: {
@@ -157,9 +162,12 @@ export async function runMemoryPipeline(opts: {
   workerToken: string;
   completeSimple: MemoryCompleteSimple;
   onProgress?: (progress: MemoryPipelineProgress) => void;
+  /** 调试用：覆盖 stage 1 候选筛选阈值（idle / age / 每次上限） */
+  stageOneSelect?: Omit<StageOneSelectOptions, 'nowSec' | 'currentThreadId'>;
 }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
   const threads = await listMemoryThreads(opts.sessionDir, { cwd: opts.cwd });
   const candidates = selectStageOneCandidates(threads, {
+    ...opts.stageOneSelect,
     nowSec: opts.nowSec,
     currentThreadId: opts.currentThreadId,
   });
@@ -260,18 +268,37 @@ export async function runMemoryPipeline(opts: {
     maxRawCandidates: MAX_RAW_MEMORIES_FOR_GLOBAL,
   });
   const prior = await loadPriorMemory(opts.memoryRoot);
-  const text = await opts.completeSimple({
-    phase: 2,
-    systemPrompt: CONSOLIDATION_SYSTEM,
-    userText: consolidationUser({
-      prior,
-      rawMemories: `# Raw Memories\n\n${raw}`,
-      rolloutSummaries: summaries || 'No rollout summaries yet.',
-    }),
-  });
+  // 失败（超时 / 解析不了）必须释放租约并保留 dirty，否则 running 状态挂到租约到期且重建请求丢失
+  const releasePhase2 = async () => {
+    jobs = {
+      ...jobs,
+      global: {
+        watermark: jobs.global.watermark,
+        status: 'failed',
+        ...(forced ? { dirty: true } : {}),
+      },
+    };
+    await saveJobs(opts.memoryRoot, jobs);
+    opts.onProgress?.({ phase: 'phase2', current: total, total });
+  };
+  let text: string;
+  try {
+    text = await opts.completeSimple({
+      phase: 2,
+      systemPrompt: CONSOLIDATION_SYSTEM,
+      userText: consolidationUser({
+        prior,
+        rawMemories: `# Raw Memories\n\n${raw}`,
+        rolloutSummaries: summaries || 'No rollout summaries yet.',
+      }),
+    });
+  } catch (error) {
+    await releasePhase2();
+    throw error;
+  }
   const parsed = parsePhaseTwoResponse(text);
   if (!parsed?.memory_md.trim() || !parsed.memory_summary.trim()) {
-    opts.onProgress?.({ phase: 'phase2', current: total, total });
+    await releasePhase2();
     return { stage1Claimed, phase2Ran: false };
   }
   await applyConsolidation(opts.memoryRoot, parsed);

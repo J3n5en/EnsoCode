@@ -63,14 +63,14 @@ function baseOpts(overrides: Partial<Parameters<typeof runMemoryPipeline>[0]> = 
     cwd: CWD,
     nowSec: NOW_SEC,
     workerToken: 'worker-1',
-    completeSimple: vi.fn(async () => STAGE1_VALID) as unknown as MemoryCompleteSimple,
+    completeSimple: vi.fn<MemoryCompleteSimple>(async () => STAGE1_VALID),
     ...overrides,
   };
 }
 
 describe('runMemoryPipeline', () => {
   it('returns {0,false} and never calls completeSimple when there are no eligible threads', async () => {
-    const completeSimple = vi.fn(async () => STAGE1_VALID) as unknown as MemoryCompleteSimple;
+    const completeSimple = vi.fn<MemoryCompleteSimple>(async () => STAGE1_VALID);
     const opts = baseOpts({ completeSimple });
 
     const result = await runMemoryPipeline(opts);
@@ -84,7 +84,7 @@ describe('runMemoryPipeline', () => {
     const opts = baseOpts({ onProgress });
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -361,7 +361,7 @@ describe('runMemoryPipeline prior memory', () => {
     writeFileSync(path.join(opts.memoryRoot, 'memory_summary.md'), 'Prior summary line\n');
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -380,7 +380,7 @@ describe('runMemoryPipeline prior memory', () => {
     writeFileSync(path.join(opts.memoryRoot, 'memory_summary.md'), 'Only summary exists\n');
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -399,7 +399,7 @@ describe('runMemoryPipeline prior memory', () => {
     writeFileSync(path.join(opts.memoryRoot, 'MEMORY.md'), hugePrior);
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -415,7 +415,7 @@ describe('runMemoryPipeline prior memory', () => {
     const opts = baseOpts();
     writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
     const completeSimple = vi
-      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .fn<MemoryCompleteSimple>()
       .mockResolvedValueOnce(STAGE1_VALID)
       .mockResolvedValueOnce(PHASE2_VALID);
     opts.completeSimple = completeSimple;
@@ -424,5 +424,52 @@ describe('runMemoryPipeline prior memory', () => {
 
     const phase2UserText = completeSimple.mock.calls[1][0].userText;
     expect(phase2UserText).not.toContain('Prior memory');
+  });
+});
+
+describe('runMemoryPipeline phase 2 失败', () => {
+  function seedForcedPhase2(memoryRoot: string) {
+    mkdirSync(memoryRoot, { recursive: true });
+    writeFileSync(
+      path.join(memoryRoot, 'stage1_outputs.json'),
+      JSON.stringify([
+        {
+          threadId: 't1',
+          sourceUpdatedAt: 10,
+          rollout_summary: 's',
+          rollout_slug: null,
+          raw_memory: 'r',
+        },
+      ])
+    );
+    writeFileSync(
+      path.join(memoryRoot, '.jobs.json'),
+      JSON.stringify({ stage1: {}, global: { watermark: 0, dirty: true } })
+    );
+  }
+  const readGlobal = (memoryRoot: string) =>
+    JSON.parse(readFileSync(path.join(memoryRoot, '.jobs.json'), 'utf8')).global;
+
+  // 真实场景：grok 写 38k 字符超时后，.jobs.json 停在 running 且 dirty 丢失，重建再也不触发
+  it('合并输出无法解析时释放 running 租约并保留 dirty，下次启动还能重试', async () => {
+    const opts = baseOpts();
+    seedForcedPhase2(opts.memoryRoot);
+    opts.completeSimple = vi.fn(async () => 'not json') as unknown as MemoryCompleteSimple;
+
+    const result = await runMemoryPipeline(opts);
+
+    expect(result.phase2Ran).toBe(false);
+    expect(readGlobal(opts.memoryRoot)).toMatchObject({ dirty: true, status: 'failed' });
+  });
+
+  it('模型调用抛错时同样释放租约并保留 dirty，错误继续向上抛', async () => {
+    const opts = baseOpts();
+    seedForcedPhase2(opts.memoryRoot);
+    opts.completeSimple = vi.fn(async () => {
+      throw new Error('timeout');
+    }) as unknown as MemoryCompleteSimple;
+
+    await expect(runMemoryPipeline(opts)).rejects.toThrow('timeout');
+    expect(readGlobal(opts.memoryRoot)).toMatchObject({ dirty: true, status: 'failed' });
   });
 });
