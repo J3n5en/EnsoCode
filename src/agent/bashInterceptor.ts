@@ -10,13 +10,21 @@ interface Rule {
   pattern: RegExp;
   tool: string;
   message: string;
+  match?: (candidate: string) => boolean;
 }
 
 const RULES: Rule[] = [
   {
+    pattern: /^\s*cat\b/,
+    tool: 'write',
+    message: 'Use the `write` tool instead of cat >/>> or heredoc redirects.',
+    match: isCatFileWrite,
+  },
+  {
     pattern: /^\s*(cat|head|tail|less|more)\s+/,
     tool: 'read',
     message: 'Use the `read` tool instead of cat/head/tail/less.',
+    match: (candidate) => !isCatFileWrite(candidate),
   },
   {
     pattern: /^\s*(Get-Content|gc|type)\b/i,
@@ -50,11 +58,19 @@ const RULES: Rule[] = [
   },
 ];
 
-const DEFAULT_TOOLS = ['read', 'grep', 'edit', 'find'];
+const DEFAULT_TOOLS = ['read', 'grep', 'edit', 'write', 'find'];
 
 const BASH_INTERCEPT_HINT =
   'Do not use cat/head/tail/less/more/grep/rg/sed -i to read or edit files. ' +
-  'Use the `read`, `grep`, `edit`, or `find` tools instead. Piped stdin consumers and git are allowed.';
+  'Do not use cat >/>> or heredocs to create or append files. ' +
+  'Use the `read`, `grep`, `edit`, `write`, or `find` tools instead. Piped stdin consumers and git are allowed.';
+
+function isCatFileWrite(candidate: string): boolean {
+  if (!/^\s*cat\b/.test(candidate)) return false;
+  if (/>>|<<<?/.test(candidate)) return true;
+  // file redirect, not fd dup like 2>&1
+  return /(^|[\s;|&])\d?>\s*(?!&)/.test(candidate);
+}
 
 export function checkBashInterception(
   command: string,
@@ -65,7 +81,7 @@ export function checkBashInterception(
     for (const rule of RULES) {
       if (!tools.has(rule.tool)) continue;
       rule.pattern.lastIndex = 0;
-      if (rule.pattern.test(candidate)) {
+      if (rule.pattern.test(candidate) && (!rule.match || rule.match(candidate))) {
         return {
           block: true,
           suggestedTool: rule.tool,

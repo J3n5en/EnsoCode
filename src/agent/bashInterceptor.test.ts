@@ -2,7 +2,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import { checkBashInterception, withBashInterception } from './bashInterceptor';
 
-const tools = ['read', 'grep', 'edit', 'find'];
+const tools = ['read', 'grep', 'edit', 'write', 'find'];
 
 describe('checkBashInterception', () => {
   it('blocks cat / head / Get-Content and points at read', () => {
@@ -52,6 +52,25 @@ describe('checkBashInterception', () => {
   it('does not block when the suggested tool is unavailable', () => {
     expect(checkBashInterception('cat file.ts', ['bash']).block).toBe(false);
   });
+
+  it('blocks cat writes and points at write, not read', () => {
+    for (const command of [
+      "cat >> src/agent/memory/pipeline.test.ts <<'EOF'",
+      'cat > /tmp/out.txt <<EOF',
+      'cat >> file.ts',
+    ]) {
+      const result = checkBashInterception(command, tools);
+      expect(result.block, command).toBe(true);
+      expect(result.suggestedTool, command).toBe('write');
+      expect(result.message, command).toMatch(/write/);
+      expect(result.message, command).not.toMatch(/`read`/);
+    }
+  });
+
+  it('still treats cat file reads as read, including 2>&1', () => {
+    expect(checkBashInterception('cat src/a.ts', tools).suggestedTool).toBe('read');
+    expect(checkBashInterception('cat src/a.ts 2>&1', tools).suggestedTool).toBe('read');
+  });
 });
 
 describe('withBashInterception description', () => {
@@ -64,7 +83,10 @@ describe('withBashInterception description', () => {
       execute: async () => ({ content: [], details: {} }),
     } as unknown as ToolDefinition);
     expect(wrapped.description).toContain('Do not use cat/head/tail/less/more/grep/rg');
-    expect(wrapped.description).toContain('Use the `read`, `grep`, `edit`, or `find` tools');
+    expect(wrapped.description).toContain('Do not use cat >/>> or heredocs');
+    expect(wrapped.description).toContain(
+      'Use the `read`, `grep`, `edit`, `write`, or `find` tools'
+    );
     expect(wrapped.description).toContain('Run a shell command.');
   });
 });
