@@ -9,8 +9,8 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { buildPhaseTwoCorpus, type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
 import type { Stage1Artifact } from './pipeline';
+import { buildPhaseTwoCorpus, type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
 
 const CWD = '/Users/me/proj';
 const NOW_SEC = 1_800_000_000;
