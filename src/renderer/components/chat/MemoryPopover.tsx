@@ -30,9 +30,6 @@ function phaseCopy(
   if (snapshot.phase2Status === 'running') {
     return { label: t('Merging…'), className: 'text-info' };
   }
-  if (snapshot.dirty) {
-    return { label: t('Merge queued'), className: 'text-warning' };
-  }
   if (snapshot.hasMemoryMd) {
     return { label: t('Ready'), className: 'text-success' };
   }
@@ -106,7 +103,7 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
         disabled={!enabled}
         className={cn(
           'shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40',
-          snapshot?.dirty && 'text-warning'
+          snapshot?.phase2Status === 'running' && 'text-info'
         )}
         title={t('Project memory')}
         aria-label={t('Project memory')}
@@ -203,12 +200,12 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
           <div className="flex items-center justify-between gap-2 pt-0.5">
             <button
               type="button"
-              disabled={busy || snapshot?.dirty}
+              disabled={busy || snapshot?.phase2Status === 'running'}
               className="inline-flex items-center gap-1 text-[11px] text-foreground/90 hover:text-foreground disabled:cursor-default disabled:text-muted-foreground"
               onClick={() => void run('enqueue')}
             >
               <Layers className="h-3 w-3" />
-              {snapshot?.dirty ? t('Already queued') : t('Queue merge')}
+              {snapshot?.phase2Status === 'running' ? t('Merging…') : t('Merge now')}
             </button>
             <div className="flex items-center gap-2">
               <button

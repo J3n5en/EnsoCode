@@ -715,6 +715,8 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
+        if (event.type === 'memory-pipeline-done') return;
+
         if (event.type === 'title-generated') {
           const baseline = pendingTitleBaselines.get(event.conversationId);
           pendingTitleBaselines.delete(event.conversationId);

@@ -515,6 +515,46 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentCommand({ ...summarize, model: rest })).toBeNull();
   });
 
+  it('run-memory-pipeline 命令完整往返；缺字段或空值拒绝', () => {
+    const command = {
+      type: 'run-memory-pipeline',
+      requestId: RECEIPT_ID,
+      cwd: '/Users/me/proj',
+      currentThreadId: 'conversation-1',
+      model,
+      phase2Model: model,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, requestId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, cwd: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, model: undefined })).toBeNull();
+    expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
+  });
+
+  it('memory-pipeline-done 事件完整往返；脏输入不崩', () => {
+    const event = {
+      type: 'memory-pipeline-done',
+      requestId: RECEIPT_ID,
+      ok: true,
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({
+        type: 'memory-pipeline-done',
+        requestId: RECEIPT_ID,
+        ok: false,
+        error: 'no model',
+      })
+    ).toEqual({
+      type: 'memory-pipeline-done',
+      requestId: RECEIPT_ID,
+      ok: false,
+      error: 'no model',
+    });
+    expect(parseAgentWorkerEvent({ ...event, requestId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
+  });
+
   it('title-generated 事件完整往返；脏输入不崩', () => {
     const event = {
       type: 'title-generated',

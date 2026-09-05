@@ -89,7 +89,7 @@ export const IPC_CHANNELS = {
   AGENT_REWIND: 'agent:rewind',
   /** 手动压缩会话上下文（/compact 与上下文面板按钮共用） */
   AGENT_COMPACT: 'agent:compact',
-  /** `/memory view|stats|diagnose|clear|enqueue`，主进程处理，不发给模型 */
+  /** 项目记忆 GUI：view/save/clear 在主进程；enqueue 立刻让 worker 跑管线 */
   AGENT_MEMORY: 'agent:memory',
   AGENT_FORK: 'agent:fork',
   AGENT_DISMISS_COWORKER: 'agent:dismiss-coworker',

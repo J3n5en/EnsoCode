@@ -30,6 +30,7 @@ describe('runMemorySlash', () => {
     });
     expect(queued.ok).toBe(true);
     expect((await loadJobs(root)).global.dirty).toBe(true);
+    if (queued.ok) expect(queued.snapshot.notice).toBe('Merging now…');
 
     const cleared = await runMemorySlash({
       action: 'clear',

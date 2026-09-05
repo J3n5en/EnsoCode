@@ -608,6 +608,10 @@ export class SessionSupervisor {
       void this.summarizeTitle(command).catch(() => {});
       return;
     }
+    if (command.type === 'run-memory-pipeline') {
+      void this.runMemoryPipelineCommand(command).catch(() => {});
+      return;
+    }
     if (command.type === 'set-proxy-env') {
       applyWorkerProxyEnv(command.env);
       return;
@@ -2895,6 +2899,64 @@ export class SessionSupervisor {
     return this.runtimePromise;
   }
 
+  private memoryPipelineChain: Promise<void> = Promise.resolve();
+
+  private enqueueMemoryPipeline<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.memoryPipelineChain.then(fn, fn);
+    this.memoryPipelineChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  private async executeMemoryPipeline(opts: {
+    cwd: string;
+    currentThreadId?: string;
+    model: SpawnModelConfig;
+    phase2Model?: SpawnModelConfig;
+  }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
+    const runtime = await this.getRuntime();
+    const sessionModel = await resolveBaseModelOrRefresh(runtime, opts.model);
+    const phase2Model = opts.phase2Model
+      ? await resolveBaseModelOrRefresh(runtime, opts.phase2Model).catch(() => sessionModel)
+      : sessionModel;
+    const phase1TimeoutMs = 60_000;
+    const phase2TimeoutMs = 120_000;
+    return runMemoryPipeline({
+      memoryRoot: getMemoryRoot(this.options.agentDir, opts.cwd),
+      sessionDir: this.options.sessionDir,
+      cwd: opts.cwd,
+      currentThreadId: opts.currentThreadId,
+      nowSec: Math.floor(Date.now() / 1000),
+      workerToken: `memory-${process.pid}`,
+      completeSimple: async ({ systemPrompt, userText, phase }) => {
+        const controller = new AbortController();
+        const timer = setTimeout(
+          () => controller.abort(),
+          phase === 1 ? phase1TimeoutMs : phase2TimeoutMs
+        );
+        try {
+          const message = await runtime.completeSimple(
+            phase === 2 ? phase2Model : sessionModel,
+            {
+              systemPrompt,
+              messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
+            },
+            { signal: controller.signal }
+          );
+          return Array.isArray((message as { content?: unknown }).content)
+            ? ((message as { content: Array<{ type?: string; text?: string }> }).content ?? [])
+                .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
+                .join('')
+            : '';
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    });
+  }
+
   private async runMemoryStartup(managed: ManagedSession): Promise<void> {
     if (
       !shouldRunMemoryStartup({
@@ -2907,49 +2969,45 @@ export class SessionSupervisor {
     }
     if (!managed.memoryCwd || !managed.memoryModel) return;
     try {
-      const runtime = await this.getRuntime();
-      const sessionModel = await resolveBaseModelOrRefresh(runtime, managed.memoryModel);
-      const phase2Model = managed.memoryPhase2Model
-        ? await resolveBaseModelOrRefresh(runtime, managed.memoryPhase2Model).catch(
-            () => sessionModel
-          )
-        : sessionModel;
-      const phase1TimeoutMs = 60_000;
-      const phase2TimeoutMs = 120_000;
-      await runMemoryPipeline({
-        memoryRoot: getMemoryRoot(this.options.agentDir, managed.memoryCwd),
-        sessionDir: this.options.sessionDir,
-        cwd: managed.memoryCwd,
-        currentThreadId: managed.identity.sessionId,
-        nowSec: Math.floor(Date.now() / 1000),
-        workerToken: `memory-${process.pid}`,
-        completeSimple: async ({ systemPrompt, userText, phase }) => {
-          const controller = new AbortController();
-          const timer = setTimeout(
-            () => controller.abort(),
-            phase === 1 ? phase1TimeoutMs : phase2TimeoutMs
-          );
-          try {
-            const message = await runtime.completeSimple(
-              phase === 2 ? phase2Model : sessionModel,
-              {
-                systemPrompt,
-                messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
-              },
-              { signal: controller.signal }
-            );
-            return Array.isArray((message as { content?: unknown }).content)
-              ? ((message as { content: Array<{ type?: string; text?: string }> }).content ?? [])
-                  .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
-                  .join('')
-              : '';
-          } finally {
-            clearTimeout(timer);
-          }
-        },
-      });
+      await this.enqueueMemoryPipeline(() =>
+        this.executeMemoryPipeline({
+          cwd: managed.memoryCwd as string,
+          currentThreadId: managed.identity.sessionId,
+          model: managed.memoryModel as SpawnModelConfig,
+          ...(managed.memoryPhase2Model ? { phase2Model: managed.memoryPhase2Model } : {}),
+        })
+      );
     } catch {
       // 记忆维护失败静默
+    }
+  }
+
+  private async runMemoryPipelineCommand(
+    command: Extract<AgentCommand, { type: 'run-memory-pipeline' }>
+  ): Promise<void> {
+    try {
+      const result = await this.enqueueMemoryPipeline(() =>
+        this.executeMemoryPipeline({
+          cwd: command.cwd,
+          currentThreadId: command.currentThreadId,
+          model: command.model,
+          ...(command.phase2Model ? { phase2Model: command.phase2Model } : {}),
+        })
+      );
+      this.options.emit({
+        type: 'memory-pipeline-done',
+        requestId: command.requestId,
+        ok: true,
+        stage1Claimed: result.stage1Claimed,
+        phase2Ran: result.phase2Ran,
+      });
+    } catch (error) {
+      this.options.emit({
+        type: 'memory-pipeline-done',
+        requestId: command.requestId,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

@@ -585,6 +585,15 @@ export type AgentCommand =
       text: string;
       model: SpawnModelConfig;
     }
+  | {
+      /** 项目记忆：立刻跑两阶段管线，不绑会话身份 */
+      type: 'run-memory-pipeline';
+      requestId: string;
+      cwd: string;
+      currentThreadId?: string;
+      model: SpawnModelConfig;
+      phase2Model?: SpawnModelConfig;
+    }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
@@ -928,6 +937,14 @@ export type AgentWorkerEvent =
       type: 'title-generated';
       conversationId: string;
       title: string;
+    }
+  | {
+      type: 'memory-pipeline-done';
+      requestId: string;
+      ok: boolean;
+      error?: string;
+      stage1Claimed?: number;
+      phase2Ran?: boolean;
     }
   | {
       type: 'task-output';
@@ -1777,6 +1794,22 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         parseSpawnModelConfig(value.model)
         ? (value as unknown as AgentCommand)
         : null;
+    case 'run-memory-pipeline':
+      return hasOnlyKeys(value, [
+        'type',
+        'requestId',
+        'cwd',
+        'currentThreadId',
+        'model',
+        'phase2Model',
+      ]) &&
+        isNonEmptyString(value.requestId) &&
+        isNonEmptyString(value.cwd) &&
+        (value.currentThreadId === undefined || isNonEmptyString(value.currentThreadId)) &&
+        parseSpawnModelConfig(value.model) &&
+        (value.phase2Model === undefined || parseSpawnModelConfig(value.phase2Model))
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'prompt':
     case 'steer': {
       const images = value.images === undefined ? [] : parseAttachedImages(value.images);
@@ -2031,6 +2064,19 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       isNonEmptyString(value.title)
       ? (value as unknown as AgentWorkerEvent)
       : null;
+  }
+  if (value.type === 'memory-pipeline-done') {
+    if (
+      !hasOnlyKeys(value, ['type', 'requestId', 'ok', 'error', 'stage1Claimed', 'phase2Ran']) ||
+      !isNonEmptyString(value.requestId) ||
+      typeof value.ok !== 'boolean' ||
+      (value.stage1Claimed !== undefined && !isSequence(value.stage1Claimed)) ||
+      (value.phase2Ran !== undefined && typeof value.phase2Ran !== 'boolean')
+    ) {
+      return null;
+    }
+    const shapeOk = value.ok ? value.error === undefined : isNonEmptyString(value.error);
+    return shapeOk ? (value as unknown as AgentWorkerEvent) : null;
   }
   const identity = parseAnySessionIdentity(value.identity);
   if (!identity || !isSequence(value.seq)) return null;

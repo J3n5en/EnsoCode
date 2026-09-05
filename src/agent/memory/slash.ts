@@ -62,7 +62,10 @@ export async function loadMemorySnapshot(
     stage1Done: stage1.filter((job) => job.status === 'done').length,
     watermark: jobs.global.watermark,
     dirty: jobs.global.dirty === true,
-    phase2Status: jobs.global.status ?? 'idle',
+    phase2Status:
+      jobs.global.status === 'running' || jobs.global.status === 'done'
+        ? jobs.global.status
+        : 'idle',
     hasMemoryMd: existsSync(path.join(root, 'MEMORY.md')),
     ...(notice ? { notice } : {}),
   };
@@ -114,11 +117,7 @@ export async function runMemorySlash(opts: {
     await saveJobs(root, enqueuePhase2(await loadJobs(root)));
     return {
       ok: true,
-      snapshot: await loadMemorySnapshot(
-        opts.agentDir,
-        opts.cwd,
-        'Queued for the next parent spawn.'
-      ),
+      snapshot: await loadMemorySnapshot(opts.agentDir, opts.cwd, 'Merging now…'),
     };
   }
   return { ok: true, snapshot: await loadMemorySnapshot(opts.agentDir, opts.cwd) };
