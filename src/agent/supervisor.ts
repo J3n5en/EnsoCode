@@ -106,6 +106,8 @@ import {
   extractLearnedNotes,
   LOCAL_MEMORY_SYSTEM_PROMPT,
   readLearnedFile,
+  shouldInjectProjectLearnedFile,
+  shouldLearnFromTurn,
 } from './localMemory';
 import { McpManager } from './mcp';
 import { createMessageCoworkerTool } from './messageCoworker';
@@ -1116,7 +1118,10 @@ export class SessionSupervisor {
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
     const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
-    const learnedFile = localMemoryEnabled && !remoteAgentsFiles ? readLearnedFile(cwd) : undefined;
+    const learnedFile =
+      localMemoryEnabled && !remoteAgentsFiles && shouldInjectProjectLearnedFile()
+        ? readLearnedFile(cwd)
+        : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
       agentDir: this.options.agentDir,
@@ -2854,6 +2859,7 @@ export class SessionSupervisor {
   }
 
   private async maybeLearnFromTurn(managed: ManagedSession): Promise<void> {
+    if (!shouldLearnFromTurn()) return;
     if (!managed.localMemoryEnabled || !managed.memoryCwd || !managed.memoryModel) return;
     if (managed.coworkerName || managed.childIdentity) return;
     const userText = buildMemoryUserText(

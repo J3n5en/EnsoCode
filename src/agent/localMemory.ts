@@ -6,6 +6,16 @@ export const LEARNED_RELATIVE_PATH = path.join('.enso', 'learned.md');
 export const LEARNED_FILE_NAME = 'learned.md';
 export const MEMORIES_DIR_NAME = 'memories';
 
+/** Project `.enso/learned.md` is no longer injected as agentsFiles. */
+export function shouldInjectProjectLearnedFile(): boolean {
+  return false;
+}
+
+/** Per-turn idle extract into `.enso/learned.md` is off; use `learn` + two-phase. */
+export function shouldLearnFromTurn(): boolean {
+  return false;
+}
+
 export function encodeProjectPath(cwd: string): string {
   return `--${cwd.replace(/^[\\/]/, '').replace(/[\\/:]/g, '-')}--`;
 }
