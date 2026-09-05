@@ -2,7 +2,7 @@ import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, defaultApprovalMode, resolveChatModel } from '@shared/defaultModel';
-import type { MemoryCommandAction } from '@shared/memoryCommand';
+import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import type {
   ApprovalMode,
   AttachedImage,
@@ -289,7 +289,8 @@ interface SessionsState {
   compact(conversationId: string, instructions?: string): void;
   memory(
     conversationId: string,
-    action: MemoryCommandAction
+    action: MemoryCommandAction,
+    patch?: MemorySavePatch
   ): Promise<
     | { ok: true; snapshot: import('@shared/memorySnapshot').MemorySnapshot }
     | { ok: false; error: string }
@@ -2270,7 +2271,7 @@ export const useSessionsStore = create<SessionsState>()(
           void window.electronAPI.agent.compact(conversationId, instructions);
         },
 
-        async memory(conversationId, action) {
+        async memory(conversationId, action, patch) {
           const conversation = get().conversations[conversationId];
           if (!conversation) return { ok: false, error: 'no conversation' };
           const project = useSettingsStore
@@ -2282,7 +2283,8 @@ export const useSessionsStore = create<SessionsState>()(
             conversationId,
             action,
             cwd,
-            project?.kind === 'ssh'
+            project?.kind === 'ssh',
+            patch
           );
           if (!result.ok || !result.snapshot) {
             return { ok: false, error: result.error ?? 'memory command failed' };

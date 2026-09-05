@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
-import type { MemoryCommandAction } from '@shared/memoryCommand';
+import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
@@ -92,6 +92,14 @@ import { sessionWorktree, shareSessionWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
+
+function parseMemoryPatch(value: unknown): MemorySavePatch | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const data = value as Record<string, unknown>;
+  if (typeof data.summary !== 'string' || !Array.isArray(data.learned)) return undefined;
+  if (!data.learned.every((line) => typeof line === 'string')) return undefined;
+  return { summary: data.summary, learned: data.learned as string[] };
+}
 
 const isValidImages = (value: unknown): value is { data: string; mimeType: string }[] | undefined =>
   value === undefined ||
@@ -842,9 +850,17 @@ export function registerAgentHandlers(): void {
       sessionId: unknown,
       action: unknown,
       cwd: unknown,
-      remote: unknown
+      remote: unknown,
+      patch: unknown
     ): Promise<AgentActionResult> => {
-      const allowed: MemoryCommandAction[] = ['view', 'stats', 'diagnose', 'clear', 'enqueue'];
+      const allowed: MemoryCommandAction[] = [
+        'view',
+        'stats',
+        'diagnose',
+        'clear',
+        'enqueue',
+        'save',
+      ];
       if (!isNonEmptyString(sessionId) || !allowed.includes(action as MemoryCommandAction)) {
         return { ok: false, error: 'invalid memory command' };
       }
@@ -858,6 +874,7 @@ export function registerAgentHandlers(): void {
         cwd: cwd.trim(),
         localMemoryEnabled: settings?.localMemoryEnabled !== false,
         remote: remote === true,
+        patch: parseMemoryPatch(patch),
       });
       return result.ok
         ? { ok: true, snapshot: result.snapshot }

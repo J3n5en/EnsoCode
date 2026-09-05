@@ -1,10 +1,11 @@
 import { existsSync, rmSync, statSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { MemoryCommandAction } from '@shared/memoryCommand';
+import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import { type MemorySnapshot, parseLearnedLines } from '@shared/memorySnapshot';
 import { getMemoryRoot, readLearnedLessons } from '../localMemory';
 import { enqueuePhase2, loadJobs, saveJobs } from './jobs';
+import { neutralizeInjection, redactSecrets } from './sanitize';
 
 export type MemorySlashResult =
   | { ok: true; snapshot: MemorySnapshot }
@@ -67,12 +68,25 @@ export async function loadMemorySnapshot(
   };
 }
 
+async function saveMemoryPatch(root: string, patch: MemorySavePatch): Promise<void> {
+  await mkdir(root, { recursive: true });
+  const summary = redactSecrets(patch.summary).trim();
+  await writeFile(path.join(root, 'memory_summary.md'), summary ? `${summary}\n` : '', 'utf8');
+  const lessons = patch.learned
+    .map((line) => neutralizeInjection(redactSecrets(line)))
+    .filter(Boolean)
+    .slice(0, 100);
+  const body = lessons.map((line) => `- ${line}`).join('\n');
+  await writeFile(path.join(root, 'learned.md'), body ? `${body}\n` : '', 'utf8');
+}
+
 export async function runMemorySlash(opts: {
   action: MemoryCommandAction;
   agentDir: string;
   cwd: string;
   localMemoryEnabled: boolean;
   remote?: boolean;
+  patch?: MemorySavePatch;
 }): Promise<MemorySlashResult> {
   if (!opts.localMemoryEnabled) {
     return { ok: false, error: 'Project memory is disabled in Settings.' };
@@ -86,6 +100,14 @@ export async function runMemorySlash(opts: {
     return {
       ok: true,
       snapshot: await loadMemorySnapshot(opts.agentDir, opts.cwd, 'Memory data cleared.'),
+    };
+  }
+  if (opts.action === 'save') {
+    if (!opts.patch) return { ok: false, error: 'memory save needs a patch' };
+    await saveMemoryPatch(root, opts.patch);
+    return {
+      ok: true,
+      snapshot: await loadMemorySnapshot(opts.agentDir, opts.cwd, 'Memory updated.'),
     };
   }
   if (opts.action === 'enqueue') {

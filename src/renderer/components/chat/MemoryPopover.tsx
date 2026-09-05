@@ -1,6 +1,6 @@
-import type { MemoryCommandAction } from '@shared/memoryCommand';
+import type { MemoryCommandAction, MemorySavePatch } from '@shared/memoryCommand';
 import type { MemorySnapshot } from '@shared/memorySnapshot';
-import { Brain, Layers, Trash2 } from 'lucide-react';
+import { Brain, Layers, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
@@ -45,17 +45,38 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
   const [busy, setBusy] = useState(false);
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [summaryDraft, setSummaryDraft] = useState('');
+  const [learnedDraft, setLearnedDraft] = useState<{ id: string; text: string }[]>([]);
   const enabled = useSettingsStore((s) => s.localMemoryEnabled !== false);
 
-  const run = async (action: MemoryCommandAction) => {
+  const applySnapshot = (next: MemorySnapshot) => {
+    setSnapshot(next);
+    setSummaryDraft(next.summary);
+    setLearnedDraft(
+      next.learned.length > 0
+        ? next.learned.map((text) => ({ id: crypto.randomUUID(), text }))
+        : [{ id: crypto.randomUUID(), text: '' }]
+    );
+  };
+
+  const dirty =
+    snapshot !== null &&
+    (summaryDraft !== snapshot.summary ||
+      learnedDraft
+        .map((row) => row.text.trim())
+        .filter(Boolean)
+        .join('\n') !== snapshot.learned.join('\n'));
+
+  const run = async (action: MemoryCommandAction, patch?: MemorySavePatch) => {
     setBusy(true);
     setError(null);
-    const result = await useSessionsStore.getState().memory(conversationId, action);
-    if (result.ok) setSnapshot(result.snapshot);
+    const result = await useSessionsStore.getState().memory(conversationId, action, patch);
+    if (result.ok) applySnapshot(result.snapshot);
     else setError(result.error);
     setBusy(false);
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: load once per open
   useEffect(() => {
     if (!open || !enabled) return;
     let cancelled = false;
@@ -66,7 +87,7 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
       .memory(conversationId, 'view')
       .then((result) => {
         if (cancelled) return;
-        if (result.ok) setSnapshot(result.snapshot);
+        if (result.ok) applySnapshot(result.snapshot);
         else setError(result.error);
       })
       .finally(() => {
@@ -78,8 +99,6 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
   }, [open, enabled, conversationId]);
 
   const phase = snapshot ? phaseCopy(t, snapshot) : null;
-  const summary = snapshot?.summary.trim() ?? '';
-  const lessons = snapshot?.learned ?? [];
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -98,7 +117,7 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
         <div className="flex flex-col gap-2.5 px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-medium">{t('Project memory')}</p>
+              <p className="font-medium text-xs">{t('Project memory')}</p>
               {snapshot && (
                 <p
                   className="truncate font-mono text-[10px] text-muted-foreground"
@@ -109,44 +128,77 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
               )}
             </div>
             {phase && (
-              <span className={cn('shrink-0 text-[10px] font-medium', phase.className)}>
+              <span className={cn('shrink-0 font-medium text-[10px]', phase.className)}>
                 {phase.label}
               </span>
             )}
           </div>
 
-          {error && <p className="text-destructive text-[11px]">{error}</p>}
+          {error && <p className="text-[11px] text-destructive">{error}</p>}
           {snapshot?.notice && !error && (
             <p className="text-[11px] text-muted-foreground">{t(snapshot.notice)}</p>
           )}
 
           {snapshot && (
-            <p className="text-[11px] tabular-nums text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground tabular-nums">
               {t('{{lessons}} lessons · {{merged}} merged · {{size}}', {
-                lessons: lessons.length,
+                lessons: learnedDraft.filter((row) => row.text.trim()).length,
                 merged: snapshot.stage1Done,
                 size: formatBytes(snapshot.bytes),
               })}
             </p>
           )}
 
-          {summary ? (
-            <p className="max-h-28 overflow-auto text-xs leading-relaxed">{summary}</p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              {t('Idle sessions write a summary after the next spawn.')}
-            </p>
-          )}
+          <textarea
+            value={summaryDraft}
+            disabled={busy || !snapshot}
+            placeholder={t('Write the working summary…')}
+            onChange={(event) => setSummaryDraft(event.target.value)}
+            className="min-h-20 resize-none bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+          />
 
-          {lessons.length > 0 && (
-            <ul className="max-h-36 space-y-1.5 overflow-auto border-l border-border pl-2">
-              {lessons.slice(0, 8).map((lesson) => (
-                <li key={lesson} className="text-[11px] leading-snug">
-                  {lesson}
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="space-y-1 border-border border-l pl-2">
+            {learnedDraft.map((lesson) => (
+              <div key={lesson.id} className="flex items-start gap-1">
+                <textarea
+                  value={lesson.text}
+                  disabled={busy || !snapshot}
+                  rows={1}
+                  placeholder={t('A durable lesson')}
+                  onChange={(event) => {
+                    setLearnedDraft(
+                      learnedDraft.map((row) =>
+                        row.id === lesson.id ? { ...row, text: event.target.value } : row
+                      )
+                    );
+                  }}
+                  className="min-h-5 flex-1 resize-none bg-transparent text-[11px] leading-snug outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  disabled={busy || learnedDraft.length === 1}
+                  className="mt-0.5 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                  onClick={() =>
+                    setLearnedDraft(learnedDraft.filter((row) => row.id !== lesson.id))
+                  }
+                  aria-label={t('Remove lesson')}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              disabled={busy || !snapshot}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+              onClick={() =>
+                setLearnedDraft([...learnedDraft, { id: crypto.randomUUID(), text: '' }])
+              }
+            >
+              <Plus className="h-3 w-3" />
+              {t('Add lesson')}
+            </button>
+          </div>
 
           <div className="flex items-center justify-between gap-2 pt-0.5">
             <button
@@ -158,17 +210,31 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
               <Layers className="h-3 w-3" />
               {snapshot?.dirty ? t('Already queued') : t('Queue merge')}
             </button>
-            <button
-              type="button"
-              disabled={busy}
-              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
-              onClick={() => {
-                if (window.confirm(t('Clear project memory?'))) void run('clear');
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-              {t('Clear')}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busy || !dirty}
+                className="text-[11px] text-foreground/90 hover:text-foreground disabled:text-muted-foreground"
+                onClick={() =>
+                  void run('save', {
+                    summary: summaryDraft,
+                    learned: learnedDraft.map((row) => row.text.trim()).filter(Boolean),
+                  })
+                }
+              >
+                {t('Save')}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                onClick={() => {
+                  if (window.confirm(t('Clear project memory?'))) void run('clear');
+                }}
+              >
+                {t('Clear')}
+              </button>
+            </div>
           </div>
         </div>
       </PopoverPopup>
