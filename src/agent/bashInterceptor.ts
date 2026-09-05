@@ -52,6 +52,10 @@ const RULES: Rule[] = [
 
 const DEFAULT_TOOLS = ['read', 'grep', 'edit', 'find'];
 
+const BASH_INTERCEPT_HINT =
+  'Do not use cat/head/tail/less/more/grep/rg/sed -i to read or edit files. ' +
+  'Use the `read`, `grep`, `edit`, or `find` tools instead. Piped stdin consumers and git are allowed.';
+
 export function checkBashInterception(
   command: string,
   availableTools: readonly string[] = DEFAULT_TOOLS
@@ -150,14 +154,18 @@ function push(
 }
 
 export function withBashInterception(definition: ToolDefinition): ToolDefinition {
+  const description = [definition.description, BASH_INTERCEPT_HINT].filter(Boolean).join('\n');
   return {
     ...definition,
+    description,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const command = (params as { command?: string }).command;
       if (typeof command === 'string') {
         const names =
-          ctx && typeof ctx === 'object' && Array.isArray((ctx as unknown as { toolNames?: unknown }).toolNames)
-            ? ((ctx as unknown as { toolNames: string[] }).toolNames)
+          ctx &&
+          typeof ctx === 'object' &&
+          Array.isArray((ctx as unknown as { toolNames?: unknown }).toolNames)
+            ? (ctx as unknown as { toolNames: string[] }).toolNames
             : DEFAULT_TOOLS;
         const hit = checkBashInterception(command, names);
         if (hit.block) throw new Error(hit.message);
