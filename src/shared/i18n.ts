@@ -625,6 +625,7 @@ export const zhTranslations: Record<string, string> = {
   'By project': '按项目',
   'No usage in this period': '该周期内没有用量',
   'Top {{count}} of {{total}}': '共 {{total}} 项，显示前 {{count}} 项',
+  '{{total}} items': '共 {{total}} 项',
   '(no project)': '（无项目）',
   'No catalog price for: {{models}}. Their cost is not included.':
     '以下模型无目录单价：{{models}}，其费用未计入。',

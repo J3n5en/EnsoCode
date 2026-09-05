@@ -1,4 +1,6 @@
 import { formatCost, formatTokens } from '@shared/usage/format';
+import * as React from 'react';
+import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -28,15 +30,19 @@ export function RankingTable({
   limit = 8,
 }: RankingTableProps) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = React.useState(false);
   const total = rows.reduce((sum, row) => sum + row.tokens, 0);
-  const visible = rows.slice(0, limit);
+  const overflow = rows.length > limit;
+  const visible = overflow && !expanded ? rows.slice(0, limit) : rows;
   return (
     <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
         <span className="text-sm font-medium">{title}</span>
-        {rows.length > limit && (
+        {overflow && (
           <span className="text-[11px] text-muted-foreground">
-            {t('Top {{count}} of {{total}}', { count: limit, total: rows.length })}
+            {expanded
+              ? t('{{total}} items', { total: rows.length })
+              : t('Top {{count}} of {{total}}', { count: limit, total: rows.length })}
           </span>
         )}
       </div>
@@ -86,6 +92,16 @@ export function RankingTable({
             })}
           </tbody>
         </table>
+      )}
+      {overflow && (
+        <Button
+          variant="ghost"
+          size="xs"
+          className="mt-2 w-full text-muted-foreground"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? t('Collapse') : t('Show all')}
+        </Button>
       )}
     </div>
   );
