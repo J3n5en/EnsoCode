@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "src/agent/localMemory.ts", "reason": "current idle extract + .enso/learned.md"}
+{"file": "src/agent/supervisor.ts", "reason": "maybeLearnFromTurn and spawn injection"}
+{"file": ".trellis/spec/guides/pre-implementation-checklist.md", "reason": "cross-layer + TDD split"}

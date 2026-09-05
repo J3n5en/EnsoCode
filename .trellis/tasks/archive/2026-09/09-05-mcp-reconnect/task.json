@@ -1,9 +1,9 @@
 {
-  "id": "coworker-peer-tool",
-  "name": "coworker-peer-tool",
-  "title": "同事点对点消息工具",
+  "id": "mcp-reconnect",
+  "name": "mcp-reconnect",
+  "title": "MCP call retry reconnect on stale transport",
   "description": "",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "J3n5en",
   "assignee": "J3n5en",
   "createdAt": "2026-09-05",
-  "completedAt": null,
+  "completedAt": "2026-09-05",
   "branch": null,
   "base_branch": "dev",
   "worktree_path": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Closed at user request. Archiving is mechanical and does not establish acceptance or completion of unchecked PRD items.",
   "meta": {}
 }

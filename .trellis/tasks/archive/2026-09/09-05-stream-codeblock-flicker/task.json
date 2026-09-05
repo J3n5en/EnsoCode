@@ -3,7 +3,7 @@
   "name": "stream-codeblock-flicker",
   "title": "修复流式 Markdown 代码块闪烁",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "J3n5en",
   "assignee": "J3n5en",
   "createdAt": "2026-09-05",
-  "completedAt": null,
+  "completedAt": "2026-09-05",
   "branch": null,
   "base_branch": "dev",
   "worktree_path": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Closed at user request. Archiving is mechanical and does not establish acceptance or completion of unchecked PRD items.",
   "meta": {}
 }
