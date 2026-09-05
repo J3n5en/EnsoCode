@@ -6,7 +6,7 @@ import { SessionSupervisor } from './supervisor';
 
 // 先按继承 env 装代理 dispatcher，再让任何模块发网络请求
 bootstrapWorkerProxyFromEnv();
-// pi-cursor 的 h2-bridge spawn 改进程内 HTTP/2；Ju/hi 挂本进程
+// pi-cursor 的 h2-bridge spawn 改进程内 HTTP/2；El/Fm 挂本进程
 installPiCursorExecHook();
 
 // agent worker 入口：跑在 utilityProcess 里，与 Main 通过 parentPort 通信。
