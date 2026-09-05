@@ -68,8 +68,8 @@ export function buildPhaseTwoCorpus(
 ): { raw: string; summaries: string } {
   const sorted = [...artifacts].sort((a, b) => b.sourceUpdatedAt - a.sourceUpdatedAt);
 
-  // raw: 仅在最新 maxRawCandidates 个中按预算逐个塑入，每个 block 根据剩余预算动态收紩，
-  // 保证最新的艺术品也能在预算不足时被裁剪而不是直接跳过。
+  // raw: 仅在最新 maxRawCandidates 个中按预算逐个放入，每个 block 按剩余预算动态收窄，
+  // 预算不足时最新 artifact 被裁剪而不是直接跳过。
   const rawCharBudget = opts.rawTokenLimit * 4;
   const rawCandidates = sorted.slice(0, opts.maxRawCandidates);
   const rawBlocks: string[] = [];

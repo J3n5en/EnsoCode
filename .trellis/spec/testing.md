@@ -45,6 +45,7 @@ pnpm test:watch    # 监听模式
 | `src/agent/gate.test.ts` | 操作门：同 key 串行、异 key 并行、抛错不断链 |
 | `src/agent/sessionShell.test.ts` | 本地 win32 用官方 `powershell`，SSH/非 Windows 用 `bash` |
 | `src/renderer/stores/sessions/reducer.test.ts` | 事件归并：seq 守卫、index upsert、截断 |
+| `src/agent/memory/{pipeline,prompts,threads,guidance}.test.ts` | 记忆管线：phase-2 语料配额（每线程至少留 summary、新的优先）、prior memory 增量合并、tool result 截断、prompt 关键约束（分类/排除/冲突规则）|
 
 **暂未覆盖**（有意为之）：React 组件、zustand store、真实网络请求、Electron 窗口行为。
 这些需要 jsdom 或真机环境，成本高且 UI 仍在快速迭代。
