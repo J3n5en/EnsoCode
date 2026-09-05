@@ -79,12 +79,10 @@ describe('withBackground promptSnippet 跟随工具名', () => {
 
 describe('resolveBackgroundLaunch', () => {
   it('给了 transform 时优先用 transform 的结果,不带 file', () => {
-    const result = resolveBackgroundLaunch(
-      'bash',
-      'echo hi',
-      '/srv/app',
-      (command, cwd) => ({ command: `ssh ${command}`, cwd: `${cwd}/x` })
-    );
+    const result = resolveBackgroundLaunch('bash', 'echo hi', '/srv/app', (command, cwd) => ({
+      command: `ssh ${command}`,
+      cwd: `${cwd}/x`,
+    }));
     expect(result).toEqual({ command: 'ssh echo hi', cwd: '/srv/app/x' });
   });
 

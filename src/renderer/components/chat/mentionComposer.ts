@@ -161,9 +161,7 @@ export function cleanTitleSummarySource(text: string): string {
     if (match[1]?.trim()) chatLabels.push(match[1].trim());
   }
 
-  const stripped = trimmed
-    .replace(INLINE_CHAT_REF, '')
-    .replace(INLINE_UI_REF, '');
+  const stripped = trimmed.replace(INLINE_CHAT_REF, '').replace(INLINE_UI_REF, '');
 
   const lines = stripped
     .split('\n')

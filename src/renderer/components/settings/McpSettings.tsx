@@ -230,7 +230,9 @@ export function McpSettings() {
                         )}
                         <OccupancyMark
                           row={occupancy.rows[server.id]}
-                          pending={server.enabled && occupancy.pending && !occupancy.rows[server.id]}
+                          pending={
+                            server.enabled && occupancy.pending && !occupancy.rows[server.id]
+                          }
                         />
                         <Switch
                           checked={server.enabled}

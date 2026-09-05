@@ -87,7 +87,8 @@ describe('buildTitleUserText：送给模型的用户消息', () => {
   });
 
   it('剥离 UI 元素引用块', () => {
-    const raw = '[Selected UI element "button" — path: div > button; text: 提交] 这个按钮点击没反应';
+    const raw =
+      '[Selected UI element "button" — path: div > button; text: 提交] 这个按钮点击没反应';
     expect(buildTitleUserText(raw)).toBe('这个按钮点击没反应');
   });
 

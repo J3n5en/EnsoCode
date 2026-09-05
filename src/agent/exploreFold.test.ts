@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyExploreFold,
-  createExploreFoldState,
-  type LlmMessage,
-} from './exploreFold';
+import { applyExploreFold, createExploreFoldState, type LlmMessage } from './exploreFold';
 
 const msg = (role: string, text: string, extra?: Partial<LlmMessage>): LlmMessage => ({
   role,
@@ -23,7 +19,9 @@ describe('applyExploreFold', () => {
       msg('toolResult', 'folded'),
       msg('assistant', 'now implement'),
     ];
-    const folded = applyExploreFold(messages, [{ from: 1, to: 6, report: 'auth is in src/auth.ts' }]);
+    const folded = applyExploreFold(messages, [
+      { from: 1, to: 6, report: 'auth is in src/auth.ts' },
+    ]);
     expect(folded.map((m) => (typeof m.content === 'string' ? m.content : ''))).toEqual([
       'look around',
       'Explore report:\nauth is in src/auth.ts',

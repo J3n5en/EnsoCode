@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type AnchorMessage,
+  ContextUsageTracker,
   calculateContextTokens,
   calculatePromptTokens,
-  ContextUsageTracker,
   findTranscriptUsageAnchor,
   hasContextTokenUsage,
   isTranscriptUsageAnchor,
-  type AnchorMessage,
 } from './contextUsage';
 
 const estimateTokens = (message: unknown): number => (message as { tokens?: number }).tokens ?? 0;
@@ -30,16 +30,28 @@ describe('calculatePromptTokens', () => {
 
 describe('calculateContextTokens', () => {
   it('contextTokens 覆盖优先，负数钳到 0', () => {
-    expect(calculateContextTokens({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 500 })).toBe(
-      500
-    );
-    expect(calculateContextTokens({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: -5 })).toBe(0);
+    expect(
+      calculateContextTokens({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        contextTokens: 500,
+      })
+    ).toBe(500);
+    expect(
+      calculateContextTokens({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        contextTokens: -5,
+      })
+    ).toBe(0);
   });
 
   it('无 contextTokens 时用 totalTokens 或四项之和', () => {
-    expect(
-      calculateContextTokens({ input: 10, output: 20, cacheRead: 5, cacheWrite: 5 })
-    ).toBe(40);
+    expect(calculateContextTokens({ input: 10, output: 20, cacheRead: 5, cacheWrite: 5 })).toBe(40);
   });
 
   it('编排（orchestration）token 从上下文用量中扣除', () => {
@@ -77,7 +89,9 @@ describe('hasContextTokenUsage', () => {
   });
 
   it('contextTokens 字段本身 > 0 即判定有用量', () => {
-    expect(hasContextTokenUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 5 })).toBe(true);
+    expect(
+      hasContextTokenUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 5 })
+    ).toBe(true);
   });
 
   it('仅有 output（如纯 thinking 应答）且不超过 output 时判定为无用量', () => {
@@ -94,7 +108,9 @@ describe('isTranscriptUsageAnchor', () => {
   });
 
   it('stopReason 为 aborted 时不算锚点', () => {
-    expect(isTranscriptUsageAnchor({ role: 'assistant', stopReason: 'aborted', usage })).toBe(false);
+    expect(isTranscriptUsageAnchor({ role: 'assistant', stopReason: 'aborted', usage })).toBe(
+      false
+    );
   });
 
   it('stopReason 为 error 时不算锚点', () => {
@@ -149,7 +165,10 @@ describe('ContextUsageTracker.getBreakdown', () => {
     const tracker = new ContextUsageTracker();
     const activeMessages: AnchorMessage[] = [
       { role: 'user', ...{ tokens: 0 } } as AnchorMessage,
-      { role: 'assistant', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 9500 } },
+      {
+        role: 'assistant',
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 9500 },
+      },
       { role: 'user', ...{ tokens: 50 } } as AnchorMessage,
       { role: 'assistant', ...{ tokens: 80 } } as AnchorMessage,
     ];
@@ -172,7 +191,10 @@ describe('ContextUsageTracker.getBreakdown', () => {
     const tracker = new ContextUsageTracker();
     const activeMessages: AnchorMessage[] = [
       { role: 'user', ...{ tokens: 0 } } as AnchorMessage,
-      { role: 'assistant', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 1000 } },
+      {
+        role: 'assistant',
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 1000 },
+      },
       { role: 'user', ...{ tokens: 40 } } as AnchorMessage,
       { role: 'assistant', ...{ tokens: 60 } } as AnchorMessage,
     ];
@@ -196,7 +218,10 @@ describe('ContextUsageTracker.getBreakdown', () => {
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 2000 },
       contextSnapshot: { promptTokens: 2000, nonMessageTokens: 300, compactionEpoch: 0 },
     };
-    const activeMessages: AnchorMessage[] = [anchor, { role: 'user', ...{ tokens: 0 } } as AnchorMessage];
+    const activeMessages: AnchorMessage[] = [
+      anchor,
+      { role: 'user', ...{ tokens: 0 } } as AnchorMessage,
+    ];
     const result = tracker.getBreakdown({
       contextWindow: 8000,
       activeMessages,

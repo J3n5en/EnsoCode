@@ -1,8 +1,8 @@
 import type { InstructionEntry, McpServerEntry, SkillEntry } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
-import { readSettingsState } from '../services/agentHost';
 import { snapshotBuiltinOccupancyTools } from '../../agent/builtinOccupancy';
+import { readSettingsState } from '../services/agentHost';
 import {
   instructionReader,
   occupancyForBuiltinTools,

@@ -163,14 +163,19 @@ export const oauthFingerprint = (tokens: McpOAuthTokens | undefined): string =>
 
 const slug = (name: string): string => name.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '');
 
-function mapToolResult(result: unknown, name: string): {
+function mapToolResult(
+  result: unknown,
+  name: string
+): {
   content: Array<
     { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
   >;
   details: undefined;
 } {
   const payload =
-    result && typeof result === 'object' ? (result as { content?: unknown; isError?: boolean }) : {};
+    result && typeof result === 'object'
+      ? (result as { content?: unknown; isError?: boolean })
+      : {};
   const content = (Array.isArray(payload.content) ? payload.content : []).map(
     (part: { type: string; text?: string; data?: string; mimeType?: string }) => {
       if (part.type === 'text') return { type: 'text' as const, text: part.text ?? '' };

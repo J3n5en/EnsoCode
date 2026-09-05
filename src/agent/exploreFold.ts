@@ -49,7 +49,8 @@ export function createExploreFoldState(): ExploreFoldState {
       return pendingGoal !== undefined;
     },
     mark(goal: string) {
-      if (pendingGoal !== undefined) throw new Error('explore_mark already active — call explore_fold first');
+      if (pendingGoal !== undefined)
+        throw new Error('explore_mark already active — call explore_fold first');
       const trimmed = goal.trim();
       if (!trimmed) throw new Error('goal is required');
       pendingGoal = trimmed;
@@ -129,7 +130,12 @@ export function createExploreFoldTools(state: ExploreFoldState): ToolDefinition[
         const report = String((params as { report?: string }).report ?? '');
         state.fold(report);
         return {
-          content: [{ type: 'text' as const, text: 'Explore folded. Subsequent turns see only this report.' }],
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Explore folded. Subsequent turns see only this report.',
+            },
+          ],
           details: { report: report.trim() },
         };
       },

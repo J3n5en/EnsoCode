@@ -27,9 +27,7 @@ export function isMessageCacheHot(
  * 不算：冷缓存清空后用户先发一句，length 变 1 但历史与正在跑的工具卡都还没补回，
  * 仍需要向 worker 要 snapshot。
  */
-export function hasAuthoritativeMessages(
-  messages: readonly { optimistic?: boolean }[]
-): boolean {
+export function hasAuthoritativeMessages(messages: readonly { optimistic?: boolean }[]): boolean {
   return messages.some((message) => !message.optimistic);
 }
 
