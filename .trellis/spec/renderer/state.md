@@ -1,6 +1,6 @@
 # 状态管理规范
 
-两个主 store：持久化的 `stores/settings/` 与内存态的 `stores/sessions/`。右侧面板另有 `stores/sidePanel/`：dock 布局与各会话的开关/宽度 persist 到 localStorage，`fullscreen` 只活在内存里。
+两个主 store：设置持久化的 `stores/settings/` 与会话元数据持久化的 `stores/sessions/`。右侧面板另有 `stores/sidePanel/`：dock 布局与各会话的开关/宽度 persist 到 localStorage，`fullscreen` 只活在内存里。
 
 ```
 stores/settings/
@@ -9,10 +9,12 @@ stores/settings/
   index.ts     create + persist + 副作用
 stores/sessions/
   reducer.ts   applyAgentEvent：agent 事件 → 会话投影的纯函数（seq 单调守卫）
-  index.ts     create（不 persist）+ onAgentEvent 订阅 + spawn/send/abort
+  index.ts     create + 元数据 persist + onAgentEvent 订阅 + spawn/send/abort
 ```
 
-`sessions` 是**可丢弃投影**（权威源在 worker/jsonl），不 persist、不进 settings.json。
+`sessions` 的正文是**可丢弃投影**（权威源在 worker/jsonl）；会话元数据写入
+`settings.json` 的 `enso-conversations`。正文、customEntries 和可由 worker 重建的
+commands 不持久化，commands 仍由 snapshot / commands 事件恢复到内存。
 消息按 `message-upsert` 的 index 整条替换，**没有增量归并**；
 过期 seq 的事件在 reducer 里丢弃。改事件处理逻辑时改 `reducer.ts`（纯函数，有测试），
 不要把逻辑写进订阅回调。
@@ -104,12 +106,20 @@ expect(store.getState().conversations.ended.messages).toHaveLength(before);
 
 ## 持久化边界
 
-store 里的一切都会被写进 `settings.json`。因此：
+写入 `settings.json` 的内容由 persist 的 `partialize` 决定。因此：
 
 - **大段文本不要进 store** —— 指令文件内容存 `userData/instructions/<id>.md`，
   store 只留元数据（`name` / `sourcePath` / `local` / `bytes`）。
 - 临时 UI 状态（弹窗开合、筛选词、忙碌标记）用 `React.useState`，不要进 store。
 - 字段的兼容性约束见 [../shared/types.md](../shared/types.md) 的"持久化类型的演进"。
+
+高频会话事件使用 `createElectronPersistStorage()` 对象级入口，在 JSON 编解码和
+contextBridge 复制之前合并写入；不能在 `createJSONStorage` 后再排队字符串。
+同键最多一个在途写入及一个最新待写值。完整契约见
+[设置持久化规范](../main/settings-persistence.md#会话流式持久化的内存上限)。
+
+Zustand persist 即使收到 `set((state) => state)` 也会调用存储适配器。
+已知无需更新的后台事件应在调用 `set` 之前返回，保留无标题首条用户消息的标题提取。
 
 ## 多窗口同步
 

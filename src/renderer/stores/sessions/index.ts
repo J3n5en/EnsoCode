@@ -46,10 +46,10 @@ export interface QueuedMessage {
 
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
-import { electronStorage, openPersistWriteGate } from '@/stores/settings/storage';
+import { createElectronPersistStorage, openPersistWriteGate } from '@/stores/settings/storage';
 import { purgeConversationAuthority } from './authorityCleanup';
 import {
   evictColdMessages,
@@ -920,37 +920,35 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
+        const current = get();
+        const currentConversation = current.conversations[id];
+        if (!currentConversation) return;
+        // 手机创建的冷会话仍需从首条用户消息提取标题。
+        const rawUserText =
+          !currentConversation.title &&
+          event.type === 'message-upsert' &&
+          event.message.role === 'user'
+            ? userMessageRawText(event.message)
+            : undefined;
+        const extractedTitle = rawUserText ? truncateTitle(rawUserText) : undefined;
+        if (
+          isBulkyAgentEvent(event.type) &&
+          !isMessageCacheHot(id, viewedFromState(current), lastViewedAt, Date.now())
+        ) {
+          if (extractedTitle && rawUserText) {
+            trySummarizeTitle(id, rawUserText, extractedTitle, {
+              providerId: currentConversation.lastProviderId,
+              modelId: currentConversation.lastModelId,
+            });
+            set((state) => patch(state, id, { title: extractedTitle }));
+          }
+          // persist 在 set 返回原 state 时也会写，必须在调用 set 之前跳过。
+          return;
+        }
+
         set((state) => {
           const conversation = state.conversations[id];
           if (!conversation) return state;
-
-          // 桌面建的会话在 spawn 时就有标题；空标题只会出现在手机建的会话上。
-          // 当首条用户消息到达时（message-upsert），无论该会话是否是桌面 hot 缓存，
-          // 都必须捕获首条消息来生成截断标题，并在开启设置时触发标题总结。
-          const isUserMessageUpsert =
-            event.type === 'message-upsert' && event.message.role === 'user';
-          let extractedTitle: string | undefined;
-          let rawUserText: string | undefined;
-          if (!conversation.title && isUserMessageUpsert) {
-            rawUserText = userMessageRawText(event.message);
-            if (rawUserText) {
-              extractedTitle = truncateTitle(rawUserText);
-            }
-          }
-
-          if (
-            isBulkyAgentEvent(event.type) &&
-            !isMessageCacheHot(id, viewedFromState(state), lastViewedAt, Date.now())
-          ) {
-            if (extractedTitle && rawUserText) {
-              trySummarizeTitle(id, rawUserText, extractedTitle, {
-                providerId: conversation.lastProviderId,
-                modelId: conversation.lastModelId,
-              });
-              return patch(state, id, { title: extractedTitle });
-            }
-            return state;
-          }
           // 冷缓存清空后用户先发了一句（乐观回显占位），worker 推来的 upsert 带原 index 对不上
           // 本地权威区：reducer 会丢正文只推 seq，若不补要 snapshot，历史与正在跑的工具卡永远不出现。
           if (
@@ -2428,7 +2426,7 @@ export const useSessionsStore = create<SessionsState>()(
       version: SESSIONS_VERSION,
       migrate: (persisted, version) => migrateSessions(persisted, version) as SessionsState,
       // 存 settings.json（localStorage 按 origin 隔离，dev 与打包版会分家）
-      storage: createJSONStorage(() => electronStorage),
+      storage: createElectronPersistStorage(),
       // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
       partialize: (state) => ({
         conversations: Object.fromEntries(
@@ -2442,6 +2440,8 @@ export const useSessionsStore = create<SessionsState>()(
                 conversation.lastActiveAt ??
                 conversation.createdAt,
               messages: [],
+              // 命令列表按会话重复且可能很大，由 worker snapshot / commands 事件恢复。
+              commands: [],
               customEntries: [],
               dispatchMainEvents: {},
               generation: undefined,
