@@ -1,9 +1,7 @@
 import type { MemoryCommandAction } from '@shared/memoryCommand';
 import type { MemorySnapshot } from '@shared/memorySnapshot';
-import { Brain, CircleHelp, Layers, ListTree, Trash2 } from 'lucide-react';
+import { Brain, Layers, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -16,14 +14,29 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function phaseLabel(
+function basename(cwd: string): string {
+  return (
+    cwd
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .at(-1) || cwd
+  );
+}
+
+function phaseCopy(
   t: (key: string) => string,
   snapshot: MemorySnapshot
-): { text: string; variant: 'success' | 'warning' | 'info' | 'outline' } {
-  if (snapshot.dirty) return { text: t('Merge queued'), variant: 'warning' };
-  if (snapshot.phase2Status === 'running') return { text: t('Merging…'), variant: 'info' };
-  if (snapshot.hasMemoryMd) return { text: t('Ready'), variant: 'success' };
-  return { text: t('Empty'), variant: 'outline' };
+): { label: string; className: string } {
+  if (snapshot.phase2Status === 'running') {
+    return { label: t('Merging…'), className: 'text-info' };
+  }
+  if (snapshot.dirty) {
+    return { label: t('Merge queued'), className: 'text-warning' };
+  }
+  if (snapshot.hasMemoryMd) {
+    return { label: t('Ready'), className: 'text-success' };
+  }
+  return { label: t('Idle'), className: 'text-muted-foreground' };
 }
 
 export function MemoryPopover({ conversationId }: { conversationId: string }) {
@@ -64,7 +77,9 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
     };
   }, [open, enabled, conversationId]);
 
-  const badge = snapshot ? phaseLabel(t, snapshot) : null;
+  const phase = snapshot ? phaseCopy(t, snapshot) : null;
+  const summary = snapshot?.summary.trim() ?? '';
+  const lessons = snapshot?.learned ?? [];
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -79,116 +94,84 @@ export function MemoryPopover({ conversationId }: { conversationId: string }) {
       >
         <Brain className="h-3.5 w-3.5" />
       </PopoverTrigger>
-      <PopoverPopup
-        side="bottom"
-        align="end"
-        className="w-[22rem] [&_[data-slot=popover-viewport]]:space-y-3 [&_[data-slot=popover-viewport]]:p-3"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-medium text-sm">{t('Project memory')}</p>
-            <p className="truncate text-[11px] text-muted-foreground" title={snapshot?.cwd}>
-              {snapshot?.cwd ?? t('Loading…')}
-            </p>
-          </div>
-          {badge && (
-            <Badge variant={badge.variant} size="sm">
-              {badge.text}
-            </Badge>
-          )}
-        </div>
-
-        {error && <p className="text-destructive text-xs">{error}</p>}
-        {snapshot?.notice && !error && (
-          <p className="rounded-md bg-info/10 px-2 py-1 text-[11px] text-info-foreground">
-            {t(snapshot.notice)}
-          </p>
-        )}
-
-        <div className="grid grid-cols-3 gap-1.5">
-          <StatCell label={t('Lessons')} value={String(snapshot?.learned.length ?? '—')} />
-          <StatCell
-            label={t('Merged sessions')}
-            value={snapshot ? `${snapshot.stage1Done}/${Math.max(snapshot.stage1Total, 0)}` : '—'}
-          />
-          <StatCell label={t('Size')} value={snapshot ? formatBytes(snapshot.bytes) : '—'} />
-        </div>
-
-        <section className="space-y-1.5">
-          <p className="font-medium text-[11px] text-muted-foreground">{t('Working summary')}</p>
-          <div className="max-h-28 overflow-auto rounded-lg border bg-muted/20 px-2.5 py-2 text-xs leading-relaxed">
-            {snapshot?.summary.trim()
-              ? snapshot.summary
-              : t('Nothing consolidated yet. Idle sessions merge after the next spawn.')}
-          </div>
-        </section>
-
-        <section className="space-y-1.5">
-          <p className="font-medium text-[11px] text-muted-foreground">{t('Recent lessons')}</p>
-          {snapshot?.learned.length ? (
-            <ul className="max-h-36 space-y-1 overflow-auto">
-              {snapshot.learned.slice(0, 8).map((lesson) => (
-                <li
-                  key={lesson}
-                  className="rounded-md border bg-card px-2 py-1.5 text-[11px] leading-snug"
+      <PopoverPopup side="bottom" align="end" className="w-80 [&_[data-slot=popover-viewport]]:p-0">
+        <div className="flex flex-col gap-2.5 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{t('Project memory')}</p>
+              {snapshot && (
+                <p
+                  className="truncate font-mono text-[10px] text-muted-foreground"
+                  title={snapshot.cwd}
                 >
+                  {basename(snapshot.cwd)}
+                </p>
+              )}
+            </div>
+            {phase && (
+              <span className={cn('shrink-0 text-[10px] font-medium', phase.className)}>
+                {phase.label}
+              </span>
+            )}
+          </div>
+
+          {error && <p className="text-destructive text-[11px]">{error}</p>}
+          {snapshot?.notice && !error && (
+            <p className="text-[11px] text-muted-foreground">{t(snapshot.notice)}</p>
+          )}
+
+          {snapshot && (
+            <p className="text-[11px] tabular-nums text-muted-foreground">
+              {t('{{lessons}} lessons · {{merged}} merged · {{size}}', {
+                lessons: lessons.length,
+                merged: snapshot.stage1Done,
+                size: formatBytes(snapshot.bytes),
+              })}
+            </p>
+          )}
+
+          {summary ? (
+            <p className="max-h-28 overflow-auto text-xs leading-relaxed">{summary}</p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              {t('Idle sessions write a summary after the next spawn.')}
+            </p>
+          )}
+
+          {lessons.length > 0 && (
+            <ul className="max-h-36 space-y-1.5 overflow-auto border-l border-border pl-2">
+              {lessons.slice(0, 8).map((lesson) => (
+                <li key={lesson} className="text-[11px] leading-snug">
                   {lesson}
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              {t('No learn captures yet. The agent writes them with the learn tool.')}
-            </p>
           )}
-        </section>
 
-        <div className="flex gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            className="h-7 flex-1 text-[11px]"
-            onClick={() => void run('enqueue')}
-          >
-            <Layers className="h-3 w-3" />
-            {t('Queue merge')}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            className="h-7 px-2 text-[11px] text-destructive hover:text-destructive"
-            onClick={() => {
-              if (window.confirm(t('Clear project memory?'))) void run('clear');
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            <button
+              type="button"
+              disabled={busy || snapshot?.dirty}
+              className="inline-flex items-center gap-1 text-[11px] text-foreground/90 hover:text-foreground disabled:cursor-default disabled:text-muted-foreground"
+              onClick={() => void run('enqueue')}
+            >
+              <Layers className="h-3 w-3" />
+              {snapshot?.dirty ? t('Already queued') : t('Queue merge')}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+              onClick={() => {
+                if (window.confirm(t('Clear project memory?'))) void run('clear');
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+              {t('Clear')}
+            </button>
+          </div>
         </div>
-
-        {snapshot && (
-          <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            {snapshot.hasMemoryMd ? (
-              <ListTree className="h-3 w-3" />
-            ) : (
-              <CircleHelp className="h-3 w-3" />
-            )}
-            {snapshot.hasMemoryMd
-              ? t('MEMORY.md is present for this project.')
-              : t('No MEMORY.md yet — waiting for idle history.')}
-          </p>
-        )}
       </PopoverPopup>
     </Popover>
-  );
-}
-
-function StatCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/15 px-2 py-1.5">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="font-medium text-xs tabular-nums">{value}</p>
-    </div>
   );
 }
