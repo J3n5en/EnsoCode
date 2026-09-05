@@ -1131,7 +1131,11 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
               </span>
             </>
           )}
-          {item.state === 'running' ? (
+          {item.state === 'reviewing' ? (
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {t('Assistant reviewing…')}
+            </span>
+          ) : item.state === 'running' ? (
             <RunningElapsed itemKey={item.key} />
           ) : (
             (item.agentMeta || item.durationMs !== null) && (
@@ -1309,9 +1313,10 @@ function RunningElapsed({ itemKey, since }: { itemKey: string; since?: number })
   );
 }
 
-function ToolStateIcon({ state }: { state: 'running' | 'ok' | 'error' }) {
+function ToolStateIcon({ state }: { state: 'running' | 'reviewing' | 'ok' | 'error' }) {
   switch (state) {
     case 'running':
+    case 'reviewing':
       return <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />;
     case 'error':
       return <CircleAlert className="h-3.5 w-3.5 shrink-0 text-destructive" />;

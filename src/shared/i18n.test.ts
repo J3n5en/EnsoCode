@@ -34,6 +34,7 @@ const MAPPED_I18N_KEYS = [
   'Auto-accept edits',
   'Full access',
   'Assistant approval',
+  'Assistant reviewing…',
   // ApprovalModePicker.MODE_META.descKey
   'Approve every command and file change',
   'Edits run freely; commands and MCP still ask',

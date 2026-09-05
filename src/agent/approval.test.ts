@@ -102,21 +102,60 @@ describe('ApprovalGate', () => {
 });
 
 describe('ApprovalGate assistant 档代审 (options.review)', () => {
-  it('reviewer 返回 auto_allow：ask() resolve allow，且不调用 onRequest（不弹真人卡）', async () => {
+  it('代审开始立刻 onRequest(phase=reviewing + toolCallId)，结束 resolved 且不弹真人卡', async () => {
     const review = vi.fn().mockResolvedValue({ decision: 'auto_allow' });
-    const { gate, requests } = makeGate('assistant', { review });
-    const result = await gate.ask('bash', 'command', 'ls', undefined);
+    const infos: ApprovalRequestInfo[] = [];
+    const resolved: string[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      (id) => resolved.push(id),
+      { review }
+    );
+    const result = await gate.ask('bash', 'command', 'ls', undefined, 'call-1');
     expect(result).toBe('allow');
-    expect(requests).toHaveLength(0);
+    expect(infos).toEqual([
+      {
+        requestId: expect.stringMatching(/^apr-/),
+        tool: 'bash',
+        kind: 'command',
+        summary: 'ls',
+        toolCallId: 'call-1',
+        phase: 'reviewing',
+      },
+    ]);
+    expect(resolved).toEqual([infos[0].requestId]);
+  }, 1500);
+
+  it('reviewer 返回 auto_allow：ask() resolve allow，onRequest 只有 reviewing 不升格 ask_user', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'auto_allow' });
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      { review }
+    );
+    const result = await gate.ask('bash', 'command', 'ls', undefined, 'call-1');
+    expect(result).toBe('allow');
+    expect(infos).toHaveLength(1);
+    expect(infos[0].phase).toBe('reviewing');
     expect(review).toHaveBeenCalledTimes(1);
   }, 1500);
 
-  it('reviewer 返回 block：resolve block，不弹卡', async () => {
+  it('reviewer 返回 block：resolve block，onRequest 只有 reviewing 不升格 ask_user', async () => {
     const review = vi.fn().mockResolvedValue({ decision: 'block' });
-    const { gate, requests } = makeGate('assistant', { review });
-    const result = await gate.ask('bash', 'command', 'rm -rf /', undefined);
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      { review }
+    );
+    const result = await gate.ask('bash', 'command', 'rm -rf /', undefined, 'call-2');
     expect(result).toBe('block');
-    expect(requests).toHaveLength(0);
+    expect(infos).toHaveLength(1);
+    expect(infos[0].phase).toBe('reviewing');
   }, 1500);
 
   it('reviewer 返回 ask_user：走 onRequest，respond allow 后 resolve allow', async () => {

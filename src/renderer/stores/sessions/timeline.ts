@@ -1,5 +1,6 @@
 import type {
   AgentSessionCustomEntry,
+  ApprovalRequestInfo,
   ProjectedMessage,
   TodoItem,
   TurnPerf,
@@ -39,7 +40,7 @@ export type TimelineItem =
       name: string;
       summary: string;
       output: string | null;
-      state: 'running' | 'ok' | 'error';
+      state: 'running' | 'reviewing' | 'ok' | 'error';
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
       edits: EditBlock[] | null;
       /** write 工具写入的文件内容,展开即可查看;非 write 为 null */
@@ -219,12 +220,24 @@ function splitThinkingTaggedText(text: string): Array<{ kind: 'text' | 'thinking
  * - assistant 的 text/thinking 各自成块，未完结（isLast 且会话 running）的块标 streaming
  * 纯函数，输入不被修改。
  */
+function reviewingToolCallIds(
+  pendingApprovals: readonly ApprovalRequestInfo[] | undefined
+): Set<string> {
+  const ids = new Set<string>();
+  for (const request of pendingApprovals ?? []) {
+    if (request.phase === 'reviewing' && request.toolCallId) ids.add(request.toolCallId);
+  }
+  return ids;
+}
+
 function buildMessageTimeline(
   messages: ProjectedMessage[],
   running: boolean,
   cwd?: string,
-  toolOutputs?: Record<string, string>
+  toolOutputs?: Record<string, string>,
+  pendingApprovals?: readonly ApprovalRequestInfo[]
 ): TimelineItem[] {
+  const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
     string,
     {
@@ -396,7 +409,9 @@ function buildMessageTimeline(
                 ? 'error'
                 : 'ok'
               : running && messageIndex === lastTurnIndex
-                ? 'running'
+                ? reviewingIds.has(part.id)
+                  ? 'reviewing'
+                  : 'running'
                 : running
                   ? 'ok'
                   : 'error',
@@ -509,9 +524,16 @@ export function buildTimeline(
     compactionNoticeAt?: number;
     /** 运行中工具的输出快照（toolCallId → 文本）；真实 toolResult 到位后优先用后者 */
     toolOutputs?: Record<string, string>;
+    pendingApprovals?: readonly ApprovalRequestInfo[];
   }
 ): TimelineItem[] {
-  const messageItems = buildMessageTimeline(messages, running, cwd, options?.toolOutputs);
+  const messageItems = buildMessageTimeline(
+    messages,
+    running,
+    cwd,
+    options?.toolOutputs,
+    options?.pendingApprovals
+  );
   const merged =
     customEntries.length === 0
       ? messageItems
@@ -759,7 +781,11 @@ export function foldTimeline(
     // running 行是「此刻在跑什么」，都不折进黑盒
     const pinned = (s: TimelineItem): boolean =>
       s.kind === 'tool' &&
-      (s.edits !== null || !!s.writeContent || s.name === 'todo' || s.state === 'running');
+      (s.edits !== null ||
+        !!s.writeContent ||
+        s.name === 'todo' ||
+        s.state === 'running' ||
+        s.state === 'reviewing');
     const editRows = segment.filter(pinned);
     const groupRows = segment.filter((s) => !pinned(s));
     const toolCount = groupRows.filter((s) => s.kind === 'tool').length;
@@ -778,7 +804,11 @@ export function foldTimeline(
         expanded,
         count: toolCount,
         stats,
-        exploring: compact && editRows.some((s) => s.kind === 'tool' && s.state === 'running'),
+        exploring:
+          compact &&
+          editRows.some(
+            (s) => s.kind === 'tool' && (s.state === 'running' || s.state === 'reviewing')
+          ),
         children: groupRows,
       });
       // 展开：原始顺序全量平铺；收拢：仅 edit 行（diff）跟在组头后

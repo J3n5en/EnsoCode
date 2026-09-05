@@ -621,6 +621,33 @@ describe('applyAgentEvent', () => {
   });
 });
 
+describe('applyAgentEvent approval-request reviewing', () => {
+  it('reviewing 进入 pendingApprovals，resolved 后清掉', () => {
+    const request = {
+      requestId: 'apr-1',
+      tool: 'write',
+      kind: 'file-write' as const,
+      summary: '/tmp/x',
+      toolCallId: 't1',
+      phase: 'reviewing' as const,
+    };
+    const reviewing = applyAgentEvent(base, 's1', {
+      type: 'approval-request',
+      identity: identity(),
+      seq: 1,
+      request,
+    });
+    expect(reviewing.pendingApprovals).toEqual([request]);
+    const resolved = applyAgentEvent(reviewing, 's1', {
+      type: 'approval-resolved',
+      identity: identity(),
+      seq: 2,
+      requestId: 'apr-1',
+    });
+    expect(resolved.pendingApprovals).toEqual([]);
+  });
+});
+
 describe('applyAgentEvent tool-output', () => {
   const toolOutput = (seq: number, output: string): RendererAgentEvent => ({
     type: 'tool-output',

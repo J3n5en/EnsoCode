@@ -78,6 +78,7 @@ export function RemoteNodeChat(props: RemoteNodeChatProps) {
   const timeline = useMemo(
     () =>
       buildTimeline(messages, running, [], entry?.cwd, {
+        pendingApprovals: view?.approvals,
         compaction: view?.compaction,
         // 尾窗是稀疏绝对 index，buildTimeline 要的是数组下标
         compactionNoticeAt: localCompactionNoticeIndex(
@@ -85,7 +86,15 @@ export function RemoteNodeChat(props: RemoteNodeChatProps) {
           view?.compactionNoticeAt
         ),
       }),
-    [messages, entries, running, entry?.cwd, view?.compaction, view?.compactionNoticeAt]
+    [
+      messages,
+      entries,
+      running,
+      entry?.cwd,
+      view?.approvals,
+      view?.compaction,
+      view?.compactionNoticeAt,
+    ]
   );
   // 流式输出按同一 index 覆盖，Virtuoso 的 followOutput 不触发；贴底时补一次单帧贴底
   // biome-ignore lint/correctness/useExhaustiveDependencies: timeline 是触发信号

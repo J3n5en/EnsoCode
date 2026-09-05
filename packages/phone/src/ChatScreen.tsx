@@ -83,6 +83,7 @@ export function ChatScreen(props: Props) {
   const timeline = useMemo(
     () =>
       buildTimeline(messages, running, [], props.cwd, {
+        pendingApprovals: view?.approvals,
         compaction: view?.compaction,
         // 尾窗是稀疏绝对 index，buildTimeline 要的是数组下标
         compactionNoticeAt: localCompactionNoticeIndex(
@@ -90,7 +91,15 @@ export function ChatScreen(props: Props) {
           view?.compactionNoticeAt
         ),
       }),
-    [messages, entries, running, props.cwd, view?.compaction, view?.compactionNoticeAt]
+    [
+      messages,
+      entries,
+      running,
+      props.cwd,
+      view?.approvals,
+      view?.compaction,
+      view?.compactionNoticeAt,
+    ]
   );
 
   /*

@@ -89,6 +89,10 @@ export interface ApprovalRequestInfo {
   kind: ApprovalKind;
   /** 命令全文 / 文件路径 / 参数预览 */
   summary: string;
+  /** 对应 toolCall.id，代审中徽章挂到时间线该行 */
+  toolCallId?: string;
+  /** reviewing = 代审模型评审中（不弹真人按钮）；缺省 = 等人决策 */
+  phase?: 'reviewing';
 }
 
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */

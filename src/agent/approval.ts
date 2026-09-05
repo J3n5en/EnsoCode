@@ -47,10 +47,17 @@ export class ApprovalGate {
     tool: string,
     kind: ApprovalKind,
     summary: string,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    toolCallId?: string
   ): Promise<'allow' | 'deny' | 'block' | 'cancel'> {
     const requestId = `apr-${++this.counter}-${Date.now()}`;
-    const info: ApprovalRequestInfo = { requestId, tool, kind, summary };
+    const info: ApprovalRequestInfo = {
+      requestId,
+      tool,
+      kind,
+      summary,
+      ...(toolCallId ? { toolCallId } : {}),
+    };
     return new Promise((resolve) => {
       let settled = false;
       const settle = (result: 'allow' | 'deny' | 'block' | 'cancel') => {
@@ -73,6 +80,7 @@ export class ApprovalGate {
         this.onRequest(info);
         return;
       }
+      this.onRequest({ ...info, phase: 'reviewing' });
       void Promise.resolve()
         .then(() => review(info, signal))
         .then((result) => {
@@ -85,6 +93,7 @@ export class ApprovalGate {
             settle('block');
             return;
           }
+          this.pending.set(requestId, { info, settle });
           this.onRequest(info);
         })
         .catch(() => {
@@ -135,7 +144,13 @@ export function withApproval(
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (gate.needsApproval(kind, definition.name)) {
-        const result = await gate.ask(definition.name, kind, summarize(kind, params), signal);
+        const result = await gate.ask(
+          definition.name,
+          kind,
+          summarize(kind, params),
+          signal,
+          toolCallId
+        );
         if (result === 'block') throw new Error('Assistant approval blocked this operation');
         if (result === 'deny') throw new Error('User denied this operation');
         if (result === 'cancel') throw new Error('Approval cancelled');

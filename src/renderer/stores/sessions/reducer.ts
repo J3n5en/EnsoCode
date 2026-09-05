@@ -311,17 +311,23 @@ export function applyAgentEvent(
         lastSeq: event.seq,
       };
     }
-    case 'approval-request':
+    case 'approval-request': {
+      const existing = current.pendingApprovals.findIndex(
+        (request) => request.requestId === event.request.requestId
+      );
+      const pendingApprovals =
+        existing === -1
+          ? [...current.pendingApprovals, event.request]
+          : current.pendingApprovals.map((request, index) =>
+              index === existing ? event.request : request
+            );
       return {
         ...current,
-        pendingApprovals: current.pendingApprovals.some(
-          (request) => request.requestId === event.request.requestId
-        )
-          ? current.pendingApprovals
-          : [...current.pendingApprovals, event.request],
+        pendingApprovals,
         lastOutputAt: now,
         lastSeq: event.seq,
       };
+    }
     case 'approval-resolved':
       return {
         ...current,

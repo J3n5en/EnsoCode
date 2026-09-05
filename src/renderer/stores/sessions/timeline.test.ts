@@ -42,6 +42,33 @@ describe('buildTimeline', () => {
     });
   });
 
+  it('无结果的 toolCall 在会话 running 且 pending reviewing 时标 reviewing', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't1', name: 'write', arguments: { path: 'a.ts' } }],
+        },
+      ],
+      true,
+      [],
+      undefined,
+      {
+        pendingApprovals: [
+          {
+            requestId: 'apr-1',
+            tool: 'write',
+            kind: 'file-write',
+            summary: 'a.ts',
+            toolCallId: 't1',
+            phase: 'reviewing',
+          },
+        ],
+      }
+    );
+    expect(timeline[0]).toMatchObject({ kind: 'tool', state: 'reviewing', name: 'write' });
+  });
+
   it('无结果的 toolCall 在会话 running 时标为 running', () => {
     const timeline = buildTimeline(
       [
