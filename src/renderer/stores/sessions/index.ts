@@ -1806,8 +1806,12 @@ export const useSessionsStore = create<SessionsState>()(
             text = `${workspaceNote}\n\n${text}`;
             set((state) => patch(state, id, { pendingWorkspaceNote: undefined }));
           }
-          // agent 干活时消息进队列(不打断);轮次结束自动投递,队列区可编辑/删除/立即发送
-          if (conversation.started && conversation.status === 'running') {
+          // agent 干活或压缩中消息进队列(不打断);收束后自动投递。压缩时 status 仍是 idle，
+          // 立刻 prompt 会撞上 isStreaming 僵尸轮报错。
+          if (
+            conversation.started &&
+            (conversation.status === 'running' || conversation.compaction)
+          ) {
             const queuedId = crypto.randomUUID();
             set((state) =>
               patch(state, id, {
@@ -2332,6 +2336,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation || !item) return;
+          if (conversation.compaction) return;
           const running = conversation.status === 'running';
           // 出队并乐观回显。optimistic 标记使其浮在权威消息之后：running 时 steer
           // 要到下一个循环边界才送达，期间当前轮的 assistant upsert 若按裸 index
