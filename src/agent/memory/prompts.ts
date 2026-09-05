@@ -38,14 +38,26 @@ export const CONSOLIDATION_SYSTEM = [
   'Return strict JSON only — no markdown, no commentary.',
 ].join('\n');
 
-export function consolidationUser(rawMemories: string, rolloutSummaries: string): string {
-  return [
-    'Memory consolidation agent.',
-    'Memory root: memory://root',
+export function consolidationUser(input: {
+  prior?: { memoryMd: string; summary: string };
+  rawMemories: string;
+  rolloutSummaries: string;
+}): string {
+  const parts = ['Memory consolidation agent.', 'Memory root: memory://root'];
+  if (input.prior) {
+    parts.push(
+      'Prior memory (baseline — revise/append/expire; do NOT drop just because new artifacts are silent on it):',
+      '## Prior MEMORY.md',
+      input.prior.memoryMd,
+      '## Prior memory_summary.md',
+      input.prior.summary
+    );
+  }
+  parts.push(
     'Input corpus (raw memories):',
-    rawMemories,
+    input.rawMemories,
     'Input corpus (rollout summaries):',
-    rolloutSummaries,
+    input.rolloutSummaries,
     'Produce strict JSON only with this schema — you NEVER include any other output:',
     '{',
     '  "memory_md": "string",',
@@ -56,6 +68,7 @@ export function consolidationUser(rawMemories: string, rolloutSummaries: string)
     '- memory_md: long-term memory document.',
     '- memory_summary: prompt-time memory guidance.',
     '- skills: reusable playbooks. Empty array allowed.',
-    '- Treat memory as advisory: current repository state wins.',
-  ].join('\n');
+    '- Treat memory as advisory: current repository state wins.'
+  );
+  return parts.join('\n');
 }

@@ -31,6 +31,8 @@ const PHASE1_INPUT_TOKEN_LIMIT = 4000;
 const PHASE2_RAW_TOKEN_LIMIT = 20_000;
 const PER_ARTIFACT_RAW_CHARS = 6_000;
 const MAX_RAW_MEMORIES_FOR_GLOBAL = 200;
+const PRIOR_MD_TOKEN_LIMIT = 10_000;
+const PRIOR_SUMMARY_TOKEN_LIMIT = 2_000;
 
 /** OMP `truncateByApproxTokens`: 1 token ≈ 4 chars, keep 60% head + 40% tail. */
 export function truncateByApproxTokens(text: string, tokenLimit: number): string {
@@ -72,6 +74,27 @@ export function buildPhaseTwoCorpus(
     .map((row) => `--- ${row.threadId} ---\n${row.rollout_summary.trim()}`)
     .join('\n\n');
   return { raw: rawBlocks.join('\n'), summaries };
+}
+
+async function loadPriorMemory(
+  memoryRoot: string
+): Promise<{ memoryMd: string; summary: string } | undefined> {
+  const readOrEmpty = async (file: string) => {
+    try {
+      return await readFile(path.join(memoryRoot, file), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const [memoryMd, summary] = await Promise.all([
+    readOrEmpty('MEMORY.md'),
+    readOrEmpty('memory_summary.md'),
+  ]);
+  if (!memoryMd.trim() && !summary.trim()) return undefined;
+  return {
+    memoryMd: truncateByApproxTokens(memoryMd, PRIOR_MD_TOKEN_LIMIT),
+    summary: truncateByApproxTokens(summary, PRIOR_SUMMARY_TOKEN_LIMIT),
+  };
 }
 
 async function loadArtifacts(memoryRoot: string): Promise<Stage1Artifact[]> {
@@ -208,13 +231,15 @@ export async function runMemoryPipeline(opts: {
     rawTokenLimit: PHASE2_RAW_TOKEN_LIMIT,
     perArtifactRawChars: PER_ARTIFACT_RAW_CHARS,
   });
+  const prior = await loadPriorMemory(opts.memoryRoot);
   const text = await opts.completeSimple({
     phase: 2,
     systemPrompt: CONSOLIDATION_SYSTEM,
-    userText: consolidationUser(
-      `# Raw Memories\n\n${raw}`,
-      summaries || 'No rollout summaries yet.'
-    ),
+    userText: consolidationUser({
+      prior,
+      rawMemories: `# Raw Memories\n\n${raw}`,
+      rolloutSummaries: summaries || 'No rollout summaries yet.',
+    }),
   });
   const parsed = parsePhaseTwoResponse(text);
   if (!parsed?.memory_md.trim() || !parsed.memory_summary.trim()) {

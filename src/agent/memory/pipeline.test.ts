@@ -245,3 +245,40 @@ describe('buildPhaseTwoCorpus', () => {
     expect(block.length).toBeLessThanOrEqual(6_200);
   });
 });
+
+describe('runMemoryPipeline prior memory', () => {
+  it('已有 MEMORY.md 与 memory_summary.md 时，phase 2 userText 包含两者内容与 Prior memory 标记', async () => {
+    const opts = baseOpts();
+    mkdirSync(opts.memoryRoot, { recursive: true });
+    writeFileSync(path.join(opts.memoryRoot, 'MEMORY.md'), '## Prior fact\nuser prefers pnpm\n');
+    writeFileSync(path.join(opts.memoryRoot, 'memory_summary.md'), 'Prior summary line\n');
+    writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
+    const completeSimple = vi
+      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .mockResolvedValueOnce(STAGE1_VALID)
+      .mockResolvedValueOnce(PHASE2_VALID);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const phase2UserText = completeSimple.mock.calls[1][0].userText;
+    expect(phase2UserText).toContain('Prior memory');
+    expect(phase2UserText).toContain('user prefers pnpm');
+    expect(phase2UserText).toContain('Prior summary line');
+  });
+
+  it('无现有 MEMORY.md/memory_summary.md 时，phase 2 userText 不包含 Prior memory 段', async () => {
+    const opts = baseOpts();
+    writeParentSession(opts.sessionDir, { id: 'thread-valid', userText: 'fix login bug' });
+    const completeSimple = vi
+      .fn<Parameters<MemoryCompleteSimple>, ReturnType<MemoryCompleteSimple>>()
+      .mockResolvedValueOnce(STAGE1_VALID)
+      .mockResolvedValueOnce(PHASE2_VALID);
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const phase2UserText = completeSimple.mock.calls[1][0].userText;
+    expect(phase2UserText).not.toContain('Prior memory');
+  });
+});
