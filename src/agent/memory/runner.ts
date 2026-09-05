@@ -35,7 +35,15 @@ export function createMemoryCompleteSimple(opts: {
         },
         { signal: controller.signal }
       );
-      const content = (message as { content?: unknown }).content;
+      const { content, stopReason, errorMessage } = message as {
+        content?: unknown;
+        stopReason?: string;
+        errorMessage?: string;
+      };
+      // pi 把传输/上游错误包成 stopReason=error 的空消息；当成空回复会让管线静默把线程标 done
+      if (stopReason === 'error') {
+        throw new Error(errorMessage || 'model request failed');
+      }
       return Array.isArray(content)
         ? (content as Array<{ type?: string; text?: string }>)
             .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))

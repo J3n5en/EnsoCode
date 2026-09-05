@@ -137,6 +137,7 @@ async function main() {
     workerToken: `cli-${process.pid}`,
     completeSimple: traced(createMemoryCompleteSimple({ runtime, sessionModel, phase2Model })),
     onProgress: (p) => console.log(`[${p.phase}] ${p.current}/${p.total}`),
+    onStageOneError: (threadId, err) => console.log(`  stage1 FAILED ${threadId}: ${String(err)}`),
     stageOneConcurrency: Number(arg('concurrency') ?? 4),
     stageOneSelect: {
       maxRolloutsPerStartup: Number(arg('limit') ?? (flag('phase2-only') ? 0 : 64)),

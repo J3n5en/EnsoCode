@@ -455,6 +455,31 @@ describe('runMemoryPipeline stage 1 并发', () => {
   });
 });
 
+describe('runMemoryPipeline stage 1 失败', () => {
+  it('某线程模型调用抛错时不标 done（下次重试），其他线程照常产出', async () => {
+    const opts = baseOpts();
+    writeParentSession(opts.sessionDir, { id: 't-bad', userText: 'bad' });
+    writeParentSession(opts.sessionDir, { id: 't-good', userText: 'good' });
+    opts.completeSimple = vi.fn<MemoryCompleteSimple>(async ({ phase, userText }) => {
+      if (phase === 2) return PHASE2_VALID;
+      if (userText.includes('t-bad')) throw new Error('Request timed out.');
+      return STAGE1_VALID;
+    });
+
+    const result = await runMemoryPipeline(opts);
+
+    expect(result.phase2Ran).toBe(true);
+    const jobs = JSON.parse(readFileSync(path.join(opts.memoryRoot, '.jobs.json'), 'utf8'));
+    expect(jobs.stage1['t-good'].status).toBe('done');
+    expect(jobs.stage1['t-bad'].status).not.toBe('done');
+    expect(jobs.stage1['t-bad'].lastSuccessWatermark).toBeUndefined();
+    const artifacts = JSON.parse(
+      readFileSync(path.join(opts.memoryRoot, 'stage1_outputs.json'), 'utf8')
+    ) as Array<{ threadId: string }>;
+    expect(artifacts.map((a) => a.threadId)).toEqual(['t-good']);
+  });
+});
+
 describe('runMemoryPipeline phase 2 失败', () => {
   function seedForcedPhase2(memoryRoot: string) {
     mkdirSync(memoryRoot, { recursive: true });

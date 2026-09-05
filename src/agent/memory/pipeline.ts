@@ -167,6 +167,7 @@ export async function runMemoryPipeline(opts: {
   stageOneSelect?: Omit<StageOneSelectOptions, 'nowSec' | 'currentThreadId'>;
   /** stage 1 模型调用并发数（jobs / artifacts 落盘仍按批串行），缺省 1 */
   stageOneConcurrency?: number;
+  onStageOneError?: (threadId: string, error: unknown) => void;
 }): Promise<{ stage1Claimed: number; phase2Ran: boolean }> {
   const threads = await listMemoryThreads(opts.sessionDir, { cwd: opts.cwd });
   const candidates = selectStageOneCandidates(threads, {
@@ -190,23 +191,31 @@ export async function runMemoryPipeline(opts: {
   let produced = false;
 
   const concurrency = Math.max(1, Math.floor(opts.stageOneConcurrency ?? 1));
-  const extractOne = async (thread: StageOneCandidate): Promise<StageOneOutput | undefined> => {
+  type ExtractResult =
+    | { ok: true; parsed: StageOneOutput | undefined }
+    | { ok: false; error: unknown };
+  const extractOne = async (thread: StageOneCandidate): Promise<ExtractResult> => {
     let payload = '';
     try {
       payload = await readFile(thread.sessionFile, 'utf8');
     } catch {
-      return undefined;
+      return { ok: true, parsed: undefined };
     }
     const items = extractPersistableMessages(payload);
-    const text = await opts.completeSimple({
-      phase: 1,
-      systemPrompt: STAGE_ONE_SYSTEM,
-      userText: stageOneUser(
-        thread.threadId,
-        truncateByApproxTokens(JSON.stringify(items), PHASE1_INPUT_TOKEN_LIMIT)
-      ),
-    });
-    return parseStageOneResponse(text);
+    try {
+      const text = await opts.completeSimple({
+        phase: 1,
+        systemPrompt: STAGE_ONE_SYSTEM,
+        userText: stageOneUser(
+          thread.threadId,
+          truncateByApproxTokens(JSON.stringify(items), PHASE1_INPUT_TOKEN_LIMIT)
+        ),
+      });
+      return { ok: true, parsed: parseStageOneResponse(text) };
+    } catch (error) {
+      // 模型/网络失败：不标 done，租约到期后下次启动重试；不影响同批其他线程
+      return { ok: false, error };
+    }
   };
 
   for (let i = 0; i < candidates.length; i += concurrency) {
@@ -227,7 +236,12 @@ export async function runMemoryPipeline(opts: {
     stage1Claimed += batch.length;
     const results = await Promise.all(batch.map(({ thread }) => extractOne(thread)));
     for (const [index, { thread, token }] of batch.entries()) {
-      const parsed = results[index];
+      const result = results[index] as ExtractResult;
+      if (!result.ok) {
+        opts.onStageOneError?.(thread.threadId, result.error);
+        continue;
+      }
+      const parsed = result.parsed;
       const done = markStage1Done(jobs, thread.threadId, {
         token,
         watermark: thread.updatedAtSec,
