@@ -1215,6 +1215,78 @@ describe('typed Agent child projection', () => {
     expect(agentPrompt).not.toHaveBeenCalled();
   });
 
+  it('上下文压缩成功结束后自动投递排队消息', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          compaction: 'running',
+          queuedMessages: [{ id: 'q1', text: 'after compact' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    onAgentEvent?.({
+      type: 'compaction',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 1,
+      state: 'end',
+    });
+
+    await vi.waitFor(() =>
+      expect(agentPrompt).toHaveBeenCalledWith('parent', 'after compact', undefined)
+    );
+    expect(
+      sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages
+    ).toHaveLength(0);
+    expect(
+      sessionsModule.useSessionsStore.getState().conversations.parent.compaction
+    ).toBeUndefined();
+  });
+
+  it('轮次结束时压缩仍在排队则不投递，等压缩结束再发', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          compaction: 'queued',
+          queuedMessages: [{ id: 'q1', text: 'wait for compact' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    onAgentEvent?.({
+      type: 'turn-completed',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 2,
+      turnId: 't1',
+    });
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'wait for compact' },
+    ]);
+
+    onAgentEvent?.({
+      type: 'compaction',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 3,
+      state: 'end',
+    });
+    await vi.waitFor(() =>
+      expect(agentPrompt).toHaveBeenCalledWith('parent', 'wait for compact', undefined)
+    );
+  });
+
   it('summon only pre-fills the parent composer and never dispatches', () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

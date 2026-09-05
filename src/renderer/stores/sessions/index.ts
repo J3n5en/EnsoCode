@@ -869,6 +869,15 @@ export const useSessionsStore = create<SessionsState>()(
                 })
               : state
           );
+          // 压缩不发 turn-completed：成功结束后再泵队列，否则排队消息会卡住
+          if (event.state === 'end') {
+            if (get().conversations[id]?.abortRequested) {
+              set((state) => patch(state, id, { abortRequested: false }));
+              return;
+            }
+            flushQueue(id);
+            continueGoal(id);
+          }
           return;
         }
 
@@ -1173,6 +1182,8 @@ export const useSessionsStore = create<SessionsState>()(
       function flushQueue(id: string): void {
         const conversation = get().conversations[id];
         if (!conversation?.started || conversation.status !== 'idle') return;
+        // 压缩排队/进行中先等压完：上下文还没换形就发下一条会打在旧占用上
+        if (conversation.compaction) return;
         const [next, ...rest] = conversation.queuedMessages ?? [];
         if (!next) return;
         if (
