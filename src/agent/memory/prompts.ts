@@ -71,7 +71,8 @@ export function consolidationUser(input: {
   if (input.prior) {
     parts.push(
       'Prior memory is the baseline: revise, append, expire — never drop an entry just',
-      'because the new artifacts below are silent about it.',
+      'because the new artifacts below are silent about it. Apply the same exclusions above when',
+      'cleaning prior memory: only durable, un-contradicted entries survive by absence of new evidence.',
       '## Prior MEMORY.md',
       input.prior.memoryMd,
       '## Prior memory_summary.md',
@@ -102,7 +103,8 @@ export function consolidationUser(input: {
     '- memory_md: long-term memory document, structured Markdown sectioned by taxonomy, headings per',
     '  category, keep file:line / commit anchors, mark superseded claims explicitly.',
     '- memory_summary: prompt-time memory guidance, sectioned by taxonomy, target 1500–4000 chars total;',
-    '  within each section, lead with the item most likely to change next-session behavior.',
+    '  within each section, lead with the item most likely to change next-session behavior;',
+    '  contains only currently valid conclusions — superseded claims stay in memory_md only, never here.',
     '- skills: reusable playbooks. Empty array allowed.',
     '- Treat memory as advisory: current repository state wins.'
   );

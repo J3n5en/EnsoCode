@@ -48,4 +48,22 @@ describe('consolidationUser', () => {
     expect(text.toLowerCase()).toContain('baseline');
     expect(text.toLowerCase()).toMatch(/revise\/append\/expire|revise, append, expire/);
   });
+
+  it('清理 prior memory 时也适用同一套排除标准：只有持久且未被新证据推翻的条目才能因“新语料没提”而静默带入下一代记忆', () => {
+    const text = consolidationUser({
+      ...base,
+      prior: { memoryMd: 'old fact', summary: 'old summary' },
+    });
+
+    expect(text.toLowerCase()).toContain('same exclusions');
+    expect(text.toLowerCase()).toMatch(/un-contradicted|uncontradicted/);
+  });
+
+  it('memory_summary 只允许当前仍有效的结论，已被取代的说法只存在 memory_md', () => {
+    const text = consolidationUser(base);
+
+    expect(text.toLowerCase()).toContain('memory_summary');
+    expect(text.toLowerCase()).toMatch(/only.{0,20}currently valid|currently valid conclusions/);
+    expect(text.toLowerCase()).toContain('memory_md only');
+  });
 });
