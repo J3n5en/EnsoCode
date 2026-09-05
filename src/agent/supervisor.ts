@@ -105,12 +105,16 @@ import {
   appendLearnedFile,
   buildMemoryUserText,
   extractLearnedNotes,
+  getMemoryRoot,
   LOCAL_MEMORY_SYSTEM_PROMPT,
   readLearnedFile,
   shouldInjectProjectLearnedFile,
   shouldLearnFromTurn,
 } from './localMemory';
 import { McpManager } from './mcp';
+import { loadJobs } from './memory/jobs';
+import { selectStageOneCandidates } from './memory/stageOne';
+import { loadSessionMemoryInjection, shouldRunMemoryStartup } from './memory/startup';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
@@ -1120,8 +1124,10 @@ export class SessionSupervisor {
       : undefined;
     const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
     const learnedFile =
-      localMemoryEnabled && !remoteAgentsFiles && shouldInjectProjectLearnedFile()
-        ? readLearnedFile(cwd)
+      localMemoryEnabled && !remoteAgentsFiles
+        ? shouldInjectProjectLearnedFile()
+          ? readLearnedFile(cwd)
+          : await loadSessionMemoryInjection(this.options.agentDir, cwd)
         : undefined;
     const resourceLoader = createSessionResourceLoader({
       cwd,
@@ -1602,6 +1608,14 @@ export class SessionSupervisor {
       sessionFile: requiredSessionFile(session),
       model: settingsModelRef(model),
     });
+    if (
+      shouldRunMemoryStartup({
+        localMemoryEnabled,
+        remote: Boolean(remote),
+      })
+    ) {
+      void this.runMemoryStartup(managedRef);
+    }
     checkpoints?.cleanupOldSessions();
   }
 
@@ -2860,6 +2874,29 @@ export class SessionSupervisor {
       return initializeWorkerRuntime(runtime);
     })();
     return this.runtimePromise;
+  }
+
+  private async runMemoryStartup(managed: ManagedSession): Promise<void> {
+    if (
+      !shouldRunMemoryStartup({
+        localMemoryEnabled: Boolean(managed.localMemoryEnabled),
+        coworker: Boolean(managed.coworkerName),
+        child: Boolean(managed.childIdentity),
+      })
+    ) {
+      return;
+    }
+    if (!managed.memoryCwd) return;
+    try {
+      const root = getMemoryRoot(this.options.agentDir, managed.memoryCwd);
+      await loadJobs(root);
+      selectStageOneCandidates([], {
+        nowSec: Math.floor(Date.now() / 1000),
+        currentThreadId: managed.identity.sessionId,
+      });
+    } catch {
+      // 记忆维护失败静默
+    }
   }
 
   private async maybeLearnFromTurn(managed: ManagedSession): Promise<void> {

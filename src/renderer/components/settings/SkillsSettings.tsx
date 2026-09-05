@@ -73,7 +73,7 @@ export function SkillsSettings() {
         <div>
           <p className="font-medium text-sm">{t('Project memory')}</p>
           <p className="text-muted-foreground text-xs">
-            {t('After a turn, extract short facts into .enso/learned.md for later sessions.')}
+            {t('Capture lessons with learn; idle sessions merge into MEMORY.md after startup.')}
           </p>
         </div>
         <Switch checked={localMemoryEnabled} onCheckedChange={setLocalMemoryEnabled} />
