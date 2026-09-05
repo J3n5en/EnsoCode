@@ -89,4 +89,30 @@ describe('extractPersistableMessages', () => {
       { role: 'toolResult', toolName: 'read', text: 'file body' },
     ]);
   });
+
+  it('keeps only bash/eval/read/grep tool results, matching OMP', () => {
+    const payload = [
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'write',
+          content: [{ type: 'text', text: 'wrote file' }],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'bash',
+          content: [{ type: 'text', text: 'ls ok' }],
+        },
+      },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join('\n');
+    expect(extractPersistableMessages(payload)).toEqual([
+      { role: 'toolResult', toolName: 'bash', text: 'ls ok' },
+    ]);
+  });
 });

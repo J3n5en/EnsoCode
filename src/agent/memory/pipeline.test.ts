@@ -1,9 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { runMemoryPipeline, type MemoryCompleteSimple } from './pipeline';
+import { type MemoryCompleteSimple, runMemoryPipeline } from './pipeline';
 
 const CWD = '/Users/me/proj';
 const NOW_SEC = 1_800_000_000;
@@ -20,7 +26,10 @@ function writeParentSession(
   const file = path.join(dir, `${opts.id}.jsonl`);
   const rows = [
     { type: 'session', id: opts.id, cwd: opts.cwd ?? CWD },
-    { type: 'message', message: { role: 'user', content: [{ type: 'text', text: opts.userText }] } },
+    {
+      type: 'message',
+      message: { role: 'user', content: [{ type: 'text', text: opts.userText }] },
+    },
   ];
   writeFileSync(file, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
   const mtime = NOW_SEC - (opts.idleSec ?? IDLE_SEC);
@@ -154,5 +163,19 @@ describe('runMemoryPipeline', () => {
     expect(call.userText).toContain('thread-other');
     expect(call.userText).not.toContain('thread-current');
     expect(result.stage1Claimed).toBe(1);
+  });
+
+  it('truncates stage-one payload around a 4000-token budget', async () => {
+    const opts = baseOpts();
+    const huge = 'x'.repeat(20_000);
+    writeParentSession(opts.sessionDir, { id: 'thread-huge', userText: huge });
+    const completeSimple = vi.fn(async () => STAGE1_EMPTY) as unknown as MemoryCompleteSimple;
+    opts.completeSimple = completeSimple;
+
+    await runMemoryPipeline(opts);
+
+    const userText = completeSimple.mock.calls[0][0].userText;
+    expect(userText).toContain('...[truncated]...');
+    expect(userText.length).toBeLessThan(huge.length);
   });
 });

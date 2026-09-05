@@ -7,7 +7,7 @@ export const LEARN_TOOL_DESCRIPTION = [
   '',
   'Use after solving insight likely to pay off again: a non-obvious fix, discovered project convention, or workflow that worked.',
   '',
-  '`skill` optional; provide only for a repeatable procedure worth codifying as `SKILL.md`, not a fact.',
+  '`skill` optional; provide only for a repeatable procedure worth codifying as `SKILL.md`, not a fact. Managed skills: isolated managed-skills; surfaced as normal skills next session; NEVER touch user-authored skills. Frontmatter: generated from `name` and `description`.',
   'Capture sparingly, specifically: one strong reusable lesson > several vague ones.',
 ].join('\n');
 
