@@ -158,6 +158,10 @@ export function ChatView() {
       name: '/compact',
       description: t('Compact the context now (/compact [summary focus])'),
     };
+    const memory = {
+      name: '/memory',
+      description: t('Project memory (/memory view · stats · diagnose · clear · enqueue)'),
+    };
     const fromSettings = skills
       .filter((skill) => skill.enabled !== false)
       .map((skill) => ({
@@ -171,12 +175,14 @@ export function ChatView() {
     const seen = new Set([
       goal.name,
       compact.name,
+      memory.name,
       ...fromSettings.map((command) => command.name),
       ...fromProject.map((command) => command.name),
     ]);
     return [
       goal,
       compact,
+      memory,
       ...fromSettings,
       ...fromProject,
       ...conversation.commands.filter((command) => !seen.has(command.name)),

@@ -4,11 +4,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   claimStage1,
+  enqueuePhase2,
   loadJobs,
+  type MemoryJobsState,
   markStage1Done,
   saveJobs,
   tryClaimPhase2,
-  type MemoryJobsState,
 } from './jobs';
 
 function memoryRoot(): string {
@@ -78,7 +79,10 @@ describe('memory jobs sidecar', () => {
     const wrong = markStage1Done(claim.state, 't1', { token: 'bogus', watermark: 150 });
     expect(wrong).toBeUndefined();
 
-    const right = markStage1Done(claim.state, 't1', { token: claim.token as string, watermark: 150 });
+    const right = markStage1Done(claim.state, 't1', {
+      token: claim.token as string,
+      watermark: 150,
+    });
     expect(right?.stage1.t1).toMatchObject({ status: 'done', lastSuccessWatermark: 150 });
   });
 
@@ -112,6 +116,16 @@ describe('memory jobs sidecar', () => {
     });
     expect(claim.claimed).toBe(true);
     expect(claim.state.global).toMatchObject({ leaseUntil: 260, status: 'running' });
+    const dirty = enqueuePhase2({ stage1: {}, global: { watermark: 400 } });
+    expect(dirty.global.dirty).toBe(true);
+    expect(
+      tryClaimPhase2(dirty, {
+        nowSec: 200,
+        leaseSeconds: 60,
+        workerToken: 'w1',
+        newWatermark: 400,
+      }).claimed
+    ).toBe(true);
   });
 
   it('saveJobs then loadJobs roundtrips the state', async () => {

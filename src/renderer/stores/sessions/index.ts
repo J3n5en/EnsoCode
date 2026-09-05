@@ -2,6 +2,7 @@ import type { AgentTypeKey } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { type DefaultModelRef, defaultApprovalMode, resolveChatModel } from '@shared/defaultModel';
+import { type MemoryCommandAction, parseMemoryCommand } from '@shared/memoryCommand';
 import type {
   ApprovalMode,
   AttachedImage,
@@ -286,6 +287,7 @@ interface SessionsState {
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
   compact(conversationId: string, instructions?: string): void;
+  memory(conversationId: string, action: MemoryCommandAction): Promise<string | null>;
   /** UI 提示过压缩失败后清掉错误，避免重复弹提示 */
   clearCompactionError(conversationId: string): void;
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
@@ -1763,6 +1765,10 @@ export const useSessionsStore = create<SessionsState>()(
             get().compact(id, compactCommand.instructions);
             return null;
           }
+          const memoryCommand = parseMemoryCommand(text);
+          if (memoryCommand) {
+            return get().memory(id, memoryCommand.action);
+          }
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
           let spawnTitle: string | undefined;
@@ -2259,6 +2265,42 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           if (!conversation?.started || conversation.compaction) return;
           void window.electronAPI.agent.compact(conversationId, instructions);
+        },
+
+        async memory(conversationId, action) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation) return 'no conversation';
+          const project = useSettingsStore
+            .getState()
+            .projects.find((p) => p.id === conversation.projectId);
+          const cwd = conversation.worktree?.path ?? project?.path;
+          if (!cwd) return 'memory command needs a project path';
+          const result = await window.electronAPI.agent.memory(
+            conversationId,
+            action,
+            cwd,
+            project?.kind === 'ssh'
+          );
+          if (!result.ok) return result.error ?? 'memory command failed';
+          const now = Date.now();
+          set((state) =>
+            patch(state, conversationId, {
+              messages: [
+                ...state.conversations[conversationId].messages,
+                {
+                  role: 'user',
+                  content: [{ type: 'text', text: `/memory ${action}` }],
+                  timestamp: now,
+                },
+                {
+                  role: 'assistant',
+                  content: [{ type: 'text', text: result.text ?? '' }],
+                  timestamp: now + 1,
+                },
+              ],
+            })
+          );
+          return null;
         },
 
         clearCompactionError(conversationId) {

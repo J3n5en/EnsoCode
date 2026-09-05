@@ -375,6 +375,13 @@ const electronAPI = {
     /** 手动压缩上下文；忙碌时 worker 自行排队，进度经 compaction 事件回来 */
     compact: (sessionId: string, instructions?: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_COMPACT, sessionId, instructions),
+    memory: (
+      sessionId: string,
+      action: 'view' | 'stats' | 'diagnose' | 'clear' | 'enqueue',
+      cwd: string,
+      remote?: boolean
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_MEMORY, sessionId, action, cwd, remote),
     /** 回退到倒数第 N+1 条 user 消息（0 = 最后一条）；结果经 rewind-done 事件回来。
      *  restoreFiles 同时把工作树还原到该轮首个写操作前(无快照静默降级) */
     rewind: (

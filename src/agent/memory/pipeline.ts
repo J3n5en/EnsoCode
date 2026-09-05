@@ -104,9 +104,18 @@ export async function runMemoryPipeline(opts: {
     await saveArtifacts(opts.memoryRoot, artifacts);
   }
 
-  if (!produced) return { stage1Claimed, phase2Ran: false };
+  const forced = jobs.global.dirty === true;
+  if (!produced && !forced) return { stage1Claimed, phase2Ran: false };
+  if (forced && artifacts.length === 0) {
+    jobs = { ...jobs, global: { ...jobs.global, dirty: undefined, status: 'done' } };
+    await saveJobs(opts.memoryRoot, jobs);
+    return { stage1Claimed, phase2Ran: false };
+  }
 
-  const newWatermark = Math.max(0, ...artifacts.map((row) => row.sourceUpdatedAt));
+  const newWatermark = Math.max(
+    forced ? jobs.global.watermark + 1 : 0,
+    ...artifacts.map((row) => row.sourceUpdatedAt)
+  );
   const phase2 = tryClaimPhase2(jobs, {
     nowSec: opts.nowSec,
     leaseSeconds: 180,

@@ -19,6 +19,8 @@ export type MemoryJobsState = {
     leaseUntil?: number;
     ownershipToken?: string;
     status?: Stage1JobStatus;
+    /** `/memory enqueue`：下次启动即使没有新 Phase 1 也跑合并 */
+    dirty?: boolean;
   };
 };
 
@@ -96,12 +98,23 @@ export function markStage1Done(
   };
 }
 
+export function enqueuePhase2(state: MemoryJobsState): MemoryJobsState {
+  return {
+    ...state,
+    global: {
+      watermark: state.global.watermark,
+      dirty: true,
+      status: 'idle',
+    },
+  };
+}
+
 export function tryClaimPhase2(
   state: MemoryJobsState,
   opts: { nowSec: number; leaseSeconds: number; workerToken: string; newWatermark: number }
 ): { claimed: boolean; state: MemoryJobsState; token?: string } {
   const global = state.global;
-  if (global.watermark >= opts.newWatermark) return { claimed: false, state };
+  if (global.watermark >= opts.newWatermark && !global.dirty) return { claimed: false, state };
   if (
     global.status === 'running' &&
     global.leaseUntil !== undefined &&

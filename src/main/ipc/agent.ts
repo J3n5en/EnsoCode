@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
+import type { MemoryCommandAction } from '@shared/memoryCommand';
 import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
@@ -29,6 +30,7 @@ import {
 } from '@shared/types/mentions';
 import { app, ipcMain, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
+import { runMemorySlash } from '../../agent/memory/slash';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
 import {
@@ -830,6 +832,34 @@ export function registerAgentHandlers(): void {
         mode as ApprovalMode,
         await readStoredOauthCredentialKeys()
       );
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_MEMORY,
+    async (
+      _event,
+      sessionId: unknown,
+      action: unknown,
+      cwd: unknown,
+      remote: unknown
+    ): Promise<AgentActionResult> => {
+      const allowed: MemoryCommandAction[] = ['view', 'stats', 'diagnose', 'clear', 'enqueue'];
+      if (!isNonEmptyString(sessionId) || !allowed.includes(action as MemoryCommandAction)) {
+        return { ok: false, error: 'invalid memory command' };
+      }
+      if (typeof cwd !== 'string' || !cwd.trim()) {
+        return { ok: false, error: 'memory command needs a project path' };
+      }
+      const settings = readSettings();
+      const result = await runMemorySlash({
+        action: action as MemoryCommandAction,
+        agentDir: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
+        cwd: cwd.trim(),
+        localMemoryEnabled: settings?.localMemoryEnabled !== false,
+        remote: remote === true,
+      });
+      return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error };
     }
   );
 
