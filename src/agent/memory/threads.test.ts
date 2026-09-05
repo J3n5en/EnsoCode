@@ -119,6 +119,50 @@ describe('extractPersistableMessages', () => {
     expect(result.text).toBe(body);
   });
 
+  it('混合 system/developer/user/assistant/toolResult 时保持原始顶序', () => {
+    const payload = [
+      {
+        type: 'message',
+        message: { role: 'system', content: [{ type: 'text', text: 'sys prompt' }] },
+      },
+      {
+        type: 'message',
+        message: { role: 'developer', content: [{ type: 'text', text: 'dev note' }] },
+      },
+      {
+        type: 'message',
+        message: { role: 'user', content: [{ type: 'text', text: 'user turn 1' }] },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'bash',
+          content: [{ type: 'text', text: 'tool output' }],
+        },
+      },
+      {
+        type: 'message',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'assistant reply' }] },
+      },
+      {
+        type: 'message',
+        message: { role: 'user', content: [{ type: 'text', text: 'user turn 2' }] },
+      },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join('\n');
+
+    expect(extractPersistableMessages(payload)).toEqual([
+      { role: 'system', text: 'sys prompt' },
+      { role: 'developer', text: 'dev note' },
+      { role: 'user', text: 'user turn 1' },
+      { role: 'toolResult', toolName: 'bash', text: 'tool output' },
+      { role: 'assistant', text: 'assistant reply' },
+      { role: 'user', text: 'user turn 2' },
+    ]);
+  });
+
   it('keeps only bash/eval/read/grep tool results, matching OMP', () => {
     const payload = [
       {
