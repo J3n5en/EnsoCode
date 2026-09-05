@@ -22,7 +22,7 @@ import {
   TerminalSquare,
   Undo2,
 } from 'lucide-react';
-import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -1076,7 +1076,107 @@ function ToolGroupRow({
   );
 }
 
-/** 只读探索工具：开关开时去卡片化为一行（与 timeline.ts 的 SEARCH_TOOLS + read 一致） */
+/** 工具详情独立跟随底部：用户上滚时暂停，滚回底部后恢复。 */
+function ToolContentScroller({
+  children,
+  className,
+  follow,
+}: {
+  children: ReactNode;
+  className?: string;
+  follow: boolean;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const followingRef = useRef(follow);
+  const followEnabledRef = useRef(follow);
+  const programmaticTargetRef = useRef<number | null>(null);
+  const touchYRef = useRef<number | null>(null);
+  const frameRef = useRef(0);
+  followEnabledRef.current = follow;
+
+  const pauseFollowing = useCallback(() => {
+    followingRef.current = false;
+    programmaticTargetRef.current = null;
+    cancelAnimationFrame(frameRef.current);
+  }, []);
+  const pinToBottom = useCallback(() => {
+    if (!followEnabledRef.current || !followingRef.current) return;
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      const scroller = scrollerRef.current;
+      if (!scroller || !followEnabledRef.current || !followingRef.current) return;
+      const target = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      programmaticTargetRef.current = target;
+      scroller.scrollTop = target;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (follow) {
+      followingRef.current = true;
+      pinToBottom();
+    } else {
+      programmaticTargetRef.current = null;
+      cancelAnimationFrame(frameRef.current);
+    }
+  }, [follow, pinToBottom]);
+  useEffect(pinToBottom);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(pinToBottom);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [pinToBottom]);
+  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
+
+  return (
+    <div
+      ref={scrollerRef}
+      onWheel={(event) => {
+        if (event.deltaY < 0) pauseFollowing();
+      }}
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        pauseFollowing();
+      }}
+      onTouchStart={(event) => {
+        touchYRef.current = event.touches[0]?.clientY ?? null;
+      }}
+      onTouchMove={(event) => {
+        const y = event.touches[0]?.clientY;
+        if (y !== undefined && touchYRef.current !== null && y > touchYRef.current) {
+          pauseFollowing();
+        }
+        touchYRef.current = y ?? null;
+      }}
+      onTouchEnd={() => {
+        touchYRef.current = null;
+      }}
+      onScroll={(event) => {
+        if (!followEnabledRef.current) return;
+        const scroller = event.currentTarget;
+        const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2;
+        if (atBottom) {
+          followingRef.current = true;
+          programmaticTargetRef.current = null;
+          return;
+        }
+        const target = programmaticTargetRef.current;
+        if (target !== null && scroller.scrollTop >= target - 2) {
+          programmaticTargetRef.current = null;
+          pinToBottom();
+          return;
+        }
+        pauseFollowing();
+      }}
+      className={cn('max-h-96 overflow-auto [overflow-anchor:none]', className)}
+    >
+      <div ref={contentRef}>{children}</div>
+    </div>
+  );
+}
 
 /** 单行工具摘要：状态点/图标 + 工具名 + 参数摘要；edit 展开为 diff,write 展开为写入内容,其余为输出 */
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
@@ -1171,23 +1271,26 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         )}
       </div>
       {expanded && hasDiff && item.edits && (
-        <div className="max-h-96 overflow-auto">
+        <ToolContentScroller follow={item.state === 'running'}>
           <EditDiff path={item.summary} blocks={item.edits} />
-        </div>
+        </ToolContentScroller>
       )}
       {expanded && hasWrite && item.writeContent && (
-        <div className="max-h-96 overflow-auto rounded-b-lg border-t border-border/60">
+        <ToolContentScroller
+          follow={item.state === 'running'}
+          className="rounded-b-lg border-t border-border/60"
+        >
           <ReadFileView path={item.summary} contents={item.writeContent} />
-        </div>
+        </ToolContentScroller>
       )}
       {expanded && !hasDiff && !hasWrite && item.output && (
-        <div
-          className={cn(
-            'max-h-96 overflow-auto',
+        <ToolContentScroller
+          follow={item.state === 'running'}
+          className={
             compact
               ? 'mt-1 rounded-lg border border-border/60 bg-muted/30'
               : 'rounded-b-lg border-t border-border/60'
-          )}
+          }
         >
           {item.name === 'bash' ? (
             <TerminalOutput command={item.summary} output={item.output} />
@@ -1202,7 +1305,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
               {item.output}
             </pre>
           )}
-        </div>
+        </ToolContentScroller>
       )}
     </div>
   );
