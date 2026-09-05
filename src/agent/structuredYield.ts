@@ -157,7 +157,8 @@ export function appendYieldJson(text: string, value: unknown): string {
 
 export function withAgentRead<T extends { execute: (...args: never[]) => unknown }>(
   definition: T,
-  getStore: () => ReadonlyMap<string, unknown>
+  getStore: () => ReadonlyMap<string, unknown>,
+  resolveVirtualPath?: (filePath: string) => string | undefined
 ): T {
   const execute = definition.execute as (
     toolCallId: string,
@@ -181,6 +182,10 @@ export function withAgentRead<T extends { execute: (...args: never[]) => unknown
         if (value === undefined) throw new Error(`unknown agent yield: ${filePath}`);
         const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
         return Promise.resolve({ content: [{ type: 'text' as const, text }], details: undefined });
+      }
+      const mapped = resolveVirtualPath?.(filePath);
+      if (mapped) {
+        return execute(toolCallId, { ...(params as object), path: mapped }, signal, onUpdate, ctx);
       }
       return execute(toolCallId, params, signal, onUpdate, ctx);
     }) as T['execute'],

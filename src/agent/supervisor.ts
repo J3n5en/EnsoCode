@@ -113,6 +113,7 @@ import {
 } from './localMemory';
 import { McpManager } from './mcp';
 import { runMemoryPipeline } from './memory/pipeline';
+import { resolveMemoryUri } from './memory/sanitize';
 import { loadSessionMemoryInjection, shouldRunMemoryStartup } from './memory/startup';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
@@ -238,6 +239,7 @@ interface ManagedSession {
   localMemoryEnabled?: boolean;
   memoryCwd?: string;
   memoryModel?: SpawnModelConfig;
+  memoryPhase2Model?: SpawnModelConfig;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
   contextUsage: ContextUsageTracker;
@@ -698,7 +700,8 @@ export class SessionSupervisor {
           command.loadHarnessAssets,
           command.windowsLocalShell,
           command.exploreFoldEnabled,
-          command.localMemoryEnabled
+          command.localMemoryEnabled,
+          command.memoryPhase2Model
         );
         return;
       case 'spawn-child':
@@ -1076,7 +1079,8 @@ export class SessionSupervisor {
     loadHarnessAssets = false,
     windowsLocalShell?: WindowsLocalShell,
     exploreFoldEnabled = false,
-    localMemoryEnabled = true
+    localMemoryEnabled = true,
+    memoryPhase2Model?: SpawnModelConfig
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const toolEnabled = (id: string) => !disabledTools.includes(id);
@@ -1196,7 +1200,12 @@ export class SessionSupervisor {
     // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
     // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
     const structuredById = new Map<string, unknown>();
-    const wrapRead = (definition: Def): Def => withAgentRead(definition, () => structuredById);
+    const wrapRead = (definition: Def): Def =>
+      withAgentRead(
+        definition,
+        () => structuredById,
+        (filePath) => resolveMemoryUri(filePath, getMemoryRoot(this.options.agentDir, cwd))
+      );
     const readOnlyTools = (): Def[] =>
       remoteOps && sshExecutor
         ? [
@@ -1546,7 +1555,7 @@ export class SessionSupervisor {
         ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
         : []),
       ...(localMemoryEnabled && !remote
-        ? [createLearnTool({ agentDir: this.options.agentDir, cwd })]
+        ? [createLearnTool({ agentDir: this.options.agentDir, cwd, skillPaths })]
         : []),
       ...(toolEnabled('todo') ? [createTodoTool()] : []),
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
@@ -1596,7 +1605,12 @@ export class SessionSupervisor {
       toolIds: customTools.map((tool) => tool.name),
       checkpoints,
       ...(localMemoryEnabled && !remote
-        ? { localMemoryEnabled: true, memoryCwd: cwd, memoryModel: model }
+        ? {
+            localMemoryEnabled: true,
+            memoryCwd: cwd,
+            memoryModel: model,
+            ...(memoryPhase2Model ? { memoryPhase2Model } : {}),
+          }
         : {}),
     });
     managedRef.browser = browser;
@@ -1662,6 +1676,7 @@ export class SessionSupervisor {
       localMemoryEnabled?: boolean;
       memoryCwd?: string;
       memoryModel?: SpawnModelConfig;
+      memoryPhase2Model?: SpawnModelConfig;
       ensoApp?: EnsoAppInvoker;
       toolIds?: string[];
       proofToolIds?: string[];
@@ -1699,7 +1714,12 @@ export class SessionSupervisor {
       roundWaiters: new Set(),
       subagents: new Map(),
       ...(opts.localMemoryEnabled
-        ? { localMemoryEnabled: true, memoryCwd: opts.memoryCwd, memoryModel: opts.memoryModel }
+        ? {
+            localMemoryEnabled: true,
+            memoryCwd: opts.memoryCwd,
+            memoryModel: opts.memoryModel,
+            memoryPhase2Model: opts.memoryPhase2Model,
+          }
         : {}),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
@@ -2889,6 +2909,11 @@ export class SessionSupervisor {
     try {
       const runtime = await this.getRuntime();
       const sessionModel = await resolveBaseModelOrRefresh(runtime, managed.memoryModel);
+      const phase2Model = managed.memoryPhase2Model
+        ? await resolveBaseModelOrRefresh(runtime, managed.memoryPhase2Model).catch(
+            () => sessionModel
+          )
+        : sessionModel;
       const phase1TimeoutMs = 60_000;
       const phase2TimeoutMs = 120_000;
       await runMemoryPipeline({
@@ -2906,7 +2931,7 @@ export class SessionSupervisor {
           );
           try {
             const message = await runtime.completeSimple(
-              sessionModel,
+              phase === 2 ? phase2Model : sessionModel,
               {
                 systemPrompt,
                 messages: [{ role: 'user', content: userText, timestamp: Date.now() }],

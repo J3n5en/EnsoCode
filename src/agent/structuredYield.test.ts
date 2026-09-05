@@ -93,4 +93,21 @@ describe('structuredYield', () => {
     const miss = await run('t', { path: '/tmp/x.ts' });
     expect((miss as { content: Array<{ text: string }> }).content[0].text).toBe('file');
   });
+
+  it('withAgentRead remaps memory://root paths before falling through', async () => {
+    const inner = {
+      execute: async (_id: string, params: { path?: string }) => ({
+        content: [{ type: 'text', text: params.path ?? '' }],
+      }),
+    };
+    const wrapped = withAgentRead(
+      inner as { execute: (...args: never[]) => unknown },
+      () => new Map(),
+      (filePath) =>
+        filePath.startsWith('memory://root/') ? `/mem/${filePath.slice(14)}` : undefined
+    );
+    const run = wrapped.execute as (id: string, params: unknown) => Promise<unknown>;
+    const hit = await run('t', { path: 'memory://root/MEMORY.md' });
+    expect((hit as { content: Array<{ text: string }> }).content[0].text).toBe('/mem/MEMORY.md');
+  });
 });

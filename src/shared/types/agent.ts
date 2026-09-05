@@ -473,7 +473,7 @@ export type AgentCommand =
       loadHarnessAssets?: boolean;
       /** 探后折叠工具 + context 折叠 */
       exploreFoldEnabled?: boolean;
-      /** 会话结束后写入 .enso/learned.md */
+      /** learn + 启动两阶段合并；关则不注册 learn、不注入、不跑管线 */
       localMemoryEnabled?: boolean;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
@@ -481,6 +481,8 @@ export type AgentCommand =
       approvalMode?: ApprovalMode;
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
+      /** Phase 2 合并用标题总结模型；缺则回落会话模型 */
+      memoryPhase2Model?: SpawnModelConfig;
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
@@ -1678,6 +1680,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'instruction',
           'approvalMode',
           'approvalReviewer',
+          'memoryPhase2Model',
           'agentTypes',
           'subagentModels',
           'disabledTools',
@@ -1700,7 +1703,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           (!Array.isArray(value.subagentModels) ||
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
-          parseSpawnModelConfig(value.approvalReviewer) === null)
+          parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.memoryPhase2Model !== undefined &&
+          parseSpawnModelConfig(value.memoryPhase2Model) === null)
       ) {
         return null;
       }

@@ -346,6 +346,26 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...command, subagentModels: 'nope' })).toBeNull();
   });
 
+  it('spawn-parent 携 memoryPhase2Model:合法通过,坏 shape 拒绝', () => {
+    const command = {
+      type: 'spawn-parent' as const,
+      identity: parent,
+      cwd: '/repo',
+      model,
+      memoryPhase2Model: model,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(
+      parseAgentCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/repo',
+        model,
+        memoryPhase2Model: { api: 'openai-completions' },
+      })
+    ).toBeNull();
+  });
+
   it('spawn model 缺 settingsProviderId 必须拒绝：worker 回报 ready 模型身份要用它', () => {
     // 生产端 spawnModelConfig() 恒发该字段，worker 的 settingsModelRef() 缺了就抛错。
     // 解析器若放行，命令会在 worker 入口被静默丢弃 → Main 只能等 ready 握手超时。
