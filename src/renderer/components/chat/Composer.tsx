@@ -303,37 +303,63 @@ export function Composer({
         ? subResults.length
         : slashResults.length;
 
-  const pickActive = useCallback(() => {
-    if (popupKind === 'mention') {
-      if (openFolderId) {
-        const candidate = mentionGroups[openFolderId][folderIndex];
-        if (candidate) pickMention(candidate);
-        return;
-      }
-      const item = mentionItems[activeIndex];
-      if (item?.type === 'item') pickMention(item.candidate);
-    } else if (popupKind === 'slash') {
-      const item = slashResults[activeIndex];
-      if (!item) return;
-      editorRef.current?.consumeToken('/');
+  const applySlashSubcommand = useCallback(
+    (name: string, sendNow: boolean) => {
+      const segments: MentionSegment[] = [{ type: 'text', text: name }];
+      editorRef.current?.setSegments(segments);
+      if (!sendNow) return;
+      const payload = createEditorPayload({
+        segments,
+        slash,
+        images,
+        recipient,
+      });
+      if (onSend(payload) === false) return;
+      editorRef.current?.clear();
+      setImages([]);
+      setSlash(null);
+      setRecipient(undefined);
+      setMentionQuery(null);
       setSlashQuery(null);
-      setSlash(item.name);
-    } else if (popupKind === 'slash-sub') {
-      const item = subResults[activeIndex];
-      if (!item) return;
-      editorRef.current?.setSegments([{ type: 'text', text: item.name }]);
-    }
-  }, [
-    activeIndex,
-    folderIndex,
-    openFolderId,
-    mentionGroups,
-    mentionItems,
-    pickMention,
-    popupKind,
-    slashResults,
-    subResults,
-  ]);
+    },
+    [images, onSend, recipient, slash]
+  );
+
+  const pickActive = useCallback(
+    (submitSubcommand = false) => {
+      if (popupKind === 'mention') {
+        if (openFolderId) {
+          const candidate = mentionGroups[openFolderId][folderIndex];
+          if (candidate) pickMention(candidate);
+          return;
+        }
+        const item = mentionItems[activeIndex];
+        if (item?.type === 'item') pickMention(item.candidate);
+      } else if (popupKind === 'slash') {
+        const item = slashResults[activeIndex];
+        if (!item) return;
+        editorRef.current?.consumeToken('/');
+        setSlashQuery(null);
+        setSlash(item.name);
+      } else if (popupKind === 'slash-sub') {
+        const item = subResults[activeIndex];
+        if (!item) return;
+        applySlashSubcommand(item.name, submitSubcommand);
+      }
+    },
+    [
+      activeIndex,
+      folderIndex,
+      openFolderId,
+      mentionGroups,
+      mentionItems,
+      pickMention,
+      popupKind,
+      slashResults,
+      subResults,
+      applySlashSubcommand,
+    ]
+  );
 
   const content = editorPlain.replaceAll('\uFFFC', '').trim();
   const hasContent = Boolean(content || slash || images.length > 0 || editorHasMentions);
@@ -415,7 +441,7 @@ export function Composer({
       }
       if (action.type === 'pick') {
         event.preventDefault();
-        pickActive();
+        pickActive(popupKind === 'slash-sub' && event.key === 'Enter');
         return;
       }
       if (action.type === 'close') {
@@ -492,7 +518,7 @@ export function Composer({
                   setSlashQuery(null);
                   setSlash(item.name);
                 } else {
-                  editorRef.current?.setSegments([{ type: 'text', text: item.name }]);
+                  applySlashSubcommand(item.name, false);
                 }
               }}
               onMouseMove={() => setActiveIndex(index)}

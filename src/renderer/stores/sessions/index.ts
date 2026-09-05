@@ -1767,7 +1767,9 @@ export const useSessionsStore = create<SessionsState>()(
           }
           const memoryCommand = parseMemoryCommand(text);
           if (memoryCommand) {
-            return get().memory(id, memoryCommand.action);
+            const error = await get().memory(id, memoryCommand.action);
+            if (error) set((state) => patch(state, id, { error }));
+            return error;
           }
           // /goal 应用级命令:设定/暂停/继续/清除会话目标,不发给 agent
           const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
