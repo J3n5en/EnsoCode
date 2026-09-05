@@ -2,7 +2,7 @@
 
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog';
 
-import { useOverlayGuard } from '@/hooks/useOverlayGuard';
+import { OverlayGuardHost } from '@/hooks/useOverlayGuard';
 import { useTrafficLightsGuard } from '@/hooks/useTrafficLightsGuard';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -57,9 +57,6 @@ function AlertDialogPopup({
   showBackdrop?: boolean;
   zIndexLevel?: 'base' | 'nested';
 }) {
-  useOverlayGuard();
-
-  // Calculate z-index based on level
   const backdropZIndex =
     zIndexLevel === 'nested' ? Z_INDEX.NESTED_MODAL_BACKDROP : Z_INDEX.MODAL_BACKDROP;
   const contentZIndex =
@@ -67,6 +64,7 @@ function AlertDialogPopup({
 
   return (
     <AlertDialogPortal>
+      <OverlayGuardHost />
       {showBackdrop && <AlertDialogBackdrop style={{ zIndex: backdropZIndex }} />}
       <AlertDialogViewport style={{ zIndex: contentZIndex }}>
         <AlertDialogPrimitive.Popup

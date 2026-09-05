@@ -12,3 +12,9 @@ export function useOverlayGuard(active = true): void {
     return () => releaseOverlayGuard();
   }, [active]);
 }
+
+/** Portal 子节点：Popup 外壳在关闭时仍挂载，guard 写在外壳上会把 guest 永远压住。 */
+export function OverlayGuardHost(): null {
+  useOverlayGuard();
+  return null;
+}
