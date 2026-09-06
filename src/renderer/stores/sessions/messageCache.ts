@@ -37,8 +37,10 @@ export function needsHistoryHydration(conversation: {
   sessionFile?: string;
   messages: readonly { optimistic?: boolean }[];
   spawning: boolean;
+  status?: string;
 }): boolean {
   return (
+    conversation.status !== 'failed' &&
     (conversation.started || Boolean(conversation.sessionFile)) &&
     !hasAuthoritativeMessages(conversation.messages) &&
     !conversation.spawning

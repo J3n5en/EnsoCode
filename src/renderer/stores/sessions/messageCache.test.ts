@@ -94,5 +94,14 @@ describe('needsHistoryHydration', () => {
     expect(
       needsHistoryHydration({ started: true, sessionFile: undefined, messages: [], spawning: true })
     ).toBe(false);
+    expect(
+      needsHistoryHydration({
+        started: false,
+        sessionFile: '/tmp/s.jsonl',
+        messages: [],
+        spawning: false,
+        status: 'failed',
+      })
+    ).toBe(false);
   });
 });

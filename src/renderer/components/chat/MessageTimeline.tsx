@@ -354,6 +354,15 @@ export function MessageTimeline({
               <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
             )}
           </div>
+        ) : items.length === 0 && error ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="max-w-md text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
+            {onRetryResume && (
+              <Button size="sm" variant="outline" onClick={onRetryResume}>
+                {t('Retry resume')}
+              </Button>
+            )}
+          </div>
         ) : items.length === 0 ? (
           // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
           <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
