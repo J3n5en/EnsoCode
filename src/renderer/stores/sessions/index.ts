@@ -52,10 +52,10 @@ import { createElectronPersistStorage, openPersistWriteGate } from '@/stores/set
 import { purgeConversationAuthority } from './authorityCleanup';
 import {
   evictColdMessages,
-  hasAuthoritativeMessages,
   isBulkyAgentEvent,
   isMessageCacheHot,
   MESSAGE_CACHE_TTL_MS,
+  needsHistoryHydration,
   viewedConversationId,
 } from './messageCache';
 import { migrateSessions, SESSIONS_VERSION } from './migrate';
@@ -2492,13 +2492,7 @@ useSessionsStore.subscribe((state) => {
   window.electronAPI.agent.setViewedSession?.(viewed);
   if (viewed) lastViewedAt[viewed] = Date.now();
   const conversation = viewed ? state.conversations[viewed] : undefined;
-  if (
-    viewed &&
-    conversation &&
-    (conversation.started || conversation.sessionFile) &&
-    !hasAuthoritativeMessages(conversation.messages) &&
-    !conversation.spawning
-  ) {
+  if (viewed && conversation && needsHistoryHydration(conversation)) {
     void window.electronAPI.agent.requestSnapshot(viewed);
   }
   if (evictTimer) clearTimeout(evictTimer);

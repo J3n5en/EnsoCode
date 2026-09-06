@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
@@ -75,12 +76,12 @@ export class EnsoSafeJournal {
     this.append({ type: 'capability-receipt', receipt: envelope.receipt, at: Date.now() });
   }
 
-  static restore(sessionFile: string): SafeJournalProjection {
+  static async restore(sessionFile: string): Promise<SafeJournalProjection> {
     const records: SafeJournalRecord[] = [];
     let partial = false;
     let lines: string[];
     try {
-      lines = readFileSync(sessionFile, 'utf8').split('\n').filter(Boolean);
+      lines = (await readFile(sessionFile, 'utf8')).split('\n').filter(Boolean);
     } catch {
       return { records, partial: true };
     }

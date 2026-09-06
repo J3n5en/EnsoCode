@@ -12,3 +12,11 @@
 ## 切片 3 — worker
 - `registerManagedSession` resume：先投影并 emit 尾窗 snapshot（赶在 status 前），再全量投影 + 全量 snapshot
 - `managed.messages` 始终是全量（upsert 下标不变）
+
+## 切片 4 — child 历史离 Main 同步路径
+- `EnsoSafeJournal.restore` 异步读盘（`readFile`），IPC handler await
+- 路径校验仍同步、不读任意文件
+
+## 切片 5 — 冷缓存空态
+- 已 started 且无权威消息：时间线走 Preparing，不闪 Ask the agent
+- 选中冷会话补 snapshot 时短暂 spawning

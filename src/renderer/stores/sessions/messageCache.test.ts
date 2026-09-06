@@ -4,6 +4,7 @@ import {
   isBulkyAgentEvent,
   isMessageCacheHot,
   MESSAGE_CACHE_TTL_MS,
+  needsHistoryHydration,
   viewedConversationId,
 } from './messageCache';
 
@@ -33,7 +34,7 @@ describe('messageCache', () => {
     };
     const next = evictColdMessages(conversations, 'hot', { stale: 0 }, MESSAGE_CACHE_TTL_MS);
     expect(next.hot).toBe(conversations.hot);
-    expect(next.stale).toEqual({ messages: [], customEntries: [] });
+    expect(next.stale).toEqual({ messages: [], customEntries: [], historyBaseIndex: undefined });
     expect(next.empty).toBe(conversations.empty);
   });
 
@@ -50,5 +51,48 @@ describe('hasAuthoritativeMessages', () => {
     expect(hasAuthoritativeMessages([])).toBe(false);
     expect(hasAuthoritativeMessages([{ optimistic: true }])).toBe(false);
     expect(hasAuthoritativeMessages([{}, { optimistic: true }])).toBe(true);
+  });
+});
+
+describe('needsHistoryHydration', () => {
+  it('started 会话无权威消息且未 spawning 时需要补正文', () => {
+    expect(
+      needsHistoryHydration({
+        started: true,
+        sessionFile: undefined,
+        messages: [],
+        spawning: false,
+      })
+    ).toBe(true);
+    expect(
+      needsHistoryHydration({
+        started: true,
+        sessionFile: '/tmp/s.jsonl',
+        messages: [{ optimistic: true }],
+        spawning: false,
+      })
+    ).toBe(true);
+  });
+
+  it('草稿、已有正文、正在 spawn 都不闪加载', () => {
+    expect(
+      needsHistoryHydration({
+        started: false,
+        sessionFile: undefined,
+        messages: [],
+        spawning: false,
+      })
+    ).toBe(false);
+    expect(
+      needsHistoryHydration({
+        started: true,
+        sessionFile: '/tmp/s.jsonl',
+        messages: [{}],
+        spawning: false,
+      })
+    ).toBe(false);
+    expect(
+      needsHistoryHydration({ started: true, sessionFile: undefined, messages: [], spawning: true })
+    ).toBe(false);
   });
 });

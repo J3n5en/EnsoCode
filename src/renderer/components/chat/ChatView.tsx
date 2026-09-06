@@ -17,6 +17,7 @@ import {
 } from '@/stores/oauthCredentials';
 
 import { useSessionsStore } from '@/stores/sessions';
+import { needsHistoryHydration } from '@/stores/sessions/messageCache';
 import { buildTimeline, terminalErrorText } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
@@ -189,7 +190,8 @@ export function ChatView() {
   const [findIndex, setFindIndex] = useState(0);
 
   const running = conversation?.status === 'running';
-  const busy = running || conversation?.spawning === true;
+  const hydrating = conversation !== null && needsHistoryHydration(conversation);
+  const busy = running || conversation?.spawning === true || hydrating;
   const toolCwd = parent?.worktree?.path ?? project?.path;
   const timeline = useMemo(
     () =>

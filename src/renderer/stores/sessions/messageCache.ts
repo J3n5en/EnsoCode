@@ -31,6 +31,20 @@ export function hasAuthoritativeMessages(messages: readonly { optimistic?: boole
   return messages.some((message) => !message.optimistic);
 }
 
+/** 已启动或可 resume 的会话缺权威正文：应显示 Preparing，并补 snapshot */
+export function needsHistoryHydration(conversation: {
+  started: boolean;
+  sessionFile?: string;
+  messages: readonly { optimistic?: boolean }[];
+  spawning: boolean;
+}): boolean {
+  return (
+    (conversation.started || Boolean(conversation.sessionFile)) &&
+    !hasAuthoritativeMessages(conversation.messages) &&
+    !conversation.spawning
+  );
+}
+
 export function isBulkyAgentEvent(type: string): boolean {
   return type === 'message-upsert' || type === 'session-custom-entry';
 }
@@ -47,7 +61,7 @@ export function evictColdMessages<T extends { messages: unknown[]; customEntries
   for (const [id, conversation] of Object.entries(conversations)) {
     if (isMessageCacheHot(id, viewedId, lastViewedAt, now, ttl)) continue;
     if (conversation.messages.length === 0 && conversation.customEntries.length === 0) continue;
-    next[id] = { ...conversation, messages: [], customEntries: [] };
+    next[id] = { ...conversation, messages: [], customEntries: [], historyBaseIndex: undefined };
     changed = true;
   }
   return changed ? next : conversations;

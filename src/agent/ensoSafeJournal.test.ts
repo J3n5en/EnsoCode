@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('EnsoSafeJournal', () => {
-  it('persists only safe projections and never raw enso_app params or secrets', () => {
+  it('persists only safe projections and never raw enso_app params or secrets', async () => {
     const root = path.join(process.cwd(), 'temp', `enso-journal-${crypto.randomUUID()}`);
     roots.push(root);
     const journal = new EnsoSafeJournal(root, child, '/project');
@@ -60,10 +60,12 @@ describe('EnsoSafeJournal', () => {
     expect(disk).not.toContain('params');
     for (const secret of secrets) expect(disk).not.toContain(secret);
     expect(disk).toContain('enso-operation');
-    expect(EnsoSafeJournal.restore(journal.sessionFile)).toMatchObject({ partial: false });
+    await expect(EnsoSafeJournal.restore(journal.sessionFile)).resolves.toMatchObject({
+      partial: false,
+    });
   });
 
-  it('strictly skips unknown or corrupt records and reports partial recovery', () => {
+  it('strictly skips unknown or corrupt records and reports partial recovery', async () => {
     const root = path.join(process.cwd(), 'temp', `enso-journal-${crypto.randomUUID()}`);
     roots.push(root);
     const journal = new EnsoSafeJournal(root, child, '/project');
@@ -72,9 +74,22 @@ describe('EnsoSafeJournal', () => {
       journal.sessionFile,
       '{broken\n{"type":"raw-tool-call","params":{"apiKey":"secret"}}\n'
     );
-    const restored = EnsoSafeJournal.restore(journal.sessionFile);
+    const restored = await EnsoSafeJournal.restore(journal.sessionFile);
     expect(restored.partial).toBe(true);
     expect(restored.records).toHaveLength(1);
     expect(JSON.stringify(restored.records)).not.toContain('secret');
+  });
+
+  it('restore is a Promise so callers can leave the event loop', async () => {
+    const root = path.join(process.cwd(), 'temp', `enso-journal-${crypto.randomUUID()}`);
+    roots.push(root);
+    const journal = new EnsoSafeJournal(root, child, '/project');
+    journal.appendUserText('hello');
+    const pending = EnsoSafeJournal.restore(journal.sessionFile);
+    expect(pending).toBeInstanceOf(Promise);
+    await expect(pending).resolves.toMatchObject({
+      partial: false,
+      records: [{ type: 'safe-user-text' }],
+    });
   });
 });

@@ -1416,7 +1416,7 @@ export class SessionSupervisor {
             ? SessionManager.open(childResume, this.options.sessionDir, cwd)
             : SessionManager.create(cwd, this.options.sessionDir);
         if (safeJournal && childResume) {
-          for (const record of EnsoSafeJournal.restore(childResume).records) {
+          for (const record of (await EnsoSafeJournal.restore(childResume)).records) {
             if (record.type === 'safe-user-text') {
               sessionManager.appendMessage({
                 role: 'user',

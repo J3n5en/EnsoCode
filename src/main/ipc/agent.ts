@@ -234,7 +234,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * 必须落在 sessions 目录内（防穿越）、basename 必须是 enso- 前缀的 safe journal
  * （不读 pi 的普通 session 文件，那里面没经过脱敏）。
  */
-function readChildHistory(conversationId: string): ChildHistoryResult {
+async function readChildHistory(conversationId: string): Promise<ChildHistoryResult> {
   const persisted = agentSessionIndex.persistedConversation(conversationId);
   const sessionFile = persisted?.sessionFile;
   if (!isNonEmptyString(sessionFile)) {
@@ -251,7 +251,7 @@ function readChildHistory(conversationId: string): ChildHistoryResult {
   if (!existsSync(resolved)) {
     return { ok: false, code: 'not-found', error: 'History file is missing.' };
   }
-  return { ok: true, projection: EnsoSafeJournal.restore(resolved) };
+  return { ok: true, projection: await EnsoSafeJournal.restore(resolved) };
 }
 
 /**
@@ -526,12 +526,12 @@ export function registerAgentHandlers(): void {
 
   // 已结束 child 的只读历史：渲染层只能给 conversationId，路径一律由 Main 从自己读的
   // 持久化会话里推导。接受渲染层传路径等于开放任意文件读取。
-  ipcMain.handle(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, async (_event, request: unknown) => {
     const conversationId = asRecord(request)?.conversationId;
     if (!isNonEmptyString(conversationId)) {
       return { ok: false, code: 'not-found', error: 'conversationId is required' };
     }
-    return readChildHistory(conversationId);
+    return await readChildHistory(conversationId);
   });
 
   // 标题总结：渲染层只传 conversationId + 首条消息文本；模型与凭证由 Main 从设置自读（回退链：
