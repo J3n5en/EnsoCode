@@ -41,6 +41,7 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
       projected.content = [{ type: 'text', text: capText(value.summary) }];
     }
     if (typeof value.tokensBefore === 'number') projected.tokensBefore = value.tokensBefore;
+    if (value.fromHook === true) projected.verified = true;
   }
   const usage = projectUsage(value.usage);
   if (usage) projected.usage = usage;

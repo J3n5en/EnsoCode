@@ -164,4 +164,24 @@ describe('projectMessage', () => {
       tokensBefore: 123456,
     });
   });
+
+  it('compactionSummary：fromHook 投影为 verified',
+    () => {
+      expect(
+        projectMessage({
+          role: 'compactionSummary',
+          summary: 'v',
+          tokensBefore: 1,
+          fromHook: true,
+        })
+      ).toMatchObject({ verified: true });
+      expect(
+        projectMessage({
+          role: 'compactionSummary',
+          summary: 'n',
+          tokensBefore: 1,
+        })
+      ).not.toHaveProperty('verified');
+    }
+  );
 });

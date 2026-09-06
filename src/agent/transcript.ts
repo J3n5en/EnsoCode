@@ -26,5 +26,25 @@ export function transcriptMessages(
     : -1;
   const cut = keptIndex >= 0 && keptIndex < compactionIndex ? keptIndex : compactionIndex;
   const summarized = branch.slice(0, cut).flatMap(sessionEntryToContextMessages);
-  return [...summarized, ...contextMessages];
+  return stampCompactionFromHook([...summarized, ...contextMessages], branch);
+}
+
+function stampCompactionFromHook(messages: unknown[], branch: SessionEntry[]): unknown[] {
+  const flags = branch
+    .filter(
+      (entry): entry is Extract<SessionEntry, { type: 'compaction' }> => entry.type === 'compaction'
+    )
+    .map((entry) => entry.fromHook === true);
+  if (!flags.some(Boolean)) return messages;
+  let i = 0;
+  return messages.map((message) => {
+    if (
+      !message ||
+      typeof message !== 'object' ||
+      (message as { role?: unknown }).role !== 'compactionSummary'
+    ) {
+      return message;
+    }
+    return flags[i++] ? { ...(message as object), fromHook: true } : message;
+  });
 }

@@ -126,7 +126,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         (b.kind === 'compaction' || b.kind === 'compaction-notice') &&
         a.kind === b.kind &&
         a.summary === b.summary &&
-        a.tokensBefore === b.tokensBefore
+        a.tokensBefore === b.tokensBefore &&
+        a.verified === b.verified
       );
     case 'compaction-progress':
       return b.kind === 'compaction-progress' && a.state === b.state;
@@ -986,10 +987,16 @@ function CompactionRow({
   const divider = item.kind === 'compaction';
   const label =
     item.tokensBefore === null
-      ? t('Context compacted')
-      : t('Context compacted ({{tokens}} tokens before)', {
-          tokens: formatTokens(item.tokensBefore),
-        });
+      ? item.verified
+        ? t('Verified context compacted')
+        : t('Context compacted')
+      : item.verified
+        ? t('Verified context compacted ({{tokens}} tokens before)', {
+            tokens: formatTokens(item.tokensBefore),
+          })
+        : t('Context compacted ({{tokens}} tokens before)', {
+            tokens: formatTokens(item.tokensBefore),
+          });
   return (
     <div>
       <button
@@ -997,9 +1004,13 @@ function CompactionRow({
         onClick={() => setExpanded((v) => !v)}
         className={cn('flex items-center gap-3', divider && 'w-full')}
         title={
-          divider
-            ? t('Messages above are no longer in the model context; only this summary is.')
-            : t('Latest compaction summary — expand to read what the model kept.')
+          item.verified
+            ? t(
+                'Verified summary from smart compaction. Messages above are no longer in the model context.'
+              )
+            : divider
+              ? t('Messages above are no longer in the model context; only this summary is.')
+              : t('Latest compaction summary — expand to read what the model kept.')
         }
       >
         {divider && <span className="h-px flex-1 bg-border" />}

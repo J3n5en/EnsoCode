@@ -733,6 +733,11 @@ export const zhTranslations: Record<string, string> = {
   '(no log available)': '(暂无日志)',
   'Context compacted': '上下文已压缩',
   'Context compacted ({{tokens}} tokens before)': '上下文已压缩（压缩前 {{tokens}} tokens）',
+  'Verified context compacted': '验证式压缩完成',
+  'Verified context compacted ({{tokens}} tokens before)':
+    '验证式压缩完成（压缩前 {{tokens}} tokens）',
+  'Verified summary from smart compaction. Messages above are no longer in the model context.':
+    '这次用了验证式摘要。此线之上的历史已不在模型上下文中。',
   'Messages above are no longer in the model context; only this summary is.':
     '以上消息已不在模型上下文中，模型只看到这份摘要。',
   'Latest compaction summary — expand to read what the model kept.':

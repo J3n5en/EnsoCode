@@ -66,11 +66,23 @@ export type TimelineItem =
     }
   | { kind: 'error'; key: string; text: string }
   /** pi 的 compaction 摘要：之前的历史已被压缩出 LLM 上下文，渲染为分隔行 */
-  | { kind: 'compaction'; key: string; summary: string; tokensBefore: number | null }
+  | {
+      kind: 'compaction';
+      key: string;
+      summary: string;
+      tokensBefore: number | null;
+      verified?: boolean;
+    }
   /** 压缩进行中 / 排队：钉在时间线底部，不依赖占用面板 */
   | { kind: 'compaction-progress'; key: string; state: 'queued' | 'running' }
   /** 摘要不在末尾时，底部再钉一条可展开提示 */
-  | { kind: 'compaction-notice'; key: string; summary: string; tokensBefore: number | null }
+  | {
+      kind: 'compaction-notice';
+      key: string;
+      summary: string;
+      tokensBefore: number | null;
+      verified?: boolean;
+    }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
@@ -311,6 +323,7 @@ function buildMessageTimeline(
         key: `${messageIndex}`,
         summary: partText(message),
         tokensBefore: message.tokensBefore ?? null,
+        ...(message.verified ? { verified: true } : {}),
       });
       return;
     }
@@ -496,6 +509,7 @@ function insertCompactionNotice(items: TimelineItem[], noticeAt: number): Timeli
     key: `compaction-notice:${lastSummary.key}`,
     summary: lastSummary.summary,
     tokensBefore: lastSummary.tokensBefore,
+    ...(lastSummary.verified ? { verified: true } : {}),
   };
   return [...items.slice(0, at), notice, ...items.slice(at)];
 }

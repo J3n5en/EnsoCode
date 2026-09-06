@@ -890,7 +890,25 @@ describe('compaction 摘要行', () => {
       summary: 'SUMMARY',
       tokensBefore: 9000,
     });
+    expect(timeline[1]).not.toHaveProperty('verified');
   });
+
+  it('verified 摘要行带 verified',
+    () => {
+      const timeline = buildTimeline(
+        [
+          {
+            role: 'compactionSummary',
+            content: [{ type: 'text', text: 'S' }],
+            tokensBefore: 1,
+            verified: true,
+          },
+        ],
+        false
+      );
+      expect(timeline[0]).toMatchObject({ kind: 'compaction', verified: true });
+    }
+  );
 
   it('compaction 行不打断 tool-group 折叠之外的顺序，且不被 foldTimeline 吞掉', () => {
     const timeline = buildTimeline(
