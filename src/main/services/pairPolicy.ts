@@ -1,4 +1,5 @@
 import type { PhoneToHost } from '@enso/pair';
+import { takeSnapshotTail } from '@shared/snapshotTail';
 import { THINKING_LEVELS } from '@shared/types/agent';
 
 /**
@@ -199,9 +200,7 @@ const SESSION_SCOPED = new Set(['message-upsert']);
  * 直接丢弃且不通知发送方，长对话的全量快照会静默消失——手机端表现为
  * 「历史加载不出、新消息却正常」。更早的消息由 history 命令分页拉取。
  */
-export const SNAPSHOT_TAIL_MESSAGES = 60;
-/** 加密封帧还会膨胀（base64 图片已在消息体内），预算须显著低于中继 1MB 上限 */
-const SNAPSHOT_BYTE_BUDGET = 600_000;
+export { SNAPSHOT_TAIL_MESSAGES } from '@shared/snapshotTail';
 
 interface SnapshotSession {
   /** 旧格式扁平 id；worker 新格式嵌在 identity 里，归一化后两者都有 */
@@ -220,24 +219,6 @@ function sessionIdOf(value: {
   return value.identity?.sessionId ?? value.sessionId;
 }
 
-/** 从尾部往前取，直到条数或字节预算耗尽；至少保 1 条（单条超预算也发，交给中继裁决）
- * 必须按 UTF-8 字节而非字符数计：中文 3 字节/字符，按字符数会低估 3 倍撑爆中继帧上限 */
-function takeTail(
-  messages: unknown[],
-  endIndex: number
-): { messages: unknown[]; baseIndex: number } {
-  let bytes = 0;
-  let start = endIndex;
-  while (start > 0 && endIndex - start < SNAPSHOT_TAIL_MESSAGES) {
-    const size = Buffer.byteLength(JSON.stringify(messages[start - 1]), 'utf8');
-    if (bytes + size > SNAPSHOT_BYTE_BUDGET && start < endIndex) break;
-    bytes += size;
-    start--;
-    if (bytes > SNAPSHOT_BYTE_BUDGET) break;
-  }
-  return { messages: messages.slice(start, endIndex), baseIndex: start };
-}
-
 export function narrowSnapshot(
   event: { type: string; sessions?: SnapshotSession[] },
   subscribedId: string | null
@@ -252,7 +233,7 @@ export function narrowSnapshot(
       const { commands: _commands, ...rest } = s;
       const base = { ...rest, sessionId: subscribedId };
       if (!Array.isArray(s.messages)) return { ...base, baseIndex: 0 };
-      const tail = takeTail(s.messages, s.messages.length);
+      const tail = takeSnapshotTail(s.messages, s.messages.length);
       return { ...base, messages: tail.messages, baseIndex: tail.baseIndex };
     });
   return sessions.length > 0 ? { type: 'snapshot', sessions } : null;
@@ -265,7 +246,7 @@ export function sliceHistory(
 ): { messages: unknown[]; baseIndex: number } {
   const end = Math.max(0, Math.min(beforeIndex, messages.length));
   if (end === 0) return { messages: [], baseIndex: 0 };
-  return takeTail(messages, end);
+  return takeSnapshotTail(messages, end);
 }
 
 /**

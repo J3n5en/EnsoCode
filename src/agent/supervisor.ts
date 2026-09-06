@@ -31,6 +31,7 @@ import { ensureAccountProvider } from '@shared/piAccounts';
 import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
+import { takeSnapshotTail } from '@shared/snapshotTail';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import type {
   AgentCommand,
@@ -1708,6 +1709,39 @@ export class SessionSupervisor {
       this.onSessionEvent(managed, event);
     });
     this.sessions.set(identity.sessionId, managed);
+    if (opts.resumeFile) {
+      const raw = this.transcript(managed);
+      const emitResumeSnapshot = (payload: { messages: ProjectedMessage[]; baseIndex: number }) => {
+        this.options.emit({
+          type: 'snapshot',
+          partial: true,
+          sessions: [
+            {
+              identity,
+              status: managed.status,
+              messages: payload.messages,
+              ...(payload.baseIndex > 0 ? { baseIndex: payload.baseIndex } : {}),
+              commands: managed.commands,
+              ...(managed.childMetadata ? { child: managed.childMetadata } : {}),
+              ...(managed.customEntries.length > 0 ? { customEntries: managed.customEntries } : {}),
+            },
+          ],
+        });
+      };
+      const window = takeSnapshotTail(raw, raw.length);
+      const tailProjected = window.messages
+        .map(projectMessage)
+        .filter((message): message is ProjectedMessage => message !== null);
+      emitResumeSnapshot({ messages: tailProjected, baseIndex: window.baseIndex });
+      if (window.baseIndex > 0 || window.messages.length !== raw.length) {
+        managed.messages = raw
+          .map(projectMessage)
+          .filter((message): message is ProjectedMessage => message !== null);
+        emitResumeSnapshot({ messages: managed.messages, baseIndex: 0 });
+      } else {
+        managed.messages = tailProjected;
+      }
+    }
     this.emitStatus(managed);
     this.options.emit({
       type: 'commands',
@@ -1716,25 +1750,6 @@ export class SessionSupervisor {
       commands: managed.commands,
     });
     this.emitSessionMeta(managed);
-    if (opts.resumeFile) {
-      managed.messages = this.transcript(managed)
-        .map(projectMessage)
-        .filter((message): message is ProjectedMessage => message !== null);
-      this.options.emit({
-        type: 'snapshot',
-        partial: true,
-        sessions: [
-          {
-            identity,
-            status: managed.status,
-            messages: managed.messages,
-            commands: managed.commands,
-            ...(managed.childMetadata ? { child: managed.childMetadata } : {}),
-            ...(managed.customEntries.length > 0 ? { customEntries: managed.customEntries } : {}),
-          },
-        ],
-      });
-    }
     return managed;
   }
 

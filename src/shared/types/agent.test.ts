@@ -847,6 +847,30 @@ describe('Main dispatch sequence and terminal authority', () => {
 });
 
 describe('custom entry and snapshot projection', () => {
+  const minimalSnapshot = {
+    identity: parent,
+    status: 'idle',
+    messages: [],
+    commands: [],
+  } as const;
+
+  it('SessionSnapshot 接受非负整数 baseIndex', () => {
+    expect(parseSessionSnapshot({ ...minimalSnapshot, baseIndex: 12 })).toEqual({
+      ...minimalSnapshot,
+      baseIndex: 12,
+    });
+  });
+
+  it('SessionSnapshot 拒绝负数 baseIndex', () => {
+    expect(parseSessionSnapshot(minimalSnapshot)).toEqual(minimalSnapshot);
+    expect(parseSessionSnapshot({ ...minimalSnapshot, baseIndex: -1 })).toBeNull();
+  });
+
+  it('SessionSnapshot 拒绝非整数 baseIndex', () => {
+    expect(parseSessionSnapshot(minimalSnapshot)).toEqual(minimalSnapshot);
+    expect(parseSessionSnapshot({ ...minimalSnapshot, baseIndex: 1.5 })).toBeNull();
+  });
+
   it('dispatch/completed/failed/receipt 是 custom entry，不是 ProjectedMessage', () => {
     const entry = {
       kind: 'capability-receipt',

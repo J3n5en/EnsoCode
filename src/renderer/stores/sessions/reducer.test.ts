@@ -10,6 +10,23 @@ import {
 
 const identity = (generation = 'g1') => ({ sessionId: 's1', generation });
 const base: SessionProjection = { ...emptyProjection };
+type TailProjection = SessionProjection & { historyBaseIndex?: number };
+const assistant = (text: string): SessionProjection['messages'][number] => ({
+  role: 'assistant',
+  content: [{ type: 'text', text }],
+});
+const tail = (messages: SessionProjection['messages'] = []): TailProjection => ({
+  ...base,
+  messages,
+  historyBaseIndex: 40,
+});
+const snapshot = (baseIndex?: number): SessionSnapshot => ({
+  identity: identity(),
+  status: 'idle',
+  messages: [],
+  commands: [],
+  ...(baseIndex === undefined ? {} : { baseIndex }),
+});
 const status = (
   seq: number,
   value: 'idle' | 'running' | 'failed',
@@ -279,6 +296,42 @@ describe('applyAgentEvent', () => {
     expect(updated.messages[0].content).toEqual([{ type: 'text', text: 'hi!' }]);
   });
 
+  it('message-upsert maps an absolute worker index into the tail window', () => {
+    const next = applyAgentEvent(tail([assistant('old')]), 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 40,
+      message: assistant('updated'),
+    });
+    expect(next.messages[0]).toEqual(assistant('updated'));
+  });
+
+  it('message-upsert appends at the absolute tail-window end', () => {
+    const next = applyAgentEvent(tail([assistant('m40')]), 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 41,
+      message: assistant('m41'),
+    });
+    expect(next.messages).toEqual([assistant('m40'), assistant('m41')]);
+  });
+
+  it('message-upsert before the tail base drops the body but advances seq', () => {
+    expect(upsertOutOfRange([], 39, 40)).toBe(true);
+    expect(upsertOutOfRange([], 40, 40)).toBe(false);
+    const next = applyAgentEvent(tail(), 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 7,
+      index: 39,
+      message: assistant('old'),
+    });
+    expect(next.messages).toEqual([]);
+    expect(next.lastSeq).toBe(7);
+  });
+
   it('message-upsert beyond the known tail never leaves holes (cold-evicted body awaiting snapshot)', () => {
     // 复现：冷会话正文被清空后重新查看，snapshot 回来前流式 upsert 以原 index 到达，
     // 直接按 index 写会产生稀疏空洞 → 后续 .optimistic / .role 读 undefined 崩溃
@@ -314,6 +367,29 @@ describe('applyAgentEvent', () => {
     });
     expect(next.messages).toEqual(withEcho.messages);
     expect(next.lastSeq).toBe(9);
+  });
+
+  it('tail snapshot records its absolute base and keeps the optimistic tail', () => {
+    const optimistic = {
+      ...assistant('in flight'),
+      role: 'user' as const,
+      optimistic: true as const,
+    };
+    const next = applyAgentEvent({ ...base, messages: [optimistic] }, 's1', {
+      type: 'snapshot',
+      sessions: [snapshot(40)],
+    }) as TailProjection;
+    expect(next.messages).toEqual([optimistic]);
+    expect(next.historyBaseIndex).toBe(40);
+  });
+
+  it('full snapshot clears an earlier tail base when baseIndex is missing or zero', () => {
+    const tailed = applyAgentEvent(base, 's1', { type: 'snapshot', sessions: [snapshot(40)] });
+    expect((tailed as TailProjection).historyBaseIndex).toBe(40);
+    const missing = applyAgentEvent(tailed, 's1', { type: 'snapshot', sessions: [snapshot()] });
+    const zero = applyAgentEvent(tailed, 's1', { type: 'snapshot', sessions: [snapshot(0)] });
+    expect((missing as TailProjection).historyBaseIndex).toBeUndefined();
+    expect((zero as TailProjection).historyBaseIndex).toBeUndefined();
   });
 
   it('snapshot keeps optimistic echoes the worker has not delivered yet', () => {

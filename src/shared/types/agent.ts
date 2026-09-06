@@ -695,8 +695,8 @@ export interface SessionSnapshot {
   status: NodeStatus;
   messages: ProjectedMessage[];
   /**
-   * messages 的绝对起始 index。仅手机链路（pairPolicy 裁尾窗）会设置：
-   * 长对话只发最近一段，手机按 baseIndex+i 幂等写入。worker 全量快照恒缺省（=0）。
+   * messages 的绝对起始 index。尾窗快照（手机 pair / 桌面 resume 首包）会设置：
+   * 长对话只发最近一段；全量快照缺省或 0。
    */
   baseIndex?: number;
   commands: SlashCommand[];
@@ -1632,6 +1632,7 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
       'identity',
       'status',
       'messages',
+      'baseIndex',
       'commands',
       'pendingApprovals',
       'pendingAsks',
@@ -1658,7 +1659,11 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
     (value.safeJournal !== undefined && parseSafeJournalProjection(value.safeJournal) === null) ||
     (value.customEntries !== undefined &&
       (!Array.isArray(value.customEntries) ||
-        value.customEntries.some((entry) => parseAgentSessionCustomEntry(entry) === null)))
+        value.customEntries.some((entry) => parseAgentSessionCustomEntry(entry) === null))) ||
+    (value.baseIndex !== undefined &&
+      (typeof value.baseIndex !== 'number' ||
+        !Number.isInteger(value.baseIndex) ||
+        value.baseIndex < 0))
   ) {
     return null;
   }

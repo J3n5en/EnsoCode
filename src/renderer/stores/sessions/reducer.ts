@@ -57,8 +57,13 @@ function authoritativeLength(messages: readonly TimelineMessage[]): number {
  * message-upsert 的 index 是否落在本地权威区之外（会被 reducer 丢正文只推 seq）。
  * store 层据此判断正文已与 worker 脱节，需重新要 snapshot。
  */
-export function upsertOutOfRange(messages: readonly TimelineMessage[], index: number): boolean {
-  return index > authoritativeLength(messages);
+export function upsertOutOfRange(
+  messages: readonly TimelineMessage[],
+  index: number,
+  historyBaseIndex = 0
+): boolean {
+  const localIndex = index - historyBaseIndex;
+  return localIndex < 0 || localIndex > authoritativeLength(messages);
 }
 
 export interface SessionProjection {
@@ -91,6 +96,8 @@ export interface SessionProjection {
   retry?: { attempt: number; maxAttempts: number; delayMs: number; error: string; at: number };
   /** 运行中工具的输出快照（toolCallId → 全量文本）；轮次收口即清空，不持久化 */
   toolOutputs: Record<string, string>;
+  /** 当前权威消息对应的 worker 绝对起点；全量快照缺省 */
+  historyBaseIndex?: number;
 }
 
 export const emptyProjection: SessionProjection = {
@@ -180,6 +187,8 @@ export function applyAgentEvent(
         message.role === 'user' &&
         ![...delivered].some((text) => sameUserText(textOf(message), text))
     );
+    const historyBaseIndex =
+      snapshot.baseIndex && snapshot.baseIndex > 0 ? snapshot.baseIndex : undefined;
     return {
       generation: snapshot.identity.generation,
       status: snapshot.status,
@@ -194,6 +203,7 @@ export function applyAgentEvent(
       backgroundTasks: snapshot.backgroundTasks ?? [],
       subagents: snapshot.subagents ?? [],
       toolOutputs: {},
+      ...(historyBaseIndex !== undefined ? { historyBaseIndex } : {}),
     };
   }
 
@@ -290,12 +300,13 @@ export function applyAgentEvent(
       const authoritativeLen = authoritativeLength(current.messages);
       const authoritative = current.messages.slice(0, authoritativeLen);
       let tail = current.messages.slice(authoritativeLen);
+      const localIndex = event.index - (current.historyBaseIndex ?? 0);
       // 正文被冷缓存清空后重新变热，snapshot 回来前的 upsert 以原 index 到达：直接写会
       // 留下稀疏空洞（.role/.optimistic 读 undefined 崩溃）。丢掉正文、只推进 seq，等 snapshot 整体被覆。
-      if (event.index > authoritative.length) {
+      if (localIndex < 0 || localIndex > authoritative.length) {
         return { ...current, lastOutputAt: now, lastSeq: event.seq };
       }
-      authoritative[event.index] = event.message;
+      authoritative[localIndex] = event.message;
       // 同文本的 user upsert 到达 = 回显对应的真消息落地，消费掉避免重复
       if (event.message.role === 'user' && tail.length > 0) {
         const deliveredText = textOf(event.message);
