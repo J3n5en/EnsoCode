@@ -18,5 +18,6 @@
 - 路径校验仍同步、不读任意文件
 
 ## 切片 5 — 冷缓存空态
-- 已 started 且无权威消息：时间线走 Preparing，不闪 Ask the agent
-- 选中冷会话补 snapshot 时短暂 spawning
+- `needsHistoryHydration`：已 started / 有 sessionFile 且无权威消息且未 spawning
+- ChatView 把 hydrating 并入 busy → Preparing，不闪 Ask the agent
+- 选中冷会话仍 `requestSnapshot`；不额外置 spawning
