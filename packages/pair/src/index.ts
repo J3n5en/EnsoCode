@@ -58,3 +58,21 @@ export {
   type PairedDevice,
   toWebSocketUrl,
 } from './relay';
+export {
+  createCachedHostLookup,
+  isMagicDnsOnly,
+  type NetworkInterfaceSnapshot,
+  type NudgeReason,
+  networkFingerprint,
+  parseLiteralHost,
+  parseRelayHostCache,
+  parseResolvConfNameservers,
+  parseScutilGlobalNameservers,
+  pickRelayConnectAddress,
+  type RelayHostAddress,
+  serializeRelayHostCache,
+  shouldReplaceOnNudge,
+  shouldSkipRelayLookup,
+  shouldUsePinnedRelaySocket,
+  TAILSCALE_MAGIC_DNS,
+} from './revive';

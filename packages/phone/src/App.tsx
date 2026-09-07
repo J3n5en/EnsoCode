@@ -177,19 +177,25 @@ export function App() {
     // 切后台时系统会掐死或冻结 socket 且不触发 close：回前台/网络恢复立即探活。
     // 退后台瞬间赶在冻结前上报不可见：桌面据此把关键事件转系统推送
     //（半开 socket 不会 close，光靠 peer-left 桌面要很久才知道手机不在看）
-    const nudge = () => {
+    const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        client.nudge();
+        client.nudge('visibility');
         client.send({ type: 'presence', visible: true });
       } else {
         client.send({ type: 'presence', visible: false });
       }
     };
-    document.addEventListener('visibilitychange', nudge);
-    window.addEventListener('online', nudge);
+    const onOnline = () => {
+      if (document.visibilityState === 'visible') {
+        client.nudge('online');
+        client.send({ type: 'presence', visible: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
     return () => {
-      document.removeEventListener('visibilitychange', nudge);
-      window.removeEventListener('online', nudge);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
       client.close();
       clientRef.current = null;
     };

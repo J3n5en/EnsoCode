@@ -12,6 +12,7 @@ import {
   parsePairUri,
   revokePairing,
   sealFrame,
+  shouldReplaceOnNudge,
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
@@ -32,6 +33,10 @@ import {
   saveNodes,
   upsertNode,
 } from './nodeStore';
+import { startPairNetworkWatch } from './pairNetworkWatch';
+import { seedRelayHostCache } from './pairRelayLookup';
+import { openPairRelayWebSocket } from './pairRelayOpen';
+import { loadRelayHostCache } from './pairStore';
 
 /**
  * 「连接到节点」guest 端：本机连到别的 EnsoCode 桌面（对方是 pairHost）。
@@ -50,6 +55,7 @@ interface Connection {
   attempt: number;
   timer: NodeJS.Timeout | null;
   closed: boolean;
+  generation: number;
 }
 
 const connections = new Map<string, Connection>();
@@ -98,30 +104,48 @@ function notifyStatus(): void {
 // ── 生命周期 ──────────────────────────────────────────────────────────
 
 let resumeHooked = false;
+let stopNetworkWatch: (() => void) | null = null;
+let cacheSeeded = false;
+
+function ensureRelayCacheSeeded(): void {
+  if (cacheSeeded) return;
+  cacheSeeded = true;
+  seedRelayHostCache(loadRelayHostCache());
+}
 
 export function startPairGuest(): void {
+  ensureRelayCacheSeeded();
   if (!resumeHooked) {
     resumeHooked = true;
     // 睡眠唤醒后 TCP 多半已死但 close 事件不会来：活链立即探测，死链立即重连
-    powerMonitor.on('resume', probeAll);
+    powerMonitor.on('resume', () => reviveAll('resume'));
+    stopNetworkWatch = startPairNetworkWatch({ onChange: () => reviveAll('network-change') });
   }
   for (const node of loadNodes()) openConnection(node);
 }
 
-function probeAll(): void {
+function reviveAll(reason: 'resume' | 'network-change'): void {
   for (const conn of connections.values()) {
     if (conn.closed) continue;
-    if (conn.ws) {
-      conn.heartbeat?.probe();
-    } else {
+    if (shouldReplaceOnNudge(reason, conn.ws !== null)) {
       if (conn.timer) clearTimeout(conn.timer);
       conn.attempt = 0;
-      connect(conn);
+      if (conn.ws) {
+        try {
+          conn.ws.close();
+        } catch {}
+      } else {
+        connect(conn);
+      }
+      continue;
     }
+    conn.heartbeat?.probe();
   }
 }
 
 export function stopPairGuest(): void {
+  stopNetworkWatch?.();
+  stopNetworkWatch = null;
   for (const conn of connections.values()) closeConnection(conn);
   connections.clear();
 }
@@ -232,6 +256,7 @@ function openConnection(node: RemoteNode): void {
     attempt: 0,
     timer: null,
     closed: false,
+    generation: 0,
   };
   connections.set(node.nodeId, conn);
   connect(conn);
@@ -239,13 +264,21 @@ function openConnection(node: RemoteNode): void {
 
 function connect(conn: Connection): void {
   if (conn.closed) return;
+  const generation = ++conn.generation;
   const base = toWebSocketUrl(conn.node.relayUrl);
   const url = `${base}/v1/pair/${encodeURIComponent(conn.node.pairId)}?role=guest&token=${encodeURIComponent(conn.node.token)}`;
-  let ws: WebSocket;
-  try {
-    ws = new WebSocket(url);
-  } catch {
-    scheduleReconnect(conn);
+  void openPairRelayWebSocket(url)
+    .then((ws) => attachGuestSocket(conn, ws, generation))
+    .catch(() => {
+      if (!conn.closed && conn.generation === generation) scheduleReconnect(conn);
+    });
+}
+
+function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number): void {
+  if (conn.closed || conn.generation !== generation) {
+    try {
+      ws.close();
+    } catch {}
     return;
   }
   ws.binaryType = 'arraybuffer';

@@ -18,6 +18,7 @@ import {
   pollHostPairing,
   revokePairing,
   sealFrame,
+  shouldReplaceOnNudge,
   startHostPairing,
   type TerminalPalette,
   toBase64Url,
@@ -48,6 +49,7 @@ import { app, powerMonitor, powerSaveBlocker } from 'electron';
 import { requestSnapshot, setPinnedSessions } from './agentHost';
 import { MacosSystemSleepAssertion } from './macosSystemSleepAssertion';
 import { bumpPairMetaEpoch, flushChangedMeta, requestPairMeta } from './pairMetaFlush';
+import { startPairNetworkWatch } from './pairNetworkWatch';
 import {
   checkSetModel,
   checkSpawn,
@@ -58,9 +60,12 @@ import {
   sliceHistory,
 } from './pairPolicy';
 import { applyPairPowerTaskEvent, shouldHoldPairPowerKeepAlive } from './pairPowerKeepAlive';
+import { seedRelayHostCache } from './pairRelayLookup';
+import { openPairRelayWebSocket } from './pairRelayOpen';
 import {
   isSecureStorageAvailable,
   loadDevices,
+  loadRelayHostCache,
   loadRelayUrl,
   renameDevice as renameInList,
   saveDevices,
@@ -113,6 +118,7 @@ interface Connection {
   attempt: number;
   timer: NodeJS.Timeout | null;
   closed: boolean;
+  generation: number;
 }
 
 const connections = new Map<string, Connection>();
@@ -231,32 +237,50 @@ function syncPinnedSessions(): void {
 // ── 生命周期 ──────────────────────────────────────────────────────────
 
 let resumeHooked = false;
+let stopNetworkWatch: (() => void) | null = null;
+let cacheSeeded = false;
+
+function ensureRelayCacheSeeded(): void {
+  if (cacheSeeded) return;
+  cacheSeeded = true;
+  seedRelayHostCache(loadRelayHostCache());
+}
 
 export function startPairHost(): void {
+  ensureRelayCacheSeeded();
   if (!resumeHooked) {
     resumeHooked = true;
     // 睡眠唤醒后 TCP 多半已死但 close 事件不会来：活链立即探测，死链立即重连
-    powerMonitor.on('resume', probeAll);
+    powerMonitor.on('resume', () => reviveAll('resume'));
+    stopNetworkWatch = startPairNetworkWatch({ onChange: () => reviveAll('network-change') });
   }
   for (const device of loadDevices()) {
     openConnection(device);
   }
 }
 
-function probeAll(): void {
+function reviveAll(reason: 'resume' | 'network-change'): void {
   for (const conn of connections.values()) {
     if (conn.closed) continue;
-    if (conn.ws) {
-      conn.heartbeat?.probe();
-    } else {
+    if (shouldReplaceOnNudge(reason, conn.ws !== null)) {
       if (conn.timer) clearTimeout(conn.timer);
       conn.attempt = 0;
-      connect(conn);
+      if (conn.ws) {
+        try {
+          conn.ws.close();
+        } catch {}
+      } else {
+        connect(conn);
+      }
+      continue;
     }
+    conn.heartbeat?.probe();
   }
 }
 
 export function stopPairHost(): void {
+  stopNetworkWatch?.();
+  stopNetworkWatch = null;
   cancelPairing();
   for (const conn of connections.values()) {
     conn.closed = true;
@@ -425,6 +449,7 @@ function openConnection(device: PairedDevice): void {
     attempt: 0,
     timer: null,
     closed: false,
+    generation: 0,
   };
   connections.set(device.pairId, conn);
   connect(conn);
@@ -432,13 +457,21 @@ function openConnection(device: PairedDevice): void {
 
 function connect(conn: Connection): void {
   if (conn.closed) return;
+  const generation = ++conn.generation;
   const base = toWebSocketUrl(conn.device.relayUrl);
   const url = `${base}/v1/pair/${encodeURIComponent(conn.device.pairId)}?role=host&token=${encodeURIComponent(conn.device.token)}`;
-  let ws: WebSocket;
-  try {
-    ws = new WebSocket(url);
-  } catch {
-    scheduleReconnect(conn);
+  void openPairRelayWebSocket(url)
+    .then((ws) => attachHostSocket(conn, ws, generation))
+    .catch(() => {
+      if (!conn.closed && conn.generation === generation) scheduleReconnect(conn);
+    });
+}
+
+function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): void {
+  if (conn.closed || conn.generation !== generation) {
+    try {
+      ws.close();
+    } catch {}
     return;
   }
   ws.binaryType = 'arraybuffer';

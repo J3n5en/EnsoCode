@@ -5,6 +5,7 @@ import {
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
+  type NudgeReason,
   openFrame,
   type PairedDevice,
   type PhoneToHost,
@@ -12,6 +13,7 @@ import {
   type ProjectGroupEntry,
   type ProviderEntry,
   sealFrame,
+  shouldReplaceOnNudge,
   toWebSocketUrl,
 } from '@enso/pair';
 import {
@@ -156,17 +158,23 @@ export class PairClient {
     };
   }
 
-  /** 回前台/网络恢复时调用：死链立即重连（跳过退避），活链立即探测 */
-  nudge(): void {
+  /** 回前台只探活；网络恢复拆半开链，死链立即重连 */
+  nudge(reason: NudgeReason = 'visibility'): void {
     if (this.closed || this.revoked) return;
-    if (this.ws) {
-      this.heartbeat?.probe();
+    if (shouldReplaceOnNudge(reason, this.ws !== null)) {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.attempt = 0;
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {}
+      } else {
+        this.connect();
+      }
       return;
     }
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    this.attempt = 0;
-    this.connect();
+    this.heartbeat?.probe();
   }
 
   close(): void {

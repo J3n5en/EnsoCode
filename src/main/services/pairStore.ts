@@ -1,6 +1,11 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { PairedDevice } from '@enso/pair';
+import {
+  type PairedDevice,
+  parseRelayHostCache,
+  type RelayHostAddress,
+  serializeRelayHostCache,
+} from '@enso/pair';
 import { app, safeStorage } from 'electron';
 
 /**
@@ -107,5 +112,30 @@ export function saveRelayUrl(relayUrl: string | null): void {
     renameSync(tmp, file);
   } catch (error) {
     console.warn('[pair] save relay url failed', error);
+  }
+}
+
+function relayHostCachePath(): string {
+  return path.join(app.getPath('userData'), 'relay-host-cache.json');
+}
+
+export function loadRelayHostCache(): Record<string, RelayHostAddress> {
+  try {
+    const file = relayHostCachePath();
+    if (!existsSync(file)) return {};
+    return Object.fromEntries(parseRelayHostCache(JSON.parse(readFileSync(file, 'utf-8'))));
+  } catch {
+    return {};
+  }
+}
+
+export function saveRelayHostCache(cache: Map<string, RelayHostAddress>): void {
+  try {
+    const file = relayHostCachePath();
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, serializeRelayHostCache(parseRelayHostCache(Object.fromEntries(cache))));
+    renameSync(tmp, file);
+  } catch (error) {
+    console.warn('[pair] save relay host cache failed', error);
   }
 }

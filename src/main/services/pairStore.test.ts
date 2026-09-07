@@ -96,3 +96,25 @@ describe('中继地址持久化', () => {
     expect(loadDevices()).toEqual([]);
   });
 });
+
+describe('中继 IP 缓存', () => {
+  it('往返合法记录，丢掉脏条目', async () => {
+    const { loadRelayHostCache, saveRelayHostCache } = await store();
+    saveRelayHostCache(
+      new Map([
+        ['enso-relay.j3.do', { address: '1.2.3.4', family: 4 }],
+        ['bad', { address: 'nope', family: 4 }],
+      ])
+    );
+    expect(loadRelayHostCache()).toEqual({
+      'enso-relay.j3.do': { address: '1.2.3.4', family: 4 },
+    });
+  });
+
+  it('文件损坏或缺失按空缓存处理', async () => {
+    const { loadRelayHostCache } = await store();
+    expect(loadRelayHostCache()).toEqual({});
+    writeFileSync(path.join(dir, 'relay-host-cache.json'), '{ not json');
+    expect(loadRelayHostCache()).toEqual({});
+  });
+});
