@@ -1,11 +1,15 @@
-import type { ProjectedMessage } from '@shared/types/agent';
+import type { ProjectedMessage, SpawnModelConfig } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import {
   buildRollingTitleUserText,
   buildTitleUserText,
   buildTurnDigest,
+  describeTitleModel,
   extractTitle,
   ROLLING_TITLE_SYSTEM_PROMPT,
+  TITLE_SUMMARY_TIMEOUTS_MS,
+  titleRejectReason,
+  titleSummaryTimeoutMs,
   TURN_DIGEST_ASSISTANT_MAX,
   TURN_DIGEST_USER_MAX,
 } from './titleSummary';
@@ -313,5 +317,64 @@ describe('ROLLING_TITLE_SYSTEM_PROMPT', () => {
 
   it('包含保持当前标题的指令', () => {
     expect(ROLLING_TITLE_SYSTEM_PROMPT.toLowerCase()).toContain('current title');
+  });
+});
+
+describe('titleSummaryTimeoutMs：候选下标 → 递增超时', () => {
+  it('三档为 60s / 120s / 180s', () => {
+    expect(TITLE_SUMMARY_TIMEOUTS_MS).toEqual([60_000, 120_000, 180_000]);
+    expect(titleSummaryTimeoutMs(0)).toBe(60_000);
+    expect(titleSummaryTimeoutMs(1)).toBe(120_000);
+    expect(titleSummaryTimeoutMs(2)).toBe(180_000);
+  });
+
+  it('越界取最后一档；负数取第一档', () => {
+    expect(titleSummaryTimeoutMs(5)).toBe(180_000);
+    expect(titleSummaryTimeoutMs(-1)).toBe(60_000);
+  });
+});
+
+describe('titleRejectReason：结果像不像标题', () => {
+  it('合法短标题 → null', () => {
+    expect(titleRejectReason('修复节点状态转圈')).toBeNull();
+    expect(titleRejectReason('Fix node status spinner')).toBeNull();
+    // 尾部句号已由 extractTitle 剥掉；中间带一个句号的也放过
+    expect(titleRejectReason('v2.5 发布准备')).toBeNull();
+  });
+
+  it('空串 → empty', () => {
+    expect(titleRejectReason('')).toBe('model returned empty title');
+    expect(titleRejectReason('   ')).toBe('model returned empty title');
+  });
+
+  it('多句叙述（composer 把出标题当任务干） → did not return a title', () => {
+    expect(
+      titleRejectReason('继续排查节点一直转圈的问题。我先查看当前代码。然后确认修复是否生效')
+    ).toBe('model did not return a title');
+    expect(
+      titleRejectReason('I will look at the code first. Then I will check the fix. Finally verify')
+    ).toBe('model did not return a title');
+  });
+});
+
+describe('describeTitleModel：人可读模型标识', () => {
+  const base: SpawnModelConfig = {
+    api: 'openai-completions',
+    baseUrl: '',
+    apiKey: '',
+    modelId: 'composer-2.5-fast',
+    settingsProviderId: '8a0c2756-cca4-41ad-9393-fc187d475cf4',
+  };
+
+  it('oauth 配置 → accountKey/modelId', () => {
+    expect(describeTitleModel({ ...base, oauthAccountKey: 'cursor' })).toBe(
+      'cursor/composer-2.5-fast'
+    );
+  });
+
+  it('apiKey 配置 → settingsProviderId/modelId', () => {
+    expect(describeTitleModel({ ...base, modelId: 'grok-4.6' })).toBe(
+      '8a0c2756-cca4-41ad-9393-fc187d475cf4/grok-4.6'
+    );
   });
 });

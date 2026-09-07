@@ -1,9 +1,52 @@
 /** 会话标题总结：一次性补全的输入与输出处理（纯函数，供 supervisor 调用）。 */
 
-import type { ProjectedMessage, TitleSummaryInput, TurnDigest } from '@shared/types/agent';
+import type {
+  ProjectedMessage,
+  SpawnModelConfig,
+  TitleSummaryInput,
+  TurnDigest,
+} from '@shared/types/agent';
 
 /** 送给模型的用户消息上限：标题只需要开头，长指令全文只会烧 token */
 const MAX_INPUT_CHARS = 2000;
+
+/**
+ * 按候选下标递增的超时：订阅类 provider（Cursor h2 bridge）首包可达 25s+，15s 一律超时；
+ * 后面的候选是回退兑底，给更宽的窗口提高至少拿到一个标题的概率。
+ */
+export const TITLE_SUMMARY_TIMEOUTS_MS = [60_000, 120_000, 180_000] as const;
+
+/** 第 index 个候选的超时；越界取最后一档，负数取第一档 */
+export function titleSummaryTimeoutMs(index: number): number {
+  const clamped = Math.max(0, Math.min(index, TITLE_SUMMARY_TIMEOUTS_MS.length - 1));
+  return TITLE_SUMMARY_TIMEOUTS_MS[clamped];
+}
+
+/** 句终标点：用于判断模型是否返回了一段叙述而非标题 */
+const SENTENCE_END = /[。．.！!？?]/g;
+
+/**
+ * 结果合法性守卫：extractTitle 之上再判“像不像标题”。返回 null 表示合法。
+ * composer 类 agent 模型会把“输出标题”当任务去干，返回“继续排查…我先查看…”这种多句叙述；
+ * 不拦下来会被截成烂标题当成功写回。判据：含 ≥ 2 个句终标点且最后一个标点后仍有内容。
+ */
+export function titleRejectReason(title: string): string | null {
+  const trimmed = title.trim();
+  if (!trimmed) return 'model returned empty title';
+  const ends = [...trimmed.matchAll(SENTENCE_END)];
+  if (ends.length >= 2) {
+    const last = ends[ends.length - 1];
+    const lastIndex = last.index ?? -1;
+    if (lastIndex >= 0 && lastIndex < trimmed.length - 1) return 'model did not return a title';
+  }
+  return null;
+}
+
+/** 人可读模型标识（失败原因前缀）：oauth → accountKey/modelId，apiKey → settingsProviderId/modelId */
+export function describeTitleModel(model: SpawnModelConfig): string {
+  const provider = model.oauthAccountKey ?? model.settingsProviderId;
+  return `${provider}/${model.modelId}`;
+}
 
 /** 滚动摘要：本轮 user 文本截头上限 */
 export const TURN_DIGEST_USER_MAX = 2000;
