@@ -323,6 +323,9 @@ export const zhTranslations: Record<string, string> = {
     '新会话发出首条消息后，用 AI 自动生成简短标题。',
   'Follows the default model': '跟随默认模型',
   'Follow default model': '改跟默认模型',
+  'Summarizing title': '标题总结中',
+  'Title summary failed': '标题总结失败',
+  'Click to retry': '点击重试',
   'Selected model is unavailable — falls back to the default model.':
     '所选模型已不可用——将回退到默认模型。',
   'No default model': '未设置默认模型',
@@ -730,6 +733,7 @@ export const zhTranslations: Record<string, string> = {
   Collapse: '收起',
   'Expand sidebar': '展开侧边栏',
   'Approval required': '需要审批',
+  'Waiting for your answer': '等待你回答',
   'Type an answer…': '输入回答…',
   'Message will queue until this round finishes…': '消息将排队,本轮结束后发送…',
   Queued: '排队',

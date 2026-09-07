@@ -23,6 +23,7 @@ import {
   Archive,
   ArchiveRestore,
   ChevronRight,
+  CircleAlert,
   Eraser,
   FileText,
   FolderGit2,
@@ -48,6 +49,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
+import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { matchesQuery } from '@/components/chat/chatSearch';
 import { insertComposerMention } from '@/components/chat/composerMentionBridge';
@@ -75,6 +77,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { addToast } from '@/components/ui/toast';
+import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
@@ -1770,6 +1773,10 @@ interface ConversationRowProps {
     projectId: string;
     messages: { timestamp?: number }[];
     forkedFromConversationId?: string;
+    /** 标题总结在飞（标题后转圈） */
+    titleSummaryPending?: boolean;
+    /** 标题总结全部候选失败（标题后红叹号，点击重试） */
+    titleSummaryError?: string;
   };
   active: boolean;
   hasRunningChild: boolean;
@@ -1872,6 +1879,13 @@ function ConversationRow({
           {displayTitle}
           {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
         </span>
+      )}
+      {!renaming && (
+        <TitleSummaryBadge
+          pending={conversation.titleSummaryPending}
+          error={conversation.titleSummaryError}
+          onRetry={() => useSessionsStore.getState().retryTitleSummary(id)}
+        />
       )}
       {!renaming &&
         (switchHint ? (
@@ -2004,6 +2018,67 @@ function WorktreeBadge({ status }: { status?: WorktreeStatus }) {
   );
 }
 
+/**
+ * 标题后的总结状态槽：在飞转圈 → 失败红叹号（点击重试） → 无。pending 优先：点重试后叹号立刻变转圈。
+ * 现行机制每个成功回合都会滚动总结，转圈频繁出现是预期行为。
+ */
+function TitleSummaryBadge({
+  pending,
+  error,
+  onRetry,
+}: {
+  pending?: boolean;
+  error?: string;
+  onRetry: () => void;
+}) {
+  const { t } = useI18n();
+  if (pending) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="status"
+              className="shrink-0 text-muted-foreground/60"
+              aria-label={t('Summarizing title')}
+            />
+          }
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
+        </TooltipTrigger>
+        <TooltipPopup side="right">{t('Summarizing title')}</TooltipPopup>
+      </Tooltip>
+    );
+  }
+  if (error) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={t('Title summary failed')}
+              className="shrink-0 rounded p-0.5 text-destructive hover:text-destructive/80"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry();
+              }}
+            />
+          }
+        >
+          <CircleAlert className="h-3 w-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="right" className="max-w-72">
+          <p className="font-medium">{t('Title summary failed')}</p>
+          <p className="mt-0.5 break-all text-muted-foreground">{error}</p>
+          <p className="mt-1 text-muted-foreground/70">{t('Click to retry')}</p>
+        </TooltipPopup>
+      </Tooltip>
+    );
+  }
+  return null;
+}
+
 function ConversationDot({
   conversation,
   hasRunningChild,
@@ -2023,16 +2098,5 @@ function ConversationDot({
     pendingAskCount: conversation.pendingAsks?.length ?? 0,
     hasRunningChild,
   });
-  return (
-    <span
-      className={cn(
-        'h-1.5 w-1.5 shrink-0 rounded-full',
-        tone === 'running' && 'animate-pulse bg-blue-500',
-        tone === 'failed' && 'bg-destructive',
-        tone === 'waiting' && 'animate-pulse bg-green-500',
-        tone === 'unread' && 'bg-green-500',
-        tone === 'idle' && 'bg-muted-foreground/30'
-      )}
-    />
-  );
+  return <ConversationStatusIndicator tone={tone} size="sm" />;
 }
