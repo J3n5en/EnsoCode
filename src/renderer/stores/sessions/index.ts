@@ -12,6 +12,7 @@ import type {
   ProjectAuthorityProjection,
   ProjectedMessage,
   ThinkingLevel,
+  TitleSummaryInput,
   TurnDigest,
 } from '@shared/types/agent';
 import type { AgentDispatchResult, AgentDispatchTask } from '@shared/types/mentions';
@@ -107,6 +108,12 @@ export interface Conversation extends SessionProjection {
   title: string;
   /** 用户手动改过名：此后一切自动标题总结（首条即时 / 每轮滚动）都跳过；随 partialize 持久化 */
   titleLocked?: boolean;
+  /** 标题总结在飞：pendingTitleBaselines 的 UI 镜像（Map 在 store 闭包里，组件读不到）；侧栏转圈。不持久化 */
+  titleSummaryPending?: boolean;
+  /** 最近一次标题总结失败原因（含模型标识）；侧栏红叹号 + tooltip。成功/改名/重试时清。不持久化 */
+  titleSummaryError?: string;
+  /** 最近一次成功回合的 digest，供手动重试走 rolling；无则退 initial。不持久化 */
+  lastTurnDigest?: TurnDigest;
   /** 是否已在 worker 侧 spawn（首条消息发出时才 spawn） */
   started: boolean;
   spawning: boolean;
@@ -234,6 +241,10 @@ interface SessionsState {
   togglePinConversation(id: string): void;
   /** 手动改会话标题（侧栏 / tab 双击或右键） */
   renameConversation(id: string, title: string): void;
+  /** 标题总结失败后手动重试（侧栏红叹号）：有最近回合 digest 走 rolling，否则退 initial */
+  retryTitleSummary(id: string): void;
+  /** 开关关闭时清掉全部在飞与失败残留（在飞 Map 在闭包里，只能由 store 自己清） */
+  clearTitleSummaryState(): void;
   /** 切换会话归档(归档时同时清置顶) */
   toggleArchiveConversation(id: string): void;
   dispatchAgent(
@@ -362,6 +373,70 @@ export const useSessionsStore = create<SessionsState>()(
        */
       const pendingTitleBaselines = new Map<string, string>();
 
+      /**
+       * 标题总结在飞的开/关必须走这两个 helper：保证不变量
+       * `conversation.titleSummaryPending === pendingTitleBaselines.has(id)`，侧栏转圈才能跟实际在飞对齐。
+       */
+      function markTitlePending(conversationId: string, baseline: string): void {
+        pendingTitleBaselines.set(conversationId, baseline);
+        set((state) =>
+          state.conversations[conversationId]
+            ? patch(state, conversationId, {
+                titleSummaryPending: true,
+                titleSummaryError: undefined,
+              })
+            : state
+        );
+      }
+
+      /** 返回原本是否在飞（迟到的 title-generated / title-failed 靠它识别） */
+      function clearTitlePending(conversationId: string): boolean {
+        const wasPending = pendingTitleBaselines.delete(conversationId);
+        set((state) => {
+          const conversation = state.conversations[conversationId];
+          if (!conversation || conversation.titleSummaryPending === undefined) return state;
+          return patch(state, conversationId, { titleSummaryPending: undefined });
+        });
+        return wasPending;
+      }
+
+      /** 所有发起路径的收口：记在飞基准、清错误、发 IPC；Main 同步拒绝时按 title-failed 语义处理 */
+      function requestTitleSummary(
+        conversationId: string,
+        baseline: string,
+        input: TitleSummaryInput,
+        sessionModel?: { providerId?: string; modelId?: string }
+      ): void {
+        markTitlePending(conversationId, baseline);
+        void (async () => {
+          let result: { ok: boolean; error?: string };
+          try {
+            result = await window.electronAPI.agent.summarizeTitle(
+              conversationId,
+              input,
+              sessionModel?.providerId && sessionModel?.modelId
+                ? { providerId: sessionModel.providerId, modelId: sessionModel.modelId }
+                : undefined
+            );
+          } catch (error) {
+            result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+          }
+          if (!result.ok) {
+            failTitleSummary(conversationId, result.error ?? 'title summary request rejected');
+          }
+        })();
+      }
+
+      /** title-failed 事件与 IPC 同步拒绝共用：只对仍在飞的会话生效，锁定的会话不写错误 */
+      function failTitleSummary(conversationId: string, error: string): void {
+        if (!clearTitlePending(conversationId)) return;
+        set((state) => {
+          const conversation = state.conversations[conversationId];
+          if (!conversation || conversation.titleLocked) return state;
+          return patch(state, conversationId, { titleSummaryError: error.slice(0, 500) });
+        });
+      }
+
       function trySummarizeTitle(
         conversationId: string,
         rawText: string,
@@ -383,13 +458,11 @@ export const useSessionsStore = create<SessionsState>()(
         const conversation = get().conversations[conversationId];
         if (!conversation || conversation.titleLocked) return;
 
-        pendingTitleBaselines.set(conversationId, baselineTitle);
-        void window.electronAPI.agent.summarizeTitle(
+        requestTitleSummary(
           conversationId,
+          baselineTitle,
           { kind: 'initial', text: cleanedText },
-          sessionModel?.providerId && sessionModel?.modelId
-            ? { providerId: sessionModel.providerId, modelId: sessionModel.modelId }
-            : undefined
+          sessionModel
         );
       }
 
@@ -398,7 +471,10 @@ export const useSessionsStore = create<SessionsState>()(
        * 模型可原样返回当前标题（不改）。每个成功回合都触发，不收敛；在飞未回流时跳过。
        * 冷会话/手机端会话没有正文也能触发——摘要来自 worker，不依赖 renderer 的 messages。
        */
-      function tryRollingSummarizeTitle(conversationId: string, digest: TurnDigest | undefined): void {
+      function tryRollingSummarizeTitle(
+        conversationId: string,
+        digest: TurnDigest | undefined
+      ): void {
         if (!digest || !useSettingsStore.getState().titleSummaryEnabled) return;
         if (!digest.userText.trim() && !digest.assistantText.trim()) return;
         const conversation = get().conversations[conversationId];
@@ -412,18 +488,16 @@ export const useSessionsStore = create<SessionsState>()(
         ) {
           return;
         }
-        pendingTitleBaselines.set(conversationId, conversation.title);
-        void window.electronAPI.agent.summarizeTitle(
+        requestTitleSummary(
           conversationId,
+          conversation.title,
           {
             kind: 'rolling',
             currentTitle: conversation.title,
             userText: digest.userText,
             assistantText: digest.assistantText,
           },
-          conversation.lastProviderId && conversation.lastModelId
-            ? { providerId: conversation.lastProviderId, modelId: conversation.lastModelId }
-            : undefined
+          { providerId: conversation.lastProviderId, modelId: conversation.lastModelId }
         );
       }
 
@@ -750,7 +824,7 @@ export const useSessionsStore = create<SessionsState>()(
 
         if (event.type === 'title-generated') {
           const baseline = pendingTitleBaselines.get(event.conversationId);
-          pendingTitleBaselines.delete(event.conversationId);
+          clearTitlePending(event.conversationId);
           set((state) => {
             const conversation = state.conversations[event.conversationId];
             // 会话已删 / 用户已手动改名（标题离开基准）→ 丢弃结果
@@ -758,15 +832,20 @@ export const useSessionsStore = create<SessionsState>()(
               return state;
             }
             const title = event.title.trim().slice(0, 80);
-            if (!title || title === conversation.title) return state;
-            return patch(state, event.conversationId, { title });
+            if (!title) return state;
+            // 模型认为标题已准确（原样返回）也是成功：清错误，但不必改写标题
+            if (title === conversation.title) {
+              return conversation.titleSummaryError === undefined
+                ? state
+                : patch(state, event.conversationId, { titleSummaryError: undefined });
+            }
+            return patch(state, event.conversationId, { title, titleSummaryError: undefined });
           });
           return;
         }
 
         if (event.type === 'title-failed') {
-          // TODO(Step 5): 在飞时写 titleSummaryError；此处先仅清基准保持编译
-          pendingTitleBaselines.delete(event.conversationId);
+          failTitleSummary(event.conversationId, event.error);
           return;
         }
 
@@ -1070,6 +1149,13 @@ export const useSessionsStore = create<SessionsState>()(
             return;
           }
           if (event.type !== 'turn-completed') return;
+          // 留下本轮摘要供侧栏红叹号的手动重试用；在发起滚动总结之前写，重试拿到的是最新一轮
+          if (event.digest) {
+            const digest = event.digest;
+            set((state) =>
+              state.conversations[id] ? patch(state, id, { lastTurnDigest: digest }) : state
+            );
+          }
           tryRollingSummarizeTitle(id, event.digest);
           flushQueue(id);
           continueGoal(id);
@@ -1575,13 +1661,73 @@ export const useSessionsStore = create<SessionsState>()(
         renameConversation(id, title) {
           const next = title.trim().slice(0, 80);
           if (!next) return;
-          // 手动改名即永久锁定：在飞的自动总结作废，之后的回合也不再刷
-          pendingTitleBaselines.delete(id);
+          // 手动改名即永久锁定：在飞的自动总结作废，之后的回合也不再刷；失败红叹号一并清掉
+          clearTitlePending(id);
           set((state) => {
             const conversation = state.conversations[id];
             if (!conversation) return state;
-            if (conversation.title === next && conversation.titleLocked) return state;
-            return patch(state, id, { title: next, titleLocked: true });
+            if (
+              conversation.title === next &&
+              conversation.titleLocked &&
+              conversation.titleSummaryError === undefined
+            ) {
+              return state;
+            }
+            return patch(state, id, {
+              title: next,
+              titleLocked: true,
+              titleSummaryError: undefined,
+            });
+          });
+        },
+
+        retryTitleSummary(id) {
+          const conversation = get().conversations[id];
+          if (
+            !conversation ||
+            conversation.titleLocked ||
+            !useSettingsStore.getState().titleSummaryEnabled ||
+            pendingTitleBaselines.has(id)
+          ) {
+            return;
+          }
+          const model = { providerId: conversation.lastProviderId, modelId: conversation.lastModelId };
+          const currentTitle = conversation.title.trim();
+          if (conversation.lastTurnDigest && currentTitle) {
+            requestTitleSummary(
+              id,
+              conversation.title,
+              { kind: 'rolling', currentTitle: conversation.title, ...conversation.lastTurnDigest },
+              model
+            );
+            return;
+          }
+          // 首条总结就失败且还没跑完一轮：退回 initial；正文被冷驱逐时用当前标题兑底
+          const text = cleanTitleSummarySource(firstUserRawText(conversation)) || currentTitle;
+          if (!text.trim()) return;
+          requestTitleSummary(id, conversation.title, { kind: 'initial', text }, model);
+        },
+
+        clearTitleSummaryState() {
+          pendingTitleBaselines.clear();
+          set((state) => {
+            let changed = false;
+            const conversations = Object.fromEntries(
+              Object.entries(state.conversations).map(([id, conversation]) => {
+                if (
+                  conversation.titleSummaryPending === undefined &&
+                  conversation.titleSummaryError === undefined
+                ) {
+                  return [id, conversation];
+                }
+                changed = true;
+                return [
+                  id,
+                  { ...conversation, titleSummaryPending: undefined, titleSummaryError: undefined },
+                ];
+              })
+            );
+            return changed ? { conversations } : state;
           });
         },
 
@@ -2500,6 +2646,10 @@ export const useSessionsStore = create<SessionsState>()(
               abortRequested: undefined,
               compaction: undefined,
               compactionError: undefined,
+              // 标题总结的运行态：在飞 Map 随重启作废，失败与摘要都不值得跨重启保留
+              titleSummaryPending: undefined,
+              titleSummaryError: undefined,
+              lastTurnDigest: undefined,
             },
           ])
         ),
@@ -2530,6 +2680,12 @@ window.electronAPI.sourceAuthority.onChanged((projection) => {
   const conversations = useSessionsStore.getState().conversations;
   const next = remapConversationProjectIds(conversations, projection.conversations);
   if (next !== conversations) useSessionsStore.setState({ conversations: next });
+});
+
+// 标题总结开关关闭：在飞与失败残留一起清掉，否则转圈/红叹号会在关闭后继续挂在侧栏
+useSettingsStore.subscribe((state, previous) => {
+  if (state.titleSummaryEnabled || !previous.titleSummaryEnabled) return;
+  useSessionsStore.getState().clearTitleSummaryState();
 });
 
 // 上报「当前正在查看的会话」给 main：窗口聚焦时,只有正被查看的会话才抑制系统通知。

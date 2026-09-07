@@ -1515,21 +1515,218 @@ describe('typed Agent child projection', () => {
       );
     });
 
-    it('title-generated 的 title 与当前相同 → store state 引用不变', async () => {
+    it('title-generated 的 title 与当前相同 → 标题不变，但在飞态清除', async () => {
       settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
       seedStartedRoot('parent');
       // 制造在飞基准
       turnCompleted('parent');
+      expect(
+        sessionsModule.useSessionsStore.getState().conversations.parent.titleSummaryPending
+      ).toBe(true);
 
-      const before = sessionsModule.useSessionsStore.getState();
       onAgentEvent?.({
         type: 'title-generated',
         conversationId: 'parent',
         title: '初始标题',
       });
-      const after = sessionsModule.useSessionsStore.getState();
-      // 模型选择不改 → 不写 state，引用应保持不变
-      expect(after).toBe(before);
+      const after = sessionsModule.useSessionsStore.getState().conversations.parent;
+      // 模型选择不改 → 标题保持；但“标题已准确”也是成功，转圈必须消失
+      expect(after.title).toBe('初始标题');
+      expect(after.titleSummaryPending).toBeUndefined();
+    });
+  });
+
+  describe('标题总结在飞态、失败态与手动重试', () => {
+    const digest = { userText: '本轮用户请求', assistantText: '本轮 assistant 结论' };
+    const conv = () => sessionsModule.useSessionsStore.getState().conversations.parent;
+
+    function seed(overrides: Record<string, unknown> = {}) {
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: {
+            ...state.conversations.parent,
+            title: '初始标题',
+            started: true,
+            spawning: false,
+            status: 'idle' as const,
+            generation: 'g1',
+            lastProviderId: 'provider-1',
+            lastModelId: 'model-1',
+            messages: [],
+            titleLocked: undefined,
+            titleSummaryError: undefined,
+            titleSummaryPending: undefined,
+            lastTurnDigest: undefined,
+            ...overrides,
+          },
+        },
+      }));
+    }
+
+    function turnCompleted(seq = 2) {
+      onAgentEvent?.({
+        type: 'turn-completed',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq,
+        turnId: `turn-${seq}`,
+        digest,
+      });
+    }
+
+    beforeEach(() => {
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+      summarizeTitle.mockClear();
+      summarizeTitle.mockResolvedValue({ ok: true });
+      // 清掉上一用例可能泄漏的在飞基准
+      onAgentEvent?.({ type: 'title-generated', conversationId: 'parent', title: '__reset__' });
+      seed();
+    });
+
+    it('发起总结后 titleSummaryPending=true；title-generated 到达后清除', async () => {
+      turnCompleted();
+      expect(conv().titleSummaryPending).toBe(true);
+      onAgentEvent?.({ type: 'title-generated', conversationId: 'parent', title: '新标题' });
+      expect(conv().titleSummaryPending).toBeUndefined();
+      expect(conv().title).toBe('新标题');
+    });
+
+    it('title-failed 在飞 → 写 titleSummaryError、清 pending；标题不变', async () => {
+      turnCompleted();
+      onAgentEvent?.({
+        type: 'title-failed',
+        conversationId: 'parent',
+        error: 'cursor/composer-2.5-fast: timed out after 60s',
+      });
+      expect(conv().titleSummaryError).toBe('cursor/composer-2.5-fast: timed out after 60s');
+      expect(conv().titleSummaryPending).toBeUndefined();
+      expect(conv().title).toBe('初始标题');
+    });
+
+    it('title-failed 不在飞（迟到） → state 引用不变', async () => {
+      const before = sessionsModule.useSessionsStore.getState();
+      onAgentEvent?.({ type: 'title-failed', conversationId: 'parent', error: 'late' });
+      expect(sessionsModule.useSessionsStore.getState()).toBe(before);
+    });
+
+    it('title-failed 对 titleLocked 会话不写错误', async () => {
+      turnCompleted();
+      sessionsModule.useSessionsStore.getState().renameConversation('parent', '手动改名');
+      // 改名已清在飞；即使再来一个在飞态（模拟竞态）也不该写错误
+      onAgentEvent?.({ type: 'title-failed', conversationId: 'parent', error: 'x' });
+      expect(conv().titleSummaryError).toBeUndefined();
+      expect(conv().title).toBe('手动改名');
+    });
+
+    it('title-generated 成功清除之前的 titleSummaryError', async () => {
+      seed({ titleSummaryError: '旧错误' });
+      turnCompleted();
+      // 发起时就已清错误
+      expect(conv().titleSummaryError).toBeUndefined();
+      seed({ titleSummaryError: '又出错', titleSummaryPending: true });
+      onAgentEvent?.({ type: 'title-generated', conversationId: 'parent', title: '初始标题' });
+      expect(conv().titleSummaryError).toBeUndefined();
+    });
+
+    it('renameConversation 清 titleSummaryError 与 titleSummaryPending', async () => {
+      turnCompleted();
+      seed({ titleSummaryError: '错', titleSummaryPending: true });
+      sessionsModule.useSessionsStore.getState().renameConversation('parent', '手动');
+      expect(conv().titleSummaryError).toBeUndefined();
+      expect(conv().titleSummaryPending).toBeUndefined();
+    });
+
+    it('turn-completed 带 digest → lastTurnDigest 写入', async () => {
+      turnCompleted();
+      expect(conv().lastTurnDigest).toEqual(digest);
+    });
+
+    it('summarizeTitle IPC 同步拒绝 → 与 title-failed 同效', async () => {
+      summarizeTitle.mockResolvedValueOnce({ ok: false, error: 'no usable title model' });
+      turnCompleted();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(conv().titleSummaryError).toBe('no usable title model');
+      expect(conv().titleSummaryPending).toBeUndefined();
+    });
+
+    it('retryTitleSummary：有 lastTurnDigest → rolling，清 error，pending=true', async () => {
+      seed({ lastTurnDigest: digest, titleSummaryError: '错' });
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        'parent',
+        { kind: 'rolling', currentTitle: '初始标题', ...digest },
+        { providerId: 'provider-1', modelId: 'model-1' }
+      );
+      expect(conv().titleSummaryError).toBeUndefined();
+      expect(conv().titleSummaryPending).toBe(true);
+    });
+
+    it('retryTitleSummary：无 digest 有正文 → initial(首条用户文本)', async () => {
+      seed({
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: '首条用户消息原文\n第二行' }] },
+          { role: 'assistant', content: [{ type: 'text', text: '回复' }] },
+        ],
+      });
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        'parent',
+        { kind: 'initial', text: '首条用户消息原文\n第二行' },
+        { providerId: 'provider-1', modelId: 'model-1' }
+      );
+    });
+
+    it('retryTitleSummary：无 digest 无正文 → initial(当前标题)', async () => {
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        'parent',
+        { kind: 'initial', text: '初始标题' },
+        { providerId: 'provider-1', modelId: 'model-1' }
+      );
+    });
+
+    it('retryTitleSummary：titleLocked / 开关关 / 在飞 → 不调用', async () => {
+      seed({ lastTurnDigest: digest, titleLocked: true });
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).not.toHaveBeenCalled();
+
+      seed({ lastTurnDigest: digest });
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: false });
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).not.toHaveBeenCalled();
+
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+      turnCompleted(); // 制造在飞
+      summarizeTitle.mockClear();
+      sessionsModule.useSessionsStore.getState().retryTitleSummary('parent');
+      expect(summarizeTitle).not.toHaveBeenCalled();
+    });
+
+    it('开关切 false → 全部 titleSummaryError / titleSummaryPending 清空', async () => {
+      turnCompleted();
+      seed({ titleSummaryError: '错', titleSummaryPending: true });
+      settingsModule.useSettingsStore.getState().setTitleSummaryEnabled(false);
+      expect(conv().titleSummaryError).toBeUndefined();
+      expect(conv().titleSummaryPending).toBeUndefined();
+      // 在飞基准也已清：迟到的 title-generated 不再写回
+      onAgentEvent?.({ type: 'title-generated', conversationId: 'parent', title: '迟到' });
+      expect(conv().title).toBe('初始标题');
+    });
+
+    it('partialize 不含 titleSummaryError / titleSummaryPending / lastTurnDigest', async () => {
+      seed({ titleSummaryError: '错', titleSummaryPending: true, lastTurnDigest: digest });
+      const partialize = sessionsModule.useSessionsStore.persist.getOptions().partialize;
+      const persisted = partialize?.(sessionsModule.useSessionsStore.getState()) as {
+        conversations: Record<string, Record<string, unknown>>;
+      };
+      // partialize 用 `key: undefined` 剔除（与周围字段同款），JSON 落盘时不写该键
+      expect(persisted.conversations.parent.titleSummaryError).toBeUndefined();
+      expect(persisted.conversations.parent.titleSummaryPending).toBeUndefined();
+      expect(persisted.conversations.parent.lastTurnDigest).toBeUndefined();
+      expect(JSON.stringify(persisted.conversations.parent)).not.toMatch(
+        /titleSummaryError|titleSummaryPending|lastTurnDigest/
+      );
     });
   });
 
