@@ -106,6 +106,7 @@ import { createHashlineIo } from './hashline/io';
 import { applyHashlineSessionTools } from './hashline/sessionTools';
 import { InMemorySnapshotStore } from './hashline/snapshots';
 import { wrapHashlineEditDefinition } from './hashline/tools';
+import { withHashlineWrite } from './hashline/withWrite';
 import { McpManager } from './mcp';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
@@ -1306,6 +1307,10 @@ export class SessionSupervisor {
         cwd,
         remoteOps ? { operations: remoteOps.edit } : undefined
       ) as unknown as Def;
+      const stockWrite = createWriteToolDefinition(
+        cwd,
+        remoteOps ? { operations: remoteOps.write } : undefined
+      ) as unknown as Def;
       return [
         ...readOnlyTools(),
         withApproval(
@@ -1340,10 +1345,7 @@ export class SessionSupervisor {
         ),
         scoped(
           'file-write',
-          createWriteToolDefinition(
-            cwd,
-            remoteOps ? { operations: remoteOps.write } : undefined
-          ) as unknown as Def
+          hashlineEditEnabled ? withHashlineWrite(stockWrite, hashlineStore) : stockWrite
         ),
       ];
     };

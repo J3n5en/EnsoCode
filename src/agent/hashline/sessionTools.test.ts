@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { computeFileHash, formatHashlineHeader } from './format';
 import type { HashlineIo } from './io';
 import { applyHashlineSessionTools } from './sessionTools';
 import { InMemorySnapshotStore } from './snapshots';
@@ -87,5 +88,53 @@ describe('applyHashlineSessionTools', () => {
     expect(result.edit).toBeUndefined();
     expect((result.read as typeof read & { outer?: boolean }).outer).toBe(true);
     expect(wrapOuterRead.mock.calls[0]?.[0]).not.toBe(read);
+  });
+
+  it('关闭时 write 保持 stock 身份', () => {
+    const guidelines = ['stock write'];
+    const write = { ...fakeTool('write', 'Wrote file'), promptGuidelines: guidelines };
+    const result = applyHashlineSessionTools({
+      enabled: false,
+      store: new InMemorySnapshotStore(),
+      io: fakeIo(),
+      read: fakeTool('read'),
+      grep: fakeTool('grep'),
+      write,
+    });
+    expect(result.write).toBe(write);
+    expect((result.write as typeof write | undefined)?.promptGuidelines).toBe(guidelines);
+  });
+
+  it('开启时包装 write，按 content 记账并回写 `[path#TAG]`', async () => {
+    const path = '/tmp/a.ts';
+    const body = 'world\n';
+    const store = new InMemorySnapshotStore();
+    const write = fakeTool('write', 'Wrote file');
+    const result = applyHashlineSessionTools({
+      enabled: true,
+      store,
+      io: fakeIo(),
+      read: fakeTool('read'),
+      grep: fakeTool('grep'),
+      write,
+    });
+    const writeResult = await result.write?.execute('call-write', { path, content: body });
+    expect(store.get(path, computeFileHash(body))).toBe(body);
+    expect((writeResult as { content: [{ text: string }] }).content[0].text).toContain(
+      formatHashlineHeader(path, computeFileHash(body))
+    );
+    expect(write.execute).toHaveBeenCalled();
+  });
+
+  it('开启且无 write 时保持只读', () => {
+    const result = applyHashlineSessionTools({
+      enabled: true,
+      store: new InMemorySnapshotStore(),
+      io: fakeIo(),
+      read: fakeTool('read'),
+      grep: fakeTool('grep'),
+    });
+    expect(result.write).toBeUndefined();
+    expect(result.edit).toBeUndefined();
   });
 });
