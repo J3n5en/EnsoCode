@@ -91,7 +91,8 @@ export function wrapHashlineEditDefinition<T extends { execute: (...args: never[
     params: unknown,
     ...rest: unknown[]
   ) => unknown;
-  const prepareStock = (stock as { prepareArguments?: (args: unknown) => unknown }).prepareArguments;
+  const prepareStock = (stock as { prepareArguments?: (args: unknown) => unknown })
+    .prepareArguments;
   return {
     ...stock,
     parameters: HASHLINE_EDIT_PARAMETERS,
@@ -118,6 +119,7 @@ export function wrapHashlineEditDefinition<T extends { execute: (...args: never[
             },
           ],
           details: {
+            oldText: applied.previous,
             diff: applied.text,
             patch: input,
           },

@@ -8,7 +8,7 @@ export async function applyHashlineToFile(options: {
   readText: (path: string) => Promise<string>;
   writeText: (path: string, text: string) => Promise<void>;
   input: string;
-}): Promise<{ path: string; text: string; tag: string }> {
+}): Promise<{ path: string; previous: string; text: string; tag: string }> {
   const header = parseHashlineHeader(options.input);
   if (!header.path || !header.tag) {
     throw new Error('hashline edit requires [path#TAG] header from a prior read');
@@ -18,5 +18,5 @@ export async function applyHashlineToFile(options: {
   const next = applyHashlineInput(liveText, options.input);
   await options.writeText(header.path, next);
   const tag = options.store.record(header.path, next);
-  return { path: header.path, text: next, tag: tag || computeFileHash(next) };
+  return { path: header.path, previous: liveText, text: next, tag: tag || computeFileHash(next) };
 }

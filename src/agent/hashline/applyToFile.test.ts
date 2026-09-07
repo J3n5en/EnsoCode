@@ -22,7 +22,7 @@ describe('applyHashlineToFile', () => {
     });
     expect(writeText).toHaveBeenCalledWith(path, next);
     expect(store.get(path, computeFileHash(next))).toBe(next);
-    expect(result).toEqual({ path, text: next, tag: computeFileHash(next) });
+    expect(result).toEqual({ path, previous: original, text: next, tag: computeFileHash(next) });
   });
 
   it('缺少文件头时拒绝且不写入', async () => {

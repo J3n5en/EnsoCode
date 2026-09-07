@@ -2,11 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { normalizeEditArguments } from '../editTool';
 import { computeFileHash } from './format';
 import { InMemorySnapshotStore } from './snapshots';
-import {
-  HASHLINE_EDIT_PARAMETERS,
-  selectHashlineTools,
-  wrapHashlineEditDefinition,
-} from './tools';
+import { HASHLINE_EDIT_PARAMETERS, selectHashlineTools, wrapHashlineEditDefinition } from './tools';
 
 const setup = (enabled: boolean) => {
   const store = new InMemorySnapshotStore();
@@ -81,6 +77,21 @@ describe('wrapHashlineEditDefinition', () => {
       input: `[${path}#${tag}]\nPUT 1.=1:\n+hello`,
     });
     expect(writeText).toHaveBeenCalledWith(path, 'hello\n');
+    expect(stock.execute).not.toHaveBeenCalled();
+  });
+
+  it('Hashline 执行详情携带补丁前后文本与原始 input', async () => {
+    const path = '/tmp/a.ts';
+    const body = 'world\n';
+    const { stock, store, wrapped } = wrappedFixture(body);
+    const tag = store.record(path, body);
+    const input = `[${path}#${tag}]\nPUT 1.=1:\n+hello`;
+    const result = await wrapped.execute('call-details', { input });
+    expect((result as unknown as { details: unknown }).details).toEqual({
+      oldText: body,
+      diff: 'hello\n',
+      patch: input,
+    });
     expect(stock.execute).not.toHaveBeenCalled();
   });
 });
