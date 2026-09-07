@@ -10,21 +10,24 @@ import {
   setNodesStatusListener,
 } from '../services/pairGuest';
 import { parseGuestOutbound } from '../services/pairGuestPolicy';
+import { getWindowWebContents, sendToAllWindows, sendToWindow } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 
-/** 「连接到节点」：本机作为 guest 连别的 EnsoCode 桌面 */
+/**
+ * 「连接到节点」：本机作为 guest 连别的 EnsoCode 桌面。
+ * 主窗口 UI 跑在独立的顶层 WebContentsView 里，`win.webContents` 是没有 preload 监听的空壳；
+ * 推送一律走 sendToWindow / getWindowWebContents，否则渲染层收不到状态与下行帧。
+ */
 export function registerNodesHandlers(): void {
   setNodesStatusListener((status) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.NODES_STATUS_CHANGED, status);
-    }
+    sendToAllWindows(IPC_CHANNELS.NODES_STATUS_CHANGED, status);
   });
   // 下行帧只给主窗口：设置窗口不渲染会话
   setNodesMessageListener((message) => {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed() && isMainWebContents(win.webContents.id)) {
-        win.webContents.send(IPC_CHANNELS.NODES_MESSAGE, message);
-      }
+      if (win.isDestroyed()) continue;
+      if (!isMainWebContents(getWindowWebContents(win).id)) continue;
+      sendToWindow(win, IPC_CHANNELS.NODES_MESSAGE, message);
     }
   });
 
