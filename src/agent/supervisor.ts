@@ -136,9 +136,12 @@ import {
   buildRollingTitleUserText,
   buildTitleUserText,
   buildTurnDigest,
+  describeTitleModel,
   extractTitle,
   ROLLING_TITLE_SYSTEM_PROMPT,
   TITLE_SYSTEM_PROMPT,
+  titleRejectReason,
+  titleSummaryTimeoutMs,
 } from './titleSummary';
 import { createTodoTool } from './todo';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
@@ -2977,50 +2980,73 @@ export class SessionSupervisor {
     }
   }
 
-  /** 会话标题总结：一次性补全，不建 AgentSession、不落盘；成功才回事件，失败静默 */
+  /**
+   * 会话标题总结：一次性补全，不建 AgentSession、不落盘。按 candidates 依次尝试（超时 60/120/180s 递增），
+   * 任一候选产出合法标题即回 title-generated 并停止；全部失败回 title-failed，error 为最后一次失败原因。
+   * 同一模型不重试：真机实测“模型不听 prompt”重试三次结果一样，换模型才有效。
+   */
   private async summarizeTitle(
     command: Extract<AgentCommand, { type: 'summarize-title' }>
   ): Promise<void> {
     const runtime = await this.getRuntime();
-    // TODO(Step 3): 按 candidates 依次尝试、递增超时、全失败回 title-failed
-    const model = await resolveBaseModelOrRefresh(runtime, command.candidates[0]);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
-    try {
-      const rolling = command.input.kind === 'rolling';
-      const message = await runtime.completeSimple(
-        model,
+    const rolling = command.input.kind === 'rolling';
+    const context = {
+      systemPrompt: rolling ? ROLLING_TITLE_SYSTEM_PROMPT : TITLE_SYSTEM_PROMPT,
+      messages: [
         {
-          systemPrompt: rolling ? ROLLING_TITLE_SYSTEM_PROMPT : TITLE_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: 'user',
-              content:
-                command.input.kind === 'rolling'
-                  ? buildRollingTitleUserText(command.input)
-                  : buildTitleUserText(command.input.text),
-              timestamp: Date.now(),
-            },
-          ],
+          role: 'user' as const,
+          content:
+            command.input.kind === 'rolling'
+              ? buildRollingTitleUserText(command.input)
+              : buildTitleUserText(command.input.text),
+          timestamp: Date.now(),
         },
-        { signal: controller.signal }
-      );
-      const title = extractTitle(message);
-      if (title) {
+      ],
+    };
+    let lastError = 'no candidates';
+    for (const [index, candidate] of command.candidates.entries()) {
+      const label = describeTitleModel(candidate);
+      const timeoutMs = titleSummaryTimeoutMs(index);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const model = await resolveBaseModelOrRefresh(runtime, candidate);
+        const message = await runtime.completeSimple(model, context, {
+          signal: controller.signal,
+        });
+        if (message.stopReason === 'aborted') {
+          lastError = `${label}: timed out after ${Math.round(timeoutMs / 1000)}s`;
+          continue;
+        }
+        if (message.stopReason === 'error') {
+          lastError = `${label}: ${message.errorMessage?.trim() || 'model error'}`;
+          continue;
+        }
+        const title = extractTitle(message);
+        const reject = titleRejectReason(title);
+        if (reject) {
+          lastError = `${label}: ${reject}`;
+          continue;
+        }
         this.options.emit({
           type: 'title-generated',
           conversationId: command.conversationId,
           title,
         });
+        return;
+      } catch (error) {
+        lastError = `${label}: ${toErrorMessage(error)}`;
+      } finally {
+        clearTimeout(timer);
       }
-    } finally {
-      clearTimeout(timer);
     }
+    this.options.emit({
+      type: 'title-failed',
+      conversationId: command.conversationId,
+      error: lastError,
+    });
   }
 }
-
-/** 标题总结超时：超过就保留截断标题，不重试 */
-const TITLE_SUMMARY_TIMEOUT_MS = 15_000;
 
 /** 同一父会话的在编 coworker 上限,防主 agent 循环疯狂雇人 */
 const MAX_ACTIVE_COWORKERS = 5;
