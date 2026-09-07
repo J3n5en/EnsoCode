@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   catalogSyncFingerprint,
   changedMetaChannels,
+  channelsForMetaPush,
   pairJsonFingerprint,
   shouldRelayPairSnapshot,
   slimCatalogForPhone,
@@ -118,6 +119,39 @@ describe('slimProjectsForPhone', () => {
         { id: 'p', name: 'app', path: '/Users/me/app', kind: 'local' as const },
       ])
     ).toEqual([{ id: 'p', name: 'app', kind: 'local' }]);
+  });
+});
+
+describe('channelsForMetaPush', () => {
+  const next = {
+    catalog: 'c',
+    projects: 'p',
+    providers: 'pr',
+    appearance: 'a',
+    pushConfig: 'push',
+    hostInfo: 'host',
+  } as const;
+
+  it('指纹未变且非强制：不发', () => {
+    expect(channelsForMetaPush({ ...next }, { ...next }, true)).toEqual([]);
+  });
+
+  it('guest 显式 snapshot（force）：即使指纹未变也整包重发', () => {
+    expect(channelsForMetaPush({ ...next }, { ...next }, true, true)).toEqual([
+      'catalog',
+      'projects',
+      'providers',
+      'appearance',
+      'pushConfig',
+      'hostInfo',
+    ]);
+  });
+
+  it('force 仍尊重 catalogReady：renderer 未就绪时不发空目录', () => {
+    expect(channelsForMetaPush({ ...next }, { ...next }, false, true)).toEqual([
+      'pushConfig',
+      'hostInfo',
+    ]);
   });
 });
 

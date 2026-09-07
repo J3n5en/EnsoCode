@@ -97,6 +97,20 @@ export function withholdRendererMeta(
   return channels.filter((key) => !RENDERER_OWNED_CHANNELS.has(key));
 }
 
+/**
+ * guest 显式 snapshot（桌面 renderer 重载 / 手机进房）必须整包重发：
+ * 指纹去重只对 host 自发的流式 upsert 有效。连接常驻时 renderer 还没挂上
+ * IPC 监听，目录帧会丢；若 snapshot 再被当成「已发过」节点就会一直转圈。
+ */
+export function channelsForMetaPush(
+  last: PairMetaFingerprints | undefined,
+  next: PairMetaFingerprints,
+  catalogReady: boolean,
+  force = false
+): PairMetaChannel[] {
+  return withholdRendererMeta(changedMetaChannels(force ? undefined : last, next), catalogReady);
+}
+
 /** 只转发手机 subscribe/history 点名的 snapshot，桌面自己的刷新不转 */
 export function shouldRelayPairSnapshot(conn: {
   subscribedId: string | null;

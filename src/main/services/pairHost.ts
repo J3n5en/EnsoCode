@@ -25,13 +25,12 @@ import {
 } from '@enso/pair';
 import {
   catalogSyncFingerprint,
-  changedMetaChannels,
+  channelsForMetaPush,
   type PairMetaFingerprints,
   pairJsonFingerprint,
   shouldRelayPairSnapshot,
   slimCatalogForPhone,
   slimProjectsForPhone,
-  withholdRendererMeta,
 } from '@shared/pair/metaSync';
 import type {
   AgentSpawnRequest,
@@ -599,8 +598,8 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       void sendMeta(conn);
       break;
     case 'snapshot':
-      // 只要目录/外观；会话正文走 subscribe
-      void sendMeta(conn);
+      // 只要目录/外观；会话正文走 subscribe。强制重发：renderer 重载会丢已推 IPC。
+      void sendMeta(conn, { force: true });
       break;
     case 'set-model': {
       const check = checkSetModel(command, whitelist);
@@ -697,7 +696,7 @@ async function send(conn: Connection, message: HostToPhone): Promise<void> {
   }
 }
 
-async function sendMeta(conn: Connection): Promise<void> {
+async function sendMeta(conn: Connection, opts?: { force?: boolean }): Promise<void> {
   const appearance = {
     type: 'appearance' as const,
     theme,
@@ -718,7 +717,7 @@ async function sendMeta(conn: Connection): Promise<void> {
     hostInfo: pairJsonFingerprint(hostInfo),
   };
   const changed = new Set(
-    withholdRendererMeta(changedMetaChannels(conn.sentMeta, next), catalogReady)
+    channelsForMetaPush(conn.sentMeta, next, catalogReady, opts?.force === true)
   );
   if (changed.size === 0) return;
   if (changed.has('catalog')) {

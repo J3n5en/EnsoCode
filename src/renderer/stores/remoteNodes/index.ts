@@ -126,16 +126,17 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
     freshIds: new Set(),
 
     bind: () => {
-      void get().refresh();
-      // 窗口重载后仍停在远程节点：main 侧连接没断，只需重新订阅
-      const active = get().activeNodeId;
-      if (active !== 'local') enterNode(active);
+      // 先挂监听再拉状态/发 snapshot：否则 NODES_LIST 回放和 host 重发的目录帧会再次丢
       const offStatus = window.electronAPI.nodes.onStatusChanged(applyStatus);
       const offMessage = window.electronAPI.nodes.onMessage((message: NodeMessage) => {
         const r = applyNodeMessage(viewOf(message.nodeId), message.payload);
         if (r.view === get().byNode[message.nodeId]) return;
         commit(message.nodeId, r.view, r.effects);
       });
+      void get().refresh();
+      // 窗口重载后仍停在远程节点：main 侧连接没断，只需重新订阅并要一次目录
+      const active = get().activeNodeId;
+      if (active !== 'local') enterNode(active);
       return () => {
         offStatus();
         offMessage();
