@@ -20,6 +20,9 @@ function parsePuts(patch: string): PutOp[] {
       i += 1;
       continue;
     }
+    if (/^PUT \d+\*:/.test(line)) {
+      throw new Error(`block locator not supported: ${line}`);
+    }
     const match = /^PUT (\d+)\.=(\d+):$/.exec(line);
     if (!match) throw new Error(`invalid hashline op: ${line}`);
     const start = Number(match[1]);
