@@ -764,6 +764,12 @@ export const useSessionsStore = create<SessionsState>()(
           return;
         }
 
+        if (event.type === 'title-failed') {
+          // TODO(Step 5): 在飞时写 titleSummaryError；此处先仅清基准保持编译
+          pendingTitleBaselines.delete(event.conversationId);
+          return;
+        }
+
         const identity = event.type === 'capability-invoke' ? event.child : event.identity;
         const id = identity.sessionId;
 

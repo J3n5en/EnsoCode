@@ -576,7 +576,8 @@ export function registerAgentHandlers(): void {
           credentialKeys
         );
         if (!resolved.ok || !resolved.selection) continue;
-        return summarizeConversationTitle(conversationId, input, resolved.selection.config);
+        // TODO(Step 4): 收集全部可解析候选下发；此处仍为单候选以保持编译
+        return summarizeConversationTitle(conversationId, input, [resolved.selection.config]);
       }
       return { ok: false, error: 'no usable title model' };
     }

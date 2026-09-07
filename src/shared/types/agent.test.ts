@@ -563,11 +563,12 @@ describe('removed project memory protocol', () => {
 });
 
 describe('标题总结命令与事件', () => {
+  const secondModel = { ...model, modelId: 'fallback-model' };
   const summarizeInitial = {
     type: 'summarize-title',
     conversationId: 'conversation-1',
     input: { kind: 'initial', text: '帮我把登录页的 bug 修一下' },
-    model,
+    candidates: [model],
   };
   const summarizeRolling = {
     type: 'summarize-title',
@@ -578,7 +579,7 @@ describe('标题总结命令与事件', () => {
       userText: '这个修复有通用性吗',
       assistantText: '只影响登录路径',
     },
-    model,
+    candidates: [model, secondModel],
   };
 
   it('summarize-title 命令 initial 输入完整往返；缺字段或空值拒绝', () => {
@@ -587,12 +588,32 @@ describe('标题总结命令与事件', () => {
     expect(
       parseAgentCommand({ ...summarizeInitial, input: { kind: 'initial', text: '' } })
     ).toBeNull();
-    expect(parseAgentCommand({ ...summarizeInitial, model: undefined })).toBeNull();
+    expect(parseAgentCommand({ ...summarizeInitial, candidates: undefined })).toBeNull();
     expect(parseAgentCommand({ ...summarizeInitial, extra: 1 })).toBeNull();
   });
 
-  it('summarize-title 命令 rolling 输入完整往返', () => {
+  it('summarize-title 命令 rolling 输入完整往返（含多候选）', () => {
     expect(parseAgentCommand(summarizeRolling)).toEqual(summarizeRolling);
+  });
+
+  it('summarize-title candidates 接受 1–3 项；空数组、超过 3 项、非数组拒绝', () => {
+    const third = { ...model, modelId: 'third-model' };
+    expect(
+      parseAgentCommand({ ...summarizeInitial, candidates: [model, secondModel, third] })
+    ).not.toBeNull();
+    expect(parseAgentCommand({ ...summarizeInitial, candidates: [] })).toBeNull();
+    expect(
+      parseAgentCommand({
+        ...summarizeInitial,
+        candidates: [model, secondModel, third, { ...model, modelId: 'fourth' }],
+      })
+    ).toBeNull();
+    expect(parseAgentCommand({ ...summarizeInitial, candidates: model })).toBeNull();
+  });
+
+  it('summarize-title 旧形状（单 model 字段而无 candidates）拒绝', () => {
+    const { candidates: _omitted, ...rest } = summarizeInitial;
+    expect(parseAgentCommand({ ...rest, model })).toBeNull();
   });
 
   it('summarize-title 旧形状（顶层 text 字段而无 input）拒绝', () => {
@@ -600,7 +621,7 @@ describe('标题总结命令与事件', () => {
       type: 'summarize-title',
       conversationId: 'conversation-1',
       text: '帮我把登录页的 bug 修一下',
-      model,
+      candidates: [model],
     };
     expect(parseAgentCommand(legacy)).toBeNull();
   });
@@ -634,9 +655,10 @@ describe('标题总结命令与事件', () => {
     ).toBeNull();
   });
 
-  it('summarize-title 的 model 缺 settingsProviderId 拒绝（与 spawn 同约束）', () => {
+  it('summarize-title 的候选缺 settingsProviderId 拒绝（与 spawn 同约束）', () => {
     const { settingsProviderId: _omitted, ...rest } = model;
-    expect(parseAgentCommand({ ...summarizeInitial, model: rest })).toBeNull();
+    expect(parseAgentCommand({ ...summarizeInitial, candidates: [rest] })).toBeNull();
+    expect(parseAgentCommand({ ...summarizeInitial, candidates: [model, rest] })).toBeNull();
   });
 
   it('parseTitleSummaryInput 直接单测：initial / rolling 合法形状通过', () => {
@@ -698,6 +720,20 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentWorkerEvent({ ...event, title: 42 })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, conversationId: undefined })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
+  });
+
+  it('title-failed 事件完整往返；缺 error / 空串 / 多余键 → null', () => {
+    const event = {
+      type: 'title-failed',
+      conversationId: 'conversation-1',
+      error: 'cursor/composer-2.5-fast: timed out after 60s',
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, error: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, error: undefined })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, error: 7 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, conversationId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, identity: parent })).toBeNull();
   });
 
   it('turn-failed 的 undelivered 只接受 true/缺省', () => {

@@ -2982,7 +2982,8 @@ export class SessionSupervisor {
     command: Extract<AgentCommand, { type: 'summarize-title' }>
   ): Promise<void> {
     const runtime = await this.getRuntime();
-    const model = await resolveBaseModelOrRefresh(runtime, command.model);
+    // TODO(Step 3): 按 candidates 依次尝试、递增超时、全失败回 title-failed
+    const model = await resolveBaseModelOrRefresh(runtime, command.candidates[0]);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TITLE_SUMMARY_TIMEOUT_MS);
     try {

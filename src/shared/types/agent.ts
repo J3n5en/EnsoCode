@@ -44,6 +44,9 @@ export type TitleSummaryInput =
   | { kind: 'initial'; text: string }
   | { kind: 'rolling'; currentTitle: string; userText: string; assistantText: string };
 
+/** 标题总结回退链最多候选数：标题模型 → 全局默认 → 会话模型 */
+export const TITLE_SUMMARY_MAX_CANDIDATES = 3;
+
 /** spawn 下发的模型配置。apiKey 只在 Main → worker 方向出现，事件类型不给 auth 位置 */
 export interface SpawnModelConfig extends ModelCapabilityOverrides {
   api: ModelApiKind;
@@ -598,11 +601,13 @@ export type AgentCommand =
     }
   | { type: 'abort'; identity: SessionIdentity }
   | {
-      /** 标题总结：一次性补全，不创建会话、不落盘；失败静默（不回事件） */
+      /** 标题总结：一次性补全，不创建会话、不落盘；worker 按序尝试 candidates（递增超时），
+       *  任一成功回 title-generated，全失败回 title-failed */
       type: 'summarize-title';
       conversationId: string;
       input: TitleSummaryInput;
-      model: SpawnModelConfig;
+      /** 回退链上全部可解析候选，按优先级排序；1–3 项 */
+      candidates: SpawnModelConfig[];
     }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
@@ -954,6 +959,12 @@ export type AgentWorkerEvent =
       type: 'title-generated';
       conversationId: string;
       title: string;
+    }
+  | {
+      /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
+      type: 'title-failed';
+      conversationId: string;
+      error: string;
     }
   | {
       type: 'task-output';
@@ -1838,10 +1849,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     }
     case 'summarize-title':
-      return hasExactKeys(value, ['type', 'conversationId', 'input', 'model']) &&
+      return hasExactKeys(value, ['type', 'conversationId', 'input', 'candidates']) &&
         isNonEmptyString(value.conversationId) &&
         parseTitleSummaryInput(value.input) &&
-        parseSpawnModelConfig(value.model)
+        Array.isArray(value.candidates) &&
+        value.candidates.length >= 1 &&
+        value.candidates.length <= TITLE_SUMMARY_MAX_CANDIDATES &&
+        value.candidates.every((candidate) => parseSpawnModelConfig(candidate))
         ? (value as unknown as AgentCommand)
         : null;
     case 'prompt':
@@ -2096,6 +2110,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'conversationId', 'title']) &&
       isNonEmptyString(value.conversationId) &&
       isNonEmptyString(value.title)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'title-failed') {
+    return hasExactKeys(value, ['type', 'conversationId', 'error']) &&
+      isNonEmptyString(value.conversationId) &&
+      isNonEmptyString(value.error)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

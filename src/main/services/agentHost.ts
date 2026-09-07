@@ -594,13 +594,13 @@ export function steerSession(
   });
 }
 
-/** 标题总结：一次性补全命令，不绑会话身份；结果经 title-generated 事件回流 */
+/** 标题总结：一次性补全命令，不绑会话身份；worker 按序尝试 candidates，结果经 title-generated / title-failed 回流 */
 export function summarizeConversationTitle(
   conversationId: string,
   input: TitleSummaryInput,
-  model: SpawnModelConfig
+  candidates: SpawnModelConfig[]
 ): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'summarize-title', conversationId, input, model });
+  return sendAgentCommand({ type: 'summarize-title', conversationId, input, candidates });
 }
 
 export function abortSession(identity: SessionIdentity): { ok: boolean; error?: string } {
