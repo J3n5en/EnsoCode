@@ -31,6 +31,7 @@ import {
   shouldRelayPairSnapshot,
   slimCatalogForPhone,
   slimProjectsForPhone,
+  withholdRendererMeta,
 } from '@shared/pair/metaSync';
 import type {
   AgentSpawnRequest,
@@ -128,6 +129,11 @@ let onQueueAction: ((action: PairQueueAction) => void) | null = null;
 
 /** renderer 推上来的目录快照（会话标题/项目/provider 只在 renderer 有） */
 let catalog: CatalogEntry[] = [];
+/**
+ * renderer 是否已推过至少一次目录。为 false 时上面的空初值不是真目录，不得下发：
+ * host 重启时对端已在房里，peer-joined 先于 renderer 首次 push，空目录会让对端误判幽灵会话。
+ */
+let catalogReady = false;
 let pinnedOrder: string[] = [];
 let projects: ProjectEntry[] = [];
 let projectGroups: ProjectGroupEntry[] = [];
@@ -711,7 +717,9 @@ async function sendMeta(conn: Connection): Promise<void> {
     pushConfig: pairJsonFingerprint(vapidPublicKey),
     hostInfo: pairJsonFingerprint(hostInfo),
   };
-  const changed = new Set(changedMetaChannels(conn.sentMeta, next));
+  const changed = new Set(
+    withholdRendererMeta(changedMetaChannels(conn.sentMeta, next), catalogReady)
+  );
   if (changed.size === 0) return;
   if (changed.has('catalog')) {
     await send(conn, { type: 'catalog', entries: catalogEntries, pinnedOrder });
@@ -727,7 +735,10 @@ async function sendMeta(conn: Connection): Promise<void> {
   if (changed.has('appearance')) await send(conn, appearance);
   if (changed.has('pushConfig')) await send(conn, { type: 'push-config', vapidPublicKey });
   if (changed.has('hostInfo')) await send(conn, { type: 'host-info', ...hostInfo });
-  conn.sentMeta = { ...conn.sentMeta, ...next };
+  // 只记实际发出的通道：被扣下的不能算“已发”，否则 renderer 首推后指纹相同就不会补发
+  const sent: PairMetaFingerprints = { ...conn.sentMeta };
+  for (const key of changed) sent[key] = next[key];
+  conn.sentMeta = sent;
 }
 
 /** agentHost 事件出口：按订阅过滤后加密发给每台在线手机 */
@@ -819,6 +830,7 @@ export function updatePairCatalog(payload: {
   compactReadOnlyTools?: boolean;
 }): void {
   catalog = payload.catalog;
+  catalogReady = true;
   pinnedOrder = payload.pinnedOrder ?? [];
   projects = payload.projects;
   projectGroups = payload.projectGroups ?? [];

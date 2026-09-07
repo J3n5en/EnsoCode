@@ -76,6 +76,27 @@ export function changedMetaChannels(
   });
 }
 
+/** 内容来自 renderer 的通道：main 在首次 PAIR_CATALOG 前只持有空初值，不构成真目录 */
+const RENDERER_OWNED_CHANNELS: ReadonlySet<PairMetaChannel> = new Set([
+  'catalog',
+  'projects',
+  'providers',
+  'appearance',
+]);
+
+/**
+ * renderer 尚未推过目录时扣下 renderer-owned 通道。
+ * host 重启后 guest 往往已在房里，peer-joined 会先于 renderer 首次 push 到达；
+ * 若此时把空 catalog 当真目录发出，guest 会把仍在订阅的会话误判为幽灵而跳回列表页。
+ */
+export function withholdRendererMeta(
+  channels: readonly PairMetaChannel[],
+  catalogReady: boolean
+): PairMetaChannel[] {
+  if (catalogReady) return [...channels];
+  return channels.filter((key) => !RENDERER_OWNED_CHANNELS.has(key));
+}
+
 /** 只转发手机 subscribe/history 点名的 snapshot，桌面自己的刷新不转 */
 export function shouldRelayPairSnapshot(conn: {
   subscribedId: string | null;
