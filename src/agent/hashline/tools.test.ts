@@ -6,18 +6,30 @@ import { HASHLINE_EDIT_PARAMETERS, selectHashlineTools, wrapHashlineEditDefiniti
 import { withHashlineGrep } from './withGrep';
 import { withHashlineRead } from './withRead';
 
+type FakeTool = {
+  name: string;
+  execute: (id?: string, params?: unknown) => unknown;
+};
+
 const setup = (enabled: boolean) => {
   const store = new InMemorySnapshotStore();
   const read = {
     name: 'read',
-    execute: vi.fn(async () => ({ content: [{ type: 'text', text: 'alpha\n' }] })),
+    execute: vi.fn(async (_id?: string, _params?: unknown) => ({
+      content: [{ type: 'text', text: 'alpha\n' }],
+    })),
   };
   const grep = {
     name: 'grep',
-    execute: vi.fn(async () => ({ content: [{ type: 'text', text: '' }] })),
+    execute: vi.fn(async (_id?: string, _params?: unknown) => ({
+      content: [{ type: 'text', text: '' }],
+    })),
   };
-  const edit = { name: 'edit', execute: vi.fn(async () => 'stock-result') };
-  const selected = selectHashlineTools({ enabled, store, read, grep, edit });
+  const edit = {
+    name: 'edit',
+    execute: vi.fn(async (_id?: string, _params?: unknown) => 'stock-result'),
+  };
+  const selected = selectHashlineTools<FakeTool>({ enabled, store, read, grep, edit });
   return { store, read, grep, edit, selected };
 };
 
@@ -26,7 +38,7 @@ const wrappedFixture = (body = 'world\n') => {
     name: 'edit',
     parameters: { type: 'object', properties: {}, required: ['path', 'edits'] },
     prepareArguments: normalizeEditArguments,
-    execute: vi.fn(async () => 'stock-result'),
+    execute: vi.fn(async (_id: string, _params: unknown) => 'stock-result'),
   };
   const store = new InMemorySnapshotStore();
   const writeText = vi.fn(async () => undefined);
