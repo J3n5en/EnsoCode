@@ -1,3 +1,4 @@
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { applyHashlineToFile } from './applyToFile';
 import { classifyEditArgs } from './classify';
 import { createHashlineEditTool } from './editTool';
@@ -7,6 +8,32 @@ import { withHashlineGrep } from './withGrep';
 import { withHashlineRead } from './withRead';
 
 type NamedTool = { name: string; execute: (...args: never[]) => unknown };
+
+/** 宽松对象：hashline `{input}` 与 replace `{path,edits}` 都能过 schema，分流放运行时 */
+export const HASHLINE_EDIT_PARAMETERS = {
+  type: 'object',
+  properties: {
+    input: {
+      type: 'string',
+      description:
+        'Hashline patch: first line [path#TAG] from a prior read/grep, then PUT operations',
+    },
+    path: { type: 'string', description: 'File path for replace edits' },
+    edits: {
+      type: 'array',
+      description: 'Replace edits as {oldText, newText} objects',
+      items: {
+        type: 'object',
+        properties: {
+          oldText: { type: 'string' },
+          newText: { type: 'string' },
+        },
+      },
+    },
+    oldText: { type: 'string', description: 'Legacy single-replace old text' },
+    newText: { type: 'string', description: 'Legacy single-replace new text' },
+  },
+} as unknown as ToolDefinition['parameters'];
 
 export function selectHashlineTools<T extends NamedTool>(options: {
   enabled: boolean;
@@ -64,9 +91,14 @@ export function wrapHashlineEditDefinition<T extends { execute: (...args: never[
     params: unknown,
     ...rest: unknown[]
   ) => unknown;
+  const prepareStock = (stock as { prepareArguments?: (args: unknown) => unknown }).prepareArguments;
   return {
     ...stock,
-    prepareArguments: (args: unknown) => args,
+    parameters: HASHLINE_EDIT_PARAMETERS,
+    prepareArguments: (args: unknown) => {
+      if (classifyEditArgs(args).kind === 'hashline') return args;
+      return prepareStock ? prepareStock(args) : args;
+    },
     execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
       const kind = classifyEditArgs(params).kind;
       if (kind === 'replace') return execute(toolCallId, params, ...rest);

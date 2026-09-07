@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { normalizeEditArguments } from '../editTool';
 import { computeFileHash } from './format';
 import { InMemorySnapshotStore } from './snapshots';
-import { selectHashlineTools } from './tools';
+import {
+  HASHLINE_EDIT_PARAMETERS,
+  selectHashlineTools,
+  wrapHashlineEditDefinition,
+} from './tools';
 
 const setup = (enabled: boolean) => {
   const store = new InMemorySnapshotStore();
@@ -17,6 +22,68 @@ const setup = (enabled: boolean) => {
   const selected = selectHashlineTools({ enabled, store, read, grep, edit });
   return { store, read, grep, edit, selected };
 };
+
+const wrappedFixture = (body = 'world\n') => {
+  const stock = {
+    name: 'edit',
+    parameters: { type: 'object', properties: {}, required: ['path', 'edits'] },
+    prepareArguments: normalizeEditArguments,
+    execute: vi.fn(async () => 'stock-result'),
+  };
+  const store = new InMemorySnapshotStore();
+  const writeText = vi.fn(async () => undefined);
+  const wrapped = wrapHashlineEditDefinition(stock, {
+    store,
+    readText: async () => body,
+    writeText,
+  });
+  return { stock, store, writeText, wrapped };
+};
+
+describe('wrapHashlineEditDefinition', () => {
+  it('使用允许可选 input/path/edits 的宽松对象 schema', () => {
+    const { wrapped } = wrappedFixture();
+    const schema = HASHLINE_EDIT_PARAMETERS as {
+      type?: string;
+      properties?: Record<string, { description?: string }>;
+      required?: string[];
+    };
+    expect(schema).toBeDefined();
+    expect(schema.type).toBe('object');
+    expect(schema.properties?.input?.description).toMatch(/\[path#TAG\].*PUT/i);
+    expect(schema.required ?? []).not.toContain('path');
+    expect(schema.required ?? []).not.toContain('edits');
+    expect(wrapped.parameters).toBe(HASHLINE_EDIT_PARAMETERS);
+    expect(wrapped.name).toBe('edit');
+  });
+
+  it('replace 的 JSON 字符串 edits 继续经过 stock prepare 归一化', () => {
+    const { wrapped } = wrappedFixture();
+    const block = { oldText: 'a', newText: 'b' };
+    expect(wrapped.prepareArguments({ path: 'f.ts', edits: JSON.stringify([block]) })).toEqual({
+      path: 'f.ts',
+      edits: [block],
+    });
+  });
+
+  it('Hashline input 经过 prepare 时保持原对象不变', () => {
+    const { wrapped } = wrappedFixture();
+    const args = { input: '[/tmp/a.ts#ABCD]\nPUT 1.=1:\n+x' };
+    expect(wrapped.prepareArguments(args)).toBe(args);
+  });
+
+  it('有效 Hashline 执行写入文件且不调用 stock edit', async () => {
+    const path = '/tmp/a.ts';
+    const body = 'world\n';
+    const { stock, store, writeText, wrapped } = wrappedFixture(body);
+    const tag = store.record(path, body);
+    await wrapped.execute('call-hashline', {
+      input: `[${path}#${tag}]\nPUT 1.=1:\n+hello`,
+    });
+    expect(writeText).toHaveBeenCalledWith(path, 'hello\n');
+    expect(stock.execute).not.toHaveBeenCalled();
+  });
+});
 
 describe('selectHashlineTools', () => {
   it('关闭时原样返回三个 stock 工具', () => {
