@@ -10,6 +10,10 @@ export const HASHLINE_EDIT_GUIDELINES = [
   'Prefer edit input that starts with [path#TAG] from a prior read/grep, then PUT/CUT/MV/REM. If there is no tag, use path + edits replace. Never invent or fabricate a tag.',
 ];
 
+export const HASHLINE_WRITE_GUIDELINES = [
+  'When Hashline is on, a successful write returns [path#TAG] plus numbered lines of the written file; copy that header into a later edit input.',
+];
+
 export function withGuidelines<T>(tool: T, extra: readonly string[]): T {
   const current = tool as T & { promptGuidelines?: string[] };
   const stock = Array.isArray(current.promptGuidelines) ? current.promptGuidelines : [];
