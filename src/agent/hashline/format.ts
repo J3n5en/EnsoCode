@@ -77,3 +77,14 @@ export function computeFileHash(text: string): string {
 export function formatHashlineHeader(filePath: string, fileHash: string): string {
   return `${HL_FILE_PREFIX}${filePath}${HL_FILE_HASH_SEP}${fileHash}${HL_FILE_SUFFIX}`;
 }
+
+export function formatNumberedLine(lineNumber: number, line: string): string {
+  return `${lineNumber}:${line}`;
+}
+
+export function formatNumberedLines(text: string, startLine = 1): string {
+  return text
+    .split('\n')
+    .map((line, i) => formatNumberedLine(startLine + i, line))
+    .join('\n');
+}
