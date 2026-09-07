@@ -120,7 +120,7 @@ describe('applyHashlineSessionTools', () => {
     });
     const writeResult = await result.write?.execute('call-write', { path, content: body });
     expect(store.get(path, computeFileHash(body))).toBe(body);
-    expect((writeResult as { content: [{ text: string }] }).content[0].text).toContain(
+    expect((writeResult as unknown as { content: [{ text: string }] }).content[0].text).toContain(
       formatHashlineHeader(path, computeFileHash(body))
     );
     expect(write.execute).toHaveBeenCalled();

@@ -5,7 +5,7 @@ import { withHashlineWrite } from './withWrite';
 
 const stockWrite = (result: object = { content: [{ type: 'text', text: 'Wrote file' }] }) => ({
   name: 'write',
-  execute: vi.fn(async () => result),
+  execute: vi.fn(async (_id: string, _params: unknown) => result),
 });
 
 describe('withHashlineWrite', () => {
