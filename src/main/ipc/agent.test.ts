@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   spawnSession: vi.fn(),
+  summarizeConversationTitle: vi.fn(() => ({ ok: true })),
+  resolveModelSelection: vi.fn(),
+  readSettings: vi.fn((): unknown => null),
   setAgentEventListener: vi.fn(),
   restoreJournal: vi.fn(() => ({ records: [], partial: false })),
   existsSync: vi.fn(() => true),
@@ -60,7 +63,7 @@ vi.mock('../services/agentHost', () => ({
   promptSession: mocks.promptSession,
   requestSnapshot: vi.fn(),
   resolveAgentTypeSpawnConfig: vi.fn(),
-  resolveModelSelection: vi.fn(),
+  resolveModelSelection: mocks.resolveModelSelection,
   respondApproval: vi.fn(),
   respondAsk: vi.fn(),
   rewindSession: vi.fn(),
@@ -73,6 +76,7 @@ vi.mock('../services/agentHost', () => ({
   spawnSession: mocks.spawnSession,
   steerSession: mocks.steerSession,
   stopBackgroundTask: vi.fn(),
+  summarizeConversationTitle: mocks.summarizeConversationTitle,
 }));
 vi.mock('../services/notifications', () => ({ maybeNotify: vi.fn() }));
 vi.mock('../services/pairHost', () => ({
@@ -96,7 +100,7 @@ vi.mock('./capabilities', () => ({
   },
   handleCapabilityInvoke: vi.fn(),
 }));
-vi.mock('./settings', () => ({ readSettings: vi.fn(() => null) }));
+vi.mock('./settings', () => ({ readSettings: mocks.readSettings }));
 vi.mock('../../agent/ensoSafeJournal', () => ({
   EnsoSafeJournal: { restore: mocks.restoreJournal },
 }));
@@ -414,5 +418,86 @@ describe('agent IPC Main identity boundary', () => {
         code: 'invalid-request',
       });
     }
+  });
+});
+
+describe('agent IPC 标题总结：回退链全部可解析候选一次性下发', () => {
+  const titleModel = { providerId: 'p-title', modelId: 'm-title' };
+  const defaultModel = { providerId: 'p-default', modelId: 'm-default' };
+  const sessionModel = { providerId: 'p-session', modelId: 'm-session' };
+  const config = (ref: { providerId: string; modelId: string }) => ({
+    api: 'openai-completions',
+    baseUrl: '',
+    apiKey: 'k',
+    modelId: ref.modelId,
+    settingsProviderId: ref.providerId,
+  });
+  const request = {
+    conversationId: 'conversation-1',
+    input: { kind: 'initial', text: '帮我修一下节点转圈' },
+    sessionModel,
+  };
+
+  beforeEach(() => {
+    mocks.handlers.clear();
+    mocks.summarizeConversationTitle.mockClear();
+    mocks.resolveModelSelection.mockReset();
+    mocks.readSettings.mockReturnValue({
+      'enso-settings': {
+        state: { titleSummaryEnabled: true, titleSummaryModel: titleModel, defaultModel },
+      },
+    });
+    registerAgentHandlers();
+  });
+
+  it('三个候选全部可解析 → 按优先级下发 3 个 config', async () => {
+    mocks.resolveModelSelection.mockImplementation((providerId: string, modelId: string) => ({
+      ok: true,
+      selection: { config: config({ providerId, modelId }) },
+    }));
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE);
+    await expect(handler!(event, request)).resolves.toEqual({ ok: true });
+    expect(mocks.summarizeConversationTitle).toHaveBeenCalledWith(
+      'conversation-1',
+      { kind: 'initial', text: '帮我修一下节点转圈' },
+      [config(titleModel), config(defaultModel), config(sessionModel)]
+    );
+  });
+
+  it('中间候选不可解析 → 跳过它，下发其余 2 个', async () => {
+    mocks.resolveModelSelection.mockImplementation((providerId: string, modelId: string) =>
+      providerId === 'p-default'
+        ? { ok: false, error: 'Model is unavailable' }
+        : { ok: true, selection: { config: config({ providerId, modelId }) } }
+    );
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE);
+    await handler!(event, request);
+    expect(mocks.summarizeConversationTitle).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.anything(),
+      [config(titleModel), config(sessionModel)]
+    );
+  });
+
+  it('全部不可解析 → 不下发，返回 no usable title model', async () => {
+    mocks.resolveModelSelection.mockReturnValue({ ok: false, error: 'nope' });
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE);
+    await expect(handler!(event, request)).resolves.toEqual({
+      ok: false,
+      error: 'no usable title model',
+    });
+    expect(mocks.summarizeConversationTitle).not.toHaveBeenCalled();
+  });
+
+  it('开关关闭 → 不解析模型、不下发', async () => {
+    mocks.readSettings.mockReturnValue({
+      'enso-settings': { state: { titleSummaryEnabled: false, titleSummaryModel: titleModel } },
+    });
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SUMMARIZE_TITLE);
+    await expect(handler!(event, request)).resolves.toEqual({
+      ok: false,
+      error: 'title summary disabled',
+    });
+    expect(mocks.resolveModelSelection).not.toHaveBeenCalled();
   });
 });

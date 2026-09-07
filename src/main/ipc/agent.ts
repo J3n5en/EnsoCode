@@ -13,6 +13,7 @@ import type {
   ChildHistoryResult,
   McpStatusPush,
   RendererAgentEvent,
+  SpawnModelConfig,
   ThinkingLevel,
 } from '@shared/types/agent';
 import {
@@ -535,8 +536,9 @@ export function registerAgentHandlers(): void {
     return await readChildHistory(conversationId);
   });
 
-  // 标题总结：渲染层只传 conversationId + 输入（首条即时 / 每轮滚动）；模型与凭证由 Main 从设置自读（回退链：
-  // 独立标题模型 → 全局默认）。失败路径全部静默：保留截断标题即兑底，不影响发消息。
+  // 标题总结：渲染层只传 conversationId + 输入（首条即时 / 每轮滚动）；模型与凭证由 Main 从设置自读。
+  // 回退链（独立标题模型 → 全局默认 → 会话模型）上全部可解析的候选一次性下发，worker 依次尝试。
+  // 解析阶段失败同步返 error（渲染层当 title-failed 处理），不影响发消息。
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SUMMARIZE_TITLE,
     async (_event, request: unknown): Promise<AgentActionResult> => {
@@ -569,17 +571,17 @@ export function registerAgentHandlers(): void {
       } catch {
         return { ok: false, error: 'model credentials unavailable' };
       }
+      const candidates: SpawnModelConfig[] = [];
       for (const candidate of titleModelCandidates(state, sessionModel)) {
         const resolved = resolveModelSelection(
           candidate.providerId,
           candidate.modelId,
           credentialKeys
         );
-        if (!resolved.ok || !resolved.selection) continue;
-        // TODO(Step 4): 收集全部可解析候选下发；此处仍为单候选以保持编译
-        return summarizeConversationTitle(conversationId, input, [resolved.selection.config]);
+        if (resolved.ok && resolved.selection) candidates.push(resolved.selection.config);
       }
-      return { ok: false, error: 'no usable title model' };
+      if (candidates.length === 0) return { ok: false, error: 'no usable title model' };
+      return summarizeConversationTitle(conversationId, input, candidates);
     }
   );
 
