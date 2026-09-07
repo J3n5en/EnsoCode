@@ -31,6 +31,23 @@ listModels: (config: ProviderApiConfig): Promise<ListModelsResult> =>
 漏掉注册的表现是 `No handler registered for '...'`。两者都是运行时才炸，
 类型检查发现不了 —— 所以改完自己对一遍这三处。
 
+## main → renderer 推送只走 sendToWindow / sendToAllWindows
+
+主窗口 UI 在独立顶层 `WebContentsView` 里，`win.webContents` 是没有 preload 的空壳：
+
+```ts
+// Wrong：静默丢弃，渲染层永远收不到
+win.webContents.send(IPC_CHANNELS.X, payload);
+if (isMainWebContents(win.webContents.id)) { /* 恒 false */ }
+
+// Correct
+sendToAllWindows(IPC_CHANNELS.X, payload);
+if (isMainWebContents(getWindowWebContents(win).id)) sendToWindow(win, IPC_CHANNELS.X, payload);
+```
+
+这类错误没有任何报错，只会表现为“状态不更新 / 一直加载中”。新增推送通道时
+补一个像 `ipc/nodes.test.ts` 那样区分 shell / UI webContents 的测试。
+
 ## 文件路径不收渲染层的，只收标识符
 
 需要读写磁盘的通道，请求里**只允许带 id**，路径由 Main 从自己读的权威数据推导：

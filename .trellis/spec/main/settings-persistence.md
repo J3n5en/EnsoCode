@@ -50,15 +50,23 @@
 
 ## 多窗口同步
 
-写入时向**除发起窗口外**的所有窗口广播：
+写入时向**除发起窗口外**的所有窗口广播（与 `src/main/ipc/settings.ts` 同步）：
 
 ```ts
 for (const win of BrowserWindow.getAllWindows()) {
-  if (win.webContents !== event.sender && !win.isDestroyed()) {
-    win.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED);
-  }
+  if (win.isDestroyed()) continue;
+  const ui = getWindowWebContents(win);
+  if (!sender || ui !== sender) sendToWindow(win, IPC_CHANNELS.SETTINGS_CHANGED);
 }
 ```
+
+**不要直接 `win.webContents.send(...)` / 比较 `win.webContents.id`**。主窗口的 UI 跑在
+独立的顶层 `WebContentsView` 里（`createPinnedWorkbench`），`win.webContents` 只是
+`BrowserWindow` 自带的空壳，没有 preload、没有监听：发进去的事件静默丢弃，类型检查
+和运行时都不报错。推送一律用 `createAppWindow.ts` 的 `sendToWindow` / `sendToAllWindows`，
+判“是不是主窗口”用 `isMainWebContents(getWindowWebContents(win).id)`。
+反例：`ipc/nodes.ts` 曾用旧写法，节点状态/下行帧全部丢失，表现为节点一直“连接中”、
+会话永远转圈；`ipc/nodes.test.ts` 锁住了推送目标必须是 UI webContents。
 
 渲染层收到后重新 rehydrate（见 `src/renderer/stores/settings/index.ts` 末尾）：
 
