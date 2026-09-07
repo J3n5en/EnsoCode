@@ -27,6 +27,23 @@ export function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${out}$`);
 }
 
+const HASHLINE_HEADER = /^\[(.+)#([0-9A-Fa-f]{4})\]$/;
+
+/** replace 走 path；hashline 从 input 首个非空文件头抽 path */
+export function extractEditTargetPath(params: unknown): string | undefined {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return undefined;
+  const record = params as Record<string, unknown>;
+  if (typeof record.path === 'string' && record.path.length > 0) return record.path;
+  if (typeof record.input !== 'string') return undefined;
+  for (const line of record.input.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = HASHLINE_HEADER.exec(trimmed);
+    return match?.[1];
+  }
+  return undefined;
+}
+
 /** filePath 绝对或相对 cwd；越出 cwd 恒 false */
 export function isPathInWriteScope(
   filePath: string,
@@ -52,7 +69,7 @@ export function withWriteScope<T extends ToolDefinition>(
   return {
     ...def,
     execute: async (id, params, ...rest) => {
-      const target = (params as { path?: unknown })?.path;
+      const target = extractEditTargetPath(params);
       if (typeof target === 'string' && !isPathInWriteScope(target, cwd, scope)) {
         throw new Error(
           `write scope: "${target}" is outside [${scope.join(', ')}] — this agent type may only write files matching those globs`

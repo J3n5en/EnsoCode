@@ -1,6 +1,6 @@
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
-import { ApprovalGate } from './approval';
+import { ApprovalGate, summarizeApproval } from './approval';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
 // options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
@@ -25,6 +25,14 @@ const makeGate = (mode: GateMode = 'supervised', options?: { review?: ReviewFn }
   );
   return { gate, requests, resolved };
 };
+
+describe('summarizeApproval', () => {
+  it('file-edit 的 Hashline 参数只显示文件头路径', () => {
+    expect(
+      summarizeApproval('file-edit', { input: '[/repo/a.ts#ABCD]\nPUT 1.=1:\n+x' })
+    ).toBe('/repo/a.ts');
+  });
+});
 
 describe('ApprovalGate', () => {
   it('三档 needsApproval:full 全免,auto-edits 免 file-*,supervised 全审', () => {

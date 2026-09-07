@@ -5,6 +5,7 @@ import type {
   ApprovalMode,
   ApprovalRequestInfo,
 } from '@shared/types/agent';
+import { extractEditTargetPath } from './writeScope';
 
 interface PendingApproval {
   info: ApprovalRequestInfo;
@@ -121,11 +122,12 @@ export class ApprovalGate {
 }
 
 /** 从工具参数提取审批展示文本：命令全文 / 文件路径 / 参数预览 */
-function summarize(kind: ApprovalKind, params: unknown): string {
+export function summarizeApproval(kind: ApprovalKind, params: unknown): string {
   const record = (params ?? {}) as Record<string, unknown>;
   if (kind === 'command' && typeof record.command === 'string') return record.command;
-  if ((kind === 'file-edit' || kind === 'file-write') && typeof record.path === 'string') {
-    return record.path;
+  if (kind === 'file-edit' || kind === 'file-write') {
+    const target = extractEditTargetPath(params);
+    if (target) return target;
   }
   try {
     return JSON.stringify(record).slice(0, 300);
@@ -147,7 +149,7 @@ export function withApproval(
         const result = await gate.ask(
           definition.name,
           kind,
-          summarize(kind, params),
+          summarizeApproval(kind, params),
           signal,
           toolCallId
         );

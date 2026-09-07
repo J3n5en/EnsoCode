@@ -1,6 +1,23 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { globToRegExp, isPathInWriteScope, withWriteScope } from './writeScope';
+import {
+  extractEditTargetPath,
+  globToRegExp,
+  isPathInWriteScope,
+  withWriteScope,
+} from './writeScope';
+
+describe('extractEditTargetPath', () => {
+  it('优先提取现有 replace 参数的非空 path', () => {
+    expect(extractEditTargetPath({ path: 'src/x.ts' })).toBe('src/x.ts');
+  });
+
+  it('从 Hashline input 的首个非空文件头提取路径', () => {
+    expect(extractEditTargetPath({ input: '\n  [src/x.ts#aBcD]  \nPUT 1.=1:\n+x' })).toBe(
+      'src/x.ts'
+    );
+  });
+});
 
 describe('globToRegExp', () => {
   it('**/*.test.ts 命中嵌套路径 a/b/c.test.ts', () => {
@@ -93,6 +110,34 @@ describe('withWriteScope', () => {
     );
     expect(def.execute).toHaveBeenCalled();
     expect((result.content[0] as { text: string }).text).toBe('ok');
+  });
+
+  it('Hashline 文件头路径越界时拒绝且不调用内部 execute', async () => {
+    const def = makeToolDef();
+    const wrapped = withWriteScope(def, '/repo', ['**/*.test.ts']);
+    await expect(
+      wrapped.execute(
+        'id',
+        { input: '[src/x.ts#ABCD]\nPUT 1.=1:\n+x' },
+        undefined,
+        undefined,
+        {} as never
+      )
+    ).rejects.toThrow(/write scope/);
+    expect(def.execute).not.toHaveBeenCalled();
+  });
+
+  it('Hashline 文件头路径在范围内时调用内部 execute', async () => {
+    const def = makeToolDef();
+    const wrapped = withWriteScope(def, '/repo', ['**/*.test.ts']);
+    await wrapped.execute(
+      'id',
+      { input: '[src/x.test.ts#ABCD]\nPUT 1.=1:\n+x' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(def.execute).toHaveBeenCalledOnce();
   });
 
   it('scope 为 undefined 时原样返回同一对象', () => {
