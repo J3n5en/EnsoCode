@@ -121,6 +121,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   setBashInterceptEnabled: excluded(
     'Bash intercept is a desktop session preference, not an Enso capability.'
   ),
+  setHashlineEditEnabled: excluded(
+    'Hashline edit is a desktop session preference, not an Enso capability.'
+  ),
   setSmartCompactEnabled: excluded(
     'Verified smart compaction is a desktop session preference, not an Enso capability.'
   ),
