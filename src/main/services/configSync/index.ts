@@ -63,6 +63,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   windowsLocalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   exploreFoldEnabled: { mode: 'portable' },
   bashInterceptEnabled: { mode: 'portable' },
+  hashlineEditEnabled: { mode: 'portable' },
   smartCompactEnabled: { mode: 'portable' },
   smartCompactModel: { mode: 'portable' },
   smartCompactMode: { mode: 'portable' },

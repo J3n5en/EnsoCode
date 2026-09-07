@@ -949,6 +949,11 @@ export const zhTranslations: Record<string, string> = {
   'Force read/find tools': '强制走 read/find 工具',
   'Block cat/head/grep/sed -i in the shell and require the dedicated file tools. Off by default. Takes effect on the next session.':
     '拦截 shell 里的 cat/head/grep/sed -i，要求改用专用文件工具。默认关。下次开会话生效。',
+  'Hashline edit': 'Hashline 编辑',
+  'Line-anchored read/edit with snapshot tags. Off by default. Takes effect on the next session. oldText replace still works when Force read/find is off.':
+    '带快照标签的行锚点 read/edit。默认关。下次开会话生效。未开强制 read/find 时仍可用 oldText 替换。',
+  'Also turn on Force read/find tools so the model uses tagged read more often. Edit still accepts oldText replace either way.':
+    '建议同时打开强制走 read/find 工具，模型会更多用带标签的 read。无论是否打开，edit 仍接受 oldText 替换。',
   'Load project harness assets': '加载项目内其它工具目录',
   'Also load skills from .claude/.codex/.cursor and rule files (.cursorrules, .cursor/rules, .claude/rules) in the project':
     '同时加载项目内 .claude/.codex/.cursor 下的 skills，以及规则文件（.cursorrules、.cursor/rules、.claude/rules）',

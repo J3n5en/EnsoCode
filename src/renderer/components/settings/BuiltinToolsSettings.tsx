@@ -21,6 +21,8 @@ export function BuiltinToolsSettings() {
   const setExploreFoldEnabled = useSettingsStore((state) => state.setExploreFoldEnabled);
   const bashInterceptEnabled = useSettingsStore((state) => state.bashInterceptEnabled);
   const setBashInterceptEnabled = useSettingsStore((state) => state.setBashInterceptEnabled);
+  const hashlineEditEnabled = useSettingsStore((state) => state.hashlineEditEnabled);
+  const setHashlineEditEnabled = useSettingsStore((state) => state.setHashlineEditEnabled);
   const occupancy = useOccupancyRows(
     BUILTIN_TOOLS.map((tool) => tool.id),
     () => window.electronAPI.assets.builtinToolOccupancy()
@@ -93,6 +95,30 @@ export function BuiltinToolsSettings() {
           </p>
         </div>
         <Switch checked={bashInterceptEnabled} onCheckedChange={setBashInterceptEnabled} />
+      </div>
+
+      <div
+        className="space-y-2 rounded-lg border px-3 py-2.5"
+        data-settings-row="tools.hashlineEditEnabled"
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-sm">{t('Hashline edit')}</p>
+            <p className="text-muted-foreground text-xs">
+              {t(
+                'Line-anchored read/edit with snapshot tags. Off by default. Takes effect on the next session. oldText replace still works when Force read/find is off.'
+              )}
+            </p>
+          </div>
+          <Switch checked={hashlineEditEnabled} onCheckedChange={setHashlineEditEnabled} />
+        </div>
+        {hashlineEditEnabled && !bashInterceptEnabled ? (
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'Also turn on Force read/find tools so the model uses tagged read more often. Edit still accepts oldText replace either way.'
+            )}
+          </p>
+        ) : null}
       </div>
 
       <div className="rounded-md border px-3 py-2.5">

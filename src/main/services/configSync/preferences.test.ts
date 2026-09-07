@@ -40,6 +40,7 @@ describe('config sync portable preference contract', () => {
       'loadHarnessAssets',
       'exploreFoldEnabled',
       'bashInterceptEnabled',
+      'hashlineEditEnabled',
       'smartCompactEnabled',
       'smartCompactModel',
       'smartCompactMode',

@@ -207,6 +207,7 @@ describe('buildSettingsCatalog', () => {
     'agents.root',
     'tools.root',
     'tools.bashInterceptEnabled',
+    'tools.hashlineEditEnabled',
     'skills.root',
     'mcp.root',
     'instructions.root',

@@ -106,6 +106,9 @@ export interface SettingsState {
   /** 强制用 read/grep/edit/write/find 替代 cat/grep/sed -i 等 shell 读写；缺省关 */
   bashInterceptEnabled: boolean;
 
+  /** Hashline 行锚点 read/edit；缺省关。开时 edit 仍兼容 oldText replace */
+  hashlineEditEnabled: boolean;
+
   /** 父会话用 Enso compact hook 做 compact 摘要；缺省关，新会话生效 */
   smartCompactEnabled: boolean;
   /** 智能压缩独立模型；null = 跟随当前会话模型 */
@@ -225,6 +228,7 @@ export interface SettingsState {
   setWindowsLocalShell: (value: WindowsLocalShell) => void;
   setExploreFoldEnabled: (value: boolean) => void;
   setBashInterceptEnabled: (value: boolean) => void;
+  setHashlineEditEnabled: (value: boolean) => void;
   setSmartCompactEnabled: (value: boolean) => void;
   setSmartCompactModel: (value: DefaultModelRef | null) => void;
   setSmartCompactMode: (value: import('@shared/smartCompactMode').SmartCompactMode) => void;

@@ -710,6 +710,7 @@ export class SessionSupervisor {
           command.windowsLocalShell,
           command.exploreFoldEnabled,
           command.bashInterceptEnabled,
+          command.hashlineEditEnabled,
           command.smartCompactEnabled,
           command.smartCompactSummaryModel,
           command.smartCompactMode
@@ -1091,6 +1092,7 @@ export class SessionSupervisor {
     windowsLocalShell?: WindowsLocalShell,
     exploreFoldEnabled = false,
     bashInterceptEnabled = false,
+    _hashlineEditEnabled = false,
     smartCompactEnabled = false,
     smartCompactSummaryModel?: SpawnModelConfig,
     smartCompactMode?: SmartCompactMode

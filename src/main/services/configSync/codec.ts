@@ -78,6 +78,7 @@ const STATE_KEYS = [
   'loadHarnessAssets',
   'exploreFoldEnabled',
   'bashInterceptEnabled',
+  'hashlineEditEnabled',
   'openChangesOnFileEdit',
   'compactReadOnlyTools',
   'generationStallTimeoutMin',
@@ -887,6 +888,7 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     'loadHarnessAssets',
     'exploreFoldEnabled',
     'bashInterceptEnabled',
+    'hashlineEditEnabled',
     'openChangesOnFileEdit',
     'compactReadOnlyTools',
   ])

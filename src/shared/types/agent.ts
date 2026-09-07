@@ -494,6 +494,8 @@ export type AgentCommand =
       exploreFoldEnabled?: boolean;
       /** 拦截 cat/grep/sed -i 等，强制走 read/grep/edit/write/find；缺省关 */
       bashInterceptEnabled?: boolean;
+      /** Hashline 行锚点 read/edit；缺省关 */
+      hashlineEditEnabled?: boolean;
       /** 父会话加载 Enso compact hook 作为 compact 摘要后端 */
       smartCompactEnabled?: boolean;
       /** 独立摘要模型；缺省跟随当前会话模型 */
@@ -1743,6 +1745,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'loadHarnessAssets',
           'exploreFoldEnabled',
           'bashInterceptEnabled',
+          'hashlineEditEnabled',
           'smartCompactEnabled',
           'smartCompactSummaryModel',
           'smartCompactMode',
@@ -1769,6 +1772,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.exploreFoldEnabled !== undefined && typeof value.exploreFoldEnabled !== 'boolean') ||
         (value.bashInterceptEnabled !== undefined &&
           typeof value.bashInterceptEnabled !== 'boolean') ||
+        (value.hashlineEditEnabled !== undefined &&
+          typeof value.hashlineEditEnabled !== 'boolean') ||
         (value.smartCompactEnabled !== undefined &&
           typeof value.smartCompactEnabled !== 'boolean') ||
         (value.smartCompactSummaryModel !== undefined &&

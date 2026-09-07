@@ -41,6 +41,9 @@ export const SETTINGS_DATA_COVERAGE = {
   bashInterceptEnabled: excluded(
     'Bash intercept is a desktop session preference, not an Enso capability.'
   ),
+  hashlineEditEnabled: excluded(
+    'Hashline edit is a desktop session preference, not an Enso capability.'
+  ),
   smartCompactEnabled: excluded(
     'Verified smart compaction is a desktop session preference, not an Enso capability.'
   ),

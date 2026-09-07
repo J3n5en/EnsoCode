@@ -43,6 +43,7 @@ export const SETTINGS_STATE_FIELDS = [
   'windowsLocalShell',
   'exploreFoldEnabled',
   'bashInterceptEnabled',
+  'hashlineEditEnabled',
   'smartCompactEnabled',
   'smartCompactModel',
   'smartCompactMode',

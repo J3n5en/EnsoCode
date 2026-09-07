@@ -167,6 +167,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     description:
       'Block cat/head/grep/sed -i in the shell and require the dedicated file tools. Off by default. Takes effect on the next session.',
   },
+  {
+    id: 'tools.hashlineEditEnabled',
+    category: 'tools',
+    title: 'Hashline edit',
+    description:
+      'Line-anchored read/edit with snapshot tags. Off by default. Takes effect on the next session. oldText replace still works when Force read/find is off.',
+  },
   { id: 'skills.root', category: 'skills', title: 'Skills' },
   { id: 'mcp.root', category: 'mcp', title: 'MCP Servers' },
   { id: 'instructions.root', category: 'instructions', title: 'Instruction Files' },

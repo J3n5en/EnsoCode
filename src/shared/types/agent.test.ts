@@ -281,6 +281,21 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...base, bashInterceptEnabled: 1 })).toBeNull();
   });
 
+  it('spawn-parent 携 hashlineEditEnabled:合法通过,脏值拒绝,缺省当关', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand(base)).toEqual(base);
+    expect(parseAgentCommand({ ...base, hashlineEditEnabled: true })).toEqual({
+      ...base,
+      hashlineEditEnabled: true,
+    });
+    expect(parseAgentCommand({ ...base, hashlineEditEnabled: false })).toEqual({
+      ...base,
+      hashlineEditEnabled: false,
+    });
+    expect(parseAgentCommand({ ...base, hashlineEditEnabled: 'true' })).toBeNull();
+    expect(parseAgentCommand({ ...base, hashlineEditEnabled: 1 })).toBeNull();
+  });
+
   it('spawn-parent 携 smartCompactEnabled:合法通过,脏值拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     expect(parseAgentCommand({ ...base, smartCompactEnabled: true })).toEqual({

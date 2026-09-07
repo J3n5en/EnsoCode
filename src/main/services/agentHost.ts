@@ -387,6 +387,7 @@ export function spawnSession(
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
   const bashInterceptEnabled = state?.bashInterceptEnabled === true;
+  const hashlineEditEnabled = state?.hashlineEditEnabled === true;
   const smartCompactEnabled = state?.smartCompactEnabled === true;
   const smartCompactRef = asModelRef(state?.smartCompactModel);
   const smartCompactSummary =
@@ -416,6 +417,7 @@ export function spawnSession(
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     ...(bashInterceptEnabled ? { bashInterceptEnabled: true } : {}),
+    ...(hashlineEditEnabled ? { hashlineEditEnabled: true } : {}),
     ...(smartCompactEnabled ? { smartCompactEnabled: true } : {}),
     ...(smartCompactSummaryModel ? { smartCompactSummaryModel } : {}),
     ...(smartCompactMode ? { smartCompactMode } : {}),

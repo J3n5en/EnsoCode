@@ -113,6 +113,7 @@ export interface ConfigSyncState {
   loadHarnessAssets?: boolean;
   exploreFoldEnabled?: boolean;
   bashInterceptEnabled?: boolean;
+  hashlineEditEnabled?: boolean;
   openChangesOnFileEdit?: boolean;
   compactReadOnlyTools?: boolean;
   generationStallTimeoutMin?: number;
