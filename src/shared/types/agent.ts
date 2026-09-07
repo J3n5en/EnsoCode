@@ -703,6 +703,8 @@ export interface ProjectedMessage {
   toolDurationMs?: number;
   /** subagent 工具 toolResult 的执行元数据 */
   subagentMeta?: { modelId?: string; outputTokens?: number; steps?: number };
+  /** Hashline edit 成功结果：补丁前后全文（不含 patch） */
+  editDiff?: { oldText: string; newText: string };
   /** compactionSummary 消息：压缩前的上下文 token 数 */
   tokensBefore?: number;
   /** 摘要来自 Enso compact hook，不是原生 summarizer */

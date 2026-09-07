@@ -165,6 +165,61 @@ describe('projectMessage', () => {
     });
   });
 
+  it('edit toolResult 将前后文本投影为 editDiff 且不透传 patch', () => {
+    const projected = projectMessage({
+      role: 'toolResult',
+      toolName: 'edit',
+      toolCallId: 'edit-1',
+      content: [{ type: 'text', text: 'ok' }],
+      details: { oldText: 'before\n', diff: 'after\n', patch: '[a.ts#ABCD]\nPUT...' },
+    });
+    expect(projected).toMatchObject({
+      role: 'toolResult',
+      toolName: 'edit',
+      toolCallId: 'edit-1',
+      content: [{ type: 'text', text: 'ok' }],
+      editDiff: { oldText: 'before\n', newText: 'after\n' },
+    });
+    expect(projected).not.toHaveProperty('details');
+    expect(JSON.stringify(projected)).not.toContain('PUT...');
+  });
+
+  it('脏详情、不完整详情与非 edit 工具都不投影 editDiff', () => {
+    const dirtyDetails = [
+      { diff: 'after\n' },
+      { oldText: 1, diff: 'after\n' },
+      { oldText: 'before\n', diff: 2 },
+      null,
+    ];
+    for (const details of dirtyDetails) {
+      expect(
+        projectMessage({ role: 'toolResult', toolName: 'edit', content: [], details })
+      ).not.toHaveProperty('editDiff');
+    }
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'read',
+        content: [],
+        details: { oldText: 'before\n', diff: 'after\n' },
+      })
+    ).not.toHaveProperty('editDiff');
+  });
+
+  it('editDiff 前后文本按 PROJECTED_TEXT_LIMIT 截断', () => {
+    const prefix = 'x'.repeat(PROJECTED_TEXT_LIMIT);
+    const projected = projectMessage({
+      role: 'toolResult',
+      toolName: 'edit',
+      content: [],
+      details: { oldText: `${prefix}OLD`, diff: `${prefix}NEW` },
+    });
+    expect((projected as unknown as { editDiff?: unknown }).editDiff).toEqual({
+      oldText: `${prefix}\n…`,
+      newText: `${prefix}\n…`,
+    });
+  });
+
   it('compactionSummary：fromHook 投影为 verified', () => {
     expect(
       projectMessage({

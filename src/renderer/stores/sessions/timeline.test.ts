@@ -42,6 +42,145 @@ describe('buildTimeline', () => {
     });
   });
 
+  it('Hashline edit 从头部提取路径并从 toolResult 生成 edits', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'hashline-1',
+              name: 'edit',
+              arguments: { input: '[src/a.ts#ABCD]\nPUT 1.=1:\n+hello' },
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'hashline-1',
+          toolName: 'edit',
+          editDiff: { oldText: 'world\n', newText: 'hello\n' },
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({
+      kind: 'tool',
+      name: 'edit',
+      summary: 'src/a.ts',
+      edits: [{ oldText: 'world\n', newText: 'hello\n' }],
+      state: 'ok',
+    });
+  });
+
+  it('replace edit 没有 editDiff 时继续使用参数中的路径与 edits', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'replace-1',
+              name: 'edit',
+              arguments: { path: 'b.ts', edits: [{ oldText: 'a', newText: 'b' }] },
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'replace-1',
+          toolName: 'edit',
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({
+      kind: 'tool',
+      summary: 'b.ts',
+      edits: [{ oldText: 'a', newText: 'b' }],
+      state: 'ok',
+    });
+  });
+
+  it('参数 edits 优先于 toolResult editDiff', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'both-1',
+              name: 'edit',
+              arguments: { path: 'b.ts', edits: [{ oldText: 'a', newText: 'b' }] },
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'both-1',
+          toolName: 'edit',
+          editDiff: { oldText: 'wrong-old', newText: 'wrong-new' },
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({
+      summary: 'b.ts',
+      edits: [{ oldText: 'a', newText: 'b' }],
+    });
+  });
+
+  it('仍在运行的 Hashline edit 显示头部路径且 edits 为 null', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'running-1',
+              name: 'edit',
+              arguments: { input: '[src/a.ts#ABCD]\nPUT 1.=1:\n+hello' },
+            },
+          ],
+        },
+      ],
+      true
+    );
+    expect(timeline[1]).toMatchObject({ summary: 'src/a.ts', edits: null, state: 'running' });
+  });
+
+  it('不完整 editDiff 不生成 edits 且不抛错', () => {
+    const timeline = buildTimeline(
+      [
+        user('改代码'),
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'dirty-1', name: 'edit', arguments: {} }],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'dirty-1',
+          toolName: 'edit',
+          editDiff: { oldText: 'before\n' } as unknown as { oldText: string; newText: string },
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({ kind: 'tool', edits: null, state: 'ok' });
+  });
+
   it('无结果的 toolCall 在会话 running 且 pending reviewing 时标 reviewing', () => {
     const timeline = buildTimeline(
       [

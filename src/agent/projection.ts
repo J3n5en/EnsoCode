@@ -5,6 +5,14 @@ export const PROJECTED_TEXT_LIMIT = 32_768;
 
 const TODO_STATUSES = ['pending', 'in_progress', 'completed'];
 
+/** Hashline edit toolResult.details 的前后全文（白名单校验，脏数据丢弃） */
+function projectEditDiff(value: unknown): { oldText: string; newText: string } | null {
+  if (!isRecord(value) || typeof value.oldText !== 'string' || typeof value.diff !== 'string') {
+    return null;
+  }
+  return { oldText: capText(value.oldText), newText: capText(value.diff) };
+}
+
 /** todo 工具 toolResult.details 的清单快照（白名单校验，脏数据丢弃） */
 function projectTodos(value: unknown): TodoItem[] | null {
   if (!isRecord(value) || !Array.isArray(value.todos)) return null;
@@ -48,6 +56,10 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (value.role === 'toolResult' && value.toolName === 'todo') {
     const todos = projectTodos(value.details);
     if (todos) projected.todos = todos;
+  }
+  if (value.role === 'toolResult' && value.toolName === 'edit') {
+    const editDiff = projectEditDiff(value.details);
+    if (editDiff) projected.editDiff = editDiff;
   }
   if (value.role === 'toolResult' && value.toolName === 'subagent' && isRecord(value.details)) {
     const details = value.details as { modelId?: unknown; outputTokens?: unknown; steps?: unknown };
