@@ -14,6 +14,13 @@ const user = (text: string): ProjectedMessage => ({
 });
 
 describe('buildTimeline', () => {
+  it('historyBaseIndex 让行 key 用绝对下标，prepend 后已有行 key 不变', () => {
+    const timeline = buildTimeline([user('tail')], false, [], undefined, {
+      historyBaseIndex: 40,
+    });
+    expect(timeline[0]).toMatchObject({ kind: 'user', key: '40', text: 'tail' });
+  });
+
   it('toolResult 折进对应 toolCall 条目，不单独成行', () => {
     const timeline = buildTimeline(
       [

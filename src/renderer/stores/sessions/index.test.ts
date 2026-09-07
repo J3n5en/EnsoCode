@@ -2,6 +2,7 @@ import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import type {
   DispatchMainEvent,
+  ParentHistoryTailResult,
   RendererAgentEvent,
   SourceAuthorityProjection,
 } from '@shared/types/agent';
@@ -16,11 +17,13 @@ let sourceProjection: SourceAuthorityProjection = { projects: [], conversations:
 let nextConversationId = 'parent';
 const agentPrompt = vi.fn(async () => ({ ok: true }));
 const agentSpawn = vi.fn(async () => ({ ok: true }));
-const readParentHistoryTail = vi.fn(async () => ({
-  ok: false as const,
-  code: 'not-found' as const,
-  error: 'no',
-}));
+const readParentHistoryTail = vi.fn(
+  async (_conversationId?: string, _beforeIndex?: number): Promise<ParentHistoryTailResult> => ({
+    ok: false,
+    code: 'not-found',
+    error: 'no',
+  })
+);
 const dispatch = vi.fn();
 const registerModelSelection = vi.fn(async () => ({
   accepted: true as const,
@@ -1804,13 +1807,11 @@ describe('typed Agent child projection', () => {
       return { ok: true };
     });
 
-    await sessionsModule.useSessionsStore
-      .getState()
-      .send('帮我看看这个竞态问题', {
-        providerId: 'provider-1',
-        modelId: 'model-1',
-        cwd: '/project',
-      });
+    await sessionsModule.useSessionsStore.getState().send('帮我看看这个竞态问题', {
+      providerId: 'provider-1',
+      modelId: 'model-1',
+      cwd: '/project',
+    });
 
     expect(sessionsModule.useSessionsStore.getState().conversations[id!].sessionFile).toBe(
       '/tmp/fresh-session.jsonl'
@@ -1825,13 +1826,7 @@ describe('typed Agent child projection', () => {
 
 describe('parent history tail hydrate', () => {
   it('spawn 中仍能上屏尾巴，且不写 historyOnly', async () => {
-    let resolveTail:
-      | ((value: {
-          ok: true;
-          messages: Array<{ role: 'assistant'; content: Array<{ type: 'text'; text: string }> }>;
-          baseIndex: number;
-        }) => void)
-      | undefined;
+    let resolveTail: ((value: ParentHistoryTailResult) => void) | undefined;
     readParentHistoryTail.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -1873,6 +1868,34 @@ describe('parent history tail hydrate', () => {
     expect(cold.historyOnly).toBeUndefined();
     expect(cold.historyBaseIndex).toBe(12);
     expect(cold.generation).toBe('stale-generation');
+  });
+
+  it('上滑只按当前 historyBaseIndex 取更早一页', async () => {
+    readParentHistoryTail.mockResolvedValue({
+      ok: true,
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'older' }] }],
+      baseIndex: 11,
+    });
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          sessionFile: '/tmp/parent.jsonl',
+          historyBaseIndex: 12,
+          messages: [{ role: 'assistant', content: [{ type: 'text', text: 'tail' }] }],
+        },
+      },
+      activeId: 'parent',
+    }));
+    await sessionsModule.useSessionsStore.getState().loadOlderHistory('parent');
+    expect(readParentHistoryTail).toHaveBeenCalledWith('parent', 12);
+    const parent = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(parent.historyBaseIndex).toBe(11);
+    expect(parent.messages.map((message) => (message.content[0] as { text: string }).text)).toEqual(
+      ['older', 'tail']
+    );
   });
 
   it('resume 已在 spawn 时 send 不再二次 spawn', async () => {
@@ -1920,5 +1943,3 @@ describe('parent history tail hydrate', () => {
     expect(agentSpawn).toHaveBeenCalledTimes(1);
   });
 });
-
-

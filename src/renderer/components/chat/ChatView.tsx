@@ -210,6 +210,7 @@ export function ChatView() {
         {
           compaction: conversation?.compaction,
           compactionNoticeAt: conversation?.compactionNoticeAt,
+          historyBaseIndex: conversation?.historyBaseIndex,
           toolOutputs: conversation?.toolOutputs,
           toolStartedAt: conversation?.toolStartedAt,
           pendingApprovals: conversation?.pendingApprovals,
@@ -218,6 +219,7 @@ export function ChatView() {
     [
       conversation?.compaction,
       conversation?.compactionNoticeAt,
+      conversation?.historyBaseIndex,
       conversation?.toolOutputs,
       conversation?.toolStartedAt,
       conversation?.pendingApprovals,
@@ -394,6 +396,12 @@ export function ChatView() {
         onRetryResume={
           !conversation.started && conversation.sessionFile && conversation.status === 'failed'
             ? () => void useSessionsStore.getState().resumeConversation(conversation.id)
+            : undefined
+        }
+        firstItemIndex={conversation.historyBaseIndex ?? 0}
+        onStartReached={
+          (conversation.historyBaseIndex ?? 0) > 0
+            ? () => void useSessionsStore.getState().loadOlderHistory(conversation.id)
             : undefined
         }
         searchQuery={findOpen ? findQuery : ''}

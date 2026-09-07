@@ -430,8 +430,11 @@ const electronAPI = {
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),
-    readParentHistoryTail: (conversationId: string): Promise<ParentHistoryTailResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL, { conversationId }),
+    readParentHistoryTail: (
+      conversationId: string,
+      beforeIndex?: number
+    ): Promise<ParentHistoryTailResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL, { conversationId, beforeIndex }),
     /** 标题总结：只传 id + 输入（首条即时 / 每轮滚动，+会话模型作回退链末级），凭证由 Main 自读；结果经 title-generated 事件回流 */
     summarizeTitle: (
       conversationId: string,

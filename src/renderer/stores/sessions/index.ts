@@ -67,6 +67,7 @@ import { remapConversationProjectIds } from './projectAuthorityRemap';
 import {
   applyAgentEvent,
   applyDispatchEvent,
+  applyHistoryPage,
   emptyProjection,
   type SessionProjection,
   type TimelineMessage,
@@ -77,6 +78,7 @@ import { DIRTY_MAIN_TREE, workspaceFallbackNote, workspaceMigratedNote } from '.
 
 const lastViewedAt: Record<string, number> = {};
 const parentTailInFlight = new Set<string>();
+const olderHistoryInFlight = new Set<string>();
 let evictTimer: ReturnType<typeof setTimeout> | null = null;
 /** 正文脱节时向 worker 补要 snapshot 的去抖：同一会话一轮重叠的 upsert 不重复要 */
 const snapshotResyncAt: Record<string, number> = {};
@@ -261,6 +263,8 @@ interface SessionsState {
   send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
+  /** 上滑加载更早历史：只读 jsonl，不 spawn */
+  loadOlderHistory(id: string): Promise<void>;
   /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
   adoptPairSession(session: PairCreatedSession): void;
   /** 登记一条从外部应用导入的对话（选中后自动 resume 回放） */
@@ -408,7 +412,10 @@ export const useSessionsStore = create<SessionsState>()(
        * 模型可原样返回当前标题（不改）。每个成功回合都触发，不收敛；在飞未回流时跳过。
        * 冷会话/手机端会话没有正文也能触发——摘要来自 worker，不依赖 renderer 的 messages。
        */
-      function tryRollingSummarizeTitle(conversationId: string, digest: TurnDigest | undefined): void {
+      function tryRollingSummarizeTitle(
+        conversationId: string,
+        digest: TurnDigest | undefined
+      ): void {
         if (!digest || !useSettingsStore.getState().titleSummaryEnabled) return;
         if (!digest.userText.trim() && !digest.assistantText.trim()) return;
         const conversation = get().conversations[conversationId];
@@ -2054,6 +2061,35 @@ export const useSessionsStore = create<SessionsState>()(
           );
           // child 的级联恢复在 Main 侧：parent-ready 后 Main 按自己读的持久化恢复
           // 未 ended 的 child（渲染层不传路径、不指定身份），tab 由事件回流重建。
+        },
+
+        async loadOlderHistory(id) {
+          if (olderHistoryInFlight.has(id)) return;
+          const conversation = get().conversations[id];
+          const beforeIndex = conversation?.historyBaseIndex;
+          if (!conversation || conversation.parentId || !beforeIndex || beforeIndex <= 0) return;
+          const read = window.electronAPI.agent.readParentHistoryTail;
+          if (!read) return;
+          olderHistoryInFlight.add(id);
+          try {
+            const result = await read(id, beforeIndex);
+            if (!result.ok || result.messages.length === 0) return;
+            const latest = get().conversations[id];
+            if (!latest || latest.historyBaseIndex !== beforeIndex) return;
+            set((state) => {
+              const current = state.conversations[id];
+              if (!current) return state;
+              const next = applyHistoryPage(current, {
+                baseIndex: result.baseIndex,
+                messages: result.messages,
+              });
+              return next === current ? state : patch(state, id, next);
+            });
+          } catch {
+            // 翻页失败保持已有尾窗，下次到顶再试
+          } finally {
+            olderHistoryInFlight.delete(id);
+          }
         },
 
         async addImportedConversation(projectId, imported) {

@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "src/main/services/sessionHistoryTail.ts", "reason": "tail/page slice"}
+{"file": "src/main/services/pairPolicy.ts", "reason": "sliceHistory budget"}
+{"file": "src/renderer/stores/sessions/reducer.ts", "reason": "history merge + snapshot prefix"}
+{"file": "src/renderer/stores/sessions/timeline.ts", "reason": "absolute timeline keys"}
+{"file": ".trellis/spec/testing.md", "reason": "TDD"}
+{"file": ".trellis/spec/main/ipc.md", "reason": "id-only IPC"}

@@ -63,10 +63,12 @@ interface MessageTimelineProps {
    */
   virtualize?: boolean;
   /**
-   * 滚动接近顶部时回调（仅非虚拟化模式；带锁存，离开顶部区域后才会再次触发）。
-   * 手机端用于上滑加载更早的历史分页。
+   * 滚动接近顶部时回调（带锁存，离开顶部区域后才会再次触发）。
+   * 桌面 Virtuoso / 手机全量渲染都走这条：上滑加载更早的历史分页。
    */
   onStartReached?: () => void;
+  /** 当前权威区绝对起点；Virtuoso prepend 时靠它钉住已渲染行 */
+  firstItemIndex?: number;
   searchQuery?: string;
   activeHit?: { key: string; nth: number } | null;
 }
@@ -87,6 +89,7 @@ export function MessageTimeline({
   onRetryResume,
   virtualize = true,
   onStartReached,
+  firstItemIndex = 0,
   searchQuery = '',
   activeHit = null,
 }: MessageTimelineProps) {
@@ -285,8 +288,14 @@ export function MessageTimeline({
     scrollToKey: jumpTo,
   }));
 
-  // 顶部触发锁存：进入顶部区域只触发一次，滚离后解锁（避免加载期间连环触发）
+  // 顶部触发锁存：进入顶部区域只触发一次，滚离后解锁（避免加载期间连环触发）。
+  // firstItemIndex 变了 = 新页已前置，必须立刻解锁，否则停在第一页。
   const startReachedLatch = useRef(false);
+  const latchedFirstItemIndex = useRef(firstItemIndex);
+  if (latchedFirstItemIndex.current !== firstItemIndex) {
+    latchedFirstItemIndex.current = firstItemIndex;
+    startReachedLatch.current = false;
+  }
 
   // 两条渲染路径（虚拟化 / 全量）共用，保证外观完全一致
   const searchHighlight = useMemo(
@@ -435,6 +444,12 @@ export function MessageTimeline({
             ref={virtuosoRef}
             data={folded}
             computeItemKey={(_, item) => item.key}
+            firstItemIndex={firstItemIndex}
+            startReached={() => {
+              if (!onStartReached || startReachedLatch.current) return;
+              startReachedLatch.current = true;
+              onStartReached();
+            }}
             // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
             followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
             atBottomThreshold={AT_BOTTOM_THRESHOLD}
@@ -446,6 +461,7 @@ export function MessageTimeline({
             initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
             // 可视范围起点附近的 user 轮次作为导航条高亮
             rangeChanged={({ startIndex }) => {
+              if (startIndex > firstItemIndex + 4) startReachedLatch.current = false;
               scheduleActiveNavKey(() => {
                 let current: string | null = null;
                 for (let i = 0; i <= Math.min(startIndex + 1, folded.length - 1); i++) {

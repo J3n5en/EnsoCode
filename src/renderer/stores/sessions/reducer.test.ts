@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyAgentEvent,
   applyDispatchEvent,
+  applyHistoryPage,
   emptyProjection,
   type SessionProjection,
   upsertOutOfRange,
@@ -36,6 +37,38 @@ const status = (
   identity: identity(generation),
   seq,
   status: value,
+});
+
+describe('applyHistoryPage', () => {
+  it('空页不改变投影对象', () => {
+    const state = tail([assistant('m40')]);
+    expect(applyHistoryPage(state, { baseIndex: 40, messages: [] })).toBe(state);
+  });
+  it('未与当前历史起点相接时不改变投影对象', () => {
+    const state = tail([assistant('m40')]);
+    expect(applyHistoryPage(state, { baseIndex: 20, messages: [assistant('m20')] })).toBe(state);
+  });
+  it('相接页前置到权威区且保留状态、审批和乐观尾巴', () => {
+    const approval = {
+      requestId: 'a1',
+      tool: 'write',
+      kind: 'file-write' as const,
+      summary: '/tmp/x',
+      toolCallId: 't1',
+      phase: 'reviewing' as const,
+    };
+    const optimistic = { ...assistant('pending'), optimistic: true as const };
+    const state = {
+      ...tail([assistant('m40'), optimistic]),
+      status: 'running' as const,
+      pendingApprovals: [approval],
+    };
+    const next = applyHistoryPage(state, { baseIndex: 39, messages: [assistant('m39')] });
+    expect(next.messages).toEqual([assistant('m39'), assistant('m40'), optimistic]);
+    expect(next.historyBaseIndex).toBe(39);
+    expect(next.status).toBe('running');
+    expect(next.pendingApprovals).toBe(state.pendingApprovals);
+  });
 });
 
 describe('applyAgentEvent', () => {
@@ -383,11 +416,26 @@ describe('applyAgentEvent', () => {
     expect(next.historyBaseIndex).toBe(40);
   });
 
+  it('尾窗 snapshot 保留已加载的更早前缀并从自身起点替换', () => {
+    const history = Array.from({ length: 40 }, (_, i) => assistant(`m${i + 20}`));
+    const next = applyAgentEvent({ ...tail(history), historyBaseIndex: 20 }, 's1', {
+      type: 'snapshot',
+      sessions: [{ ...snapshot(40), messages: [assistant('new40'), assistant('new41')] }],
+    });
+    expect(next.messages.slice(0, 20)).toEqual(history.slice(0, 20));
+    expect(next.messages.slice(20)).toEqual([assistant('new40'), assistant('new41')]);
+    expect(next.historyBaseIndex).toBe(20);
+  });
+
   it('full snapshot clears an earlier tail base when baseIndex is missing or zero', () => {
     const tailed = applyAgentEvent(base, 's1', { type: 'snapshot', sessions: [snapshot(40)] });
     expect((tailed as TailProjection).historyBaseIndex).toBe(40);
-    const missing = applyAgentEvent(tailed, 's1', { type: 'snapshot', sessions: [snapshot()] });
+    const missing = applyAgentEvent(tailed, 's1', {
+      type: 'snapshot',
+      sessions: [{ ...snapshot(), messages: [assistant('full')] }],
+    });
     const zero = applyAgentEvent(tailed, 's1', { type: 'snapshot', sessions: [snapshot(0)] });
+    expect(missing.messages).toEqual([assistant('full')]);
     expect((missing as TailProjection).historyBaseIndex).toBeUndefined();
     expect((zero as TailProjection).historyBaseIndex).toBeUndefined();
     // patch 是浅合并：缺 key 会把尾巴 base 留下，全量 800 条后 upsert 写到本地 60。

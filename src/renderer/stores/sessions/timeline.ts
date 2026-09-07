@@ -250,7 +250,8 @@ function buildMessageTimeline(
   cwd?: string,
   toolOutputs?: Record<string, string>,
   pendingApprovals?: readonly ApprovalRequestInfo[],
-  toolStartedAt?: Record<string, number>
+  toolStartedAt?: Record<string, number>,
+  historyBaseIndex = 0
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -297,6 +298,7 @@ function buildMessageTimeline(
   let turnSteps = 0;
   messages.forEach((message, messageIndex) => {
     const isLastMessage = messageIndex === messages.length - 1;
+    const absIndex = historyBaseIndex + messageIndex;
     if (message.role === 'user') {
       turnStartMs = undefined;
       turnSteps = 0;
@@ -309,21 +311,21 @@ function buildMessageTimeline(
         const detail = noteMatch[1].trim();
         items.push({
           kind: 'task-note',
-          key: `${messageIndex}`,
+          key: `${absIndex}`,
           summary: detail.split('\n', 1)[0] ?? detail,
           detail,
         });
         return;
       }
       if (text || images.length > 0) {
-        items.push({ kind: 'user', key: `${messageIndex}`, text, images });
+        items.push({ kind: 'user', key: `${absIndex}`, text, images });
       }
       return;
     }
     if (message.role === 'compactionSummary') {
       items.push({
         kind: 'compaction',
-        key: `${messageIndex}`,
+        key: `${absIndex}`,
         summary: partText(message),
         tokensBefore: message.tokensBefore ?? null,
         ...(message.verified ? { verified: true } : {}),
@@ -343,7 +345,7 @@ function buildMessageTimeline(
     // 空占位 part，按「最后一个 part」判会把正在生成的块误判为已完结
     const lastActiveIndex = findLastActivePartIndex(message.content);
     message.content.forEach((part, partIndex) => {
-      const key = `${messageIndex}-${partIndex}`;
+      const key = `${absIndex}-${partIndex}`;
       const isStreamingPart = isLastMessage && partIndex === lastActiveIndex;
       // pi 流式中的消息 stopReason 是 "pending"（非空！），只有真正的终止原因才算完结
       const settled = Boolean(message.stopReason) && message.stopReason !== 'pending';
@@ -436,9 +438,7 @@ function buildMessageTimeline(
             todos: result?.todos ?? null,
             durationMs: result?.durationMs ?? null,
             agentMeta: result?.agentMeta ?? null,
-            ...(result || !toolStartedAt
-              ? {}
-              : { startedAt: toolStartedAt[part.id] ?? null }),
+            ...(result || !toolStartedAt ? {} : { startedAt: toolStartedAt[part.id] ?? null }),
           });
           return;
         }
@@ -453,7 +453,7 @@ function buildMessageTimeline(
       const retried = messages[messageIndex + 1]?.role === 'assistant';
       const pendingRetry = running && messageIndex === messages.length - 1;
       if (!retried && !pendingRetry) {
-        items.push({ kind: 'error', key: `${messageIndex}-err`, text: message.errorMessage });
+        items.push({ kind: 'error', key: `${absIndex}-err`, text: message.errorMessage });
       }
     }
   });
@@ -483,8 +483,12 @@ const messageItemIndex = (item: TimelineItem): number => {
   return Number.isInteger(index) ? index : -1;
 };
 
-const messageItemTime = (item: TimelineItem, messages: readonly ProjectedMessage[]): number => {
-  const index = messageItemIndex(item);
+const messageItemTime = (
+  item: TimelineItem,
+  messages: readonly ProjectedMessage[],
+  historyBaseIndex = 0
+): number => {
+  const index = messageItemIndex(item) - historyBaseIndex;
   return index >= 0
     ? (messages[index]?.timestamp ?? Number.NEGATIVE_INFINITY)
     : Number.NEGATIVE_INFINITY;
@@ -542,19 +546,23 @@ export function buildTimeline(
   options?: {
     compaction?: 'queued' | 'running';
     compactionNoticeAt?: number;
+    /** 当前权威消息对应的 worker 绝对起点；尾窗分页时行 key 用绝对下标 */
+    historyBaseIndex?: number;
     /** 运行中工具的输出快照（toolCallId → 文本）；真实 toolResult 到位后优先用后者 */
     toolOutputs?: Record<string, string>;
     pendingApprovals?: readonly ApprovalRequestInfo[];
     toolStartedAt?: Record<string, number>;
   }
 ): TimelineItem[] {
+  const historyBaseIndex = options?.historyBaseIndex ?? 0;
   const messageItems = buildMessageTimeline(
     messages,
     running,
     cwd,
     options?.toolOutputs,
     options?.pendingApprovals,
-    options?.toolStartedAt
+    options?.toolStartedAt,
+    historyBaseIndex
   );
   const merged =
     customEntries.length === 0
@@ -562,7 +570,7 @@ export function buildTimeline(
       : [
           ...messageItems.map((item, order) => ({
             item,
-            at: messageItemTime(item, messages),
+            at: messageItemTime(item, messages, historyBaseIndex),
             order,
           })),
           ...customEntries.map((entry, index) => ({
@@ -804,7 +812,7 @@ export function foldTimeline(
     // 非 compact 仍把 running 钉在组外，方便看此刻在跑什么。
     const pinned = (s: TimelineItem): boolean => {
       if (s.kind !== 'tool') return false;
-      if (s.edits !== null || !!s.writeContent || s.name === 'todo') return true;
+      if (s.edits !== null || s.writeContent || s.name === 'todo') return true;
       if (s.state !== 'running' && s.state !== 'reviewing') return false;
       return !(compact && isReadOnlyTool(s));
     };

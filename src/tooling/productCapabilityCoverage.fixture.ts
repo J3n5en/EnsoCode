@@ -302,7 +302,7 @@ export const IPC_PRODUCT_COVERAGE = {
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
   ),
   AGENT_PARENT_HISTORY_TAIL: excluded(
-    'Read-only parent jsonl tail for cold-open UI; no spawn, no execution rights.'
+    'Read-only parent jsonl tail/page for cold-open UI; no spawn, no execution rights.'
   ),
   AGENT_SUMMARIZE_TITLE: excluded(
     'Fire-and-forget conversation title summarization; single LLM completion, no execution rights.'

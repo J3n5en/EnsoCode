@@ -76,7 +76,11 @@ import { maybeNotify, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
-import { projectParentHistoryTail, resolveParentHistoryFile } from '../services/sessionHistoryTail';
+import {
+  projectParentHistoryPage,
+  projectParentHistoryTail,
+  resolveParentHistoryFile,
+} from '../services/sessionHistoryTail';
 import {
   importExternalSession,
   listExternalSessions,
@@ -257,7 +261,10 @@ async function readChildHistory(conversationId: string): Promise<ChildHistoryRes
   return { ok: true, projection: await EnsoSafeJournal.restore(resolved) };
 }
 
-async function readParentHistoryTail(conversationId: string): Promise<ParentHistoryTailResult> {
+async function readParentHistoryTail(
+  conversationId: string,
+  beforeIndex?: number
+): Promise<ParentHistoryTailResult> {
   const persisted = agentSessionIndex.persistedConversation(conversationId);
   const sessionFile =
     typeof persisted?.sessionFile === 'string' ? persisted.sessionFile : undefined;
@@ -276,7 +283,13 @@ async function readParentHistoryTail(conversationId: string): Promise<ParentHist
   try {
     const { SessionManager } = await import('@earendil-works/pi-coding-agent');
     const manager = SessionManager.open(resolved, sessionDir);
-    return { ok: true, ...projectParentHistoryTail(manager.getBranch()) };
+    const branch = manager.getBranch();
+    return {
+      ok: true,
+      ...(beforeIndex === undefined
+        ? projectParentHistoryTail(branch)
+        : projectParentHistoryPage(branch, beforeIndex)),
+    };
   } catch (error) {
     return {
       ok: false,
@@ -567,11 +580,15 @@ export function registerAgentHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL, async (_event, request: unknown) => {
-    const conversationId = asRecord(request)?.conversationId;
+    const record = asRecord(request);
+    const conversationId = record?.conversationId;
     if (!isNonEmptyString(conversationId)) {
       return { ok: false, code: 'not-found', error: 'conversationId is required' };
     }
-    return await readParentHistoryTail(conversationId);
+    const rawBefore = record?.beforeIndex;
+    const beforeIndex =
+      typeof rawBefore === 'number' && Number.isFinite(rawBefore) ? rawBefore : undefined;
+    return await readParentHistoryTail(conversationId, beforeIndex);
   });
 
   // 标题总结：渲染层只传 conversationId + 输入（首条即时 / 每轮滚动）；模型与凭证由 Main 从设置自读（回退链：

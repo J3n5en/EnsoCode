@@ -15,16 +15,38 @@ export function resolveParentHistoryFile(
   return within ? resolved : null;
 }
 
-export function projectParentHistoryTail(branch: readonly SessionEntry[]): {
+function projectWindow(
+  raw: unknown[],
+  endIndex: number
+): {
   messages: ProjectedMessage[];
   baseIndex: number;
 } {
-  const raw = branch.flatMap(sessionEntryToContextMessages);
-  const window = takeSnapshotTail(raw, raw.length);
+  const end = Math.max(0, Math.min(endIndex, raw.length));
+  if (end === 0) return { messages: [], baseIndex: 0 };
+  const window = takeSnapshotTail(raw, end);
   return {
     messages: window.messages
       .map(projectMessage)
       .filter((message): message is ProjectedMessage => message !== null),
     baseIndex: window.baseIndex,
   };
+}
+
+export function projectParentHistoryPage(
+  branch: readonly SessionEntry[],
+  beforeIndex: number
+): {
+  messages: ProjectedMessage[];
+  baseIndex: number;
+} {
+  return projectWindow(branch.flatMap(sessionEntryToContextMessages), beforeIndex);
+}
+
+export function projectParentHistoryTail(branch: readonly SessionEntry[]): {
+  messages: ProjectedMessage[];
+  baseIndex: number;
+} {
+  const raw = branch.flatMap(sessionEntryToContextMessages);
+  return projectWindow(raw, raw.length);
 }

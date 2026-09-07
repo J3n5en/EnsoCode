@@ -83,6 +83,21 @@ export function upsertOutOfRange(
   return localIndex < 0 || localIndex > authoritativeLength(messages);
 }
 
+/** 上滑分页：只在新页右端正好接到当前权威起点时前置，其它情况原对象返回。 */
+export function applyHistoryPage(
+  state: SessionProjection,
+  page: { baseIndex: number; messages: readonly TimelineMessage[] }
+): SessionProjection {
+  if (page.messages.length === 0) return state;
+  const localBase = state.historyBaseIndex ?? 0;
+  if (page.baseIndex + page.messages.length !== localBase) return state;
+  return {
+    ...state,
+    messages: [...page.messages, ...state.messages],
+    historyBaseIndex: page.baseIndex,
+  };
+}
+
 export interface SessionProjection {
   generation?: string;
   status: NodeStatus;
@@ -209,10 +224,16 @@ export function applyAgentEvent(
       leftover.splice(matched, 1);
       return false;
     });
+    const snapBase = snapshot.baseIndex ?? 0;
+    const localBase = state.historyBaseIndex ?? 0;
+    const authLen = authoritativeLength(state.messages);
+    const keepPrefix = snapBase > localBase && authLen >= snapBase - localBase;
+    const prefix = keepPrefix ? state.messages.slice(0, snapBase - localBase) : [];
+    const authoritative = prefix.length > 0 ? [...prefix, ...snapshot.messages] : snapshot.messages;
     return {
       generation: snapshot.identity.generation,
       status: snapshot.status,
-      messages: tail.length > 0 ? [...snapshot.messages, ...tail] : snapshot.messages,
+      messages: tail.length > 0 ? [...authoritative, ...tail] : authoritative,
       customEntries: snapshot.customEntries ?? [],
       commands: snapshot.commands,
       dispatchMainEvents: {},
@@ -224,8 +245,7 @@ export function applyAgentEvent(
       subagents: snapshot.subagents ?? [],
       toolOutputs: {},
       toolStartedAt: {},
-      historyBaseIndex:
-        snapshot.baseIndex && snapshot.baseIndex > 0 ? snapshot.baseIndex : undefined,
+      historyBaseIndex: keepPrefix ? localBase : snapBase > 0 ? snapBase : undefined,
     };
   }
 
