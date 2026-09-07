@@ -3,6 +3,8 @@ import { normalizeEditArguments } from '../editTool';
 import { computeFileHash } from './format';
 import { InMemorySnapshotStore } from './snapshots';
 import { HASHLINE_EDIT_PARAMETERS, selectHashlineTools, wrapHashlineEditDefinition } from './tools';
+import { withHashlineGrep } from './withGrep';
+import { withHashlineRead } from './withRead';
 
 const setup = (enabled: boolean) => {
   const store = new InMemorySnapshotStore();
@@ -53,6 +55,24 @@ describe('wrapHashlineEditDefinition', () => {
     expect(wrapped.name).toBe('edit');
   });
 
+  it('追加命名 edit 的 Hashline 首选与 replace 回退指南并保留 stock 指南', () => {
+    const fixture = wrappedFixture();
+    const stockGuidelines = ['Keep files small'];
+    const stock = { ...fixture.stock, promptGuidelines: stockGuidelines };
+    const wrapped = wrapHashlineEditDefinition(stock, {
+      store: fixture.store,
+      readText: async () => 'world\n',
+      writeText: fixture.writeText,
+    });
+    expect(Array.isArray(wrapped.promptGuidelines)).toBe(true);
+    expect(wrapped.promptGuidelines).toContain('Keep files small');
+    const text = wrapped.promptGuidelines.join('\n');
+    expect(text).toMatch(/\bedit\b/i);
+    expect(text).toMatch(/\[path#TAG\].*input|input.*\[path#TAG\]/is);
+    expect(text).toMatch(/edits.*replace|replace.*edits/is);
+    expect(text).toMatch(/(?:do not|never).*(?:invent|fabricat).*tag/is);
+  });
+
   it('replace 的 JSON 字符串 edits 继续经过 stock prepare 归一化', () => {
     const { wrapped } = wrappedFixture();
     const block = { oldText: 'a', newText: 'b' };
@@ -93,6 +113,38 @@ describe('wrapHashlineEditDefinition', () => {
       patch: input,
     });
     expect(stock.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('Hashline read/grep promptGuidelines', () => {
+  it('read 指南说明标签与编号行并保留 stock 指南', () => {
+    const stockGuidelines = ['Read narrowly'];
+    const stock = {
+      name: 'read',
+      promptGuidelines: stockGuidelines,
+      execute: vi.fn(async () => ({ content: [{ type: 'text', text: 'body\n' }] })),
+    };
+    const wrapped = withHashlineRead(stock, new InMemorySnapshotStore());
+    expect(wrapped.promptGuidelines).toContain('Read narrowly');
+    const text = wrapped.promptGuidelines.join('\n');
+    expect(text).toMatch(/\bread\b/i);
+    expect(text).toMatch(/\[path#TAG\]/i);
+    expect(text).toMatch(/numbered lines|N:/i);
+  });
+
+  it('grep 指南说明命中项的标签头锚点并保留 stock 指南', () => {
+    const stockGuidelines = ['Search precisely'];
+    const stock = {
+      name: 'grep',
+      promptGuidelines: stockGuidelines,
+      execute: vi.fn(async () => ({ content: [{ type: 'text', text: 'a.ts:1:hit' }] })),
+    };
+    const wrapped = withHashlineGrep(stock, new InMemorySnapshotStore(), async () => 'hit\n');
+    expect(wrapped.promptGuidelines).toContain('Search precisely');
+    const text = wrapped.promptGuidelines.join('\n');
+    expect(text).toMatch(/\bgrep\b/i);
+    expect(text).toMatch(/#TAG/i);
+    expect(text).toMatch(/(?:header|anchor).*hit|hit.*(?:header|anchor)/is);
   });
 });
 

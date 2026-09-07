@@ -1,5 +1,6 @@
 import { parseAgentUri } from '../structuredYield';
 import { formatHashlineHeader, formatNumberedLines } from './format';
+import { HASHLINE_READ_GUIDELINES, withGuidelines } from './prompts';
 import type { InMemorySnapshotStore } from './snapshots';
 
 interface ContentPart {
@@ -29,25 +30,28 @@ export function withHashlineRead<T extends { execute: (...args: never[]) => unkn
     params: unknown,
     ...rest: unknown[]
   ) => unknown;
-  return {
-    ...definition,
-    execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
-      const result = await execute(toolCallId, params, ...rest);
-      const filePath = String((params as { path?: string } | undefined)?.path ?? '');
-      if (!filePath || parseAgentUri(filePath)) return result;
-      if (!result || typeof result !== 'object') return result;
-      const body = snapshotText((result as { content?: unknown }).content);
-      if (body === undefined) return result;
-      const tag = store.record(filePath, body);
-      return {
-        ...(result as object),
-        content: [
-          {
-            type: 'text',
-            text: `${formatHashlineHeader(filePath, tag)}\n${formatNumberedLines(body)}`,
-          },
-        ],
-      };
-    }) as T['execute'],
-  };
+  return withGuidelines(
+    {
+      ...definition,
+      execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
+        const result = await execute(toolCallId, params, ...rest);
+        const filePath = String((params as { path?: string } | undefined)?.path ?? '');
+        if (!filePath || parseAgentUri(filePath)) return result;
+        if (!result || typeof result !== 'object') return result;
+        const body = snapshotText((result as { content?: unknown }).content);
+        if (body === undefined) return result;
+        const tag = store.record(filePath, body);
+        return {
+          ...(result as object),
+          content: [
+            {
+              type: 'text',
+              text: `${formatHashlineHeader(filePath, tag)}\n${formatNumberedLines(body)}`,
+            },
+          ],
+        };
+      }) as T['execute'],
+    },
+    HASHLINE_READ_GUIDELINES
+  );
 }

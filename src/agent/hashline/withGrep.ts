@@ -1,4 +1,5 @@
 import { formatHashlineHeader } from './format';
+import { HASHLINE_GREP_GUIDELINES, withGuidelines } from './prompts';
 import type { InMemorySnapshotStore } from './snapshots';
 
 const HIT = /^(.+?):(\d+)(?::\d+)?:/;
@@ -36,26 +37,29 @@ export function withHashlineGrep<T extends { execute: (...args: never[]) => unkn
     params: unknown,
     ...rest: unknown[]
   ) => unknown;
-  return {
-    ...definition,
-    execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
-      const result = await execute(toolCallId, params, ...rest);
-      const text = resultText(result);
-      if (text === undefined) return result;
-      const trimmed = text.trim();
-      if (!trimmed || /^no matches found$/i.test(trimmed)) return result;
-      const headers: string[] = [];
-      for (const filePath of extractHitPaths(text)) {
-        const body = await readFileText(filePath);
-        if (body === undefined) continue;
-        const tag = store.record(filePath, body);
-        headers.push(formatHashlineHeader(filePath, tag));
-      }
-      if (headers.length === 0) return result;
-      return {
-        ...(result as object),
-        content: [{ type: 'text', text: `${headers.join('\n')}\n${text}` }],
-      };
-    }) as T['execute'],
-  };
+  return withGuidelines(
+    {
+      ...definition,
+      execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
+        const result = await execute(toolCallId, params, ...rest);
+        const text = resultText(result);
+        if (text === undefined) return result;
+        const trimmed = text.trim();
+        if (!trimmed || /^no matches found$/i.test(trimmed)) return result;
+        const headers: string[] = [];
+        for (const filePath of extractHitPaths(text)) {
+          const body = await readFileText(filePath);
+          if (body === undefined) continue;
+          const tag = store.record(filePath, body);
+          headers.push(formatHashlineHeader(filePath, tag));
+        }
+        if (headers.length === 0) return result;
+        return {
+          ...(result as object),
+          content: [{ type: 'text', text: `${headers.join('\n')}\n${text}` }],
+        };
+      }) as T['execute'],
+    },
+    HASHLINE_GREP_GUIDELINES
+  );
 }

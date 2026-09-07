@@ -3,6 +3,7 @@ import { applyHashlineToFile } from './applyToFile';
 import { classifyEditArgs } from './classify';
 import { createHashlineEditTool } from './editTool';
 import { formatHashlineHeader, formatNumberedLines } from './format';
+import { HASHLINE_EDIT_GUIDELINES, withGuidelines } from './prompts';
 import type { InMemorySnapshotStore } from './snapshots';
 import { withHashlineGrep } from './withGrep';
 import { withHashlineRead } from './withRead';
@@ -93,42 +94,45 @@ export function wrapHashlineEditDefinition<T extends { execute: (...args: never[
   ) => unknown;
   const prepareStock = (stock as { prepareArguments?: (args: unknown) => unknown })
     .prepareArguments;
-  return {
-    ...stock,
-    parameters: HASHLINE_EDIT_PARAMETERS,
-    prepareArguments: (args: unknown) => {
-      if (classifyEditArgs(args).kind === 'hashline') return args;
-      return prepareStock ? prepareStock(args) : args;
-    },
-    execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
-      const kind = classifyEditArgs(params).kind;
-      if (kind === 'replace') return execute(toolCallId, params, ...rest);
-      if (kind === 'hashline') {
-        const input = String((params as { input?: string } | undefined)?.input ?? '');
-        const applied = await applyHashlineToFile({
-          store: options.store,
-          readText: options.readText,
-          writeText: options.writeText,
-          input,
-        });
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `${formatHashlineHeader(applied.path, applied.tag)}\n${formatNumberedLines(applied.text)}`,
+  return withGuidelines(
+    {
+      ...stock,
+      parameters: HASHLINE_EDIT_PARAMETERS,
+      prepareArguments: (args: unknown) => {
+        if (classifyEditArgs(args).kind === 'hashline') return args;
+        return prepareStock ? prepareStock(args) : args;
+      },
+      execute: (async (toolCallId: string, params: unknown, ...rest: unknown[]) => {
+        const kind = classifyEditArgs(params).kind;
+        if (kind === 'replace') return execute(toolCallId, params, ...rest);
+        if (kind === 'hashline') {
+          const input = String((params as { input?: string } | undefined)?.input ?? '');
+          const applied = await applyHashlineToFile({
+            store: options.store,
+            readText: options.readText,
+            writeText: options.writeText,
+            input,
+          });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `${formatHashlineHeader(applied.path, applied.tag)}\n${formatNumberedLines(applied.text)}`,
+              },
+            ],
+            details: {
+              oldText: applied.previous,
+              diff: applied.text,
+              patch: input,
             },
-          ],
-          details: {
-            oldText: applied.previous,
-            diff: applied.text,
-            patch: input,
-          },
-        };
-      }
-      if (kind === 'mixed') {
-        throw new Error('edit accepts either hashline input or replace edits, not both');
-      }
-      throw new Error('edit requires hashline input or replace edits');
-    }) as T['execute'],
-  };
+          };
+        }
+        if (kind === 'mixed') {
+          throw new Error('edit accepts either hashline input or replace edits, not both');
+        }
+        throw new Error('edit requires hashline input or replace edits');
+      }) as T['execute'],
+    },
+    HASHLINE_EDIT_GUIDELINES
+  );
 }

@@ -20,9 +20,12 @@ const fakeIo = (body = 'world\n'): HashlineIo => ({
 
 describe('applyHashlineSessionTools', () => {
   it('关闭时仅应用 outer read，grep/edit 保持 stock 身份', () => {
-    const read = fakeTool('read');
-    const grep = fakeTool('grep');
-    const edit = fakeTool('edit');
+    const readGuidelines = ['stock read'];
+    const grepGuidelines = ['stock grep'];
+    const editGuidelines = ['stock edit'];
+    const read = { ...fakeTool('read'), promptGuidelines: readGuidelines };
+    const grep = { ...fakeTool('grep'), promptGuidelines: grepGuidelines };
+    const edit = { ...fakeTool('edit'), promptGuidelines: editGuidelines };
     const wrapOuterRead = vi.fn((def: typeof read) => ({ ...def, outer: true }));
     const result = applyHashlineSessionTools({
       enabled: false,
@@ -37,6 +40,9 @@ describe('applyHashlineSessionTools', () => {
     expect(wrapOuterRead).toHaveBeenCalledWith(read);
     expect(result.grep).toBe(grep);
     expect(result.edit).toBe(edit);
+    expect(result.read.promptGuidelines).toBe(readGuidelines);
+    expect(result.grep.promptGuidelines).toBe(grepGuidelines);
+    expect(result.edit?.promptGuidelines).toBe(editGuidelines);
   });
 
   it('开启时按 outer(hashline(read)) 包装并让 Hashline edit 写入 IO', async () => {
