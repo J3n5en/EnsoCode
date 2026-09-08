@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DirectCandidate } from '../protocol';
 import { encodeChunks } from './chunk';
 import { DirectLink, type DirectSignal } from './link';
-import type { DirectCandidate, DirectPeer } from './peer';
+import type { DirectPeer } from './peer';
 
 /** 可脚本化的假对端：记录调用，测试手动触发回调 */
 function fakePeer() {

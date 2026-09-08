@@ -12,6 +12,33 @@ export {
   type PairKeypair,
   sealFrame,
 } from './crypto';
+export { createBrowserDirectPeerFactory } from './direct/browserPeer';
+export {
+  CHUNK_PAYLOAD_BYTES,
+  createReassembler,
+  encodeChunks,
+  type Reassembler,
+} from './direct/chunk';
+export {
+  DIRECT_NEGOTIATE_TIMEOUT_MS,
+  type DirectAction,
+  type DirectEvent,
+  type DirectPhase,
+  type DirectRole,
+  type DirectState,
+  type DirectTransport,
+  directBackoffDelay,
+  initialDirectState,
+  pickTransport,
+  reduceDirect,
+} from './direct/directSession';
+export { DirectLink, type DirectLinkDeps, type DirectSignal } from './direct/link';
+export {
+  type DirectPeer,
+  type DirectPeerFactory,
+  isAllowedCandidate,
+  normalizeCandidate,
+} from './direct/peer';
 export {
   buildPairLink,
   buildPairUri,
