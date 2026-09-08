@@ -491,6 +491,7 @@ function openConnection(device: PairedDevice): void {
       bumpPairMetaEpoch(conn);
       requestMeta(conn);
     },
+    onDiagnostic: (line) => console.log(`[pair] ${device.deviceName}: ${line}`),
   });
   connections.set(device.pairId, conn);
   connect(conn);

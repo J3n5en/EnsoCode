@@ -111,6 +111,7 @@ export class PairClient {
         this.send({ type: 'snapshot' });
         if (this.subscribedId) this.subscribe(this.subscribedId);
       },
+      onDiagnostic: (line) => console.info(`[pair] ${line}`),
     });
   }
 

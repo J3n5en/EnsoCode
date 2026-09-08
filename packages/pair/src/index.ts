@@ -32,6 +32,7 @@ export {
   reduceDirect,
 } from './direct/directSession';
 export { DirectLink, type DirectLinkDeps, type DirectSignal } from './direct/link';
+export { classifyNatMapping, describeCandidates, type NatMapping } from './direct/nat';
 export {
   type DirectPeer,
   type DirectPeerFactory,

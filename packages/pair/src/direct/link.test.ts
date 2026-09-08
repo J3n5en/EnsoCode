@@ -87,9 +87,11 @@ function harness(role: 'guest' | 'host', factoryNull = false) {
   const signals: DirectSignal[] = [];
   const frames: Uint8Array[] = [];
   const transports: string[] = [];
+  const diagnostics: string[] = [];
   let resyncs = 0;
   const link = new DirectLink({
     role,
+    onDiagnostic: (line) => diagnostics.push(line),
     factory: (iceServers) => {
       factoryIceServers.push(iceServers);
       if (factoryNull) return null;
@@ -112,9 +114,40 @@ function harness(role: 'guest' | 'host', factoryNull = false) {
     signals,
     frames,
     transports,
+    diagnostics,
     resyncs: () => resyncs,
   };
 }
+
+const SRFLX_A = 'candidate:3 1 UDP 1686 203.0.113.9 61000 typ srflx raddr 192.168.1.10 rport 51234';
+const SRFLX_B = 'candidate:5 1 UDP 1686 203.0.113.9 61777 typ srflx raddr 192.168.1.10 rport 51234';
+const HOST_6 = 'candidate:2 1 UDP 2122 2409:8a00:1:2::10 51234 typ host';
+
+describe('DirectLink 诊断', () => {
+  it('直连建立：汇报本代双方候选摘要', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    h.peers[0].fire.ice({ candidate: SRFLX_A, sdpMid: '0' });
+    h.peers[0].fire.ice({ candidate: SRFLX_B, sdpMid: '0' });
+    h.link.handleSignal({ type: 'direct-ice', gen: 1, candidate: HOST_6, sdpMid: '0' });
+    h.peers[0].fire.open();
+    expect(h.diagnostics).toEqual([
+      'direct open gen=1 local[srflx×2 nat=symmetric] remote[host×1 v6 nat=none]',
+    ]);
+  });
+
+  it('协商超时：汇报失败与双方候选摘要，便于判断是否双方都是对称 NAT', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    h.peers[0].fire.ice({ candidate: SRFLX_A, sdpMid: '0' });
+    await vi.advanceTimersByTimeAsync(DIRECT_NEGOTIATE_TIMEOUT_MS + 1);
+    expect(h.diagnostics).toEqual(['direct failed gen=1 local[srflx×1 nat=cone] remote[none]']);
+  });
+});
 
 const flush = async () => {
   await Promise.resolve();

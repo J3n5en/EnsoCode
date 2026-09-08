@@ -284,6 +284,7 @@ function openConnection(node: RemoteNode): void {
       void sendFrame(conn, { type: 'snapshot' });
       if (conn.lastSubscribe) void sendFrame(conn, conn.lastSubscribe);
     },
+    onDiagnostic: (line) => console.log(`[nodes] ${conn.node.label}: ${line}`),
   });
   connections.set(node.nodeId, conn);
   connect(conn);

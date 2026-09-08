@@ -10,6 +10,7 @@ import {
   initialDirectState,
   reduceDirect,
 } from './directSession';
+import { describeCandidates } from './nat';
 import {
   type DirectPeer,
   type DirectPeerFactory,
@@ -36,6 +37,8 @@ export interface DirectLinkDeps {
   onTransportChange(transport: DirectTransport): void;
   /** 切通道后修复缝隙：guest 重发 snapshot/subscribe，host 重推 meta */
   onResync(): void;
+  /** 每代协商的结果与双方候选摘要（NAT 类型 / 地址族），供日志判断为何打不通 */
+  onDiagnostic?(line: string): void;
 }
 
 /** DataChannel 心跳字节：与分片头（0x00/0x01）区分，在拆片之前拦截 */
@@ -90,6 +93,7 @@ export class DirectLink {
         this.dispatch({ type: 'answer', gen: signal.gen });
         break;
       case 'direct-ice':
+        if (signal.gen === this.state.gen) this.remoteCandidates.push(signal.candidate);
         this.pendingIce = { candidate: signal.candidate, sdpMid: signal.sdpMid };
         this.dispatch({ type: 'ice', gen: signal.gen });
         break;
@@ -142,12 +146,30 @@ export class DirectLink {
   private pendingOffer = '';
   private pendingAnswer = '';
   private pendingIce: { candidate: string; sdpMid: string | null } | null = null;
+  private localCandidates: string[] = [];
+  private remoteCandidates: string[] = [];
 
   private dispatch(event: Parameters<typeof reduceDirect>[1]): void {
     if (this.closed) return;
+    const prev = this.state;
     const { state, actions } = reduceDirect(this.state, event);
     this.state = state;
+    this.diagnose(prev, event);
     for (const action of actions) this.run(action);
+  }
+
+  private diagnose(prev: DirectState, event: Parameters<typeof reduceDirect>[1]): void {
+    if (!this.deps.onDiagnostic || prev.phase !== 'negotiating') return;
+    const outcome =
+      this.state.phase === 'connected'
+        ? 'open'
+        : event.type === 'negotiate-timeout' || event.type === 'dc-close'
+          ? 'failed'
+          : null;
+    if (!outcome) return;
+    this.deps.onDiagnostic(
+      `direct ${outcome} gen=${prev.gen} local[${describeCandidates(this.localCandidates)}] remote[${describeCandidates(this.remoteCandidates)}]`
+    );
   }
 
   private run(action: DirectAction): void {
@@ -222,8 +244,12 @@ export class DirectLink {
     this.peer = peer;
     this.peerGen = gen;
     this.reassembler = createReassembler();
+    this.localCandidates = [];
+    this.remoteCandidates = [];
     peer.onIceCandidate((c) => {
-      if (this.peerGen !== gen || !isAllowedCandidate(c.candidate)) return;
+      if (this.peerGen !== gen) return;
+      this.localCandidates.push(c.candidate);
+      if (!isAllowedCandidate(c.candidate)) return;
       this.deps.sendSignal({
         type: 'direct-ice',
         gen,

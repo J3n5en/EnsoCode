@@ -68,10 +68,15 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
     dc = channel;
     channel.onOpen(() => {
       if (closed) return;
-      // 真机验收靠这一行分辨 LAN（host↔host）还是 STUN 打洞（srflx/prflx）
+      // 真机验收靠这一行分辨 LAN（host↔host）、STUN 打洞（srflx/prflx）与地址族（v6 无 NAT）
       try {
         const pair = pc.getSelectedCandidatePair();
-        if (pair) console.log(`[pair] direct open via ${pair.local.type}↔${pair.remote.type}`);
+        if (pair) {
+          const fam = (a: string) => (a.includes(':') ? 'v6' : 'v4');
+          console.log(
+            `[pair] direct open via ${pair.local.type}/${fam(pair.local.address)}↔${pair.remote.type}/${fam(pair.remote.address)}`
+          );
+        }
       } catch {}
       for (const cb of openCbs) cb();
     });
