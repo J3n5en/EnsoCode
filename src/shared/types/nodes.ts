@@ -13,6 +13,8 @@ export interface RemoteNodeStatus {
   connected: boolean;
   /** 对方桌面（host）是否在房间里 */
   hostOnline: boolean;
+  /** 业务帧当前出口：直连（WebRTC）或中继 */
+  transport?: 'relay' | 'direct';
   /** 对方下发的自述（连上后才有） */
   hostname?: string;
   appVersion?: string;

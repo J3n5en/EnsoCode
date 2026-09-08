@@ -10,6 +10,8 @@ export interface PairStatusDevice {
   connected: boolean;
   /** 手机是否在房间里 */
   phoneOnline: boolean;
+  /** 业务帧当前出口：直连（WebRTC）或中继；缺省（旧 main）视为中继 */
+  transport?: 'relay' | 'direct';
 }
 
 export interface PairStatus {

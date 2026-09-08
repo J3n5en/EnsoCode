@@ -5,6 +5,8 @@ import {
   buildPairLink,
   type CatalogEntry,
   DEFAULT_RELAY_URL,
+  DirectLink,
+  type DirectSignal,
   fromBase64Url,
   type Heartbeat,
   type HostAppearance,
@@ -50,6 +52,8 @@ import { app, powerMonitor, powerSaveBlocker } from 'electron';
 import { requestSnapshot, setPinnedSessions } from './agentHost';
 import { MacosSystemSleepAssertion } from './macosSystemSleepAssertion';
 import { readNotifyMainAgentOnly } from './notifications';
+import { PAIR_DIRECT_ENABLED, PAIR_STUN_SERVERS } from './pairDirectConfig';
+import { isDirectPeerAvailable, mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
 import { bumpPairMetaEpoch, flushChangedMeta, requestPairMeta } from './pairMetaFlush';
 import { startPairNetworkWatch } from './pairNetworkWatch';
 import {
@@ -95,6 +99,7 @@ export interface PairStatusDevice {
   pairedAt: number;
   connected: boolean;
   phoneOnline: boolean;
+  transport?: 'relay' | 'direct';
 }
 
 interface Connection {
@@ -102,6 +107,8 @@ interface Connection {
   contentKey: Uint8Array;
   ws: WebSocket | null;
   heartbeat: Heartbeat | null;
+  /** WebRTC 直连：业务帧优先出口；信令与在线态仍走中继 */
+  direct: DirectLink;
   /** 手机当前订阅的会话（null = 列表页，不收正文） */
   subscribedId: string | null;
   sinceIndex?: number;
@@ -262,14 +269,18 @@ export function startPairHost(): void {
     powerMonitor.on('resume', () => reviveAll('resume'));
     stopNetworkWatch = startPairNetworkWatch({ onChange: () => reviveAll('network-change') });
   }
-  for (const device of loadDevices()) {
-    openConnection(device);
-  }
+  // 先装好 WebRTC 原生模块再进房：host-info 的能力声明在首次 meta 推送就要确定
+  void preloadDirectPeer().finally(() => {
+    for (const device of loadDevices()) {
+      openConnection(device);
+    }
+  });
 }
 
 function reviveAll(reason: 'resume' | 'network-change'): void {
   for (const conn of connections.values()) {
     if (conn.closed) continue;
+    if (reason === 'network-change') conn.direct.networkChange();
     if (shouldReplaceOnNudge(reason, conn.ws !== null)) {
       if (conn.timer) clearTimeout(conn.timer);
       conn.attempt = 0;
@@ -295,6 +306,7 @@ export function stopPairHost(): void {
     if (conn.timer) clearTimeout(conn.timer);
     conn.heartbeat?.stop();
     conn.heartbeat = null;
+    conn.direct.close();
     try {
       conn.ws?.close();
     } catch {}
@@ -426,6 +438,7 @@ export function getPairStatus(): PairStatus {
         pairedAt: d.pairedAt,
         connected: conn?.ws?.readyState === 1,
         phoneOnline: conn?.phoneOnline ?? false,
+        transport: conn?.direct.transport() ?? 'relay',
       };
     }),
   };
@@ -440,6 +453,7 @@ function openConnection(device: PairedDevice): void {
     if (existing.timer) clearTimeout(existing.timer);
     existing.heartbeat?.stop();
     existing.heartbeat = null;
+    existing.direct.close();
     try {
       existing.ws?.close();
     } catch {}
@@ -449,6 +463,7 @@ function openConnection(device: PairedDevice): void {
     contentKey: fromBase64Url(device.contentKey),
     ws: null,
     heartbeat: null,
+    direct: null as unknown as DirectLink,
     subscribedId: null,
     metaDirty: false,
     metaSending: false,
@@ -459,6 +474,20 @@ function openConnection(device: PairedDevice): void {
     closed: false,
     generation: 0,
   };
+  conn.direct = new DirectLink({
+    role: 'host',
+    factory: PAIR_DIRECT_ENABLED ? mainDirectPeerFactory : null,
+    iceServers: PAIR_STUN_SERVERS,
+    // 信令只走中继：绕过 send() 的出口选择
+    sendSignal: (signal) => void sendViaRelay(conn, signal),
+    onFrame: (frame) => void handleFrame(conn, frame),
+    onTransportChange: () => notifyStatus(),
+    // 切通道的瞬间旧通道在途帧可能丢：目录类重推，会话正文由手机自己 subscribe 补
+    onResync: () => {
+      bumpPairMetaEpoch(conn);
+      requestMeta(conn);
+    },
+  });
   connections.set(device.pairId, conn);
   connect(conn);
 }
@@ -523,6 +552,7 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
         if (control.type === 'peer-joined') {
           conn.phoneOnline = true;
           conn.phoneVisible = true;
+          conn.direct.peerOnline(true);
           conn.subscribedId = null;
           conn.pendingSnapshot = undefined;
           conn.pendingHistory = undefined;
@@ -532,6 +562,7 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
           notifyStatus();
         } else if (control.type === 'peer-left') {
           conn.phoneOnline = false;
+          conn.direct.peerOnline(false);
           notifyStatus();
         } else if (control.type === 'revoked') {
           // 手机端解除了配对：连凭据一起清掉，否则设置页会一直挂着一个连不上的设备
@@ -560,6 +591,7 @@ function forgetDevice(pairId: string): void {
     if (conn.timer) clearTimeout(conn.timer);
     conn.heartbeat?.stop();
     conn.heartbeat = null;
+    conn.direct.close();
     try {
       conn.ws?.close();
     } catch {}
@@ -681,6 +713,11 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'presence':
       conn.phoneVisible = command.visible;
       break;
+    case 'direct-offer':
+    case 'direct-ice':
+    case 'direct-close':
+      conn.direct.handleSignal(command);
+      break;
     case 'spawn': {
       const check = checkSpawn(command, whitelist);
       if (!check.ok) {
@@ -725,21 +762,37 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
 // ── 发：加密下行 ──────────────────────────────────────────────────────
 
 async function send(conn: Connection, message: HostToPhone): Promise<boolean> {
-  const ws = conn.ws;
-  if (ws?.readyState !== 1) return false;
+  const direct = conn.direct.transport() === 'direct';
+  if (!direct && conn.ws?.readyState !== 1) return false;
   try {
     const frame = await sealFrame(conn.contentKey, message);
-    // 中继对超过 1MB 的帧直接丢弃且不通知发送方：本地拦下并留痕，别白发
+    // 中继对超过 1MB 的帧直接丢弃且不通知发送方：本地拦下并留痕，别白发（直连同限，分片上限对齐）
     if (frame.byteLength > 1_000_000) {
       console.warn(`[pair] frame ${frame.byteLength}B over relay limit, dropped locally`);
       return false;
     }
-    if (ws !== conn.ws || ws.readyState !== 1) return false;
-    ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
-    return true;
+    // 直连优先；背压/刚好断掉时无缝退回中继
+    if (conn.direct.send(frame)) return true;
+    return sendFrameViaRelay(conn, frame);
   } catch (error) {
     console.warn('[pair] send failed', error);
     return false;
+  }
+}
+
+function sendFrameViaRelay(conn: Connection, frame: Uint8Array): boolean {
+  const ws = conn.ws;
+  if (ws?.readyState !== 1) return false;
+  ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
+  return true;
+}
+
+/** 直连信令只能走中继（直连未建/已坏时信令就是为了修它） */
+async function sendViaRelay(conn: Connection, message: DirectSignal): Promise<void> {
+  try {
+    sendFrameViaRelay(conn, await sealFrame(conn.contentKey, message as HostToPhone));
+  } catch (error) {
+    console.warn('[pair] signal send failed', error);
   }
 }
 
@@ -757,7 +810,12 @@ async function sendMeta(conn: Connection): Promise<void> {
     expandLiveEdits,
   };
   const vapidPublicKey = getVapidPublicKey();
-  const hostInfo = { hostname: os.hostname(), appVersion: app.getVersion() };
+  const directReady = PAIR_DIRECT_ENABLED && isDirectPeerAvailable();
+  const hostInfo = {
+    hostname: os.hostname(),
+    appVersion: app.getVersion(),
+    ...(directReady ? { capabilities: ['direct-v1' as const], iceServers: PAIR_STUN_SERVERS } : {}),
+  };
   const catalogEntries = slimCatalogForPhone(catalog, conn.subscribedId);
   const projectEntries = slimProjectsForPhone(projects);
   const next: PairMetaFingerprints = {
