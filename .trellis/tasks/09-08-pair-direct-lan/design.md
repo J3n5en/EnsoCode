@@ -60,6 +60,72 @@
 - 中继 WS 重连成功后 host 会重发 `host-info`（既有 peer-joined → requestMeta 路径），天然触发 guest 重新发起——**网络变化后的重协商不需要额外机制**。
 - `resync` 动作 = guest 侧按既有重连语义执行 `snapshot` + `subscribe(sinceIndex)`；切通道瞬间在旧通道丢失的帧由游标增量/全量 snapshot 修复（R4）。
 
+### 3.1 接口契约（`packages/pair/src/direct/directSession.ts`，测试依据）
+
+```ts
+export type DirectRole = 'guest' | 'host';
+export type DirectPhase = 'idle' | 'negotiating' | 'connected' | 'cooldown';
+export interface DirectState {
+  role: DirectRole;
+  phase: DirectPhase;
+  gen: number;        // 当前代，0 = 尚未协商过
+  attempt: number;    // 连续失败次数，退避用
+  capable: boolean;   // guest：已见到 host 声明能力；host：始终 false，不用
+  peerOnline: boolean;
+}
+export type DirectEvent =
+  | { type: 'peer-capable'; capable: boolean }  // guest：收到 host-info（有/无 caps）
+  | { type: 'peer-online'; online: boolean }    // 中继控制帧 host-online/offline, peer-joined/left
+  | { type: 'offer'; gen: number }              // host 收到 direct-offer
+  | { type: 'answer'; gen: number }             // guest 收到 direct-answer
+  | { type: 'ice'; gen: number }
+  | { type: 'remote-close'; gen: number }       // host 收到 direct-close
+  | { type: 'dc-open'; gen: number }
+  | { type: 'dc-close'; gen: number }           // 含 pc failed / 心跳判死
+  | { type: 'negotiate-timeout'; gen: number }
+  | { type: 'cooldown-elapsed' }
+  | { type: 'network-change' }
+  | { type: 'peer-gone' };                      // revoked / 本端解绑 / close()
+export type DirectAction =
+  | { type: 'create-offer'; gen: number }       // guest：新建 peer，发 offer
+  | { type: 'accept-offer'; gen: number }       // host：新建 peer，回 answer
+  | { type: 'apply-answer'; gen: number }
+  | { type: 'apply-ice'; gen: number }
+  | { type: 'start-timeout'; gen: number }      // 15s 协商超时
+  | { type: 'destroy-peer' }
+  | { type: 'send-close'; gen: number }         // guest 通知 host 释放本代
+  | { type: 'switch'; transport: 'direct' | 'relay' }
+  | { type: 'resync' }                          // guest: snapshot+subscribe; host: bump meta epoch
+  | { type: 'schedule-retry'; attempt: number }; // guest：调用方用 directBackoffDelay(attempt)
+export function initialDirectState(role: DirectRole): DirectState;
+export function reduceDirect(state: DirectState, event: DirectEvent): { state: DirectState; actions: DirectAction[] };
+export function pickTransport(state: DirectState, dcOpen: boolean, wsOpen: boolean): 'direct' | 'relay' | null;
+export function directBackoffDelay(attempt: number, random?: () => number): number; // 1s·2^attempt，上限 300_000，±30% 抖动
+```
+
+语义（guest）：
+- `idle` 且 `capable && peerOnline` 成立的那一刻（由 peer-capable(true) 或 peer-online(true) 触发）→ `negotiating`，gen+1，actions `[create-offer, start-timeout]`。
+- `negotiating`/`connected` 下的 peer-capable / peer-online(true) 只更新字段，不重协商。peer-capable(false)（host 降级）在任意态 → 如 phase≠idle：`[destroy-peer, (connected 时 switch relay, resync)]` → idle。
+- `answer(gen==)` 仅 negotiating → `[apply-answer]`；`ice(gen==)` 在 negotiating/connected → `[apply-ice]`；gen 不等 → 无动作、状态不变。
+- `dc-open(gen==)` 仅 negotiating → connected，attempt=0，`[switch direct, resync]`。
+- `negotiate-timeout(gen==)` 仅 negotiating → cooldown，attempt+1，`[send-close, destroy-peer, schedule-retry]`。
+- `dc-close(gen==)`：connected → cooldown，attempt+1，`[destroy-peer, switch relay, resync, schedule-retry]`；negotiating → cooldown，attempt+1，`[send-close, destroy-peer, schedule-retry]`。
+- `cooldown-elapsed` 仅 cooldown → 若 `capable && peerOnline` → negotiating gen+1 `[create-offer, start-timeout]`；否则 idle（无动作）。
+- `network-change`：attempt=0；phase≠idle 时 `[send-close(当前 gen), destroy-peer, (connected 时 switch relay, resync)]`；之后若 `capable && peerOnline` → 立即 negotiating gen+1 `[create-offer, start-timeout]`，否则 idle。
+- `peer-gone` → idle，capable=false，peerOnline=false，attempt=0，`[destroy-peer, (connected 时 switch relay)]`。
+- `peer-online(false)` 只更新字段（中继侧离线不拆直连）。
+- stale gen 的 dc-open/dc-close/negotiate-timeout 一律忽略。
+
+语义（host）：
+- `offer(gen)`：`gen > state.gen` 才接受；若当前 phase≠idle 先 `[destroy-peer, (connected 时 switch relay, resync)]`，再 negotiating(gen) `[accept-offer, start-timeout]`。`gen <= state.gen` → 无动作。
+- `ice(gen==)` 在 negotiating/connected → `[apply-ice]`。
+- `dc-open(gen==)` 仅 negotiating → connected `[switch direct, resync]`。
+- `dc-close(gen==)` / `negotiate-timeout(gen==)` / `remote-close(gen==)` → idle，`[destroy-peer, (connected 时 switch relay, resync)]`。host 不重试，由 guest 驱动。
+- `network-change` / `peer-gone` → idle，`[destroy-peer, (connected 时 switch relay, resync)]`；peer-gone 额外 peerOnline=false。gen 保留（不归零，防旧 offer 重放）。
+- peer-capable / answer / cooldown-elapsed / schedule 对 host 是 no-op。
+
+`pickTransport`：`phase==='connected' && dcOpen` → 'direct'；否则 `wsOpen` → 'relay'；否则 null。
+
 ## 4. 数据面
 
 - **载荷**：`sealFrame(contentKey, msg)` 的字节原样上 DataChannel；接收端进同一个 `handleFrame`。加解密、白名单、投影零改动。
