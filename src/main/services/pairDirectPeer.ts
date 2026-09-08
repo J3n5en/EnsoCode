@@ -67,7 +67,13 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
   const attach = (channel: NdcChannel): void => {
     dc = channel;
     channel.onOpen(() => {
-      if (!closed) for (const cb of openCbs) cb();
+      if (closed) return;
+      // 真机验收靠这一行分辨 LAN（host↔host）还是 STUN 打洞（srflx/prflx）
+      try {
+        const pair = pc.getSelectedCandidatePair();
+        if (pair) console.log(`[pair] direct open via ${pair.local.type}↔${pair.remote.type}`);
+      } catch {}
+      for (const cb of openCbs) cb();
     });
     channel.onMessage((msg) => {
       if (closed) return;
