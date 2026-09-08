@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { directBackoffDelay, initialDirectState, reduceDirect } from './directSession';
 
-describe('guest direct session', () => {
-  it('waits for an online capable peer before starting generation 1 negotiation', () => {
+describe('访客端直连会话', () => {
+  it('等待在线且具备能力的对端后才发起第 1 代协商', () => {
     const initial = initialDirectState('guest');
     const capable = reduceDirect(initial, { type: 'peer-capable', capable: true });
 
@@ -34,7 +34,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('ignores a wrong-generation answer and applies the current-generation answer', () => {
+  it('忽略错误代次的应答并应用当前代应答', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'negotiating' as const,
@@ -50,7 +50,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('connects on current-generation dc-open and resets the failure attempt', () => {
+  it('当前代数据通道打开后连接并重置失败次数', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'negotiating' as const,
@@ -66,7 +66,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('falls back and schedules retry when the connected data channel closes', () => {
+  it('已连接的数据通道关闭后回退并安排重试', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'connected' as const,
@@ -86,7 +86,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('closes a timed-out negotiation and enters incremented cooldown', () => {
+  it('协商超时后关闭当前代并以递增次数进入冷却', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'negotiating' as const,
@@ -106,7 +106,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('retries after cooldown only while the peer remains capable and online', () => {
+  it('仅在对端仍具备能力且在线时于冷却结束后重试', () => {
     const ready = {
       ...initialDirectState('guest'),
       phase: 'cooldown' as const,
@@ -130,7 +130,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('restarts negotiation immediately after a connected network change', () => {
+  it('已连接时网络变化会立即重新协商', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'connected' as const,
@@ -153,7 +153,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('does not interrupt negotiation when peer capability is repeated', () => {
+  it('重复上报对端能力不会中断协商', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'negotiating' as const,
@@ -168,7 +168,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('returns to idle and relay when the connected peer is gone', () => {
+  it('已连接对端离线后回到空闲和中继', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'connected' as const,
@@ -190,7 +190,7 @@ describe('guest direct session', () => {
     });
   });
 
-  it('ignores stale dc-open generations', () => {
+  it('忽略过期代次的数据通道打开事件', () => {
     const state = {
       ...initialDirectState('guest'),
       phase: 'negotiating' as const,
@@ -202,7 +202,7 @@ describe('guest direct session', () => {
     expect(reduceDirect(state, { type: 'dc-open', gen: 5 })).toEqual({ state, actions: [] });
   });
 
-  it('calculates jittered exponential direct retry delay with a five-minute cap', () => {
+  it('计算带抖动的指数退避且上限为五分钟', () => {
     const midpoint = () => 0.5;
 
     expect(directBackoffDelay(0, midpoint)).toBe(1_000);
@@ -212,8 +212,8 @@ describe('guest direct session', () => {
   });
 });
 
-describe('host direct session', () => {
-  it('accepts the first offer and starts its negotiation timeout', () => {
+describe('主机端直连会话', () => {
+  it('接受首次提议并启动协商超时', () => {
     const state = initialDirectState('host');
 
     expect(reduceDirect(state, { type: 'offer', gen: 1 })).toEqual({
@@ -225,14 +225,14 @@ describe('host direct session', () => {
     });
   });
 
-  it('ignores offers whose generation is not newer than the host generation', () => {
+  it('忽略代次不高于主机当前代的提议', () => {
     const state = { ...initialDirectState('host'), gen: 2 };
 
     expect(reduceDirect(state, { type: 'offer', gen: 2 })).toEqual({ state, actions: [] });
     expect(reduceDirect(state, { type: 'offer', gen: 1 })).toEqual({ state, actions: [] });
   });
 
-  it('replaces a connected peer when a newer offer arrives', () => {
+  it('收到较新代次提议时替换已连接对端', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'connected' as const,
@@ -252,7 +252,7 @@ describe('host direct session', () => {
     });
   });
 
-  it('applies current-generation ice while negotiating and ignores stale ice', () => {
+  it('协商中应用当前代 ICE 并忽略过期 ICE', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'negotiating' as const,
@@ -267,7 +267,7 @@ describe('host direct session', () => {
     expect(reduceDirect(state, { type: 'ice', gen: 2 })).toEqual({ state, actions: [] });
   });
 
-  it('connects on current-generation dc-open', () => {
+  it('当前代数据通道打开后建立连接', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'negotiating' as const,
@@ -281,7 +281,7 @@ describe('host direct session', () => {
     });
   });
 
-  it('returns to idle on current-generation remote-close while preserving generation', () => {
+  it('收到当前代远端关闭时回到空闲并保留代次', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'connected' as const,
@@ -299,7 +299,7 @@ describe('host direct session', () => {
     });
   });
 
-  it('destroys a timed-out negotiation and returns to idle', () => {
+  it('协商超时后销毁对端并回到空闲', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'negotiating' as const,
@@ -313,7 +313,7 @@ describe('host direct session', () => {
     });
   });
 
-  it('handles peer-gone and ignores guest-only events without resetting generation', () => {
+  it('处理对端离线并忽略访客端专属事件且不重置代次', () => {
     const state = {
       ...initialDirectState('host'),
       phase: 'connected' as const,

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DirectCandidate } from '../protocol';
+import type { DirectCandidate, IceServerEntry } from '../protocol';
 import { encodeChunks } from './chunk';
+import { DIRECT_NEGOTIATE_TIMEOUT_MS } from './directSession';
 import { DirectLink, type DirectSignal } from './link';
 import type { DirectPeer } from './peer';
 
@@ -13,6 +14,7 @@ function fakePeer() {
     close: [] as (() => void)[],
   };
   const sent: Uint8Array[] = [];
+  const sendResults: boolean[] = [];
   const calls: string[] = [];
   let closed = false;
   const peer: DirectPeer = {
@@ -47,7 +49,7 @@ function fakePeer() {
       return () => {};
     },
     send: (b) => {
-      if (closed) return false;
+      if (closed || sendResults.shift() === false) return false;
       sent.push(b);
       return true;
     },
@@ -60,6 +62,7 @@ function fakePeer() {
     peer,
     calls,
     sent,
+    sendResults,
     isClosed: () => closed,
     fire: {
       ice: (c: DirectCandidate) => {
@@ -80,19 +83,20 @@ function fakePeer() {
 
 function harness(role: 'guest' | 'host', factoryNull = false) {
   const peers: ReturnType<typeof fakePeer>[] = [];
+  const factoryIceServers: IceServerEntry[][] = [];
   const signals: DirectSignal[] = [];
   const frames: Uint8Array[] = [];
   const transports: string[] = [];
   let resyncs = 0;
   const link = new DirectLink({
     role,
-    factory: factoryNull
-      ? () => null
-      : () => {
-          const p = fakePeer();
-          peers.push(p);
-          return p.peer;
-        },
+    factory: (iceServers) => {
+      factoryIceServers.push(iceServers);
+      if (factoryNull) return null;
+      const p = fakePeer();
+      peers.push(p);
+      return p.peer;
+    },
     iceServers: [{ urls: ['stun:example'] }],
     sendSignal: (s) => signals.push(s),
     onFrame: (f) => frames.push(f),
@@ -101,7 +105,15 @@ function harness(role: 'guest' | 'host', factoryNull = false) {
       resyncs += 1;
     },
   });
-  return { link, peers, signals, frames, transports, resyncs: () => resyncs };
+  return {
+    link,
+    peers,
+    factoryIceServers,
+    signals,
+    frames,
+    transports,
+    resyncs: () => resyncs,
+  };
 }
 
 const flush = async () => {
@@ -131,12 +143,31 @@ describe('DirectLink guest', () => {
     expect(h.signals).toEqual([]);
   });
 
-  it('工厂返回 null（本端无 WebRTC）→ 不发信令', async () => {
+  it('工厂返回 null（本端无 WebRTC）→ 保持中继且不留协商超时副作用', async () => {
     const h = harness('guest', true);
     h.link.peerOnline(true);
     h.link.hostInfo({ capabilities: ['direct-v1'] });
     await flush();
+    expect(h.factoryIceServers).toHaveLength(1);
     expect(h.signals).toEqual([]);
+    expect(h.link.transport()).toBe('relay');
+    expect(h.transports).toEqual([]);
+    expect(h.resyncs()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(DIRECT_NEGOTIATE_TIMEOUT_MS + 1);
+    expect(h.factoryIceServers).toHaveLength(1);
+    expect(h.signals).toEqual([]);
+    expect(h.transports).toEqual([]);
+    expect(h.resyncs()).toBe(0);
+  });
+
+  it('host-info 下发的 ICE 服务器用于创建下一对端', async () => {
+    const h = harness('guest');
+    const iceServers = [{ urls: ['stun:host-info'] }];
+    h.link.hostInfo({ capabilities: ['direct-v1'], iceServers });
+    h.link.peerOnline(true);
+    await flush();
+    expect(h.factoryIceServers).toEqual([iceServers]);
   });
 
   it('本地候选过滤后转发（去 a=，拒 relay）；answer/ice 按 gen 应用', async () => {
@@ -182,6 +213,38 @@ describe('DirectLink guest', () => {
     expect(h.frames).toEqual([new Uint8Array([1, 2, 3])]);
   });
 
+  it('多片帧第二片发送失败 → 作废直连并切回中继', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+    p.sendResults.push(true, false);
+
+    expect(h.link.send(new Uint8Array(20_000))).toBe(false);
+    expect(p.sent).toHaveLength(1);
+    expect(p.isClosed()).toBe(true);
+    expect(h.link.transport()).toBe('relay');
+    expect(h.transports).toEqual(['direct', 'relay']);
+  });
+
+  it('多片帧第一片发送失败 → 保留未污染的直连通道', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+    p.sendResults.push(false);
+
+    expect(h.link.send(new Uint8Array(20_000))).toBe(false);
+    expect(p.sent).toEqual([]);
+    expect(p.isClosed()).toBe(false);
+    expect(h.link.transport()).toBe('direct');
+    expect(h.transports).toEqual(['direct']);
+  });
+
   it('通道关闭 → 切回 relay、resync、退避后重新 offer（gen 2）', async () => {
     const h = harness('guest');
     h.link.peerOnline(true);
@@ -207,6 +270,21 @@ describe('DirectLink guest', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     expect(h.signals.at(-1)).toEqual({ type: 'direct-close', gen: 1 });
     expect(h.peers[0].isClosed()).toBe(true);
+  });
+
+  it('协商超时进入冷却后 close() → 清除重试且不再发信令', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    await vi.advanceTimersByTimeAsync(DIRECT_NEGOTIATE_TIMEOUT_MS);
+    const signalCount = h.signals.length;
+    expect(h.signals.at(-1)).toEqual({ type: 'direct-close', gen: 1 });
+
+    h.link.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.signals).toHaveLength(signalCount);
+    expect(h.factoryIceServers).toHaveLength(1);
   });
 
   it('心跳：25s 发 ping，10s 内无消息判死 → 切回 relay', async () => {
@@ -236,6 +314,28 @@ describe('DirectLink guest', () => {
     p.fire.message(new Uint8Array([0x03]));
     await vi.advanceTimersByTimeAsync(10_000);
     expect(h.link.transport()).toBe('direct');
+  });
+
+  it('已连接对端离线 → 静默回中继，恢复能力与在线后发起新一代协商', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    h.peers[0].fire.open();
+    expect(h.resyncs()).toBe(1);
+
+    h.link.peerGone();
+    expect(h.peers[0].isClosed()).toBe(true);
+    expect(h.link.transport()).toBe('relay');
+    expect(h.transports).toEqual(['direct', 'relay']);
+    expect(h.resyncs()).toBe(1);
+
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    expect(h.peers).toHaveLength(2);
+    expect(h.peers[1].calls).toEqual(['createOffer']);
+    expect(h.signals.at(-1)).toEqual({ type: 'direct-offer', gen: 2, sdp: 'offer-sdp' });
   });
 
   it('网络变化：拆旧代、发 close、立刻新一代 offer', async () => {
@@ -288,5 +388,37 @@ describe('DirectLink host', () => {
     h.link.handleSignal({ type: 'direct-close', gen: 2 });
     expect(h.peers[1].isClosed()).toBe(true);
     expect(h.link.transport()).toBe('relay');
+  });
+
+  it('已连接时网络变化 → 销毁对端并回中继，随后接受更高代提议', async () => {
+    const h = harness('host');
+    h.link.handleSignal({ type: 'direct-offer', gen: 1, sdp: 'a' });
+    await flush();
+    h.peers[0].fire.open();
+    const resyncsBefore = h.resyncs();
+
+    h.link.networkChange();
+    expect(h.peers[0].isClosed()).toBe(true);
+    expect(h.link.transport()).toBe('relay');
+    expect(h.transports).toEqual(['direct', 'relay']);
+    expect(h.resyncs() - resyncsBefore).toBe(1);
+
+    h.link.handleSignal({ type: 'direct-offer', gen: 2, sdp: 'b' });
+    await flush();
+    expect(h.peers[1].calls).toEqual(['acceptOffer:b']);
+  });
+
+  it('工厂返回 null 时拒绝当前提议并允许后续更高代重试', async () => {
+    const h = harness('host', true);
+    h.link.handleSignal({ type: 'direct-offer', gen: 1, sdp: 'a' });
+    await flush();
+    expect(h.factoryIceServers).toHaveLength(1);
+    expect(h.signals).toEqual([]);
+    expect(h.link.transport()).toBe('relay');
+
+    h.link.handleSignal({ type: 'direct-offer', gen: 2, sdp: 'b' });
+    await flush();
+    expect(h.factoryIceServers).toHaveLength(2);
+    expect(h.signals).toEqual([]);
   });
 });
