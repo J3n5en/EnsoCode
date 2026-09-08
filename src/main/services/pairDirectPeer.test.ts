@@ -14,7 +14,6 @@ describe('node-datachannel 回环直连', () => {
     const hostFrames: Uint8Array[] = [];
     const guestFrames: Uint8Array[] = [];
     const transports: string[] = [];
-    // biome-ignore lint/style/useConst: 互相引用，先声明
     let host: DirectLink;
     const relay = (to: () => DirectLink) => (s: DirectSignal) => {
       setTimeout(() => to().handleSignal(s), 0);

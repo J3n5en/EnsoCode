@@ -167,7 +167,12 @@ describe('直连信令帧校验', () => {
   it('放行 direct-offer / direct-ice / direct-close', () => {
     const ok = [
       { type: 'direct-offer', gen: 1, sdp: 'v=0\r\n' },
-      { type: 'direct-ice', gen: 1, candidate: 'candidate:1 1 UDP 1 10.0.0.2 5000 typ host', sdpMid: '0' },
+      {
+        type: 'direct-ice',
+        gen: 1,
+        candidate: 'candidate:1 1 UDP 1 10.0.0.2 5000 typ host',
+        sdpMid: '0',
+      },
       { type: 'direct-ice', gen: 2, candidate: 'candidate:x', sdpMid: null },
       { type: 'direct-close', gen: 3 },
     ];
