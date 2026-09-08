@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // 开发用副本：独立脚本名 + 独立 DO 命名空间，只走 workers.dev，不占生产自定义域。
+  // 桌面端「设置 → 设备 → 中继地址」填这里的 workers.dev 地址即可整链路联调。
+  "name": "enso-pair-relay-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": { "enabled": false },
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "PAIR_ROOM", "class_name": "PairRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PairRoom"] }],
+  "assets": {
+    "directory": "../phone/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*"]
+  }
+}
