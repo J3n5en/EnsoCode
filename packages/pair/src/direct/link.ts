@@ -112,7 +112,9 @@ export class DirectLink {
     if (this.closed) return;
     this.dispatch({ type: 'peer-gone' });
     this.closed = true;
+    // idle/cooldown 态 teardown 为空：定时器与 peer 无条件清干净
     this.clearRetry();
+    this.destroyPeer();
   }
 
   // ── 输出 ──────────────────────────────────────────────────────────
@@ -124,8 +126,13 @@ export class DirectLink {
   /** 直连可用时分片发出；返回 false 表示调用方应改走中继 */
   send(frame: Uint8Array): boolean {
     if (this.transport() !== 'direct' || !this.peer) return false;
-    for (const chunk of encodeChunks(frame)) {
-      if (!this.peer.send(chunk)) return false;
+    const chunks = encodeChunks(frame);
+    for (let i = 0; i < chunks.length; i++) {
+      if (!this.peer.send(chunks[i])) {
+        // 半帧已出：对端拼帧器已污染，本代通道作废重协商，别让下一帧拼到残片后面
+        if (i > 0) this.failGen(this.peerGen);
+        return false;
+      }
     }
     return true;
   }
@@ -173,6 +180,8 @@ export class DirectLink {
         break;
       case 'start-timeout':
         this.clearNegotiateTimer();
+        // spawnPeer 建不出 peer 时已在同批 action 内回 idle：不留空转定时器
+        if (!this.peer) break;
         this.negotiateTimer = setTimeout(() => {
           this.negotiateTimer = null;
           this.dispatch({ type: 'negotiate-timeout', gen: action.gen });
@@ -204,8 +213,10 @@ export class DirectLink {
     this.destroyPeer();
     const peer = this.deps.factory?.(this.iceServers) ?? null;
     if (!peer) {
-      // 本端建不出 peer（原生模块缺失等）：视为不具备能力，静默回 idle，不发信令不重试
-      this.dispatch({ type: 'peer-capable', capable: false });
+      // 本端建不出 peer（原生模块缺失等）：guest 视为不具备能力静默回 idle；
+      // host 对 peer-capable 不响应，按本代关闭处理，免得空等 15s
+      if (this.deps.role === 'guest') this.dispatch({ type: 'peer-capable', capable: false });
+      else this.dispatch({ type: 'dc-close', gen });
       return;
     }
     this.peer = peer;

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  directBackoffDelay,
-  initialDirectState,
-  pickTransport,
-  reduceDirect,
-} from './directSession';
+import { directBackoffDelay, initialDirectState, reduceDirect } from './directSession';
 
 describe('guest direct session', () => {
   it('waits for an online capable peer before starting generation 1 negotiation', () => {
@@ -205,18 +200,6 @@ describe('guest direct session', () => {
     };
 
     expect(reduceDirect(state, { type: 'dc-open', gen: 5 })).toEqual({ state, actions: [] });
-  });
-
-  it('picks direct only for an open connected channel, then relay, then null', () => {
-    const connected = {
-      ...initialDirectState('guest'),
-      phase: 'connected' as const,
-      gen: 1,
-    };
-
-    expect(pickTransport(connected, true, true)).toBe('direct');
-    expect(pickTransport(connected, false, true)).toBe('relay');
-    expect(pickTransport(connected, false, false)).toBeNull();
   });
 
   it('calculates jittered exponential direct retry delay with a five-minute cap', () => {

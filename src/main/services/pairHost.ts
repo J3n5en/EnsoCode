@@ -476,12 +476,16 @@ function openConnection(device: PairedDevice): void {
   };
   conn.direct = new DirectLink({
     role: 'host',
-    factory: PAIR_DIRECT_ENABLED ? mainDirectPeerFactory : null,
+    factory: PAIR_DIRECT_ENABLED && isDirectPeerAvailable() ? mainDirectPeerFactory : null,
     iceServers: PAIR_STUN_SERVERS,
     // 信令只走中继：绕过 send() 的出口选择
     sendSignal: (signal) => void sendViaRelay(conn, signal),
     onFrame: (frame) => void handleFrame(conn, frame),
-    onTransportChange: () => notifyStatus(),
+    onTransportChange: (transport) => {
+      // 直连掉了且中继也不在：两条路都没了才算离线，转系统推送
+      if (transport === 'relay' && conn.ws?.readyState !== 1) conn.phoneOnline = false;
+      notifyStatus();
+    },
     // 切通道的瞬间旧通道在途帧可能丢：目录类重推，会话正文由手机自己 subscribe 补
     onResync: () => {
       bumpPairMetaEpoch(conn);
@@ -522,7 +526,8 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
     conn.heartbeat?.stop();
     conn.heartbeat = null;
     conn.ws = null;
-    conn.phoneOnline = false;
+    // 直连还活着就不算手机离线：业务帧继续走 DataChannel（直连再掉时由 onTransportChange 补置离线）
+    if (conn.direct.transport() !== 'direct') conn.phoneOnline = false;
     // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）。
     // 不能只看「连不上」就放弃，那是正常的网络波动，仍需重连。
     if (code === 1008) {
@@ -553,9 +558,12 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
           conn.phoneOnline = true;
           conn.phoneVisible = true;
           conn.direct.peerOnline(true);
-          conn.subscribedId = null;
-          conn.pendingSnapshot = undefined;
-          conn.pendingHistory = undefined;
+          // 中继重连期间直连一直在用：订阅没断过，不清
+          if (conn.direct.transport() !== 'direct') {
+            conn.subscribedId = null;
+            conn.pendingSnapshot = undefined;
+            conn.pendingHistory = undefined;
+          }
           bumpPairMetaEpoch(conn);
           // 手机进房即推目录（它也会发 snapshot，指纹相同则不重发）
           requestMeta(conn);

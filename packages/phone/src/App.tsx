@@ -278,6 +278,11 @@ export function App() {
       : state === 'online' && syncing && activeId
         ? '同步中…'
         : null;
+  // 在线时附带业务帧出口（直连 / 中继）：顶栏副标题与抽屉设备行共用
+  const connectionLabel =
+    state === 'online'
+      ? `${STATE_LABEL.online} · ${transport === 'direct' ? '直连' : '中继'}`
+      : STATE_LABEL[state];
   const prevBannerRef = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevBannerRef.current;
@@ -412,7 +417,7 @@ export function App() {
         cwd={entry?.cwd}
         view={view}
         connState={state}
-        stateLabel={STATE_LABEL[state]}
+        stateLabel={connectionLabel}
         banner={banner}
         onOpenDrawer={() => setDrawerOpen(true)}
         onNewSession={() => setComposing(true)}
@@ -457,11 +462,7 @@ export function App() {
         devices={devices}
         activeDevicePairId={device.pairId}
         connected={state === 'online'}
-        connectionLabel={
-          state === 'online'
-            ? `${STATE_LABEL.online} · ${transport === 'direct' ? '直连' : '中继'}`
-            : STATE_LABEL[state]
-        }
+        connectionLabel={connectionLabel}
         onClose={() => setDrawerOpen(false)}
         onSelect={(id) => {
           setActiveId(id);

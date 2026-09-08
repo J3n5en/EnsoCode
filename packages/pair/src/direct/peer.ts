@@ -38,7 +38,3 @@ export function isAllowedCandidate(candidate: string): boolean {
   const typ = /\styp\s+(\S+)/.exec(normalizeCandidate(candidate))?.[1];
   return typ === 'host' || typ === 'srflx';
 }
-
-/** 心跳沿用中继的 ping/pong 文本约定；DataChannel 上由对端自己应答 */
-export const DIRECT_PING = 'ping';
-export const DIRECT_PONG = 'pong';

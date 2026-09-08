@@ -29,7 +29,6 @@ export {
   type DirectTransport,
   directBackoffDelay,
   initialDirectState,
-  pickTransport,
   reduceDirect,
 } from './direct/directSession';
 export { DirectLink, type DirectLinkDeps, type DirectSignal } from './direct/link';

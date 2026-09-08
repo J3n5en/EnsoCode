@@ -222,16 +222,6 @@ export function reduceDirect(state: DirectState, event: DirectEvent): DirectStep
   return state.role === 'guest' ? reduceGuest(state, event) : reduceHost(state, event);
 }
 
-/** 两端各自独立选择出口；接收端两条通道都收，不需要协商「谁切了」 */
-export function pickTransport(
-  state: DirectState,
-  dcOpen: boolean,
-  wsOpen: boolean
-): DirectTransport | null {
-  if (state.phase === 'connected' && dcOpen) return 'direct';
-  return wsOpen ? 'relay' : null;
-}
-
 /** 直连重试退避：1s·2^attempt，上限 5 分钟，±30% 抖动。打不通的对称 NAT 会持续失败，别每 30s 折腾手机 */
 export function directBackoffDelay(attempt: number, random: () => number = Math.random): number {
   const base = Math.min(300_000, 1000 * 2 ** Math.max(0, attempt));

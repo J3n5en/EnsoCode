@@ -35,7 +35,7 @@ import {
   upsertNode,
 } from './nodeStore';
 import { PAIR_DIRECT_ENABLED } from './pairDirectConfig';
-import { mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
+import { isDirectPeerAvailable, mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
 import { startPairNetworkWatch } from './pairNetworkWatch';
 import { seedRelayHostCache } from './pairRelayLookup';
 import { openPairRelayWebSocket } from './pairRelayOpen';
@@ -54,6 +54,8 @@ interface Connection {
   heartbeat: Heartbeat | null;
   /** WebRTC 直连：业务帧优先出口；信令与在线态仍走中继 */
   direct: DirectLink;
+  /** renderer 最后一次订阅：切通道 resync 时原样重发（游标偏旧只会多重放，按 index 幂等） */
+  lastSubscribe: PhoneToHost | null;
   hostOnline: boolean;
   hostname?: string;
   appVersion?: string;
@@ -263,6 +265,7 @@ function openConnection(node: RemoteNode): void {
     ws: null,
     heartbeat: null,
     direct: null as unknown as DirectLink,
+    lastSubscribe: null,
     hostOnline: false,
     attempt: 0,
     timer: null,
@@ -271,12 +274,16 @@ function openConnection(node: RemoteNode): void {
   };
   conn.direct = new DirectLink({
     role: 'guest',
-    factory: PAIR_DIRECT_ENABLED ? mainDirectPeerFactory : null,
+    // openConnection 在 preloadDirectPeer 之后：原生模块缺失就别对 host-info 白跑协商
+    factory: PAIR_DIRECT_ENABLED && isDirectPeerAvailable() ? mainDirectPeerFactory : null,
     sendSignal: (signal) => void sendViaRelay(conn, signal as PhoneToHost),
     onFrame: (frame) => void handleFrame(conn, frame),
     onTransportChange: () => notifyStatus(),
-    // 切通道瞬间旧通道在途帧可能丢：与 host-online 同义重要目录，正文由 renderer 订阅流程补
-    onResync: () => void sendFrame(conn, { type: 'snapshot' }),
+    // 切通道瞬间旧通道在途帧可能丢：重要目录 + 重发订阅（renderer 不感知通道切换，由 main 代补）
+    onResync: () => {
+      void sendFrame(conn, { type: 'snapshot' });
+      if (conn.lastSubscribe) void sendFrame(conn, conn.lastSubscribe);
+    },
   });
   connections.set(node.nodeId, conn);
   connect(conn);
@@ -460,5 +467,6 @@ async function sendViaRelay(conn: Connection, command: PhoneToHost): Promise<voi
 export function sendToNode(nodeId: string, command: PhoneToHost): Promise<NodeActionResult> {
   const conn = connections.get(nodeId);
   if (!conn) return Promise.resolve({ ok: false, error: 'node not found' });
+  if (command.type === 'subscribe') conn.lastSubscribe = command.sessionId ? command : null;
   return sendFrame(conn, command);
 }

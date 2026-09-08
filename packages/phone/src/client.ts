@@ -100,7 +100,12 @@ export class PairClient {
       // 信令只走中继；直连未建/已坏时信令就是为了修它
       sendSignal: (signal) => this.sendViaRelay(signal as PhoneToHost),
       onFrame: (frame) => void this.handleFrame(frame),
-      onTransportChange: (t) => this.events.onTransport?.(t),
+      onTransportChange: (t) => {
+        if (t === 'relay' && this.ws?.readyState !== 1 && !this.revoked && !this.closed) {
+          this.events.onState('offline');
+        }
+        this.events.onTransport?.(t);
+      },
       // 切通道瞬间旧通道在途帧可能丢：按重连同一套语义补（目录 + 游标增量）
       onResync: () => {
         this.send({ type: 'snapshot' });
@@ -139,10 +144,12 @@ export class PairClient {
       // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
       if (code === 1008 || this.revoked) {
         this.revoked = true;
+        this.direct.close();
         this.events.onState('unauthorized');
         return;
       }
-      this.events.onState('offline');
+      // 直连还活着就不算掉线：中继默默重连，直连再掉时由 onTransportChange 补置 offline
+      if (this.direct.transport() !== 'direct') this.events.onState('offline');
       this.scheduleReconnect();
     };
     this.heartbeat = attachHeartbeat(ws, () => {

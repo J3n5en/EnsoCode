@@ -106,9 +106,14 @@ function createPeer(mod: Ndc, iceServers: IceServerEntry[]): DirectPeer {
   /** libdatachannel 自动协商：建通道 / 收 offer 后 onLocalDescription 吐本地 SDP */
   const waitLocalDescription = (): Promise<string> =>
     new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('local description timeout')), 5_000);
+      const timer = setTimeout(() => {
+        pc.onLocalDescription(() => {});
+        reject(new Error('local description timeout'));
+      }, 5_000);
       pc.onLocalDescription((sdp) => {
         clearTimeout(timer);
+        // 单槽回调：用过即解绑，免得日后重协商再触发时误把旧 resolve 捕住
+        pc.onLocalDescription(() => {});
         resolve(sdp);
       });
     });
