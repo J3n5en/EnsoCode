@@ -78,6 +78,22 @@ git diff --stat -- packages/relay      # 必须为空（AC5）
 - [x] 审查修正（eb687876）：中继 ws 断开时直连存活则保留 phoneOnline（否则 forwardAgentEvent 会停发，AC1 不成立）；多片帧半途失败作废本代通道；guest resync 重发最后一次 subscribe；手机 1008 拆直连；建不出 peer 时 host 不空等 15s。
 - [ ] 手工（需真机）：桌面「设置 → 设备 → 中继地址」填 `https://enso-pair-relay-dev.j3.workers.dev`，扫码后按下方场景验收。
 
+### 打洞诊断（c3427730）
+
+每代协商结束桌面主进程日志（手机在 Safari 控制台）会打一行：
+
+```
+[pair] iPhone: direct open gen=1 local[host×2 srflx×1 v6 nat=cone] remote[srflx×2 v6 nat=symmetric]
+[pair] direct open via host/v6↔prflx/v6
+[pair] iPhone: direct failed gen=3 local[host×1 srflx×2 nat=symmetric] remote[srflx×2 nat=symmetric]
+```
+
+读法：
+- `nat=symmetric` 两侧都出现 → 纯 STUN 打不通是预期，只能靠 v6 或加 TURN/UPnP；一侧 `cone` 就应该能通。
+- `nat=none` 且无 srflx → UDP 被封或 STUN 不可达（代理 fake-ip 环境下也会这样）。
+- 有 `v6` 但选中候选对是 v4 → 查路由器 v6 防火墙 / 手机是否拿到 v6 srflx（只有 `stun.cloudflare.com` 有 AAAA，另两台只有 v4）。
+- 本机开发环境无公网 v6，**libjuice 的 v6 host 候选收集未实测**，需在双栈网络下确认 `local[... v6 ...]`。
+
 手工（AC1/AC2/AC7/AC8）：同一 Wi‑Fi 桌面 + 手机 → 标签变「直连」；`/etc/hosts` 屏蔽 relay 域名后手机仍能收流式输出；手机切蜂窝 → 数秒内「中继」，若 NAT 可打洞 15s 内重回「直连」（日志打印 selected candidate pair 确认为 srflx/prflx）；屏蔽全部 STUN 域名后同 Wi‑Fi 仍能 LAN 直连；回 Wi‑Fi → 自动「直连」。
 兼容（AC3/AC4）：旧版桌面 build 配新 PWA、新桌面配 SW 缓存的旧 PWA，各观察 5 分钟无 warn 刷屏、行为同现状。
 
