@@ -85,6 +85,7 @@ export function App() {
   /** 已配对状态下的「配对新电脑」流程（覆盖 PairScreen） */
   const [adding, setAdding] = useState(false);
   const [state, setState] = useState<ConnState>('connecting');
+  const [transport, setTransport] = useState<'relay' | 'direct'>('relay');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   /** 桌面置顶组的手动拖拽顺序（旧桌面不下发，空 = 按活跃倒序） */
   const [pinnedOrder, setPinnedOrder] = useState<string[]>([]);
@@ -144,8 +145,10 @@ export function App() {
     vapidKeyRef.current = null;
     setPushConfigReady(false);
     setHistoryPending(new Set());
+    setTransport('relay');
     const client = new PairClient(device, {
       onState: setState,
+      onTransport: setTransport,
       onCatalog: (entries, order) => {
         setCatalog(entries);
         setPinnedOrder(order ?? []);
@@ -454,7 +457,11 @@ export function App() {
         devices={devices}
         activeDevicePairId={device.pairId}
         connected={state === 'online'}
-        connectionLabel={STATE_LABEL[state]}
+        connectionLabel={
+          state === 'online'
+            ? `${STATE_LABEL.online} · ${transport === 'direct' ? '直连' : '中继'}`
+            : STATE_LABEL[state]
+        }
         onClose={() => setDrawerOpen(false)}
         onSelect={(id) => {
           setActiveId(id);

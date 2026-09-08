@@ -2,6 +2,10 @@ import {
   attachHeartbeat,
   backoffDelay,
   type CatalogEntry,
+  createBrowserDirectPeerFactory,
+  DirectLink,
+  type DirectPeerFactory,
+  type DirectTransport,
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
@@ -64,6 +68,8 @@ export interface ClientEvents {
   onGhostSession?(sessionId: string): void;
   /** 上滑翻页在途变化 */
   onHistoryPending?(sessionId: string, pending: boolean): void;
+  /** 业务帧出口切换：直连（WebRTC）↔ 中继 */
+  onTransport?(transport: DirectTransport): void;
 }
 
 export class PairClient {
@@ -80,12 +86,31 @@ export class PairClient {
   /** 分页请求在途标记（每会话一次一发，响应或换订阅时清） */
   private historyPending = new Set<string>();
   private sync: SyncTracking = initialSync;
+  private direct: DirectLink;
 
   constructor(
     private device: PairedDevice,
-    private events: ClientEvents
+    private events: ClientEvents,
+    directFactory: DirectPeerFactory | null = createBrowserDirectPeerFactory()
   ) {
     this.contentKey = fromBase64Url(device.contentKey);
+    this.direct = new DirectLink({
+      role: 'guest',
+      factory: directFactory,
+      // 信令只走中继；直连未建/已坏时信令就是为了修它
+      sendSignal: (signal) => this.sendViaRelay(signal as PhoneToHost),
+      onFrame: (frame) => void this.handleFrame(frame),
+      onTransportChange: (t) => this.events.onTransport?.(t),
+      // 切通道瞬间旧通道在途帧可能丢：按重连同一套语义补（目录 + 游标增量）
+      onResync: () => {
+        this.send({ type: 'snapshot' });
+        if (this.subscribedId) this.subscribe(this.subscribedId);
+      },
+    });
+  }
+
+  transport(): DirectTransport {
+    return this.direct.transport();
   }
 
   connect(): void {
@@ -140,13 +165,16 @@ export class PairClient {
           const control = JSON.parse(event.data) as { type?: string };
           if (control.type === 'host-online') {
             this.events.onState('online');
+            this.direct.peerOnline(true);
             this.send({ type: 'snapshot' });
             if (this.subscribedId) this.subscribe(this.subscribedId);
           } else if (control.type === 'host-offline') {
             this.events.onState('host-offline');
+            this.direct.peerOnline(false);
           } else if (control.type === 'revoked') {
             // 桌面端解除了配对：立即停手，别再重连
             this.revoked = true;
+            this.direct.peerGone();
             this.events.onState('unauthorized');
           }
         } catch {}
@@ -167,6 +195,8 @@ export class PairClient {
   /** 回前台只探活；网络恢复拆半开链，死链立即重连 */
   nudge(reason: NudgeReason = 'visibility'): void {
     if (this.closed || this.revoked) return;
+    // 网络换了：直连的候选地址已失效，拆掉立即重协商（先落回中继）
+    if (reason === 'online' || reason === 'network-change') this.direct.networkChange();
     if (shouldReplaceOnNudge(reason, this.ws !== null)) {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
@@ -186,6 +216,7 @@ export class PairClient {
   close(): void {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
+    this.direct.close();
     this.heartbeat?.stop();
     this.heartbeat = null;
     try {
@@ -238,6 +269,13 @@ export class PairClient {
         break;
       case 'push-config':
         this.events.onPushConfig?.(payload.vapidPublicKey);
+        break;
+      case 'host-info':
+        this.direct.hostInfo(payload);
+        break;
+      case 'direct-answer':
+      case 'direct-ice':
+        this.direct.handleSignal(payload);
         break;
       case 'history': {
         // 上滑分页应答：只并入消息，不动 status/审批（那些以尾窗快照为准）
@@ -299,10 +337,21 @@ export class PairClient {
   }
 
   send(command: PhoneToHost): void {
-    if (this.ws?.readyState !== 1) return;
+    if (this.direct.transport() !== 'direct' && this.ws?.readyState !== 1) return;
     void sealFrame(this.contentKey, command).then((frame) => {
-      this.ws?.send(frame.slice().buffer as ArrayBuffer);
+      // 直连优先；背压/刚好断掉时无缝退回中继
+      if (this.direct.send(frame)) return;
+      this.sendFrameViaRelay(frame);
     });
+  }
+
+  private sendFrameViaRelay(frame: Uint8Array): void {
+    if (this.ws?.readyState !== 1) return;
+    this.ws.send(frame.slice().buffer as ArrayBuffer);
+  }
+
+  private sendViaRelay(command: PhoneToHost): void {
+    void sealFrame(this.contentKey, command).then((frame) => this.sendFrameViaRelay(frame));
   }
 
   private setSync(next: SyncTracking): void {
