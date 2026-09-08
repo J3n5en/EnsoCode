@@ -1,3 +1,4 @@
+import os from 'node:os';
 import type {
   ExternalSession,
   ExternalSessionSource,
@@ -64,7 +65,7 @@ const readerOf = (sourceId: string): SessionReader | undefined =>
 /** 列出各本地 AI 应用在某项目目录下的会话（无会话的应用不返回） */
 export function listExternalSessions(
   projectPath: string,
-  home = process.env.HOME ?? ''
+  home = os.homedir()
 ): ExternalSessionSource[] {
   return READERS.map((reader) => ({
     sourceId: reader.sourceId,

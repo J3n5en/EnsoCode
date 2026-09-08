@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { ExternalSession, SimpleMessage } from '@shared/types/sessionImport';
 
@@ -38,8 +39,8 @@ function listRolloutFiles(sessionsDir: string): { path: string; mtime: number }[
   return results.sort((a, b) => b.mtime - a.mtime);
 }
 
-/** 只读首行 session_meta 判定该会话属于哪个目录 */
-function cwdOfSession(filePath: string): string | null {
+/** Codex 新版 session_meta 会携带较长配置；分块读取完整首行并限制最大内存占用。 */
+function readFirstLine(filePath: string, maxBytes = 1024 * 1024): string | null {
   let fd: number;
   try {
     fd = fs.openSync(filePath, 'r');
@@ -47,17 +48,45 @@ function cwdOfSession(filePath: string): string | null {
     return null;
   }
   try {
-    const buffer = Buffer.alloc(4096);
-    const bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const firstLine = buffer.toString('utf-8', 0, bytes).split('\n', 1)[0];
-    const entry = parseLine(firstLine);
-    const payload = entry?.payload as { cwd?: unknown } | undefined;
-    return typeof payload?.cwd === 'string' ? payload.cwd : null;
+    const chunks: Buffer[] = [];
+    let position = 0;
+    while (position < maxBytes) {
+      const buffer = Buffer.alloc(Math.min(4096, maxBytes - position));
+      const bytes = fs.readSync(fd, buffer, 0, buffer.length, position);
+      if (bytes === 0) return Buffer.concat(chunks).toString('utf-8');
+      const content = buffer.subarray(0, bytes);
+      const newline = content.indexOf(0x0a);
+      chunks.push(Buffer.from(newline >= 0 ? content.subarray(0, newline) : content));
+      if (newline >= 0) return Buffer.concat(chunks).toString('utf-8');
+      position += bytes;
+    }
+    return null;
   } catch {
     return null;
   } finally {
     fs.closeSync(fd);
   }
+}
+
+/** 只读首行 session_meta 判定该会话属于哪个目录 */
+function cwdOfSession(filePath: string): string | null {
+  const firstLine = readFirstLine(filePath);
+  if (firstLine === null) return null;
+  const entry = parseLine(firstLine);
+  const payload = entry?.payload as { cwd?: unknown } | undefined;
+  return typeof payload?.cwd === 'string' ? payload.cwd : null;
+}
+
+function sameProjectPath(left: string, right: string): boolean {
+  const windowsPath = /^(?:[a-z]:[\\/]|\\\\)/i;
+  if (windowsPath.test(left) || windowsPath.test(right)) {
+    return (
+      windowsPath.test(left) &&
+      windowsPath.test(right) &&
+      path.win32.resolve(left).toLowerCase() === path.win32.resolve(right).toLowerCase()
+    );
+  }
+  return path.resolve(left) === path.resolve(right);
 }
 
 function textOfParts(content: unknown): string {
@@ -101,14 +130,12 @@ export function readCodexSession(filePath: string): { title: string; messages: S
 }
 
 /** 列出 Codex 在某项目目录下的会话 */
-export function listCodexSessions(
-  projectPath: string,
-  home = process.env.HOME ?? ''
-): ExternalSession[] {
+export function listCodexSessions(projectPath: string, home = os.homedir()): ExternalSession[] {
   const files = listRolloutFiles(path.join(home, '.codex', 'sessions'));
   const sessions: ExternalSession[] = [];
   for (const file of files) {
-    if (cwdOfSession(file.path) !== projectPath) continue;
+    const sessionCwd = cwdOfSession(file.path);
+    if (!sessionCwd || !sameProjectPath(sessionCwd, projectPath)) continue;
     const { title, messages } = readCodexSession(file.path);
     if (messages.length === 0) continue;
     sessions.push({ path: file.path, title, updatedAt: file.mtime, messageCount: messages.length });

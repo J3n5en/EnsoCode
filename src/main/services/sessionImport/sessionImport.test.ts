@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeClaudeProjectDir, listClaudeSessions, readClaudeSession } from './claudeCode';
-import { readCodexSession } from './codex';
+import { listCodexSessions, readCodexSession } from './codex';
 import { importExternalSession, listExternalSessions, readExternalSession } from './index';
 import { writePiSession } from './piJsonl';
 
@@ -14,6 +14,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 const jsonl = (entries: unknown[]) => entries.map((e) => JSON.stringify(e)).join('\n');
@@ -125,6 +127,44 @@ describe('readCodexSession', () => {
   });
 });
 
+describe('listCodexSessions', () => {
+  const writeRollout = (home: string, cwd: string, metaPadding = '') => {
+    const dir = path.join(home, '.codex', 'sessions', '2026', '09', '08');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `rollout-${crypto.randomUUID()}.jsonl`),
+      jsonl([
+        { type: 'session_meta', payload: { cwd, metaPadding } },
+        {
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Windows 会话' }],
+          },
+        },
+      ])
+    );
+  };
+
+  it('Windows 未设置 HOME 时从系统用户目录扫描 Codex 会话', () => {
+    writeRollout(tmp, 'D:\\Work\\Demo');
+    vi.stubEnv('HOME', undefined);
+    vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    expect(listCodexSessions('D:\\Work\\Demo')).toHaveLength(1);
+  });
+
+  it('session_meta 首行超过 4096 字节时仍能识别项目目录', () => {
+    writeRollout(tmp, 'D:\\Work\\Demo', 'x'.repeat(5000));
+    expect(listCodexSessions('D:\\Work\\Demo', tmp)).toHaveLength(1);
+  });
+
+  it('Windows 路径仅盘符或目录大小写不同时仍视为同一项目', () => {
+    writeRollout(tmp, 'd:\\work\\demo');
+    expect(listCodexSessions('D:\\Work\\Demo', tmp)).toHaveLength(1);
+  });
+});
+
 const grokSessionDir = (home: string, projectPath: string, id: string) => {
   const dir = path.join(home, '.grok', 'sessions', encodeURIComponent(projectPath), id);
   fs.mkdirSync(dir, { recursive: true });
@@ -149,6 +189,18 @@ describe('外部会话编排', () => {
     );
     const grok = listExternalSessions(projectPath, tmp).find((s) => s.sourceId === 'grok');
     expect(grok?.sourceName).toBe('Grok CLI');
+  });
+
+  it('Windows 未设置 HOME 时统一从系统用户目录扫描本地应用', () => {
+    const projectPath = '/tmp/demo';
+    const dir = grokSessionDir(tmp, projectPath, 'sess-1');
+    fs.writeFileSync(
+      path.join(dir, 'chat_history.jsonl'),
+      jsonl([{ type: 'user', content: '你好' }])
+    );
+    vi.stubEnv('HOME', undefined);
+    vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    expect(listExternalSessions(projectPath).map((source) => source.sourceId)).toContain('grok');
   });
 });
 
