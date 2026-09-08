@@ -32,10 +32,10 @@ export function classifyNatMapping(candidates: string[]): NatMapping {
   const mappings = new Map<string, Set<string>>();
   for (const c of candidates) {
     const p = parse(c);
-    if (!p || p.typ !== 'srflx' || !p.base) continue;
-    let set = mappings.get(p.base);
-    if (!set) mappings.set(p.base, (set = new Set()));
+    if (p?.typ !== 'srflx' || !p.base) continue;
+    const set = mappings.get(p.base) ?? new Set<string>();
     set.add(`${p.address}:${p.port}`);
+    mappings.set(p.base, set);
   }
   if (mappings.size === 0) return 'none';
   for (const set of mappings.values()) if (set.size > 1) return 'symmetric';
