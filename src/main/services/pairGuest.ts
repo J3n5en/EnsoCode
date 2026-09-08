@@ -3,6 +3,7 @@ import {
   attachHeartbeat,
   backoffDelay,
   claimPairing,
+  DirectLink,
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
@@ -33,6 +34,8 @@ import {
   saveNodes,
   upsertNode,
 } from './nodeStore';
+import { PAIR_DIRECT_ENABLED } from './pairDirectConfig';
+import { mainDirectPeerFactory, preloadDirectPeer } from './pairDirectPeer';
 import { startPairNetworkWatch } from './pairNetworkWatch';
 import { seedRelayHostCache } from './pairRelayLookup';
 import { openPairRelayWebSocket } from './pairRelayOpen';
@@ -49,6 +52,8 @@ interface Connection {
   contentKey: Uint8Array;
   ws: WebSocket | null;
   heartbeat: Heartbeat | null;
+  /** WebRTC 直连：业务帧优先出口；信令与在线态仍走中继 */
+  direct: DirectLink;
   hostOnline: boolean;
   hostname?: string;
   appVersion?: string;
@@ -89,6 +94,7 @@ export function getNodesStatus(): NodesStatus {
         pairedAt: node.pairedAt,
         connected: conn?.ws?.readyState === 1,
         hostOnline: conn?.hostOnline ?? false,
+        transport: conn?.direct.transport() ?? 'relay',
         ...(conn?.hostname ? { hostname: conn.hostname } : {}),
         ...(conn?.appVersion ? { appVersion: conn.appVersion } : {}),
       };
@@ -121,12 +127,15 @@ export function startPairGuest(): void {
     powerMonitor.on('resume', () => reviveAll('resume'));
     stopNetworkWatch = startPairNetworkWatch({ onChange: () => reviveAll('network-change') });
   }
-  for (const node of loadNodes()) openConnection(node);
+  void preloadDirectPeer().finally(() => {
+    for (const node of loadNodes()) openConnection(node);
+  });
 }
 
 function reviveAll(reason: 'resume' | 'network-change'): void {
   for (const conn of connections.values()) {
     if (conn.closed) continue;
+    if (reason === 'network-change') conn.direct.networkChange();
     if (shouldReplaceOnNudge(reason, conn.ws !== null)) {
       if (conn.timer) clearTimeout(conn.timer);
       conn.attempt = 0;
@@ -155,6 +164,7 @@ function closeConnection(conn: Connection): void {
   if (conn.timer) clearTimeout(conn.timer);
   conn.heartbeat?.stop();
   conn.heartbeat = null;
+  conn.direct.close();
   try {
     conn.ws?.close();
   } catch {}
@@ -252,12 +262,22 @@ function openConnection(node: RemoteNode): void {
     contentKey: fromBase64Url(node.contentKey),
     ws: null,
     heartbeat: null,
+    direct: null as unknown as DirectLink,
     hostOnline: false,
     attempt: 0,
     timer: null,
     closed: false,
     generation: 0,
   };
+  conn.direct = new DirectLink({
+    role: 'guest',
+    factory: PAIR_DIRECT_ENABLED ? mainDirectPeerFactory : null,
+    sendSignal: (signal) => void sendViaRelay(conn, signal as PhoneToHost),
+    onFrame: (frame) => void handleFrame(conn, frame),
+    onTransportChange: () => notifyStatus(),
+    // 切通道瞬间旧通道在途帧可能丢：与 host-online 同义重要目录，正文由 renderer 订阅流程补
+    onResync: () => void sendFrame(conn, { type: 'snapshot' }),
+  });
   connections.set(node.nodeId, conn);
   connect(conn);
 }
@@ -320,11 +340,13 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'host-online') {
           conn.hostOnline = true;
+          conn.direct.peerOnline(true);
           notifyStatus();
           // 进房即要目录（host 收 peer-joined 也会推，双保险防时序丢帧）
           void sendFrame(conn, { type: 'snapshot' });
         } else if (control.type === 'host-offline') {
           conn.hostOnline = false;
+          conn.direct.peerOnline(false);
           notifyStatus();
         } else if (control.type === 'revoked') {
           dropRevoked(conn);
@@ -384,9 +406,14 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
         saveNodes(next);
         conn.node = updated;
       }
+      conn.direct.hostInfo(payload);
       notifyStatus();
       return;
     }
+    case 'direct-answer':
+    case 'direct-ice':
+      conn.direct.handleSignal(payload);
+      return;
     // 桌面保留自己的主题；桌面没有 Web Push
     case 'appearance':
     case 'push-config':
@@ -399,16 +426,33 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
 // ── 发：加密上行 ──────────────────────────────────────────────────────
 
 async function sendFrame(conn: Connection, command: PhoneToHost): Promise<NodeActionResult> {
-  if (conn.ws?.readyState !== 1) return { ok: false, error: 'offline' };
+  const direct = conn.direct.transport() === 'direct';
+  if (!direct && conn.ws?.readyState !== 1) return { ok: false, error: 'offline' };
   try {
     const frame = await sealFrame(conn.contentKey, command);
     if (frame.byteLength > 1_000_000) {
       return { ok: false, error: 'frame over relay limit' };
     }
-    conn.ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
-    return { ok: true };
+    // 直连优先；背压/刚好断掉时无缝退回中继
+    if (conn.direct.send(frame)) return { ok: true };
+    return sendFrameViaRelay(conn, frame) ? { ok: true } : { ok: false, error: 'offline' };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function sendFrameViaRelay(conn: Connection, frame: Uint8Array): boolean {
+  if (conn.ws?.readyState !== 1) return false;
+  conn.ws.send(new Uint8Array(frame).slice().buffer as ArrayBuffer);
+  return true;
+}
+
+/** 直连信令只能走中继 */
+async function sendViaRelay(conn: Connection, command: PhoneToHost): Promise<void> {
+  try {
+    sendFrameViaRelay(conn, await sealFrame(conn.contentKey, command));
+  } catch (error) {
+    console.warn('[nodes] signal send failed', error);
   }
 }
 

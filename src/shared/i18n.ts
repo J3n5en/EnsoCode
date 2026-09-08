@@ -1108,6 +1108,8 @@ export const zhTranslations: Record<string, string> = {
   'Generate a pairing code to let a phone or another desktop connect.':
     '生成配对码，让手机或另一台桌面连入。',
   'Waiting for device': '等待设备',
+  'Direct link': '直连',
+  'Via relay': '中继',
   Copied: '已复制',
   'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.':
     '浏览并操控另一台 EnsoCode 桌面上的会话。agent、密钥与历史都留在对方机器上。',

@@ -279,6 +279,22 @@ function ConnectToNodesSection() {
   );
 }
 
+/** 业务帧出口标签：直连（WebRTC）/ 中继；只读，切换由 main 自动完成 */
+function TransportBadge({ transport }: { transport?: 'relay' | 'direct' }) {
+  const { t } = useI18n();
+  const direct = transport === 'direct';
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none',
+        direct ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground'
+      )}
+    >
+      {direct ? t('Direct link') : t('Via relay')}
+    </span>
+  );
+}
+
 function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState<string | null>(null);
@@ -314,6 +330,7 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
                   ? t('Waiting for device')
                   : t('Offline')}
             </span>
+            {device.phoneOnline && <TransportBadge transport={device.transport} />}
           </>
         ) : (
           <Input
@@ -384,6 +401,7 @@ function NodeRow({ node, onChanged }: { node: RemoteNodeStatus; onChanged: () =>
                   ? t('Remote desktop is offline')
                   : t('Offline')}
             </span>
+            {node.hostOnline && <TransportBadge transport={node.transport} />}
           </>
         ) : (
           <Input
