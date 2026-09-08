@@ -4,9 +4,9 @@
 
 ## 0. 前置
 
-- [ ] 读 `design.md` §6 + `research/webrtc-electron-main.md`。`pnpm add node-datachannel`（无 install 脚本，不需加 `onlyBuiltDependencies`）；electron-vite 保持 external；`electron-builder.yml` 确认 `.node` 与平台 optional package 进产物（必要时 `asarUnpack`）。
-- [ ] **Spike gate**：临时脚本在打包产物里 `require('node-datachannel')` + 本机 loopback DataChannel；再用最小 offer/answer 页面对 iPhone Safari 验证 `.local` 候选可连、16KB 二进制往返。任一失败 → 按研究文件换 `werift` 重测后再进步骤 4。spike 代码不入库。
-- [ ] `pnpm typecheck && pnpm test` 基线绿。
+- [x] 读 `design.md` §6 + `research/webrtc-electron-main.md`。`pnpm add node-datachannel@0.33.2`（无 install 脚本）；electron-vite 默认 external（`out/main/index.js` 保留 `import("node-datachannel")`）；electron-builder 无需改配置：`@node-datachannel/darwin-arm64/node_datachannel.node` 自动落到 `app.asar.unpacked`。
+- [x] **Spike gate**（darwin-arm64）：`electron-builder --mac --dir` 产物里用 `ELECTRON_RUN_AS_NODE=1 EnsoCode.app/Contents/MacOS/EnsoCode` 从 `app.asar` require `node-datachannel` → 加载成功，本机 loopback DataChannel 20000B 二进制往返 OK。其他平台同 `@mariozechner/clipboard` 模式（各 OS 的 CI 各自安装自己的 optional 二进制）。iPhone Safari 真机验证留到步骤 8 手工项（dev worker 已部署）。
+- [x] `pnpm typecheck && pnpm test` 基线绿。
 
 ## 1. 协议扩展（`packages/pair/src/protocol.ts`）— 纯类型 + 白名单
 
@@ -73,6 +73,10 @@
 pnpm typecheck && pnpm test && pnpm exec biome check .
 git diff --stat -- packages/relay      # 必须为空（AC5）
 ```
+
+- [x] 自动门禁全绿；`packages/relay/src` 零 diff（仅新增 `wrangler.dev.jsonc` + `release:dev` 脚本）。
+- [x] 审查修正（eb687876）：中继 ws 断开时直连存活则保留 phoneOnline（否则 forwardAgentEvent 会停发，AC1 不成立）；多片帧半途失败作废本代通道；guest resync 重发最后一次 subscribe；手机 1008 拆直连；建不出 peer 时 host 不空等 15s。
+- [ ] 手工（需真机）：桌面「设置 → 设备 → 中继地址」填 `https://enso-pair-relay-dev.j3.workers.dev`，扫码后按下方场景验收。
 
 手工（AC1/AC2/AC7/AC8）：同一 Wi‑Fi 桌面 + 手机 → 标签变「直连」；`/etc/hosts` 屏蔽 relay 域名后手机仍能收流式输出；手机切蜂窝 → 数秒内「中继」，若 NAT 可打洞 15s 内重回「直连」（日志打印 selected candidate pair 确认为 srflx/prflx）；屏蔽全部 STUN 域名后同 Wi‑Fi 仍能 LAN 直连；回 Wi‑Fi → 自动「直连」。
 兼容（AC3/AC4）：旧版桌面 build 配新 PWA、新桌面配 SW 缓存的旧 PWA，各观察 5 分钟无 warn 刷屏、行为同现状。

@@ -77,6 +77,13 @@ typecheck 全绿、单测全绿，**唯独白名单没加**，运行时什么都
 手机端（pair）是否下发是独立决定：需要的话还要进 `pairPolicy.ts` 的
 `SESSION_SCOPED` 与 `guestProjection.ts` 的投影分支；不需要就在 PRD 里写成非目标。
 
+### 配对协议（`packages/pair/src/protocol.ts`）只能加帧，不能改帧
+
+线上 PWA 不随桌面版同步发布，新旧版本长期混跑：新能力一律“新增帧类型 + 可选字段”，
+旧端按 `default` 分支静默忽略。能力类功能（如直连 `direct-v1`）由 host 在 `host-info.capabilities` 先声明，
+对端看到才发起；这样旧桌面永远收不到它不认识的上行帧。上行新帧要同时登记 `PHONE_COMMAND_TYPES`
+与 `pairPolicy.ts` 的字段校验（长度上限），并在 `pairPolicy.test.ts` 补往返用例。
+
 ### 给既有事件加可选字段：parser 必须校验形状，不能只放行
 
 `turn-completed.digest?: TurnDigest` 是先例：字段可选，但**存在时形状非法要让整条事件判 null**

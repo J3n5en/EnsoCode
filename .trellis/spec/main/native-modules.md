@@ -1,13 +1,22 @@
 # 原生模块规范
 
-本项目有两个原生模块，**都只用于只读地扫描其它应用的配置**：
+本项目的原生模块：
 
 | 模块 | 用途 | 位置 |
 |------|------|------|
-| `better-sqlite3` | 读 CC Switch / Alma / Cursor 的 sqlite | `services/providerScan/readers.ts`、`services/assetScan/ccSwitch.ts` |
-| `level` | 读 Cherry Studio 的 leveldb | `services/providerScan/readers.ts` |
+| `better-sqlite3` | 读 CC Switch / Alma / Cursor 的 sqlite（只读扫描） | `services/providerScan/readers.ts`、`services/assetScan/ccSwitch.ts` |
+| `level` | 读 Cherry Studio 的 leveldb（只读扫描） | `services/providerScan/readers.ts` |
+| `node-datachannel` | 配对直连（WebRTC DataChannel），main 进程内跑，不开隐藏窗口 | `services/pairDirectPeer.ts` |
 
 不要用它们做本项目自身的持久化 —— 设置存 JSON，见 [settings-persistence.md](settings-persistence.md)。
+
+## 可选能力型原生模块：动态 import + 静默降级
+
+`node-datachannel` 这类「没有也能跑」的模块不要顶层 `import`：用 `await import()` 包在 try 里预加载（`preloadDirectPeer()`），
+失败只 `console.warn` 一次并让工厂返回 `null`，上层自动退回无该能力的路径（直连 → 中继）。
+它的二进制在嵌套 optional 依赖 `@node-datachannel/<platform>` 里，无 install 脚本，不进 `onlyBuiltDependencies`；
+electron-builder 会自动把 `.node` 放到 `app.asar.unpacked`，各 OS 的 CI 各自安装自己平台的二进制（与 `@mariozechner/clipboard` 同模式）。
+验证打包产物时用 `ELECTRON_RUN_AS_NODE=1 <App>/Contents/MacOS/<App> script.cjs` 从 `app.asar` require，而不是系统 node（ABI 不同）。
 
 ## 只读打开
 
