@@ -163,6 +163,32 @@ describe('手机命令白名单', () => {
   });
 });
 
+describe('直连信令帧校验', () => {
+  it('放行 direct-offer / direct-ice / direct-close', () => {
+    const ok = [
+      { type: 'direct-offer', gen: 1, sdp: 'v=0\r\n' },
+      { type: 'direct-ice', gen: 1, candidate: 'candidate:1 1 UDP 1 10.0.0.2 5000 typ host', sdpMid: '0' },
+      { type: 'direct-ice', gen: 2, candidate: 'candidate:x', sdpMid: null },
+      { type: 'direct-close', gen: 3 },
+    ];
+    for (const cmd of ok) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(true);
+  });
+
+  it('gen 必须是非负整数，sdp/candidate 必须是有界字符串', () => {
+    const bad = [
+      { type: 'direct-offer', sdp: 'v=0' },
+      { type: 'direct-offer', gen: -1, sdp: 'v=0' },
+      { type: 'direct-offer', gen: 1.5, sdp: 'v=0' },
+      { type: 'direct-offer', gen: 1 },
+      { type: 'direct-offer', gen: 1, sdp: 'x'.repeat(16_385) },
+      { type: 'direct-ice', gen: 1, sdpMid: '0' },
+      { type: 'direct-ice', gen: 1, candidate: 'c', sdpMid: 5 },
+      { type: 'direct-close' },
+    ];
+    for (const cmd of bad) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(false);
+  });
+});
+
 describe('set-model 白名单校验', () => {
   const whitelist: SpawnWhitelist = {
     projects: [],

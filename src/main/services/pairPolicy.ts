@@ -1,4 +1,4 @@
-import type { PhoneToHost } from '@enso/pair';
+import { DIRECT_SIGNAL_MAX_CHARS, type PhoneToHost } from '@enso/pair';
 import { takeSnapshotTail } from '@shared/snapshotTail';
 import { THINKING_LEVELS } from '@shared/types/agent';
 
@@ -10,6 +10,9 @@ import { THINKING_LEVELS } from '@shared/types/agent';
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 const isThinkingLevel = (v: unknown): boolean =>
   typeof v === 'string' && (THINKING_LEVELS as readonly string[]).includes(v);
+const isGen = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+const isSignal = (v: unknown): v is string =>
+  typeof v === 'string' && v.length > 0 && v.length <= DIRECT_SIGNAL_MAX_CHARS;
 
 /** spawn 需要的白名单上下文：手机只能在这些集合内选，cwd 由 main 反查，不接受手机传路径 */
 export interface SpawnWhitelist {
@@ -138,6 +141,20 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       if (typeof v.beforeIndex !== 'number' || v.beforeIndex < 0) {
         return { ok: false, error: 'invalid beforeIndex' };
       }
+      return { ok: true, command: value as PhoneToHost };
+    case 'direct-offer':
+      if (!isGen(v.gen)) return { ok: false, error: 'invalid gen' };
+      if (!isSignal(v.sdp)) return { ok: false, error: 'invalid sdp' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'direct-ice':
+      if (!isGen(v.gen)) return { ok: false, error: 'invalid gen' };
+      if (!isSignal(v.candidate)) return { ok: false, error: 'invalid candidate' };
+      if (v.sdpMid !== null && typeof v.sdpMid !== 'string') {
+        return { ok: false, error: 'invalid sdpMid' };
+      }
+      return { ok: true, command: value as PhoneToHost };
+    case 'direct-close':
+      if (!isGen(v.gen)) return { ok: false, error: 'invalid gen' };
       return { ok: true, command: value as PhoneToHost };
     default:
       return { ok: false, error: `command not allowed: ${String(v.type)}` };

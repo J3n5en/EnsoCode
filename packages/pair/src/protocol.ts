@@ -31,6 +31,23 @@ export interface PushSubscriptionJson {
   keys: { p256dh: string; auth: string };
 }
 
+// ── 直连（WebRTC DataChannel）信令：经中继 E2E 帧交换，中继不感知 ──────────────
+
+/** host 声明的直连能力；guest 只在看到它时才发起 offer，旧桌面永不声明、旧 PWA 忽略字段 */
+export type DirectCapability = 'direct-v1';
+
+export interface IceServerEntry {
+  urls: string[];
+}
+
+export interface DirectCandidate {
+  candidate: string;
+  sdpMid: string | null;
+}
+
+/** 信令帧单字段上限：SDP 通常 < 4KB，候选 < 300B；超出即非法 */
+export const DIRECT_SIGNAL_MAX_CHARS = 16_384;
+
 // ── 上行：手机 → Electron（加密 payload，白名单）─────────────────────────
 export type PhoneToHost =
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
@@ -70,7 +87,12 @@ export type PhoneToHost =
    * 可见性上报：iOS 锁屏/切后台时 socket 只是半开不会 close，桌面无法靠
    * peer-left 判断手机是否还在看。退后台瞬间主动发一帧，推送据此门控。
    */
-  | { type: 'presence'; visible: boolean };
+  | { type: 'presence'; visible: boolean }
+  /** 直连协商：guest 发起，`gen` 每轮递增，不等于当前代的信令一律丢弃 */
+  | { type: 'direct-offer'; gen: number; sdp: string }
+  | ({ type: 'direct-ice'; gen: number } & DirectCandidate)
+  /** guest 放弃本代（超时/网络变化），host 释放对应 PeerConnection */
+  | { type: 'direct-close'; gen: number };
 
 /** 手机命令白名单：main 只接受这些 type，其余（set-approval-mode、设置写入等）拒绝 */
 export const PHONE_COMMAND_TYPES = [
@@ -94,6 +116,9 @@ export const PHONE_COMMAND_TYPES = [
   'push-subscribe',
   'push-unsubscribe',
   'presence',
+  'direct-offer',
+  'direct-ice',
+  'direct-close',
 ] as const satisfies readonly PhoneToHost['type'][];
 
 export function isPhoneCommand(value: unknown): value is PhoneToHost {
@@ -225,4 +250,14 @@ export type HostToPhone =
    * host 自述：guest（另一台桌面）用 hostname 作默认节点名。
    * 旧版 PWA 的 switch 无 default 分支，未知帧直接忽略，因此可安全新增。
    */
-  | { type: 'host-info'; hostname: string; appVersion: string };
+  | {
+      type: 'host-info';
+      hostname: string;
+      appVersion: string;
+      /** 直连能力声明；缺省（旧桌面）即不支持 */
+      capabilities?: DirectCapability[];
+      /** STUN 列表由 host 下发，guest 不硬编码，换地址只改桌面 */
+      iceServers?: IceServerEntry[];
+    }
+  | { type: 'direct-answer'; gen: number; sdp: string }
+  | ({ type: 'direct-ice'; gen: number } & DirectCandidate);
