@@ -176,7 +176,10 @@ function reduceGuest(state: DirectState, event: DirectEvent): DirectStep {
 
 function reduceHost(state: DirectState, event: DirectEvent): DirectStep {
   const current = (gen: number): boolean => gen === state.gen;
-  const toIdle = (): DirectStep => ({ state: { ...state, phase: 'idle' }, actions: teardown(state) });
+  const toIdle = (): DirectStep => ({
+    state: { ...state, phase: 'idle' },
+    actions: teardown(state),
+  });
   switch (event.type) {
     case 'peer-online':
       return noop({ ...state, peerOnline: event.online });
