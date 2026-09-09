@@ -5,6 +5,7 @@ import {
   foldTimeline,
   historyPageChrome,
   isReadOnlyCommand,
+  parseSandboxOutput,
   type TimelineItem,
   terminalErrorText,
 } from './timeline';
@@ -64,6 +65,51 @@ describe('buildTimeline', () => {
       summary: 'a.ts',
       output: 'file body',
       state: 'ok',
+    });
+  });
+
+  it('exec 摘要用首行 JS，source 保留全文，结果 JSON 解析为 value/calls', () => {
+    const code = 'const pkg = await read({ path: "package.json" });\nreturn pkg;';
+    const output = JSON.stringify({
+      status: 'completed',
+      value: { ok: true },
+      calls: [
+        { name: 'read', ok: true },
+        { name: 'ls', ok: true },
+      ],
+    });
+    const timeline = buildTimeline(
+      [
+        user('试试 code mode'),
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'e1', name: 'exec', arguments: { code } }],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'e1',
+          toolName: 'exec',
+          isError: false,
+          content: [{ type: 'text', text: output }],
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({
+      kind: 'tool',
+      name: 'exec',
+      summary: 'const pkg = await read({ path: "package.json" });',
+      source: code,
+      output,
+      state: 'ok',
+    });
+    expect(parseSandboxOutput(output)).toEqual({
+      status: 'completed',
+      value: { ok: true },
+      calls: [
+        { name: 'read', ok: true },
+        { name: 'ls', ok: true },
+      ],
     });
   });
 

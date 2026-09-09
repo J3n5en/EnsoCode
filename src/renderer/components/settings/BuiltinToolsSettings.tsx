@@ -46,7 +46,7 @@ export function BuiltinToolsSettings() {
           <OccupancyEnabledTotal tokens={enabledTokens} />
         </h3>
         <p className="text-muted-foreground text-sm">
-          {t('Toggle the built-in tools available to agents. All enabled by default.')}
+          {t('Toggle the built-in tools available to agents.')}
         </p>
       </div>
 
@@ -55,7 +55,7 @@ export function BuiltinToolsSettings() {
           <div key={tool.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
             <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{tool.name}</p>
+              <p className="text-sm font-medium">{t(tool.name)}</p>
               <p className="text-muted-foreground text-xs">{t(tool.description)}</p>
             </div>
             <OccupancyMark

@@ -71,7 +71,11 @@ export function ApprovalBar({ approvals, onRespond, allowSession = true }: Appro
         </span>
         <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
           <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate font-mono">{active.tool}</span>
+          <span className="truncate font-mono">
+            {(active.toolCallId?.split(':').length ?? 0) >= 3
+              ? `${t('Isolated sandbox')} › ${active.tool}`
+              : active.tool}
+          </span>
         </span>
         {approvals.length > 1 && (
           <span className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums">

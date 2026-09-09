@@ -61,6 +61,7 @@
     "node-datachannel": "^0.33.2",
     "node-pty": "^1.1.0",
     "qrcode": "^1.5.4",
+    "quickjs-wasi": "3.6.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

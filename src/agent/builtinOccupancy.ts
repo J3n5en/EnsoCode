@@ -4,6 +4,7 @@ import type { AgentTypeSpawnConfig, SubagentModelOption } from '@shared/types/ag
 import { AskManager, createAskTool } from './ask';
 import { createTaskTools } from './backgroundTasks';
 import { createCoworkerTool } from './coworker';
+import { createIsolatedSandboxTool } from './isolatedSandbox';
 import { createSubagentTool } from './subagent';
 import { createTodoTool } from './todo';
 import { BrowserInvoker, createBrowserTools } from './tools/browser';
@@ -80,5 +81,6 @@ export function snapshotBuiltinOccupancyTools(input?: {
       stop: () => false,
       knownIds: () => [],
     } as never).map(fields),
+    isolated_sandbox: [fields(createIsolatedSandboxTool({ getTools: () => [] }))],
   };
 }

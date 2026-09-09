@@ -630,4 +630,92 @@ describe('SessionSupervisor coworker wait/report', () => {
     await settle();
     expect(mocks.loaderOptions[2]?.noExtensions).not.toBe(true);
   });
+
+  it('子会话跟父开关下发 exec + explore-fold，不含嵌套 hire', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      exploreFoldEnabled: true,
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 0);
+    const parentTools = (
+      mocks.createAgentSession.mock.calls[0][0] as { customTools: Array<{ name: string }> }
+    ).customTools.map((tool) => tool.name);
+    expect(parentTools).toEqual(expect.arrayContaining(['exec', 'explore_mark', 'explore_fold']));
+    const coworkerTool = (
+      mocks.createAgentSession.mock.calls[0][0] as { customTools: CoworkerToolLike[] }
+    ).customTools.find(
+      (tool) => (tool as unknown as { name: string }).name === 'coworker'
+    ) as unknown as CoworkerToolLike;
+    await coworkerTool.execute(
+      't1',
+      { operation: 'spawn', name: 'bob', task: 'first task' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    const childTools = (
+      mocks.createAgentSession.mock.calls[1][0] as { customTools: Array<{ name: string }> }
+    ).customTools.map((tool) => tool.name);
+    expect(childTools).toEqual(expect.arrayContaining(['exec', 'explore_mark', 'explore_fold']));
+    expect(childTools).not.toContain('coworker');
+    expect(childTools).not.toContain('subagent');
+    const childFactories = mocks.loaderOptions[1]?.extensionFactories as
+      | Array<{ name?: string }>
+      | undefined;
+    expect(childFactories?.some((factory) => factory.name === 'explore-fold')).toBe(true);
+  });
+
+  it('父关掉 isolated_sandbox / explore-fold 时子也不下发', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-cw-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      disabledTools: ['isolated_sandbox'],
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 0);
+    const parentTools = (
+      mocks.createAgentSession.mock.calls[0][0] as { customTools: Array<{ name: string }> }
+    ).customTools.map((tool) => tool.name);
+    expect(parentTools).not.toContain('exec');
+    expect(parentTools).not.toContain('explore_mark');
+    const coworkerTool = (
+      mocks.createAgentSession.mock.calls[0][0] as { customTools: CoworkerToolLike[] }
+    ).customTools.find(
+      (tool) => (tool as unknown as { name: string }).name === 'coworker'
+    ) as unknown as CoworkerToolLike;
+    await coworkerTool.execute(
+      't1',
+      { operation: 'spawn', name: 'bob', task: 'first task' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    await settle();
+    const childTools = (
+      mocks.createAgentSession.mock.calls[1][0] as { customTools: Array<{ name: string }> }
+    ).customTools.map((tool) => tool.name);
+    expect(childTools).not.toContain('exec');
+    expect(childTools).not.toContain('explore_mark');
+    const childFactories = mocks.loaderOptions[1]?.extensionFactories as
+      | Array<{ name?: string }>
+      | undefined;
+    expect(childFactories?.some((factory) => factory.name === 'explore-fold')).toBeFalsy();
+  });
 });

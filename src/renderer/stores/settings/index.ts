@@ -12,6 +12,7 @@ import {
   type StatusLineSegmentId,
 } from '@shared/statusLine';
 import { parseTerminalShell } from '@shared/terminalShell';
+import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { SourceAuthorityProjection } from '@shared/types/agent';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
@@ -170,7 +171,7 @@ const initialState = {
   subagentModelsEnabled: false,
   subagentModels: [] as import('@shared/types').SubagentModelEntry[],
   disabledBuiltinAgentTypes: [] as string[],
-  disabledBuiltinTools: [] as string[],
+  disabledBuiltinTools: [...DEFAULT_DISABLED_BUILTIN_TOOLS] as string[],
   onboarded: false,
   keybindings: {} as Record<string, string>,
   projects: [] as import('@shared/types').Project[],

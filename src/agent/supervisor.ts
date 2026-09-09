@@ -108,12 +108,14 @@ import { InMemorySnapshotStore } from './hashline/snapshots';
 import { wrapHashlineEditDefinition } from './hashline/tools';
 import { withHashlineWrite } from './hashline/withWrite';
 import { type ContextMessage, pruneHistoricalImages } from './imageContext';
+import { createIsolatedSandboxTool } from './isolatedSandbox';
 import { McpManager } from './mcp';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
 import { projectMessage } from './projection';
 import { applyWorkerProxyEnv } from './proxyEnv';
+import { withReadTruncationMeta } from './readTruncation';
 import { projectMessages, projectResumeTail } from './resumeSnapshots';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
@@ -318,31 +320,27 @@ function createSessionResourceLoader(options: {
           }));
         },
       } satisfies InlineExtension,
-      ...(!options.noExtensions && (options.exploreFold || options.smartCompactEnabled)
+      ...(options.exploreFold
         ? [
-            ...(options.exploreFold
-              ? [
-                  {
-                    name: 'explore-fold',
-                    hidden: true,
-                    factory: (pi) => {
-                      pi.on('context', (event) => ({
-                        messages: options.exploreFold!.apply(
-                          event.messages as never
-                        ) as typeof event.messages,
-                      }));
-                    },
-                  } satisfies InlineExtension,
-                ]
-              : []),
-            ...(options.smartCompactEnabled
-              ? [
-                  smartCompactInlineExtension({
-                    summaryModel: options.smartCompactSummaryModel,
-                    mode: options.smartCompactMode,
-                  }),
-                ]
-              : []),
+            {
+              name: 'explore-fold',
+              hidden: true,
+              factory: (pi) => {
+                pi.on('context', (event) => ({
+                  messages: options.exploreFold!.apply(
+                    event.messages as never
+                  ) as typeof event.messages,
+                }));
+              },
+            } satisfies InlineExtension,
+          ]
+        : []),
+      ...(!options.noExtensions && options.smartCompactEnabled
+        ? [
+            smartCompactInlineExtension({
+              summaryModel: options.smartCompactSummaryModel,
+              mode: options.smartCompactMode,
+            }),
           ]
         : []),
     ],
@@ -1276,7 +1274,8 @@ export class SessionSupervisor {
         ? { readFile: remoteOps.read.readFile, writeFile: remoteOps.edit.writeFile }
         : undefined,
     });
-    const wrapRead = (definition: Def): Def => withAgentRead(definition, () => structuredById);
+    const wrapRead = (definition: Def): Def =>
+      withReadTruncationMeta(withAgentRead(definition, () => structuredById));
     const applyHashline = <T extends Def>(tools: { read: T; grep: T; edit?: T }) =>
       applyHashlineSessionTools({
         enabled: hashlineEditEnabled,
@@ -1480,7 +1479,10 @@ export class SessionSupervisor {
                 }
               )
             : undefined;
-        const subTools = isLockedEnso
+        const childExploreFold =
+          !isLockedEnso && exploreFoldEnabled ? createExploreFoldState() : undefined;
+        const childSandboxCatalog: { current: Def[] } = { current: [] };
+        const childTools = isLockedEnso
           ? [createEnsoCapabilitiesTool(), createEnsoAppTool(ensoApp!), createAskTool(askManager!)]
           : [
               ...(resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
@@ -1488,6 +1490,21 @@ export class SessionSupervisor {
                 : buildBaseTools(childGate, undefined, agentType?.writeScope)),
               ...(resolved || agentType ? typeMcpTools : wrapMcpTools(childGate)),
               ...(extraTools as Def[]),
+              ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
+            ];
+        childSandboxCatalog.current = childTools;
+        const subTools = isLockedEnso
+          ? childTools
+          : [
+              ...childTools,
+              ...(toolEnabled('isolated_sandbox')
+                ? [
+                    createIsolatedSandboxTool({
+                      getTools: () => childSandboxCatalog.current,
+                      store: new Map(),
+                    }),
+                  ]
+                : []),
             ];
         const selectedSkillPaths = resolved?.skillPaths ?? agentType?.skillPaths ?? [];
         const subLoader = isLockedEnso
@@ -1502,6 +1519,7 @@ export class SessionSupervisor {
               remoteAgentsFiles,
               // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
               loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
+              ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
             });
         await subLoader.reload();
         const safeJournal =
@@ -1549,7 +1567,8 @@ export class SessionSupervisor {
         };
       },
     };
-    // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；工具同父但不含 task/todo（防递归）
+    // 子代理：同 worker 子会话，复用 runtime/model/审批门/MCP 连接；不含 subagent/coworker（防递归）。
+    // 隔离沙箱 / 探后折叠跟父会话同一开关，catalog 用子自己的工具集。
     const taskTool = createSubagentTool({
       modelId: model.modelId,
       agentTypes,
@@ -1659,7 +1678,9 @@ export class SessionSupervisor {
           });
         })
       : undefined;
-    const customTools = [
+    const catalogRef: { current: Def[] } = { current: [] };
+    const sandboxStore = new Map<string, unknown>();
+    const sessionTools = [
       ...buildCoreTools(),
       ...(browser
         ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
@@ -1682,6 +1703,13 @@ export class SessionSupervisor {
               note,
             });
           })
+        : []),
+    ];
+    catalogRef.current = sessionTools;
+    const customTools = [
+      ...sessionTools,
+      ...(toolEnabled('isolated_sandbox')
+        ? [createIsolatedSandboxTool({ getTools: () => catalogRef.current, store: sandboxStore })]
         : []),
     ].map((tool) => withTaskReminders(tool, takePendingReminders));
 

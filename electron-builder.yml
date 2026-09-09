@@ -13,6 +13,8 @@ files:
     to: node_modules/@rahularya01/pi-cursor
   - from: node_modules/@bufbuild/protobuf
     to: node_modules/@bufbuild/protobuf
+  - from: node_modules/quickjs-wasi
+    to: node_modules/quickjs-wasi
 mac:
   category: public.app-category.developer-tools
   target:

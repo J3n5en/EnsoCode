@@ -53,6 +53,10 @@ export type TimelineItem =
       startedAt?: number | null;
       /** subagent 工具的执行元数据（模型/token/步数）；非 subagent 为 null */
       agentMeta: { modelId?: string; outputTokens?: number; steps?: number } | null;
+      /** exec / 隔离沙箱的 JS 源码；其它工具缺省 */
+      source?: string | null;
+      /** 嵌套审批未决数（exec 脚本内 write 等） */
+      nestedPending?: number;
     }
   | {
       kind: 'tool-group';
@@ -165,6 +169,73 @@ export function historyPageChrome(
   if (loading) return 'loading';
   if (hasOlder === false && everHadOlder) return 'start';
   return 'none';
+}
+
+export function execSourceFromArgs(args: unknown): string | null {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  const record = args as Record<string, unknown>;
+  const code = [record.code, record.command].find(
+    (value) => typeof value === 'string' && value.trim()
+  );
+  return typeof code === 'string' ? code : null;
+}
+
+export function summarizeExecSource(code: string): string {
+  const line =
+    code
+      .split('\n')
+      .map((part) => part.trim())
+      .find(Boolean) ?? '';
+  return line.length > 72 ? `${line.slice(0, 72)}…` : line;
+}
+
+export interface SandboxCallView {
+  name: string;
+  ok: boolean;
+  error?: string;
+  summary?: string;
+}
+
+export interface SandboxView {
+  status: 'completed' | 'failed';
+  value?: unknown;
+  error?: string;
+  calls: SandboxCallView[];
+}
+
+export function parseSandboxOutput(output: string | null): SandboxView | null {
+  if (!output?.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    if (record.status !== 'completed' && record.status !== 'failed') return null;
+    const calls = Array.isArray(record.calls)
+      ? record.calls.flatMap((entry) => {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+          const call = entry as Record<string, unknown>;
+          if (typeof call.name !== 'string' || !call.name) return [];
+          return [
+            {
+              name: call.name,
+              ok: call.ok === true,
+              ...(typeof call.error === 'string' ? { error: call.error } : {}),
+              ...(typeof call.summary === 'string' ? { summary: call.summary } : {}),
+            },
+          ];
+        })
+      : [];
+    return {
+      status: record.status,
+      ...(record.status === 'failed' && typeof record.error === 'string'
+        ? { error: record.error }
+        : {}),
+      ...(record.status === 'completed' ? { value: record.value } : {}),
+      calls,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** write 工具参数里取出写入内容 */
@@ -307,9 +378,22 @@ function reviewingToolCallIds(
 ): Set<string> {
   const ids = new Set<string>();
   for (const request of pendingApprovals ?? []) {
-    if (request.phase === 'reviewing' && request.toolCallId) ids.add(request.toolCallId);
+    if (request.phase === 'reviewing' && request.toolCallId) {
+      ids.add(request.toolCallId);
+      const parent = request.toolCallId.split(':')[0];
+      if (parent) ids.add(parent);
+    }
   }
   return ids;
+}
+
+function nestedPendingCount(
+  toolCallId: string,
+  pendingApprovals: readonly ApprovalRequestInfo[] | undefined
+): number {
+  const prefix = `${toolCallId}:`;
+  return (pendingApprovals ?? []).filter((request) => request.toolCallId?.startsWith(prefix))
+    .length;
 }
 
 function buildMessageTimeline(
@@ -486,14 +570,21 @@ function buildMessageTimeline(
           const result = results.get(part.id);
           // 未完成时退而用执行中的输出快照（空串不算，否则行会变“可展开但空”）
           const partial = toolOutputs?.[part.id];
+          const execSource = part.name === 'exec' ? execSourceFromArgs(part.arguments) : null;
+          const output = result ? result.output : (partial ?? null) || null;
+          const sandboxView = part.name === 'exec' ? parseSandboxOutput(output) : null;
           items.push({
             kind: 'tool',
             key,
             name: part.name,
-            summary: summarizeArgs(part.arguments, cwd),
-            output: result ? result.output : (partial ?? null) || null,
+            summary: execSource
+              ? summarizeExecSource(execSource)
+              : summarizeArgs(part.arguments, cwd),
+            source: execSource,
+            output,
+            nestedPending: nestedPendingCount(part.id, pendingApprovals) || undefined,
             state: result
-              ? result.isError
+              ? result.isError || sandboxView?.status === 'failed'
                 ? 'error'
                 : 'ok'
               : running && messageIndex === lastTurnIndex

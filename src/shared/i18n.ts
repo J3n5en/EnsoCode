@@ -518,6 +518,8 @@ export const zhTranslations: Record<string, string> = {
   'Use the unrestricted coworker tool.': '使用不受限的 Coworker 工具。',
   'Run a background shell task.': '运行后台 shell 任务。',
   "Browse pages in Enso's built-in browser.": '在 Enso 内嵌浏览器里浏览页面。',
+  'Run JavaScript that calls coding-session tools, including edits.':
+    '运行会调用编码会话工具（含编辑）的 JavaScript。',
   Save: '保存',
   // Skills & MCP
   Skills: '技能',
@@ -780,8 +782,10 @@ export const zhTranslations: Record<string, string> = {
   Remove: '移除',
   'Agent types': '子代理类型',
   'Built-in tools': '内置工具',
-  'Toggle the built-in tools available to agents. All enabled by default.':
-    '开关 agent 可用的内置工具,默认全部启用。',
+  'Toggle the built-in tools available to agents.': '开关 agent 可用的内置工具。',
+  'Isolated sandbox': '隔离沙箱',
+  'Run JavaScript in an isolated sandbox that can call session tools. Intermediate reads and edits stay out of the chat; only the returned value is added to the conversation.':
+    '在隔离沙箱里跑 JavaScript，并可调用会话工具。中间的读取和修改不会进对话，只有返回值会留下。',
   'One-shot subagent: delegate a self-contained task and return a final report (parallel or async)':
     '一次性子代理:委派自包含子任务,返回最终报告(可并行、可异步)',
   'Persistent subagent: hire for multi-turn dialogue; you can watch and intervene from a tab':
@@ -793,6 +797,8 @@ export const zhTranslations: Record<string, string> = {
     '后台 shell 任务:长命令挂后台跑,完成时通知',
   "Built-in browser: open pages in Enso's own Chromium, read snapshots, click and type by ref":
     '内嵌浏览器:在 Enso 自带 Chromium 里打开页面,读快照,按 ref 点击与输入',
+  'QuickJS sandbox: write JavaScript that calls session tools (including edits) in one cell':
+    'QuickJS 沙箱:用 JavaScript 在一个 cell 里调用会话工具(含编辑)',
   '(log unavailable)': '(日志不可用)',
   'Loading…': '加载中…',
   '(no log available)': '(暂无日志)',

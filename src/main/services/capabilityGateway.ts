@@ -29,6 +29,7 @@ import {
   type AgentTypeEntry,
   BUILTIN_AGENT_TYPES,
   BUILTIN_TOOLS,
+  effectiveDisabledBuiltinTools,
   MODEL_THINKING_LEVEL_OVERRIDES,
   type ModelProvider,
   type Preset,
@@ -1227,9 +1228,8 @@ export function createCapabilityHandlers(
       );
     },
     'tools.list': () => {
-      const current = settingsState(services.readSettings()).disabledBuiltinTools;
       const disabled = new Set(
-        Array.isArray(current) ? current.filter((id): id is string => typeof id === 'string') : []
+        effectiveDisabledBuiltinTools(settingsState(services.readSettings()).disabledBuiltinTools)
       );
       return success(BUILTIN_TOOLS.map((tool) => ({ ...tool, enabled: !disabled.has(tool.id) })));
     },
@@ -1238,11 +1238,8 @@ export function createCapabilityHandlers(
       if (!id || typeof params.enabled !== 'boolean') return invalid('id and enabled are required');
       if (!BUILTIN_TOOLS.some((tool) => tool.id === id))
         return invalid(`Unknown built-in tool: ${id}`);
-      const current = settingsState(services.readSettings()).disabledBuiltinTools;
       const disabled = new Set(
-        Array.isArray(current)
-          ? current.filter((value): value is string => typeof value === 'string')
-          : []
+        effectiveDisabledBuiltinTools(settingsState(services.readSettings()).disabledBuiltinTools)
       );
       if (params.enabled) disabled.delete(id);
       else disabled.add(id);

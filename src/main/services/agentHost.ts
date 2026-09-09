@@ -21,6 +21,7 @@ import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
+import { effectiveDisabledBuiltinTools } from '@shared/types';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -393,9 +394,7 @@ export function spawnSession(
   const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
   const agentTypes = configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
   const state = readSettingsState();
-  const disabledTools = Array.isArray(state?.disabledBuiltinTools)
-    ? state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string')
-    : [];
+  const disabledTools = effectiveDisabledBuiltinTools(state?.disabledBuiltinTools);
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
