@@ -33,8 +33,10 @@ function fakeJwt(payload: Record<string, unknown>): string {
 }
 
 const expires = Date.now() + 3_600_000;
+const noNetworkFetch = vi.fn(async () => new Response('', { status: 404 }));
 
 beforeAll(() => {
+  vi.stubGlobal('fetch', noNetworkFetch);
   const dir = path.join(userData, 'agent', 'pi-agent');
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -44,15 +46,15 @@ beforeAll(() => {
       'anthropic#2': { type: 'oauth', access: 'sk-ant-oat01-two', refresh: 'r2', expires },
       cursor: {
         type: 'oauth',
-        access: 'cursor-access-token',
+        access: '',
         refresh: 'cursor-refresh-token',
         expires,
       },
       'openai-codex': {
         type: 'oauth',
         access: fakeJwt({
-          email: 'user@example.com',
           'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' },
+          'https://api.openai.com/profile': { email: 'user@example.com' },
         }),
         refresh: 'r3',
         expires,
@@ -60,7 +62,7 @@ beforeAll(() => {
       // Antigravity 的凭证自带 projectId / email（pi 不拒绝额外字段）
       'google-antigravity': {
         type: 'oauth',
-        access: 'ya29.access-token',
+        access: '',
         refresh: 'r4',
         expires,
         projectId: 'projects/enso-test',
@@ -73,6 +75,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  vi.unstubAllGlobals();
   rmSync(userData, { recursive: true, force: true });
 });
 
@@ -96,13 +99,137 @@ describe('listOauthProviders 的账号枚举', () => {
     ).toBe(true);
   });
 
-  it('access token 是 JWT 时，email 与套餐不发网络请求就能读出来', async () => {
+  it('OpenAI access token 的 profile claim 包含 email 时不发网络请求就能读出来', async () => {
     const { listOauthProviders } = await import('./oauthProviders');
     const providers = await listOauthProviders();
     const codex = providers.find((provider) => provider.id === 'openai-codex');
     expect(codex?.accounts).toEqual([
       { key: 'openai-codex', providerId: 'openai-codex', email: 'user@example.com', plan: 'plus' },
     ]);
+  });
+
+  it('OpenAI access token 的顶层 email 保持兼容', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 'legacy@example.com',
+          'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts[0]?.email).toBe('legacy@example.com');
+    } finally {
+      restore();
+    }
+  });
+
+  it.each([
+    ['缺失', undefined],
+    ['null', null],
+    ['字符串', 'invalid-profile'],
+    ['数组', []],
+  ])('OpenAI profile %s 时回退到有效顶层 email', async (_label, profile) => {
+    const restore = withAuthJson((parsed) => {
+      const claims: Record<string, unknown> = {
+        email: 'legacy@example.com',
+        'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' },
+      };
+      if (profile !== undefined) claims['https://api.openai.com/profile'] = profile;
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt(claims),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts).toEqual([
+        {
+          key: 'openai-codex',
+          providerId: 'openai-codex',
+          email: 'legacy@example.com',
+          plan: 'plus',
+        },
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('OpenAI profile email 类型错误时回退到有效顶层 email', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 'legacy@example.com',
+          'https://api.openai.com/profile': { email: 123 },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts[0]?.email).toBe('legacy@example.com');
+    } finally {
+      restore();
+    }
+  });
+
+  it('OpenAI profile 与顶层 email 均非字符串时只保留账号 key', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 456,
+          'https://api.openai.com/profile': { email: null },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts).toEqual([{ key: 'openai-codex', providerId: 'openai-codex' }]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('OpenAI profile 与顶层 email 都有效时 profile 优先', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed['openai-codex'] = {
+        type: 'oauth',
+        access: fakeJwt({
+          email: 'legacy@example.com',
+          'https://api.openai.com/profile': { email: 'profile@example.com' },
+        }),
+        refresh: 'r3',
+        expires,
+      };
+    });
+    try {
+      const { listOauthProviders } = await import('./oauthProviders');
+      const providers = await listOauthProviders();
+      const codex = providers.find((provider) => provider.id === 'openai-codex');
+      expect(codex?.accounts[0]?.email).toBe('profile@example.com');
+    } finally {
+      restore();
+    }
   });
 
   it('未登录的 provider 是空 accounts 数组，api_key 凭证不算订阅账号', async () => {
@@ -347,6 +474,7 @@ describe('IPC 入参收窄', () => {
 // 整段当 Bearer 打过去会 401，再被 best-effort 静默成空窗口，长得就像「接了但没数据」。
 describe('Antigravity 额度探测', () => {
   it('用解开的 access token 打请求，绝不把整段凭证 JSON 当 Bearer', async () => {
+    const restore = withAntigravityAccess();
     const { getOauthAccountUsage } = await import('./oauthProviders');
     const seenAuth: string[] = [];
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -365,18 +493,23 @@ describe('Antigravity 额度探测', () => {
       );
     });
 
-    const usage = await getOauthAccountUsage('google-antigravity');
+    try {
+      const usage = await getOauthAccountUsage('google-antigravity');
 
-    expect(usage.error).toBeUndefined();
-    expect(usage.windows).toEqual([
-      { label: 'Google Daily', usedPercent: 75, resetsAt: expect.any(Number) },
-    ]);
-    expect(seenAuth).toContain('Bearer ya29.access-token');
-    expect(seenAuth.some((value) => value.includes('projectId'))).toBe(false);
-    fetchSpy.mockRestore();
+      expect(usage.error).toBeUndefined();
+      expect(usage.windows).toEqual([
+        { label: 'Google Daily', usedPercent: 75, resetsAt: expect.any(Number) },
+      ]);
+      expect(seenAuth).toContain('Bearer ya29.access-token');
+      expect(seenAuth.some((value) => value.includes('projectId'))).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
   });
 
   it('厂商 windowLabel 超长时按共享上限截断', async () => {
+    const restore = withAntigravityAccess();
     const { getOauthAccountUsage } = await import('./oauthProviders');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       return new Response(
@@ -401,6 +534,7 @@ describe('Antigravity 额度探测', () => {
       expect(usage.windows[0]?.label).toBe('W'.repeat(OAUTH_LABEL_MAX_LENGTH));
     } finally {
       fetchSpy.mockRestore();
+      restore();
     }
   });
 
@@ -429,6 +563,19 @@ function withAuthJson(mutate: (parsed: Record<string, unknown>) => void): () => 
   mutate(parsed);
   writeFileSync(authFile(), JSON.stringify(parsed));
   return () => writeFileSync(authFile(), original);
+}
+
+function withAntigravityAccess(): () => void {
+  return withAuthJson((parsed) => {
+    parsed['google-antigravity'] = {
+      type: 'oauth',
+      access: 'ya29.access-token',
+      refresh: 'r4',
+      expires,
+      projectId: 'projects/enso-test',
+      email: 'ag@example.com',
+    };
+  });
 }
 
 function jsonOk(body: unknown): Response {
@@ -578,6 +725,14 @@ describe('Cursor 额度探测', () => {
   });
 
   it('非 JWT token 退到 GetCurrentPeriodUsage', async () => {
+    const restore = withAuthJson((parsed) => {
+      parsed.cursor = {
+        type: 'oauth',
+        access: 'cursor-access-token',
+        refresh: 'cursor-refresh-token',
+        expires,
+      };
+    });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       if (url.includes('GetCurrentPeriodUsage')) {
@@ -602,6 +757,7 @@ describe('Cursor 额度探测', () => {
       ]);
     } finally {
       fetchSpy.mockRestore();
+      restore();
     }
   });
 });

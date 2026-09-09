@@ -208,6 +208,8 @@ function identityFromCredential(providerId: string, access: string): AccountIden
   const identity: AccountIdentity = {};
   if (typeof claims.email === 'string') identity.email = claims.email;
   if (providerId === 'openai-codex') {
+    const profileEmail = obj(claims['https://api.openai.com/profile']).email;
+    if (typeof profileEmail === 'string') identity.email = profileEmail;
     const planType = obj(claims['https://api.openai.com/auth']).chatgpt_plan_type;
     if (typeof planType === 'string') assignPlan(identity, planType);
   } else if (providerId === 'xai') {
