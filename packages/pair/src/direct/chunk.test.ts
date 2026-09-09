@@ -47,7 +47,11 @@ describe('DataChannel 分片编解码', () => {
     const chunks = encodeChunks(frame);
     expect(chunks.length).toBe(Math.ceil(1_000_000 / CHUNK_PAYLOAD_BYTES));
     for (const c of chunks) expect(c.byteLength).toBeLessThanOrEqual(CHUNK_PAYLOAD_BYTES + 1);
-    expect(roundTrip(frame)).toEqual(frame);
+    const r = createReassembler();
+    let got: Uint8Array | null = null;
+    for (const c of chunks) got = r.push(c) ?? got;
+    expect(got).not.toBeNull();
+    expect(Buffer.compare(got as Uint8Array, frame)).toBe(0);
   });
 
   it('中间片返回 null，末片才吐完整帧；连续两帧互不串', () => {

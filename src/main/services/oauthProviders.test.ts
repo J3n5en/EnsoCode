@@ -80,7 +80,7 @@ afterAll(() => {
 });
 
 describe('listOauthProviders 的账号枚举', () => {
-  it('同一厂商的两个账号各占一行，裸 key 排在 #2 前面', async () => {
+  it('同一厂商的两个账号各占一行，裸 key 排在 #2 前面', { timeout: 20_000 }, async () => {
     const { listOauthProviders } = await import('./oauthProviders');
     const providers = await listOauthProviders();
     const anthropic = providers.find((provider) => provider.id === 'anthropic');

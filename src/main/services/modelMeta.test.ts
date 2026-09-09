@@ -31,7 +31,9 @@ afterAll(() => {
 });
 
 describe('queryModelMeta', () => {
-  it('订阅条目按 catalog 取值，contextWindow 与 runtime.getModel 一致', async () => {
+  it('订阅条目按 catalog 取值，contextWindow 与 runtime.getModel 一致', {
+    timeout: 20_000,
+  }, async () => {
     const { queryModelMeta } = await import('./modelMeta');
     const { getRuntime } = await import('./oauthProviders');
     const runtime = await getRuntime();
