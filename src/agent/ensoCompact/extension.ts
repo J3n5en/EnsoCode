@@ -134,9 +134,7 @@ export function createEnsoCompactFactory(options: EnsoCompactOptions = {}) {
 
       const mode: CompactMode = options.mode ?? 'auto';
       const budget = BUDGETS[mode];
-      const summaryWindow = positiveWindow(
-        (model as { contextWindow?: unknown }).contextWindow
-      );
+      const summaryWindow = positiveWindow((model as { contextWindow?: unknown }).contextWindow);
       const singlePassMaxTokens = clampToModelWindow(budget.singlePassMaxTokens, summaryWindow);
       const maxChunkTokens = clampToModelWindow(budget.maxChunkTokens, summaryWindow);
       const previousSummary = preparation.previousSummary;
