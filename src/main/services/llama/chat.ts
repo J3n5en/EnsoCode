@@ -6,6 +6,7 @@ import {
   resolveChatModelSpec,
 } from './chatModels';
 import { withoutReasoning } from './chatWrapper';
+import { ModelIdleTimer } from './idle';
 import {
   acquireModel,
   type LlamaContextLike,
@@ -43,6 +44,21 @@ const DEFAULT_CONTEXT_SIZE = 8192;
  * 重叠推理会抢同一份 KV，所以进程内所有本地 Complete 共用这一把锁。
  */
 let queue: Promise<unknown> = Promise.resolve();
+let chatIdle = new ModelIdleTimer(() => releaseLocalChatSlot());
+
+let selectedChatModel = REMOTE_CHAT_MODEL_ID;
+
+export function syncLocalChatFromSettings(state: Record<string, unknown>): void {
+  chatIdle.configure(state.memoryModelIdleMinutes);
+  const id = chatModelIdFromSettings(state);
+  if (id === selectedChatModel) return;
+  selectedChatModel = id;
+  void releaseLocalChatSlot().catch(() => {});
+}
+
+export function holdLocalChat(): () => void {
+  return chatIdle.acquire();
+}
 
 function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   const run = queue.then(fn, fn);
@@ -87,10 +103,6 @@ async function defaultCreateSession(
   modelPath: string,
   contextSize: number
 ): Promise<ChatSessionLike> {
-  if (cachedContext && cachedContext.path !== modelPath) {
-    await cachedContext.context.dispose().catch(() => {});
-    cachedContext = null;
-  }
   if (!cachedContext) {
     const context = await model.createContext({ contextSize });
     cachedContext = { path: modelPath, context, sequence: null };
@@ -117,6 +129,9 @@ async function defaultCreateSession(
 
 /** 仅供测试：丢掉缓存的 KV，避免跨用例串台 */
 export function __resetLocalChatForTest(): void {
+  selectedChatModel = REMOTE_CHAT_MODEL_ID;
+  chatIdle.reset();
+  chatIdle = new ModelIdleTimer(() => releaseLocalChatSlot());
   cachedContext = null;
   queue = Promise.resolve();
 }
@@ -126,13 +141,20 @@ export function __resetLocalChatForTest(): void {
  * 实测（2026-09-10，Metal，gemma-4-E2B Q4）：AbortSignal 在 decode 中第 12 chunk 触发后 31ms
  * prompt() 即拒绝，再等 2.5s 无新 chunk，下一次推理 286ms 起步——GPU 侧停了，不必再叠一层硬 dispose。
  */
-export async function releaseLocalChatSlot(): Promise<void> {
-  if (cachedContext) {
-    // sequence 随 context 一起释放，不单独 dispose（它是 context 的槽位）
-    await cachedContext.context.dispose().catch(() => {});
-    cachedContext = null;
-  }
-  await releaseModel('chat');
+export function releaseLocalChatSlot(): Promise<void> {
+  chatIdle.reset();
+  return enqueue(async () => {
+    await disposeChatContext();
+    await releaseModel('chat');
+    chatIdle.reset();
+  });
+}
+
+async function disposeChatContext(): Promise<void> {
+  if (!cachedContext) return;
+  const previous = cachedContext;
+  cachedContext = null;
+  await previous.context.dispose().catch(() => {});
 }
 
 export function createLocalComplete(
@@ -146,33 +168,37 @@ export function createLocalComplete(
     opts.createSession ??
     ((model, systemPrompt) => defaultCreateSession(model, systemPrompt, modelPath, contextSize));
 
-  return (systemPrompt, userText) =>
-    enqueue(async () => {
-      const ac = new AbortController();
-      const timedOut = new Error('local chat timed out');
-      const timer = setTimeout(() => ac.abort(timedOut), timeoutMs);
-      let session: ChatSessionLike | null = null;
-      try {
-        const model = await acquire('chat', modelPath);
-        session = await createSession(model, systemPrompt);
-        // signal 交给 llama.cpp 停 decode；race 防止 prompt 忽略 abort 时 JS 侧永久挂起
-        return await Promise.race([
-          session.prompt(userText, { signal: ac.signal }),
-          new Promise<string>((_, reject) => {
-            ac.signal.addEventListener('abort', () => {
-              reject(ac.signal.reason instanceof Error ? ac.signal.reason : timedOut);
-            });
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
+  return (systemPrompt, userText) => {
+    const release = chatIdle.acquire();
+    return new Promise<string>((resolve, reject) => {
+      void enqueue(async () => {
+        const ac = new AbortController();
+        const timedOut = new Error('local chat timed out');
+        const timer = setTimeout(() => {
+          ac.abort(timedOut);
+          reject(timedOut);
+        }, timeoutMs);
+        let session: ChatSessionLike | null = null;
         try {
-          session?.dispose();
-        } catch {
-          /* session 释放失败不能卡住下一轮 */
+          if (cachedContext && cachedContext.path !== modelPath) await disposeChatContext();
+          const model = await acquire('chat', modelPath);
+          ac.signal.throwIfAborted();
+          session = await createSession(model, systemPrompt);
+          ac.signal.throwIfAborted();
+          // 调用者超时不代表 native 已停；锁、session 和空闲计时都等真实推理 settle。
+          resolve(await session.prompt(userText, { signal: ac.signal }));
+        } catch (error) {
+          reject(error);
+        } finally {
+          clearTimeout(timer);
+          try {
+            session?.dispose();
+          } catch {}
+          release();
         }
-      }
+      });
     });
+  };
 }
 
 export async function memoryCompleteFromSettings(

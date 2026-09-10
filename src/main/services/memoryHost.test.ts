@@ -42,7 +42,7 @@ vi.mock('./chatModels', () => ({
   cancelChatModelDownload: vi.fn(() => false),
   deleteChatModel: vi.fn(() => false),
 }));
-vi.mock('./llama/runtime', () => ({ acquireModel: vi.fn() }));
+vi.mock('./llama/runtime', () => ({ acquireModel: vi.fn(), releaseModel: vi.fn(async () => {}) }));
 
 import {
   awaitMemoryDistill,

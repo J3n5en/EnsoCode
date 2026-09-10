@@ -34,4 +34,5 @@ export interface EmbeddingProvider {
   /** 每个输入对应一个向量；空输入 / 无可用 token 返回 null（调用方按「无向量」处理，不落零向量） */
   embed(texts: string[], kind: EmbedKind): Promise<(Float32Array | null)[]>;
   close?(): void | Promise<void>;
+  setIdleMinutes?(minutes: number): void;
 }

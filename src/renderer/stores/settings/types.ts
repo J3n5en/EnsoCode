@@ -125,6 +125,8 @@ export interface SettingsState {
   memoryEmbeddingModel: string;
   /** 本地模型未就绪时是否后台下载；设备本地，缺省关 */
   memoryEmbeddingAutoDownload: boolean;
+  /** 本地记忆模型空闲卸载分钟数；5/10/30，0 = 永不，缺省 10 */
+  memoryModelIdleMinutes: number;
   /** remote:* 模型使用哪个已配置 provider 的 baseUrl/apiKey；设备本地 */
   memoryEmbeddingRemoteProviderId: string | null;
   /** 会话结束后是否用 LLM 自动蒸馏长期记忆；缺省关（只想手动记忆的用户保持关闭） */
@@ -267,6 +269,7 @@ export interface SettingsState {
   setExploreFoldEnabled: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;
   setMemoryEmbeddingAutoDownload: (value: boolean) => void;
+  setMemoryModelIdleMinutes: (value: number) => void;
   setMemoryEmbeddingRemoteProviderId: (value: string | null) => void;
   setMemoryDistillEnabled: (value: boolean) => void;
   setMemoryKgEnabled: (value: boolean) => void;

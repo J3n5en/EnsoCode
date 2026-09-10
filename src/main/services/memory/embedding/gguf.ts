@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { LlamaModel } from 'node-llama-cpp';
-import { acquireModel, type LlamaModelLike } from '../../llama/runtime';
+import { acquireModel, type LlamaModelLike, releaseModel } from '../../llama/runtime';
 import type { EmbedKind } from '../types';
 import { withPrefix } from './prefix';
 import type { EmbeddingModelSpec, EmbeddingProvider } from './types';
@@ -29,15 +29,23 @@ export async function createGgufEmbeddingProvider(
   if (!cfg) throw new Error(`embedding: ${spec.id} has no gguf settings`);
 
   const modelPath = path.join(ctx.modelDir, cfg.file);
-  const acquire = ctx.acquire ?? ((p: string) => acquireModel('embedding', p));
-  const model = (await acquire(modelPath)) as unknown as Pick<
+  const acquire = ctx.acquire ?? ((p: string) => acquireModel('embedding', p, { retain: true }));
+  const ownedModel = await acquire(modelPath);
+  const release = () => (ctx.acquire ? Promise.resolve() : releaseModel('embedding', ownedModel));
+  const model = ownedModel as unknown as Pick<
     LlamaModel,
     'createEmbeddingContext' | 'trainContextSize' | 'tokenizer' | 'tokens' | 'vocabularyType'
   >;
 
   // embedding context 不公开实际长度；固定请求大小，避免按自适应前的上限计算预算。
   const contextSize = Math.min(cfg.maxTokens, model.trainContextSize);
-  const context = await model.createEmbeddingContext({ contextSize });
+  let context: Awaited<ReturnType<typeof model.createEmbeddingContext>>;
+  try {
+    context = await model.createEmbeddingContext({ contextSize });
+  } catch (error) {
+    await release();
+    throw error;
+  }
   // 与 node-llama-cpp getEmbeddingFor 的首尾补齐规则一致，仅使用公开模型元数据。
   const { tokens, vocabularyType } = model;
   const beginning =
@@ -78,6 +86,12 @@ export async function createGgufEmbeddingProvider(
       }
       return out;
     },
-    close: () => context.dispose(),
+    close: async () => {
+      try {
+        await context.dispose();
+      } finally {
+        await release();
+      }
+    },
   };
 }

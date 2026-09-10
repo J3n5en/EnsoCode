@@ -870,6 +870,9 @@ export const zhTranslations: Record<string, string> = {
   'Embedding provider': '嵌入服务商',
   'Credentials stay in the main process and are never sent to the renderer.':
     '凭证只留在主进程,不会下发到渲染层。',
+  'Unload automatically when idle': '空闲自动卸载',
+  'Release local model memory after this idle period. Models load automatically the next time they are needed.':
+    '空闲达到此时长后释放本地模型内存，下次需要时会自动加载。',
   'Download models automatically': '自动下载模型',
   'Off by default, so a model is only fetched when you press Download. While a model is missing, search degrades to full-text; existing memories are re-embedded once it arrives.':
     '默认关闭,模型只在你点「下载」时才获取。模型缺失期间检索降级为纯全文,模型就绪后已有记忆会自动补向量。',

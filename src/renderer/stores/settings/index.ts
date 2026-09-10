@@ -5,6 +5,10 @@ import {
   DEFAULT_MAX_ACTIVE_COWORKERS,
   normalizeMaxActiveCoworkers,
 } from '@shared/maxActiveCoworkers';
+import {
+  DEFAULT_MEMORY_MODEL_IDLE_MINUTES,
+  normalizeMemoryModelIdleMinutes,
+} from '@shared/memory/modelIdle';
 import { applyProjectGroupPatch } from '@shared/projectGroups';
 import { projectNameFromPath } from '@shared/projectName';
 import { applyIncomingProviders } from '@shared/providerIdentity';
@@ -133,6 +137,7 @@ const initialState = {
   smartCompactMode: 'auto' as import('@shared/smartCompactMode').SmartCompactMode,
   memoryEmbeddingModel: 'local:potion-multilingual-128M',
   memoryEmbeddingAutoDownload: false,
+  memoryModelIdleMinutes: DEFAULT_MEMORY_MODEL_IDLE_MINUTES,
   memoryEmbeddingRemoteProviderId: null as string | null,
   memoryDistillEnabled: false,
   memoryKgEnabled: false,
@@ -263,6 +268,8 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryEmbeddingModel: (memoryEmbeddingModel) => set({ memoryEmbeddingModel }),
       setMemoryEmbeddingAutoDownload: (memoryEmbeddingAutoDownload) =>
         set({ memoryEmbeddingAutoDownload }),
+      setMemoryModelIdleMinutes: (value) =>
+        set({ memoryModelIdleMinutes: normalizeMemoryModelIdleMinutes(value) }),
       setMemoryEmbeddingRemoteProviderId: (memoryEmbeddingRemoteProviderId) =>
         set({ memoryEmbeddingRemoteProviderId }),
       setMemoryDistillEnabled: (memoryDistillEnabled) => set({ memoryDistillEnabled }),
@@ -843,6 +850,10 @@ export const useSettingsStore = create<SettingsState>()(
           segments.some((id, i) => s.statusLineSegments[i] !== id)
         ) {
           useSettingsStore.setState({ statusLineSegments: segments });
+        }
+        const memoryModelIdleMinutes = normalizeMemoryModelIdleMinutes(s.memoryModelIdleMinutes);
+        if (memoryModelIdleMinutes !== s.memoryModelIdleMinutes) {
+          useSettingsStore.setState({ memoryModelIdleMinutes });
         }
         const maxActiveCoworkers = normalizeMaxActiveCoworkers(s.maxActiveCoworkers);
         if (maxActiveCoworkers !== s.maxActiveCoworkers) {

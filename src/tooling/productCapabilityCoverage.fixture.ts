@@ -42,6 +42,7 @@ export const SETTINGS_DATA_COVERAGE = {
   ),
   memoryEmbeddingModel: excluded('Memory embedding model choice is a desktop preference.'),
   memoryEmbeddingAutoDownload: excluded('Memory model download policy is a device preference.'),
+  memoryModelIdleMinutes: excluded('Memory model idle unloading policy is a device preference.'),
   memoryEmbeddingRemoteProviderId: excluded(
     'Memory remote embedding provider is a device-local reference.'
   ),
@@ -145,6 +146,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setMemoryEmbeddingModel: excluded('Memory embedding model choice is a desktop preference.'),
   setMemoryEmbeddingAutoDownload: excluded('Memory model download policy is a device preference.'),
+  setMemoryModelIdleMinutes: excluded('Memory model idle unloading policy is a device preference.'),
   setMemoryEmbeddingRemoteProviderId: excluded(
     'Memory remote embedding provider is a device-local reference.'
   ),

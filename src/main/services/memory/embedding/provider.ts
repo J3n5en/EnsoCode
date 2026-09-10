@@ -1,3 +1,4 @@
+import { ModelIdleTimer } from '../../llama/idle';
 import type { Embedder } from '../types';
 import { createGgufEmbeddingProvider } from './gguf';
 import { Model2VecModel } from './model2vec';
@@ -15,6 +16,7 @@ export interface CreateProviderContext {
   modelDir: string;
   /** remote:* 必供；由接线层从既有 ModelProvider 配置取出 */
   remote?: RemoteEmbeddingOptions;
+  idleMinutes?: number;
 }
 
 /**
@@ -22,6 +24,60 @@ export interface CreateProviderContext {
  * modelDir / remote 凭证由接线层注入，本模块不感知 electron。
  */
 export async function createEmbeddingProvider(
+  spec: EmbeddingModelSpec,
+  ctx: CreateProviderContext
+): Promise<EmbeddingProvider | null> {
+  if (spec.runtime === 'gguf' || spec.runtime === 'model2vec') {
+    const load = () => createRawProvider(spec, ctx);
+    let resource = await load();
+    const resolvedSpec = resource!.spec;
+    let queue: Promise<unknown> = Promise.resolve();
+    let closed = false;
+    let closing: Promise<void> | null = null;
+    const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+      const run = queue.then(task, task);
+      queue = run.then(
+        () => {},
+        () => {}
+      );
+      return run;
+    };
+    const unload = async () => {
+      const previous = resource;
+      resource = null;
+      await previous?.close?.();
+    };
+    const idle = new ModelIdleTimer(() => enqueue(unload));
+    idle.configure(ctx.idleMinutes);
+    idle.touch();
+    return {
+      spec: resolvedSpec,
+      setIdleMinutes: (minutes) => idle.configure(minutes),
+      embed: (texts, kind) => {
+        if (closed) return Promise.reject(new Error('embedding provider is closed'));
+        const release = idle.acquire();
+        return enqueue(async () => {
+          try {
+            resource ??= await load();
+            return await resource!.embed(texts, kind);
+          } finally {
+            release();
+            if (closed) idle.reset();
+          }
+        });
+      },
+      close: () => {
+        closed = true;
+        idle.reset();
+        closing ??= enqueue(unload);
+        return closing;
+      },
+    };
+  }
+  return createRawProvider(spec, ctx);
+}
+
+async function createRawProvider(
   spec: EmbeddingModelSpec,
   ctx: CreateProviderContext
 ): Promise<EmbeddingProvider | null> {

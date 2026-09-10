@@ -74,6 +74,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     mode: 'excluded',
     reason: 'device policy for a multi-hundred-MB model download',
   },
+  memoryModelIdleMinutes: { mode: 'excluded', reason: 'device-local model residency policy' },
   memoryEmbeddingRemoteProviderId: {
     mode: 'excluded',
     reason: 'references a device-local provider record id',

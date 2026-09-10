@@ -38,7 +38,15 @@ function model(overrides: Partial<EmbeddingModelDto> = {}): EmbeddingModelDto {
   };
 }
 
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/i18n', async () => {
+  const { translate } = await import('@shared/i18n');
+  return {
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, string | number>) =>
+        translate(harness.state.language === 'zh' ? 'zh' : 'en', key, params),
+    }),
+  };
+});
 
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -52,6 +60,8 @@ function setState(overrides: Record<string, unknown> = {}) {
     providers: [{ id: 'p1', name: 'Provider One' }],
     memoryEmbeddingModel: 'local:potion-multilingual-128M',
     setMemoryEmbeddingModel: vi.fn(),
+    memoryModelIdleMinutes: 10,
+    setMemoryModelIdleMinutes: vi.fn(),
     memoryEmbeddingAutoDownload: false,
     setMemoryEmbeddingAutoDownload: vi.fn(),
     memoryEmbeddingRemoteProviderId: null,
@@ -212,6 +222,30 @@ describe('groupSessionsByProject', () => {
 });
 
 describe('MemorySettings', () => {
+  it.each([
+    [5, '5 min', '5 分钟'],
+    [10, '10 min', '10 分钟'],
+    [30, '30 min', '30 分钟'],
+    [0, 'Never', '永不'],
+  ])('空闲卸载 %i 的选中值显示中英文标签而非原始数字', (minutes, en, zh) => {
+    setState({ memoryModelIdleMinutes: minutes });
+    expect(renderToStaticMarkup(createElement(MemorySettings))).toContain(`>${en}</span>`);
+    setState({ memoryModelIdleMinutes: minutes, language: 'zh' });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain(`>${zh}</span>`);
+    expect(html).toContain('空闲自动卸载');
+    expect(html).toContain('空闲达到此时长后释放本地模型内存，下次需要时会自动加载。');
+  });
+
+  it('显示空闲自动卸载和下次自动加载的说明', () => {
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('data-settings-row="memory.modelIdleMinutes"');
+    expect(html).toContain('Unload automatically when idle');
+    expect(html).toContain(
+      'Release local model memory after this idle period. Models load automatically the next time they are needed.'
+    );
+  });
+
   it('does not carry its own enable switch', () => {
     // 这一页本身只在 memory 工具启用后才出现（见 settingsCategories）。
     // 页内再放一个「关闭我自己」的开关，点下去整页消失，旁边的说明也永远看不到。

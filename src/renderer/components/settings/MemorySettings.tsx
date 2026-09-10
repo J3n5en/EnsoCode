@@ -6,6 +6,7 @@ import type {
   MemoryJobsSnapshot,
   MemoryStats,
 } from '@shared/memory/dto';
+import { MEMORY_MODEL_IDLE_MINUTES } from '@shared/memory/modelIdle';
 import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
@@ -191,6 +192,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const setEmbeddingModel = useSettingsStore((state) => state.setMemoryEmbeddingModel);
   const autoDownload = useSettingsStore((state) => state.memoryEmbeddingAutoDownload);
   const setAutoDownload = useSettingsStore((state) => state.setMemoryEmbeddingAutoDownload);
+  const modelIdleMinutes = useSettingsStore((state) => state.memoryModelIdleMinutes);
+  const setModelIdleMinutes = useSettingsStore((state) => state.setMemoryModelIdleMinutes);
   const remoteProviderId = useSettingsStore((state) => state.memoryEmbeddingRemoteProviderId);
   const setRemoteProviderId = useSettingsStore((state) => state.setMemoryEmbeddingRemoteProviderId);
   const distillEnabled = useSettingsStore((state) => state.memoryDistillEnabled);
@@ -352,6 +355,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     value: provider.id,
     label: provider.name,
   }));
+  const modelIdleItems = MEMORY_MODEL_IDLE_MINUTES.map((minutes) => ({
+    value: String(minutes),
+    label: minutes === 0 ? t('Never') : t('{{count}} min', { count: minutes }),
+  }));
   const languageItems = [
     { value: 'en', label: t('English') },
     { value: 'zh', label: t('Simplified Chinese') },
@@ -374,6 +381,39 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             在这里再放一个「关闭我自己」的开关，点下去整页消失，说明文字也永远看不到 */}
         <p className="text-muted-foreground text-xs">{t('Turn memory off in Built-in tools.')}</p>
       </section>
+
+      <div
+        className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+        data-settings-row="memory.modelIdleMinutes"
+      >
+        <div className="min-w-0">
+          <p className="text-sm">{t('Unload automatically when idle')}</p>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Release local model memory after this idle period. Models load automatically the next time they are needed.'
+            )}
+          </p>
+        </div>
+        <Select
+          value={String(modelIdleMinutes)}
+          items={modelIdleItems}
+          onValueChange={(value) => {
+            if (value !== null) setModelIdleMinutes(Number(value));
+          }}
+          disabled={!memoryEnabled}
+        >
+          <SelectTrigger className="w-56 shrink-0" aria-label={t('Unload automatically when idle')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {modelIdleItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium">{t('Embedding model')}</h3>

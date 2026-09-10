@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
+import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import type { MemoryOp } from '@shared/types/agent';
 import { hasProviderCredentials, type ModelProvider } from '@shared/types/llm';
 import type Database from 'better-sqlite3';
 import { app } from 'electron';
+import { holdLocalChat, syncLocalChatFromSettings } from './llama/chat';
 import { executeMemoryOp } from './memory/bridge';
 import { openMemoryDb } from './memory/db';
 import {
@@ -62,23 +64,23 @@ let download: Promise<void> | null = null;
 let providerInit: Promise<Embedder | null> | null = null;
 let embeddingGeneration = 0;
 let embeddingClose: Promise<void> = Promise.resolve();
+let memoryModelIdleMinutes = 10;
 
 function invalidateMemoryEmbedding(): void {
   embeddingGeneration += 1;
   reembedAbort?.abort();
   const previous = provider;
+  const previousInit = providerInit;
+  const previousClose = embeddingClose;
   provider = null;
   embedder = null;
   providerInit = null;
   download = null;
   lastEmbeddingError = null;
-  embeddingClose = (async () => {
-    try {
-      await previous?.close?.();
-    } catch {
-      /* 切换模型 / 退出都不能被 close 卡住 */
-    }
+  const closing = (async () => {
+    await previous?.close?.();
   })();
+  embeddingClose = Promise.allSettled([previousClose, previousInit, closing]).then(() => {});
 }
 
 export function awaitMemoryEmbeddingClose(): Promise<void> {
@@ -97,6 +99,9 @@ export function configureMemoryEmbedding(next: Partial<MemoryEmbeddingConfig>): 
 
 /** settings.json 的 state 按 unknown 收窄；非法 id 回默认模型，按实际凭证去重（API key 不离开 Main） */
 export function syncMemoryEmbeddingFromSettings(state: Record<string, unknown>): void {
+  memoryModelIdleMinutes = normalizeMemoryModelIdleMinutes(state.memoryModelIdleMinutes);
+  syncLocalChatFromSettings({ ...state, memoryModelIdleMinutes });
+  provider?.setIdleMinutes?.(memoryModelIdleMinutes);
   const rawModel = state.memoryEmbeddingModel;
   const modelId =
     typeof rawModel === 'string' && resolveEmbeddingModelSpec(rawModel)
@@ -151,7 +156,11 @@ function memoryDb(): Database.Database {
  */
 let llmJobRun: Promise<void> = Promise.resolve();
 const enqueueLlmJob = (task: () => Promise<void>): Promise<void> => {
-  const run = llmJobRun.then(task).catch(() => {});
+  const release = holdLocalChat();
+  const run = llmJobRun
+    .then(task)
+    .catch(() => {})
+    .finally(release);
   llmJobRun = run;
   return run;
 };
@@ -541,12 +550,17 @@ async function memoryEmbedder(): Promise<Embedder | null> {
     }
     return null;
   }
-  const init = createEmbeddingProvider(spec, { modelDir: dir, remote: remoteOptions(spec) })
-    .then((p) => {
+  const init = createEmbeddingProvider(spec, {
+    modelDir: dir,
+    remote: remoteOptions(spec),
+    idleMinutes: memoryModelIdleMinutes,
+  })
+    .then(async (p) => {
       if (generation !== embeddingGeneration) {
-        p?.close?.();
+        await p?.close?.();
         return null;
       }
+      p?.setIdleMinutes?.(memoryModelIdleMinutes);
       provider = p;
       embedder = p ? toEmbedder(p) : null;
       lastEmbeddingError = p ? null : 'embedding provider could not be created';

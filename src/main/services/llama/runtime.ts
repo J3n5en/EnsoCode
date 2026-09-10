@@ -92,6 +92,23 @@ interface SlotState {
 }
 
 const slots = new Map<ModelSlot, SlotState>();
+const slotQueues = new Map<ModelSlot, Promise<unknown>>();
+const retained = new Map<LlamaModelLike, number>();
+let disposal: Promise<void> | null = null;
+let ownersReleased: (() => void) | null = null;
+
+function inSlot<T>(slot: ModelSlot, task: () => Promise<T>): Promise<T> {
+  const run = (slotQueues.get(slot) ?? Promise.resolve()).then(task, task);
+  const settled = run.then(
+    () => {},
+    () => {}
+  );
+  slotQueues.set(slot, settled);
+  void settled.then(() => {
+    if (slotQueues.get(slot) === settled) slotQueues.delete(slot);
+  });
+  return run;
+}
 
 /**
  * 取指定槽的模型；路径变化时释放旧模型再加载新的。
@@ -100,57 +117,97 @@ const slots = new Map<ModelSlot, SlotState>();
 export async function acquireModel(
   slot: ModelSlot,
   modelPath: string,
-  opts: { gpuLayers?: number | 'auto' | 'max'; loadLlamaImpl?: () => Promise<LlamaLike> } = {}
+  opts: {
+    gpuLayers?: number | 'auto' | 'max';
+    loadLlamaImpl?: () => Promise<LlamaLike>;
+    retain?: boolean;
+  } = {}
 ): Promise<LlamaModelLike> {
-  const current = slots.get(slot);
-  if (current?.path === modelPath) return current.model;
-  if (current) {
-    slots.delete(slot);
-    await current.model.dispose().catch(() => {});
-  }
-  const llama = await (opts.loadLlamaImpl ?? loadLlama)();
-  const model = await llama.loadModel({ modelPath, gpuLayers: opts.gpuLayers ?? 'auto' });
-  slots.set(slot, { path: modelPath, model });
-  return model;
+  if (disposal) throw new Error('llama runtime is closing');
+  return inSlot(slot, async () => {
+    const current = slots.get(slot);
+    let model = current?.path === modelPath ? current.model : null;
+    if (!model) {
+      if (current) {
+        slots.delete(slot);
+        if (!retained.has(current.model)) await current.model.dispose().catch(() => {});
+      }
+      const llama = await (opts.loadLlamaImpl ?? loadLlama)();
+      model = await llama.loadModel({ modelPath, gpuLayers: opts.gpuLayers ?? 'auto' });
+      slots.set(slot, { path: modelPath, model });
+    }
+    if (opts.retain) retained.set(model, (retained.get(model) ?? 0) + 1);
+    return model;
+  });
 }
 
-/** 释放某个槽；退出或切换模型时调用 */
-export async function releaseModel(slot: ModelSlot): Promise<void> {
-  const current = slots.get(slot);
-  if (!current) return;
-  slots.delete(slot);
-  await current.model.dispose().catch(() => {});
+export async function releaseModel(slot: ModelSlot, expected?: LlamaModelLike): Promise<void> {
+  return inSlot(slot, async () => {
+    const current = slots.get(slot);
+    const model = expected ?? current?.model;
+    if (!model) return;
+    if (expected) {
+      const count = retained.get(model);
+      if (count === undefined) return;
+      if (count > 1) {
+        retained.set(model, count - 1);
+        return;
+      }
+      retained.delete(model);
+    } else if (retained.has(model)) {
+      // provider 仍持有 context，由最后一个 owner 的身份释放收尾。
+      return;
+    }
+    if (current?.model === model) slots.delete(slot);
+    await model.dispose().catch(() => {});
+    if (retained.size === 0) ownersReleased?.();
+  });
 }
 
 export async function releaseAllModels(): Promise<void> {
-  await Promise.all([...slots.keys()].map(releaseModel));
+  await Promise.all((['embedding', 'chat'] as const).map((slot) => releaseModel(slot)));
 }
 
 export function llamaRuntimeActive(): boolean {
-  return llamaPromise !== null || slots.size > 0;
+  return llamaPromise !== null || slots.size > 0 || slotQueues.size > 0;
 }
 
 /**
  * 先放模型槽再 dispose Llama 单例。
  * 必须在 will-quit 里 await：N-API AsyncWorker 在 FreeEnvironment 期间 OnWorkComplete 会 SIGABRT。
  */
-export async function disposeLlamaRuntime(): Promise<void> {
-  const loading = llamaPromise;
-  llamaPromise = null;
-  await releaseAllModels();
-  if (!loading) return;
-  try {
-    const llama = await loading;
-    await llama.dispose?.();
-  } catch {
-    /* 加载失败或 dispose 抛错都不能挡住退出 */
-  }
+export function disposeLlamaRuntime(): Promise<void> {
+  disposal ??= (async () => {
+    await releaseAllModels();
+    if (retained.size > 0) {
+      await new Promise<void>((resolve) => {
+        ownersReleased = resolve;
+      });
+      ownersReleased = null;
+      await releaseAllModels();
+    }
+    // 已接收的排队加载也可能创建 Llama，必须在 drain 后取快照。
+    const loading = llamaPromise;
+    llamaPromise = null;
+    if (!loading) return;
+    try {
+      const llama = await loading;
+      await llama.dispose?.();
+    } catch {
+      /* 加载失败或 dispose 抛错都不能挡住退出 */
+    }
+  })();
+  return disposal;
 }
 
 /** 仅供测试：重置单例与槽位 */
 export function __resetLlamaForTest(): void {
   llamaPromise = null;
   slots.clear();
+  retained.clear();
+  slotQueues.clear();
+  disposal = null;
+  ownersReleased = null;
 }
 
 /** 仅供测试：跳过 getLlama，直接挂上已有实例 */
