@@ -146,6 +146,8 @@ export interface SearchOptions {
   /** 何时写入系统（滤 created_at） */
   recordedDateFrom?: string | null;
   recordedDateTo?: string | null;
+  /** fast = 等权三通道（缺省）；deep = 按查询意图加权 RRF。都不改写查询、不调 instruct LLM。 */
+  mode?: 'fast' | 'deep';
   /** 最终排序后、截 limit 前用 MMR（λ=MMR_LAMBDA）去冗余；默认开（生产路径 bridge.ts 也显式传 true）。
    * 取舍：开启后页内顺序是贪心重排结果，不再是「分数 → RRF → updated_at → id」稳定排序；
    * 需要严格稳定排序的调用方传 false。无向量时 MMR 恒等，不影响排序。

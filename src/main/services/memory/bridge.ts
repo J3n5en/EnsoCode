@@ -56,6 +56,7 @@ export async function executeMemoryOp(
       limit: request.limit,
       embedder: ctx.embedder,
       now: ctx.now,
+      mode: request.mode,
       // agent 检索启用 MMR 去冗余；显式写出来，默认值变化不会静默关掉它
       mmr: true,
       eventDateFrom: request.eventDateFrom ?? null,

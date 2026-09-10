@@ -1,8 +1,9 @@
-import { CRYSTAL_BOOST, MMR_LAMBDA } from '@shared/memory/constants';
+import { CRYSTAL_BOOST, MMR_LAMBDA, RRF_K } from '@shared/memory/constants';
 import { computeDecayScore } from '@shared/memory/decay';
 import { normalizeEntityName } from '@shared/memory/entityNormalize';
 import { mmrRerank } from '@shared/memory/mmr';
 import { finalScore, minMaxNormalize, rrf } from '@shared/memory/rrf';
+import { channelWeights, detectSearchIntent } from '@shared/memory/searchIntent';
 import { expandTemporalRange, normalizeTemporalDate } from '@shared/memory/temporal';
 import { computeTemporalBoost, detectTemporalIntent } from '@shared/memory/temporalIntent';
 import type Database from 'better-sqlite3';
@@ -232,7 +233,7 @@ function loadVectors(
 }
 
 // 多通道并发（单通道失败只记日志）→ 融合去重 → decay 混分 → 排序 → appearances+1（best-effort）。
-// 融合用 RRF(k=60)，混分见 finalScore。
+// 融合用 RRF(k=60)；deep 才按查询意图加权，fast / 缺省等权。混分见 finalScore。
 export async function searchMemories(
   db: Database.Database,
   opts: SearchOptions
@@ -259,7 +260,8 @@ export async function searchMemories(
       .catch(() => [] as string[]),
   ]);
 
-  const fused = rrf([ftsIds, vecIds, entityIds]).slice(0, rerankPoolSize(limit));
+  const weights = opts.mode === 'deep' ? channelWeights(detectSearchIntent(q)) : undefined;
+  const fused = rrf([ftsIds, vecIds, entityIds], RRF_K, weights).slice(0, rerankPoolSize(limit));
   if (fused.length === 0) return [];
 
   const placeholders = fused.map(() => '?').join(',');

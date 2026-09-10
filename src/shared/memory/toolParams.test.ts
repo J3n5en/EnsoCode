@@ -15,11 +15,28 @@ describe('normalizeMemorySearchParams', () => {
       query: 'pg',
       limit: 10,
       spaceId: 'all',
+      mode: 'fast',
     });
     expect(normalizeMemorySearchParams({ query: 'pg', limit: '3', spaceId: 'global' })).toEqual({
       query: 'pg',
       limit: 3,
       spaceId: 'global',
+      mode: 'fast',
+    });
+  });
+
+  it('缺省 mode=fast；deep 原样保留；非法值回退 fast', () => {
+    expect(normalizeMemorySearchParams({ query: 'pg', mode: 'deep' })).toEqual({
+      query: 'pg',
+      limit: 10,
+      spaceId: 'all',
+      mode: 'deep',
+    });
+    expect(normalizeMemorySearchParams({ query: 'pg', mode: 'DEEP' })).toMatchObject({
+      mode: 'deep',
+    });
+    expect(normalizeMemorySearchParams({ query: 'pg', mode: 'hyde' })).toMatchObject({
+      mode: 'fast',
     });
   });
 
@@ -28,6 +45,7 @@ describe('normalizeMemorySearchParams', () => {
       query: 'x',
       limit: 10,
       spaceId: 'all',
+      mode: 'fast',
     });
     expect(normalizeMemorySearchParams({ query: 'x', limit: 999 })).toMatchObject({ limit: 50 });
     expect(normalizeMemorySearchParams({ query: 'x', limit: 0 })).toMatchObject({ limit: 1 });
@@ -38,6 +56,7 @@ describe('normalizeMemorySearchParams', () => {
       query: 'a',
       limit: 10,
       spaceId: 'all',
+      mode: 'fast',
     });
     expect(normalizeMemorySearchParams(null)).toBeNull();
     expect(normalizeMemorySearchParams('plain')).toBe('plain');
@@ -57,6 +76,7 @@ describe('search 双时间参数', () => {
       query: 'x',
       limit: 10,
       spaceId: 'all',
+      mode: 'fast',
       eventDateFrom: '2020',
       recordedDateFrom: '2021-01',
     });
@@ -64,15 +84,24 @@ describe('search 双时间参数', () => {
       query: 'x',
       limit: 10,
       spaceId: 'all',
+      mode: 'fast',
     });
   });
 
   it('收窄：日期键必须是字符串；接受只带 event 或只带 recorded 的形状', () => {
-    const base = { query: 'x', limit: 10, spaceId: 'all' };
+    const base = { query: 'x', limit: 10, spaceId: 'all', mode: 'fast' as const };
     expect(
-      parseMemorySearchRequest({ ...base, eventDateFrom: '2020', eventDateTo: '2021' })
+      parseMemorySearchRequest({
+        query: 'x',
+        limit: 10,
+        spaceId: 'all',
+        eventDateFrom: '2020',
+        eventDateTo: '2021',
+      })
     ).toEqual({ ...base, eventDateFrom: '2020', eventDateTo: '2021' });
-    expect(parseMemorySearchRequest({ ...base, recordedDateTo: '2021-06' })).toEqual({
+    expect(
+      parseMemorySearchRequest({ query: 'x', limit: 10, spaceId: 'all', recordedDateTo: '2021-06' })
+    ).toEqual({
       ...base,
       recordedDateTo: '2021-06',
     });
@@ -160,7 +189,19 @@ describe('parse*Request（Main 侧 unknown 收窄）', () => {
       query: 'q',
       limit: 5,
       spaceId: 'project',
+      mode: 'fast',
     });
+    expect(
+      parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'all', mode: 'deep' })
+    ).toEqual({
+      query: 'q',
+      limit: 5,
+      spaceId: 'all',
+      mode: 'deep',
+    });
+    expect(
+      parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'all', mode: 'hyde' })
+    ).toBeNull();
     expect(parseMemorySearchRequest({ query: '', limit: 5, spaceId: 'all' })).toBeNull();
     expect(parseMemorySearchRequest({ query: 'q', limit: 5 })).toBeNull();
     expect(parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'all', x: 1 })).toBeNull();

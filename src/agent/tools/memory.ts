@@ -5,6 +5,7 @@ import { CRYSTAL_MIN_SOURCES, EVOLVES_RELATIONS, UNIT_TYPES } from '@shared/memo
 import {
   MEMORY_CAPTURE_SPACES,
   MEMORY_SEARCH_MAX_LIMIT,
+  MEMORY_SEARCH_MODES,
   MEMORY_SEARCH_SPACES,
   normalizeMemoryCaptureParams,
   normalizeMemoryCrystallizeParams,
@@ -167,7 +168,10 @@ export function createMemoryTools(
         'returns nothing relevant costs a round trip. Results are ranked by relevance and recency; only the latest ' +
         'version of each memory is returned. Two independent time filters exist: eventDate* filters by ' +
         'WHEN THE EVENT HAPPENED (e.g. "the 2020 migration"), recordedDate* filters by WHEN THE MEMORY ' +
-        'WAS SAVED (e.g. "what did we note last month"). Use one family per call, never both.' +
+        'WAS SAVED (e.g. "what did we note last month"). Use one family per call, never both. ' +
+        'mode=fast (default) is vector + full-text + entity graph with equal fusion weights and no extra LLM. ' +
+        'mode=deep uses the same recall channels but reweights fusion by query intent (keyword vs conceptual vs relationship); ' +
+        'it does not rewrite the query and does not use HyDE. Skip deep for named-thing lookups.' +
         languageHint(opts.language),
       schema(
         {
@@ -203,6 +207,12 @@ export function createMemoryTools(
             type: 'string',
             description:
               'Latest date the memory was saved (inclusive). Cannot be combined with eventDate*',
+          },
+          mode: {
+            type: 'string',
+            enum: [...MEMORY_SEARCH_MODES],
+            description:
+              "'fast' (default) = equal-weight vector/FTS/entity, no extra LLM; 'deep' = same recall, intent-weighted fusion",
           },
         },
         ['query']

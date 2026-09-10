@@ -72,9 +72,15 @@ describe('createMemoryTools', () => {
       for (const prop of Object.values(schema.properties)) expect(prop.type).toBeDefined();
       expect(tool.description).toMatch(/when/i);
     }
-    const search = tools[0].parameters as unknown as { required: string[] };
+    const search = tools[0].parameters as unknown as {
+      required: string[];
+      properties: { mode: { type: string; enum: string[] } };
+    };
     const capture = tools[1].parameters as unknown as { required: string[] };
     expect(search.required).toEqual(['query']);
+    expect(search.properties.mode).toMatchObject({ type: 'string', enum: ['fast', 'deep'] });
+    expect(tools[0].description).toMatch(/mode=fast/);
+    expect(tools[0].description).toMatch(/mode=deep/);
     expect(capture.required).toEqual(['content']);
     const crystallize = tools[2].parameters as unknown as {
       required: string[];
@@ -115,6 +121,8 @@ describe('createMemoryTools', () => {
         { query: 'pg', limit: '5', spaceId: 'global' },
         { query: 'pg', eventDateFrom: '2020', eventDateTo: ' 2021-03 ' },
         { query: 'pg', recordedDateFrom: '2024-01-01', recordedDateTo: '' },
+        { query: 'pg', mode: 'deep' },
+        { query: 'pg', mode: 'FAST' },
       ],
       memory_capture: [
         { content: 'c' },
@@ -147,7 +155,12 @@ describe('createMemoryTools', () => {
     const tools = createMemoryTools(new MemoryInvoker(identity, () => {}));
     const prep = (i: number, args: unknown) =>
       (tools[i].prepareArguments as unknown as (a: unknown) => unknown)(args);
-    expect(prep(0, { query: 'pg', limit: '5' })).toEqual({ query: 'pg', limit: 5, spaceId: 'all' });
+    expect(prep(0, { query: 'pg', limit: '5' })).toEqual({
+      query: 'pg',
+      limit: 5,
+      spaceId: 'all',
+      mode: 'fast',
+    });
     expect(prep(1, '{"content":"c","unitType":" Vibe "}')).toEqual({
       content: 'c',
       unitType: 'vibe',

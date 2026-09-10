@@ -566,6 +566,27 @@ describe('searchMemories — 实体通道（三通道并集）', () => {
   });
 });
 
+describe('searchMemories — mode fast vs deep', () => {
+  it('fast 等权 RRF 保持 FTS 优先；deep 关系问句抬实体通道', async () => {
+    // 先写实体-only，再写 FTS-only：等权时 min-max 拉平 RRF，updated_at 让较新的字面命中排前。
+    const paraphrase = await add('集群编排方案确定，后续按此推进');
+    applyExtraction(db, paraphrase, {
+      entities: [
+        { name: 'Postgres', type: 'PRODUCT', description: null, confidence: 0.9, aliases: [] },
+      ],
+      relations: [],
+    });
+    const literal = await add('We chose Postgres as the primary database');
+    const q = 'how Postgres relates to the database choice';
+    const fast = ids(await searchMemories(db, { q, spaceIds: ['global'] }));
+    const deep = ids(await searchMemories(db, { q, spaceIds: ['global'], mode: 'deep' }));
+    expect(fast[0]).toBe(literal.id);
+    expect(deep[0]).toBe(paraphrase.id);
+    expect(new Set(fast)).toEqual(new Set([literal.id, paraphrase.id]));
+    expect(new Set(deep)).toEqual(new Set([literal.id, paraphrase.id]));
+  });
+});
+
 describe('searchMemories — decay 在候选池上生效', () => {
   // 12 条都命中 LIKE 通道（2 字查询），RRF 名次 = updated_at 倒序：#11 rank1、#10 rank2、#9 rank3。
   // 全部 importance=0、200 天未访问 → decay 落到 floor 0.3；只把 rank3 提成「刚访问 + 访问 100 次」→ decay 1.0。

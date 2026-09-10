@@ -12,8 +12,10 @@ import {
 /** 模型侧只说 space 语义，不持有 Project.id；`project` 由 Main 按会话权威解析成 `proj:<id>`。 */
 export const MEMORY_SEARCH_SPACES = ['all', 'global', 'project'] as const;
 export const MEMORY_CAPTURE_SPACES = ['global', 'project'] as const;
+export const MEMORY_SEARCH_MODES = ['fast', 'deep'] as const;
 export type MemorySearchSpace = (typeof MEMORY_SEARCH_SPACES)[number];
 export type MemoryCaptureSpace = (typeof MEMORY_CAPTURE_SPACES)[number];
+export type MemorySearchMode = (typeof MEMORY_SEARCH_MODES)[number];
 
 export const MEMORY_SEARCH_DEFAULT_LIMIT = 10;
 export const MEMORY_SEARCH_MAX_LIMIT = 50;
@@ -31,6 +33,8 @@ export interface MemorySearchRequest extends Partial<Record<MemorySearchDateKey,
   query: string;
   limit: number;
   spaceId: MemorySearchSpace;
+  /** fast = 等权三通道，不调 LLM；deep = 按查询意图换融合权重。缺省 fast */
+  mode: MemorySearchMode;
 }
 
 /** Main 侧收窄后的结果：unitType 已落到闭集，unitTypeSource 是派生信息，不出现在工具参数里 */
@@ -94,6 +98,7 @@ export function normalizeMemorySearchParams(raw: unknown): unknown {
   if (!record) return raw;
   const limit = asNumber(record.limit);
   const space = typeof record.spaceId === 'string' ? record.spaceId.trim() : '';
+  const mode = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : '';
   const dates: Partial<Record<MemorySearchDateKey, string>> = {};
   for (const key of MEMORY_SEARCH_DATE_KEYS) {
     const v = optionalText(record[key]);
@@ -106,6 +111,9 @@ export function normalizeMemorySearchParams(raw: unknown): unknown {
         ? MEMORY_SEARCH_DEFAULT_LIMIT
         : Math.min(MEMORY_SEARCH_MAX_LIMIT, Math.max(1, Math.floor(limit))),
     spaceId: (MEMORY_SEARCH_SPACES as readonly string[]).includes(space) ? space : 'all',
+    mode: (MEMORY_SEARCH_MODES as readonly string[]).includes(mode)
+      ? (mode as MemorySearchMode)
+      : 'fast',
     ...dates,
   };
 }
@@ -190,7 +198,7 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
   if (
     !record ||
     typeof value === 'string' ||
-    !hasOnlyKeys(record, ['query', 'limit', 'spaceId', ...MEMORY_SEARCH_DATE_KEYS]) ||
+    !hasOnlyKeys(record, ['query', 'limit', 'spaceId', 'mode', ...MEMORY_SEARCH_DATE_KEYS]) ||
     typeof record.query !== 'string' ||
     !record.query.trim() ||
     typeof record.limit !== 'number' ||
@@ -198,6 +206,8 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
     record.limit < 1 ||
     record.limit > MEMORY_SEARCH_MAX_LIMIT ||
     !(MEMORY_SEARCH_SPACES as readonly unknown[]).includes(record.spaceId) ||
+    (record.mode !== undefined &&
+      !(MEMORY_SEARCH_MODES as readonly unknown[]).includes(record.mode)) ||
     MEMORY_SEARCH_DATE_KEYS.some(
       (k) => record[k] !== undefined && (typeof record[k] !== 'string' || !record[k].trim())
     )
@@ -208,6 +218,7 @@ export function parseMemorySearchRequest(value: unknown): MemorySearchRequest | 
     query: record.query,
     limit: record.limit,
     spaceId: record.spaceId as MemorySearchSpace,
+    mode: record.mode === 'deep' ? 'deep' : 'fast',
   };
   for (const k of MEMORY_SEARCH_DATE_KEYS) if (typeof record[k] === 'string') out[k] = record[k];
   return out;

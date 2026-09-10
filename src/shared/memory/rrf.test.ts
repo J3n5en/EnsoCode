@@ -43,6 +43,17 @@ describe('rrf', () => {
   it('respects a custom k', () => {
     expect(rrf([['a']], 1)).toEqual([['a', 0.5]]);
   });
+
+  it('scales each channel by optional weights', () => {
+    expect(rrf([['a'], ['b']], 60, [0.5, 2]).map(([id]) => id)).toEqual(['b', 'a']);
+    expect(rrf([['a'], ['b']], 60, [2, 1])[0]?.[0]).toBe('a');
+    expect(rrf([['a'], ['b']], 60, [2, 1])[0]?.[1]).toBeCloseTo(2 / 61, 12);
+  });
+
+  it('skips a channel when its weight is not positive', () => {
+    expect(rrf([['a'], ['b']], 60, [0, 1])).toEqual([['b', 1 / 61]]);
+    expect(rrf([['a'], ['b']], 60, [-1])).toEqual([['b', 1 / 61]]);
+  });
 });
 
 describe('finalScore', () => {

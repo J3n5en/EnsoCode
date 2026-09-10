@@ -2,16 +2,22 @@ import { DECAY_WEIGHT, RRF_K } from './constants';
 
 // RRF(k=60) 为本项目工程决定。每个通道先按 id 去重保留首次名次，
 // 缺失通道允许为空；同分时按首次出现顺序稳定。
-export function rrf(rankLists: readonly (readonly string[])[], k = RRF_K): [string, number][] {
+export function rrf(
+  rankLists: readonly (readonly string[])[],
+  k = RRF_K,
+  weights?: readonly number[]
+): [string, number][] {
   const scores = new Map<string, number>();
-  for (const list of rankLists) {
+  for (const [i, list] of rankLists.entries()) {
+    const weight = weights?.[i] ?? 1;
+    if (!(weight > 0)) continue;
     const seen = new Set<string>();
     let rank = 0;
     for (const id of list) {
       if (seen.has(id)) continue;
       seen.add(id);
       rank += 1;
-      scores.set(id, (scores.get(id) ?? 0) + 1 / (k + rank));
+      scores.set(id, (scores.get(id) ?? 0) + weight / (k + rank));
     }
   }
   return [...scores.entries()].sort((a, b) => b[1] - a[1]);
