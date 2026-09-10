@@ -132,6 +132,36 @@ describe.each([false, true])('edit 工具完整契约（Hashline=%s）', (hashli
     expect(tool.promptGuidelines?.join('\n')).toMatch(/Do not.*JSON string/s);
   });
 
+  it('描述中的单次与批量JSON示例可解析并通过本工具schema', () => {
+    const tool = toolFor('/tmp');
+    const examples = [
+      ...tool.description.matchAll(/(?:Single|Batch) replacement example: (\{[^\n]+\})/g),
+    ];
+    expect(examples).toHaveLength(2);
+    const [single, batch] = examples.map((match) => JSON.parse(match[1]));
+    expect(single).toMatchObject({ oldText: expect.any(String), newText: expect.any(String) });
+    expect(single).not.toHaveProperty('edits');
+    expect(single.oldText).toContain('\n');
+    expect(single.oldText).toContain('"');
+    expect(batch.edits).toHaveLength(2);
+    expect(batch).not.toHaveProperty('newText');
+    for (const args of [single, batch]) {
+      expect(matchesJsonSchema(tool.parameters as unknown as JsonSchema, args)).toBe(true);
+      const prepared = tool.prepareArguments?.(args);
+      expect(matchesJsonSchema(tool.parameters as unknown as JsonSchema, prepared)).toBe(true);
+    }
+  });
+
+  it('指南明确固定字段名和批量参数失败后的单次重试方式', () => {
+    const tool = toolFor('/tmp');
+    const guidelines = tool.promptGuidelines?.join('\n') ?? '';
+    expect(guidelines).toMatch(/literal keys "oldText" and "newText"/);
+    expect(guidelines).toMatch(/code.*values.*not.*keys/is);
+    expect(guidelines).toMatch(/fails argument validation.*single-replacement form/is);
+    const schema = tool.parameters as unknown as JsonSchema;
+    expect(schema.properties?.edits?.description).toMatch(/literal keys "oldText" and "newText"/);
+  });
+
   it('参数先归一再通过本工具schema，执行后文件内容正确', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'enso-edit-'));
     try {

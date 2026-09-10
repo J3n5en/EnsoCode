@@ -7,14 +7,32 @@ import {
 export const EDIT_REPLACE_GUIDELINE =
   'For a single replacement, send path + oldText + newText and omit edits. ' +
   'For multiple replacements, send path + edits as an actual array of objects, each with oldText and newText strings; omit top-level oldText/newText. ' +
-  'Do not encode edits as a JSON string or mix the single and batch forms.';
+  'Use the literal keys "oldText" and "newText"; put code in their string values, not in object keys. ' +
+  'Do not encode edits as a JSON string or mix the single and batch forms. ' +
+  'If a batch call fails argument validation, rebuild the arguments using the single-replacement form; do not resend or complete the broken edits string.';
+
+export const EDIT_REPLACE_EXAMPLES =
+  '\nSingle replacement example: ' +
+  JSON.stringify({
+    path: 'src/a.ts',
+    oldText: 'const label = "old";\n',
+    newText: 'const label = "new";\n',
+  }) +
+  '\nBatch replacement example: ' +
+  JSON.stringify({
+    path: 'src/a.ts',
+    edits: [
+      { oldText: 'const a = 1;', newText: 'const a = 2;' },
+      { oldText: 'const b = 3;', newText: 'const b = 4;' },
+    ],
+  });
 
 export const EDIT_REPLACE_PROPERTIES = {
   path: { type: 'string', description: 'Path to the file to edit (relative or absolute)' },
   edits: {
     type: 'array',
     description:
-      'Batch replacements: an actual array of objects, not a JSON string. Each oldText must be exact, unique and non-overlapping in the original file. Omit top-level oldText/newText.',
+      'Batch replacements: an actual array of objects, not a JSON string. Use the literal keys "oldText" and "newText" in every item. Each oldText must be exact, unique and non-overlapping in the original file. Keep newText inside its item; omit top-level oldText/newText.',
     items: {
       type: 'object',
       properties: {
@@ -154,7 +172,7 @@ export function createNormalizedEditTool(cwd: string, options?: EditToolOptions)
   const prepareBase = base.prepareArguments;
   return {
     ...base,
-    description: `${base.description} ${EDIT_REPLACE_GUIDELINE}`,
+    description: `${base.description} ${EDIT_REPLACE_GUIDELINE}${EDIT_REPLACE_EXAMPLES}`,
     promptGuidelines: [...(base.promptGuidelines ?? []), EDIT_REPLACE_GUIDELINE],
     parameters: {
       type: 'object',

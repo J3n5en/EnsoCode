@@ -1,4 +1,4 @@
-import { EDIT_REPLACE_GUIDELINE } from '../editTool';
+import { EDIT_REPLACE_EXAMPLES, EDIT_REPLACE_GUIDELINE } from '../editTool';
 
 export const HASHLINE_READ_GUIDELINES = [
   'When Hashline is on, read returns a [path#TAG] header followed by numbered lines. To edit that file with a hashline patch, put the header as the first line of the edit `input` string.',
@@ -17,7 +17,8 @@ export const HASHLINE_EDIT_DESCRIPTION =
   'Edit a single file in one of two mutually exclusive modes — never send both in one call. ' +
   '(1) Hashline: only `input`, a patch whose first line is the exact [path#TAG] header from the latest read/grep/write of that file, followed by one or more PUT blocks. ' +
   '(2) Replace: exact, unique text replacements. Use replace when you have no fresh tag. Mixed calls are rejected. ' +
-  EDIT_REPLACE_GUIDELINE;
+  EDIT_REPLACE_GUIDELINE +
+  EDIT_REPLACE_EXAMPLES;
 
 export const HASHLINE_EDIT_GUIDELINES = [
   'edit has two exclusive modes: hashline `input` (header line + PUT blocks) or replace `path` + `edits`. Do not put the [path#TAG] header in `input` and the change in `edits` — pick one mode. Sending both is rejected.',
