@@ -62,8 +62,6 @@ function setState(overrides: Record<string, unknown> = {}) {
     setMemoryDistillEnabled: vi.fn(),
     memoryKgEnabled: false,
     setMemoryKgEnabled: vi.fn(),
-    memoryWorkingFileEnabled: false,
-    setMemoryWorkingFileEnabled: vi.fn(),
     ...overrides,
   };
 }
@@ -233,7 +231,6 @@ describe('MemorySettings', () => {
     const html = renderToStaticMarkup(createElement(MemorySettings));
     expect(html).toContain('Distill sessions automatically');
     expect(html).toContain('Extract entities');
-    expect(html).toContain('Write working memory file');
     // 体积由模型清单那行动态显示；描述里不再硬编码某个数字（换模型就会对不上）
     expect(html).not.toContain('512MB');
     expect(html).toContain('only fetched when you press Download');

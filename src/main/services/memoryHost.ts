@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
-import { WM_REFRESH_DEBOUNCE_MS } from '@shared/memory/constants';
 import type { MemoryOp } from '@shared/types/agent';
 import { hasProviderCredentials, type ModelProvider } from '@shared/types/llm';
 import type Database from 'better-sqlite3';
@@ -32,7 +31,6 @@ import type { EmbeddingModelSpec, EmbeddingProvider } from './memory/embedding/t
 import { ensureKgJob, type KgJob, listKgJobs, listResumableKgJobs, runKgJob } from './memory/kg';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
 import { type Embedder, GLOBAL_SPACE, type Memory, projectSpaceId } from './memory/types';
-import { writeWorkingMemoryFile } from './memory/workingMemory';
 
 // electron 只出现在这层接线：services/memory/* 保持纯 Node 以便测试注入路径
 let db: Database.Database | null = null;
@@ -378,72 +376,9 @@ export function notifyMemoryChanged(): void {
 /** createMemory 的 onCreated hook：只排队，不在这里调 LLM；开关关闭时连任务都不建 */
 function onMemoryCreated(memory: Memory): void {
   notifyMemoryChanged();
-  scheduleWorkingMemoryRefresh();
   if (!kgConfig.enabled || !db) return;
   const job = ensureKgJob(db, memory.id);
   if (job) void enqueueLlmJob(() => runOneKg(job));
-}
-
-// ---------------------------------------------------------------------------
-// Working Memory 文件：userData/memory/working-memory.md。记忆新增后防抖重写，退出关库前 flush。
-// 失败一律吞掉：文件是可丢弃投影，绝不影响写路径。
-// ---------------------------------------------------------------------------
-
-export interface MemoryWorkingFileConfig {
-  /** 独立开关（设置 memoryWorkingFileEnabled），缺省关 */
-  enabled: boolean;
-  /** 防抖窗口；测试注入 0 */
-  debounceMs: number;
-}
-
-let wmConfig: MemoryWorkingFileConfig = { enabled: false, debounceMs: WM_REFRESH_DEBOUNCE_MS };
-let wmPending: { timer: NodeJS.Timeout; done: Promise<void>; fire: () => void } | null = null;
-
-export function configureMemoryWorkingFile(next: Partial<MemoryWorkingFileConfig>): void {
-  wmConfig = { ...wmConfig, ...next };
-}
-
-export function syncMemoryWorkingFileFromSettings(state: Record<string, unknown>): void {
-  configureMemoryWorkingFile({ enabled: state.memoryWorkingFileEnabled === true });
-}
-
-export function getWorkingMemoryPath(): string {
-  return path.join(memoryRoot(), 'working-memory.md');
-}
-
-// 窗口内的首次新增起计时，后续新增并入同一次重写；开关关 / 库未开时不建目录也不建文件
-function scheduleWorkingMemoryRefresh(): void {
-  if (!wmConfig.enabled || !db || wmPending) return;
-  let resolve!: () => void;
-  const done = new Promise<void>((r) => {
-    resolve = r;
-  });
-  const fire = () => {
-    if (wmPending?.fire !== fire) return;
-    clearTimeout(wmPending.timer);
-    wmPending = null;
-    refreshWorkingMemory();
-    resolve();
-  };
-  const timer = setTimeout(fire, wmConfig.debounceMs);
-  timer.unref?.();
-  wmPending = { timer, done, fire };
-}
-
-function refreshWorkingMemory(): void {
-  if (!db) return;
-  try {
-    // 接线层没有“当前项目”：多窗口可同时开多个项目，projectId 只在每次 invokeMemory 调用里。
-    // 文件因此只写 global space；项目 space 的纳入等待一个真实的“活动项目”信号，不用最近一次写入去猜。
-    writeWorkingMemoryFile(db, getWorkingMemoryPath(), { spaceIds: [GLOBAL_SPACE] });
-  } catch {
-    /* 可丢弃投影，失败不外溢 */
-  }
-}
-
-/** 等待当前待写的一轮落盘（测试用）；没有待写立即返回 */
-export async function awaitMemoryWorkingFile(): Promise<void> {
-  await wmPending?.done;
 }
 
 async function runOneKg(job: KgJob): Promise<void> {
@@ -639,8 +574,6 @@ function remoteOptions(spec: EmbeddingModelSpec): RemoteEmbeddingOptions | undef
 export function closeMemoryDb(): void {
   invalidateMemoryEmbedding();
   reembedAbort = null;
-  // 退出前把没到防抖时间的那轮重写补上（同步，库仍开着）
-  wmPending?.fire();
   db?.close();
   db = null;
 }

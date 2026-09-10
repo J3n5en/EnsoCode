@@ -29,8 +29,6 @@ describe('memory constants', () => {
     expect(c.DEDUP_MIN_CHARS).toBe(100);
     expect(c.EVOLVES_MIN_CONF).toBe(0.7);
     expect(c.CRYSTAL_MIN_SOURCES).toBe(3);
-    expect(c.WM_TARGET).toBe(3072);
-    expect(c.WM_MAX).toBe(4096);
   });
 
   it('isUnitType only accepts the closed set', () => {

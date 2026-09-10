@@ -81,8 +81,6 @@ export interface ConfigSyncState {
   memoryDistillEnabled?: boolean;
   /** 记忆创建后是否用 LLM 异步抽取实体图谱；缺省关 */
   memoryKgEnabled?: boolean;
-  /** 是否维护 userData/memory/working-memory.md 投影文件；缺省关 */
-  memoryWorkingFileEnabled?: boolean;
   defaultReasoningEnabled?: boolean;
   defaultThinkingLevel?: ThinkingLevel;
   defaultPresetId?: string;

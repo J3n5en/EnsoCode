@@ -80,7 +80,6 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   },
   memoryDistillEnabled: { mode: 'portable' },
   memoryKgEnabled: { mode: 'portable' },
-  memoryWorkingFileEnabled: { mode: 'portable' },
   autoUpdate: { mode: 'excluded', reason: 'device update policy' },
   proxyMode: { mode: 'excluded', reason: 'device network configuration' },
   customProxyUrl: { mode: 'excluded', reason: 'device network configuration may contain secrets' },

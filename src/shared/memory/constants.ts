@@ -153,8 +153,3 @@ export const KG_RELATION_TYPES = [
   'IMPLEMENTS',
 ] as const;
 export const KG_DEFAULT_RELATION_TYPE = 'RELATED_TO';
-
-export const WM_TARGET = 3072;
-export const WM_MAX = 4096;
-/** Working Memory 文件刷新防抖：一窗口内的多次写入合并为一次重写 */
-export const WM_REFRESH_DEBOUNCE_MS = 30_000;

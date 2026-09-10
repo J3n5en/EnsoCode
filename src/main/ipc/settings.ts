@@ -103,7 +103,6 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
   'memoryKgEnabled',
-  'memoryWorkingFileEnabled',
   'onboarded',
   'keybindings',
   'projects',
@@ -148,13 +147,11 @@ function notifyMemoryEmbeddingSettings(settings: Record<string, unknown>): void 
         syncMemoryEmbeddingFromSettings,
         syncMemoryDistillFromSettings,
         syncMemoryKgFromSettings,
-        syncMemoryWorkingFileFromSettings,
       }) => {
         const state = settingsStateOf(settings);
         syncMemoryEmbeddingFromSettings(state);
         syncMemoryDistillFromSettings(state);
         syncMemoryKgFromSettings(state);
-        syncMemoryWorkingFileFromSettings(state);
       }
     )
     .catch(() => {});

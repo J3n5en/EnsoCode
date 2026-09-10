@@ -47,7 +47,6 @@ export const SETTINGS_DATA_COVERAGE = {
   ),
   memoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
   memoryKgEnabled: excluded('Memory entity-graph extraction preference; not an Enso capability.'),
-  memoryWorkingFileEnabled: excluded('Memory working-file preference; not an Enso capability.'),
   bashInterceptEnabled: excluded(
     'Bash intercept is a desktop session preference, not an Enso capability.'
   ),
@@ -153,7 +152,6 @@ export const SETTINGS_ACTION_COVERAGE = {
   setMemoryKgEnabled: excluded(
     'Memory entity-graph extraction preference; not an Enso capability.'
   ),
-  setMemoryWorkingFileEnabled: excluded('Memory working-file preference; not an Enso capability.'),
   setBashInterceptEnabled: excluded(
     'Bash intercept is a desktop session preference, not an Enso capability.'
   ),

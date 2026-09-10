@@ -48,7 +48,6 @@ describe('config sync portable preference contract', () => {
       'memoryChatModel',
       'memoryDistillEnabled',
       'memoryKgEnabled',
-      'memoryWorkingFileEnabled',
       'openChangesOnFileEdit',
       'compactReadOnlyTools',
       'expandLiveEdits',

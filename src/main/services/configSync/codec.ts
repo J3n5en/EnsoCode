@@ -66,7 +66,6 @@ const STATE_KEYS = [
   'memoryEmbeddingModel',
   'memoryDistillEnabled',
   'memoryKgEnabled',
-  'memoryWorkingFileEnabled',
   'defaultReasoningEnabled',
   'defaultThinkingLevel',
   'defaultPresetId',
@@ -839,7 +838,6 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     'smartCompactEnabled',
     'memoryDistillEnabled',
     'memoryKgEnabled',
-    'memoryWorkingFileEnabled',
     'defaultReasoningEnabled',
     'subagentModelsEnabled',
   ])

@@ -48,19 +48,16 @@ import {
   awaitMemoryDistill,
   awaitMemoryKg,
   awaitMemoryReembed,
-  awaitMemoryWorkingFile,
   closeMemoryDb,
   configureMemoryDistill,
   configureMemoryEmbedding,
   configureMemoryKg,
-  configureMemoryWorkingFile,
   distillSessionNow,
   getMemoryDistillJobs,
   getMemoryEmbedder,
   getMemoryEmbeddingError,
   getMemoryKgJobs,
   getMemoryReembedProgress,
-  getWorkingMemoryPath,
   invokeMemory,
   memoryDatabase,
   refreshMemoryEmbedding,
@@ -70,7 +67,6 @@ import {
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
-  syncMemoryWorkingFileFromSettings,
 } from './memoryHost';
 
 import {
@@ -586,80 +582,6 @@ describe('memoryHost KG 抽取接线', () => {
     expect(entityNames()).toContain('ArgoCD');
     configureMemoryDistill({ enabled: false });
     configureMemoryKg({ enabled: false });
-  });
-});
-
-describe('memoryHost Working Memory 文件接线', () => {
-  const PROJECT = '22222222-2222-4222-8222-222222222222';
-  const capture = (content: string, spaceId = 'global', projectId: string | null = null) =>
-    invokeMemory('capture', { content, importance: 0.6, spaceId }, projectId) as Promise<{
-      status: string;
-      memory: { id: string };
-    }>;
-  const file = () => getWorkingMemoryPath();
-  const read = () => (existsSync(file()) ? readFileSync(file(), 'utf8') : null);
-
-  it('路径在 userData/memory 下；开关关闭：capture 不写文件', async () => {
-    closeMemoryDb();
-    configureMemoryEmbedding({ modelId: 'none' });
-    configureMemoryDistill({ enabled: false });
-    configureMemoryKg({ enabled: false });
-    expect(file()).toBe(path.join(userData, 'memory', 'working-memory.md'));
-    configureMemoryWorkingFile({ enabled: false, debounceMs: 0 });
-    await capture('关闭时不该出现在文件里');
-    await awaitMemoryWorkingFile();
-    expect(read()).toBeNull();
-  });
-
-  it('syncMemoryWorkingFileFromSettings 按 unknown 收窄：非布尔 true 视为关', async () => {
-    syncMemoryWorkingFileFromSettings({ memoryWorkingFileEnabled: 'true' });
-    await capture('字串 true 也不算开');
-    await awaitMemoryWorkingFile();
-    expect(read()).toBeNull();
-  });
-
-  it('开关打开：capture 后防抖刷新，只含 global space（接线层拿不到“当前项目”，不猜）', async () => {
-    syncMemoryWorkingFileFromSettings({ memoryWorkingFileEnabled: true });
-    configureMemoryWorkingFile({ debounceMs: 0 });
-    const g = await capture('全局：团队用 pnpm 管理 monorepo');
-    const p = await capture('项目：用 vite 打包', 'project', PROJECT);
-    await awaitMemoryWorkingFile();
-    const text = read() ?? '';
-    expect(text.startsWith('# Working Memory')).toBe(true);
-    expect(text).toContain(`ensocode://memory/${g.memory.id}`);
-    expect(text).not.toContain(p.memory.id);
-    expect(existsSync(`${file()}.tmp`)).toBe(false);
-  });
-
-  it('防抖：窗口内多次写入合并为一次重写，两条都在', async () => {
-    configureMemoryWorkingFile({ enabled: true, debounceMs: 50 });
-    const a = await capture('防抖记忆一 alpha');
-    const b = await capture('防抖记忆二 beta');
-    expect(read() ?? '').not.toContain(b.memory.id);
-    await awaitMemoryWorkingFile();
-    const text = read() ?? '';
-    expect(text).toContain(a.memory.id);
-    expect(text).toContain(b.memory.id);
-  });
-
-  it('退出关库前 flush 一次：未到防抖时间的写入也落盘', async () => {
-    configureMemoryWorkingFile({ enabled: true, debounceMs: 600_000 });
-    const m = await capture('退出前要落盘的记忆 gamma');
-    expect(read() ?? '').not.toContain(m.memory.id);
-    closeMemoryDb();
-    expect(read() ?? '').toContain(m.memory.id);
-  });
-
-  it('写文件失败被吞：capture 本身成功', async () => {
-    configureMemoryWorkingFile({ enabled: true, debounceMs: 0 });
-    rmSync(file(), { force: true });
-    mkdirSync(file(), { recursive: true }); // 目标路径被目录占位，rename 必失败
-    const r = await capture('写失败也不影响落库 delta');
-    expect(r.status).toBe('inserted');
-    await expect(awaitMemoryWorkingFile()).resolves.toBeUndefined();
-    rmSync(file(), { recursive: true, force: true });
-    rmSync(`${file()}.tmp`, { force: true });
-    configureMemoryWorkingFile({ enabled: false });
   });
 });
 

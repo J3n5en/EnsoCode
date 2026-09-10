@@ -19,7 +19,6 @@ import {
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
-  syncMemoryWorkingFileFromSettings,
 } from './services/memoryHost';
 import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
@@ -96,7 +95,6 @@ if (!gotTheLock) {
     syncMemoryEmbeddingFromSettings(persistedState);
     syncMemoryDistillFromSettings(persistedState);
     syncMemoryKgFromSettings(persistedState);
-    syncMemoryWorkingFileFromSettings(persistedState);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
     // 内嵌浏览器 guest view 挂主窗口（无头也要 viewport）；窗口重建后 getMainWindow 自动指向新窗

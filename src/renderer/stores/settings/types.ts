@@ -131,8 +131,6 @@ export interface SettingsState {
   memoryDistillEnabled: boolean;
   /** 记忆创建后是否用 LLM 异步抽取实体图谱；缺省关 */
   memoryKgEnabled: boolean;
-  /** 是否维护 userData/memory/working-memory.md 投影文件；缺省关 */
-  memoryWorkingFileEnabled: boolean;
 
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
@@ -272,7 +270,6 @@ export interface SettingsState {
   setMemoryEmbeddingRemoteProviderId: (value: string | null) => void;
   setMemoryDistillEnabled: (value: boolean) => void;
   setMemoryKgEnabled: (value: boolean) => void;
-  setMemoryWorkingFileEnabled: (value: boolean) => void;
   setBashInterceptEnabled: (value: boolean) => void;
   setHashlineEditEnabled: (value: boolean) => void;
   setSmartCompactEnabled: (value: boolean) => void;

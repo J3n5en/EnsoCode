@@ -891,9 +891,6 @@ export const zhTranslations: Record<string, string> = {
   'Extract entities': '抽取实体',
   'Build an entity graph so a memory can be recalled by a name it does not literally contain.':
     '建立实体图谱,让正文里没出现该词的记忆也能被这个名字召回。',
-  'Write working memory file': '写入工作记忆文件',
-  'Keep a small markdown digest of current focus on disk for external tools to read.':
-    '在磁盘上维护一份当前焦点的小体积 markdown 摘要,供外部工具读取。',
   Library: '记忆库',
   'No memories stored yet.': '还没有存下任何记忆。',
   'Memory is not enabled.': '记忆未启用。',

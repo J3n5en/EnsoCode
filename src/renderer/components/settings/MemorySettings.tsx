@@ -197,8 +197,6 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
   const setKgEnabled = useSettingsStore((state) => state.setMemoryKgEnabled);
-  const workingFileEnabled = useSettingsStore((state) => state.memoryWorkingFileEnabled);
-  const setWorkingFileEnabled = useSettingsStore((state) => state.setMemoryWorkingFileEnabled);
   const distillModel = useSettingsStore((state) => state.memoryDistillModel);
   const setDistillModel = useSettingsStore((state) => state.setMemoryDistillModel);
   const chatModel = useSettingsStore((state) => state.memoryChatModel) || 'remote';
@@ -731,16 +729,6 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           )}
           checked={kgEnabled}
           onChange={setKgEnabled}
-          disabled={!memoryEnabled}
-        />
-        <SwitchRow
-          rowId="memory.workingFile"
-          title={t('Write working memory file')}
-          description={t(
-            'Keep a small markdown digest of current focus on disk for external tools to read.'
-          )}
-          checked={workingFileEnabled}
-          onChange={setWorkingFileEnabled}
           disabled={!memoryEnabled}
         />
       </section>
