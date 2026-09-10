@@ -1,4 +1,5 @@
 import type { JsonSchema } from '@shared/capabilities/types';
+import { parseMemoryCaptureRequest } from '@shared/memory/toolParams';
 import { describe, expect, it, vi } from 'vitest';
 import { matchesJsonSchema } from '../../tooling/productCapabilityCoverage.fixture';
 import { createMemoryTools, MemoryInvoker } from './memory';
@@ -131,6 +132,18 @@ describe('createMemoryTools', () => {
         { content: 'c', force: 'true' },
         { content: 'c', evolvesFromId: 'm1', evolvesRelation: ' Replaces ' },
         { content: 'c', force: true, evolvesFromId: 'm1', evolvesRelation: 'challenges' },
+        {
+          content: 'c',
+          title: 't',
+          unitType: 'preference',
+          importance: 0.6,
+          spaceId: 'project',
+          eventStart: '',
+          eventEnd: '',
+          force: false,
+          evolvesFromId: '',
+          evolvesRelation: 'enriches',
+        },
       ],
       memory_crystallize: [
         { content: 'c', title: 't', sourceIds: ['a', 'b', 'c'] },
@@ -167,6 +180,25 @@ describe('createMemoryTools', () => {
       importance: 0.6,
       spaceId: 'project',
     });
+    const placeholder = prep(1, {
+      content: 'c',
+      title: 't',
+      unitType: 'preference',
+      importance: 0.6,
+      spaceId: 'project',
+      eventStart: '',
+      eventEnd: '',
+      force: false,
+      evolvesFromId: '',
+      evolvesRelation: 'enriches',
+    });
+    expect(placeholder).toEqual({
+      content: 'c',
+      title: 't',
+      unitType: 'preference',
+      importance: 0.6,
+      spaceId: 'project',
+    });
   });
 
   it('execute 把归一后的参数发上桥，并把 Main 结果以文本回给模型', async () => {
@@ -197,6 +229,42 @@ describe('createMemoryTools', () => {
       result: { status: 'inserted', id: 'm2' },
     });
     await pending2;
+  });
+
+  it('execute 占位演进字段：prepare 后再归一与直接 execute 上桥 params 均可被 Main parse', async () => {
+    const emit = vi.fn();
+    const invoker = new MemoryInvoker(identity, emit);
+    const capture = createMemoryTools(invoker)[1];
+    const raw = {
+      content: 'c',
+      title: 't',
+      unitType: 'preference',
+      importance: 0.6,
+      spaceId: 'project',
+      eventStart: '',
+      eventEnd: '',
+      force: false,
+      evolvesFromId: '',
+      evolvesRelation: 'enriches',
+    };
+    const prepare = capture.prepareArguments as unknown as (a: unknown) => unknown;
+
+    const run = async (params: unknown, id: string) => {
+      const pending = exec(capture, params);
+      const sent = emit.mock.calls.at(-1)?.[0] as { requestId: string; params: unknown };
+      expect(sent.params).not.toHaveProperty('evolvesFromId');
+      expect(sent.params).not.toHaveProperty('evolvesRelation');
+      const parsed = parseMemoryCaptureRequest(sent.params);
+      expect(parsed).toMatchObject({ content: 'c', title: 't', unitType: 'preference' });
+      expect(parsed).not.toHaveProperty('evolvesFromId');
+      expect(parsed).not.toHaveProperty('evolvesRelation');
+      invoker.resolve({ requestId: sent.requestId, ok: true, result: { status: 'inserted', id } });
+      const out = await pending;
+      expect(JSON.parse(out.content[0].text ?? '')).toEqual({ status: 'inserted', id });
+    };
+
+    await run(prepare(raw), 'm-prep');
+    await run(raw, 'm-direct');
   });
 
   it('search 缺 query / capture 缺 content / crystallize 缺 content 直接抛错，不上桥', async () => {

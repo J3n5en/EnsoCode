@@ -282,12 +282,14 @@ export function createMemoryTools(
           evolvesFromId: {
             type: 'string',
             description:
-              'Id of an existing memory this one evolves from (from candidates_found or memory_search); requires evolvesRelation',
+              'Id of an existing memory this one evolves from (from candidates_found or memory_search); requires evolvesRelation. ' +
+              'Omit both evolves* fields for a new memory. An empty id means no evolution.',
           },
           evolvesRelation: {
             type: 'string',
             enum: [...EVOLVES_RELATIONS],
             description:
+              'Only with a non-empty evolvesFromId; a valid relation paired with an empty id is ignored. ' +
               'replaces = supersedes the old memory (it stops being latest); enriches = adds detail; ' +
               'confirms = restates it; challenges = contradicts it (both stay latest, flagged for review)',
           },

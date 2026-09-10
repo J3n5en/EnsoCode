@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_CREATE_IMPORTANCE, CRYSTAL_MIN_SOURCES } from './constants';
+import { AGENT_CREATE_IMPORTANCE, CRYSTAL_MIN_SOURCES, EVOLVES_RELATIONS } from './constants';
 import {
   normalizeMemoryCaptureParams,
   normalizeMemoryCrystallizeParams,
@@ -180,6 +180,85 @@ describe('capture 版本参数（force / evolvesFromId / evolvesRelation）', ()
     expect(parseMemoryCaptureRequest({ ...base, evolvesRelation: 'replaces' })).toBeNull();
     expect(parseMemoryCaptureRequest({ ...base, evolvesFromId: 'm1' })).toBeNull();
     expect(parseMemoryCaptureRequest({ ...base, force: 'true' })).toBeNull();
+  });
+
+  it('strict 界面填齐：空白 evolvesFromId + 合法枚举 relation 当本轮不演进，成对丢弃', () => {
+    const raw = {
+      content: '用户偏好深色主题',
+      title: '主题偏好',
+      unitType: 'preference',
+      importance: AGENT_CREATE_IMPORTANCE,
+      spaceId: 'project',
+      eventStart: '',
+      eventEnd: '',
+      force: false,
+      evolvesFromId: '',
+      evolvesRelation: 'enriches',
+    };
+    const expected = {
+      content: '用户偏好深色主题',
+      title: '主题偏好',
+      unitType: 'preference',
+      importance: AGENT_CREATE_IMPORTANCE,
+      spaceId: 'project',
+    };
+    const once = normalizeMemoryCaptureParams(raw);
+    expect(once).toEqual(expected);
+    const twice = normalizeMemoryCaptureParams(once);
+    expect(twice).toEqual(once);
+
+    const parsed = parseMemoryCaptureRequest(once);
+    expect(parsed).toEqual({
+      ...expected,
+      unitTypeSource: 'explicit',
+    });
+    expect(parsed).not.toHaveProperty('evolvesFromId');
+    expect(parsed).not.toHaveProperty('evolvesRelation');
+
+    const fromJson = normalizeMemoryCaptureParams(JSON.stringify(raw));
+    expect(fromJson).toEqual(expected);
+    expect(parseMemoryCaptureRequest(fromJson)).toEqual(parsed);
+
+    expect(
+      normalizeMemoryCaptureParams({
+        content: 'c',
+        evolvesFromId: '  ',
+        evolvesRelation: 'Enriches',
+      })
+    ).toEqual({
+      content: 'c',
+      importance: AGENT_CREATE_IMPORTANCE,
+      spaceId: 'project',
+    });
+
+    for (const relation of EVOLVES_RELATIONS) {
+      const n = normalizeMemoryCaptureParams({
+        content: 'c',
+        evolvesFromId: '',
+        evolvesRelation: relation,
+      });
+      expect(n, relation).not.toHaveProperty('evolvesFromId');
+      expect(n, relation).not.toHaveProperty('evolvesRelation');
+      expect(parseMemoryCaptureRequest(n), relation).not.toBeNull();
+    }
+  });
+
+  it('只吞空白目标 + 合法枚举占位；非法 relation / 非字符串 id / 孤立关系仍拒绝', () => {
+    const through = (raw: unknown) => parseMemoryCaptureRequest(normalizeMemoryCaptureParams(raw));
+
+    expect(through({ content: 'c', evolvesFromId: '', evolvesRelation: 'supersedes' })).toBeNull();
+    expect(through({ content: 'c', evolvesFromId: 1, evolvesRelation: 'enriches' })).toBeNull();
+    expect(through({ content: 'c', evolvesRelation: 'enriches' })).toBeNull();
+    expect(through({ content: 'c', evolvesFromId: null, evolvesRelation: 'enriches' })).toBeNull();
+    expect(through({ content: 'c', evolvesFromId: 'm1' })).toBeNull();
+    expect(
+      through({ content: 'c', evolvesFromId: 'm1', evolvesRelation: 'supersedes' })
+    ).toBeNull();
+    expect(through({ content: 'c', evolvesFromId: 'm1', evolvesRelation: '' })).toBeNull();
+
+    expect(
+      through({ content: 'c', evolvesFromId: ' m1 ', evolvesRelation: ' Replaces ' })
+    ).toMatchObject({ content: 'c', evolvesFromId: 'm1', evolvesRelation: 'replaces' });
   });
 });
 

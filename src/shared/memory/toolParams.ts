@@ -133,6 +133,11 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
   const force = record.force === true || record.force === 'true';
   const evolvesFromId = optionalText(record.evolvesFromId);
   const evolvesRelation = optionalText(record.evolvesRelation)?.toLowerCase();
+  // 部分调用端会填齐可选字段：空目标旁的合法关系枚举只是占位，须一起去掉。
+  const emptyEvolutionTarget =
+    typeof record.evolvesFromId === 'string' &&
+    !evolvesFromId &&
+    isEvolvesRelation(evolvesRelation);
   return {
     content: record.content,
     ...(title ? { title } : {}),
@@ -146,7 +151,7 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
     ...(eventEnd ? { eventEnd } : {}),
     ...(force ? { force } : {}),
     ...(evolvesFromId ? { evolvesFromId } : {}),
-    ...(evolvesRelation ? { evolvesRelation } : {}),
+    ...(evolvesRelation && !emptyEvolutionTarget ? { evolvesRelation } : {}),
   };
 }
 

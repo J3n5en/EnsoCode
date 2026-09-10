@@ -27,6 +27,14 @@ pi 的工具执行顺序是 **`prepareArguments` → JSON schema 校验（TypeBo
 对每个工具、多组代表性输入，断言 `matchesJsonSchema(tool.parameters, prepareArguments(input))`。
 新增带 `prepareArguments` 的工具，照抄这条测试。
 
+## 可选演进字段也要成对归一
+
+另一次 `memory_capture` 真机失败来自填齐可选字段：`evolvesFromId: ''` 搭配合法枚举 `evolvesRelation: 'enriches'`。归一只丢空 id、留下关系，虽然 schema 通过，Main 成对校验仍拒绝；改用只传必要字段的调用才成功。
+
+仅将「显式空白字符串 id + 合法关系枚举」视为未指定演进并成对丢弃。关系先 trim/小写；非空 id 缺关系、缺 id 键却给关系、非字符串 id 或非法关系仍拒绝，不得统统降级成新写入。Main 校验不放宽。
+
+回归覆盖完整占位载荷、对象/JSON 字符串、两次归一幂等，以及 `prepareArguments → schema → execute → Main parse`；真正成对的演进参数保持不变。隔离真机用 OpenAI `gpt-4.1-mini` 与 xAI `grok-4.6` 直接调用完整占位载荷，两者均返回 `inserted`。
+
 ## 相关代码
 
 - `src/shared/memory/toolParams.ts` — `normalizeMemoryCaptureParams` / `parseMemoryCaptureRequest`
