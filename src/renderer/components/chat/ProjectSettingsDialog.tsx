@@ -13,7 +13,8 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectItem,
@@ -40,6 +41,8 @@ export function ProjectSettingsDialog({
   const defaultThinkingLevel = useSettingsStore((state) => state.defaultThinkingLevel);
   const setProjectDefaultModel = useSettingsStore((state) => state.setProjectDefaultModel);
   const setProjectGroupId = useSettingsStore((state) => state.setProjectGroupId);
+  const setProjectAlias = useSettingsStore((state) => state.setProjectAlias);
+  const [alias, setAlias] = useState('');
   const [defaultModel, setDefaultModel] = useState<DefaultModelRef | null>(null);
   const [reasoningEnabled, setReasoningEnabled] = useState(true);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
@@ -49,6 +52,7 @@ export function ProjectSettingsDialog({
     if (!open) return;
     setDefaultModel(project?.defaultModel ?? null);
     setGroupId(project?.groupId ?? '');
+    setAlias(project?.alias ?? '');
     const group = project?.groupId
       ? groups.find((entry) => entry.id === project.groupId)
       : undefined;
@@ -91,6 +95,7 @@ export function ProjectSettingsDialog({
               defaultModel ? { reasoningEnabled, thinkingLevel } : null
             );
             setProjectGroupId(project.id, groupId || null);
+            setProjectAlias(project.id, alias);
             onOpenChange(false);
           }}
         >
@@ -101,6 +106,17 @@ export function ProjectSettingsDialog({
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
+            <Field className="w-full items-stretch">
+              <FieldLabel>{t('Alias')}</FieldLabel>
+              <Input
+                value={alias}
+                onChange={(event) => setAlias(event.target.value)}
+                placeholder={project ? projectDisplayName({ ...project, alias: undefined }) : ''}
+              />
+              <FieldDescription>
+                {t('Shown in the sidebar instead of the folder name. Leave blank to reset.')}
+              </FieldDescription>
+            </Field>
             <Field className="w-full items-stretch">
               <FieldLabel>{t('Path')}</FieldLabel>
               <p className="truncate font-mono text-muted-foreground text-xs" title={pathLabel}>

@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils';
 /** 会话状态指示：ask_user 等待回答时用琥珀色问号（不闪烁），其余状态沿用圆点语义。 */
 export type ConversationIndicatorTone = CoworkerTabTone | 'unread';
 
-const DOT_SIZE = { sm: 'h-1.5 w-1.5', md: 'h-2 w-2' } as const;
+// 空心=无事发生,实心=有状态;空心圈需要 8px 才能稳定画出 1px 描边
+const DOT_SIZE = { sm: 'size-2', md: 'size-2.5' } as const;
 const ICON_SIZE = { sm: 'h-3 w-3', md: 'h-3.5 w-3.5' } as const;
 
 export function ConversationStatusIndicator({
@@ -49,7 +50,7 @@ export function ConversationStatusIndicator({
         tone === 'running' && 'animate-pulse bg-blue-500',
         tone === 'failed' && 'bg-destructive',
         tone === 'unread' && 'bg-green-500',
-        tone === 'idle' && 'bg-muted-foreground/30',
+        tone === 'idle' && 'border border-muted-foreground/50',
         className
       )}
     />

@@ -643,6 +643,9 @@ export const zhTranslations: Record<string, string> = {
   'Delete group': '删除分组',
   'No color': '无颜色',
   'Project group': '项目组',
+  Alias: '别名',
+  'Shown in the sidebar instead of the folder name. Leave blank to reset.':
+    '在侧边栏代替目录名显示，留空则恢复默认。',
   'Groups organize projects in the sidebar.': '用分组整理侧栏里的项目。',
   'Move projects into this group': '选择要移入的项目',
   'Move to ungrouped': '移到未分组',

@@ -20,7 +20,6 @@ import type { Project } from '@shared/types';
 import type { WorktreeStatus } from '@shared/types/worktree';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Activity,
   Archive,
   ArchiveRestore,
   ChevronRight,
@@ -28,14 +27,15 @@ import {
   Eraser,
   FileText,
   FolderGit2,
+  FolderOpen,
   FolderPlus,
+  Folders,
   GitBranch,
   GitBranchPlus,
   HardDriveDownload,
   Layers,
   Loader2,
   MessageSquarePlus,
-  MoreHorizontal,
   PanelLeft,
   PanelLeftClose,
   Pencil,
@@ -379,7 +379,6 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
 
   const [importProject, setImportProject] = useState<Project | null>(null);
   // 项目行展开了次级操作(设置/导入/归档/删除)的项目 id
-  const [expandedActions, setExpandedActions] = useState<string | null>(null);
   // 待确认的删除动作(项目连带其对话 / 单个对话)
   const [pendingRemove, setPendingRemove] = useState<
     | { kind: 'project'; project: Project; conversationIds: string[] }
@@ -433,7 +432,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
     matches: convMatches,
     projectMatches: (projectId) => {
       const project = orderedProjects.find((item) => item.id === projectId);
-      return Boolean(project && matchesQuery(listQuery, [project.name, project.path]));
+      return Boolean(
+        project && matchesQuery(listQuery, [project.alias ?? '', project.name, project.path])
+      );
     },
     leadingIds: visibleActiveIds,
   });
@@ -463,7 +464,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
           const project = projects.find((item) => item.id === group.projectId);
           const projectHit =
             group.projectArchived === true &&
-            Boolean(project && matchesQuery(listQuery, [project.name, project.path]));
+            Boolean(
+              project && matchesQuery(listQuery, [project.alias ?? '', project.name, project.path])
+            );
           return projectHit ? group : { ...group, ids: group.ids.filter(convMatches) };
         })
         .filter((group) => group.ids.length > 0)
@@ -758,11 +761,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
           )}
           {visibleActiveIds.length > 0 && (
             <div data-slot="active-section">
-              <div className="flex items-center gap-1 px-2 py-2">
-                <span className="h-5 w-5 shrink-0" />
-                <Activity className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="text-sm font-medium">{t('Active')}</span>
-              </div>
+              <SidebarSectionLabel>{t('Active')}</SidebarSectionLabel>
               <div className="flex flex-col gap-y-0.5">
                 {visibleActiveIds.map((id) => (
                   <ConversationRow
@@ -773,7 +772,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                     switchHint={switchHintFor(id, 'active')}
                     locale={locale}
                     nowTick={nowTick}
-                    hoverTitle={projects.find((p) => p.id === conversations[id].projectId)?.name}
+                    hoverTitle={hoverProjectName(projects, conversations[id].projectId)}
                     worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
                     isolated={Boolean(conversations[id].worktree)}
                     onSelect={selectConversation}
@@ -800,12 +799,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
           )}
           {visiblePinnedIds.length > 0 && (
             <PinnedDropZone data-slot="pinned-section">
-              <div className="flex items-center gap-1 px-2 py-2">
-                {/* 与项目行同宽的 chevron 占位,让标题与项目名对齐 */}
-                <span className="h-5 w-5 shrink-0" />
-                <Pin className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="text-sm font-medium">{t('Pinned')}</span>
-              </div>
+              <SidebarSectionLabel>{t('Pinned')}</SidebarSectionLabel>
               <div className="flex flex-col gap-y-0.5">
                 <SortableContext
                   items={visiblePinnedIds.map((id) => pinnedChatDragId(id))}
@@ -820,9 +814,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                         switchHint={switchHintFor(id, 'pinned')}
                         locale={locale}
                         nowTick={nowTick}
-                        hoverTitle={
-                          projects.find((p) => p.id === conversations[id].projectId)?.name
-                        }
+                        hoverTitle={hoverProjectName(projects, conversations[id].projectId)}
                         worktreeStatus={
                           conversations[id].worktree ? worktreeStatuses[id] : undefined
                         }
@@ -847,11 +839,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
             </PinnedDropZone>
           )}
           {pendingProject && (
-            <div className="flex w-full items-center gap-1 rounded-lg px-2 py-2 text-muted-foreground">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <div className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-muted-foreground">
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <Loader2 className="size-4 animate-spin" />
               </span>
-              <FolderGit2 className="h-4 w-4 shrink-0" />
               <span
                 className="min-w-0 flex-1 truncate text-sm font-medium"
                 title={pendingProject.path}
@@ -886,7 +877,11 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                   conversations,
                   project.id
                 );
-                const projectHit = matchesQuery(listQuery, [project.name, project.path]);
+                const projectHit = matchesQuery(listQuery, [
+                  project.alias ?? '',
+                  project.name,
+                  project.path,
+                ]);
                 const visibleConversations =
                   !searching || projectHit
                     ? projectConversations
@@ -898,6 +893,67 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                   ? visibleConversations.length
                   : shownConversationCount(visibleConversations.length, revealedExtra);
                 const hiddenIds = visibleConversations.slice(shownCount);
+                // 项目右键菜单项;抽成数据是为了把动态分组列表与固定项平铺在一起
+                const projectActions: ProjectAction[] = [
+                  {
+                    kind: 'item',
+                    key: 'settings',
+                    label: t('Project settings'),
+                    icon: <Settings />,
+                    onSelect: () => setProjectSettingsId(project.id),
+                  },
+                  {
+                    kind: 'item',
+                    key: 'import',
+                    label: t('Import session'),
+                    icon: <HardDriveDownload />,
+                    onSelect: () => setImportProject(project),
+                  },
+                  { kind: 'separator', key: 'sep-group' },
+                  {
+                    kind: 'item',
+                    key: 'ungrouped',
+                    label: t('Move to ungrouped'),
+                    icon: <GroupGlyph />,
+                    onSelect: () => setProjectGroupId(project.id, null),
+                  },
+                  // 分组项没有天然图标,用分组自己的 emoji/色点占同一个 16px 图标列,保证文字对齐
+                  ...projectGroups.map<ProjectAction>((group) => ({
+                    kind: 'item',
+                    key: `group-${group.id}`,
+                    label: t('Move to {{name}}', { name: group.name }),
+                    icon: <GroupGlyph emoji={group.emoji} color={group.color} />,
+                    onSelect: () => setProjectGroupId(project.id, group.id),
+                  })),
+                  {
+                    kind: 'item',
+                    key: 'new-group',
+                    label: t('New group'),
+                    icon: <FolderPlus />,
+                    onSelect: () => setGroupEditor({ mode: 'create' }),
+                  },
+                  { kind: 'separator', key: 'sep-danger' },
+                  {
+                    kind: 'item',
+                    key: 'archive',
+                    label: t('Archive project'),
+                    icon: <Archive />,
+                    onSelect: () => toggleArchiveProject(project.id),
+                  },
+                  {
+                    kind: 'item',
+                    key: 'remove',
+                    label: t('Remove project'),
+                    icon: <Trash2 />,
+                    destructive: true,
+                    onSelect: () =>
+                      setPendingRemove({
+                        kind: 'project',
+                        project,
+                        conversationIds: projectConversations,
+                      }),
+                  },
+                ];
                 return (
                   <SortableProject key={project.id} project={project}>
                     {(drag) => (
@@ -906,7 +962,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                           render={
                             (
                               <div ref={drag.setNodeRef} style={drag.style}>
-                                {/* 项目行：chevron 槽 + 仓库图标 + 名称 + 常驻操作（EnsoAI 尺寸）；整行可拖拽排序 */}
+                                {/* 项目行：图标列（折叠态文件夹/hover 折叠箭头）+ 名称 + 常驻操作；整行可拖拽排序 */}
                                 <div
                                   className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-accent/30"
                                   {...drag.handleProps}
@@ -914,18 +970,10 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                                   <button
                                     type="button"
                                     onClick={() => toggleProject(project.id)}
-                                    className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
                                     title={project.path}
                                   >
-                                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                                      <ChevronRight
-                                        className={cn(
-                                          'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                                          !folded && 'rotate-90'
-                                        )}
-                                      />
-                                    </span>
-                                    <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                    <IconSlot>{folded ? <FolderGit2 /> : <FolderOpen />}</IconSlot>
                                     <span
                                       className="min-w-0 flex-1 truncate text-sm font-medium"
                                       title={
@@ -942,98 +990,15 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                                       )}
                                     </span>
                                   </button>
-                                  <div
-                                    className="flex shrink-0 items-center"
-                                    onBlur={(event) => {
-                                      if (
-                                        expandedActions === project.id &&
-                                        !event.currentTarget.contains(event.relatedTarget)
-                                      ) {
-                                        setExpandedActions(null);
-                                      }
-                                    }}
+                                  {/* 只留高频的新建会话;其余操作全部走右键菜单 */}
+                                  <button
+                                    type="button"
+                                    onClick={() => void newConversation(project.id)}
+                                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    title={t('New conversation')}
                                   >
-                                    <AnimatePresence initial={false} mode="popLayout">
-                                      {expandedActions === project.id ? (
-                                        <motion.div
-                                          key="extra"
-                                          className="flex items-center overflow-hidden"
-                                          initial={{ width: 0, opacity: 0 }}
-                                          animate={{ width: 'auto', opacity: 1 }}
-                                          exit={{ width: 0, opacity: 0 }}
-                                          transition={springStandard}
-                                        >
-                                          <button
-                                            type="button"
-                                            onClick={() => setProjectSettingsId(project.id)}
-                                            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                            title={t('Project settings')}
-                                          >
-                                            <Settings className="h-3.5 w-3.5" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => setImportProject(project)}
-                                            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                            title={t('Import session')}
-                                          >
-                                            <HardDriveDownload className="h-3.5 w-3.5" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleArchiveProject(project.id)}
-                                            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                            title={t('Archive project')}
-                                          >
-                                            <Archive className="h-3.5 w-3.5" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              setPendingRemove({
-                                                kind: 'project',
-                                                project,
-                                                conversationIds: projectConversations,
-                                              })
-                                            }
-                                            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-                                            title={t('Remove project')}
-                                          >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                          </button>
-                                        </motion.div>
-                                      ) : (
-                                        <motion.button
-                                          key="new"
-                                          type="button"
-                                          onClick={() => void newConversation(project.id)}
-                                          className="shrink-0 overflow-hidden rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                          title={t('New conversation')}
-                                          initial={{ width: 0, opacity: 0 }}
-                                          animate={{ width: 'auto', opacity: 1 }}
-                                          exit={{ width: 0, opacity: 0 }}
-                                          transition={springStandard}
-                                        >
-                                          <MessageSquarePlus className="h-3.5 w-3.5" />
-                                        </motion.button>
-                                      )}
-                                    </AnimatePresence>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setExpandedActions((current) =>
-                                          current === project.id ? null : project.id
-                                        )
-                                      }
-                                      className={cn(
-                                        'shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground',
-                                        expandedActions === project.id && 'bg-muted text-foreground'
-                                      )}
-                                      title={t('More actions')}
-                                    >
-                                      <MoreHorizontal className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
+                                    <MessageSquarePlus className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
                                 <AnimatePresence initial={false}>
                                   {!folded && (
@@ -1147,7 +1112,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                                             </div>
                                           )}
                                         {visibleConversations.length === 0 && (
-                                          <p className="py-1.5 pl-10 text-xs text-muted-foreground">
+                                          <p className="py-1.5 pl-8 text-xs text-muted-foreground">
                                             {t('No conversations yet')}
                                           </p>
                                         )}
@@ -1159,26 +1124,21 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                             ) as React.ReactElement<Record<string, unknown>>
                           }
                         />
-                        <ContextMenuPopup className="min-w-36">
-                          <ContextMenuItem onClick={() => setProjectSettingsId(project.id)}>
-                            {t('Project settings')}
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem onClick={() => setProjectGroupId(project.id, null)}>
-                            {t('Move to ungrouped')}
-                          </ContextMenuItem>
-                          {projectGroups.map((group) => (
-                            <ContextMenuItem
-                              key={group.id}
-                              onClick={() => setProjectGroupId(project.id, group.id)}
-                            >
-                              {t('Move to {{name}}', { name: group.name })}
-                            </ContextMenuItem>
-                          ))}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem onClick={() => setGroupEditor({ mode: 'create' })}>
-                            {t('New group')}
-                          </ContextMenuItem>
+                        <ContextMenuPopup className="min-w-40">
+                          {projectActions.map((action) =>
+                            action.kind === 'separator' ? (
+                              <ContextMenuSeparator key={action.key} />
+                            ) : (
+                              <ContextMenuItem
+                                key={action.key}
+                                onClick={action.onSelect}
+                                variant={action.destructive ? 'destructive' : 'default'}
+                              >
+                                {action.icon}
+                                {action.label}
+                              </ContextMenuItem>
+                            )
+                          )}
                         </ContextMenuPopup>
                       </ContextMenu>
                     )}
@@ -1260,16 +1220,11 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                         : t('Other');
                       return (
                         <div key={group.projectId}>
-                          <div className="group flex items-center gap-1 rounded-md pr-0.5">
+                          <div className="group flex items-center gap-2 rounded-md pr-0.5 pl-2">
                             {group.projectArchived && (
-                              <FolderGit2 className="ml-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                              <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
                             )}
-                            <span
-                              className={cn(
-                                'min-w-0 flex-1 truncate py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase',
-                                group.projectArchived ? 'px-1' : 'px-2'
-                              )}
-                            >
+                            <span className="min-w-0 flex-1 truncate py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                               {projectName}
                             </span>
                             <span className="shrink-0 text-[10px] text-muted-foreground">
@@ -1354,17 +1309,16 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
               <button
                 type="button"
                 onClick={() => setArchivedOpen((open) => !open)}
-                className="flex min-w-0 flex-1 items-center gap-1 px-2 py-2 text-left"
+                className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <IconSlot>
                   <ChevronRight
                     className={cn(
-                      'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
-                      archivedOpen ? '-rotate-90' : 'rotate-0'
+                      'size-3.5 transition-transform duration-150',
+                      archivedOpen && 'rotate-90'
                     )}
                   />
-                </span>
-                <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </IconSlot>
                 <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                   {t('Archived')}
                 </span>
@@ -1578,7 +1532,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
             dragPayload?.type === 'workspace-file') && (
             <div className="flex w-56 items-center gap-2 rounded-lg border bg-background/95 px-3 py-1.5 text-sm shadow-md">
               {dragPayload.type === 'project' ? (
-                <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
               ) : dragPayload.type === 'workspace-file' ? (
                 <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               ) : (
@@ -1643,7 +1597,7 @@ function ProjectGroupHeader({
         opacity: sortableDrag.isDragging ? 0.4 : undefined,
       }}
       className={cn(
-        'group flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground',
+        'group relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground',
         droppable.isOver && 'bg-accent/40 text-foreground',
         sortable && 'cursor-grab'
       )}
@@ -1654,21 +1608,31 @@ function ProjectGroupHeader({
         type="button"
         onClick={onToggle}
         onPointerDown={(event) => event.stopPropagation()}
-        className="flex min-w-0 flex-1 items-center gap-1"
+        className="flex min-w-0 flex-1 items-center gap-2"
       >
-        <ChevronRight
-          className={cn(
-            'h-3.5 w-3.5 shrink-0 transition-transform duration-150',
-            !folded && 'rotate-90'
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <ChevronRight
+            className={cn('size-3.5 transition-transform duration-150', !folded && 'rotate-90')}
+          />
+        </span>
+        {/* emoji/色点跟在名字右侧,不占左侧图标列,否则设了标记的分组名会比其他分组右移 */}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="min-w-0 truncate text-left">{name}</span>
+          {emoji && <span className="shrink-0 text-sm leading-none">{emoji}</span>}
+          {color && (
+            <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
           )}
-        />
-        {emoji && <span className="shrink-0 text-sm">{emoji}</span>}
-        {color && (
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-        )}
-        <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        <span className="shrink-0 text-[10px] text-muted-foreground/70">{count}</span>
+        </span>
+        <span
+          className={cn(
+            'shrink-0 text-[10px] text-muted-foreground/70 tabular-nums',
+            onEdit && 'transition-opacity group-hover:opacity-0'
+          )}
+        >
+          {count}
+        </span>
       </button>
+      {/* 编辑按钮绝对定位盖在计数上,不占流:否则未分组(无 onEdit)的计数会比其他分组右移 */}
       {onEdit && (
         <button
           type="button"
@@ -1677,7 +1641,7 @@ function ProjectGroupHeader({
             onEdit();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="absolute inset-y-0 right-1 my-auto flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
         >
           <Pencil className="h-3.5 w-3.5" />
         </button>
@@ -1932,8 +1896,8 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       className={cn(
-        // 会话行:标题对齐到项目名之下(chevron 槽 + 图标宽度),并用弱色与加粗的项目名区分
-        'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-10 text-sm transition-colors',
+        // 会话行:与项目行共用「图标列 + 文字列」基准,靠 dot 的视觉轻重表达从属,不再额外缩进
+        'group flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 pl-2 text-sm transition-colors',
         active
           ? 'bg-muted text-foreground'
           : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
@@ -2181,6 +2145,53 @@ function TitleSummaryBadge({
   return null;
 }
 
+/** 会话悬停提示里的所属项目名,跟随别名 */
+function hoverProjectName(projects: Project[], projectId: string | undefined) {
+  const project = projects.find((entry) => entry.id === projectId);
+  return project ? projectDisplayName(project) : undefined;
+}
+
+/** 分组在菜单里的图标位:有 emoji 用 emoji,否则用统一的分组图标并套上分组色 */
+function GroupGlyph({ emoji, color }: { emoji?: string; color?: string }) {
+  if (emoji) {
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center text-sm leading-none">
+        {emoji}
+      </span>
+    );
+  }
+  return <Folders style={color ? { color } : undefined} />;
+}
+
+type ProjectAction =
+  | { kind: 'separator'; key: string }
+  | {
+      kind: 'item';
+      key: string;
+      label: string;
+      icon?: React.ReactNode;
+      destructive?: boolean;
+      onSelect: () => void;
+    };
+
+/** 区块标签:纯文字,不占图标列(对应不可折叠的 Active / Pinned 等分区) */
+function SidebarSectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
+      <span className="truncate">{children}</span>
+    </div>
+  );
+}
+
+/** 行首图标列:固定 16px,让项目/会话/分区三种行共用同一条图标基准线 */
+function IconSlot({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">
+      {children}
+    </span>
+  );
+}
+
 function ConversationDot({
   conversation,
 }: {
@@ -2199,5 +2210,10 @@ function ConversationDot({
     pendingAskCount: conversation.pendingAsks?.length ?? 0,
     hasRunningChild: conversation.hasRunningChild,
   });
-  return <ConversationStatusIndicator tone={tone} size="sm" />;
+  // 锁进与项目行同宽的图标列:圆点/图标两种形态切换时标题不再左右跳动
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center">
+      <ConversationStatusIndicator tone={tone} size="sm" />
+    </span>
+  );
 }

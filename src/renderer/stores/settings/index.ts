@@ -713,6 +713,19 @@ export const useSettingsStore = create<SettingsState>()(
           }),
         }));
       },
+      setProjectAlias: (projectId, alias) => {
+        const next = alias?.trim();
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            if (!next) {
+              const { alias: _removed, ...rest } = project;
+              return rest;
+            }
+            return { ...project, alias: next };
+          }),
+        }));
+      },
       setProjectDefaultModel: (projectId, model, reasoning) => {
         set((state) => ({
           projects: state.projects.map((project) => {

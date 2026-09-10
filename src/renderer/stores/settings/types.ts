@@ -381,6 +381,8 @@ export interface SettingsState {
   removeProjectGroup: (id: string) => void;
   reorderProjectGroups: (activeId: string, overId: string) => void;
   setProjectGroupId: (projectId: string, groupId: string | null) => void;
+  /** 空串或纯空白视为清除别名 */
+  setProjectAlias: (projectId: string, alias: string | null) => void;
   setProjectDefaultModel: (
     projectId: string,
     model: DefaultModelRef | null,
