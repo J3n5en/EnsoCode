@@ -13,6 +13,12 @@ interface TerminalEntry {
 }
 
 const terminals = new Map<string, TerminalEntry>();
+/** kill 之后 native wait 线程仍可能活着；FreeEnvironment 前必须等 onExit，否则 TSFN 抛 C++ 异常 abort */
+const pendingPtys = new Set<IPty>();
+
+const PTY_QUIT_SOFT_MS = 500;
+const PTY_QUIT_HARD_MS = 1500;
+const PTY_QUIT_POLL_MS = 20;
 
 function isDirectory(dir: string): boolean {
   try {
@@ -123,14 +129,24 @@ export function createTerminal(
       env: withUtf8Locale(spec.env ?? process.env),
     });
     const entry: TerminalEntry = { pty, sender };
+    pendingPtys.add(pty);
     pty.onData((data) => {
-      if (!entry.sender.isDestroyed())
-        entry.sender.send(IPC_CHANNELS.TERMINAL_DATA, { termId: request.termId, data });
+      try {
+        if (!entry.sender.isDestroyed())
+          entry.sender.send(IPC_CHANNELS.TERMINAL_DATA, { termId: request.termId, data });
+      } catch {
+        // 退出过程中 webContents 可能已不可用
+      }
     });
     pty.onExit(({ exitCode }) => {
+      pendingPtys.delete(pty);
       terminals.delete(request.termId);
-      if (!entry.sender.isDestroyed())
-        entry.sender.send(IPC_CHANNELS.TERMINAL_EXIT, { termId: request.termId, exitCode });
+      try {
+        if (!entry.sender.isDestroyed())
+          entry.sender.send(IPC_CHANNELS.TERMINAL_EXIT, { termId: request.termId, exitCode });
+      } catch {
+        // 同上
+      }
     });
     // 窗口销毁时回收 pty,避免孤儿 shell
     sender.once('destroyed', () => disposeTerminal(request.termId));
@@ -161,10 +177,79 @@ export function disposeTerminal(termId: string): void {
   try {
     entry.pty.kill();
   } catch {
-    // 已退出
+    // onExit 才从 pending 删；kill 抛错时 wait 线程可能仍活着
   }
 }
 
 export function disposeAllTerminals(): void {
   for (const termId of [...terminals.keys()]) disposeTerminal(termId);
+}
+
+async function waitForPendingPtys(timeoutMs: number, pollMs = PTY_QUIT_POLL_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (pendingPtys.size > 0 && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+function forceKillPendingPtys(): void {
+  for (const pty of [...pendingPtys]) {
+    try {
+      if (process.platform === 'win32') pty.kill();
+      else pty.kill('SIGKILL');
+    } catch {
+      // onExit 才从 pending 删
+    }
+  }
+}
+
+/** SIGHUP 等不及就 SIGKILL，避免 FreeEnvironment 时 TSFN CallJS abort */
+export async function runPtyQuitIdle(input: {
+  hasPending: () => boolean;
+  forceKill: () => void;
+  waitUntilIdle: (ms: number) => Promise<void>;
+  softMs: number;
+  hardMs: number;
+}): Promise<void> {
+  await input.waitUntilIdle(input.softMs);
+  if (!input.hasPending()) return;
+  input.forceKill();
+  await input.waitUntilIdle(input.hardMs);
+}
+
+export function createPtyQuitDrain(input: {
+  disposeAll: () => void;
+  hasPending: () => boolean;
+  waitIdle: () => Promise<void>;
+}): { onWillQuit: (event: { preventDefault: () => void }, quit: () => void) => void } {
+  let draining = false;
+  return {
+    onWillQuit(event, quit) {
+      if (draining) return;
+      input.disposeAll();
+      if (!input.hasPending()) return;
+      draining = true;
+      event.preventDefault();
+      void input.waitIdle().finally(quit);
+    },
+  };
+}
+
+export function attachPtyQuitDrain(app: {
+  on(event: 'will-quit', listener: (event: { preventDefault: () => void }) => void): void;
+  quit(): void;
+}): void {
+  const drain = createPtyQuitDrain({
+    disposeAll: disposeAllTerminals,
+    hasPending: () => pendingPtys.size > 0,
+    waitIdle: () =>
+      runPtyQuitIdle({
+        hasPending: () => pendingPtys.size > 0,
+        forceKill: forceKillPendingPtys,
+        waitUntilIdle: waitForPendingPtys,
+        softMs: PTY_QUIT_SOFT_MS,
+        hardMs: PTY_QUIT_HARD_MS,
+      }),
+  });
+  app.on('will-quit', (event) => drain.onWillQuit(event, () => app.quit()));
 }

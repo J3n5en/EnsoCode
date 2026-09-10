@@ -21,6 +21,7 @@ import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
+import { attachPtyQuitDrain } from './services/terminalService';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试。
@@ -134,6 +135,8 @@ if (!gotTheLock) {
     void browserHost.dispose();
     closeMemoryDb();
   });
+  // node-pty TSFN 在 FreeEnvironment 期间回调会 SIGABRT；will-quit 里 kill 并等到 onExit
+  attachPtyQuitDrain(app);
 }
 
 /** 打包环境下启动自动更新(dev 无 app-update.yml,electron-updater 会报错;Linux deb 由 IPC 层守卫) */

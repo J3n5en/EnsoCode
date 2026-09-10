@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { pickSessionCwd, resolvePtySize, withUtf8Locale } from './terminalService';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  createPtyQuitDrain,
+  pickSessionCwd,
+  resolvePtySize,
+  runPtyQuitIdle,
+  withUtf8Locale,
+} from './terminalService';
 
 const exists = (dir: string) => dir === '/wt' || dir === '/proj';
 
@@ -82,5 +88,81 @@ describe('withUtf8Locale', () => {
     const next = withUtf8Locale({ LANG: 'zh_CN.UTF-8', LC_ALL: 'C' });
     expect(next.LC_ALL).toMatch(/utf-?8/i);
     expect(next.LANG).toMatch(/utf-?8/i);
+  });
+});
+
+describe('createPtyQuitDrain', () => {
+  it('无 pending pty 时不拦截退出', () => {
+    const disposeAll = vi.fn();
+    const drain = createPtyQuitDrain({
+      disposeAll,
+      hasPending: () => false,
+      waitIdle: vi.fn(async () => {}),
+    });
+    const preventDefault = vi.fn();
+    const quit = vi.fn();
+    drain.onWillQuit({ preventDefault }, quit);
+    expect(disposeAll).toHaveBeenCalledOnce();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it('有 pending 时先 preventDefault，idle 后再 quit；第二次放行', async () => {
+    let pending = true;
+    const drain = createPtyQuitDrain({
+      disposeAll: vi.fn(),
+      hasPending: () => pending,
+      waitIdle: async () => {
+        pending = false;
+      },
+    });
+    const preventDefault = vi.fn();
+    const quit = vi.fn();
+    drain.onWillQuit({ preventDefault }, quit);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(quit).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+
+    const prevent2 = vi.fn();
+    const quit2 = vi.fn();
+    drain.onWillQuit({ preventDefault: prevent2 }, quit2);
+    expect(prevent2).not.toHaveBeenCalled();
+    expect(quit2).not.toHaveBeenCalled();
+  });
+});
+
+describe('runPtyQuitIdle', () => {
+  it('soft 期内已 idle 则不 forceKill', async () => {
+    const forceKill = vi.fn();
+    const waitUntilIdle = vi.fn(async () => {});
+    await runPtyQuitIdle({
+      hasPending: () => false,
+      forceKill,
+      waitUntilIdle,
+      softMs: 40,
+      hardMs: 80,
+    });
+    expect(waitUntilIdle).toHaveBeenCalledOnce();
+    expect(waitUntilIdle).toHaveBeenCalledWith(40);
+    expect(forceKill).not.toHaveBeenCalled();
+  });
+
+  it('soft 后仍 pending 则 SIGKILL 再等 hard', async () => {
+    let pending = true;
+    const forceKill = vi.fn(() => {
+      pending = false;
+    });
+    const waited: number[] = [];
+    await runPtyQuitIdle({
+      hasPending: () => pending,
+      forceKill,
+      waitUntilIdle: async (ms) => {
+        waited.push(ms);
+      },
+      softMs: 40,
+      hardMs: 80,
+    });
+    expect(waited).toEqual([40, 80]);
+    expect(forceKill).toHaveBeenCalledOnce();
   });
 });
