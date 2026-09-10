@@ -863,6 +863,7 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
         name: projectNameFromPath(project.canonicalPath),
         path: project.canonicalPath,
         ...(previous?.groupId ? { groupId: previous.groupId } : {}),
+        ...(previous?.alias?.trim() ? { alias: previous.alias } : {}),
         ...(project.kind === 'ssh'
           ? {
               kind: 'ssh' as const,
@@ -895,7 +896,8 @@ function sameProjectProjection(
       project.sshHost === candidate.sshHost &&
       project.sshConnectionId === candidate.sshConnectionId &&
       project.sshConnectionName === candidate.sshConnectionName &&
-      project.groupId === candidate.groupId
+      project.groupId === candidate.groupId &&
+      project.alias === candidate.alias
     );
   });
 }

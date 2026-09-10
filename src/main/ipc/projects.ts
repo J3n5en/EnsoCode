@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveSshTarget } from '@shared/ssh';
 import { IPC_CHANNELS } from '@shared/types';
@@ -38,8 +39,15 @@ export function registerProjectHandlers(): void {
       if (project?.state !== 'active') return { ok: false, error: 'unavailable' };
       // ssh 项目的路径在远端，本机打不开
       if (project.kind === 'ssh') return { ok: false, error: 'unsupported' };
-      const failure = await shell.openPath(project.canonicalPath);
-      return failure ? { ok: false, error: failure } : { ok: true };
+      try {
+        if (!(await stat(project.canonicalPath)).isDirectory()) {
+          return { ok: false, error: 'unavailable' };
+        }
+        const failure = await shell.openPath(project.canonicalPath);
+        return failure ? { ok: false, error: failure } : { ok: true };
+      } catch {
+        return { ok: false, error: 'unavailable' };
+      }
     }
   );
 
