@@ -6,7 +6,7 @@ import {
   parseRemoveProjectAuthorityRequest,
   parseSelectProjectAuthorityRequest,
 } from '@shared/types/agent';
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import { getRecentProjects } from '../services/recentProjects';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
@@ -23,6 +23,25 @@ export function registerProjectHandlers(): void {
       return [];
     }
   });
+
+  // 渲染层只传 projectId，磁盘路径由 Main 从权威记录推导，不接受任意路径
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECTS_REVEAL,
+    async (event, request: unknown): Promise<{ ok: boolean; error?: string }> => {
+      if (!isMainWebContents(event.sender.id)) return { ok: false, error: 'unavailable' };
+      if (!request || typeof request !== 'object') return { ok: false, error: 'invalid' };
+      const projectId = (request as { projectId?: unknown }).projectId;
+      if (typeof projectId !== 'string' || projectId.length === 0) {
+        return { ok: false, error: 'invalid' };
+      }
+      const project = getSourceAuthorityRegistry()?.project(projectId);
+      if (project?.state !== 'active') return { ok: false, error: 'unavailable' };
+      // ssh 项目的路径在远端，本机打不开
+      if (project.kind === 'ssh') return { ok: false, error: 'unsupported' };
+      const failure = await shell.openPath(project.canonicalPath);
+      return failure ? { ok: false, error: failure } : { ok: true };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.SOURCE_PROJECT_CREATE, async (event, request: unknown) => {
     const parsed = parseCreateProjectAuthorityRequest(request);

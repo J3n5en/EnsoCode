@@ -1,7 +1,9 @@
 import { type DefaultModelRef, resolveChatReasoning } from '@shared/defaultModel';
 import { projectDisplayName } from '@shared/projectName';
 import type { Project, ThinkingLevel } from '@shared/types';
+import { FolderOpen } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { CopyButton } from '@/components/chat/CopyButton';
 import { ScopedDefaultModelField } from '@/components/chat/ScopedDefaultModelField';
 import { Button } from '@/components/ui/button';
 import {
@@ -119,9 +121,25 @@ export function ProjectSettingsDialog({
             </Field>
             <Field className="w-full items-stretch">
               <FieldLabel>{t('Path')}</FieldLabel>
-              <p className="truncate font-mono text-muted-foreground text-xs" title={pathLabel}>
-                {pathLabel}
-              </p>
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <p className="min-w-0 flex-1 truncate font-mono text-xs" title={pathLabel}>
+                  {pathLabel}
+                </p>
+                <CopyButton text={pathLabel} className="shrink-0" />
+                {/* ssh 项目路径在远端，本机打不开 */}
+                {project && project.kind !== 'ssh' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void window.electronAPI.projects.reveal({ projectId: project.id })
+                    }
+                    className="shrink-0 transition-colors hover:text-foreground"
+                    title={t('Open folder')}
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             </Field>
             {groups.length > 0 && (
               <Field className="w-full items-stretch">

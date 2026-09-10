@@ -77,6 +77,9 @@ import {
   ContextMenuItem,
   ContextMenuPopup,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubPopup,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
@@ -910,21 +913,29 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                     onSelect: () => setImportProject(project),
                   },
                   { kind: 'separator', key: 'sep-group' },
+                  // 分组列表是动态的,收进二级菜单,否则分组一多主菜单就被撑长
                   {
-                    kind: 'item',
-                    key: 'ungrouped',
-                    label: t('Move to ungrouped'),
+                    kind: 'submenu',
+                    key: 'move-to-group',
+                    label: t('Move to group'),
                     icon: <GroupGlyph />,
-                    onSelect: () => setProjectGroupId(project.id, null),
+                    items: [
+                      {
+                        kind: 'item',
+                        key: 'ungrouped',
+                        label: t('Ungrouped'),
+                        icon: <GroupGlyph />,
+                        onSelect: () => setProjectGroupId(project.id, null),
+                      },
+                      ...projectGroups.map<ProjectAction>((group) => ({
+                        kind: 'item',
+                        key: `group-${group.id}`,
+                        label: group.name,
+                        icon: <GroupGlyph emoji={group.emoji} color={group.color} />,
+                        onSelect: () => setProjectGroupId(project.id, group.id),
+                      })),
+                    ],
                   },
-                  // 分组项没有天然图标,用分组自己的 emoji/色点占同一个 16px 图标列,保证文字对齐
-                  ...projectGroups.map<ProjectAction>((group) => ({
-                    kind: 'item',
-                    key: `group-${group.id}`,
-                    label: t('Move to {{name}}', { name: group.name }),
-                    icon: <GroupGlyph emoji={group.emoji} color={group.color} />,
-                    onSelect: () => setProjectGroupId(project.id, group.id),
-                  })),
                   {
                     kind: 'item',
                     key: 'new-group',
@@ -1125,20 +1136,7 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                           }
                         />
                         <ContextMenuPopup className="min-w-40">
-                          {projectActions.map((action) =>
-                            action.kind === 'separator' ? (
-                              <ContextMenuSeparator key={action.key} />
-                            ) : (
-                              <ContextMenuItem
-                                key={action.key}
-                                onClick={action.onSelect}
-                                variant={action.destructive ? 'destructive' : 'default'}
-                              >
-                                {action.icon}
-                                {action.label}
-                              </ContextMenuItem>
-                            )
-                          )}
+                          {renderProjectActions(projectActions)}
                         </ContextMenuPopup>
                       </ContextMenu>
                     )}
@@ -2172,7 +2170,44 @@ type ProjectAction =
       icon?: React.ReactNode;
       destructive?: boolean;
       onSelect: () => void;
+    }
+  | {
+      kind: 'submenu';
+      key: string;
+      label: string;
+      icon?: React.ReactNode;
+      items: ProjectAction[];
     };
+
+/** 菜单项渲染:submenu 递归展开,让动态分组列表不把主菜单撑长 */
+function renderProjectActions(actions: ProjectAction[]): React.ReactNode {
+  return actions.map((action) => {
+    if (action.kind === 'separator') return <ContextMenuSeparator key={action.key} />;
+    if (action.kind === 'submenu') {
+      return (
+        <ContextMenuSub key={action.key}>
+          <ContextMenuSubTrigger>
+            {action.icon}
+            {action.label}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubPopup className="min-w-40">
+            {renderProjectActions(action.items)}
+          </ContextMenuSubPopup>
+        </ContextMenuSub>
+      );
+    }
+    return (
+      <ContextMenuItem
+        key={action.key}
+        onClick={action.onSelect}
+        variant={action.destructive ? 'destructive' : 'default'}
+      >
+        {action.icon}
+        {action.label}
+      </ContextMenuItem>
+    );
+  });
+}
 
 /** 区块标签:纯文字,不占图标列(对应不可折叠的 Active / Pinned 等分区) */
 function SidebarSectionLabel({ children }: { children: React.ReactNode }) {

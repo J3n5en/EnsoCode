@@ -255,6 +255,9 @@ const electronAPI = {
   projects: {
     /** 从本机编辑器 / 编程应用读取最近打开的目录 */
     getRecent: (): Promise<RecentProject[]> => ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_GET_RECENT),
+    /** 在系统文件管理器里打开项目根目录；ssh 项目返回 unsupported */
+    reveal: (request: { projectId: string }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECTS_REVEAL, request),
   },
 
   git: {
