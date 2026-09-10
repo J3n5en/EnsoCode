@@ -4,11 +4,12 @@ import {
   UNIT_TYPES,
   type UnitType,
 } from '@shared/memory/constants';
-import type {
-  EvolvesEdgeDto,
-  MemoryDetail,
-  MemoryListItem,
-  MemorySearchMode,
+import {
+  type EvolvesEdgeDto,
+  isMemoryRetrievalMode,
+  type MemoryDetail,
+  type MemoryListItem,
+  type MemorySearchMode,
 } from '@shared/memory/dto';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -55,7 +56,7 @@ export function isPristineEmpty(libraryHasRows: boolean | null, hasFilters: bool
 export type MemoryEmptyReason = 'needs-query' | 'library-empty' | 'no-match';
 
 /**
- * 语义检索按相关度排序，没有查询词就无从排起，后端直接返回空——
+ * fast/deep 按相关度排序，没有查询词就无从排起，后端直接返回空——
  * 这时说「没有符合筛选条件」是误导，要请用户先输入。
  */
 export function emptyReason(
@@ -64,7 +65,7 @@ export function emptyReason(
   libraryHasRows: boolean | null,
   hasFilters: boolean
 ): MemoryEmptyReason {
-  if (mode === 'semantic' && !query.trim()) return 'needs-query';
+  if (isMemoryRetrievalMode(mode) && !query.trim()) return 'needs-query';
   return isPristineEmpty(libraryHasRows, hasFilters) ? 'library-empty' : 'no-match';
 }
 
@@ -238,7 +239,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
     const request = ++listRequest.current;
     const isCurrent = () => mounted.current && request === listRequest.current;
     // 语义模式没有查询词时后端必然返回空，别白跑一次 IPC（还会顺带加载 embedder）
-    if (mode === 'semantic' && !query.trim()) {
+    if (isMemoryRetrievalMode(mode) && !query.trim()) {
       setItems([]);
       setTotal(0);
       setApproximate(true);
@@ -343,7 +344,8 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   ];
   const modeItems = [
     { value: 'exact', label: t('Exact match') },
-    { value: 'semantic', label: t('Semantic search') },
+    { value: 'fast', label: t('Fast retrieval') },
+    { value: 'deep', label: t('Deep retrieval') },
   ];
 
   return (
@@ -372,7 +374,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               items={modeItems}
               onValueChange={(value) => {
                 setOffset(0);
-                setMode(value === 'semantic' ? 'semantic' : 'exact');
+                setMode(value === 'deep' ? 'deep' : value === 'fast' ? 'fast' : 'exact');
               }}
             >
               <SelectTrigger
@@ -444,10 +446,12 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         )}
       </div>
 
-      {mode === 'semantic' && (
+      {isMemoryRetrievalMode(mode) && (
         <p className="text-xs text-muted-foreground">
           {t(
-            'Same path the agent uses: full-text, vectors and entities merged by relevance. Shows the top matches only — no exact count, and archived memories are excluded.'
+            mode === 'deep'
+              ? 'Same recall as Fast, plus intent-weighted fusion and an optional short-timeout LLM rerank. Failures fall back; archived memories are excluded.'
+              : 'Same path the agent uses: full-text, vectors and entities merged by relevance. Shows the top matches only — no exact count, and archived memories are excluded.'
           )}
           {!vectorsUsed && ` ${t('Embedding model is not ready, so vectors are skipped.')}`}
         </p>

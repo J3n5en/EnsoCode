@@ -30,7 +30,7 @@ import {
   updateMemory,
   vecDelete,
 } from './memory/store';
-import type { Embedder, Evolves, Memory } from './memory/types';
+import type { Embedder, Evolves, Memory, SearchAssist } from './memory/types';
 
 const SUMMARY_CHARS = 240;
 
@@ -124,7 +124,8 @@ export function listMemoriesForAdmin(
 export async function searchMemoriesForAdmin(
   db: Database.Database,
   query: MemoryListQuery,
-  embedder: Embedder | null
+  embedder: Embedder | null,
+  assist?: SearchAssist | null
 ): Promise<MemoryListResult> {
   const text = query.query?.trim() ?? '';
   if (!text) return { items: [], total: 0, approximate: true, vectorsUsed: false };
@@ -136,6 +137,8 @@ export async function searchMemoriesForAdmin(
     limit: query.limit,
     embedder,
     mmr: true,
+    mode: query.mode === 'deep' ? 'deep' : 'fast',
+    assist: query.mode === 'deep' ? assist : undefined,
   });
   // unitType 在语义通道里没有下推，只能在结果上后过滤
   const items = hits

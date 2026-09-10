@@ -564,6 +564,34 @@ describe('searchMemories — 实体通道（三通道并集）', () => {
       m.id,
     ]);
   });
+
+  it('社区通道召回 1-hop 邻居实体的记忆', async () => {
+    const k8s = await add('Kubernetes 上线流程已经跑通');
+    const docker = await add('镜像构建走多阶段发布');
+    entity(k8s, 'Kubernetes');
+    entity(docker, 'Docker');
+    const kId = (
+      db.prepare("SELECT id FROM entities WHERE normalized_name = 'kubernetes'").get() as {
+        id: string;
+      }
+    ).id;
+    const dId = (
+      db.prepare("SELECT id FROM entities WHERE normalized_name = 'docker'").get() as {
+        id: string;
+      }
+    ).id;
+    db.prepare(
+      `INSERT INTO entity_relations (id, source_id, target_id, relation_type, strength, created_at)
+       VALUES ('rel-1', ?, ?, 'USES', 0.8, datetime('now'))`
+    ).run(kId, dId);
+    expect(ids(await searchMemories(db, { q: 'Kubernetes', spaceIds: ['global'] })).sort()).toEqual(
+      [k8s.id, docker.id].sort()
+    );
+    db.exec('DELETE FROM entity_relations');
+    expect(ids(await searchMemories(db, { q: 'Kubernetes', spaceIds: ['global'] }))).toEqual([
+      k8s.id,
+    ]);
+  });
 });
 
 describe('searchMemories — mode fast vs deep', () => {
@@ -577,6 +605,14 @@ describe('searchMemories — mode fast vs deep', () => {
       relations: [],
     });
     const literal = await add('We chose Postgres as the primary database');
+    db.prepare('UPDATE memories SET updated_at = ? WHERE id = ?').run(
+      '2025-01-01T00:00:00.000Z',
+      paraphrase.id
+    );
+    db.prepare('UPDATE memories SET updated_at = ? WHERE id = ?').run(
+      '2025-01-02T00:00:00.000Z',
+      literal.id
+    );
     const q = 'how Postgres relates to the database choice';
     const fast = ids(await searchMemories(db, { q, spaceIds: ['global'] }));
     const deep = ids(await searchMemories(db, { q, spaceIds: ['global'], mode: 'deep' }));
@@ -584,6 +620,68 @@ describe('searchMemories — mode fast vs deep', () => {
     expect(deep[0]).toBe(paraphrase.id);
     expect(new Set(fast)).toEqual(new Set([literal.id, paraphrase.id]));
     expect(new Set(deep)).toEqual(new Set([literal.id, paraphrase.id]));
+  });
+
+  it('deep 的 LLM 意图覆盖启发式；rerank 失败则保持融合序', async () => {
+    const paraphrase = await add('集群编排方案确定，后续按此推进');
+    applyExtraction(db, paraphrase, {
+      entities: [
+        { name: 'Postgres', type: 'PRODUCT', description: null, confidence: 0.9, aliases: [] },
+      ],
+      relations: [],
+    });
+    const literal = await add('We chose Postgres as the primary database');
+    const q = 'Postgres';
+    const heuristic = ids(await searchMemories(db, { q, spaceIds: ['global'], mode: 'deep' }));
+    expect(heuristic[0]).toBe(literal.id);
+    const analyzed = ids(
+      await searchMemories(db, {
+        q,
+        spaceIds: ['global'],
+        mode: 'deep',
+        assist: {
+          analyze: async () => ({
+            intent: 'relationship',
+            entityTerms: ['Postgres'],
+            confidence: 1,
+            temporal: null,
+          }),
+          rerank: async () => null,
+        },
+      })
+    );
+    expect(analyzed[0]).toBe(paraphrase.id);
+  });
+
+  it('deep LLM rerank 只动前 8 条，失败长度不匹配则原序', async () => {
+    const older = await add('Postgres note alpha');
+    const newer = await add('Postgres note beta');
+    const flipped = ids(
+      await searchMemories(db, {
+        q: 'Postgres',
+        spaceIds: ['global'],
+        mode: 'deep',
+        mmr: false,
+        assist: {
+          analyze: async () => null,
+          rerank: async () => [0, 10],
+        },
+      })
+    );
+    expect(flipped[0]).toBe(older.id);
+    const kept = ids(
+      await searchMemories(db, {
+        q: 'Postgres',
+        spaceIds: ['global'],
+        mode: 'deep',
+        mmr: false,
+        assist: {
+          analyze: async () => null,
+          rerank: async () => [1],
+        },
+      })
+    );
+    expect(kept[0]).toBe(newer.id);
   });
 });
 

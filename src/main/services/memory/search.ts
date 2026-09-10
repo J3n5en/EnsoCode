@@ -3,6 +3,7 @@ import { computeDecayScore } from '@shared/memory/decay';
 import { normalizeEntityName } from '@shared/memory/entityNormalize';
 import { mmrRerank } from '@shared/memory/mmr';
 import { finalScore, minMaxNormalize, rrf } from '@shared/memory/rrf';
+import { blendRerankScore, SEARCH_LLM_RERANK_MAX, termCoverage } from '@shared/memory/searchAssist';
 import { channelWeights, detectSearchIntent } from '@shared/memory/searchIntent';
 import { expandTemporalRange, normalizeTemporalDate } from '@shared/memory/temporal';
 import { computeTemporalBoost, detectTemporalIntent } from '@shared/memory/temporalIntent';
@@ -20,6 +21,7 @@ import {
   type Embedder,
   type MemorySearchHit,
   MemoryValidationError,
+  type SearchAssist,
   type SearchOptions,
 } from './types';
 
@@ -174,6 +176,42 @@ function entityChannel(db: Database.Database, q: string, scope: Scope, pool: num
   }
 }
 
+// 社区通道：查询命中实体的 1-hop 邻居所提及的记忆。不是 Louvain；
+// 直接 MENTIONS 查询实体的记忆走实体通道，这里只召回「图上相邻、查询词未出现」的记忆。
+function communityChannel(db: Database.Database, q: string, scope: Scope, pool: number): string[] {
+  const key = normalizeEntityName(q);
+  if (!key) return [];
+  try {
+    const rows = db
+      .prepare(
+        `WITH seeds AS (
+           SELECT DISTINCT e.id AS id
+           FROM entities e
+           LEFT JOIN entity_aliases a ON a.entity_id = e.id
+           WHERE (length(e.normalized_name) >= ? AND instr(?, e.normalized_name) > 0)
+              OR (length(a.normalized_alias) >= ? AND instr(?, a.normalized_alias) > 0)
+         ),
+         neighbors AS (
+           SELECT CASE WHEN r.source_id IN (SELECT id FROM seeds) THEN r.target_id ELSE r.source_id END AS id
+           FROM entity_relations r
+           WHERE r.source_id IN (SELECT id FROM seeds) OR r.target_id IN (SELECT id FROM seeds)
+         )
+         SELECT m.id AS id, max(mn.confidence) AS conf
+         FROM memories m
+         JOIN mentions mn ON mn.memory_id = m.id
+         WHERE ${scope.sql}
+           AND mn.entity_id IN (SELECT id FROM neighbors)
+           AND mn.entity_id NOT IN (SELECT id FROM seeds)
+         GROUP BY m.id
+         ORDER BY conf DESC, m.updated_at DESC, m.id ASC LIMIT ?`
+      )
+      .all(ENTITY_MIN_CHARS, key, ENTITY_MIN_CHARS, key, ...scope.params, pool) as { id: string }[];
+    return rows.map((r) => r.id);
+  } catch {
+    return [];
+  }
+}
+
 async function vectorChannel(
   db: Database.Database,
   embedder: Embedder,
@@ -232,8 +270,47 @@ function loadVectors(
   return out;
 }
 
+function hitOrder(a: MemorySearchHit, b: MemorySearchHit): number {
+  return (
+    b.score - a.score ||
+    b.rrf - a.rrf ||
+    (b.memory.updatedAt > a.memory.updatedAt
+      ? 1
+      : b.memory.updatedAt < a.memory.updatedAt
+        ? -1
+        : 0) ||
+    (a.memory.id < b.memory.id ? -1 : 1)
+  );
+}
+
+async function applyLlmRerank(
+  q: string,
+  hits: MemorySearchHit[],
+  assist: SearchAssist
+): Promise<void> {
+  const window = hits.slice(0, Math.min(SEARCH_LLM_RERANK_MAX, hits.length));
+  const scores = await assist
+    .rerank(
+      q,
+      window.map((h) => ({ title: h.memory.title, content: h.memory.content }))
+    )
+    .catch(() => null);
+  if (!scores || scores.length !== window.length) return;
+  const orig = minMaxNormalize(window.map((h) => h.score));
+  for (const [i, hit] of window.entries()) {
+    const coverage = termCoverage(
+      q,
+      `${hit.memory.title}
+${hit.memory.content}`
+    );
+    hit.score = blendRerankScore(scores[i] ?? 0, orig[i] ?? 0, coverage);
+  }
+  window.sort(hitOrder);
+  hits.splice(0, window.length, ...window);
+}
+
 // 多通道并发（单通道失败只记日志）→ 融合去重 → decay 混分 → 排序 → appearances+1（best-effort）。
-// 融合用 RRF(k=60)；deep 才按查询意图加权，fast / 缺省等权。混分见 finalScore。
+// 融合用 RRF(k=60)；deep 才按查询意图加权，并可并行 LLM 辅助（失败回退）。混分见 finalScore。
 export async function searchMemories(
   db: Database.Database,
   opts: SearchOptions
@@ -246,7 +323,7 @@ export async function searchMemories(
   const pool = Math.max(rerankPoolSize(limit), 20);
   const scope = scopeClause(opts.spaceIds, temporal);
 
-  const [ftsIds, vecIds, entityIds] = await Promise.all([
+  const [ftsIds, vecIds, entityIds, communityIds, analysis] = await Promise.all([
     Promise.resolve()
       .then(() => ftsChannel(db, q, scope, pool))
       .catch(() => [] as string[]),
@@ -258,10 +335,20 @@ export async function searchMemories(
     Promise.resolve()
       .then(() => entityChannel(db, q, scope, pool))
       .catch(() => [] as string[]),
+    Promise.resolve()
+      .then(() => communityChannel(db, q, scope, pool))
+      .catch(() => [] as string[]),
+    opts.mode === 'deep' && opts.assist
+      ? opts.assist.analyze(q).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
-  const weights = opts.mode === 'deep' ? channelWeights(detectSearchIntent(q)) : undefined;
-  const fused = rrf([ftsIds, vecIds, entityIds], RRF_K, weights).slice(0, rerankPoolSize(limit));
+  const searchIntent = analysis?.intent ?? (opts.mode === 'deep' ? detectSearchIntent(q) : null);
+  const weights = searchIntent ? channelWeights(searchIntent) : undefined;
+  const fused = rrf([ftsIds, vecIds, entityIds, communityIds], RRF_K, weights).slice(
+    0,
+    rerankPoolSize(limit)
+  );
   if (fused.length === 0) return [];
 
   const placeholders = fused.map(() => '?').join(',');
@@ -271,8 +358,9 @@ export async function searchMemories(
   const byId = new Map(rows.map((r) => [r.id, rowToMemory(r)]));
 
   const now = opts.now ?? new Date();
-  // 时间意图只走正则门；boost 见 computeTemporalBoost
-  const intent = detectTemporalIntent(q);
+  // 时间意图：fast / 无 LLM 结果走正则门；deep 可用分析里的 temporal
+  const temporalIntent =
+    opts.mode === 'deep' && analysis?.temporal ? analysis.temporal : detectTemporalIntent(q);
   const semantic = minMaxNormalize(fused.map(([, s]) => s));
   const hits: MemorySearchHit[] = [];
   fused.forEach(([id, rrfScore], i) => {
@@ -284,23 +372,15 @@ export async function searchMemories(
       importance: memory.importance,
       now,
     });
-    const boost = intent ? computeTemporalBoost(memory.eventStart, now, intent) : 0;
+    const boost = temporalIntent ? computeTemporalBoost(memory.eventStart, now, temporalIntent) : 0;
     // crystal 是多源合成的结论，同分时应压过任一单源记忆：乘法 boost
     const score = finalScore(semantic[i], decay, boost) * (memory.isCrystal ? CRYSTAL_BOOST : 1);
     hits.push({ memory, rrf: rrfScore, decay, score });
   });
-  // 按分数、RRF、updated_at、id 稳定排序；排完再截页
-  hits.sort(
-    (a, b) =>
-      b.score - a.score ||
-      b.rrf - a.rrf ||
-      (b.memory.updatedAt > a.memory.updatedAt
-        ? 1
-        : b.memory.updatedAt < a.memory.updatedAt
-          ? -1
-          : 0) ||
-      (a.memory.id < b.memory.id ? -1 : 1)
-  );
+  hits.sort(hitOrder);
+  if (opts.mode === 'deep' && opts.assist && hits.length > 1) {
+    await applyLlmRerank(q, hits, opts.assist);
+  }
   if (opts.mmr !== false && hits.length > limit) {
     // 只用当前模型的已存向量（BLOB 已 L2 归一化）；无向量的行不参与惩罚，纯 FTS 时保持原序。
     // 量纲：relevance 是混分后的 finalScore（约 0.3–1.5），惩罚项是余弦（0–1）×(1−λ)，两者不同尺度，

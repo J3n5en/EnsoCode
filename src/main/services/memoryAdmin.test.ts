@@ -47,7 +47,7 @@ describe('memory admin — 语义搜索模式', () => {
     await add('我们决定用 Postgres 做主库');
     const result = await searchMemoriesForAdmin(
       db,
-      { query: 'Postgres', limit: 10, offset: 0, mode: 'semantic' },
+      { query: 'Postgres', limit: 10, offset: 0, mode: 'fast' },
       null
     );
     expect(result.vectorsUsed).toBe(false);
@@ -68,7 +68,7 @@ describe('memory admin — 语义搜索模式', () => {
     }
     const semantic = await searchMemoriesForAdmin(
       db,
-      { query: 'Kubernetes', limit: 10, offset: 0, mode: 'semantic' },
+      { query: 'Kubernetes', limit: 10, offset: 0, mode: 'fast' },
       embedder
     );
     expect(semantic.items.map((i) => i.id).sort()).toEqual([literal.id, paraphrase.id].sort());

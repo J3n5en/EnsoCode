@@ -949,8 +949,12 @@ export const zhTranslations: Record<string, string> = {
   '{{count}} task(s) in progress': '{{count}} 个任务进行中',
   'Exact match': '精确匹配',
   'Semantic search': '语义检索',
+  'Fast retrieval': '快速检索',
+  'Deep retrieval': '深入检索',
   'Same path the agent uses: full-text, vectors and entities merged by relevance. Shows the top matches only — no exact count, and archived memories are excluded.':
-    '与 agent 同一条检索路径：全文、向量与实体按相关度融合。只给最相关的几条，没有精确总数，也不包含已归档的记忆。',
+    '与 agent 同一条检索路径：全文、向量、实体与一跳相关实体按相关度融合。只给最相关的几条，没有精确总数，也不包含已归档的记忆。',
+  'Same recall as Fast, plus intent-weighted fusion and an optional short-timeout LLM rerank. Failures fall back; archived memories are excluded.':
+    '召回与快速检索相同，再按意图加权融合，并可选短超时 LLM 重排。失败则回退；不含已归档记忆。',
   'Embedding model is not ready, so vectors are skipped.': '嵌入模型未就绪，本次跳过了向量通道。',
   Knowledge: '知识',
   'Browse what the agent knows as a graph or a tree, ask for an interpretation, and consolidate related memories into a crystal.':

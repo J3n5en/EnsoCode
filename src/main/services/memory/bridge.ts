@@ -8,7 +8,9 @@ import {
 import type { MemoryOp } from '@shared/types/agent';
 import type Database from 'better-sqlite3';
 import { createCrystal } from './crystal';
+import type { Complete } from './distill';
 import { searchMemories } from './search';
+import { createSearchAssist } from './searchLlm';
 import { createMemory, getMemory } from './store';
 import {
   type Embedder,
@@ -25,6 +27,8 @@ export interface MemoryBridgeContext {
   now?: Date;
   /** 真正新插一行后的 best-effort hook（KG 抽取排队） */
   onCreated?: (memory: Memory) => void;
+  /** deep 检索的 instruct LLM；不可用时检索退回本地意图 */
+  complete?: (() => Complete | null | Promise<Complete | null>) | null;
 }
 
 /** 模型只说 space 语义，这里换成真实 space_id；`project` 无项目时返回空集合让调用方决定拒绝还是空结果。 */
@@ -50,6 +54,8 @@ export async function executeMemoryOp(
     if (!request)
       throw new MemoryValidationError('invalid_request', 'invalid memory_search params');
     const spaceIds = resolveSpaceIds(request.spaceId, ctx.projectId);
+    const assist =
+      request.mode === 'deep' ? createSearchAssist((await ctx.complete?.()) ?? null) : undefined;
     const hits = await searchMemories(db, {
       q: request.query,
       spaceIds,
@@ -57,6 +63,7 @@ export async function executeMemoryOp(
       embedder: ctx.embedder,
       now: ctx.now,
       mode: request.mode,
+      assist,
       // agent 检索启用 MMR 去冗余；显式写出来，默认值变化不会静默关掉它
       mmr: true,
       eventDateFrom: request.eventDateFrom ?? null,

@@ -269,7 +269,7 @@ describe('MemoryLibrary response ordering', () => {
           ui.click('Next');
           break;
         case 'mode':
-          ui.select(0, 'semantic');
+          ui.select(0, 'fast');
           break;
         case 'changed':
           changed();
@@ -302,7 +302,7 @@ describe('MemoryLibrary response ordering', () => {
     const { ui, reply } = setupLibrary();
     await reply(0, ['Initial']);
     ui.query('slow');
-    ui.select(0, 'semantic');
+    ui.select(0, 'fast');
     ui.query('fast');
     await reply(3, ['Most relevant', 'Less relevant'], { approximate: true, vectorsUsed: true });
     const latest = ui.html();
@@ -317,7 +317,7 @@ describe('MemoryLibrary response ordering', () => {
     const { ui, reply, requests } = setupLibrary();
     await reply(0, ['Initial']);
     ui.query('slow semantic');
-    ui.select(0, 'semantic');
+    ui.select(0, 'fast');
     ui.query('   ');
     expect(requests).toHaveLength(3);
     ui.render();
@@ -334,7 +334,7 @@ describe('MemoryLibrary response ordering', () => {
     'keeps statistics and reviews independent of list retrieval (empty semantic: %s)',
     async (emptySemantic) => {
       const { ui, memory } = setupLibrary();
-      if (emptySemantic) ui.select(0, 'semantic');
+      if (emptySemantic) ui.select(0, 'fast');
       await Promise.resolve();
       ui.render();
       expect(memory.list).toHaveBeenCalledOnce();
@@ -410,13 +410,13 @@ describe('MemoryLibrary response ordering', () => {
 describe('emptyReason', () => {
   it('asks for a query in semantic mode instead of blaming the filters', () => {
     // 语义检索按相关度排序，没查询词后端直接返回空——说「没有符合筛选条件」是误导
-    expect(emptyReason('semantic', '', false, false)).toBe('needs-query');
-    expect(emptyReason('semantic', '   ', true, true)).toBe('needs-query');
+    expect(emptyReason('fast', '', false, false)).toBe('needs-query');
+    expect(emptyReason('deep', '   ', true, true)).toBe('needs-query');
   });
 
   it('falls back to the exact-mode distinction once a query exists', () => {
-    expect(emptyReason('semantic', 'redis', false, false)).toBe('library-empty');
-    expect(emptyReason('semantic', 'redis', true, true)).toBe('no-match');
+    expect(emptyReason('fast', 'redis', false, false)).toBe('library-empty');
+    expect(emptyReason('deep', 'redis', true, true)).toBe('no-match');
     // 精确模式可以无查询词列全部，所以空查询不算 needs-query
     expect(emptyReason('exact', '', false, false)).toBe('library-empty');
     expect(emptyReason('exact', '', true, false)).toBe('no-match');

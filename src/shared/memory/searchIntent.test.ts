@@ -18,9 +18,9 @@ describe('detectSearchIntent', () => {
 });
 
 describe('channelWeights', () => {
-  it('通道顺序固定为 FTS / vector / entity', () => {
-    expect(channelWeights('factual')).toEqual([1.2, 1, 0.8]);
-    expect(channelWeights('conceptual')).toEqual([0.8, 1.2, 0.8]);
-    expect(channelWeights('relationship')).toEqual([0.8, 1, 1.3]);
+  it('通道顺序固定为 FTS / vector / entity / community', () => {
+    expect(channelWeights('factual')).toEqual([1.2, 1, 0.8, 0.4]);
+    expect(channelWeights('conceptual')).toEqual([0.8, 1.2, 0.8, 1]);
+    expect(channelWeights('relationship')).toEqual([0.8, 1, 1.3, 1.1]);
   });
 });

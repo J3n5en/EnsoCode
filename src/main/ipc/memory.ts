@@ -5,6 +5,7 @@ import {
   type DistillableSessionDto,
   isEvolvesReviewState,
   isMemoryListQuery,
+  isMemoryRetrievalMode,
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
@@ -39,6 +40,7 @@ import {
   memoriesForEntity,
   memoriesForPrompt,
 } from '../services/memory/graph';
+import { createSearchAssist } from '../services/memory/searchLlm';
 import { getMemory } from '../services/memory/store';
 import {
   archiveMemory,
@@ -155,10 +157,12 @@ export function registerMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_LIST, async (event, request: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isMemoryListQuery(request)) return EMPTY_LIST;
     // 语义模式要拿 embedder，且 searchMemories 是异步的；库不存在时两条路径都返回空
-    const embedder = request.mode === 'semantic' ? await getMemoryEmbedder() : null;
+    const retrieval = isMemoryRetrievalMode(request.mode);
+    const embedder = retrieval ? await getMemoryEmbedder() : null;
+    const assist = request.mode === 'deep' ? createSearchAssist(await getMemoryCompletion()) : null;
     const result = await withExistingDbAsync(EMPTY_LIST, (db) =>
-      request.mode === 'semantic'
-        ? searchMemoriesForAdmin(db, request, embedder)
+      retrieval
+        ? searchMemoriesForAdmin(db, request, embedder, assist)
         : Promise.resolve(listMemoriesForAdmin(db, request))
     );
     const label = await spaceLabeler();

@@ -49,7 +49,11 @@ export interface MemoryDetail extends MemoryListItem {
   crystalSources: CrystalSourceDto[];
 }
 
-export type MemorySearchMode = 'exact' | 'semantic';
+export type MemorySearchMode = 'exact' | 'fast' | 'deep';
+
+export function isMemoryRetrievalMode(mode: unknown): mode is 'fast' | 'deep' {
+  return mode === 'fast' || mode === 'deep';
+}
 
 export interface MemoryListQuery {
   spaceId?: string | null;
@@ -60,7 +64,7 @@ export interface MemoryListQuery {
   offset: number;
   /**
    * exact（缺省）= FTS 全文，可精确分页；
-   * semantic = 与 agent 同一条检索路径（FTS ∪ 向量 ∪ 实体 → RRF → decay），只返回 top-N。
+   * fast / deep = 与 agent 同一条检索路径（FTS ∪ 向量 ∪ 实体 → RRF → decay），只返回 top-N。
    */
   mode?: MemorySearchMode;
 }
@@ -68,9 +72,9 @@ export interface MemoryListQuery {
 export interface MemoryListResult {
   items: MemoryListItem[];
   total: number;
-  /** semantic 模式下 total 只是本次返回条数，不能用于深分页 */
+  /** fast/deep 模式下 total 只是本次返回条数，不能用于深分页 */
   approximate?: boolean;
-  /** semantic 模式实际是否用上了向量（模型未就绪时自动降级为 FTS + 实体） */
+  /** fast/deep 模式实际是否用上了向量（模型未就绪时自动降级为 FTS + 实体） */
   vectorsUsed?: boolean;
 }
 
@@ -210,7 +214,8 @@ export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
   if (row.unitType !== undefined && (typeof row.unitType !== 'string' || !isUnitType(row.unitType)))
     return false;
   if (row.includeArchived !== undefined && typeof row.includeArchived !== 'boolean') return false;
-  if (row.mode !== undefined && row.mode !== 'exact' && row.mode !== 'semantic') return false;
+  if (row.mode !== undefined && row.mode !== 'exact' && row.mode !== 'fast' && row.mode !== 'deep')
+    return false;
   return true;
 }
 
