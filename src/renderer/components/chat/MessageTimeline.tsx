@@ -473,6 +473,8 @@ export function MessageTimeline({
           <Virtuoso
             ref={virtuosoRef}
             data={folded}
+            // 不用首条长消息探测整段高度，否则初始定位反复校正，正文隐藏只剩脚点。
+            defaultItemHeight={80}
             computeItemKey={(_, item) => item.key}
             firstItemIndex={firstItemIndex}
             startReached={() => {

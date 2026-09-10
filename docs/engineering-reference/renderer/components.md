@@ -130,6 +130,14 @@
 - 验证方法：CDP `/json/list` 应出现 `type: worker`；prod 是 `file://`，模块 worker 照常可加载
   （已用 bogus 消息回 `Unknown request type` 验过）。
 
+## 时间线初始高度不能取首条消息
+
+`MessageTimeline` 切会话会重挂 Virtuoso 并定位 `LAST`。必须提供 `defaultItemHeight` 初始估算，不能让首条长文本的探测高度外推到全部消息；实际行高仍动态测量，不能改成 `fixedItemHeight`。
+
+首条高度异常时，总高会被放大几十倍，初始定位反复修正。此时 Virtuoso 隐藏正文、但不隐藏 Footer，表现为白屏只剩三个点，滚动条先很短、滚动测量后又变长，不代表历史尚未读回。
+
+回归：在隔离 dev 环境、窗口保持可见时运行 `node scripts/verify-timeline-height.mjs`，真实测量长首条 / 长末条 / 往返切换 / 短列表的总高、正文可见和末条贴底；脚本不改会话或设置。
+
 ## 子模型思考与条目开关
 
 条目 enabled（可供派发）和 reasoning（是否思考）是两个开关。禁用条目保留编辑内容，显示“已停用”。
