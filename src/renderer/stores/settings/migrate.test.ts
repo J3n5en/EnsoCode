@@ -125,6 +125,28 @@ describe('设置持久化迁移', () => {
     expect(previous.localMemoryEnabled).toBe(true);
   });
 
+  it('v7 → v8 把已落盘的空 disabledBuiltinTools 补上 memory 默认关', () => {
+    expect(migrateSettings({ theme: 'dark', disabledBuiltinTools: [] }, 7)).toEqual({
+      theme: 'dark',
+      disabledBuiltinTools: ['memory'],
+    });
+  });
+
+  it('v7 → v8 已有其它禁用项时只追加 memory，不覆盖用户选择', () => {
+    expect(migrateSettings({ disabledBuiltinTools: ['browser'] }, 7)).toEqual({
+      disabledBuiltinTools: ['browser', 'memory'],
+    });
+  });
+
+  it('v7 → v8 已经关掉 memory 则不重复追加', () => {
+    const state = { disabledBuiltinTools: ['memory', 'browser'] };
+    expect(migrateSettings(state, 7)).toEqual(state);
+  });
+
+  it('v7 没有 disabledBuiltinTools 字段时不捏造（缺字段走 initialState 默认）', () => {
+    expect(migrateSettings({ theme: 'dark' }, 7)).toEqual({ theme: 'dark' });
+  });
+
   it('v0 数据一路迁到当前版本，标题总结字段同样补齐', () => {
     const migrated = migrateSettings({ providers: [legacyProvider] }, 0) as Record<string, unknown>;
     expect(migrated).toMatchObject({

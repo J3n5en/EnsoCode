@@ -10,7 +10,7 @@
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 
 /**
  * v0 → v1：`ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`。
@@ -19,6 +19,8 @@ export const SETTINGS_VERSION = 7;
  * v3 → v4：新增助手代审模型，缺省未选（该档禁用）。
  * v4 → v5：记住上次审批档；缺省未选，新会话仍走代审可用性默认。
  * v5/v6 → v7：移除项目记忆配置，兼容曾保存独立记忆模型的开发版。
+ * v7 → v8：旧落盘的空 `disabledBuiltinTools` 不是「用户打开了 memory」——
+ * 只是 memory 加进默认关名单之前就写下的「全开」。补上 memory，缺字段不动（initialState 已是关）。
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
@@ -54,6 +56,12 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 7) {
     const { localMemoryEnabled, memoryModel, memoryConcurrency, ...rest } = state;
     state = rest;
+  }
+  if (version < 8 && Array.isArray(state.disabledBuiltinTools)) {
+    const list = state.disabledBuiltinTools.filter((id): id is string => typeof id === 'string');
+    if (!list.includes('memory')) {
+      state = { ...state, disabledBuiltinTools: [...list, 'memory'] };
+    }
   }
   return state;
 }
