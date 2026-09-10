@@ -78,8 +78,6 @@ export async function createGgufEmbeddingProvider(
       }
       return out;
     },
-    close: () => {
-      void context.dispose();
-    },
+    close: () => context.dispose(),
   };
 }

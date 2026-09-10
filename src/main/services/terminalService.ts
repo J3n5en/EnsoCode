@@ -185,6 +185,20 @@ export function disposeAllTerminals(): void {
   for (const termId of [...terminals.keys()]) disposeTerminal(termId);
 }
 
+export function hasPendingPtys(): boolean {
+  return pendingPtys.size > 0;
+}
+
+export function waitPtyQuitIdle(): Promise<void> {
+  return runPtyQuitIdle({
+    hasPending: () => pendingPtys.size > 0,
+    forceKill: forceKillPendingPtys,
+    waitUntilIdle: waitForPendingPtys,
+    softMs: PTY_QUIT_SOFT_MS,
+    hardMs: PTY_QUIT_HARD_MS,
+  });
+}
+
 async function waitForPendingPtys(timeoutMs: number, pollMs = PTY_QUIT_POLL_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (pendingPtys.size > 0 && Date.now() < deadline) {

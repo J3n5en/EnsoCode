@@ -45,6 +45,8 @@ export interface LlamaLike {
     gpuLayers?: number | 'auto' | 'max';
     createSignal?: AbortSignal;
   }): Promise<LlamaModelLike>;
+  /** node-llama-cpp 的 Llama.dispose；退出前必须等它跑完，否则 AsyncWorker 在 FreeEnvironment 里 abort */
+  dispose?(): Promise<void>;
 }
 
 export class LlamaUnavailableError extends Error {
@@ -124,8 +126,34 @@ export async function releaseAllModels(): Promise<void> {
   await Promise.all([...slots.keys()].map(releaseModel));
 }
 
+export function llamaRuntimeActive(): boolean {
+  return llamaPromise !== null || slots.size > 0;
+}
+
+/**
+ * 先放模型槽再 dispose Llama 单例。
+ * 必须在 will-quit 里 await：N-API AsyncWorker 在 FreeEnvironment 期间 OnWorkComplete 会 SIGABRT。
+ */
+export async function disposeLlamaRuntime(): Promise<void> {
+  const loading = llamaPromise;
+  llamaPromise = null;
+  await releaseAllModels();
+  if (!loading) return;
+  try {
+    const llama = await loading;
+    await llama.dispose?.();
+  } catch {
+    /* 加载失败或 dispose 抛错都不能挡住退出 */
+  }
+}
+
 /** 仅供测试：重置单例与槽位 */
 export function __resetLlamaForTest(): void {
   llamaPromise = null;
   slots.clear();
+}
+
+/** 仅供测试：跳过 getLlama，直接挂上已有实例 */
+export function __installLlamaForTest(llama: LlamaLike): void {
+  llamaPromise = Promise.resolve(llama);
 }

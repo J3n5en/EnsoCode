@@ -5,12 +5,16 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { readSettings } from './ipc/settings';
 import { startAgentWorker } from './services/agentHost';
+import { attachAppQuitDrain } from './services/appQuitDrain';
 import { browserHost } from './services/browserHost';
+import { releaseLocalChatSlot } from './services/llama/chat';
+import { disposeLlamaRuntime, llamaRuntimeActive } from './services/llama/runtime';
 import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
 } from './services/localImageProtocol';
 import {
+  awaitMemoryEmbeddingClose,
   closeMemoryDb,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
@@ -21,7 +25,7 @@ import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
-import { attachPtyQuitDrain } from './services/terminalService';
+import { disposeAllTerminals, hasPendingPtys, waitPtyQuitIdle } from './services/terminalService';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试。
@@ -135,8 +139,23 @@ if (!gotTheLock) {
     void browserHost.dispose();
     closeMemoryDb();
   });
-  // node-pty TSFN 在 FreeEnvironment 期间回调会 SIGABRT；will-quit 里 kill 并等到 onExit
-  attachPtyQuitDrain(app);
+  // node-pty TSFN / llama AsyncWorker 在 FreeEnvironment 期间回调会 SIGABRT；
+  // 两步必须共用一次 preventDefault，谁先 app.quit 都会拆掉另一边的环境。
+  attachAppQuitDrain(app, [
+    {
+      begin: disposeAllTerminals,
+      shouldWait: hasPendingPtys,
+      wait: waitPtyQuitIdle,
+    },
+    {
+      shouldWait: llamaRuntimeActive,
+      wait: async () => {
+        await awaitMemoryEmbeddingClose();
+        await releaseLocalChatSlot();
+        await disposeLlamaRuntime();
+      },
+    },
+  ]);
 }
 
 /** 打包环境下启动自动更新(dev 无 app-update.yml,electron-updater 会报错;Linux deb 由 IPC 层守卫) */

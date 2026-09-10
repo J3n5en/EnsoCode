@@ -63,6 +63,7 @@ let download: Promise<void> | null = null;
 // provider 构造是异步的（GGUF 加载 / 建 context）；失败后置 null 让下次调用重试
 let providerInit: Promise<Embedder | null> | null = null;
 let embeddingGeneration = 0;
+let embeddingClose: Promise<void> = Promise.resolve();
 
 function invalidateMemoryEmbedding(): void {
   embeddingGeneration += 1;
@@ -73,7 +74,17 @@ function invalidateMemoryEmbedding(): void {
   providerInit = null;
   download = null;
   lastEmbeddingError = null;
-  previous?.close?.();
+  embeddingClose = (async () => {
+    try {
+      await previous?.close?.();
+    } catch {
+      /* 切换模型 / 退出都不能被 close 卡住 */
+    }
+  })();
+}
+
+export function awaitMemoryEmbeddingClose(): Promise<void> {
+  return embeddingClose;
 }
 
 /**

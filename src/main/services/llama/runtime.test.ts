@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  __installLlamaForTest,
   __resetLlamaForTest,
   acquireModel,
+  disposeLlamaRuntime,
   type LlamaLike,
   type LlamaModelLike,
+  llamaRuntimeActive,
   releaseAllModels,
   releaseModel,
 } from './runtime';
@@ -118,5 +121,37 @@ describe('acquireModel', () => {
     );
     // 第一次失败后槽位必须是空的，否则重试会拿到半个状态
     await expect(acquireModel('chat', '/m/a.gguf', { loadLlamaImpl: impl })).resolves.toBeDefined();
+  });
+});
+
+describe('disposeLlamaRuntime', () => {
+  it('is inactive until a model or llama instance exists', () => {
+    expect(llamaRuntimeActive()).toBe(false);
+  });
+
+  it('disposes slotted models and the llama instance before going idle', async () => {
+    const { llama, models } = fakeLlama();
+    llama.dispose = vi.fn(async () => {});
+    __installLlamaForTest(llama);
+    await acquireModel('embedding', '/m/a.gguf', { loadLlamaImpl: async () => llama });
+    expect(llamaRuntimeActive()).toBe(true);
+
+    await disposeLlamaRuntime();
+
+    expect(models[0].disposed).toBe(true);
+    expect(llama.dispose).toHaveBeenCalledOnce();
+    expect(llamaRuntimeActive()).toBe(false);
+  });
+
+  it('still finishes quit teardown if llama.dispose throws', async () => {
+    const llama: LlamaLike = {
+      loadModel: vi.fn(),
+      dispose: vi.fn(async () => {
+        throw new Error('metal teardown');
+      }),
+    };
+    __installLlamaForTest(llama);
+    await expect(disposeLlamaRuntime()).resolves.toBeUndefined();
+    expect(llamaRuntimeActive()).toBe(false);
   });
 });
