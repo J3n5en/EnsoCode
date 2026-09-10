@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { EDIT_REPLACE_PROPERTIES } from '../editTool';
 import { applyHashlineToFile } from './applyToFile';
 import { classifyEditArgs } from './classify';
 import { createHashlineEditTool } from './editTool';
@@ -26,21 +27,7 @@ export const HASHLINE_EDIT_PARAMETERS = {
       type: 'string',
       description: `Hashline mode only (do not combine with edits/oldText/newText). First line: the exact [path#TAG] header from the latest read/grep/write. Then PUT blocks. ${HASHLINE_PUT_RULE} Example:\n${HASHLINE_PUT_EXAMPLE}`,
     },
-    path: { type: 'string', description: 'Replace mode: file path (pair with edits)' },
-    edits: {
-      type: 'array',
-      description:
-        'Replace mode: [{oldText, newText}] with exact, unique oldText. Do not combine with input.',
-      items: {
-        type: 'object',
-        properties: {
-          oldText: { type: 'string' },
-          newText: { type: 'string' },
-        },
-      },
-    },
-    oldText: { type: 'string', description: 'Legacy single-replace old text' },
-    newText: { type: 'string', description: 'Legacy single-replace new text' },
+    ...EDIT_REPLACE_PROPERTIES,
   },
 } as unknown as ToolDefinition['parameters'];
 

@@ -4,6 +4,42 @@ import {
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 
+export const EDIT_REPLACE_GUIDELINE =
+  'For a single replacement, send path + oldText + newText and omit edits. ' +
+  'For multiple replacements, send path + edits as an actual array of objects, each with oldText and newText strings; omit top-level oldText/newText. ' +
+  'Do not encode edits as a JSON string or mix the single and batch forms.';
+
+export const EDIT_REPLACE_PROPERTIES = {
+  path: { type: 'string', description: 'Path to the file to edit (relative or absolute)' },
+  edits: {
+    type: 'array',
+    description:
+      'Batch replacements: an actual array of objects, not a JSON string. Each oldText must be exact, unique and non-overlapping in the original file. Omit top-level oldText/newText.',
+    items: {
+      type: 'object',
+      properties: {
+        oldText: {
+          type: 'string',
+          description: 'Exact, unique text to replace in the original file',
+        },
+        newText: {
+          type: 'string',
+          description: 'Replacement text; empty string deletes the old text',
+        },
+      },
+      required: ['oldText', 'newText'],
+    },
+  },
+  oldText: {
+    type: 'string',
+    description: 'Single replacement: exact old text; pair with newText and omit edits',
+  },
+  newText: {
+    type: 'string',
+    description: 'Single replacement: new text; pair with oldText and omit edits',
+  },
+};
+
 function isSingleEdit(value: unknown): value is { oldText: string; newText: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const edit = value as Record<string, unknown>;
@@ -25,6 +61,27 @@ function arrayLikeValues(value: unknown): unknown[] | undefined {
     .map((key) => (value as Record<string, unknown>)[key]);
 }
 
+// 只转义 JSON 字符串内裸控制字符；已有转义与结构原样保留，最终仍须完整 JSON.parse。
+function escapeJsonControlCharacters(value: string): string {
+  let inString = false;
+  let escaped = false;
+  let result = '';
+  for (const character of value) {
+    if (escaped) {
+      escaped = false;
+    } else if (character === '"') {
+      inString = !inString;
+    } else if (inString && character === '\\') {
+      escaped = true;
+    } else if (inString && character.charCodeAt(0) < 0x20) {
+      result += `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    result += character;
+  }
+  return result;
+}
+
 /** 递归 unwrap 看起来像 JSON 的字符串；截断或非法则原样返回 */
 function unwrapJson(value: unknown, depth = 0): unknown {
   if (typeof value !== 'string' || depth > 3) return value;
@@ -32,7 +89,11 @@ function unwrapJson(value: unknown, depth = 0): unknown {
   try {
     return unwrapJson(JSON.parse(value), depth + 1);
   } catch {
-    return value;
+    try {
+      return unwrapJson(JSON.parse(escapeJsonControlCharacters(value)), depth + 1);
+    } catch {
+      return value;
+    }
   }
 }
 
@@ -63,8 +124,9 @@ function rejectUnparsedEditsJson(edits: unknown): void {
         : [];
   if (leftover.some(looksLikeJsonContainer)) {
     throw new Error(
-      'edits must be an array of {oldText, newText} objects. ' +
-        'Do not encode the array as a JSON string — a truncated or invalid string is treated as characters and fails as edits.0: must be object.'
+      'Invalid edits: the JSON string is incomplete or malformed. No files were changed by this call. ' +
+        'Resend complete arguments. ' +
+        EDIT_REPLACE_GUIDELINE
     );
   }
 }
@@ -86,12 +148,19 @@ export function normalizeEditArguments(input: unknown): unknown {
   return next === args.edits ? args : { ...args, edits: next };
 }
 
-/** 叠在 stock pi edit 上，不放宽 schema */
+/** 保留 stock 执行语义，公开它已支持的单次替换参数。 */
 export function createNormalizedEditTool(cwd: string, options?: EditToolOptions): ToolDefinition {
   const base = createEditToolDefinition(cwd, options) as unknown as ToolDefinition;
   const prepareBase = base.prepareArguments;
   return {
     ...base,
+    description: `${base.description} ${EDIT_REPLACE_GUIDELINE}`,
+    promptGuidelines: [...(base.promptGuidelines ?? []), EDIT_REPLACE_GUIDELINE],
+    parameters: {
+      type: 'object',
+      properties: EDIT_REPLACE_PROPERTIES,
+      required: ['path'],
+    } as unknown as ToolDefinition['parameters'],
     prepareArguments: ((args: unknown) => {
       const normalized = normalizeEditArguments(args);
       return prepareBase ? prepareBase(normalized) : normalized;
