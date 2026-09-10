@@ -65,6 +65,11 @@ import { useSettingsStore } from '@/stores/settings';
 import { createElectronPersistStorage, openPersistWriteGate } from '@/stores/settings/storage';
 import { purgeConversationAuthority } from './authorityCleanup';
 import {
+  canWakeConversationForRewind,
+  rewindWorkerPhase,
+  shouldSendRewindCommand,
+} from './conversationRewind';
+import {
   evictColdMessages,
   hasAuthoritativeMessages,
   isBulkyAgentEvent,
@@ -87,6 +92,7 @@ import {
   emptyProjection,
   type SessionProjection,
   type TimelineMessage,
+  truncatedNeedsSnapshotResync,
   upsertOutOfRange,
 } from './reducer';
 import { applyConversationReload } from './reload';
@@ -372,7 +378,7 @@ interface SessionsState {
   sendQueuedNow(conversationId: string, messageId: string): void;
   /** 打断当前轮并立即发送队列中某条(中断收束后以新一轮 prompt 投递) */
   interruptAndSendQueued(conversationId: string, messageId: string): Promise<void>;
-  /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条);截断与预填由 worker 事件回流。
+  /** 回退到倒数第 N+1 条 user 消息(0 = 最后一条)。冷会话先 resume 并等到 worker 会话可用（snapshot / ready）。
    *  restoreFiles 同时还原工作树文件 */
   rewind(conversationId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
   /** 手动压缩上下文（/compact 与上下文面板按钮共用）。忙碌时 worker 排队，本轮结束后执行 */
@@ -449,6 +455,7 @@ export const useSessionsStore = create<SessionsState>()(
        * 才覆盖——用户已手动改名的绝不动。不持久化：重启后在飞的总结直接作废。
        */
       const pendingTitleBaselines = new Map<string, string>();
+      const rewindInFlight = new Set<string>();
 
       /**
        * 标题总结在飞的开/关必须走这两个 helper：保证不变量
@@ -1232,6 +1239,12 @@ export const useSessionsStore = create<SessionsState>()(
             event.type === 'message-upsert' &&
             conversation.started &&
             upsertOutOfRange(conversation.messages, event.index, conversation.historyBaseIndex)
+          ) {
+            resyncSnapshot(id);
+          }
+          if (
+            event.type === 'messages-truncated' &&
+            truncatedNeedsSnapshotResync(conversation.historyBaseIndex, event.length)
           ) {
             resyncSnapshot(id);
           }
@@ -3099,12 +3112,70 @@ export const useSessionsStore = create<SessionsState>()(
         rewind(conversationId, userIndexFromEnd, restoreFiles) {
           const conversation = get().conversations[conversationId];
           if (
-            !conversation?.started ||
+            !conversation ||
+            conversation.historyOnly ||
             conversation.workspaceMigrating ||
             conversation.status === 'running'
-          )
+          ) {
             return;
-          void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
+          }
+          if (rewindInFlight.has(conversationId)) return;
+          if (shouldSendRewindCommand(conversation)) {
+            void window.electronAPI.agent.rewind(conversationId, userIndexFromEnd, restoreFiles);
+            return;
+          }
+          if (!conversation.started && !canWakeConversationForRewind(conversation)) return;
+          rewindInFlight.add(conversationId);
+          const sessionFile = conversation.sessionFile;
+          void (async () => {
+            try {
+              if (!get().conversations[conversationId]?.started) {
+                await get().resumeConversation(conversationId);
+              }
+              const phase = await new Promise<'ready' | 'failed'>((resolve) => {
+                let settled = false;
+                const finish = (next: 'ready' | 'failed') => {
+                  if (settled) return;
+                  settled = true;
+                  clearTimeout(timer);
+                  unsubscribe();
+                  resolve(next);
+                };
+                const check = () => {
+                  const next = rewindWorkerPhase(get().conversations[conversationId], sessionFile);
+                  if (next !== 'wait') finish(next);
+                };
+                const unsubscribe = useSessionsStore.subscribe(check);
+                const timer = setTimeout(() => finish('failed'), 30_000);
+                check();
+              });
+              const after = get().conversations[conversationId];
+              if (
+                phase === 'ready' &&
+                after &&
+                shouldSendRewindCommand(after) &&
+                after.sessionFile === sessionFile
+              ) {
+                void window.electronAPI.agent.rewind(
+                  conversationId,
+                  userIndexFromEnd,
+                  restoreFiles
+                );
+                return;
+              }
+              if (after && !after.error && !after.worktreeMissing && phase === 'failed') {
+                set((state) =>
+                  patch(state, conversationId, {
+                    error: 'Unable to restore this conversation for rewind.',
+                  })
+                );
+              }
+            } catch {
+              return;
+            } finally {
+              rewindInFlight.delete(conversationId);
+            }
+          })();
         },
 
         async forkFromMessage(conversationId, userIndexFromEnd) {

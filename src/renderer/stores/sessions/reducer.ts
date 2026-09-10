@@ -105,6 +105,14 @@ export function upsertOutOfRange(
   return localIndex < 0 || localIndex > authoritativeLength(messages);
 }
 
+/** worker 的 truncated.length 是绝对长度；裁到尾窗起点之前时本地权威正文已全部失效。 */
+export function truncatedNeedsSnapshotResync(
+  historyBaseIndex: number | undefined,
+  length: number
+): boolean {
+  return length <= (historyBaseIndex ?? 0);
+}
+
 /** 上滑分页：只在新页右端正好接到当前权威起点时前置，其它情况原对象返回。 */
 export function applyHistoryPage(
   state: SessionProjection,
@@ -558,8 +566,26 @@ export function applyAgentEvent(
         toolStartedAt: {},
         lastSeq: event.seq,
       };
-    case 'messages-truncated':
-      return { ...current, messages: current.messages.slice(0, event.length), lastSeq: event.seq };
+    case 'messages-truncated': {
+      const base = current.historyBaseIndex ?? 0;
+      const localKeep = event.length - base;
+      if (localKeep >= current.messages.length) {
+        return { ...current, lastSeq: event.seq };
+      }
+      if (localKeep > 0) {
+        return {
+          ...current,
+          messages: current.messages.slice(0, localKeep),
+          lastSeq: event.seq,
+        };
+      }
+      return {
+        ...current,
+        messages: current.messages.filter((message) => message.optimistic),
+        historyBaseIndex: undefined,
+        lastSeq: event.seq,
+      };
+    }
     case 'commands':
       return { ...current, commands: event.commands, lastSeq: event.seq };
     case 'turn-failed':

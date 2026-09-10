@@ -2724,9 +2724,71 @@ describe('manual conversation reload', () => {
   });
 });
 
+function emitRewindSnapshot(sessionId = 'parent') {
+  onAgentEvent?.({
+    type: 'snapshot',
+    partial: true,
+    sessions: [
+      {
+        identity: { sessionId, generation: 'g-ready' },
+        status: 'idle',
+        messages: [],
+        commands: [],
+      },
+    ],
+  });
+}
+
+function enableRewindResumeModel() {
+  settingsModule.useSettingsStore.setState({
+    projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
+    providers: [
+      {
+        id: 'p1',
+        name: 'p1',
+        api: 'openai-completions',
+        apiKey: 'k',
+        baseUrl: 'https://example.test/v1',
+        enabled: true,
+        models: [{ id: 'm1' }],
+      },
+    ],
+    defaultModel: { providerId: 'p1', modelId: 'm1' },
+  });
+}
+
 describe('rewind 在 failed 状态放行、running 仍拦截', () => {
-  beforeEach(() => {
+  beforeAll(async () => {
+    settingsModule = await import('../settings');
+    sessionsModule = await import('./index');
+  });
+
+  beforeEach(async () => {
     agentRewind.mockClear();
+    agentSpawn.mockClear();
+    agentSpawn.mockResolvedValue({ ok: true });
+    nextConversationId = 'parent';
+    sourceProjection = {
+      projects: [
+        {
+          projectId: 'project',
+          canonicalPath: '/workspace',
+          state: 'active',
+          version: 1,
+        },
+      ],
+      conversations: [],
+    };
+    sessionsModule.useSessionsStore.setState({
+      conversations: {},
+      order: [],
+      activeId: null,
+      pendingAgentPrefill: undefined,
+    });
+    settingsModule.useSettingsStore.setState({
+      projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
+    });
+    await seedParent();
   });
 
   it('status:failed 时调用 window.electronAPI.agent.rewind', () => {
@@ -2760,6 +2822,247 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
       },
     }));
     sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    expect(agentRewind).not.toHaveBeenCalled();
+  });
+
+  it('started 但仍 spawning（尚未 parent-ready）时不下发 rewind', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: true,
+          status: 'idle' as const,
+          generation: 'g1',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    expect(agentRewind).not.toHaveBeenCalled();
+  });
+
+  it('热路径 spawning 时等待；空 snapshot 不发，含该会话 snapshot 后只发一次', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: true,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          generation: 'g-ready',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    expect(agentRewind).not.toHaveBeenCalled();
+    onAgentEvent?.({ type: 'snapshot', partial: true, sessions: [] });
+    await Promise.resolve();
+    expect(agentRewind).not.toHaveBeenCalled();
+    emitRewindSnapshot();
+    await vi.waitFor(() => expect(agentRewind).toHaveBeenCalledTimes(1));
+    expect(agentRewind).toHaveBeenCalledWith('parent', 0, false);
+  });
+
+  it('同一 tick 状态变 ready 后再 rewind 仍走 inFlight 不双发', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: true,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    expect(agentRewind).not.toHaveBeenCalled();
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, spawning: false },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    expect(agentRewind).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(agentRewind).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(['workspaceMigrating', 'worktreeMissing'] as const)(
+    'ready 到实际下发之间出现 %s 时取消回退',
+    async (flag) => {
+      const store = sessionsModule.useSessionsStore;
+      store.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: {
+            ...state.conversations.parent,
+            started: true,
+            spawning: true,
+            status: 'idle' as const,
+            sessionFile: '/tmp/cold.jsonl',
+          },
+        },
+      }));
+      store.getState().rewind('parent', 0, true);
+      store.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, spawning: false },
+        },
+      }));
+      store.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: { ...state.conversations.parent, [flag]: true },
+        },
+      }));
+      await Promise.resolve();
+      expect(agentRewind).not.toHaveBeenCalled();
+    }
+  );
+
+  it('冷加载历史主会话 spawn ack 不下发，含该会话 snapshot 后才 rewind', async () => {
+    enableRewindResumeModel();
+    let finishSpawn: ((value: { ok: true }) => void) | undefined;
+    agentSpawn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSpawn = resolve;
+        })
+    );
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+        },
+        other: { ...state.conversations.parent, id: 'other', started: true },
+      },
+      activeId: 'other',
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 1, false);
+    await vi.waitFor(() => expect(agentSpawn).toHaveBeenCalled());
+    expect(agentRewind).not.toHaveBeenCalled();
+    finishSpawn?.({ ok: true });
+    await vi.waitFor(() =>
+      expect(sessionsModule.useSessionsStore.getState().conversations.parent.started).toBe(true)
+    );
+    expect(agentRewind).not.toHaveBeenCalled();
+    emitRewindSnapshot();
+    await vi.waitFor(() => expect(agentRewind).toHaveBeenCalledWith('parent', 1, false));
+    expect(agentSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'parent', resumeFile: '/tmp/cold.jsonl' })
+    );
+    expect(agentRewind).not.toHaveBeenCalledWith('other', expect.anything(), expect.anything());
+  });
+
+  it('冷会话 resume 失败不下发 rewind', async () => {
+    enableRewindResumeModel();
+    agentSpawn.mockResolvedValueOnce({ ok: false });
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    await vi.waitFor(() => expect(agentSpawn).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(sessionsModule.useSessionsStore.getState().conversations.parent.status).toBe('failed')
+    );
+    expect(agentRewind).not.toHaveBeenCalled();
+  });
+
+  it('resume 期间目标 jsonl 被换掉或变 running 后不下发 rewind', async () => {
+    enableRewindResumeModel();
+    let finishSpawn: ((value: { ok: true }) => void) | undefined;
+    agentSpawn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSpawn = resolve;
+        })
+    );
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('parent', 0, false);
+    await vi.waitFor(() => expect(agentSpawn).toHaveBeenCalled());
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          sessionFile: '/tmp/other.jsonl',
+          status: 'running' as const,
+        },
+      },
+    }));
+    finishSpawn?.({ ok: true });
+    await vi.waitFor(() =>
+      expect(sessionsModule.useSessionsStore.getState().conversations.parent.started).toBe(true)
+    );
+    expect(agentRewind).not.toHaveBeenCalled();
+  });
+
+  it('未恢复的 coworker / historyOnly 不唤醒也不 rewind', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        child: {
+          ...state.conversations.parent,
+          id: 'child',
+          parentId: 'parent',
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/child.jsonl',
+          historyOnly: true,
+        },
+        coworker: {
+          ...state.conversations.parent,
+          id: 'coworker',
+          parentId: 'parent',
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/coworker.jsonl',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().rewind('child', 0, false);
+    sessionsModule.useSessionsStore.getState().rewind('coworker', 0, false);
+    expect(agentSpawn).not.toHaveBeenCalled();
     expect(agentRewind).not.toHaveBeenCalled();
   });
 });

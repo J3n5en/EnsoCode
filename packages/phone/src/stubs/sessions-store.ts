@@ -4,7 +4,7 @@ import type { ProjectedMessage } from '@shared/types/agent';
  * `@/stores/sessions` 的 PWA 桩：手机端会话状态在 client.ts，不用 zustand。
  * 形状对齐桌面被复用组件读取的字段（activeId / conversations / rewind），
  * 使 RewindButton、RunningElapsed 无需改动即可编译并自动降级：
- * started 恒为 false → RewindButton 直接不渲染。
+ * started 恒为 false 且无 sessionFile → RewindButton 不渲染。
  * 经 vite alias 注入，桌面源码零改动。
  */
 

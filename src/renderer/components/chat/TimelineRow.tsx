@@ -36,6 +36,10 @@ import { type TFunction, useI18n } from '@/i18n';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
+import {
+  canShowConversationRewind,
+  resolveRewindConfirm,
+} from '@/stores/sessions/conversationRewind';
 import { formatDuration, formatTokens } from '@/stores/sessions/stats';
 import { isReadOnlyTool, parseSandboxOutput, type TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
@@ -671,12 +675,12 @@ function canActOnDisplayedSession(
   return Boolean(conversation?.started && !conversation.spawning && statusOk(conversation.status));
 }
 
-/** 回退：failed 也可（与 Retry 对齐）；分叉仍要 idle，worker fork 不接受非 idle 源 */
+/** 回退：failed 也可；未 ready 的 spawning / 冷会话走 store 唤醒，不在这里强行显示不安全入口 */
 function canRewindDisplayedSession(
   state: ReturnType<typeof useSessionsStore.getState>,
   host: ReturnType<typeof useChatHost>
 ) {
-  return canActOnDisplayedSession(state, host, (status) => status !== 'running');
+  return canShowConversationRewind(displayedConversation(state), host);
 }
 
 function canForkDisplayedSession(
@@ -719,22 +723,33 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
   );
 }
 
-/** 回退入口:仅 idle 且已 spawn 的会话显示;点击弹出「仅对话 / 对话+文件」二选,选后再确认 */
+/** 回退入口：已 spawn 非 spawning，或可 resume 的历史主会话。未恢复 coworker / remote / historyOnly 不显示；活 child 保持。 */
 function RewindButton({ messageIndex }: { messageIndex: number }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  /** 待确认的回退(值 = restoreFiles);null = 无 */
-  const [pendingRestoreFiles, setPendingRestoreFiles] = useState<boolean | null>(null);
+  /** 待确认的回退；绑打开时的会话，confirm 当时重算锚点 */
+  const [pending, setPending] = useState<{ restoreFiles: boolean; conversationId: string } | null>(
+    null
+  );
   const host = useChatHost();
   const canRewind = useSessionsStore((state) => canRewindDisplayedSession(state, host));
   if (!canRewind) return null;
-  const rewind = (restoreFiles: boolean) => {
-    const state = useSessionsStore.getState();
-    const conversation = displayedConversation(state);
+  const queueRewind = (restoreFiles: boolean) => {
+    const conversation = displayedConversation(useSessionsStore.getState());
     if (!conversation) return;
-    const userIndexFromEnd = userIndexFromEndAt(conversation, messageIndex);
-    if (userIndexFromEnd === null) return;
-    state.rewind(conversation.id, userIndexFromEnd, restoreFiles);
+    setPending({ restoreFiles, conversationId: conversation.id });
+  };
+  const rewind = (restoreFiles: boolean, originId: string) => {
+    const state = useSessionsStore.getState();
+    const displayed = displayedConversation(state);
+    const target = resolveRewindConfirm(
+      originId,
+      displayed?.id,
+      state.conversations[originId],
+      messageIndex
+    );
+    if (!target) return;
+    state.rewind(target.conversationId, target.userIndexFromEnd, restoreFiles);
   };
   const options = [
     {
@@ -742,14 +757,14 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
       label: t('Conversation only'),
       desc: t('Rewind to this message'),
       restoreFiles: false,
-      action: () => setPendingRestoreFiles(false),
+      action: () => queueRewind(false),
     },
     {
       icon: History,
       label: t('Conversation + files'),
       desc: t('Rewind and restore files to before this turn'),
       restoreFiles: true,
-      action: () => setPendingRestoreFiles(true),
+      action: () => queueRewind(true),
     },
   ];
   return (
@@ -785,13 +800,13 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
         ))}
       </PopoverPopup>
       <ConfirmDialog
-        open={pendingRestoreFiles !== null}
+        open={pending !== null}
         onOpenChange={(dialogOpen) => {
-          if (!dialogOpen) setPendingRestoreFiles(null);
+          if (!dialogOpen) setPending(null);
         }}
         title={t('Rewind to this message?')}
         description={
-          pendingRestoreFiles
+          pending?.restoreFiles
             ? t(
                 'Later messages leave the current branch and working-tree files are restored to before this turn.'
               )
@@ -799,7 +814,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
         }
         confirmLabel={t('Rewind')}
         onConfirm={() => {
-          if (pendingRestoreFiles !== null) rewind(pendingRestoreFiles);
+          if (pending) rewind(pending.restoreFiles, pending.conversationId);
         }}
       />
     </Popover>

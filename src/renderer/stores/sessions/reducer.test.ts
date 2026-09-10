@@ -6,6 +6,7 @@ import {
   applyHistoryPage,
   emptyProjection,
   type SessionProjection,
+  truncatedNeedsSnapshotResync,
   upsertOutOfRange,
 } from './reducer';
 import { shouldAbortStalledGeneration } from './stallTimeout';
@@ -1394,5 +1395,38 @@ describe('snapshot running clocks', () => {
     expect(restored.lastOutputAt).toBe(2_000);
     expect(restore(running, { status: 'idle' }).toolOutputs).toEqual({});
     expect(restore(running, { identity: identity('g2') }).toolOutputs).toEqual({});
+  });
+
+  it('messages-truncated 按绝对 length 减去 historyBaseIndex 裁局部窗口', () => {
+    const state = tail([assistant('m40'), assistant('m41'), assistant('m42')]);
+    const next = applyAgentEvent(state, 's1', {
+      type: 'messages-truncated',
+      identity: identity(),
+      seq: 1,
+      length: 42,
+    }) as TailProjection;
+    expect(next.messages).toEqual([assistant('m40'), assistant('m41')]);
+    expect(next.historyBaseIndex).toBe(40);
+  });
+
+  it('messages-truncated length<=base 丢弃尾窗权威正文并清 historyBaseIndex', () => {
+    const optimistic = { ...assistant('pending'), optimistic: true as const };
+    const state = tail([assistant('m40'), assistant('m41'), optimistic]);
+    const next = applyAgentEvent(state, 's1', {
+      type: 'messages-truncated',
+      identity: identity(),
+      seq: 1,
+      length: 10,
+    }) as TailProjection;
+    expect(next.messages).toEqual([optimistic]);
+    expect(next.historyBaseIndex).toBeUndefined();
+    expect(Object.hasOwn(next, 'historyBaseIndex')).toBe(true);
+  });
+
+  it('truncatedNeedsSnapshotResync：裁到尾窗起点之前才要补快照', () => {
+    expect(truncatedNeedsSnapshotResync(40, 10)).toBe(true);
+    expect(truncatedNeedsSnapshotResync(40, 40)).toBe(true);
+    expect(truncatedNeedsSnapshotResync(40, 41)).toBe(false);
+    expect(truncatedNeedsSnapshotResync(undefined, 1)).toBe(false);
   });
 });
