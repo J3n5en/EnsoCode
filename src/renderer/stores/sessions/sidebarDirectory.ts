@@ -52,6 +52,7 @@ type Source = {
   parentId?: string;
   sessionFile?: string;
   worktree?: { path?: string };
+  reloading?: boolean;
 };
 
 function lastActiveAt(conversation: Source): number | undefined {
@@ -130,4 +131,99 @@ export function selectSidebarConversations(
   }
   cached = { source: conversations, prints, value: next };
   return next;
+}
+
+export interface ChatCandidateConversation {
+  id: string;
+  title: string;
+  projectId: string;
+  parentId?: string;
+  sessionFile?: string;
+  createdAt: number;
+}
+
+let cachedChatCandidates: {
+  source: Record<string, Source | undefined>;
+  print: string;
+  value: ChatCandidateConversation[];
+} | null = null;
+
+/** 只投影 @chat 候选实际使用的字段，流式正文和状态变化时保持引用稳定。 */
+export function selectChatCandidateConversations(
+  conversations: Record<string, Source | undefined>
+): ChatCandidateConversation[] {
+  if (cachedChatCandidates?.source === conversations) return cachedChatCandidates.value;
+  const next: ChatCandidateConversation[] = [];
+  for (const [id, conversation] of Object.entries(conversations)) {
+    if (!conversation || conversation.parentId || !conversation.sessionFile) continue;
+    next.push({
+      id: conversation.id ?? id,
+      title: conversation.title,
+      projectId: conversation.projectId,
+      sessionFile: conversation.sessionFile,
+      createdAt: conversation.createdAt,
+    });
+  }
+  const print = JSON.stringify(next);
+  const value = cachedChatCandidates?.print === print ? cachedChatCandidates.value : next;
+  cachedChatCandidates = { source: conversations, print, value };
+  return value;
+}
+
+export interface CoworkerTabConversation {
+  id: string;
+  title: string;
+  status: string;
+  spawning: boolean;
+  pendingApprovalCount: number;
+  pendingAskCount: number;
+  pendingCapabilityAskCount: number;
+  coworkerName?: string;
+  child?: { agentInstanceName?: string };
+  reloading: boolean;
+}
+
+interface CoworkerTabsCache {
+  source: Record<string, Source | undefined>;
+  print: string;
+  value: CoworkerTabConversation[];
+}
+
+const EMPTY_COWORKER_TABS: CoworkerTabConversation[] = [];
+const cachedCoworkerTabs = new WeakMap<Source, CoworkerTabsCache>();
+
+/** 当前 tab 条的窄投影，避免其它会话事件触发 CoworkerTabs 重渲染。 */
+export function selectCoworkerTabConversations(
+  conversations: Record<string, Source | undefined>,
+  parentId: string
+): CoworkerTabConversation[] {
+  const parent = conversations[parentId];
+  if (!parent) return EMPTY_COWORKER_TABS;
+  const cached = cachedCoworkerTabs.get(parent);
+  if (cached?.source === conversations) return cached.value;
+  const next = (parent.coworkerIds ?? []).flatMap((id) => {
+    const conversation = conversations[id];
+    return conversation
+      ? [
+          {
+            id: conversation.id ?? id,
+            title: conversation.title,
+            status: conversation.status ?? 'idle',
+            spawning: conversation.spawning === true,
+            pendingApprovalCount: conversation.pendingApprovals?.length ?? 0,
+            pendingAskCount: conversation.pendingAsks?.length ?? 0,
+            pendingCapabilityAskCount: conversation.pendingCapabilityAsks?.length ?? 0,
+            coworkerName: conversation.coworkerName,
+            child: conversation.child?.agentInstanceName
+              ? { agentInstanceName: conversation.child.agentInstanceName }
+              : undefined,
+            reloading: conversation.reloading === true,
+          },
+        ]
+      : [];
+  });
+  const print = JSON.stringify(next);
+  const value = cached?.print === print ? cached.value : next;
+  cachedCoworkerTabs.set(parent, { source: conversations, print, value });
+  return value;
 }

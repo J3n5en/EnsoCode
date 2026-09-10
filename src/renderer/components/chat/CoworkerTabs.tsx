@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { type Conversation, useSessionsStore } from '@/stores/sessions';
-import { selectSidebarConversations } from '@/stores/sessions/sidebarDirectory';
+import { selectCoworkerTabConversations } from '@/stores/sessions/sidebarDirectory';
 import { useSettingsStore } from '@/stores/settings';
 
 /**
@@ -42,13 +42,10 @@ export function CoworkerTabs({
   trailing?: React.ReactNode;
 }) {
   const { t } = useI18n();
-  const conversations = useSessionsStore((state) =>
-    selectSidebarConversations(state.conversations)
+  const coworkers = useSessionsStore((state) =>
+    selectCoworkerTabConversations(state.conversations, parent.id)
   );
   const [hiring, setHiring] = React.useState(false);
-  const coworkers = (parent.coworkerIds ?? [])
-    .map((id) => conversations[id])
-    .filter((c): c is Conversation => Boolean(c));
 
   const tabClass = (active: boolean) =>
     cn(
@@ -71,9 +68,9 @@ export function CoworkerTabs({
           const tone = coworkerTabTone({
             status: coworker.status,
             spawning: coworker.spawning,
-            pendingApprovalCount: (coworker.pendingApprovals ?? []).length,
-            pendingAskCount: (coworker.pendingAsks ?? []).length,
-            pendingCapabilityAskCount: (coworker.pendingCapabilityAsks ?? []).length,
+            pendingApprovalCount: coworker.pendingApprovalCount,
+            pendingAskCount: coworker.pendingAskCount,
+            pendingCapabilityAskCount: coworker.pendingCapabilityAskCount,
           });
           return (
             <div key={coworker.id} className="group/tab relative shrink-0">
@@ -95,8 +92,8 @@ export function CoworkerTabs({
                     <ConversationStatusIndicator tone={tone} size="sm" />
                   </span>
                 }
-                reloadDisabled={coworker.reloading === true || coworker.spawning}
-                reloading={coworker.reloading === true}
+                reloadDisabled={coworker.reloading || coworker.spawning}
+                reloading={coworker.reloading}
                 onSelect={() => useSessionsStore.getState().selectTab(parent.id, coworker.id)}
               />
               {/* 关闭覆在状态灯槽上，hover 替换而不拉宽 tab */}

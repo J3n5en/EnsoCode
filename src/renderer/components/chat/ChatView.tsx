@@ -1,5 +1,5 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
-import { conversationDotTone } from '@shared/conversationDotTone';
+import { conversationDotTone, conversationHasRunningChild } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +17,7 @@ import {
 
 import { useSessionsStore } from '@/stores/sessions';
 import { chatSurfaceBusy, chatTimelineBusy } from '@/stores/sessions/messageCache';
-import { selectSidebarConversations } from '@/stores/sessions/sidebarDirectory';
+import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
 import { buildTimeline, terminalErrorText } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
@@ -57,20 +57,21 @@ export function ChatView() {
   });
 
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
-  // @ chats 候选：同项目可回放的过去会话。ChatView 本就随 agent 事件重渲染，订阅全表不额外增负。
-  const allConversations = useSessionsStore((state) =>
-    selectSidebarConversations(state.conversations)
+  const candidateConversations = useSessionsStore((state) =>
+    selectChatCandidateConversations(state.conversations)
   );
+  const parentHasRunningChild = useSessionsStore((state) => {
+    const active = state.activeId ? state.conversations[state.activeId] : undefined;
+    return conversationHasRunningChild(active, state.conversations);
+  });
+  const parentId = parent?.id;
+  const parentProjectId = parent?.projectId;
   const chatCandidates = useMemo(
     () =>
-      parent
-        ? toChatMentionCandidates(
-            Object.values(allConversations).filter((entry) => entry.id),
-            parent.projectId,
-            parent.id
-          )
+      parentId !== undefined && parentProjectId !== undefined
+        ? toChatMentionCandidates(candidateConversations, parentProjectId, parentId)
         : [],
-    [allConversations, parent]
+    [candidateConversations, parentId, parentProjectId]
   );
   const enabledProviders = useMemo(
     () => usableProvidersForOauthSnapshot(providers, oauthSnapshot),
@@ -388,10 +389,7 @@ export function ChatView() {
               <StatusDot
                 status={conversation.spawning ? 'running' : conversation.status}
                 pendingAskCount={(conversation.pendingAsks ?? []).length}
-                hasRunningChild={
-                  conversation.id === parent.id &&
-                  allConversations[parent.id]?.hasRunningChild === true
-                }
+                hasRunningChild={conversation.id === parent.id && parentHasRunningChild}
               />
             </div>
           }
