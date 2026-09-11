@@ -671,6 +671,7 @@ export type AgentCommand =
       userText: string;
       candidates: SpawnModelConfig[];
       timeoutMs: number;
+      maxTokens?: number;
     }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
@@ -1994,20 +1995,33 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     }
     case 'complete-text':
-      return hasExactKeys(value, [
+      return (hasExactKeys(value, [
         'type',
         'requestId',
         'systemPrompt',
         'userText',
         'candidates',
         'timeoutMs',
-      ]) &&
+      ]) ||
+        hasExactKeys(value, [
+          'type',
+          'requestId',
+          'systemPrompt',
+          'userText',
+          'candidates',
+          'timeoutMs',
+          'maxTokens',
+        ])) &&
         isNonEmptyString(value.requestId) &&
         typeof value.systemPrompt === 'string' &&
         typeof value.userText === 'string' &&
         typeof value.timeoutMs === 'number' &&
         Number.isFinite(value.timeoutMs) &&
         value.timeoutMs > 0 &&
+        (value.maxTokens === undefined ||
+          (typeof value.maxTokens === 'number' &&
+            Number.isInteger(value.maxTokens) &&
+            value.maxTokens > 0)) &&
         Array.isArray(value.candidates) &&
         value.candidates.length >= 1 &&
         value.candidates.length <= TITLE_SUMMARY_MAX_CANDIDATES &&

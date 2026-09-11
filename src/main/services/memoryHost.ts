@@ -242,23 +242,37 @@ export async function distillSessionNow(
   payload: DistillPayload,
   opts: { force?: boolean } = {}
 ): Promise<boolean> {
+  const overallStartedAt = performance.now();
   let started = false;
   await runDistill(
     payload,
     () => {
       started = true;
     },
-    opts.force
+    opts.force,
+    true
   );
+  console.info('[memory-distill] manual overall', {
+    sessionId: payload.sessionId,
+    durationMs: Math.round(performance.now() - overallStartedAt),
+    started,
+  });
   return started;
 }
 
 function runDistill(
   payload: DistillPayload,
   onStarted?: () => void,
-  force?: boolean
+  force?: boolean,
+  manual = false
 ): Promise<void> {
+  const queuedAt = performance.now();
   return enqueueLlmJob(async () => {
+    if (manual)
+      console.info('[memory-distill] manual background queue wait', {
+        sessionId: payload.sessionId,
+        durationMs: Math.round(performance.now() - queuedAt),
+      });
     const messages = await distillConfig.readTranscript(payload.sessionFile);
     const transcript = buildTranscript(messages);
     if (!transcript) return;

@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
 import {
+  DISTILL_CONSOLIDATE_MAX_TOKENS,
+  DISTILL_EXTRACT_MAX_TOKENS,
   DISTILL_MAX_ATTEMPTS,
   DISTILL_MAX_CHUNK_CHARS,
+  DISTILL_MAX_OUTPUT_TOKENS,
   DISTILL_MIN_IMPORTANCE,
+  DISTILL_SINGLE_EXTRACT_MAX_TOKENS,
   isUnitType,
 } from '@shared/memory/constants';
 import {
@@ -21,7 +25,16 @@ import type { CreateMemoryInput, Embedder, Memory } from './types';
  * 本文件是纯逻辑层：不碰 electron / worker，LLM 调用以 `Complete` 注入，便于全部 mock。
  */
 
-export type Complete = (systemPrompt: string, userText: string) => Promise<string>;
+export interface CompleteOptions {
+  maxTokens?: number;
+  stage?: 'extract' | 'consolidate';
+}
+
+export type Complete = (
+  systemPrompt: string,
+  userText: string,
+  options?: CompleteOptions
+) => Promise<string>;
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant';
@@ -192,7 +205,31 @@ const num = (v: unknown): number | null => {
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
 /** 解析不出任何 JSON 结构时返回 null（模型异常 / 截断到无法修复），与“模型正常返回但没有值得记的东西”区分 */
+function hasCompleteJsonObject(raw: string): boolean {
+  const start = raw.indexOf('{');
+  if (start < 0) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const ch of raw.slice(start)) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0) return true;
+    }
+  }
+  return false;
+}
+
 export function parseDistillResponse(raw: string): DistilledMemory[] | null {
+  if (!hasCompleteJsonObject(raw)) return null;
   const parsed = looseParse(raw);
   if (parsed === null || typeof parsed !== 'object') return null;
   const list = Array.isArray(parsed)
@@ -266,22 +303,71 @@ export function toCreateInput(m: DistilledMemory, spaceId: string): CreateMemory
 
 const CONSOLIDATE_ABOVE = 3;
 
+class DistillTruncatedError extends Error {
+  override name = 'DistillTruncatedError';
+}
+
 /**
  * 小线程一次用 DISTILL_THREAD_PROMPT；大线程按块用 distillChunkPrompt，块结果 >3 条再 distillConsolidatePrompt 合并到 3 条。
- * 单块失败跳过；全部失败才抛（给任务层记 error）。合并失败时退回按 importance 取前 3。
+ * 普通单块失败跳过、全部失败才抛；提取截断立即整轮上抛，合并失败则退回 importance 前 3。
  */
 export async function distillTranscript(
   transcript: string,
   complete: Complete,
-  opts: { maxChunkChars?: number; language?: unknown } = {}
+  opts: { maxChunkChars?: number; language?: unknown; extractMaxTokens?: number } = {}
 ): Promise<DistilledMemory[]> {
   const chunks = chunkTranscript(transcript, opts.maxChunkChars);
+  const extractMaxTokens = opts.extractMaxTokens ?? DISTILL_SINGLE_EXTRACT_MAX_TOKENS;
   const systemPrompt = withMemoryLanguage(DISTILL_THREAD_PROMPT, opts.language);
-  const unparseable = () => new Error('model output is not parseable JSON');
-  if (chunks.length === 1) {
-    const parsed = parseDistillResponse(await complete(systemPrompt, transcript));
-    if (!parsed) throw unparseable();
+  const infer = async (
+    system: string,
+    user: string,
+    options: CompleteOptions,
+    round: string
+  ): Promise<string> => {
+    const startedAt = performance.now();
+    let ok = false;
+    try {
+      const raw = await complete(system, user, options);
+      ok = true;
+      return raw;
+    } finally {
+      console.info('[memory-distill] inference round', {
+        stage: options.stage,
+        round,
+        durationMs: Math.round(performance.now() - startedAt),
+        maxTokens: options.maxTokens,
+        ok,
+      });
+    }
+  };
+  const parseWithTruncationRetry = async (
+    system: string,
+    user: string,
+    options: CompleteOptions,
+    round: string
+  ): Promise<DistilledMemory[]> => {
+    let raw = await infer(system, user, options, round);
+    const retryableIncomplete = !raw.trim() || raw.includes('{');
+    if (!hasCompleteJsonObject(raw) && retryableIncomplete) {
+      if ((options.maxTokens ?? 0) >= DISTILL_MAX_OUTPUT_TOKENS)
+        throw new DistillTruncatedError('model output is incomplete JSON');
+      raw = await infer(system, user, { ...options, maxTokens: DISTILL_MAX_OUTPUT_TOKENS }, round);
+      if (!hasCompleteJsonObject(raw))
+        throw new DistillTruncatedError('model output is incomplete JSON');
+    }
+    const parsed = parseDistillResponse(raw);
+    if (!parsed) throw new Error('model output is not parseable JSON');
     return parsed;
+  };
+
+  if (chunks.length === 1) {
+    return parseWithTruncationRetry(
+      systemPrompt,
+      transcript,
+      { maxTokens: extractMaxTokens, stage: 'extract' },
+      '1/1'
+    );
   }
 
   const collected: DistilledMemory[] = [];
@@ -289,12 +375,22 @@ export async function distillTranscript(
   let ok = 0;
   for (const [i, chunk] of chunks.entries()) {
     try {
-      const raw = await complete(systemPrompt, distillChunkPrompt(i + 1, chunks.length, chunk));
-      const parsed = parseDistillResponse(raw);
-      if (!parsed) throw unparseable();
+      const parsed = await parseWithTruncationRetry(
+        systemPrompt,
+        distillChunkPrompt(i + 1, chunks.length, chunk),
+        {
+          maxTokens:
+            opts.extractMaxTokens === DISTILL_MAX_OUTPUT_TOKENS
+              ? DISTILL_MAX_OUTPUT_TOKENS
+              : DISTILL_EXTRACT_MAX_TOKENS,
+          stage: 'extract',
+        },
+        `${i + 1}/${chunks.length}`
+      );
       collected.push(...parsed);
       ok++;
     } catch (error) {
+      if (error instanceof DistillTruncatedError) throw error;
       lastError = error;
     }
   }
@@ -309,12 +405,21 @@ export async function distillTranscript(
     )
     .join('\n\n');
   try {
-    const merged = parseDistillOutput(
-      await complete(DISTILL_THREAD_PROMPT, distillConsolidatePrompt(collected.length, listing))
+    const merged = await parseWithTruncationRetry(
+      DISTILL_THREAD_PROMPT,
+      distillConsolidatePrompt(collected.length, listing),
+      {
+        maxTokens:
+          opts.extractMaxTokens === DISTILL_MAX_OUTPUT_TOKENS
+            ? DISTILL_MAX_OUTPUT_TOKENS
+            : DISTILL_CONSOLIDATE_MAX_TOKENS,
+        stage: 'consolidate',
+      },
+      '1/1'
     );
     if (merged.length > 0) return merged.slice(0, CONSOLIDATE_ABOVE);
   } catch {
-    /* fall through */
+    // 提取结果已完整；合并截断只放弃重写并回退 top-3，不应让整轮重跑。
   }
   return [...collected].sort((a, b) => b.importance - a.importance).slice(0, CONSOLIDATE_ABOVE);
 }
@@ -554,6 +659,7 @@ export async function runDistillJob(
   try {
     distilled = await distillTranscript(opts.transcript, opts.complete, {
       language: jobLanguage ?? 'en',
+      extractMaxTokens: attempts >= 2 ? DISTILL_MAX_OUTPUT_TOKENS : undefined,
     });
   } catch (error) {
     const message = `distill failed: ${error instanceof Error ? error.message : String(error)}`;

@@ -3342,6 +3342,7 @@ export class SessionSupervisor {
         const model = await resolveBaseModelOrRefresh(runtime, candidate);
         const message = await runtime.completeSimple(model, context, {
           signal: controller.signal,
+          ...(command.maxTokens !== undefined ? { maxTokens: command.maxTokens } : {}),
         });
         if (message.stopReason === 'aborted') {
           lastError = `${label}: timed out after ${Math.round(command.timeoutMs / 1000)}s`;

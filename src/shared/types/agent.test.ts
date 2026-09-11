@@ -678,6 +678,26 @@ describe('removed project memory protocol', () => {
   });
 });
 
+describe('一次性文本补全命令', () => {
+  it('接受正整数输出预算并拒绝脏值', () => {
+    const command = {
+      type: 'complete-text',
+      requestId: 'completion-1',
+      systemPrompt: 'system',
+      userText: 'user',
+      candidates: [model],
+      timeoutMs: 1000,
+      maxTokens: 1024,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    const { maxTokens: _maxTokens, ...withoutBudget } = command;
+    expect(parseAgentCommand(withoutBudget)).toEqual(withoutBudget);
+    for (const maxTokens of [0, -1, 1.5, Number.NaN, '1024']) {
+      expect(parseAgentCommand({ ...command, maxTokens })).toBeNull();
+    }
+  });
+});
+
 describe('标题总结命令与事件', () => {
   const secondModel = { ...model, modelId: 'fallback-model' };
   const summarizeInitial = {

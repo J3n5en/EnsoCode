@@ -71,6 +71,10 @@ export const CRYSTAL_BOOST = 1.25;
 
 // 蒸馏：块上限 `min(max_chunk_size, 4000)`；importance 阈值取提示词 “<0.5 omit”
 export const DISTILL_MAX_CHUNK_CHARS = 4000;
+export const DISTILL_SINGLE_EXTRACT_MAX_TOKENS = 1536;
+export const DISTILL_EXTRACT_MAX_TOKENS = 1536;
+export const DISTILL_CONSOLIDATE_MAX_TOKENS = 1536;
+export const DISTILL_MAX_OUTPUT_TOKENS = 3072;
 export const DISTILL_MIN_IMPORTANCE = 0.5;
 // 暂时性失败（provider 超时 / 输出不可解析）保留 pending 重试的上限；超过则标 done 记 error，避免坏会话无限烧调用
 export const DISTILL_MAX_ATTEMPTS = 3;

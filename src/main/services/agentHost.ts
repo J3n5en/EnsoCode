@@ -721,6 +721,7 @@ export function completeText(input: {
   userText: string;
   candidates: SpawnModelConfig[];
   timeoutMs: number;
+  maxTokens?: number;
 }): Promise<string> {
   if (!worker || !workerReady) return Promise.reject(new Error('Agent worker is not running.'));
   const requestId = randomUUID();

@@ -83,6 +83,7 @@ import { memoryCompleteFromSettings } from '../services/llama/chat';
 import { toStoredTokens } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
+import type { Complete } from '../services/memory/distill';
 import {
   configureMemoryDistill,
   invokeMemory,
@@ -300,9 +301,7 @@ async function readChildHistory(conversationId: string): Promise<ChildHistoryRes
  * 记忆蒸馏的 LLM 入口。设置为本地 GGUF 时走 llama.cpp；否则复用标题总结的远程回退链。
  * worker 不在线 / 本地权重未就绪返 null，让任务保留 pending 到下次开库续跑。
  */
-async function distillCompletion(): Promise<
-  ((system: string, user: string) => Promise<string>) | null
-> {
+async function distillCompletion(): Promise<Complete | null> {
   const state = (
     readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
   )?.state;
@@ -314,7 +313,7 @@ async function distillCompletion(): Promise<
 
 async function remoteDistillCompletion(
   state: Record<string, unknown> | undefined
-): Promise<((system: string, user: string) => Promise<string>) | null> {
+): Promise<Complete | null> {
   if (!isAgentWorkerReady() || !state) return null;
   const credentialKeys = await readStoredOauthCredentialKeys();
   const candidates: SpawnModelConfig[] = [];
@@ -332,8 +331,14 @@ async function remoteDistillCompletion(
     if (resolved.ok && resolved.selection) candidates.push(resolved.selection.config);
   }
   if (candidates.length === 0) return null;
-  return (systemPrompt, userText) =>
-    completeText({ systemPrompt, userText, candidates, timeoutMs: titleSummaryTimeoutMs(1) });
+  return (systemPrompt, userText, options) =>
+    completeText({
+      systemPrompt,
+      userText,
+      candidates,
+      timeoutMs: titleSummaryTimeoutMs(1),
+      ...(options?.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+    });
 }
 
 async function readParentHistoryTail(

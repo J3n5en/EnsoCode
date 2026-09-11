@@ -2,7 +2,14 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DEDUP_MIN_CHARS, DISTILL_MAX_ATTEMPTS } from '@shared/memory/constants';
+import {
+  DEDUP_MIN_CHARS,
+  DISTILL_CONSOLIDATE_MAX_TOKENS,
+  DISTILL_EXTRACT_MAX_TOKENS,
+  DISTILL_MAX_ATTEMPTS,
+  DISTILL_MAX_OUTPUT_TOKENS,
+  DISTILL_SINGLE_EXTRACT_MAX_TOKENS,
+} from '@shared/memory/constants';
 import { DISTILL_THREAD_PROMPT } from '@shared/memory/prompts';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -158,9 +165,7 @@ describe('parseDistillOutput（容错 JSON）', () => {
       },
     ]);
     const truncated = `{"memories":[{"title":"t","content":"c","importance":0.7,"confidence":0.5,"unit_type":"fact","temporal":null},{"title":"u","content":"long text that got cut`;
-    const parsed = parseDistillOutput(truncated);
-    expect(parsed[0]).toMatchObject({ title: 't', content: 'c' });
-    expect(parsed.length).toBeGreaterThanOrEqual(1);
+    expect(parseDistillOutput(truncated)).toEqual([]);
     expect(parseDistillOutput('I could not find anything durable.')).toEqual([]);
     expect(parseDistillOutput('')).toEqual([]);
     // 缺 importance / content 非字符串的条目丢弃，不影响其余
@@ -227,17 +232,21 @@ describe('distillFingerprint 迁移兼容', () => {
 });
 
 describe('distillTranscript（小/大线程路由）', () => {
-  it('小线程：一次调用，system 为 DISTILL_THREAD_PROMPT 原文', async () => {
-    const calls: { system: string; user: string }[] = [];
-    const out = await distillTranscript('User: use pg', async (system, user) => {
-      calls.push({ system, user });
+  it('小线程：一次调用，system 为 DISTILL_THREAD_PROMPT 原文，并使用抽取输出预算', async () => {
+    const calls: { system: string; user: string; maxTokens?: number; stage?: string }[] = [];
+    const out = await distillTranscript('User: use pg', async (system, user, options) => {
+      calls.push({ system, user, ...options });
       return json([mem()]);
     });
     expect(calls).toHaveLength(1);
     // 提示词原文不变，语言规则只能追加在后（缺省英文）
     expect(calls[0].system).toContain(DISTILL_THREAD_PROMPT);
     expect(calls[0].system).toContain('in English');
-    expect(calls[0].user).toBe('User: use pg');
+    expect(calls[0]).toMatchObject({
+      user: 'User: use pg',
+      maxTokens: DISTILL_SINGLE_EXTRACT_MAX_TOKENS,
+      stage: 'extract',
+    });
     expect(out).toEqual([mem()]);
   });
 
@@ -249,24 +258,120 @@ describe('distillTranscript（小/大线程路由）', () => {
       }))
     );
     const chunks = chunkTranscript(t);
-    const calls: string[] = [];
-    const out = await distillTranscript(t, async (_system, user) => {
-      calls.push(user);
+    const calls: { user: string; maxTokens?: number; stage?: string }[] = [];
+    const out = await distillTranscript(t, async (_system, user, options) => {
+      calls.push({ user, ...options });
       if (user.startsWith('Consolidate these')) return json([mem({ title: 'merged' })]);
       const n = Number(/CHUNK (\d+)\//.exec(user)?.[1]);
       return json([mem({ title: `c${n}a` }), mem({ title: `c${n}b` })]);
     });
-    expect(calls.filter((u) => /^Extract 1-2 key memories/.test(u))).toHaveLength(chunks.length);
-    expect(calls.filter((u) => u.startsWith('Consolidate these'))).toHaveLength(1);
+    expect(calls.filter(({ user }) => /^Extract 0-3 key memories/.test(user))).toHaveLength(
+      chunks.length
+    );
+    expect(calls.filter(({ user }) => user.startsWith('Consolidate these'))).toHaveLength(1);
+    expect(
+      calls
+        .filter(({ stage }) => stage === 'extract')
+        .every(({ maxTokens }) => maxTokens === DISTILL_EXTRACT_MAX_TOKENS)
+    ).toBe(true);
+    expect(calls.find(({ stage }) => stage === 'consolidate')?.maxTokens).toBe(
+      DISTILL_CONSOLIDATE_MAX_TOKENS
+    );
     expect(out.map((m) => m.title)).toEqual(['merged']);
     // 每个块提示词都带 CHUNK i/N
     for (const [i] of chunks.entries())
-      expect(calls[i]).toContain(`CHUNK ${i + 1}/${chunks.length}`);
+      expect(calls[i].user).toContain(`CHUNK ${i + 1}/${chunks.length}`);
 
     const few = await distillTranscript(t, async (_s, user) =>
       /CHUNK 1\//.test(user) ? json([mem({ title: 'only' })]) : json([])
     );
     expect(few.map((m) => m.title)).toEqual(['only']);
+  });
+
+  it('截断输出在同轮提高到硬上限重试一次，仍截断则拒绝', async () => {
+    const budgets: number[] = [];
+    const truncated = '{"memories":[{"title":"x","content":"cut';
+    const recovered = await distillTranscript('User: use pg', async (_system, _user, options) => {
+      budgets.push(options?.maxTokens ?? 0);
+      return budgets.length === 1 ? truncated : json([mem()]);
+    });
+    expect(budgets).toEqual([DISTILL_SINGLE_EXTRACT_MAX_TOKENS, DISTILL_MAX_OUTPUT_TOKENS]);
+    expect(recovered).toEqual([mem()]);
+
+    let calls = 0;
+    await expect(
+      distillTranscript('User: use pg', async () => {
+        calls++;
+        return truncated;
+      })
+    ).rejects.toThrow(/incomplete JSON/);
+    expect(calls).toBe(2);
+
+    calls = 0;
+    await expect(
+      distillTranscript(
+        'User: use pg',
+        async (_system, _user, options) => {
+          calls++;
+          expect(options?.maxTokens).toBe(DISTILL_MAX_OUTPUT_TOKENS);
+          return truncated;
+        },
+        { extractMaxTokens: DISTILL_MAX_OUTPUT_TOKENS }
+      )
+    ).rejects.toThrow(/incomplete JSON/);
+    expect(calls).toBe(1);
+  });
+
+  it('分块路径每个截断块各自升到硬上限，不丢弃后续截断块', async () => {
+    const transcript = `User: ${'x'.repeat(20)}`;
+    const seen = new Map<string, number>();
+    const budgets: number[] = [];
+    const chunks = chunkTranscript(transcript, 10);
+    const out = await distillTranscript(
+      transcript,
+      async (_system, user, options) => {
+        budgets.push(options?.maxTokens ?? 0);
+        const count = (seen.get(user) ?? 0) + 1;
+        seen.set(user, count);
+        return count === 1 ? '{"memories":[{"content":"cut' : json([mem({ title: user })]);
+      },
+      { maxChunkChars: 10 }
+    );
+    expect(out).toHaveLength(chunks.length);
+    expect(budgets.filter((budget) => budget === DISTILL_MAX_OUTPUT_TOKENS)).toHaveLength(
+      chunks.length
+    );
+  });
+
+  it('分块提取在单块达到硬上限仍截断时整轮拒绝', async () => {
+    const transcript = `User: ${'x'.repeat(20)}`;
+    const truncated = '{"memories":[{"content":"cut';
+    let calls = 0;
+    await expect(
+      distillTranscript(
+        transcript,
+        async (_system, user) => {
+          calls++;
+          return /CHUNK 1\//.test(user) ? truncated : json([mem()]);
+        },
+        { maxChunkChars: 10 }
+      )
+    ).rejects.toMatchObject({ name: 'DistillTruncatedError' });
+    expect(calls).toBe(2);
+  });
+
+  it('合并截断时保留完整分块结果并回退到重要度前三', async () => {
+    const transcript = `User: ${'x'.repeat(20)}`;
+    const out = await distillTranscript(
+      transcript,
+      async (_system, user) => {
+        if (user.startsWith('Consolidate these')) return '{"memories":[{"title":"x","content":"cut';
+        const chunk = Number(/CHUNK (\d+)\//.exec(user)?.[1]);
+        return json([mem({ title: `chunk-${chunk}`, importance: chunk / 10 })]);
+      },
+      { maxChunkChars: 7 }
+    );
+    expect(out.map((memory) => memory.title)).toEqual(['chunk-4', 'chunk-3', 'chunk-2']);
   });
 
   it('单块失败不拖垮整体，全部失败抛出', async () => {
@@ -344,7 +449,7 @@ describe('蒸馏任务（memory_jobs kind=distill）', () => {
       complete: async (_system, user) => {
         sent.push(user);
         const output = mem({ content: config, title: config });
-        return json(user.startsWith('Consolidate these') ? [output] : [output, output]);
+        return user.startsWith('Consolidate these') ? json([output]) : json([output, output]);
       },
     });
     expect(done).toMatchObject({ status: 'done', done: 1 });
@@ -397,7 +502,7 @@ describe('蒸馏任务（memory_jobs kind=distill）', () => {
       complete: async (_system, user) => {
         sent.push(user);
         return user.startsWith('Consolidate these')
-          ? json([mem({ content: 'Config {"password":"merged_secret"}' })])
+          ? json([mem({ content: 'Config {"apiKey":"[REDACTED]"}' })])
           : json([
               mem({ content: 'Config {"apiKey":"chunk_secret"}' }),
               mem({ title: 'password=chunk_title_secret' }),
@@ -410,7 +515,7 @@ describe('蒸馏任务（memory_jobs kind=distill）', () => {
     expect(consolidation[0]).not.toContain('chunk_secret');
     expect(consolidation[0]).not.toContain('chunk_title_secret');
     expect(consolidation[0]).toContain('Config {"apiKey":"[REDACTED]"}');
-    expect(rows()[0].content).toBe('Config {"password":"[REDACTED]"}');
+    expect(rows()[0].content).toBe('Config {"apiKey":"[REDACTED]"}');
   });
 
   it.each([
@@ -511,6 +616,64 @@ describe('蒸馏任务（memory_jobs kind=distill）', () => {
     expect(ok).toMatchObject({ status: 'done', attempts: 3, total: 1, done: 1, error: null });
     expect(rows()).toHaveLength(1);
     expect(ensureDistillJob(db, payload, fp)).toBeNull();
+  });
+
+  it('多块提取硬截断时整轮 pending，成功块也不落库', async () => {
+    const longTranscript = buildTranscript([
+      { role: 'user', text: 'x'.repeat(DISTILL_MAX_CHUNK_CHARS * 2) },
+    ]);
+    const fp = distillFingerprint('multi-truncated', longTranscript);
+    const job = ensureDistillJob(db, { ...payload, sessionId: 'multi-truncated' }, fp)!;
+    const truncated = '{"memories":[{"content":"cut';
+    const users: string[] = [];
+    const failed = await runDistillJob(db, job, {
+      transcript: longTranscript,
+      complete: async (_system, user) => {
+        users.push(user);
+        if (/CHUNK 1\//.test(user)) return json([mem({ title: 'written-before-failure' })]);
+        if (/CHUNK 2\//.test(user)) return truncated;
+        throw new Error(`unexpected round: ${user.slice(0, 40)}`);
+      },
+    });
+    expect(failed).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      done: 0,
+      total: 0,
+    });
+    expect(failed.error).toMatch(/incomplete JSON/);
+    expect(rows()).toHaveLength(0);
+    expect(users).toHaveLength(3);
+    expect(users.every((user) => !user.includes('CHUNK 3/'))).toBe(true);
+  });
+
+  it('截断输出同轮只升预算一次；后续 attempt 首发硬上限且不重复升预算', async () => {
+    const fp = distillFingerprint('s1', transcript);
+    const job = ensureDistillJob(db, payload, fp)!;
+    const truncated = '{"memories":[{"content":"cut';
+    const firstBudgets: number[] = [];
+    const failed = await runDistillJob(db, job, {
+      transcript,
+      complete: async (_system, _user, options) => {
+        firstBudgets.push(options?.maxTokens ?? 0);
+        return truncated;
+      },
+    });
+    expect(firstBudgets).toEqual([DISTILL_SINGLE_EXTRACT_MAX_TOKENS, DISTILL_MAX_OUTPUT_TOKENS]);
+    expect(failed).toMatchObject({ status: 'pending', attempts: 1, done: 0 });
+    expect(failed.error).toMatch(/incomplete JSON/);
+
+    const retryBudgets: number[] = [];
+    const failedAgain = await runDistillJob(db, failed, {
+      transcript,
+      complete: async (_system, _user, options) => {
+        retryBudgets.push(options?.maxTokens ?? 0);
+        return truncated;
+      },
+    });
+    expect(retryBudgets).toEqual([DISTILL_MAX_OUTPUT_TOKENS]);
+    expect(failedAgain).toMatchObject({ status: 'pending', attempts: 2, done: 0 });
+    expect(rows()).toHaveLength(0);
   });
 
   it('暂时性失败超过 DISTILL_MAX_ATTEMPTS 次标 done 记 error，不再重试', async () => {

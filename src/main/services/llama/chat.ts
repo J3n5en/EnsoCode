@@ -8,16 +8,25 @@ import {
 import { withoutReasoning } from './chatWrapper';
 import { ModelIdleTimer } from './idle';
 import {
+  addThoughtChunk,
+  type LocalInferenceDiag,
+  publicInferenceDiag,
+  type TokenMeterSnapshot,
+  tokenMeterDelta,
+} from './inferenceDiag';
+import {
   acquireModel,
   type LlamaContextLike,
   type LlamaContextSequenceLike,
   type LlamaModelLike,
+  loadLlama,
   releaseModel,
 } from './runtime';
 
 export interface ChatSessionLike {
-  prompt(userText: string, opts?: { signal?: AbortSignal }): Promise<string>;
+  prompt(userText: string, opts?: { signal?: AbortSignal; maxTokens?: number }): Promise<string>;
   dispose(): void;
+  lastDiag?: LocalInferenceDiag;
 }
 
 export interface CreateLocalCompleteOptions {
@@ -76,6 +85,7 @@ let cachedContext: {
   /** resolveChatWrapper 要解析模型元数据，每轮重建是白费开销 */
   wrapper?: object;
 } | null = null;
+let cachedGpu: string | boolean | null | undefined;
 
 /**
  * context 默认只有 1 条 sequence，`getSequence()` 取完就耗尽。
@@ -119,12 +129,77 @@ async function defaultCreateSession(
     // 必须为 false：sequence 由 cachedContext 持有并复用，销毁它就耗尽了槽位
     autoDisposeSequence: false,
   });
-  return {
-    prompt: (userText, opts) => session.prompt(userText, { signal: opts?.signal, temperature: 0 }),
+  const handle: ChatSessionLike = {
+    prompt: async (userText, opts) => {
+      const thoughts = { thoughtChars: 0, thoughtTokens: 0 };
+      let firstTokenMs: number | null = null;
+      const before = readTokenMeter(sequence);
+      const startedAt = performance.now();
+      const text = await session.prompt(userText, {
+        signal: opts?.signal,
+        temperature: 0,
+        maxTokens: opts?.maxTokens,
+        onResponseChunk: (chunk: {
+          type?: string;
+          segmentType?: string;
+          text?: string;
+          tokens?: readonly unknown[];
+        }) => {
+          if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - startedAt);
+          addThoughtChunk(thoughts, chunk);
+        },
+      });
+      const promptMs = Math.round(performance.now() - startedAt);
+      const delta = tokenMeterDelta(before, readTokenMeter(sequence));
+      handle.lastDiag = {
+        ...delta,
+        firstTokenMs,
+        promptMs,
+        ...thoughts,
+        gpu: await readGpu(),
+        gpuLayers: readGpuLayers(model, sequence),
+        flashAttentionConfig: readFlashAttention(sequence),
+        finalTextChars: typeof text === 'string' ? text.length : null,
+      };
+      return text;
+    },
     dispose: () => {
       session.dispose({ disposeSequence: false });
     },
   };
+  return handle;
+}
+
+function readTokenMeter(sequence: LlamaContextSequenceLike): TokenMeterSnapshot | undefined {
+  const state = (
+    sequence as { tokenMeter?: { getState?: () => TokenMeterSnapshot } }
+  ).tokenMeter?.getState?.();
+  if (!state) return undefined;
+  return { usedInputTokens: state.usedInputTokens, usedOutputTokens: state.usedOutputTokens };
+}
+
+function readGpuLayers(model: LlamaModelLike, sequence: LlamaContextSequenceLike): number | null {
+  const fromModel = (model as { gpuLayers?: unknown }).gpuLayers;
+  if (typeof fromModel === 'number' && Number.isFinite(fromModel)) return fromModel;
+  const fromSeq = (sequence as { model?: { gpuLayers?: unknown } }).model?.gpuLayers;
+  return typeof fromSeq === 'number' && Number.isFinite(fromSeq) ? fromSeq : null;
+}
+
+function readFlashAttention(sequence: LlamaContextSequenceLike): string | boolean | null {
+  const value = (sequence as { context?: { flashAttention?: unknown } }).context?.flashAttention;
+  return typeof value === 'string' || typeof value === 'boolean' ? value : null;
+}
+
+async function readGpu(): Promise<string | boolean | null> {
+  if (cachedGpu !== undefined) return cachedGpu;
+  try {
+    const llama = await loadLlama();
+    const gpu = (llama as { gpu?: unknown }).gpu;
+    cachedGpu = typeof gpu === 'string' || typeof gpu === 'boolean' ? gpu : null;
+  } catch {
+    cachedGpu = null;
+  }
+  return cachedGpu;
 }
 
 /** 仅供测试：丢掉缓存的 KV，避免跨用例串台 */
@@ -133,6 +208,7 @@ export function __resetLocalChatForTest(): void {
   chatIdle.reset();
   chatIdle = new ModelIdleTimer(() => releaseLocalChatSlot());
   cachedContext = null;
+  cachedGpu = undefined;
   queue = Promise.resolve();
 }
 
@@ -168,10 +244,17 @@ export function createLocalComplete(
     opts.createSession ??
     ((model, systemPrompt) => defaultCreateSession(model, systemPrompt, modelPath, contextSize));
 
-  return (systemPrompt, userText) => {
+  return (systemPrompt, userText, completeOptions) => {
+    const queuedAt = performance.now();
     const release = chatIdle.acquire();
     return new Promise<string>((resolve, reject) => {
       void enqueue(async () => {
+        const startedAt = performance.now();
+        if (completeOptions?.stage)
+          console.info('[memory-distill] local queue wait', {
+            stage: completeOptions.stage,
+            durationMs: Math.round(startedAt - queuedAt),
+          });
         const ac = new AbortController();
         const timedOut = new Error('local chat timed out');
         const timer = setTimeout(() => {
@@ -181,12 +264,36 @@ export function createLocalComplete(
         let session: ChatSessionLike | null = null;
         try {
           if (cachedContext && cachedContext.path !== modelPath) await disposeChatContext();
+          const modelStartedAt = performance.now();
           const model = await acquire('chat', modelPath);
+          if (completeOptions?.stage)
+            console.info('[memory-distill] local model acquire', {
+              stage: completeOptions.stage,
+              durationMs: Math.round(performance.now() - modelStartedAt),
+            });
           ac.signal.throwIfAborted();
+          const sessionStartedAt = performance.now();
           session = await createSession(model, systemPrompt);
+          if (completeOptions?.stage)
+            console.info('[memory-distill] local context/session prepare', {
+              stage: completeOptions.stage,
+              durationMs: Math.round(performance.now() - sessionStartedAt),
+            });
           ac.signal.throwIfAborted();
+          const inferenceStartedAt = performance.now();
+          const text = await session.prompt(userText, {
+            signal: ac.signal,
+            maxTokens: completeOptions?.maxTokens,
+          });
+          if (completeOptions?.stage)
+            console.info('[memory-distill] local inference', {
+              stage: completeOptions.stage,
+              durationMs: Math.round(performance.now() - inferenceStartedAt),
+              maxTokens: completeOptions.maxTokens,
+              ...publicInferenceDiag(session.lastDiag),
+            });
           // 调用者超时不代表 native 已停；锁、session 和空闲计时都等真实推理 settle。
-          resolve(await session.prompt(userText, { signal: ac.signal }));
+          resolve(text);
         } catch (error) {
           reject(error);
         } finally {
