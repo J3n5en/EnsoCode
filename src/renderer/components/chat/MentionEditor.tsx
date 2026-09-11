@@ -529,14 +529,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
           event.preventDefault();
           const text = event.clipboardData.getData('text/plain');
           if (!text) return;
-          const selection = window.getSelection();
-          if (!selection || selection.rangeCount === 0) return;
-          const range = selection.getRangeAt(0);
-          range.deleteContents();
-          const node = document.createTextNode(text);
-          range.insertNode(node);
-          placeCaretAfter(node);
-          emitState();
+          document.execCommand('insertText', false, text);
         }}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={() => {
