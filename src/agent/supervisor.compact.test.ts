@@ -384,7 +384,10 @@ describe('SessionSupervisor failTurn compaction cleanup', () => {
     // 给分支塞一条 user 消息，rewind 才有可回退目标
     (mocks.managers[0] as { getBranch: () => unknown[] }).getBranch().push({
       type: 'message',
-      message: { role: 'user' },
+      message: {
+        role: 'user',
+        content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }],
+      },
       id: 'entry-user-1',
       timestamp: 1,
     });
@@ -407,6 +410,12 @@ describe('SessionSupervisor failTurn compaction cleanup', () => {
 
     // failed 不应被 idle 守卫早退空操作：应实际尝试 navigateTree 到那条 user 消息
     expect(parentSession.navigateTree).toHaveBeenCalledWith('entry-user-1');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'rewind-done',
+        editorImages: [{ data: 'AAAA', mimeType: 'image/png' }],
+      })
+    );
 
     await supervisor.shutdown();
   });

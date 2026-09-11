@@ -1,8 +1,9 @@
-import { Check, Pencil, Send, SquareX, X } from 'lucide-react';
+import { Check, Images, Pencil, Send, SquareX, X } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/i18n';
 import type { QueuedMessage } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
+import { canSaveQueuedEdit, queuedAttachmentLabel } from './queueEdit';
 
 /**
  * 排队消息区(grok build 形态):agent 干活时用户消息先入队,显示在输入框上方;
@@ -20,9 +21,9 @@ export function MessageQueue({
   const [draft, setDraft] = useState('');
   if (queued.length === 0) return null;
 
-  const saveEdit = (messageId: string) => {
-    if (draft.trim()) {
-      useSessionsStore.getState().updateQueuedMessage(conversationId, messageId, draft.trim());
+  const saveEdit = (message: QueuedMessage) => {
+    if (canSaveQueuedEdit(draft, message.images?.length ?? 0)) {
+      useSessionsStore.getState().updateQueuedMessage(conversationId, message.id, draft.trim());
     }
     setEditingId(null);
   };
@@ -43,7 +44,7 @@ export function MessageQueue({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
-                if (e.key === 'Enter') saveEdit(message.id);
+                if (e.key === 'Enter') saveEdit(message);
                 if (e.key === 'Escape') setEditingId(null);
               }}
               // biome-ignore lint/a11y/noAutofocus: 进入编辑态即聚焦是预期交互
@@ -53,10 +54,21 @@ export function MessageQueue({
           ) : (
             <span className="min-w-0 flex-1 truncate">{message.text || '[image]'}</span>
           )}
+          {queuedAttachmentLabel(message.images?.length ?? 0, t('attachments')) && (
+            <span
+              title={
+                queuedAttachmentLabel(message.images?.length ?? 0, t('attachments')) ?? undefined
+              }
+              className="flex shrink-0 items-center gap-0.5 text-muted-foreground"
+            >
+              <Images className="h-3 w-3" />
+              {message.images?.length}
+            </span>
+          )}
           {editingId === message.id ? (
             <button
               type="button"
-              onClick={() => saveEdit(message.id)}
+              onClick={() => saveEdit(message)}
               className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
             >
               <Check className="h-3.5 w-3.5" />

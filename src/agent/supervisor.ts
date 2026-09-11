@@ -1200,7 +1200,7 @@ export class SessionSupervisor {
           .getBranch()
           .filter((entry) => entry.type === 'message' && entry.message.role === 'user');
         const target = userEntries[userEntries.length - 1 - command.userIndexFromEnd];
-        if (!target) {
+        if (target?.type !== 'message' || target.message.role !== 'user') {
           this.options.emit({
             type: 'rewind-done',
             identity: managed.identity,
@@ -1226,12 +1226,20 @@ export class SessionSupervisor {
           }
         }
         const result = await managed.session.navigateTree(target.id);
+        const editorImages = Array.isArray(target.message.content)
+          ? target.message.content.flatMap((part) =>
+              part.type === 'image' && part.data && part.mimeType
+                ? [{ data: part.data, mimeType: part.mimeType }]
+                : []
+            )
+          : [];
         this.reconcileMessages(managed, this.transcript(managed));
         this.options.emit({
           type: 'rewind-done',
           identity: managed.identity,
           seq: ++managed.seq,
           ...(!result.cancelled && result.editorText ? { editorText: result.editorText } : {}),
+          ...(!result.cancelled && editorImages.length > 0 ? { editorImages } : {}),
           ...(filesRestored ? { filesRestored } : {}),
         });
         return;

@@ -56,6 +56,7 @@ interface ComposerProps {
   toolbar?: React.ReactNode;
   locked?: boolean;
   injectedDraft?: string;
+  injectedImages?: AttachedImage[];
   onDraftConsumed?: () => void;
   initialRecipient?: AgentTypeMentionCandidate;
   onInitialRecipientConsumed?: () => void;
@@ -87,6 +88,7 @@ export function Composer({
   toolbar,
   locked = false,
   injectedDraft,
+  injectedImages,
   onDraftConsumed,
   initialRecipient,
   onInitialRecipientConsumed,
@@ -226,15 +228,16 @@ export function Composer({
     onInitialRecipientConsumed?.();
   }, [initialRecipient, onInitialRecipientConsumed]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: injectedDraft is an external one-shot signal.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: injected content is an external one-shot signal.
   useEffect(() => {
-    if (!injectedDraft) return;
-    const parsed = splitSlashCommand(injectedDraft);
+    if (!injectedDraft && !injectedImages?.length) return;
+    const parsed = splitSlashCommand(injectedDraft ?? '');
     setSlash(parsed.slash);
+    setImages(injectedImages ?? []);
     editorRef.current?.setSegments(parsed.rest ? [{ type: 'text', text: parsed.rest }] : []);
     onDraftConsumed?.();
     window.setTimeout(() => editorRef.current?.focus(), 0);
-  }, [injectedDraft]);
+  }, [injectedDraft, injectedImages]);
 
   const subQuery = slashSubcommandQuery(slash, editorPlain.replaceAll('\uFFFC', ''));
   const slashResults =

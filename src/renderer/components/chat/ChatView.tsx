@@ -512,6 +512,7 @@ export function ChatView() {
             }
             focusKey={conversation.id}
             injectedDraft={conversation.draftText}
+            injectedImages={conversation.draftImages}
             onDraftConsumed={() => useSessionsStore.getState().clearDraft(conversation.id)}
             initialRecipient={
               conversation.prefillAgentTypeKey === ENSO_AGENT_TYPE_KEY

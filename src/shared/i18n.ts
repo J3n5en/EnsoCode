@@ -838,6 +838,7 @@ export const zhTranslations: Record<string, string> = {
   'Type an answer…': '输入回答…',
   'Message will queue until this round finishes…': '消息将排队,本轮结束后发送…',
   Queued: '排队',
+  attachments: '个附件',
   Edit: '编辑',
   'Send now': '立即发送',
   'Interrupt and send now': '打断并立即发送',

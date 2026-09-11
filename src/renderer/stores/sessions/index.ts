@@ -243,8 +243,9 @@ export interface Conversation extends SessionProjection {
   queuedMessages?: QueuedMessage[];
   /** 会话目标(设定后空闲自动续跑) */
   goal?: SessionGoal;
-  /** 回退后待预填输入框的文本(rewind-done 回流,ChatInput 消费一次) */
+  /** 回退后待预填输入框的内容(rewind-done 回流,Composer 消费一次) */
   draftText?: string;
+  draftImages?: AttachedImage[];
   /** 隔离会话的 worktree 绑定（main 权威的投影）；持久化，resume 时据此校验与定 cwd */
   worktree?: SessionWorktree;
   /** 工作区迁移/回退提醒，随下一条用户消息前置注入后清除；持久化 */
@@ -1181,7 +1182,12 @@ export const useSessionsStore = create<SessionsState>()(
             if (next === conversation) return state;
             return patch(state, id, {
               ...next,
-              ...(event.editorText ? { draftText: event.editorText } : {}),
+              ...(event.editorText || event.editorImages?.length
+                ? {
+                    draftText: event.editorText,
+                    draftImages: event.editorImages?.length ? event.editorImages : undefined,
+                  }
+                : {}),
             });
           });
           return;
@@ -3200,8 +3206,12 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         clearDraft(conversationId) {
-          if (get().conversations[conversationId]?.draftText === undefined) return;
-          set((state) => patch(state, conversationId, { draftText: undefined }));
+          const conversation = get().conversations[conversationId];
+          if (conversation?.draftText === undefined && conversation?.draftImages === undefined)
+            return;
+          set((state) =>
+            patch(state, conversationId, { draftText: undefined, draftImages: undefined })
+          );
         },
 
         sendQueuedNow(conversationId, messageId) {

@@ -1873,6 +1873,96 @@ describe('typed Agent child projection', () => {
     expect(agentPrompt).not.toHaveBeenCalled();
   });
 
+  it('编辑排队消息保留图片', () => {
+    const images = [{ data: 'AAAA', mimeType: 'image/png' }];
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          queuedMessages: [{ id: 'q1', text: 'before', images }],
+        },
+      },
+    }));
+
+    sessionsModule.useSessionsStore.getState().updateQueuedMessage('parent', 'q1', 'after');
+
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'after', images },
+    ]);
+  });
+
+  it('编辑后的排队消息发送时仍携带图片', async () => {
+    const images = [{ data: 'AAAA', mimeType: 'image/png' }];
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          queuedMessages: [{ id: 'q1', text: 'before', images }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    const store = sessionsModule.useSessionsStore.getState();
+    store.updateQueuedMessage('parent', 'q1', 'after');
+    store.sendQueuedNow('parent', 'q1');
+
+    await vi.waitFor(() => expect(agentPrompt).toHaveBeenCalledWith('parent', 'after', images));
+  });
+
+  it('仅图片回退事件也把图片交给输入框', () => {
+    onAgentEvent?.({
+      type: 'rewind-done',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 1,
+      editorImages: [{ data: 'AAAA', mimeType: 'image/png' }],
+    });
+
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
+      draftImages: [{ data: 'AAAA', mimeType: 'image/png' }],
+    });
+  });
+
+  it('连续回退用本次内容成对替换草稿，避免文本和图片串台', () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          generation: 'pg1',
+          draftText: 'stale text',
+          draftImages: [{ data: 'OLD', mimeType: 'image/png' }],
+        },
+      },
+    }));
+
+    onAgentEvent?.({
+      type: 'rewind-done',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 1,
+      editorText: 'fresh text',
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
+      draftText: 'fresh text',
+      draftImages: undefined,
+    });
+
+    onAgentEvent?.({
+      type: 'rewind-done',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 2,
+      editorImages: [{ data: 'NEW', mimeType: 'image/jpeg' }],
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
+      draftText: undefined,
+      draftImages: [{ data: 'NEW', mimeType: 'image/jpeg' }],
+    });
+  });
+
   it('压缩进行中发送消息入队，不立刻 prompt', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

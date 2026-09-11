@@ -974,6 +974,7 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       seq: number;
       editorText?: string;
+      editorImages?: AttachedImage[];
       filesRestored?: boolean;
     }
   | {
@@ -2408,11 +2409,15 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         : null;
     case 'messages-truncated':
       return isSequence(value.length) ? (value as unknown as AgentWorkerEvent) : null;
-    case 'rewind-done':
+    case 'rewind-done': {
+      const editorImages =
+        value.editorImages === undefined ? undefined : parseAttachedImages(value.editorImages);
       return (value.editorText === undefined || typeof value.editorText === 'string') &&
+        editorImages !== null &&
         (value.filesRestored === undefined || typeof value.filesRestored === 'boolean')
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    }
     case 'fork-done':
       return isUuid(value.targetConversationId) &&
         (value.sessionFile === undefined || typeof value.sessionFile === 'string') &&

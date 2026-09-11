@@ -905,6 +905,20 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
   });
 
+  it('rewind-done 保留待回填图片并拒绝脏图片', () => {
+    const event = {
+      type: 'rewind-done',
+      identity: parent,
+      seq: 3,
+      editorText: '再试一次',
+      editorImages: [{ data: 'AAAA', mimeType: 'image/png' }],
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({ ...event, editorImages: [{ data: 7, mimeType: 'image/png' }] })
+    ).toBeNull();
+  });
+
   it('snapshot 事件外壳保留 partial / sessionId：空 targeted 快照靠 sessionId 路由收回 started', () => {
     const empty = { type: 'snapshot', sessions: [], partial: true, sessionId: 'evicted' };
     expect(parseAgentWorkerEvent(empty)).toEqual(empty);
