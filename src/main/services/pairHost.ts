@@ -677,7 +677,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
       } else {
         conn.pendingSnapshot = undefined;
       }
-      // 切换订阅后目录要重裁（cwd/排队只挂当前会话）
+      // 切换订阅后目录要重裁（cwd/排队/目标只挂当前会话）
       requestMeta(conn);
       break;
     case 'snapshot':
@@ -704,7 +704,10 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'queue-update':
     case 'queue-send-now':
     case 'queue-interrupt-send':
-      // 结构已校验；交 renderer 的会话 store（与桌面队列区同一路径）
+    case 'goal-pause':
+    case 'goal-resume':
+    case 'goal-clear':
+      // 结构已校验；交 renderer 的会话 store（与桌面队列区 / GoalBar 同一路径）
       onQueueAction?.(command);
       break;
     case 'history':

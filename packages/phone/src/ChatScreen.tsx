@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Composer } from '@/components/chat/Composer';
+import { GoalBar } from '@/components/chat/GoalBar';
 import { MessageQueue } from '@/components/chat/MessageQueue';
 import {
   CHAT_COL,
@@ -29,8 +30,8 @@ interface Props {
   view: SessionView | null;
   connState: ConnState;
   stateLabel: string;
-  /** TG 式状态横幅：progress = 连接/同步中，ok = 短暂闪现「已是最新」；null 不显示 */
-  banner: { label: string; tone: 'progress' | 'ok' } | null;
+  /** 订阅会话同步中：标题旁状态灯用 amber pulse */
+  syncing?: boolean;
   canCreate: boolean;
   onOpenDrawer(): void;
   onNewSession(): void;
@@ -47,6 +48,8 @@ interface Props {
   onSelectTab?(sessionId: string): void;
   /** 排队中的消息（桌面下发）：本轮未结束时发的消息先入队 */
   queued?: { id: string; text: string; hasImages?: boolean }[];
+  /** 会话目标（桌面下发）：GoalBar 展示与暂停/继续/清除 */
+  goal?: CatalogEntry['goal'];
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
@@ -160,7 +163,18 @@ export function ChatScreen(props: Props) {
           <PanelLeft className="h-4.5 w-4.5" />
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <p className="truncate font-medium text-sm">{props.title}</p>
+          <p className="flex min-w-0 items-center justify-center gap-1.5">
+            {props.connState === 'online' && (
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  props.syncing ? 'animate-pulse bg-amber-500' : 'bg-emerald-500'
+                )}
+                title={props.syncing ? '同步中…' : props.stateLabel}
+              />
+            )}
+            <span className="truncate font-medium text-sm">{props.title}</span>
+          </p>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {props.projectName || props.stateLabel}
           </p>
@@ -176,20 +190,10 @@ export function ChatScreen(props: Props) {
         </button>
       </header>
 
-      {/* TG 式状态横幅：连接/同步中时诚实告知时间线可能陈旧，同步完短暂闪现已最新 */}
-      {props.banner && (
-        <div
-          className={cn(
-            'flex shrink-0 items-center justify-center gap-1.5 py-1 text-xs transition-colors',
-            props.banner.tone === 'ok'
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-          )}
-        >
-          {props.banner.tone === 'progress' && (
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-          )}
-          <span>{props.banner.label}</span>
+      {props.connState !== 'online' && props.connState !== 'unauthorized' && (
+        <div className="flex shrink-0 items-center justify-center gap-1.5 bg-amber-500/10 py-1 text-amber-700 text-xs dark:text-amber-400">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+          <span>{props.stateLabel}</span>
         </div>
       )}
 
@@ -264,6 +268,9 @@ export function ChatScreen(props: Props) {
               conversationId={sessionId}
               queued={(props.queued ?? []).map((q) => ({ id: q.id, text: q.text }))}
             />
+            {props.goal && (
+              <GoalBar conversationId={sessionId} goal={{ ...props.goal, noProgressRuns: 0 }} />
+            )}
             {/* 后台任务 / subagent 胶囊：复用桌面组件，停止按钮经 stub 降级为无操作 */}
             <TaskBar
               sessionId={sessionId}

@@ -53,6 +53,9 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       return { ok: true, command: value as PhoneToHost };
     }
     case 'abort':
+    case 'goal-pause':
+    case 'goal-resume':
+    case 'goal-clear':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
       return { ok: true, command: value as PhoneToHost };
     case 'queue-remove':

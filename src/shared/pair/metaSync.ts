@@ -38,6 +38,7 @@ export function pairJsonFingerprint(value: unknown): string {
 const CATALOG_CHAT_KEYS = [
   'cwd',
   'queued',
+  'goal',
   'projectName',
   'providerId',
   'modelId',

@@ -48,8 +48,8 @@ export type PairSessionConfig =
   | { type: 'set-thinking'; sessionId: string; level: ThinkingLevel };
 
 /**
- * 手机端的排队消息操作（已过白名单校验）。queuedMessages 只存于 renderer store，
- * 故不走 agent bridge，一律交 renderer 的 store 方法（与桌面队列区同一路径）。
+ * 手机端的排队消息 / 会话目标操作（已过白名单校验）。queuedMessages 与 goal 只存于
+ * renderer store，故不走 agent bridge，一律交 renderer 的 store 方法（与桌面同一路径）。
  */
 export type PairQueueAction =
   | {
@@ -61,7 +61,10 @@ export type PairQueueAction =
   | { type: 'queue-remove'; sessionId: string; messageId: string }
   | { type: 'queue-update'; sessionId: string; messageId: string; text: string }
   | { type: 'queue-send-now'; sessionId: string; messageId: string }
-  | { type: 'queue-interrupt-send'; sessionId: string; messageId: string };
+  | { type: 'queue-interrupt-send'; sessionId: string; messageId: string }
+  | { type: 'goal-pause'; sessionId: string }
+  | { type: 'goal-resume'; sessionId: string }
+  | { type: 'goal-clear'; sessionId: string };
 
 /** renderer 推给 main 的目录快照。providers 必须已剥掉 apiKey/baseUrl。 */
 export interface PairCatalogPayload {
@@ -82,6 +85,13 @@ export interface PairCatalogPayload {
     thinkingLevel?: string;
     /** 排队中的消息（手机队列区展示用） */
     queued?: { id: string; text: string; hasImages?: boolean }[];
+    /** 会话目标（手机 GoalBar 展示用） */
+    goal?: {
+      text: string;
+      status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
+      note?: string;
+      autoTurns: number;
+    };
   }[];
   /** 置顶组手动拖拽顺序（会话 id）；项目手动顺序已直接体现在 projects 排序里 */
   pinnedOrder?: string[];

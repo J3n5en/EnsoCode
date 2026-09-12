@@ -80,6 +80,9 @@ export type PhoneToHost =
   | { type: 'queue-update'; sessionId: string; messageId: string; text: string }
   | { type: 'queue-send-now'; sessionId: string; messageId: string }
   | { type: 'queue-interrupt-send'; sessionId: string; messageId: string }
+  | { type: 'goal-pause'; sessionId: string }
+  | { type: 'goal-resume'; sessionId: string }
+  | { type: 'goal-clear'; sessionId: string }
   /** 登记/解除 Web Push 订阅：手机离线时桌面用它发系统推送 */
   | { type: 'push-subscribe'; subscription: PushSubscriptionJson }
   | { type: 'push-unsubscribe' }
@@ -113,6 +116,9 @@ export const PHONE_COMMAND_TYPES = [
   'queue-update',
   'queue-send-now',
   'queue-interrupt-send',
+  'goal-pause',
+  'goal-resume',
+  'goal-clear',
   'push-subscribe',
   'push-unsubscribe',
   'presence',
@@ -155,6 +161,13 @@ export interface CatalogEntry {
   thinkingLevel?: ThinkingLevel;
   /** 排队中的消息（桌面 renderer 独有状态），手机队列区展示与操作用 */
   queued?: { id: string; text: string; hasImages?: boolean }[];
+  /** 会话目标（桌面 renderer 独有状态），手机 GoalBar 展示与操作用 */
+  goal?: {
+    text: string;
+    status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
+    note?: string;
+    autoTurns: number;
+  };
 }
 export interface ProjectEntry {
   id: string;

@@ -101,8 +101,6 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   /** 上滑翻页在途的会话 */
   const [historyPending, setHistoryPending] = useState<ReadonlySet<string>>(new Set());
-  /** 横幅刚收起时短暂闪现「已是最新」，随后淡出 */
-  const [okFlash, setOkFlash] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [composing, setComposing] = useState(false);
   /** 从抽屉项目旁进入时预填；顶栏新建为 null */
@@ -245,6 +243,9 @@ export function App() {
       interruptAndSendQueued: async (sessionId, messageId) => {
         clientRef.current?.send({ type: 'queue-interrupt-send', sessionId, messageId });
       },
+      pauseGoal: (sessionId) => clientRef.current?.send({ type: 'goal-pause', sessionId }),
+      resumeGoal: (sessionId) => clientRef.current?.send({ type: 'goal-resume', sessionId }),
+      clearGoal: (sessionId) => clientRef.current?.send({ type: 'goal-clear', sessionId }),
     });
   }, []);
 
@@ -272,34 +273,11 @@ export function App() {
       '选择模型')
     : undefined;
 
-  // TG 式状态横幅：非 online 显示连接状态；online 且订阅同步中显示同步中；
-  // 收起瞬间短暂闪现「已是最新」再淡出，不常驻占屏。
-  const bannerLabel =
-    state !== 'online' && state !== 'unauthorized'
-      ? STATE_LABEL[state]
-      : state === 'online' && syncing && activeId
-        ? '同步中…'
-        : null;
   // 在线时附带业务帧出口（直连 / 中继）：顶栏副标题与抽屉设备行共用
   const connectionLabel =
     state === 'online'
       ? `${STATE_LABEL.online} · ${transport === 'direct' ? '直连' : '中继'}`
       : STATE_LABEL[state];
-  const prevBannerRef = useRef<string | null>(null);
-  useEffect(() => {
-    const prev = prevBannerRef.current;
-    prevBannerRef.current = bannerLabel;
-    if (prev && !bannerLabel) {
-      setOkFlash(true);
-      const timer = setTimeout(() => setOkFlash(false), 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [bannerLabel]);
-  const banner = bannerLabel
-    ? { label: bannerLabel, tone: 'progress' as const }
-    : okFlash
-      ? { label: '已是最新', tone: 'ok' as const }
-      : null;
 
   /** 切到另一台时清空上一台的目录/视图，等新桌面下发 */
   const resetHostState = (nextActiveId: string | null) => {
@@ -420,7 +398,7 @@ export function App() {
         view={view}
         connState={state}
         stateLabel={connectionLabel}
-        banner={banner}
+        syncing={syncing && Boolean(activeId)}
         onOpenDrawer={() => setDrawerOpen(true)}
         onNewSession={() => {
           setComposeProjectId(null);
@@ -437,6 +415,7 @@ export function App() {
         historyLoading={Boolean(activeId && historyPending.has(activeId))}
         onLoadOlder={() => activeId && clientRef.current?.requestHistory(activeId)}
         queued={entry?.queued}
+        goal={entry?.goal}
         onSend={(text, images) => {
           if (!activeId) return;
           // 与桌面同语义：轮次进行中先入队（可编辑/删除/立即发送/打断并发送）

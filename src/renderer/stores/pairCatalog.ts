@@ -69,6 +69,16 @@ function buildPayload(): PairCatalogPayload {
           })),
         }
       : {}),
+    ...(c.goal
+      ? {
+          goal: {
+            text: c.goal.text,
+            status: c.goal.status,
+            ...(c.goal.note ? { note: c.goal.note } : {}),
+            autoTurns: c.goal.autoTurns,
+          },
+        }
+      : {}),
   });
 
   const topLevel = sessions.order
@@ -219,6 +229,15 @@ export function bindPairCatalogSync(): void {
         break;
       case 'queue-interrupt-send':
         void store.interruptAndSendQueued(action.sessionId, action.messageId);
+        break;
+      case 'goal-pause':
+        store.pauseGoal(action.sessionId);
+        break;
+      case 'goal-resume':
+        store.resumeGoal(action.sessionId);
+        break;
+      case 'goal-clear':
+        store.clearGoal(action.sessionId);
         break;
     }
   });

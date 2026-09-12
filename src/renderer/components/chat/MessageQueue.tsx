@@ -33,7 +33,7 @@ export function MessageQueue({
       {queued.map((message) => (
         <div
           key={message.id}
-          className="group flex items-center gap-2 rounded-lg border border-border/60 border-dashed bg-muted/20 px-2.5 py-1.5 text-xs"
+          className="flex items-center gap-2 rounded-lg border border-border/60 border-dashed bg-muted/20 px-2.5 py-1.5 text-xs"
         >
           <span className="shrink-0 text-[10px] text-muted-foreground uppercase tracking-wide">
             {t('Queued')}
@@ -74,7 +74,7 @@ export function MessageQueue({
               <Check className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <div className="pointer-events-none flex shrink-0 items-center gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
+            <div className="flex shrink-0 items-center gap-0.5">
               <button
                 type="button"
                 title={t('Edit')}

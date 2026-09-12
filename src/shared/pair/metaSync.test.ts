@@ -96,9 +96,10 @@ describe('slimCatalogForPhone', () => {
     modelId: 'm',
     reasoningEnabled: true,
     thinkingLevel: 'high' as const,
+    goal: { text: 'ship checkout', status: 'active' as const, autoTurns: 2 },
   };
 
-  it('未订阅时剥掉 cwd/排队/模型，只留抽屉字段', () => {
+  it('未订阅时剥掉 cwd/排队/模型/目标，只留抽屉字段', () => {
     expect(slimCatalogForPhone([fat], null)).toEqual([
       { id: 's1', title: 't', projectId: 'p', status: 'idle' },
     ]);

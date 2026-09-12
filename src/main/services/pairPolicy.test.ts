@@ -48,6 +48,14 @@ describe('手机命令白名单', () => {
     for (const cmd of bad) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(false);
   });
 
+  it('放行 goal 暂停/继续/清除，缺 sessionId 被拒', () => {
+    for (const type of ['goal-pause', 'goal-resume', 'goal-clear'] as const) {
+      expect(parsePhoneCommand({ type, sessionId: 's' }).ok, type).toBe(true);
+      expect(parsePhoneCommand({ type }).ok, type).toBe(false);
+      expect(parsePhoneCommand({ type, sessionId: '' }).ok, type).toBe(false);
+    }
+  });
+
   it('拒绝白名单外命令（改审批模式 / 设置写入 / 任意命令）', () => {
     for (const cmd of [
       { type: 'set-approval-mode', sessionId: 's', mode: 'full' },

@@ -10,7 +10,10 @@ import type { ProjectedMessage } from '@shared/types/agent';
 
 export interface SessionGoal {
   text: string;
-  status: 'active' | 'paused';
+  status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
+  note?: string;
+  autoTurns: number;
+  noProgressRuns: number;
 }
 
 export interface QueuedMessage {
@@ -29,12 +32,15 @@ export interface Conversation {
   queuedMessages?: QueuedMessage[];
 }
 
-/** 队列操作：真正的队列在桌面 renderer store，手机只发命令，由 App 注入 */
+/** 队列 / 目标操作：真正状态在桌面 renderer store，手机只发命令，由 App 注入 */
 export interface QueueActions {
   removeQueuedMessage(conversationId: string, messageId: string): void;
   updateQueuedMessage(conversationId: string, messageId: string, text: string): void;
   sendQueuedNow(conversationId: string, messageId: string): void;
   interruptAndSendQueued(conversationId: string, messageId: string): Promise<void>;
+  pauseGoal(conversationId: string): void;
+  resumeGoal(conversationId: string): void;
+  clearGoal(conversationId: string): void;
 }
 
 type SessionsSlice = {
@@ -54,6 +60,9 @@ const state: SessionsSlice = {
   updateQueuedMessage: () => {},
   sendQueuedNow: () => {},
   interruptAndSendQueued: async () => {},
+  pauseGoal: () => {},
+  resumeGoal: () => {},
+  clearGoal: () => {},
 };
 
 /** App 启动时注入：把桌面 MessageQueue 组件的 store 调用转成 pair 命令 */

@@ -45,7 +45,7 @@ export function registerPairHandlers(): void {
     sendToAllWindows(IPC_CHANNELS.PAIR_SESSION_CONFIG, config);
   });
 
-  // 手机操作排队消息：队列只在 renderer store，交给它处理
+  // 手机操作排队消息 / 会话目标：状态只在 renderer store，交给它处理
   setPairQueueActionListener((action) => {
     sendToAllWindows(IPC_CHANNELS.PAIR_QUEUE_ACTION, action);
   });
