@@ -3,8 +3,8 @@ import type { ProjectedMessage } from '@shared/types/agent';
 /**
  * `@/stores/sessions` 的 PWA 桩：手机端会话状态在 client.ts，不用 zustand。
  * 形状对齐桌面被复用组件读取的字段（activeId / conversations / rewind），
- * 使 RewindButton、RunningElapsed 无需改动即可编译并自动降级：
- * started 恒为 false 且无 sessionFile → RewindButton 不渲染。
+ * 使 RewindButton、RunningElapsed 无需改动即可编译。
+ * started / rewind / retry 由 ChatScreen + App 注入。
  * 经 vite alias 注入，桌面源码零改动。
  */
 
@@ -41,19 +41,18 @@ export interface QueueActions {
   pauseGoal(conversationId: string): void;
   resumeGoal(conversationId: string): void;
   clearGoal(conversationId: string): void;
+  rewind(sessionId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
+  retry(sessionId: string): void;
 }
 
 type SessionsSlice = {
   activeId: string | null;
   conversations: Record<string, Conversation>;
-  rewind(sessionId: string, userIndexFromEnd: number, restoreFiles?: boolean): void;
-  retry(sessionId: string): void;
 } & QueueActions;
 
 const state: SessionsSlice = {
   activeId: null,
   conversations: {},
-  // 手机端不支持回退（RewindButton 因 started=false 已不渲染，这里只为类型完整）
   rewind: () => {},
   retry: () => {},
   removeQueuedMessage: () => {},

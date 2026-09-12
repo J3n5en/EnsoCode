@@ -56,7 +56,33 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
     case 'goal-pause':
     case 'goal-resume':
     case 'goal-clear':
+    case 'retry':
       if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'goal-set':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (!isStr(v.text)) return { ok: false, error: 'missing text' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'compact':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (v.instructions !== undefined && typeof v.instructions !== 'string') {
+        return { ok: false, error: 'invalid instructions' };
+      }
+      return { ok: true, command: value as PhoneToHost };
+    case 'rewind':
+      if (!isStr(v.sessionId)) return { ok: false, error: 'missing sessionId' };
+      if (typeof v.userIndexFromEnd !== 'number' || v.userIndexFromEnd < 0) {
+        return { ok: false, error: 'invalid userIndexFromEnd' };
+      }
+      if (v.restoreFiles !== undefined && typeof v.restoreFiles !== 'boolean') {
+        return { ok: false, error: 'invalid restoreFiles' };
+      }
+      return { ok: true, command: value as PhoneToHost };
+    case 'task-stop':
+      if (!isStr(v.sessionId) || !isStr(v.taskId)) return { ok: false, error: 'missing ids' };
+      return { ok: true, command: value as PhoneToHost };
+    case 'subagent-stop':
+      if (!isStr(v.sessionId) || !isStr(v.agentId)) return { ok: false, error: 'missing ids' };
       return { ok: true, command: value as PhoneToHost };
     case 'queue-remove':
     case 'queue-send-now':

@@ -39,6 +39,7 @@ export function installElectronApiShim(): void {
       },
       agent: {
         stopTask: async () => ({ ok: false as const, error: 'not supported on phone' }),
+        stopSubagent: async () => ({ ok: false as const, error: 'not supported on phone' }),
       },
       providers: {
         getOauthUsage: async () => null,
@@ -46,4 +47,22 @@ export function installElectronApiShim(): void {
     },
     writable: false,
   });
+}
+
+/** App 注入：TaskBar 停止按钮经 pair 发回桌面 */
+export function setPhoneAgentActions(actions: {
+  stopTask(sessionId: string, taskId: string): void;
+  stopSubagent(sessionId: string, agentId: string): void;
+}): void {
+  const agent = (window as { electronAPI?: { agent?: Record<string, unknown> } }).electronAPI
+    ?.agent;
+  if (!agent) return;
+  agent.stopTask = async (sessionId: string, taskId: string) => {
+    actions.stopTask(sessionId, taskId);
+    return { ok: true as const };
+  };
+  agent.stopSubagent = async (sessionId: string, agentId: string) => {
+    actions.stopSubagent(sessionId, agentId);
+    return { ok: true as const };
+  };
 }

@@ -97,6 +97,7 @@ describe('slimCatalogForPhone', () => {
     reasoningEnabled: true,
     thinkingLevel: 'high' as const,
     goal: { text: 'ship checkout', status: 'active' as const, autoTurns: 2 },
+    slashCommands: [{ name: '/skill:foo', description: 'do foo' }],
   };
 
   it('未订阅时剥掉 cwd/排队/模型/目标，只留抽屉字段', () => {

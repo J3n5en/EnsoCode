@@ -687,6 +687,7 @@ function canForkDisplayedSession(
   state: ReturnType<typeof useSessionsStore.getState>,
   host: ReturnType<typeof useChatHost>
 ) {
+  if (host?.canFork === false) return false;
   return canActOnDisplayedSession(state, host, (status) => status === 'idle');
 }
 
@@ -769,14 +770,7 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   ];
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className={cn(
-          userActionClass,
-          // popover 打开期间保持可见,否则 hover 移开触发按钮会随组隐藏
-          open ? 'opacity-100' : 'opacity-0 group-hover/user:opacity-100'
-        )}
-        title={t('Rewind to this message')}
-      >
+      <PopoverTrigger className={userActionClass} title={t('Rewind to this message')}>
         <Undo2 className="h-3 w-3" />
         {t('Rewind')}
       </PopoverTrigger>

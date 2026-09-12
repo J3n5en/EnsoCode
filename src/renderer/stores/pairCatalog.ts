@@ -42,6 +42,9 @@ function buildPayload(): PairCatalogPayload {
     const owner = (c.parentId ? sessions.conversations[c.parentId] : undefined) ?? c;
     return owner.worktree?.path ?? projectPath.get(c.projectId);
   };
+  const slashCommands = settings.skills
+    .filter((skill) => skill.enabled !== false)
+    .map((skill) => ({ name: `/skill:${skill.name}`, description: skill.description }));
   const toEntry = (c: Conversation) => ({
     id: c.id,
     title: c.parentId ? c.coworkerName || c.title : c.title,
@@ -79,6 +82,7 @@ function buildPayload(): PairCatalogPayload {
           },
         }
       : {}),
+    ...(slashCommands.length ? { slashCommands } : {}),
   });
 
   const topLevel = sessions.order
@@ -181,7 +185,8 @@ export function bindPairCatalogSync(): void {
       state.terminalTheme !== prev.terminalTheme ||
       state.terminalFontFamily !== prev.terminalFontFamily ||
       state.compactReadOnlyTools !== prev.compactReadOnlyTools ||
-      state.expandLiveEdits !== prev.expandLiveEdits
+      state.expandLiveEdits !== prev.expandLiveEdits ||
+      state.skills !== prev.skills
     ) {
       schedulePush();
     }
@@ -238,6 +243,24 @@ export function bindPairCatalogSync(): void {
         break;
       case 'goal-clear':
         store.clearGoal(action.sessionId);
+        break;
+      case 'goal-set':
+        store.setGoal(action.sessionId, action.text);
+        break;
+      case 'compact':
+        store.compact(action.sessionId, action.instructions);
+        break;
+      case 'rewind':
+        store.rewind(action.sessionId, action.userIndexFromEnd, action.restoreFiles);
+        break;
+      case 'retry':
+        store.retry(action.sessionId);
+        break;
+      case 'task-stop':
+        void window.electronAPI.agent.stopTask(action.sessionId, action.taskId);
+        break;
+      case 'subagent-stop':
+        void window.electronAPI.agent.stopSubagent(action.sessionId, action.agentId);
         break;
     }
   });

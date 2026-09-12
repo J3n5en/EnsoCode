@@ -83,6 +83,12 @@ export type PhoneToHost =
   | { type: 'goal-pause'; sessionId: string }
   | { type: 'goal-resume'; sessionId: string }
   | { type: 'goal-clear'; sessionId: string }
+  | { type: 'goal-set'; sessionId: string; text: string }
+  | { type: 'compact'; sessionId: string; instructions?: string }
+  | { type: 'rewind'; sessionId: string; userIndexFromEnd: number; restoreFiles?: boolean }
+  | { type: 'retry'; sessionId: string }
+  | { type: 'task-stop'; sessionId: string; taskId: string }
+  | { type: 'subagent-stop'; sessionId: string; agentId: string }
   /** 登记/解除 Web Push 订阅：手机离线时桌面用它发系统推送 */
   | { type: 'push-subscribe'; subscription: PushSubscriptionJson }
   | { type: 'push-unsubscribe' }
@@ -119,6 +125,12 @@ export const PHONE_COMMAND_TYPES = [
   'goal-pause',
   'goal-resume',
   'goal-clear',
+  'goal-set',
+  'compact',
+  'rewind',
+  'retry',
+  'task-stop',
+  'subagent-stop',
   'push-subscribe',
   'push-unsubscribe',
   'presence',
@@ -168,6 +180,8 @@ export interface CatalogEntry {
     note?: string;
     autoTurns: number;
   };
+  /** 斜杠命令（技能名），仅当前订阅会话下发 */
+  slashCommands?: { name: string; description: string }[];
 }
 export interface ProjectEntry {
   id: string;

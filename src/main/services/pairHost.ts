@@ -707,7 +707,13 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
     case 'goal-pause':
     case 'goal-resume':
     case 'goal-clear':
-      // 结构已校验；交 renderer 的会话 store（与桌面队列区 / GoalBar 同一路径）
+    case 'goal-set':
+    case 'compact':
+    case 'rewind':
+    case 'retry':
+    case 'task-stop':
+    case 'subagent-stop':
+      // 结构已校验；交 renderer 的会话 store / electronAPI（与桌面同一路径）
       onQueueAction?.(command);
       break;
     case 'history':

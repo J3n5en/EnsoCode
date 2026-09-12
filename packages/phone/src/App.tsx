@@ -6,6 +6,7 @@ import {
   type ProviderEntry,
   revokePairing,
 } from '@enso/pair';
+import { parseCompactCommand } from '@shared/compactCommand';
 import { Smartphone } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,7 @@ import {
   saveDevices,
   saveLastSession,
 } from './storage';
+import { setPhoneAgentActions } from './stubs/electron-api';
 import { setQueueActions } from './stubs/sessions-store';
 
 /**
@@ -246,6 +248,20 @@ export function App() {
       pauseGoal: (sessionId) => clientRef.current?.send({ type: 'goal-pause', sessionId }),
       resumeGoal: (sessionId) => clientRef.current?.send({ type: 'goal-resume', sessionId }),
       clearGoal: (sessionId) => clientRef.current?.send({ type: 'goal-clear', sessionId }),
+      rewind: (sessionId, userIndexFromEnd, restoreFiles) =>
+        clientRef.current?.send({
+          type: 'rewind',
+          sessionId,
+          userIndexFromEnd,
+          ...(restoreFiles ? { restoreFiles } : {}),
+        }),
+      retry: (sessionId) => clientRef.current?.send({ type: 'retry', sessionId }),
+    });
+    setPhoneAgentActions({
+      stopTask: (sessionId, taskId) =>
+        clientRef.current?.send({ type: 'task-stop', sessionId, taskId }),
+      stopSubagent: (sessionId, agentId) =>
+        clientRef.current?.send({ type: 'subagent-stop', sessionId, agentId }),
     });
   }, []);
 
@@ -416,8 +432,28 @@ export function App() {
         onLoadOlder={() => activeId && clientRef.current?.requestHistory(activeId)}
         queued={entry?.queued}
         goal={entry?.goal}
+        slashCommands={entry?.slashCommands}
         onSend={(text, images) => {
           if (!activeId) return;
+          const compact = parseCompactCommand(text);
+          if (compact) {
+            send({
+              type: 'compact',
+              sessionId: activeId,
+              ...(compact.instructions ? { instructions: compact.instructions } : {}),
+            });
+            return;
+          }
+          const goalMatch = /^\/goal(?:\s+([\s\S]+))?$/.exec(text.trim());
+          if (goalMatch) {
+            const arg = goalMatch[1]?.trim();
+            if (!arg) return;
+            if (arg === 'clear') send({ type: 'goal-clear', sessionId: activeId });
+            else if (arg === 'pause') send({ type: 'goal-pause', sessionId: activeId });
+            else if (arg === 'resume') send({ type: 'goal-resume', sessionId: activeId });
+            else send({ type: 'goal-set', sessionId: activeId, text: arg });
+            return;
+          }
           // 与桌面同语义：轮次进行中先入队（可编辑/删除/立即发送/打断并发送）
           send({
             type: view?.status === 'running' ? 'enqueue' : 'prompt',

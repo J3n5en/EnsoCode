@@ -8,7 +8,7 @@ import type {
   MentionCandidate,
   UiElementMentionCandidate,
 } from '@shared/types/mentions';
-import { ArrowUp, CircleStop, SlashSquare, X } from 'lucide-react';
+import { ArrowUp, CircleStop, ImagePlus, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -140,6 +140,7 @@ export function Composer({
   }, []);
   const editorRef = useRef<MentionEditorHandle>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const [popupLayout, setPopupLayout] = useState<{
     left: number;
@@ -597,7 +598,7 @@ export function Composer({
                     onClick={() =>
                       setImages((current) => current.filter((_, item) => item !== index))
                     }
-                    className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
+                    className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm transition-opacity hover:text-destructive"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -683,7 +684,30 @@ export function Composer({
         </div>
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
         <div className="flex items-center justify-between gap-1.5 px-1.5 pb-1">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">{toolbar}</div>
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                ingestFiles(Array.from(event.target.files ?? []));
+                event.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => imageInputRef.current?.click()}
+              aria-label={t('Attach image')}
+              title={t('Attach image')}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            >
+              <ImagePlus className="h-3.5 w-3.5" />
+            </button>
+            {toolbar}
+          </div>
           {/* 生成中且输入为空才显示停止；有草稿则保持发送，方便手机点按钮入队 */}
           {effectiveBusy && !hasContent ? (
             <Button

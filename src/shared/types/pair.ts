@@ -64,7 +64,13 @@ export type PairQueueAction =
   | { type: 'queue-interrupt-send'; sessionId: string; messageId: string }
   | { type: 'goal-pause'; sessionId: string }
   | { type: 'goal-resume'; sessionId: string }
-  | { type: 'goal-clear'; sessionId: string };
+  | { type: 'goal-clear'; sessionId: string }
+  | { type: 'goal-set'; sessionId: string; text: string }
+  | { type: 'compact'; sessionId: string; instructions?: string }
+  | { type: 'rewind'; sessionId: string; userIndexFromEnd: number; restoreFiles?: boolean }
+  | { type: 'retry'; sessionId: string }
+  | { type: 'task-stop'; sessionId: string; taskId: string }
+  | { type: 'subagent-stop'; sessionId: string; agentId: string };
 
 /** renderer 推给 main 的目录快照。providers 必须已剥掉 apiKey/baseUrl。 */
 export interface PairCatalogPayload {
@@ -92,6 +98,7 @@ export interface PairCatalogPayload {
       note?: string;
       autoTurns: number;
     };
+    slashCommands?: { name: string; description: string }[];
   }[];
   /** 置顶组手动拖拽顺序（会话 id）；项目手动顺序已直接体现在 projects 排序里 */
   pinnedOrder?: string[];

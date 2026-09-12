@@ -11,6 +11,8 @@ export interface ChatHost {
   sessionId: string | null;
   canRewind: boolean;
   canRetry: boolean;
+  /** 缺省跟随 canRewind；手机 PWA 开回退但不开分叉 */
+  canFork?: boolean;
 }
 
 export const ChatHostContext = createContext<ChatHost | null>(null);

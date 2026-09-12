@@ -56,12 +56,37 @@ describe('手机命令白名单', () => {
     }
   });
 
+  it('放行 goal-set / compact / rewind / retry / 停任务，缺字段被拒', () => {
+    const ok = [
+      { type: 'goal-set', sessionId: 's', text: 'ship' },
+      { type: 'compact', sessionId: 's' },
+      { type: 'compact', sessionId: 's', instructions: 'keep tests' },
+      { type: 'rewind', sessionId: 's', userIndexFromEnd: 0 },
+      { type: 'rewind', sessionId: 's', userIndexFromEnd: 1, restoreFiles: true },
+      { type: 'retry', sessionId: 's' },
+      { type: 'task-stop', sessionId: 's', taskId: 't' },
+      { type: 'subagent-stop', sessionId: 's', agentId: 'a' },
+    ];
+    for (const cmd of ok) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(true);
+
+    const bad = [
+      { type: 'goal-set', sessionId: 's', text: '' },
+      { type: 'goal-set', sessionId: 's' },
+      { type: 'compact', sessionId: 's', instructions: 1 },
+      { type: 'rewind', sessionId: 's' },
+      { type: 'rewind', sessionId: 's', userIndexFromEnd: -1 },
+      { type: 'rewind', sessionId: 's', userIndexFromEnd: 0, restoreFiles: 'yes' },
+      { type: 'retry' },
+      { type: 'task-stop', sessionId: 's' },
+      { type: 'subagent-stop', agentId: 'a' },
+    ];
+    for (const cmd of bad) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(false);
+  });
+
   it('拒绝白名单外命令（改审批模式 / 设置写入 / 任意命令）', () => {
     for (const cmd of [
       { type: 'set-approval-mode', sessionId: 's', mode: 'full' },
       { type: 'settings-write', key: 'providers' },
-      { type: 'rewind', sessionId: 's' },
-      { type: 'task-stop', sessionId: 's', taskId: 't' },
       {},
       null,
       'prompt',
