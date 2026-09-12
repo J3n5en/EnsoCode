@@ -4,7 +4,12 @@ import {
   type ProjectGroupEntry,
   sshProjectLabel,
 } from '@enso/pair';
-import { orderPinned, orderProjectSessions, sortByActivity } from '@shared/pair/drawerOrder';
+import {
+  isDrawerActive,
+  orderPinned,
+  orderProjectSessions,
+  sortByActivity,
+} from '@shared/pair/drawerOrder';
 import {
   ALL_GROUP_ID,
   filterProjectsByGroup,
@@ -180,10 +185,14 @@ export function SessionDrawer({
   const groupSections = sectionsForAllView(projects, groups, archivedProjectIds);
   const slicedIdSet = new Set(activeProjects.map((project) => project.id));
   const topLevel = catalog.filter((c) => !c.parentId);
+  const inSlice = (c: CatalogEntry) => !c.projectId || slicedIdSet.has(c.projectId);
+  const hasRunningChild = (id: string) =>
+    catalog.some((child) => child.parentId === id && child.status === 'running');
+  const activeSessions = sortByActivity(
+    topLevel.filter((c) => !isArchived(c) && inSlice(c) && isDrawerActive(c, hasRunningChild(c.id)))
+  );
   const pinnedSessions = orderPinned(
-    topLevel.filter(
-      (c) => c.pinned && !isArchived(c) && (!c.projectId || slicedIdSet.has(c.projectId))
-    ),
+    topLevel.filter((c) => c.pinned && !isArchived(c) && inSlice(c)),
     pinnedOrder
   );
   const archivedSessions = sortByActivity(
@@ -268,6 +277,25 @@ export function SessionDrawer({
             <p className="rounded-lg border border-dashed px-3 py-6 text-center text-muted-foreground text-sm">
               桌面端还没有项目
             </p>
+          )}
+
+          {activeSessions.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1.5 px-2 py-2">
+                <span className="font-medium text-sm">活跃中</span>
+              </div>
+              <div className="flex flex-col gap-y-0.5">
+                {activeSessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    active={activeId === session.id}
+                    nowTick={nowTick}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            </div>
           )}
 
           {pinnedSessions.length > 0 && (

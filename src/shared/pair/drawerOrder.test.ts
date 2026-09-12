@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
+import { isDrawerActive, orderPinned, orderProjectSessions, sortByActivity } from './drawerOrder';
 
 const s = (id: string, updatedAt?: number, pinned?: boolean) => ({
   id,
@@ -36,5 +36,19 @@ describe('orderProjectSessions', () => {
   it('置顶靠前，置顶组与普通组各自按活跃倒序', () => {
     const out = orderProjectSessions([s('a', 5), s('b', 1, true), s('c', 3, true), s('d', 9)]);
     expect(out.map((x) => x.id)).toEqual(['c', 'b', 'd', 'a']);
+  });
+});
+
+describe('isDrawerActive', () => {
+  it('运行 / 未读 / 失败 / 待提问 / 子会话在跑 算活跃', () => {
+    expect(isDrawerActive({ status: 'running' }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle', unread: true }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'failed' }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle', pendingAskCount: 1 }, false)).toBe(true);
+    expect(isDrawerActive({ status: 'idle' }, true)).toBe(true);
+  });
+
+  it('空闲且已读不算活跃', () => {
+    expect(isDrawerActive({ status: 'idle' }, false)).toBe(false);
   });
 });

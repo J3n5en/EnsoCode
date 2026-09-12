@@ -1,3 +1,5 @@
+import { conversationDotTone } from '@shared/conversationDotTone';
+
 /**
  * 抽屉排序纯函数，与桌面侧栏同语义（src/renderer/stores/sessions/pinned.ts）：
  * 各栏目按活跃时间倒序；置顶手动顺序来自桌面下发的 pinnedOrder。
@@ -38,4 +40,18 @@ export function orderProjectSessions<T extends Orderable>(sessions: readonly T[]
     ...sortByActivity(sessions.filter((s) => s.pinned)),
     ...sortByActivity(sessions.filter((s) => !s.pinned)),
   ];
+}
+
+/** 桌面 Active 栏目：运行 / 待提问 / 失败 / 未读 / 子会话在跑 */
+export function isDrawerActive(
+  session: { status: string; unread?: boolean; pendingAskCount?: number },
+  hasRunningChild: boolean
+): boolean {
+  const tone = conversationDotTone({
+    status: session.status,
+    unread: session.unread,
+    pendingAskCount: session.pendingAskCount,
+    hasRunningChild,
+  });
+  return tone !== 'idle';
 }

@@ -160,6 +160,8 @@ export interface CatalogEntry {
   status: string;
   /** 完成后未查看：桌面绿点、手机灰点 */
   unread?: boolean;
+  /** 挂起的 ask_user 数：抽屉「活跃中」与桌面 waiting 色点同口径 */
+  pendingAskCount?: number;
   parentId?: string;
   /** 最后活动时间（末条消息或创建时间），手机端显示相对时间 */
   updatedAt?: number;
