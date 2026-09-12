@@ -248,4 +248,25 @@ describe('projectMessage', () => {
       })
     ).not.toHaveProperty('verified');
   });
+
+  it('compactionSummary：compactionSource=memory 投影为 memory，其它值忽略', () => {
+    expect(
+      projectMessage({
+        role: 'compactionSummary',
+        summary: 'm',
+        tokensBefore: 1,
+        fromHook: true,
+        compactionSource: 'memory',
+      })
+    ).toMatchObject({ verified: true, memory: true });
+    expect(
+      projectMessage({
+        role: 'compactionSummary',
+        summary: 'x',
+        tokensBefore: 1,
+        fromHook: true,
+        compactionSource: 'bogus',
+      })
+    ).not.toHaveProperty('memory');
+  });
 });

@@ -1,3 +1,5 @@
+import { resolveCompactStrategy } from '@shared/compactStrategy';
+
 /**
  * 持久化数据的版本迁移。
  *
@@ -10,7 +12,7 @@
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 9;
 
 /**
  * v0 → v1：`ModelProvider.oauthProviderId` 改名为 `oauthAccountKey`。
@@ -21,6 +23,7 @@ export const SETTINGS_VERSION = 8;
  * v5/v6 → v7：移除项目记忆配置，兼容曾保存独立记忆模型的开发版。
  * v7 → v8：旧落盘的空 `disabledBuiltinTools` 不是「用户打开了 memory」——
  * 只是 memory 加进默认关名单之前就写下的「全开」。补上 memory，缺字段不动（initialState 已是关）。
+ * v8 → v9：压缩策略改为互斥枚举；旧 `smartCompactEnabled` 布尔迁为 `compactStrategy`，缺字段不动。
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
@@ -62,6 +65,15 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     if (!list.includes('memory')) {
       state = { ...state, disabledBuiltinTools: [...list, 'memory'] };
     }
+  }
+  if (
+    version < 9 &&
+    (typeof state.smartCompactEnabled === 'boolean' || 'compactStrategy' in state)
+  ) {
+    state = {
+      ...state,
+      compactStrategy: resolveCompactStrategy(state.compactStrategy, state.smartCompactEnabled),
+    };
   }
   return state;
 }

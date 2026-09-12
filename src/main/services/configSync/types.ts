@@ -1,3 +1,4 @@
+import type { CompactStrategy } from '@shared/compactStrategy';
 import type { DefaultModelRef } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
@@ -73,6 +74,7 @@ export interface ConfigSyncState {
   smartCompactModel?: DefaultModelRef | null;
   approvalReviewer?: DefaultModelRef | null;
   titleSummaryEnabled?: boolean;
+  compactStrategy?: CompactStrategy;
   smartCompactEnabled?: boolean;
   smartCompactMode?: SmartCompactMode;
   /** 记忆向量模型注册表 id（`none` / `local:*` / `remote:*`） */

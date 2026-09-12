@@ -1020,18 +1020,18 @@ function CompactionRow({
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const divider = item.kind === 'compaction';
-  const label =
-    item.tokensBefore === null
-      ? item.verified
+  const tokens = item.tokensBefore === null ? null : formatTokens(item.tokensBefore);
+  const label = item.memory
+    ? tokens === null
+      ? t('Memory context compacted')
+      : t('Memory context compacted ({{tokens}} tokens before)', { tokens })
+    : item.verified
+      ? tokens === null
         ? t('Verified context compacted')
-        : t('Context compacted')
-      : item.verified
-        ? t('Verified context compacted ({{tokens}} tokens before)', {
-            tokens: formatTokens(item.tokensBefore),
-          })
-        : t('Context compacted ({{tokens}} tokens before)', {
-            tokens: formatTokens(item.tokensBefore),
-          });
+        : t('Verified context compacted ({{tokens}} tokens before)', { tokens })
+      : tokens === null
+        ? t('Context compacted')
+        : t('Context compacted ({{tokens}} tokens before)', { tokens });
   return (
     <div>
       <button
@@ -1039,13 +1039,17 @@ function CompactionRow({
         onClick={() => setExpanded((v) => !v)}
         className={cn('flex items-center gap-3', divider && 'w-full')}
         title={
-          item.verified
+          item.memory
             ? t(
-                'Verified summary from smart compaction. Messages above are no longer in the model context.'
+                'Summary rendered from continuous memory. Messages above are no longer in the model context; use recall for sources.'
               )
-            : divider
-              ? t('Messages above are no longer in the model context; only this summary is.')
-              : t('Latest compaction summary — expand to read what the model kept.')
+            : item.verified
+              ? t(
+                  'Verified summary from smart compaction. Messages above are no longer in the model context.'
+                )
+              : divider
+                ? t('Messages above are no longer in the model context; only this summary is.')
+                : t('Latest compaction summary — expand to read what the model kept.')
         }
       >
         {divider && <span className="h-px flex-1 bg-border" />}

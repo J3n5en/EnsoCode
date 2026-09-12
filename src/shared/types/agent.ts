@@ -18,6 +18,7 @@ import {
   parseCapabilityReceipt,
   parseCapabilityResult,
 } from '../capabilities/types';
+import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
@@ -535,7 +536,9 @@ export type AgentCommand =
       bashInterceptEnabled?: boolean;
       /** Hashline 行锚点 read/edit；缺省关 */
       hashlineEditEnabled?: boolean;
-      /** 父会话加载 Enso compact hook 作为 compact 摘要后端 */
+      /** 上下文压缩策略；缺省 standard。与旧 smartCompactEnabled 过渡兼容。 */
+      compactStrategy?: CompactStrategy;
+      /** @deprecated 仅用于读取旧 Main 命令；新代码发送 compactStrategy。 */
       smartCompactEnabled?: boolean;
       /** 独立摘要模型；缺省跟随当前会话模型 */
       smartCompactSummaryModel?: SpawnModelConfig;
@@ -777,6 +780,8 @@ export interface ProjectedMessage {
   tokensBefore?: number;
   /** 摘要来自 Enso compact hook，不是原生 summarizer */
   verified?: boolean;
+  /** 摘要由持续记忆 ledger 渲染（非智能压缩兜底） */
+  memory?: boolean;
 }
 
 export interface SessionSnapshot {
@@ -1891,6 +1896,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'exploreFoldEnabled',
           'bashInterceptEnabled',
           'hashlineEditEnabled',
+          'compactStrategy',
           'smartCompactEnabled',
           'smartCompactSummaryModel',
           'smartCompactMode',
@@ -1920,6 +1926,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           typeof value.bashInterceptEnabled !== 'boolean') ||
         (value.hashlineEditEnabled !== undefined &&
           typeof value.hashlineEditEnabled !== 'boolean') ||
+        (value.compactStrategy !== undefined &&
+          parseCompactStrategy(value.compactStrategy) === null) ||
         (value.smartCompactEnabled !== undefined &&
           typeof value.smartCompactEnabled !== 'boolean') ||
         (value.smartCompactSummaryModel !== undefined &&

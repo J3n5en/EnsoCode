@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   managers: [] as Array<Record<string, unknown>>,
   mcpToolsFor: vi.fn(),
   createAgentSession: vi.fn(),
+  loaderOptions: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('./cursor/loadProvider', () => ({
@@ -26,6 +27,9 @@ vi.mock('./mcp', () => ({
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   const original = await importOriginal<Record<string, unknown>>();
   class Loader {
+    constructor(options: Record<string, unknown>) {
+      mocks.loaderOptions.push(options);
+    }
     async reload() {}
     getSkills() {
       return { skills: [] };
@@ -139,6 +143,38 @@ describe('SessionSupervisor compact failure', () => {
     mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
       session: session(options),
     }));
+  });
+
+  it('装载层压缩策略互斥：同一会话只挂一个 compact 扩展', async () => {
+    const names = async (command: Record<string, unknown>) => {
+      mocks.loaderOptions.length = 0;
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-compact-')),
+      });
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        ...command,
+      } as never);
+      await waitFor(events, 'parent-ready');
+      await supervisor.shutdown();
+      const factories = mocks.loaderOptions[0]?.extensionFactories as Array<{ name: string }>;
+      return factories
+        .map((factory) => factory.name)
+        .filter((name) => name === 'enso-compact' || name === 'enso-continuous-memory');
+    };
+    expect(await names({ compactStrategy: 'continuous-memory' })).toEqual([
+      'enso-continuous-memory',
+    ]);
+    expect(await names({ compactStrategy: 'smart' })).toEqual(['enso-compact']);
+    expect(await names({ smartCompactEnabled: true })).toEqual(['enso-compact']);
+    expect(await names({ compactStrategy: 'standard', smartCompactEnabled: true })).toEqual([]);
+    expect(await names({})).toEqual([]);
   });
 
   it('compaction_end 已带错误时不再因 compact() 抛错重复上报', async () => {

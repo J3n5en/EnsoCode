@@ -156,9 +156,9 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
   {
     id: 'general.smartCompactEnabled',
     category: 'general',
-    title: 'Verified smart compaction',
+    title: 'Context compaction strategy',
     description:
-      'Use Enso verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session. Choose Auto/Fast/Balanced/Thorough (budget and tail) and a dedicated summary model or follow the session model.',
+      'Standard, smart compaction (Enso verified summary) or continuous memory (background observations). Falls back to default compact on failure. Takes effect on the next session. Choose Auto/Fast/Balanced/Thorough (budget and tail) and a dedicated summary or background memory model, or follow the session model.',
   },
   {
     id: 'general.generationStallTimeout',

@@ -132,6 +132,7 @@ const initialState = {
   exploreFoldEnabled: false,
   bashInterceptEnabled: false,
   hashlineEditEnabled: false,
+  compactStrategy: 'standard' as import('@shared/compactStrategy').CompactStrategy,
   smartCompactEnabled: false,
   smartCompactModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   smartCompactMode: 'auto' as import('@shared/smartCompactMode').SmartCompactMode,
@@ -276,7 +277,10 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryKgEnabled: (memoryKgEnabled) => set({ memoryKgEnabled }),
       setBashInterceptEnabled: (bashInterceptEnabled) => set({ bashInterceptEnabled }),
       setHashlineEditEnabled: (hashlineEditEnabled) => set({ hashlineEditEnabled }),
-      setSmartCompactEnabled: (smartCompactEnabled) => set({ smartCompactEnabled }),
+      setCompactStrategy: (compactStrategy) =>
+        set({ compactStrategy, smartCompactEnabled: compactStrategy === 'smart' }),
+      setSmartCompactEnabled: (smartCompactEnabled) =>
+        set({ smartCompactEnabled, compactStrategy: smartCompactEnabled ? 'smart' : 'standard' }),
       setSmartCompactModel: (smartCompactModel) => set({ smartCompactModel }),
       setSmartCompactMode: (smartCompactMode) =>
         set({

@@ -1,3 +1,4 @@
+import type { CompactStrategy } from '@shared/compactStrategy';
 import type {
   DefaultModelNotice,
   DefaultModelRef,
@@ -114,7 +115,9 @@ export interface SettingsState {
   /** Hashline 行锚点 read/edit；缺省关。开时 edit 仍兼容 oldText replace */
   hashlineEditEnabled: boolean;
 
-  /** 父会话用 Enso compact hook 做 compact 摘要；缺省关，新会话生效 */
+  /** 上下文压缩策略；缺省 standard，新会话生效。 */
+  compactStrategy: CompactStrategy;
+  /** 旧设置兼容：rehydrate 后由策略选择取代。 */
   smartCompactEnabled: boolean;
   /** 智能压缩独立模型；null = 跟随当前会话模型 */
   smartCompactModel: DefaultModelRef | null;
@@ -275,6 +278,7 @@ export interface SettingsState {
   setMemoryKgEnabled: (value: boolean) => void;
   setBashInterceptEnabled: (value: boolean) => void;
   setHashlineEditEnabled: (value: boolean) => void;
+  setCompactStrategy: (value: CompactStrategy) => void;
   setSmartCompactEnabled: (value: boolean) => void;
   setSmartCompactModel: (value: DefaultModelRef | null) => void;
   setSmartCompactMode: (value: import('@shared/smartCompactMode').SmartCompactMode) => void;

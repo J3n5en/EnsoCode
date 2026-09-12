@@ -257,6 +257,7 @@ describe('config sync sender-bound import flow', () => {
       },
     ]);
     settings.patchSettingsState('smartCompactEnabled', true);
+    settings.patchSettingsState('compactStrategy', 'continuous-memory');
     settings.patchSettingsState('smartCompactModel', {
       providerId: 'smart-provider',
       modelId: 'model-1',
@@ -269,9 +270,11 @@ describe('config sync sender-bound import flow', () => {
     const decoded = await decodeBundle(readFileSync(exported));
     expect(decoded.state).toMatchObject({
       smartCompactEnabled: true,
+      compactStrategy: 'continuous-memory',
       smartCompactModel: { providerId: 'smart-provider', modelId: 'model-1' },
     });
     settings.patchSettingsState('smartCompactEnabled', false);
+    settings.patchSettingsState('compactStrategy', 'standard');
     settings.patchSettingsState('smartCompactModel', null);
   });
 

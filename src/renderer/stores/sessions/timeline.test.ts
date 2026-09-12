@@ -1232,6 +1232,30 @@ describe('compaction 摘要行', () => {
     expect(timeline[0]).toMatchObject({ kind: 'compaction', verified: true });
   });
 
+  it('memory 摘要行带 memory，且 compaction-notice 也带', () => {
+    const timeline = buildTimeline(
+      [
+        {
+          role: 'compactionSummary',
+          content: [{ type: 'text', text: 'S' }],
+          tokensBefore: 1,
+          verified: true,
+          memory: true,
+        },
+        user('kept'),
+        user('after'),
+      ],
+      false,
+      [],
+      undefined,
+      { compactionNoticeAt: 2 }
+    );
+    expect(timeline[0]).toMatchObject({ kind: 'compaction', memory: true });
+    expect(timeline.find((item) => item.kind === 'compaction-notice')).toMatchObject({
+      memory: true,
+    });
+  });
+
   it('compaction 行不打断 tool-group 折叠之外的顺序，且不被 foldTimeline 吞掉', () => {
     const timeline = buildTimeline(
       [

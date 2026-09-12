@@ -5,6 +5,7 @@ import {
   scrypt as scryptCallback,
 } from 'node:crypto';
 import { isReservedAgentTypeName } from '@shared/builtinAgents';
+import { parseCompactStrategy } from '@shared/compactStrategy';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import {
@@ -61,6 +62,7 @@ const STATE_KEYS = [
   'smartCompactModel',
   'approvalReviewer',
   'titleSummaryEnabled',
+  'compactStrategy',
   'smartCompactEnabled',
   'smartCompactMode',
   'memoryEmbeddingModel',
@@ -842,6 +844,8 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     'subagentModelsEnabled',
   ])
     booleanField(state, key, 'state', false);
+  if (state.compactStrategy !== undefined && parseCompactStrategy(state.compactStrategy) === null)
+    throw new Error('Invalid state.compactStrategy');
   if (
     state.smartCompactMode !== undefined &&
     parseSmartCompactMode(state.smartCompactMode) === null

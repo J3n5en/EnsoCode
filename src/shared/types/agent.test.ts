@@ -397,6 +397,15 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...base, hashlineEditEnabled: 1 })).toBeNull();
   });
 
+  it('spawn-parent 携 compactStrategy:仅接受三个互斥策略', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    for (const compactStrategy of ['standard', 'smart', 'continuous-memory'] as const) {
+      expect(parseAgentCommand({ ...base, compactStrategy })).toEqual({ ...base, compactStrategy });
+    }
+    expect(parseAgentCommand({ ...base, compactStrategy: 'plugin' })).toBeNull();
+    expect(parseAgentCommand({ ...base, compactStrategy: true })).toBeNull();
+  });
+
   it('spawn-parent 携 smartCompactEnabled:合法通过,脏值拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     expect(parseAgentCommand({ ...base, smartCompactEnabled: true })).toEqual({

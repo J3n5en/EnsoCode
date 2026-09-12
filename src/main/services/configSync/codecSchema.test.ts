@@ -76,6 +76,20 @@ describe('config sync codec schema and crypto boundaries', () => {
     expect(() => validateBundle(input)).toThrow(/smartCompactModel|reference/i);
   });
 
+  it('压缩策略与旧 smartCompactEnabled 一起往返，非法策略拒绝', () => {
+    const input = minimalBundle();
+    input.state.compactStrategy = 'continuous-memory';
+    input.state.smartCompactEnabled = false;
+    expect(validateBundle(input).state).toMatchObject({
+      compactStrategy: 'continuous-memory',
+      smartCompactEnabled: false,
+    });
+    delete input.state.compactStrategy;
+    expect(validateBundle(input).state).not.toHaveProperty('compactStrategy');
+    (input.state as unknown as Record<string, unknown>).compactStrategy = 'bogus';
+    expect(() => validateBundle(input)).toThrow(/compactStrategy/);
+  });
+
   it('拒绝缺少任何必需的资源数组', () => {
     for (const key of ['skills', 'instructions'] as const) {
       const input = minimalBundle();

@@ -12,6 +12,7 @@ import {
   type SessionIdentity,
 } from '@shared/builtinAgents';
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
+import { resolveCompactStrategy } from '@shared/compactStrategy';
 import {
   type DefaultModelRef,
   type ModelCredentialContext,
@@ -473,10 +474,14 @@ export function spawnSession(
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
   const bashInterceptEnabled = state?.bashInterceptEnabled === true;
   const hashlineEditEnabled = state?.hashlineEditEnabled === true;
-  const smartCompactEnabled = state?.smartCompactEnabled === true;
+  const compactStrategy = resolveCompactStrategy(
+    state?.compactStrategy,
+    state?.smartCompactEnabled
+  );
+  const smartCompactEnabled = compactStrategy === 'smart';
   const smartCompactRef = asModelRef(state?.smartCompactModel);
   const smartCompactSummary =
-    smartCompactEnabled && smartCompactRef
+    compactStrategy !== 'standard' && smartCompactRef
       ? resolveModelSelection(
           smartCompactRef.providerId,
           smartCompactRef.modelId,
@@ -505,6 +510,7 @@ export function spawnSession(
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     ...(bashInterceptEnabled ? { bashInterceptEnabled: true } : {}),
     ...(hashlineEditEnabled ? { hashlineEditEnabled: true } : {}),
+    ...(compactStrategy !== 'standard' ? { compactStrategy } : {}),
     ...(smartCompactEnabled ? { smartCompactEnabled: true } : {}),
     ...(smartCompactSummaryModel ? { smartCompactSummaryModel } : {}),
     ...(smartCompactMode ? { smartCompactMode } : {}),

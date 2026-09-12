@@ -147,9 +147,14 @@ export const zhTranslations: Record<string, string> = {
   'Expand file edits while running': '运行中自动展开文件改动',
   'Automatically unfold the diff or written content of edit/write calls while the agent is still running':
     'agent 运行中，edit/write 调用的 diff 或写入内容自动展开',
-  'Verified smart compaction': '验证式智能压缩',
-  'Use Enso verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.':
-    'Enso 自有验证式摘要做长会话 compact。失败回退默认压缩。可能更慢、更费 token。下一个会话生效。',
+  'Context compaction strategy': '上下文压缩策略',
+  'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Continuous memory records observations in the background so compact keeps more context; both fall back to default compact on failure and take effect on the next session.':
+    '标准使用默认压缩。智能压缩在压缩时用 Enso 验证式摘要。持续记忆在后台持续记录观察，压缩时保留更多上下文；两者失败都回退默认压缩，下一个会话生效。',
+  Standard: '标准',
+  'Smart compaction': '智能压缩',
+  'Continuous memory (experimental)': '持续记忆（实验性）',
+  'Summary model': '摘要模型',
+  'Background memory model': '后台记忆模型',
   'Compaction mode': '压缩档位',
   'Auto (by usage)': '自动（按占用）',
   Fast: '快速',
@@ -1048,6 +1053,11 @@ export const zhTranslations: Record<string, string> = {
     '验证式压缩完成（压缩前 {{tokens}} tokens）',
   'Verified summary from smart compaction. Messages above are no longer in the model context.':
     '这次用了验证式摘要。此线之上的历史已不在模型上下文中。',
+  'Memory context compacted': '持续记忆压缩完成',
+  'Memory context compacted ({{tokens}} tokens before)':
+    '持续记忆压缩完成（压缩前 {{tokens}} tokens）',
+  'Summary rendered from continuous memory. Messages above are no longer in the model context; use recall for sources.':
+    '这次由持续记忆直接渲染摘要。此线之上的历史已不在模型上下文中，可用 recall 查看来源。',
   'Messages above are no longer in the model context; only this summary is.':
     '以上消息已不在模型上下文中，模型只看到这份摘要。',
   'Latest compaction summary — expand to read what the model kept.':
