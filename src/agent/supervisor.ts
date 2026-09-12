@@ -22,6 +22,7 @@ import {
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
+import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import {
   findCatalogModelById,
@@ -93,6 +94,10 @@ import {
   type ContextUsageTracker,
   ContextUsageTracker as UsageTracker,
 } from './contextUsage';
+import {
+  cancelContinuousMemory,
+  continuousMemoryInlineExtension,
+} from './continuousMemory/extension';
 import { createCoworkerTool } from './coworker';
 import { CURSOR_PROVIDER_ID, loadCursorProvider } from './cursor/loadProvider';
 import { attachCursorBridgeToSession, isCursorModel } from './cursor/sessionBridge';
@@ -303,8 +308,8 @@ function createSessionResourceLoader(options: {
   /** 加载项目内 .claude/.codex/.cursor 的 skills 与规则文件；远程会话不适用（cwd 不在本机） */
   loadHarnessAssets?: boolean;
   exploreFold?: ReturnType<typeof createExploreFoldState>;
-  /** 仅父会话：加载 Enso compact hook 作为 compact 摘要后端 */
-  smartCompactEnabled?: boolean;
+  /** 仅父会话：互斥压缩策略。 */
+  compactStrategy?: CompactStrategy;
   smartCompactSummaryModel?: SpawnModelConfig;
   smartCompactMode?: SmartCompactMode;
 }): DefaultResourceLoader {
@@ -364,14 +369,21 @@ function createSessionResourceLoader(options: {
             } satisfies InlineExtension,
           ]
         : []),
-      ...(!options.noExtensions && options.smartCompactEnabled
+      ...(!options.noExtensions && options.compactStrategy === 'continuous-memory'
         ? [
-            smartCompactInlineExtension({
-              summaryModel: options.smartCompactSummaryModel,
+            continuousMemoryInlineExtension({
+              model: options.smartCompactSummaryModel,
               mode: options.smartCompactMode,
             }),
           ]
-        : []),
+        : !options.noExtensions && options.compactStrategy === 'smart'
+          ? [
+              smartCompactInlineExtension({
+                summaryModel: options.smartCompactSummaryModel,
+                mode: options.smartCompactMode,
+              }),
+            ]
+          : []),
     ],
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
@@ -645,6 +657,7 @@ export class SessionSupervisor {
       child.subagentAborts.clear();
       child.gate.cancelAll();
       child.asks.cancelAll();
+      cancelContinuousMemory(child.session.sessionManager);
       child.ensoApp?.cancelAll('Parent released');
       try {
         await child.session.abort();
@@ -661,6 +674,7 @@ export class SessionSupervisor {
     managed.subagentAborts.clear();
     managed.gate.cancelAll();
     managed.asks.cancelAll();
+    cancelContinuousMemory(managed.session.sessionManager);
     managed.ensoApp?.cancelAll('Session released');
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
@@ -884,7 +898,7 @@ export class SessionSupervisor {
           command.exploreFoldEnabled,
           command.bashInterceptEnabled,
           command.hashlineEditEnabled,
-          command.smartCompactEnabled,
+          resolveCompactStrategy(command.compactStrategy, command.smartCompactEnabled),
           command.smartCompactSummaryModel,
           command.smartCompactMode,
           command.memoryLanguage
@@ -1248,6 +1262,7 @@ export class SessionSupervisor {
         const managed = this.must(command.identity);
         managed.gate.cancelAll();
         managed.asks.cancelAll();
+        cancelContinuousMemory(managed.session.sessionManager);
         managed.ensoApp?.cancelAll('Enso capability invocation aborted');
         managed.browser?.cancelAll('Browser action aborted');
         managed.memory?.cancelAll('Memory action aborted');
@@ -1288,7 +1303,7 @@ export class SessionSupervisor {
     exploreFoldEnabled = false,
     bashInterceptEnabled = false,
     hashlineEditEnabled = false,
-    smartCompactEnabled = false,
+    compactStrategy: CompactStrategy = 'standard',
     smartCompactSummaryModel?: SpawnModelConfig,
     smartCompactMode?: SmartCompactMode,
     memoryLanguage?: string
@@ -1351,9 +1366,9 @@ export class SessionSupervisor {
       ...(remote ? { remoteSsh: { host: remote.host } } : {}),
       loadHarnessAssets,
       exploreFold,
-      ...(smartCompactEnabled
+      ...(compactStrategy !== 'standard'
         ? {
-            smartCompactEnabled: true,
+            compactStrategy,
             smartCompactSummaryModel,
             smartCompactMode,
           }
@@ -2323,6 +2338,7 @@ export class SessionSupervisor {
     if (managed) {
       managed.gate.cancelAll();
       managed.asks.cancelAll();
+      cancelContinuousMemory(managed.session.sessionManager);
       managed.ensoApp?.cancelAll('Child dismissed');
       try {
         await managed.session.abort();
@@ -3235,6 +3251,7 @@ export class SessionSupervisor {
     this.workspaceSwitch.clear();
     this.bgTasks.stopAll();
     for (const managed of this.sessions.values()) {
+      cancelContinuousMemory(managed.session.sessionManager);
       managed.ensoApp?.cancelAll('Enso worker shutdown');
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');

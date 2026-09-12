@@ -1,3 +1,8 @@
+import {
+  COMPACT_STRATEGIES,
+  type CompactStrategy,
+  resolveCompactStrategy,
+} from '@shared/compactStrategy';
 import { SMART_COMPACT_MODES, type SmartCompactMode } from '@shared/smartCompactMode';
 import { useMemo } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
@@ -9,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
   usableProvidersForOauthSnapshot,
@@ -28,8 +32,11 @@ const MODE_LABEL: Record<SmartCompactMode, string> = {
 export function SmartCompactPicker() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
-  const enabled = useSettingsStore((state) => state.smartCompactEnabled);
-  const setEnabled = useSettingsStore((state) => state.setSmartCompactEnabled);
+  const storedStrategy = useSettingsStore((state) => state.compactStrategy);
+  const legacyEnabled = useSettingsStore((state) => state.smartCompactEnabled);
+  const strategy = resolveCompactStrategy(storedStrategy, legacyEnabled);
+  const setStrategy = useSettingsStore((state) => state.setCompactStrategy);
+  const enabled = strategy !== 'standard';
   const model = useSettingsStore((state) => state.smartCompactModel);
   const setModel = useSettingsStore((state) => state.setSmartCompactModel);
   const mode = useSettingsStore((state) => state.smartCompactMode);
@@ -51,17 +58,40 @@ export function SmartCompactPicker() {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h4 className="font-medium text-sm">{t('Verified smart compaction')}</h4>
+          <h4 className="font-medium text-sm">{t('Context compaction strategy')}</h4>
           <p className="mt-0.5 text-muted-foreground text-xs">
             {t(
-              'Use Enso verified summary for long-session compact. Falls back to default compact on failure. May be slower and use more tokens. Takes effect on the next session.'
+              'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Continuous memory records observations in the background so compact keeps more context; both fall back to default compact on failure and take effect on the next session.'
             )}
           </p>
         </div>
-        <Switch checked={enabled} onCheckedChange={setEnabled} />
+        <Select
+          items={{
+            standard: t('Standard'),
+            smart: t('Smart compaction'),
+            'continuous-memory': t('Continuous memory (experimental)'),
+          }}
+          value={strategy}
+          onValueChange={(value) => setStrategy(value as CompactStrategy)}
+        >
+          <SelectTrigger className="w-52">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {COMPACT_STRATEGIES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value === 'standard'
+                  ? t('Standard')
+                  : value === 'smart'
+                    ? t('Smart compaction')
+                    : t('Continuous memory (experimental)')}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
       </div>
 
-      {enabled && (
+      {strategy === 'smart' && (
         <div className="flex items-center justify-between gap-4" data-smart-compact-mode={mode}>
           <div className="min-w-0">
             <p className="text-muted-foreground text-xs">{t('Compaction mode')}</p>
@@ -94,6 +124,9 @@ export function SmartCompactPicker() {
 
       {enabled && (
         <div className="space-y-2">
+          <p className="font-medium text-sm">
+            {t(strategy === 'continuous-memory' ? 'Background memory model' : 'Summary model')}
+          </p>
           {candidates.length > 0 && (
             <div className="w-full min-w-0">
               <ModelPicker

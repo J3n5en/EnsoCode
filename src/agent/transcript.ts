@@ -1,4 +1,5 @@
 import { type SessionEntry, sessionEntryToContextMessages } from '@earendil-works/pi-coding-agent';
+import { OM_FOLDED } from './continuousMemory/session-ledger/types';
 
 /**
  * 渲染层要的是完整对话记录，而 pi 的 `session.messages` 是 LLM 上下文视图：
@@ -29,13 +30,25 @@ export function transcriptMessages(
   return stampCompactionFromHook([...summarized, ...contextMessages], branch);
 }
 
+function isMemoryFolded(details: unknown): boolean {
+  return (
+    typeof details === 'object' &&
+    details !== null &&
+    (details as { type?: unknown }).type === OM_FOLDED
+  );
+}
+
+/** 按 compaction 条目顺序给 compactionSummary 打标：fromHook = Enso hook 产出；compactionSource='memory' = 持续记忆渲染。 */
 function stampCompactionFromHook(messages: unknown[], branch: SessionEntry[]): unknown[] {
   const flags = branch
     .filter(
       (entry): entry is Extract<SessionEntry, { type: 'compaction' }> => entry.type === 'compaction'
     )
-    .map((entry) => entry.fromHook === true);
-  if (!flags.some(Boolean)) return messages;
+    .map((entry) => ({
+      fromHook: entry.fromHook === true,
+      memory: entry.fromHook === true && isMemoryFolded(entry.details),
+    }));
+  if (!flags.some((flag) => flag.fromHook)) return messages;
   let i = 0;
   return messages.map((message) => {
     if (
@@ -45,6 +58,12 @@ function stampCompactionFromHook(messages: unknown[], branch: SessionEntry[]): u
     ) {
       return message;
     }
-    return flags[i++] ? { ...(message as object), fromHook: true } : message;
+    const flag = flags[i++];
+    if (!flag?.fromHook) return message;
+    return {
+      ...(message as object),
+      fromHook: true,
+      ...(flag.memory ? { compactionSource: 'memory' } : {}),
+    };
   });
 }

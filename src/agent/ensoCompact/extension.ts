@@ -1,4 +1,8 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionBeforeCompactEvent,
+} from '@earendil-works/pi-coding-agent';
 import { type EvictedItem, selectKeptBoundary } from './budget';
 import { BUDGETS, type CompactMode, chunkMessages, type MessageChunk } from './chunk';
 import { extractCompactFacts } from './extract';
@@ -113,120 +117,108 @@ async function summarizeHierarchical(
   }
 }
 
-export function createEnsoCompactFactory(options: EnsoCompactOptions = {}) {
+export function createEnsoCompactHandler(options: EnsoCompactOptions = {}) {
   const lastEstimatedAfter = new WeakMap<object, number>();
-  return (pi: ExtensionAPI) => {
-    pi.on('session_before_compact', async (event, ctx) => {
-      const branch = asEntries(event.branchEntries ?? ctx.sessionManager.getBranch());
-      if (branch.length < 3) return;
+  return async (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => {
+    const branch = asEntries(event.branchEntries ?? ctx.sessionManager.getBranch());
+    if (branch.length < 3) return;
 
-      const ref = options.summaryModel;
-      const model = ref ? ctx.modelRegistry.find(ref.provider, ref.id) : ctx.model;
-      if (!model) return;
+    const ref = options.summaryModel;
+    const model = ref ? ctx.modelRegistry.find(ref.provider, ref.id) : ctx.model;
+    if (!model) return;
 
-      const preparation = event.preparation as typeof event.preparation & {
-        previousSummary?: string;
-        fileOps?: FileOpsLike;
-      };
-      const tokensBefore = preparation.tokensBefore;
-      const firstKeptEntryId = preparation.firstKeptEntryId;
-      if (!firstKeptEntryId || !(tokensBefore > 0)) return;
+    const preparation = event.preparation as typeof event.preparation & {
+      previousSummary?: string;
+      fileOps?: FileOpsLike;
+    };
+    const tokensBefore = preparation.tokensBefore;
+    const firstKeptEntryId = preparation.firstKeptEntryId;
+    if (!firstKeptEntryId || !(tokensBefore > 0)) return;
 
-      const mode: CompactMode = options.mode ?? 'auto';
-      const budget = BUDGETS[mode];
-      const summaryWindow = positiveWindow((model as { contextWindow?: unknown }).contextWindow);
-      const singlePassMaxTokens = clampToModelWindow(budget.singlePassMaxTokens, summaryWindow);
-      const maxChunkTokens = clampToModelWindow(budget.maxChunkTokens, summaryWindow);
-      const previousSummary = preparation.previousSummary;
-      let keptId = firstKeptEntryId;
-      let evicted: EvictedItem[] = [];
-      const origin = branch.findIndex((entry) => entry.id === firstKeptEntryId);
-      // 切点对不上 branch id 时不改（旧测试/无 id 会话），避免误 cancel
-      if (origin >= 0) {
-        const cut = selectKeptBoundary({
-          branch,
-          preparation: { firstKeptEntryId, previousSummary, tokensBefore },
-          contextWindow: ctx.model?.contextWindow,
-          previousEstimatedAfter: lastEstimatedAfter.get(ctx.sessionManager),
-        });
-        if ('fail' in cut) return { cancel: true };
-        keptId = cut.firstKeptEntryId;
-        evicted = cut.evicted;
-        lastEstimatedAfter.set(ctx.sessionManager, cut.estimatedAfter);
-      }
-      const keptIndex = branch.findIndex((entry) => entry.id === keptId);
-      const extra = origin >= 0 && keptIndex > origin ? branch.slice(origin, keptIndex) : [];
-      let prepared: { facts: CompactFacts; transcript: string; chunks: MessageChunk[] };
-      try {
-        const pruned = pruneMessages([
-          ...messagesToSummarize(preparation.messagesToSummarize, branch, mode),
-          ...normalizeMessages(extra),
-        ]);
-        if (pruned.length === 0) return;
-        const transcript = serializeMessages(pruned);
-        prepared = {
-          facts: extractCompactFacts(pruned, preparation.fileOps),
-          transcript,
-          // 始终切块，单趟失败时可直接降级分层，不必再算一次
-          chunks: chunkMessages(pruned, maxChunkTokens),
-        };
-      } catch {
-        // 准备阶段是本地确定性操作；失败时无 facts，无法构造兜底，只能让位原生
-        return;
-      }
-      const { facts, transcript, chunks } = prepared;
-      const preferSingle = estimateTextTokens(transcript) < singlePassMaxTokens;
-      const calls = preferSingle ? 1 : chunks.length + 1;
-
-      const controller = new AbortController();
-      const timer = setTimeout(
-        () => controller.abort(),
-        event.reason === 'manual'
-          ? MAX_TIMEOUT_MS
-          : Math.min(MAX_TIMEOUT_MS, BASE_TIMEOUT_MS + PER_CALL_TIMEOUT_MS * (calls - 1))
-      );
-      const signal = AbortSignal.any([event.signal, controller.signal]);
-      const complete: Complete = async (prompt, maxTokens) =>
-        textFromComplete(
-          await ctx.modelRegistry.complete(
-            model,
-            {
-              messages: [
-                { role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() },
-              ],
-            },
-            { signal, maxTokens }
-          )
-        );
-      const maxTokens = MAX_TOKENS[mode];
-      const finish = (drafted: string) => ({
-        compaction: {
-          summary: patchCompactSummary(drafted, facts, evicted),
-          firstKeptEntryId: keptId,
-          tokensBefore,
-        },
+    const mode: CompactMode = options.mode ?? 'auto';
+    const budget = BUDGETS[mode];
+    const summaryWindow = positiveWindow((model as { contextWindow?: unknown }).contextWindow);
+    const singlePassMaxTokens = clampToModelWindow(budget.singlePassMaxTokens, summaryWindow);
+    const maxChunkTokens = clampToModelWindow(budget.maxChunkTokens, summaryWindow);
+    const previousSummary = preparation.previousSummary;
+    let keptId = firstKeptEntryId;
+    let evicted: EvictedItem[] = [];
+    const origin = branch.findIndex((entry) => entry.id === firstKeptEntryId);
+    // 切点对不上 branch id 时不改（旧测试/无 id 会话），避免误 cancel
+    if (origin >= 0) {
+      const cut = selectKeptBoundary({
+        branch,
+        preparation: { firstKeptEntryId, previousSummary, tokensBefore },
+        contextWindow: ctx.model?.contextWindow,
+        previousEstimatedAfter: lastEstimatedAfter.get(ctx.sessionManager),
       });
-      try {
-        let drafted: string;
-        if (preferSingle) {
-          try {
-            drafted =
-              (await complete(
-                compactSummaryPrompt(facts, transcript, previousSummary),
-                maxTokens
-              )) || assembleFallback(facts, [], previousSummary);
-          } catch {
-            // token limit / 模型错误：分层比 Pi 原生单次摘要更可能成功
-            if (event.signal.aborted) return;
-            drafted = await summarizeHierarchical(
-              chunks,
-              facts,
-              previousSummary,
-              complete,
-              maxTokens
-            );
-          }
-        } else {
+      if ('fail' in cut) return { cancel: true };
+      keptId = cut.firstKeptEntryId;
+      evicted = cut.evicted;
+      lastEstimatedAfter.set(ctx.sessionManager, cut.estimatedAfter);
+    }
+    const keptIndex = branch.findIndex((entry) => entry.id === keptId);
+    const extra = origin >= 0 && keptIndex > origin ? branch.slice(origin, keptIndex) : [];
+    let prepared: { facts: CompactFacts; transcript: string; chunks: MessageChunk[] };
+    try {
+      const pruned = pruneMessages([
+        ...messagesToSummarize(preparation.messagesToSummarize, branch, mode),
+        ...normalizeMessages(extra),
+      ]);
+      if (pruned.length === 0) return;
+      const transcript = serializeMessages(pruned);
+      prepared = {
+        facts: extractCompactFacts(pruned, preparation.fileOps),
+        transcript,
+        // 始终切块，单趟失败时可直接降级分层，不必再算一次
+        chunks: chunkMessages(pruned, maxChunkTokens),
+      };
+    } catch {
+      // 准备阶段是本地确定性操作；失败时无 facts，无法构造兜底，只能让位原生
+      return;
+    }
+    const { facts, transcript, chunks } = prepared;
+    const preferSingle = estimateTextTokens(transcript) < singlePassMaxTokens;
+    const calls = preferSingle ? 1 : chunks.length + 1;
+
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      event.reason === 'manual'
+        ? MAX_TIMEOUT_MS
+        : Math.min(MAX_TIMEOUT_MS, BASE_TIMEOUT_MS + PER_CALL_TIMEOUT_MS * (calls - 1))
+    );
+    const signal = AbortSignal.any([event.signal, controller.signal]);
+    const complete: Complete = async (prompt, maxTokens) =>
+      textFromComplete(
+        await ctx.modelRegistry.complete(
+          model,
+          {
+            messages: [
+              { role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() },
+            ],
+          },
+          { signal, maxTokens }
+        )
+      );
+    const maxTokens = MAX_TOKENS[mode];
+    const finish = (drafted: string) => ({
+      compaction: {
+        summary: patchCompactSummary(drafted, facts, evicted),
+        firstKeptEntryId: keptId,
+        tokensBefore,
+      },
+    });
+    try {
+      let drafted: string;
+      if (preferSingle) {
+        try {
+          drafted =
+            (await complete(compactSummaryPrompt(facts, transcript, previousSummary), maxTokens)) ||
+            assembleFallback(facts, [], previousSummary);
+        } catch {
+          // token limit / 模型错误：分层比 Pi 原生单次摘要更可能成功
+          if (event.signal.aborted) return;
           drafted = await summarizeHierarchical(
             chunks,
             facts,
@@ -235,18 +227,28 @@ export function createEnsoCompactFactory(options: EnsoCompactOptions = {}) {
             maxTokens
           );
         }
-        // 只有用户取消才让位；内部超时仍交确定性兜底，避免原生再撞窗
-        if (event.signal.aborted) return;
-        return finish(drafted || assembleFallback(facts, [], previousSummary));
-      } catch {
-        if (event.signal.aborted) return;
-        return finish(assembleFallback(facts, [], previousSummary));
-      } finally {
-        clearTimeout(timer);
+      } else {
+        drafted = await summarizeHierarchical(chunks, facts, previousSummary, complete, maxTokens);
       }
-    });
+      // 只有用户取消才让位；内部超时仍交确定性兜底，避免原生再撞窗
+      if (event.signal.aborted) return;
+      return finish(drafted || assembleFallback(facts, [], previousSummary));
+    } catch {
+      if (event.signal.aborted) return;
+      return finish(assembleFallback(facts, [], previousSummary));
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
+
+export function createEnsoCompactFactory(options: EnsoCompactOptions = {}) {
+  return (pi: ExtensionAPI) => {
+    pi.on('session_before_compact', createEnsoCompactHandler(options));
+  };
+}
+
+export const createEnsoCompactFallback = createEnsoCompactHandler;
 
 export const ensoCompactInlineExtension = {
   name: 'enso-compact',

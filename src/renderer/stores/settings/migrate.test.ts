@@ -158,6 +158,23 @@ describe('设置持久化迁移', () => {
     });
   });
 
+  it('v8 → v9 旧 smartCompactEnabled=true 迁为 smart 策略，显式策略优先且幂等', () => {
+    expect(migrateSettings({ smartCompactEnabled: true }, 8)).toMatchObject({
+      compactStrategy: 'smart',
+      smartCompactEnabled: true,
+    });
+    expect(migrateSettings({ smartCompactEnabled: false }, 8)).toMatchObject({
+      compactStrategy: 'standard',
+    });
+    expect(migrateSettings({}, 8)).not.toHaveProperty('compactStrategy');
+    const explicit = { compactStrategy: 'continuous-memory', smartCompactEnabled: true };
+    expect(migrateSettings(explicit, 8)).toMatchObject(explicit);
+    expect(migrateSettings(migrateSettings(explicit, 8), 8)).toMatchObject(explicit);
+    expect(
+      migrateSettings({ compactStrategy: 'bogus', smartCompactEnabled: true }, 8)
+    ).toMatchObject({ compactStrategy: 'smart' });
+  });
+
   it('已是当前版本时原样返回，不重复搬运', () => {
     const current = { providers: [{ id: 'p1', oauthAccountKey: 'anthropic#2' }] };
     expect(migrateSettings(current, SETTINGS_VERSION)).toBe(current);

@@ -46,6 +46,7 @@ export const SETTINGS_STATE_FIELDS = [
   'exploreFoldEnabled',
   'bashInterceptEnabled',
   'hashlineEditEnabled',
+  'compactStrategy',
   'smartCompactEnabled',
   'smartCompactModel',
   'smartCompactMode',

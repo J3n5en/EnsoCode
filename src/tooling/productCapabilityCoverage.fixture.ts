@@ -54,6 +54,7 @@ export const SETTINGS_DATA_COVERAGE = {
   hashlineEditEnabled: excluded(
     'Hashline edit is a desktop session preference, not an Enso capability.'
   ),
+  compactStrategy: excluded('Context compaction is a desktop session preference.'),
   smartCompactEnabled: excluded(
     'Verified smart compaction is a desktop session preference, not an Enso capability.'
   ),
@@ -160,6 +161,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setHashlineEditEnabled: excluded(
     'Hashline edit is a desktop session preference, not an Enso capability.'
   ),
+  setCompactStrategy: excluded('Context compaction is a desktop session preference.'),
   setSmartCompactEnabled: excluded(
     'Verified smart compaction is a desktop session preference, not an Enso capability.'
   ),

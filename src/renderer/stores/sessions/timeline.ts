@@ -78,6 +78,7 @@ export type TimelineItem =
       summary: string;
       tokensBefore: number | null;
       verified?: boolean;
+      memory?: boolean;
     }
   /** 压缩进行中 / 排队：钉在时间线底部，不依赖占用面板 */
   | { kind: 'compaction-progress'; key: string; state: 'queued' | 'running' }
@@ -88,6 +89,7 @@ export type TimelineItem =
       summary: string;
       tokensBefore: number | null;
       verified?: boolean;
+      memory?: boolean;
     }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
@@ -496,6 +498,7 @@ function buildMessageTimeline(
         summary: partText(message),
         tokensBefore: message.tokensBefore ?? null,
         ...(message.verified ? { verified: true } : {}),
+        ...(message.memory ? { memory: true } : {}),
       });
       return;
     }
@@ -711,6 +714,7 @@ function insertCompactionNotice(items: TimelineItem[], noticeAt: number): Timeli
     summary: lastSummary.summary,
     tokensBefore: lastSummary.tokensBefore,
     ...(lastSummary.verified ? { verified: true } : {}),
+    ...(lastSummary.memory ? { memory: true } : {}),
   };
   return [...items.slice(0, at), notice, ...items.slice(at)];
 }

@@ -17,7 +17,8 @@ const compaction = (
   summary: string,
   tokensBefore: number,
   firstKeptEntryId?: string,
-  fromHook?: boolean
+  fromHook?: boolean,
+  details?: unknown
 ): SessionEntry =>
   ({
     type: 'compaction',
@@ -28,6 +29,7 @@ const compaction = (
     tokensBefore,
     ...(firstKeptEntryId ? { firstKeptEntryId } : {}),
     ...(fromHook ? { fromHook } : {}),
+    ...(details !== undefined ? { details } : {}),
   }) as unknown as SessionEntry;
 
 describe('transcriptMessages', () => {
@@ -82,6 +84,29 @@ describe('transcriptMessages', () => {
       fromHook?: boolean;
     }[];
     expect(result.find((m) => m.role === 'compactionSummary')?.fromHook).toBe(true);
+  });
+
+  it('om.folded compaction 标 memory；智能压缩兜底的 hook compaction 不标', () => {
+    const entries: SessionEntry[] = [
+      msg('1', 'user', 'old', null),
+      compaction('2', '1', 'M', 10, undefined, true, { type: 'om.folded', version: 1 }),
+      msg('3', 'user', 'mid', '2'),
+      compaction('4', '3', 'S', 20, '3', true, { type: 'enso-compact' }),
+      msg('5', 'user', 'new', '4'),
+    ];
+    // 第二次压缩后 pi context 只剩最新 summary + 新消息；M 由 branch 回填
+    const context = [
+      { role: 'compactionSummary', summary: 'S', tokensBefore: 20 },
+      { role: 'user', content: 'new' },
+    ];
+    const result = transcriptMessages({ getBranch: () => entries }, context) as {
+      role: string;
+      fromHook?: boolean;
+      compactionSource?: string;
+    }[];
+    const summaries = result.filter((m) => m.role === 'compactionSummary');
+    expect(summaries.map((m) => m.compactionSource)).toEqual(['memory', undefined]);
+    expect(summaries.every((m) => m.fromHook)).toBe(true);
   });
 
   it('firstKeptEntryId 缺失（全部摘要）时补回 compaction 之前的全部历史', () => {

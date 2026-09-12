@@ -66,6 +66,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   exploreFoldEnabled: { mode: 'portable' },
   bashInterceptEnabled: { mode: 'portable' },
   hashlineEditEnabled: { mode: 'portable' },
+  compactStrategy: { mode: 'portable' },
   smartCompactEnabled: { mode: 'portable' },
   smartCompactModel: { mode: 'portable' },
   smartCompactMode: { mode: 'portable' },

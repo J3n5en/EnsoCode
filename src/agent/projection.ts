@@ -50,6 +50,7 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     }
     if (typeof value.tokensBefore === 'number') projected.tokensBefore = value.tokensBefore;
     if (value.fromHook === true) projected.verified = true;
+    if (value.compactionSource === 'memory') projected.memory = true;
   }
   const usage = projectUsage(value.usage);
   if (usage) projected.usage = usage;
