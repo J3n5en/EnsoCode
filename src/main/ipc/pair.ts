@@ -2,6 +2,7 @@ import type {
   CatalogEntry,
   HostAppearance,
   ProjectEntry,
+  ProjectGroupEntry,
   ProviderEntry,
   TerminalPalette,
 } from '@enso/pair';
@@ -76,6 +77,7 @@ export function registerPairHandlers(): void {
       catalog?: CatalogEntry[];
       pinnedOrder?: string[];
       projects?: ProjectEntry[];
+      projectGroups?: ProjectGroupEntry[];
       providers?: ProviderEntry[];
       projectPaths?: { id: string; path: string }[];
       theme?: HostAppearance;
@@ -89,6 +91,7 @@ export function registerPairHandlers(): void {
       catalog: Array.isArray(p.catalog) ? p.catalog : [],
       pinnedOrder: Array.isArray(p.pinnedOrder) ? p.pinnedOrder : [],
       projects: Array.isArray(p.projects) ? p.projects : [],
+      projectGroups: Array.isArray(p.projectGroups) ? p.projectGroups : [],
       providers: Array.isArray(p.providers) ? p.providers : [],
       projectPaths: Array.isArray(p.projectPaths) ? p.projectPaths : [],
       theme:

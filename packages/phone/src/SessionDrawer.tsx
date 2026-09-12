@@ -594,6 +594,7 @@ function SessionRow({
       )}
     >
       <StatusDot status={session.status} unread={session.unread} />
+      {session.pinned && <Pin className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
       <span className="min-w-0 flex-1 truncate">
         {session.title || '新对话'}
         {subtitle && <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>}
