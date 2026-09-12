@@ -72,6 +72,10 @@ let llamaPromise: Promise<LlamaLike> | null = null;
 export async function loadLlama(): Promise<LlamaLike> {
   llamaPromise ??= (async () => {
     try {
+      const { ensureGpuBackend } = await import('./gpuBackendInstall');
+      await ensureGpuBackend().catch((err: unknown) => {
+        console.warn('[llama] GPU backend unavailable, using CPU:', err);
+      });
       const mod = await import('node-llama-cpp');
       // build:'never' —— 桌面端不该在用户机器上现编译 llama.cpp
       return (await mod.getLlama({ build: 'never', progressLogs: false })) as unknown as LlamaLike;

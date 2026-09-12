@@ -18,6 +18,8 @@
 electron-builder 会自动把 `.node` 放到 `app.asar.unpacked`，各 OS 的 CI 各自安装自己平台的二进制（与 `@mariozechner/clipboard` 同模式）。
 验证打包产物时用 `ELECTRON_RUN_AS_NODE=1 <App>/Contents/MacOS/<App> script.cjs` 从 `app.asar` require，而不是系统 node（ABI 不同）。
 
+`node-llama-cpp` 的 CUDA / Vulkan 预编译（含 cuda-ext）不要打进安装包：Linux 上合计约 600MB，Mac 只有 Metal 十来 MB。CPU（以及 Mac Metal）随包提供；有 GPU 时 `ensureGpuBackend` 从 npm 拉对应平台包到 `userData/llama-gpu-backends`。排除 glob 以 `electron-builder.yml` 与 `ELECTRON_BUILDER_GPU_EXCLUDES` 为准。
+
 ## 只读打开
 
 ```ts
