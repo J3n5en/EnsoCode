@@ -1,5 +1,6 @@
 import { toPairProjectEntry } from '@enso/pair';
 import { catalogSyncFingerprint, pairJsonFingerprint } from '@shared/pair/metaSync';
+import { projectDisplayName } from '@shared/projectName';
 import type { PairCatalogPayload } from '@shared/types';
 import { getXtermTheme } from '@/lib/ghosttyTheme';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -33,7 +34,8 @@ function buildPayload(): PairCatalogPayload {
   // 与桌面侧栏一致的项目手动顺序（拖拽偏好存 localStorage，不进 settings store）
   const orderedProjects = applyProjectOrder(settings.projects, readSidebarOrder(PROJECT_ORDER_KEY));
   const archivedProjects = new Set(readSidebarOrder(ARCHIVED_PROJECTS_KEY));
-  const projectName = new Map(settings.projects.map((p) => [p.id, p.name]));
+  // 与桌面侧栏同口径的展示名（别名优先），手机端没有 settings.projects 只能拿下发的字符串
+  const projectName = new Map(settings.projects.map((p) => [p.id, projectDisplayName(p)]));
   const projectPath = new Map(settings.projects.map((p) => [p.id, p.path]));
 
   type Conversation = NonNullable<(typeof sessions.conversations)[string]>;

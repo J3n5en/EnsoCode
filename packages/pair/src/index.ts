@@ -59,7 +59,12 @@ export {
   startHostPairing,
 } from './handshake';
 export { attachHeartbeat, type Heartbeat } from './heartbeat';
-export { pairProjectListLabel, sshProjectLabel, toPairProjectEntry } from './projectEntry';
+export {
+  pairProjectDisplayName,
+  pairProjectListLabel,
+  sshProjectLabel,
+  toPairProjectEntry,
+} from './projectEntry';
 export {
   type ApprovalDecision,
   type ApprovalMode,

@@ -189,6 +189,8 @@ export interface ProjectEntry {
   id: string;
   name: string;
   path: string;
+  /** 用户设置的项目别名；展示一律走 pairProjectDisplayName，name 保持真实项目名 */
+  alias?: string;
   kind?: 'local' | 'ssh';
   sshConnectionName?: string;
   sshHost?: string;

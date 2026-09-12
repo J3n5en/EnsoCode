@@ -1,4 +1,9 @@
-import type { CatalogEntry, ProjectEntry, ProjectGroupEntry } from '@enso/pair';
+import {
+  type CatalogEntry,
+  type ProjectEntry,
+  type ProjectGroupEntry,
+  pairProjectDisplayName,
+} from '@enso/pair';
 import { orderPinned, orderProjectSessions, sortByActivity } from '@shared/pair/drawerOrder';
 import {
   ALL_GROUP_ID,
@@ -259,7 +264,9 @@ export function RemoteNodeSidebar({
                 ) : (
                   <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 )}
-                <span className="min-w-0 flex-1 truncate font-medium text-sm">{project.name}</span>
+                <span className="min-w-0 flex-1 truncate font-medium text-sm">
+                  {pairProjectDisplayName(project)}
+                </span>
                 {project.sshHost && (
                   <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
                     ssh

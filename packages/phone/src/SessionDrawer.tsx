@@ -2,6 +2,7 @@ import {
   type CatalogEntry,
   type ProjectEntry,
   type ProjectGroupEntry,
+  pairProjectDisplayName,
   sshProjectLabel,
 } from '@enso/pair';
 import {
@@ -367,7 +368,7 @@ export function SessionDrawer({
             ) : (
               <ProjectGroup
                 key={item.project.id}
-                name={item.project.name}
+                name={pairProjectDisplayName(item.project)}
                 badge={sshProjectLabel(item.project)}
                 sessions={orderProjectSessions(
                   active.filter((c) => c.projectId === item.project.id)
@@ -421,7 +422,10 @@ export function SessionDrawer({
                     session={session}
                     active={activeId === session.id}
                     nowTick={nowTick}
-                    subtitle={projects.find((p) => p.id === session.projectId)?.name}
+                    subtitle={(() => {
+                      const project = projects.find((p) => p.id === session.projectId);
+                      return project ? pairProjectDisplayName(project) : undefined;
+                    })()}
                     onSelect={onSelect}
                   />
                 ))}

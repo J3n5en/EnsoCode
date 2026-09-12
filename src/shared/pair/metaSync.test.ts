@@ -1,3 +1,4 @@
+import { pairProjectListLabel, toPairProjectEntry } from '@enso/pair';
 import { describe, expect, it } from 'vitest';
 import {
   catalogSyncFingerprint,
@@ -121,6 +122,23 @@ describe('slimProjectsForPhone', () => {
         { id: 'p', name: 'app', path: '/Users/me/app', kind: 'local' as const },
       ])
     ).toEqual([{ id: 'p', name: 'app', kind: 'local' }]);
+  });
+
+  // 别名全链路：桌面组帧 → 下发前裁剪 → 对端展示，真实 name 不被改写
+  it('裁剪后保留别名，对端按别名展示且 name 仍是真实项目名', () => {
+    const [entry] = slimProjectsForPhone([
+      toPairProjectEntry({ id: 'p', name: 'enso-code', path: '/Users/me/app', alias: '线上' }),
+    ]);
+    expect(entry).toEqual({ id: 'p', name: 'enso-code', alias: '线上' });
+    expect(pairProjectListLabel(entry)).toBe('线上');
+  });
+
+  it('别名新增与删除都会改变 projects 指纹，不被去重吞掉', () => {
+    const base = toPairProjectEntry({ id: 'p', name: 'app', path: '/tmp/app' });
+    const aliased = toPairProjectEntry({ id: 'p', name: 'app', path: '/tmp/app', alias: '线上' });
+    const fingerprint = (project: object) =>
+      pairJsonFingerprint({ projects: slimProjectsForPhone([project]), groups: [] });
+    expect(fingerprint(aliased)).not.toBe(fingerprint(base));
   });
 });
 

@@ -107,6 +107,8 @@ export interface PairCatalogPayload {
     id: string;
     name: string;
     path: string;
+    /** 项目别名；对端展示走 pairProjectDisplayName，name 保持真实项目名 */
+    alias?: string;
     kind?: 'local' | 'ssh';
     sshConnectionName?: string;
     sshHost?: string;
