@@ -23,21 +23,21 @@ afterEach(() => {
 });
 
 describe('selectGpuBackendPackage', () => {
-  it('does not download on macOS — Metal is already bundled', () => {
+  it('picks Metal on Apple Silicon and CPU on Intel Mac', () => {
     expect(
       selectGpuBackendPackage({
         platform: 'darwin',
         arch: 'arm64',
         supportedGpus: ['metal'],
       })
-    ).toBeNull();
+    ).toEqual({ name: '@node-llama-cpp/mac-arm64-metal' });
     expect(
       selectGpuBackendPackage({
         platform: 'darwin',
         arch: 'x64',
         supportedGpus: ['cuda'],
       })
-    ).toBeNull();
+    ).toEqual({ name: '@node-llama-cpp/mac-x64' });
   });
 
   it('picks CUDA over Vulkan on linux/win x64', () => {
@@ -67,24 +67,31 @@ describe('selectGpuBackendPackage', () => {
     ).toEqual({ name: '@node-llama-cpp/linux-x64-vulkan' });
   });
 
-  it('stays on the bundled CPU binary when no GPU is present', () => {
+  it('picks the CPU package when no GPU is present', () => {
     expect(
       selectGpuBackendPackage({
         platform: 'linux',
         arch: 'x64',
         supportedGpus: [false],
       })
-    ).toBeNull();
+    ).toEqual({ name: '@node-llama-cpp/linux-x64' });
+    expect(
+      selectGpuBackendPackage({
+        platform: 'win32',
+        arch: 'x64',
+        supportedGpus: [false],
+      })
+    ).toEqual({ name: '@node-llama-cpp/win-x64' });
   });
 
-  it('does not fetch extra-arch GPU packages', () => {
+  it('picks the CPU package on linux arm64 — there is no CUDA build', () => {
     expect(
       selectGpuBackendPackage({
         platform: 'linux',
         arch: 'arm64',
         supportedGpus: ['cuda'],
       })
-    ).toBeNull();
+    ).toEqual({ name: '@node-llama-cpp/linux-arm64' });
   });
 });
 
@@ -172,7 +179,7 @@ describe('verifyIntegrity', () => {
 });
 
 describe('electron-builder GPU excludes', () => {
-  it('keeps CUDA/Vulkan llama backends out of the installer', () => {
+  it('keeps all @node-llama-cpp platform backends out of the installer', () => {
     const yml = readFileSync(path.resolve(__dirname, '../../../../electron-builder.yml'), 'utf8');
     for (const glob of ELECTRON_BUILDER_GPU_EXCLUDES) {
       expect(yml).toContain(glob);

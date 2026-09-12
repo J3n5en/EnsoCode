@@ -15,11 +15,9 @@ files:
     to: node_modules/@bufbuild/protobuf
   - from: node_modules/quickjs-wasi
     to: node_modules/quickjs-wasi
-  # node-llama-cpp 的 CUDA/Vulkan 预编译按需下载；打进包会比 Mac 多 400MB+
-  - '!node_modules/@node-llama-cpp/*cuda*/**'
-  - '!node_modules/@node-llama-cpp/*vulkan*/**'
-  - '!node_modules/.pnpm/@node-llama-cpp+*cuda*/**'
-  - '!node_modules/.pnpm/@node-llama-cpp+*vulkan*/**'
+  # node-llama-cpp 平台预编译全部按需下载（含 CPU / Metal / CUDA / Vulkan）
+  - '!node_modules/@node-llama-cpp/**'
+  - '!node_modules/.pnpm/@node-llama-cpp+*/**'
 # sqlite-vec 是 dlopen 的动态库，留在 asar 内无法加载（db.ts 会回退到 app.asar.unpacked）
 asarUnpack:
   - node_modules/sqlite-vec-*/**

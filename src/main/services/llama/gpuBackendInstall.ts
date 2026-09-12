@@ -44,7 +44,6 @@ export async function ensureGpuBackend(
 ): Promise<void> {
   const platform = opts.platform ?? process.platform;
   const arch = opts.arch ?? process.arch;
-  if (platform === 'darwin') return;
 
   const detect =
     opts.detectGpus ??
@@ -67,7 +66,19 @@ export async function ensureGpuBackend(
   const version = opts.version ?? llamaCppVersion();
   const dest = gpuBackendInstallDir(root, selected.name, version);
   if (!isGpuBackendReady(dest)) {
-    await downloadGpuBackend(selected.name, version, dest, opts);
+    try {
+      await downloadGpuBackend(selected.name, version, dest, opts);
+    } catch (error) {
+      const cpu = selectGpuBackendPackage({ platform, arch, supportedGpus: [false] });
+      if (!cpu || cpu.name === selected.name) throw error;
+      console.warn('[llama] GPU backend download failed, falling back to CPU:', error);
+      const cpuDest = gpuBackendInstallDir(root, cpu.name, version);
+      if (!isGpuBackendReady(cpuDest)) {
+        await downloadGpuBackend(cpu.name, version, cpuDest, opts);
+      }
+      (opts.resolvePackage ?? registerGpuPackage)(cpu.name, cpuDest);
+      return;
+    }
   }
   (opts.resolvePackage ?? registerGpuPackage)(selected.name, dest);
 }

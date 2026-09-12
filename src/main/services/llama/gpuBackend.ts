@@ -3,12 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-/** 安装包必须排除的 glob，与 electron-builder.yml 同步；cuda-ext 走 *cuda* 一并去掉。 */
+/** 安装包必须排除的 glob，与 electron-builder.yml 同步。不含 node-llama-cpp 本体。 */
 export const ELECTRON_BUILDER_GPU_EXCLUDES = [
-  '!node_modules/@node-llama-cpp/*cuda*/**',
-  '!node_modules/@node-llama-cpp/*vulkan*/**',
-  '!node_modules/.pnpm/@node-llama-cpp+*cuda*/**',
-  '!node_modules/.pnpm/@node-llama-cpp+*vulkan*/**',
+  '!node_modules/@node-llama-cpp/**',
+  '!node_modules/.pnpm/@node-llama-cpp+*/**',
 ] as const;
 
 const READY_MARKER = '.ready';
@@ -19,12 +17,42 @@ export function selectGpuBackendPackage(input: {
   arch: string;
   supportedGpus: readonly (string | boolean)[];
 }): { name: string } | null {
-  if (input.platform === 'darwin' || input.platform === 'mac') return null;
-  if (input.arch !== 'x64') return null;
-  const os = input.platform === 'win32' || input.platform === 'win' ? 'win' : input.platform;
-  if (os !== 'linux' && os !== 'win') return null;
-  if (input.supportedGpus.includes('cuda')) return { name: `@node-llama-cpp/${os}-x64-cuda` };
-  if (input.supportedGpus.includes('vulkan')) return { name: `@node-llama-cpp/${os}-x64-vulkan` };
+  const os =
+    input.platform === 'darwin' || input.platform === 'mac'
+      ? 'mac'
+      : input.platform === 'win32' || input.platform === 'win'
+        ? 'win'
+        : input.platform === 'linux'
+          ? 'linux'
+          : null;
+  if (!os) return null;
+  if (os === 'mac') {
+    if (input.arch === 'arm64') return { name: '@node-llama-cpp/mac-arm64-metal' };
+    if (input.arch === 'x64') return { name: '@node-llama-cpp/mac-x64' };
+    return null;
+  }
+  const gpu = input.supportedGpus.includes('cuda')
+    ? 'cuda'
+    : input.supportedGpus.includes('vulkan')
+      ? 'vulkan'
+      : false;
+  if (os === 'linux') {
+    if (input.arch === 'x64') {
+      if (gpu === 'cuda') return { name: '@node-llama-cpp/linux-x64-cuda' };
+      if (gpu === 'vulkan') return { name: '@node-llama-cpp/linux-x64-vulkan' };
+      return { name: '@node-llama-cpp/linux-x64' };
+    }
+    if (input.arch === 'arm64') return { name: '@node-llama-cpp/linux-arm64' };
+    if (input.arch === 'arm') return { name: '@node-llama-cpp/linux-armv7l' };
+    if (input.arch === 'riscv64') return { name: '@node-llama-cpp/linux-riscv64' };
+    return null;
+  }
+  if (input.arch === 'x64') {
+    if (gpu === 'cuda') return { name: '@node-llama-cpp/win-x64-cuda' };
+    if (gpu === 'vulkan') return { name: '@node-llama-cpp/win-x64-vulkan' };
+    return { name: '@node-llama-cpp/win-x64' };
+  }
+  if (input.arch === 'arm64') return { name: '@node-llama-cpp/win-arm64' };
   return null;
 }
 
