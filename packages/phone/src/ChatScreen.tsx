@@ -188,13 +188,17 @@ export function ChatScreen(props: Props) {
           </button>
           <div className="min-w-0 flex-1 text-center">
             <p className="flex min-w-0 items-center justify-center gap-1.5">
-              {props.connState === 'online' && (
+              {props.connState !== 'host-offline' && props.connState !== 'unauthorized' && (
                 <span
                   className={cn(
                     'h-1.5 w-1.5 shrink-0 rounded-full',
-                    props.syncing ? 'animate-pulse bg-amber-500' : 'bg-emerald-500'
+                    props.connState === 'online' && !props.syncing
+                      ? 'bg-emerald-500'
+                      : 'animate-pulse bg-amber-500'
                   )}
-                  title={props.syncing ? '同步中…' : props.stateLabel}
+                  title={
+                    props.connState === 'online' && props.syncing ? '同步中…' : props.stateLabel
+                  }
                 />
               )}
               <span className="truncate font-medium text-sm">{props.title}</span>
@@ -214,7 +218,7 @@ export function ChatScreen(props: Props) {
           </button>
         </header>
 
-        {props.connState !== 'online' && props.connState !== 'unauthorized' && (
+        {props.connState === 'host-offline' && (
           <div className="flex shrink-0 items-center justify-center gap-1.5 bg-amber-500/10 py-1 text-amber-700 text-xs dark:text-amber-400">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
             <span>{props.stateLabel}</span>
