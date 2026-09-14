@@ -86,7 +86,11 @@ export function PairNodeDialog({
             spellCheck={false}
             className="font-mono text-xs"
           />
-          {error && <p className="text-destructive text-xs">{error}</p>}
+          {error && (
+            <p key={error} className="t-shake-in text-destructive text-xs">
+              {error}
+            </p>
+          )}
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>

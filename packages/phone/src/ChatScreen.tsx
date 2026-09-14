@@ -65,6 +65,26 @@ interface Props {
 export function ChatScreen(props: Props) {
   const { view, sessionId } = props;
   const timelineRef = useRef<MessageTimelineHandle>(null);
+  // tabs sliding：pill 位置/尺寸由 JS 测量写入，CSS 负责补间；首帧挂起过渡避免从 0 宽飞入
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const pillReady = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect 通过 ref 读写 DOM，依赖项是重定位 pill/镜像层的真实触发信号
+  useLayoutEffect(() => {
+    const bar = tabsRef.current;
+    const pill = pillRef.current;
+    const active = bar?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!bar || !pill || !active) return;
+    if (!pillReady.current) pill.style.transition = 'none';
+    pill.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    pill.style.width = `${active.offsetWidth}px`;
+    pill.style.height = `${active.offsetHeight}px`;
+    if (!pillReady.current) {
+      void pill.offsetWidth;
+      pill.style.transition = '';
+      pillReady.current = true;
+    }
+  }, [sessionId, props.tabGroup]);
   const running = view?.status === 'running';
   const host = useMemo(
     () => ({ sessionId, canRewind: true, canRetry: true, canFork: false }),
@@ -236,9 +256,16 @@ export function ChatScreen(props: Props) {
 
         {/* coworker tab 条：与桌面 CoworkerTabs 同观感，无 coworker 时不渲染；手机不提供雇佣/解雇 */}
         {props.tabGroup && props.tabGroup.children.length > 0 && (
-          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1">
+          <div
+            ref={tabsRef}
+            role="tablist"
+            className="t-tabs flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1"
+          >
+            <span ref={pillRef} aria-hidden="true" className="t-tabs-pill" />
             <button
               type="button"
+              role="tab"
+              aria-selected={sessionId === props.tabGroup.parent.id}
               className={tabClass(sessionId === props.tabGroup.parent.id)}
               onClick={() => props.onSelectTab?.(props.tabGroup?.parent.id ?? '')}
             >
@@ -248,6 +275,8 @@ export function ChatScreen(props: Props) {
               <button
                 key={child.id}
                 type="button"
+                role="tab"
+                aria-selected={sessionId === child.id}
                 className={tabClass(sessionId === child.id)}
                 onClick={() => props.onSelectTab?.(child.id)}
               >
@@ -356,8 +385,8 @@ export function ChatScreen(props: Props) {
 /** 与桌面 CoworkerTabs 的 tabClass 同款 */
 function tabClass(active: boolean): string {
   return cn(
-    'flex min-w-0 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-    active ? 'bg-muted font-medium' : 'text-muted-foreground'
+    't-tab flex min-w-0 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+    active ? 'font-medium' : 'text-muted-foreground'
   );
 }
 

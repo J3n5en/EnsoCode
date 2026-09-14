@@ -1,3 +1,4 @@
+import { PopDigits } from '@/components/ui/pop-digits';
 import { cn } from '@/lib/utils';
 
 interface StatCardProps {
@@ -34,7 +35,7 @@ export function StatCard({ label, value, delta, tone = 'default' }: StatCardProp
         )}
         title={value}
       >
-        {value}
+        <PopDigits value={value} />
       </div>
     </div>
   );

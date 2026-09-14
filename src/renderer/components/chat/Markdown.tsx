@@ -203,9 +203,11 @@ export function Markdown({
   );
   return (
     <MarkdownCtx.Provider value={ctx}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
-        {text}
-      </ReactMarkdown>
+      <div className={streaming ? 't-stream-live' : undefined}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
+          {text}
+        </ReactMarkdown>
+      </div>
     </MarkdownCtx.Provider>
   );
 }

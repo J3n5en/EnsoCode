@@ -9,7 +9,7 @@ import {
   ChevronsUpDown,
   CircleAlert,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CODE_THEME, ensureHighlighter } from '@/components/chat/codeHighlighter';
 import { useI18n } from '@/i18n';
 import { buildChangeItems, type ChangeItemMemo } from '@/lib/changesItems';
@@ -64,6 +64,26 @@ export function ChangesView({
   const { t } = useI18n();
   const mode = useSidePanelStore((s) => s.changesModeByConversation[conversationId]) ?? 'all';
   const setMode = useSidePanelStore((s) => s.setChangesMode);
+  // tabs sliding：pill 位置/尺寸由 JS 测量写入，CSS 负责补间；首帧挂起过渡避免从 0 宽飞入
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const pillReady = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect 通过 ref 读写 DOM，依赖项是重定位 pill/镜像层的真实触发信号
+  useLayoutEffect(() => {
+    const bar = tabsRef.current;
+    const pill = pillRef.current;
+    const active = bar?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!bar || !pill || !active) return;
+    if (!pillReady.current) pill.style.transition = 'none';
+    pill.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    pill.style.width = `${active.offsetWidth}px`;
+    pill.style.height = `${active.offsetHeight}px`;
+    if (!pillReady.current) {
+      void pill.offsetWidth;
+      pill.style.transition = '';
+      pillReady.current = true;
+    }
+  }, [mode]);
   // undefined = 尚未从主进程回读；回读前不聚合、不保存，否则 reconstruct 结果会盖掉磁盘上更早的快照
   const snapshots = useSidePanelStore((s) => s.snapshotsByConversation[conversationId]);
   const saveSnapshots = useSidePanelStore((s) => s.saveSnapshots);
@@ -262,12 +282,15 @@ export function ChangesView({
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex shrink-0 gap-1 border-b px-2 py-1">
-        <ModeTab active={mode === 'all'} onClick={() => setMode(conversationId, 'all')}>
-          {t('Session')}
-        </ModeTab>
-        <ModeTab active={mode === 'git'} onClick={() => setMode(conversationId, 'git')}>
-          {t('Git')}
-        </ModeTab>
+        <div ref={tabsRef} role="tablist" className="t-tabs">
+          <span ref={pillRef} aria-hidden="true" className="t-tabs-pill" />
+          <ModeTab active={mode === 'all'} onClick={() => setMode(conversationId, 'all')}>
+            {t('Session')}
+          </ModeTab>
+          <ModeTab active={mode === 'git'} onClick={() => setMode(conversationId, 'git')}>
+            {t('Git')}
+          </ModeTab>
+        </div>
         {items.length > 0 && (
           <button
             type="button"
@@ -363,10 +386,12 @@ function ModeTab({
   return (
     <button
       type="button"
+      role="tab"
       onClick={onClick}
+      aria-selected={active}
       className={cn(
-        'rounded-md px-2 py-1 text-xs transition-colors',
-        active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
+        't-tab rounded-md px-2 py-1 text-xs transition-colors',
+        active ? 'font-medium' : 'text-muted-foreground hover:bg-muted/50'
       )}
     >
       {children}

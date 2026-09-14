@@ -919,7 +919,13 @@ function ThinkingRow({
         className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <Brain className={cn('h-3.5 w-3.5', streaming && 'animate-pulse')} />
-        <span>{streaming ? t('Thinking…') : t('Thought process')}</span>
+        {streaming ? (
+          <span className="t-shimmer" data-text={t('Thinking…')}>
+            {t('Thinking…')}
+          </span>
+        ) : (
+          <span>{t('Thought process')}</span>
+        )}
         {streaming ? (
           <RunningElapsed itemKey={itemKey} since={startedAt} />
         ) : (
@@ -932,7 +938,7 @@ function ThinkingRow({
         <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
       </button>
       {expanded && (
-        <p className="mt-1.5 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+        <p className="t-acc-reveal mt-1.5 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
           {text}
         </p>
       )}
@@ -1409,12 +1415,12 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         )}
       </div>
       {expanded && hasDiff && item.edits && (
-        <ToolContentScroller follow={item.state === 'running'}>
+        <ToolContentScroller follow={item.state === 'running'} className="t-acc-reveal">
           <EditDiff path={item.summary} blocks={item.edits} />
         </ToolContentScroller>
       )}
       {expanded && hasFileChanges && item.fileChanges && (
-        <ToolContentScroller follow={item.state === 'running'}>
+        <ToolContentScroller follow={item.state === 'running'} className="t-acc-reveal">
           {item.fileChanges.map((change) => (
             <div
               key={`${change.type}:${diffCacheKey(change.path, change.oldText, change.newText)}`}
@@ -1432,7 +1438,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         </ToolContentScroller>
       )}
       {expanded && shouldShowToolOutputAfterFileChanges(item) && (
-        <ToolContentScroller follow={false} className="border-t border-border/60">
+        <ToolContentScroller follow={false} className="t-acc-reveal border-t border-border/60">
           <pre className="px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
             {item.output}
           </pre>
@@ -1441,7 +1447,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
       {expanded && hasWrite && item.writeContent && (
         <ToolContentScroller
           follow={item.state === 'running'}
-          className="rounded-b-lg border-t border-border/60"
+          className="t-acc-reveal rounded-b-lg border-t border-border/60"
         >
           <ReadFileView path={item.summary} contents={item.writeContent} />
         </ToolContentScroller>
@@ -1451,8 +1457,8 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           follow={item.state === 'running'}
           className={
             compact
-              ? 'mt-1 rounded-lg border border-border/60 bg-muted/30'
-              : 'rounded-b-lg border-t border-border/60'
+              ? 't-acc-reveal mt-1 rounded-lg border border-border/60 bg-muted/30'
+              : 't-acc-reveal rounded-b-lg border-t border-border/60'
           }
         >
           {item.name === 'exec' ? (

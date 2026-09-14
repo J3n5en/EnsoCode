@@ -232,7 +232,11 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
             />
           </Field>
 
-          {error && <p className="text-destructive text-xs">{error}</p>}
+          {error && (
+            <p key={error} className="t-shake-in text-destructive text-xs">
+              {error}
+            </p>
+          )}
         </DialogPanel>
 
         <DialogFooter>

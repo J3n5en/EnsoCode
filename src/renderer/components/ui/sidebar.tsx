@@ -580,32 +580,58 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) 
 function SidebarMenuSkeleton({
   className,
   showIcon = false,
+  loading = true,
+  children,
   ...props
 }: React.ComponentProps<'div'> & {
   showIcon?: boolean;
+  loading?: boolean;
 }) {
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
   // Random width between 50 to 90%.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
   }, []);
 
+  React.useEffect(() => {
+    const root = rootRef.current;
+    const skeleton = root?.querySelector<HTMLElement>('.t-skel-skeleton');
+    if (!root || !skeleton) return;
+    if (!loading) {
+      root.classList.add('is-revealed');
+      return;
+    }
+    root.classList.add('is-resetting');
+    root.classList.remove('is-revealed');
+    skeleton.classList.remove('is-pulsing');
+    void skeleton.offsetWidth;
+    root.classList.remove('is-resetting');
+    skeleton.classList.add('is-pulsing');
+  }, [loading]);
+
   return (
     <div
-      className={cn('flex h-8 items-center gap-2 rounded-lg px-2', className)}
+      ref={rootRef}
+      className={cn('t-skel h-8 rounded-lg', className)}
+      data-state={loading ? 'loading' : 'loaded'}
       data-sidebar="menu-skeleton"
       data-slot="sidebar-menu-skeleton"
       {...props}
     >
-      {showIcon && <Skeleton className="size-4 rounded-lg" data-sidebar="menu-skeleton-icon" />}
-      <Skeleton
-        className="h-4 max-w-(--skeleton-width) flex-1"
-        data-sidebar="menu-skeleton-text"
-        style={
-          {
-            '--skeleton-width': width,
-          } as React.CSSProperties
-        }
-      />
+      <div className="t-skel-skeleton is-pulsing flex h-8 items-center gap-2 px-2">
+        {showIcon && <Skeleton className="size-4 rounded-lg" data-sidebar="menu-skeleton-icon" />}
+        <Skeleton
+          className="h-4 max-w-(--skeleton-width) flex-1"
+          data-sidebar="menu-skeleton-text"
+          style={
+            {
+              '--skeleton-width': width,
+            } as React.CSSProperties
+          }
+        />
+      </div>
+      <div className="t-skel-content">{children}</div>
     </div>
   );
 }

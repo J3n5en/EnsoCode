@@ -29,6 +29,16 @@ import { isCompactRow, RetryTurnButton, TimelineRow } from './TimelineRow';
 export const CHAT_COL =
   'enso-chat-col mx-auto w-full max-w-2xl px-4 @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[84rem]:max-w-5xl @min-[96rem]:max-w-6xl @min-[112rem]:max-w-7xl';
 
+/** 空状态容器：挂载后播放错峰入场（texts-reveal，rAF 后加 is-shown 触发过渡） */
+function EmptyReveal({ className, children }: { className?: string; children: ReactNode }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return <div className={cn('t-stagger', shown && 'is-shown', className)}>{children}</div>;
+}
+
 /** 贴底判定阈值（px）：与旧实现一致，离底 40px 内视为贴底 */
 const AT_BOTTOM_THRESHOLD = 40;
 
@@ -378,11 +388,13 @@ export function MessageTimeline({
       <div className="@container relative min-h-0 flex-1">
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         {items.length === 0 && !busy ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="text-lg font-medium">{emptyTitle}</p>
+          <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="t-stagger-line t-stagger-line--1 text-lg font-medium">{emptyTitle}</p>
             {error ? (
               <>
-                <p className="max-w-md text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
+                <p className="t-stagger-line t-stagger-line--2 max-w-md text-sm text-destructive whitespace-pre-wrap">
+                  {t(error)}
+                </p>
                 {onRetryResume && (
                   <Button size="sm" variant="outline" onClick={onRetryResume}>
                     {t('Retry resume')}
@@ -390,18 +402,22 @@ export function MessageTimeline({
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">{t('Ask the agent…')}</p>
+              <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
+                {t('Ask the agent…')}
+              </p>
             )}
-          </div>
+          </EmptyReveal>
         ) : items.length === 0 && error ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="max-w-md text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
+          <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="t-stagger-line t-stagger-line--1 max-w-md text-sm text-destructive whitespace-pre-wrap">
+              {t(error)}
+            </p>
             {onRetryResume && (
               <Button size="sm" variant="outline" onClick={onRetryResume}>
                 {t('Retry resume')}
               </Button>
             )}
-          </div>
+          </EmptyReveal>
         ) : items.length === 0 ? (
           // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
           <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">

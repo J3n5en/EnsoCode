@@ -26,7 +26,14 @@ export function CopyButton({
       className={cn('flex items-center gap-1 transition-colors hover:text-foreground', className)}
       title={t('Copy')}
     >
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      <span className="t-icon-swap" data-state={copied ? 'b' : 'a'}>
+        <span className="t-icon inline-flex" data-icon="a">
+          <Copy className="h-3 w-3" />
+        </span>
+        <span className="t-icon inline-flex" data-icon="b">
+          <Check className="h-3 w-3" />
+        </span>
+      </span>
     </button>
   );
 }

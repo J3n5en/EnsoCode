@@ -2,12 +2,100 @@
 
 import { Autocomplete as AutocompletePrimitive } from '@base-ui/react/autocomplete';
 import { ChevronsUpDownIcon, XIcon } from 'lucide-react';
+import * as React from 'react';
 
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
 const Autocomplete = AutocompletePrimitive.Root;
+
+const clearTimers = new WeakMap<HTMLElement, number>();
+
+function motionNumber(name: string, fallback: number) {
+  const value = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue(name)
+  );
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function syncAutocompleteClearLayers(wrap: HTMLElement) {
+  if (wrap.classList.contains('is-clearing')) return;
+  const input = wrap.querySelector('input');
+  const mirror = wrap.querySelector<HTMLElement>('.t-clear-mirror');
+  if (!input || !mirror) return;
+  const hasValue = input.value.length > 0;
+  wrap.classList.toggle('has-value', hasValue);
+  mirror.textContent = hasValue ? input.value.replace(/ /g, '\u00a0') : '';
+}
+
+function animateAutocompleteClear(button: HTMLElement) {
+  const wrap = button.closest<HTMLElement>('.t-clear');
+  const input = wrap?.querySelector('input');
+  const mirror = wrap?.querySelector<HTMLElement>('.t-clear-mirror');
+  const placeholder = wrap?.querySelector<HTMLElement>('.t-clear-placeholder');
+  if (!wrap || !input || !mirror || !placeholder || !input.value) return;
+
+  const previousTimer = clearTimers.get(wrap);
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+
+  mirror.textContent = input.value.replace(/ /g, '\u00a0');
+  placeholder.textContent = input.placeholder;
+  wrap.classList.remove('has-value');
+  wrap.classList.add('is-clearing');
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    wrap.classList.remove('is-clearing');
+    mirror.textContent = '';
+    return;
+  }
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const total = motionNumber('--clear-dur', 1000);
+  const outDuration = motionNumber('--clear-out-dur', 400);
+  const inDuration = motionNumber('--clear-in-dur', 400);
+  const outFly = motionNumber('--clear-out-fly', 12);
+  const inFly = motionNumber('--clear-in-fly', 12);
+  const blur = motionNumber('--clear-blur', 2);
+  const outEase = rootStyles.getPropertyValue('--clear-out-ease').trim() || 'ease-out';
+  const inEase = rootStyles.getPropertyValue('--clear-in-ease').trim() || 'ease-out';
+
+  const outgoing = mirror.animate(
+    [
+      { transform: 'translateY(0)', opacity: 1, filter: 'blur(0)' },
+      {
+        transform: `translateY(${outFly}px)`,
+        opacity: 0,
+        filter: `blur(${blur}px)`,
+      },
+    ],
+    { duration: outDuration, easing: outEase, fill: 'forwards' }
+  );
+  const incoming = placeholder.animate(
+    [
+      {
+        transform: `translateY(-${inFly}px)`,
+        opacity: 0.9,
+        filter: `blur(${blur}px)`,
+      },
+      { transform: 'translateY(0)', opacity: 1, filter: 'blur(0)' },
+    ],
+    { duration: inDuration, easing: inEase, fill: 'forwards' }
+  );
+
+  const timer = window.setTimeout(
+    () => {
+      outgoing.cancel();
+      incoming.cancel();
+      wrap.classList.remove('is-clearing');
+      mirror.textContent = '';
+      clearTimers.delete(wrap);
+      syncAutocompleteClearLayers(wrap);
+    },
+    Math.max(total, outDuration, inDuration)
+  );
+  clearTimers.set(wrap, timer);
+}
 
 function AutocompleteInput({
   className,
@@ -24,9 +112,19 @@ function AutocompleteInput({
   ref?: React.Ref<HTMLInputElement>;
 }) {
   const sizeValue = (size ?? 'default') as 'sm' | 'default' | 'lg' | number;
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect 通过 ref 读写 DOM，依赖项是重定位 pill/镜像层的真实触发信号
+  React.useLayoutEffect(() => {
+    if (wrapRef.current) syncAutocompleteClearLayers(wrapRef.current);
+  }, [props.value]);
 
   return (
-    <div className="relative w-full">
+    <div
+      ref={wrapRef}
+      className="t-clear autocomplete-clear-dissolve relative w-full"
+      onInput={(event) => syncAutocompleteClearLayers(event.currentTarget)}
+    >
       {startAddon && (
         <div
           aria-hidden="true"
@@ -49,6 +147,31 @@ function AutocompleteInput({
         render={<Input size={sizeValue} />}
         {...props}
       />
+      <div
+        aria-hidden="true"
+        className={cn(
+          't-clear-mirror px-[calc(--spacing(3)-1px)] text-base sm:text-sm',
+          sizeValue === 'sm' && 'px-[calc(--spacing(2.5)-1px)]',
+          startAddon &&
+            (sizeValue === 'sm'
+              ? 'ps-[calc(--spacing(7.5)-1px)] sm:ps-[calc(--spacing(7)-1px)]'
+              : 'ps-[calc(--spacing(8.5)-1px)] sm:ps-[calc(--spacing(8)-1px)]')
+        )}
+      />
+      <div
+        aria-hidden="true"
+        className={cn(
+          't-clear-placeholder px-[calc(--spacing(3)-1px)] text-base text-muted-foreground/72 opacity-0 sm:text-sm',
+          sizeValue === 'sm' && 'px-[calc(--spacing(2.5)-1px)]',
+          startAddon &&
+            (sizeValue === 'sm'
+              ? 'ps-[calc(--spacing(7.5)-1px)] sm:ps-[calc(--spacing(7)-1px)]'
+              : 'ps-[calc(--spacing(8.5)-1px)] sm:ps-[calc(--spacing(8)-1px)]')
+        )}
+      >
+        {props.placeholder}
+      </div>
+      <div aria-hidden="true" className="t-clear-glow" />
       {showTrigger && (
         <AutocompleteTrigger
           className={cn(
@@ -190,7 +313,12 @@ function AutocompleteList({ className, ...props }: AutocompletePrimitive.List.Pr
   );
 }
 
-function AutocompleteClear({ className, ...props }: AutocompletePrimitive.Clear.Props) {
+function AutocompleteClear({
+  className,
+  onClickCapture,
+  onPointerDownCapture,
+  ...props
+}: AutocompletePrimitive.Clear.Props) {
   return (
     <AutocompletePrimitive.Clear
       className={cn(
@@ -198,6 +326,15 @@ function AutocompleteClear({ className, ...props }: AutocompletePrimitive.Clear.
         className
       )}
       data-slot="autocomplete-clear"
+      onClickCapture={(event) => {
+        onClickCapture?.(event);
+        if (!event.defaultPrevented) animateAutocompleteClear(event.currentTarget);
+      }}
+      onPointerDownCapture={(event) => {
+        onPointerDownCapture?.(event);
+        const input = event.currentTarget.closest('.t-clear')?.querySelector('input');
+        if (!event.defaultPrevented && document.activeElement === input) event.preventDefault();
+      }}
       {...props}
     >
       <XIcon />
