@@ -483,3 +483,94 @@
   --stack-depth2-blur: 2px;
   --stack-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
+
+/* 手机端发送/停止按钮触控与视觉呈现：
+ * 保持 iOS 推荐的 44px 最小触控区域，视觉上呈现 34px 圆形按钮，
+ * 提升移动端触屏点击体验，与移动端输入法节奏对齐。
+ */
+:root {
+  --phone-touch: 44px;
+  --phone-ease: cubic-bezier(0.2, 0, 1, 1);
+  --phone-press-duration: 120ms;
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up),
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop),
+.phone-dock [data-composer-action] {
+  position: relative;
+  width: var(--phone-touch);
+  height: var(--phone-touch);
+  min-width: var(--phone-touch);
+  min-height: var(--phone-touch);
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--primary-foreground);
+  box-shadow: none;
+  opacity: 1;
+  touch-action: manipulation;
+  transition-property: background-color, color, scale;
+  transition-duration: var(--phone-press-duration);
+  transition-timing-function: var(--phone-ease);
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up)::before,
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop)::before,
+.phone-dock [data-composer-action]::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: none;
+  transition: background-color var(--phone-press-duration) var(--phone-ease);
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up) > svg,
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop) > svg,
+.phone-dock [data-composer-action] > svg {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  opacity: 1;
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up):disabled,
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop),
+.phone-dock [data-composer-action]:disabled,
+.phone-dock [data-composer-action="stop"] {
+  color: var(--muted-foreground);
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up):disabled::before,
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop)::before,
+.phone-dock [data-composer-action]:disabled::before,
+.phone-dock [data-composer-action="stop"]::before {
+  background: var(--muted);
+}
+
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up):active:not(:disabled),
+.phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop):active:not(:disabled),
+.phone-dock [data-composer-action]:active:not(:disabled) {
+  scale: 0.96;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up),
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop),
+  .phone-dock [data-composer-action],
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up)::before,
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop)::before,
+  .phone-dock [data-composer-action]::before {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-arrow-up):active:not(:disabled),
+  .phone-dock [data-slot="composer"] button:has(> svg.lucide-circle-stop):active:not(:disabled),
+  .phone-dock [data-composer-action]:active:not(:disabled) {
+    scale: 1;
+  }
+}
+
