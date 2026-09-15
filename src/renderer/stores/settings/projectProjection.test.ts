@@ -99,4 +99,44 @@ describe('project authority projection write guard', () => {
       { id: 'p0', name: 'alpha', path: '/tmp/alpha', groupId: 'work' },
     ]);
   });
+
+  // 别名与项目级默认模型只存在于渲染侧设置，投影里没有对应字段；
+  // 重建时不带上就会被广播抹掉（新建对话必定触发一次广播）。
+  it('keeps alias and project-level default model across a projection refresh', () => {
+    const local = {
+      id: 'p0',
+      name: 'alpha',
+      path: '/tmp/alpha',
+      alias: '线上',
+      defaultModel: { providerId: 'anthropic', modelId: 'claude' },
+      // 取 false：只有 `!== undefined` 判断才留得住，真值判断会把它丢掉
+      defaultReasoningEnabled: false,
+      defaultThinkingLevel: 'high' as const,
+    };
+    settingsModule.useSettingsStore.setState({ projects: [local] });
+    writeKey.mockClear();
+
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
+
+    const [alpha] = settingsModule.useSettingsStore.getState().projects;
+    expect(alpha).toEqual(local);
+  });
+
+  // 投影按 registry 的插入顺序下发，本地数组顺序可能不同（项目删除后重建会错位）。
+  // 顺序差异不是内容变化，按索引比对会让每次广播都重写整个数组。
+  it('treats a reordered projection with the same projects as unchanged', async () => {
+    settingsModule.useSettingsStore.setState({
+      projects: [
+        { id: 'p1', name: 'beta', path: '/tmp/beta' },
+        { id: 'p0', name: 'alpha', path: '/tmp/alpha', alias: '线上' },
+      ],
+    });
+    writeKey.mockClear();
+
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
+    await Promise.resolve();
+
+    expect(writeKey).not.toHaveBeenCalled();
+    expect(settingsModule.useSettingsStore.getState().projects[1]?.alias).toBe('线上');
+  });
 });

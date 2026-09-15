@@ -895,6 +895,29 @@ export const useSettingsStore = create<SettingsState>()(
   )
 );
 
+type ProjectEntry = SettingsState['projects'][number];
+
+/**
+ * 投影里没有的字段：别名、分组、项目级默认模型只存在于渲染侧设置。
+ * 重建 projects 时不原样带回就会被 source-authority 广播抹掉（新建对话必定触发一次广播）。
+ */
+const LOCAL_PROJECT_KEYS = [
+  'alias',
+  'groupId',
+  'defaultModel',
+  'defaultReasoningEnabled',
+  'defaultThinkingLevel',
+] as const satisfies readonly (keyof ProjectEntry)[];
+
+function localProjectFields(previous: ProjectEntry | undefined): Partial<ProjectEntry> {
+  const local: Partial<ProjectEntry> = {};
+  if (!previous) return local;
+  for (const key of LOCAL_PROJECT_KEYS) {
+    if (previous[key] !== undefined) Object.assign(local, { [key]: previous[key] });
+  }
+  return local;
+}
+
 function applyProjectAuthorityProjection(projection: SourceAuthorityProjection): void {
   const previousById = new Map(
     useSettingsStore.getState().projects.map((project) => [project.id, project])
@@ -907,7 +930,7 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
         id: project.projectId,
         name: projectNameFromPath(project.canonicalPath),
         path: project.canonicalPath,
-        ...(previous?.groupId ? { groupId: previous.groupId } : {}),
+        ...localProjectFields(previous),
         ...(project.kind === 'ssh'
           ? {
               kind: 'ssh' as const,
@@ -930,10 +953,13 @@ function sameProjectProjection(
   next: SettingsState['projects']
 ): boolean {
   if (current.length !== next.length) return false;
-  return current.every((project, index) => {
-    const candidate = next[index];
+  // 按 id 比对而非按下标：投影按 registry 插入顺序下发，本地数组顺序可能不同
+  // （项目删除后重建会错位）。按下标比会把纯顺序差异当成内容变化，每次广播都重写整个数组。
+  const currentById = new Map(current.map((project) => [project.id, project]));
+  return next.every((candidate) => {
+    const project = currentById.get(candidate.id);
     return (
-      project.id === candidate.id &&
+      project !== undefined &&
       project.name === candidate.name &&
       project.path === candidate.path &&
       project.kind === candidate.kind &&
