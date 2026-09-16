@@ -39,6 +39,10 @@ export const session = {
   },
 };
 export const Menu = { buildFromTemplate: () => ({ popup: () => {} }) };
+export const screen = {
+  on: () => {},
+  removeListener: () => {},
+};
 export const powerMonitor = { on: () => {} };
 export const powerSaveBlocker = { start: () => 0, stop: () => {} };
 
@@ -52,6 +56,7 @@ export default {
   WebContentsView,
   session,
   Menu,
+  screen,
   powerMonitor,
   powerSaveBlocker,
 };

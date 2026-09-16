@@ -47,6 +47,7 @@ import type {
 import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
 import { getWorkbenchView } from '../windows/createAppWindow';
+import { pinnedWorkbenchBounds } from '../windows/win32Restore';
 import { assertBrowserUrl, resolveLocalCwdForBrowser } from './browserFileRoot';
 
 /**
@@ -340,8 +341,8 @@ export class BrowserHost {
   private ensureWorkbenchOnTop(window: BrowserWindow): void {
     const workbench = getWorkbenchView(window);
     if (!workbench) return;
-    const { width, height } = window.getContentBounds();
-    workbench.setBounds({ x: 0, y: 0, width, height });
+    const bounds = pinnedWorkbenchBounds(window);
+    if (bounds) workbench.setBounds(bounds);
     window.contentView.addChildView(workbench);
   }
 

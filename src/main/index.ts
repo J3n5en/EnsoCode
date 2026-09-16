@@ -26,6 +26,7 @@ import { getProxyConfig } from './services/proxyConfig';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { disposeAllTerminals, hasPendingPtys, waitPtyQuitIdle } from './services/terminalService';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
+import { applyWindowsChromiumSwitches } from './windows/win32Restore';
 
 // 仅开发环境开放 CDP 端口，便于调试；打包后不开，避免暴露远程调试。
 // 同机跑两以上实例（如验证节点互连）时可用 ENSO_CDP_PORT 错开。
@@ -36,6 +37,7 @@ if (!app.isPackaged) {
     /^\d+$/.test(cdpPort ?? '') ? cdpPort! : '9222'
   );
 }
+applyWindowsChromiumSwitches(app.commandLine);
 
 // 自动化可在开发环境显式指定 userData；打包版永不接受环境覆盖。
 // dev 缺省隔离到 appData/enso-code-dev：与打包版彻底分离，避免单实例锁 /
@@ -65,8 +67,14 @@ if (!gotTheLock) {
     const win = getMainWindow();
     if (win) {
       if (win.isMinimized()) win.restore();
+      win.show();
       win.focus();
     }
+  });
+  app.on('child-process-gone', (_event, details) => {
+    console.error(
+      `[process] child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode} serviceName=${details.serviceName ?? ''} name=${details.name ?? ''}`
+    );
   });
 
   app.whenReady().then(() => {

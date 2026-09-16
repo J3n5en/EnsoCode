@@ -78,6 +78,7 @@ const makeWindow = () => {
   const children: any[] = [];
   return {
     isDestroyed: () => false,
+    isMinimized: () => false,
     getContentBounds: () => ({ width: 1200, height: 800 }),
     contentView: {
       children,

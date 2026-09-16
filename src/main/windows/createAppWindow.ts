@@ -1,7 +1,17 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { app, BrowserWindow, Menu, shell, type WebContents, WebContentsView } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  screen,
+  shell,
+  type WebContents,
+  WebContentsView,
+} from 'electron';
+import { shouldReloadRenderer } from './rendererGone';
+import { attachPinnedWorkbenchBoundsSync, attachWindowsRestoreWake } from './win32Restore';
 
 export interface CreateWindowOptions {
   /** renderer 入口 html 文件名（不含扩展名），对应 electron.vite renderer input */
@@ -96,7 +106,6 @@ function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, en
     return { action: 'deny' };
   });
 
-  const recoverable = new Set(['crashed', 'abnormal-exit', 'oom', 'launch-failed']);
   let goneAt = 0;
   let goneCount = 0;
   contents.on('render-process-gone', (_event, details) => {
@@ -108,7 +117,7 @@ function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, en
       `[renderer] render-process-gone entry=${entry} reason=${details.reason} exitCode=${details.exitCode} count=${goneCount}`
     );
     if (win.isDestroyed() || contents.isDestroyed()) return;
-    if (!recoverable.has(details.reason) || goneCount > 3) return;
+    if (!shouldReloadRenderer(details.reason, goneCount)) return;
     contents.reload();
   });
 }
@@ -123,15 +132,15 @@ function loadRenderer(contents: WebContents, entry: string): void {
 
 function createPinnedWorkbench(win: BrowserWindow, entry: string): WebContentsView {
   const view = new WebContentsView({ webPreferences: webPreferences() });
-  const sync = (): void => {
-    if (win.isDestroyed()) return;
-    const { width, height } = win.getContentBounds();
-    view.setBounds({ x: 0, y: 0, width, height });
-  };
   view.setBackgroundColor('#00000000');
   win.contentView.addChildView(view);
-  win.on('resize', sync);
-  sync();
+  const { resync } = attachPinnedWorkbenchBoundsSync(win, view);
+  if (process.platform === 'win32') {
+    screen.on('display-metrics-changed', resync);
+    win.on('closed', () => {
+      screen.removeListener('display-metrics-changed', resync);
+    });
+  }
   workbenchViews.set(win, view);
   attachWebContentsHandlers(win, view.webContents, entry);
   view.webContents.once('did-finish-load', () => {
@@ -177,13 +186,16 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     ...(isMac && { trafficLightPosition: TRAFFIC_LIGHT_POSITION }),
     ...(isWindows && { thickFrame: true }),
     show: false,
-    backgroundColor: '#00000000',
-    ...(options.pinWorkbenchView ? { transparent: true } : {}),
+    ...(options.pinWorkbenchView ? { transparent: true, backgroundColor: '#00000000' } : {}),
     webPreferences: webPreferences(),
   });
 
   if (state.isMaximized) {
     win.maximize();
+  }
+
+  if (isWindows) {
+    attachWindowsRestoreWake(win);
   }
 
   if (options.stateFile) {

@@ -104,6 +104,13 @@ describe('Main startup order', () => {
   });
 });
 
+describe('Main process diagnostics', () => {
+  it('listens for child-process-gone', async () => {
+    await import('./index');
+    expect(mocks.appHandlers.has('child-process-gone')).toBe(true);
+  });
+});
+
 describe('Main userData isolation', () => {
   it('uses ENSO_USER_DATA_DIR only in development when it is non-empty', async () => {
     process.env.ENSO_USER_DATA_DIR = '  ./temp/isolated-user-data  ';
