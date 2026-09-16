@@ -36,7 +36,7 @@ const state = {
 };
 
 mkdirSync(dir, { recursive: true });
-writeFileSync(`${dir}/settings.json`, JSON.stringify({ 'enso-settings': { state, version: 2 } }));
+writeFileSync(`${dir}/settings.json`, JSON.stringify({ 'enso-settings': { state, version: 10 } }));
 mkdirSync(`${dir}-proj`, { recursive: true });
 writeFileSync(
   `${dir}-proj/README.md`,
