@@ -33,6 +33,9 @@ interface SetupOptions {
   /** 覆盖 resolveAgentType（模拟类型已删） */
   resolveAgentTypeError?: string;
   readCredentials?: () => Promise<ReadonlySet<string>>;
+  /** 跳过写入 draft selection，模拟新对话尚未选过模型 */
+  persistSelection?: boolean;
+  resolveDefaultModel?: () => { providerId: string; modelId: string } | null;
 }
 
 async function setup(
@@ -52,12 +55,15 @@ async function setup(
     projectVersion: project.value.version,
   });
   if (!conversation.accepted) throw new Error(conversation.error);
-  const selected = authority.updateSelection({
-    requestId: 's',
-    conversationId: conversation.value.conversationId,
-    version: conversation.value.version,
-    selection: { providerId: 'provider', modelId: 'model' },
-  });
+  const selected =
+    options.persistSelection === false
+      ? conversation
+      : authority.updateSelection({
+          requestId: 's',
+          conversationId: conversation.value.conversationId,
+          version: conversation.value.version,
+          selection: { providerId: 'provider', modelId: 'model' },
+        });
   if (!selected.accepted) throw new Error(selected.error);
   let persistedConversationId = '';
   const index = new AgentSessionIndex({
@@ -75,6 +81,7 @@ async function setup(
     authority,
     sessionIndex: index,
     isMainWebContents: (id) => id === 1,
+    ...(options.resolveDefaultModel ? { resolveDefaultModel: options.resolveDefaultModel } : {}),
   });
   bindings.selectConversation(1, selected.value.conversationId);
   const parentBinding = bindings.bindSource(1, { requestId: 'bind' });
@@ -331,6 +338,26 @@ describe('AgentDispatchService delta coordination', () => {
       );
     }
   );
+
+  it('新对话未写入 draft selection 时仍能按 binding 解析 spawn cwd', async () => {
+    const fixture = await setup(undefined, {
+      persistSelection: false,
+      resolveDefaultModel: () => ({ providerId: 'provider', modelId: 'model' }),
+    });
+    const result = await fixture.service.dispatch(
+      {
+        requestId: 'draft-dispatch',
+        selectionBindingId: fixture.selectionBindingId,
+        typeKey: 'agent:enso',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    expect(result).toMatchObject({ accepted: true });
+    expect(fixture.spawnParentCalls).toEqual([
+      { sessionId: fixture.conversationId, cwd: fixture.projectPath },
+    ]);
+  });
 
   it('receipt 的每笔调用 requestId 与派发 requestId 不同时，完成通知仍带安全 summary', async () => {
     const { service, selectionBindingId, customEntries } = await setup();

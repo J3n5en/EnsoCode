@@ -2379,6 +2379,10 @@ export const useSessionsStore = create<SessionsState>()(
             return result;
           }
           try {
+            // 新草稿尚未 setModel 时先把 UI 模型写入 authority，避免 Main 只认全局默认。
+            if (!parent.started) {
+              get().setModel(parentId, selectedModel.providerId, selectedModel.modelId);
+            }
             await pendingSelectionUpdates.get(parentId);
             const authority = await activateConversationAuthority(parentId);
             if (!authority) {

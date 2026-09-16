@@ -774,9 +774,7 @@ export class AgentDispatchService {
     const { sessionWorktree, sessionWorktreeBusy } = await import('../ipc/worktree');
     if (sessionWorktreeBusy(binding.parentConversationId))
       throw new Error('Worktree operation in progress.');
-    const source = this.options.sourceRegistry.resolveParentSource(binding.parentConversationId);
-    if (!source) throw new Error('The parent source is unavailable.');
-    return sessionWorktree(binding.parentConversationId)?.path ?? source.parentProjectPath;
+    return sessionWorktree(binding.parentConversationId)?.path ?? binding.parentProjectPath;
   }
 
   private currentOrNewParent(binding: ParentSourceBinding): SessionIdentity {

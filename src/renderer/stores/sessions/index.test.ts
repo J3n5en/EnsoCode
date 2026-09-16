@@ -601,6 +601,36 @@ describe('typed Agent child projection', () => {
     expect(agentPrompt).not.toHaveBeenCalled();
   });
 
+  it('persists the draft model before dispatching an Agent from a new conversation', async () => {
+    dispatch.mockResolvedValue({
+      accepted: true,
+      requestId: '123e4567-e89b-42d3-a456-426614174080',
+      dispatchId: '123e4567-e89b-42d3-a456-426614174081',
+      child: childIdentity(1),
+    });
+    const task = { text: 'inspect from a new chat', images: [], fileMentions: [] };
+    const result = await sessionsModule.useSessionsStore.getState().dispatchAgent(
+      'builtin:scout',
+      task,
+      { providerId: 'project-provider', modelId: 'project-model' }
+    );
+    expect(result.accepted).toBe(true);
+    expect(updateConversationSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'parent',
+        selection: { providerId: 'project-provider', modelId: 'project-model' },
+      })
+    );
+    expect(registerModelSelection).toHaveBeenCalledWith({
+      parentBindingId: 'parent-binding-1',
+      selection: { providerId: 'project-provider', modelId: 'project-model' },
+    });
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
+      lastProviderId: 'project-provider',
+      lastModelId: 'project-model',
+    });
+  });
+
   it('keeps the settings provider id after parent-ready exposes a different runtime provider', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {
