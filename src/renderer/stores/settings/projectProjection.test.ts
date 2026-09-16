@@ -122,6 +122,21 @@ describe('project authority projection write guard', () => {
     expect(alpha).toEqual(local);
   });
 
+  it('keeps project-level builtin tool override across a projection refresh', () => {
+    const local = {
+      id: 'p0',
+      name: 'alpha',
+      path: '/tmp/alpha',
+      disabledBuiltinTools: ['browser', 'memory'],
+    };
+    settingsModule.useSettingsStore.setState({ projects: [local] });
+
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
+
+    const [alpha] = settingsModule.useSettingsStore.getState().projects;
+    expect(alpha).toEqual(local);
+  });
+
   // 投影按 registry 的插入顺序下发，本地数组顺序可能不同（项目删除后重建会错位）。
   // 顺序差异不是内容变化，按索引比对会让每次广播都重写整个数组。
   it('treats a reordered projection with the same projects as unchanged', async () => {

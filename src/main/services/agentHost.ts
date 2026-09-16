@@ -23,7 +23,11 @@ import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
-import { effectiveDisabledBuiltinTools, resolveEditMode } from '@shared/types';
+import {
+  projectDisabledBuiltinTools,
+  resolveDisabledBuiltinTools,
+  resolveEditMode,
+} from '@shared/types';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -444,7 +448,9 @@ export function spawnSession(
   request: AgentSpawnRequest,
   authenticatedAccountKeys: ReadonlySet<string>,
   /** 由 main 从项目权威派生(渲染层不可伪造):ssh 项目的会话工具走远端执行 */
-  remote?: AgentRemoteConfig
+  remote?: AgentRemoteConfig,
+  /** 由 main 从会话权威派生，渲染层不可伪造 */
+  projectId?: string
 ): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
@@ -472,7 +478,9 @@ export function spawnSession(
   const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
   const agentTypes = configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
   const state = readSettingsState();
-  const disabledTools = effectiveDisabledBuiltinTools(state?.disabledBuiltinTools);
+  const disabledTools = resolveDisabledBuiltinTools(state?.disabledBuiltinTools, {
+    disabledBuiltinTools: projectDisabledBuiltinTools(state?.projects, projectId),
+  });
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;

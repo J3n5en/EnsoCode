@@ -363,6 +363,9 @@ export const zhTranslations: Record<string, string> = {
   'Default model for {{name}}': '{{name}} 的默认模型',
   'Follows group, then global default': '跟随分组默认，再跟随全局默认',
   'Follows the global default': '跟随全局默认',
+  'Follow global built-in tools': '跟随全局内置工具',
+  'When off, configure built-in tools for this project. They override the global setting on the next session.':
+    '关闭后可为本项目单独配置内置工具，优先级高于全局，下次会话生效。',
   'Session choice overrides the project default.': '会话里手动选的模型优先于项目默认。',
   'Conversation title summary': '会话标题总结',
   'Generate a short AI title from the first message of a new conversation.':

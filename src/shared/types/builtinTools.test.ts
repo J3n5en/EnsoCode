@@ -3,6 +3,8 @@ import {
   BUILTIN_TOOLS,
   DEFAULT_DISABLED_BUILTIN_TOOLS,
   effectiveDisabledBuiltinTools,
+  projectDisabledBuiltinTools,
+  resolveDisabledBuiltinTools,
 } from './builtinTools';
 
 describe('effectiveDisabledBuiltinTools', () => {
@@ -25,5 +27,38 @@ describe('effectiveDisabledBuiltinTools', () => {
       'browser',
       'isolated_sandbox',
     ]);
+  });
+});
+
+describe('resolveDisabledBuiltinTools', () => {
+  it('缺项目覆盖时用全局列表', () => {
+    expect(resolveDisabledBuiltinTools(['browser'])).toEqual(['browser']);
+    expect(resolveDisabledBuiltinTools(['browser'], undefined)).toEqual(['browser']);
+    expect(resolveDisabledBuiltinTools(['browser'], {})).toEqual(['browser']);
+  });
+
+  it('项目存了列表则覆盖全局（空列表 = 本项目全开）', () => {
+    expect(
+      resolveDisabledBuiltinTools(['browser', 'memory'], { disabledBuiltinTools: ['subagent'] })
+    ).toEqual(['subagent']);
+    expect(resolveDisabledBuiltinTools(['memory'], { disabledBuiltinTools: [] })).toEqual([]);
+  });
+
+  it('项目字段不是数组时仍跟全局，不把脏值当成覆盖', () => {
+    expect(resolveDisabledBuiltinTools(['browser'], { disabledBuiltinTools: 'memory' })).toEqual([
+      'browser',
+    ]);
+  });
+});
+
+describe('projectDisabledBuiltinTools', () => {
+  const projects = [{ id: 'p1', disabledBuiltinTools: ['browser'] }, { id: 'p2' }];
+
+  it('按 id 取出项目覆盖，找不到或未覆盖返回 undefined', () => {
+    expect(projectDisabledBuiltinTools(projects, 'p1')).toEqual(['browser']);
+    expect(projectDisabledBuiltinTools(projects, 'p2')).toBeUndefined();
+    expect(projectDisabledBuiltinTools(projects, 'missing')).toBeUndefined();
+    expect(projectDisabledBuiltinTools(projects, undefined)).toBeUndefined();
+    expect(projectDisabledBuiltinTools(undefined, 'p1')).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 import { type DefaultModelRef, resolveChatReasoning } from '@shared/defaultModel';
 import { projectDisplayName } from '@shared/projectName';
-import type { Project, ThinkingLevel } from '@shared/types';
-import { FolderOpen } from 'lucide-react';
+import { BUILTIN_TOOLS, type Project, type ThinkingLevel } from '@shared/types';
+import { FolderOpen, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CopyButton } from '@/components/chat/CopyButton';
 import { ScopedDefaultModelField } from '@/components/chat/ScopedDefaultModelField';
@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
@@ -44,11 +45,16 @@ export function ProjectSettingsDialog({
   const setProjectDefaultModel = useSettingsStore((state) => state.setProjectDefaultModel);
   const setProjectGroupId = useSettingsStore((state) => state.setProjectGroupId);
   const setProjectAlias = useSettingsStore((state) => state.setProjectAlias);
+  const setProjectDisabledBuiltinTools = useSettingsStore(
+    (state) => state.setProjectDisabledBuiltinTools
+  );
   const [alias, setAlias] = useState('');
   const [defaultModel, setDefaultModel] = useState<DefaultModelRef | null>(null);
   const [reasoningEnabled, setReasoningEnabled] = useState(true);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
   const [groupId, setGroupId] = useState('');
+  const [followGlobalTools, setFollowGlobalTools] = useState(true);
+  const [disabledBuiltinTools, setDisabledBuiltinTools] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +72,12 @@ export function ProjectSettingsDialog({
     });
     setReasoningEnabled(project?.defaultReasoningEnabled ?? inherited.reasoningEnabled);
     setThinkingLevel(project?.defaultThinkingLevel ?? inherited.thinkingLevel);
+    const follow = project?.disabledBuiltinTools === undefined;
+    setFollowGlobalTools(follow);
+    const globalDisabled = useSettingsStore.getState().disabledBuiltinTools;
+    setDisabledBuiltinTools(
+      follow ? [...globalDisabled] : [...(project?.disabledBuiltinTools ?? [])]
+    );
   }, [open, project, groups, defaultReasoningEnabled, defaultThinkingLevel]);
 
   const groupItems = useMemo(
@@ -85,9 +97,9 @@ export function ProjectSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <form
-          className="flex flex-col"
+          className="contents"
           onSubmit={(event) => {
             event.preventDefault();
             if (!project) return;
@@ -98,6 +110,10 @@ export function ProjectSettingsDialog({
             );
             setProjectGroupId(project.id, groupId || null);
             setProjectAlias(project.id, alias);
+            setProjectDisabledBuiltinTools(
+              project.id,
+              followGlobalTools ? null : disabledBuiltinTools
+            );
             onOpenChange(false);
           }}
         >
@@ -107,7 +123,7 @@ export function ProjectSettingsDialog({
               {project ? projectDisplayName(project) : t('Project')}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
+          <DialogPanel className="max-h-[60vh] space-y-4">
             <Field className="w-full items-stretch">
               <FieldLabel>{t('Alias')}</FieldLabel>
               <Input
@@ -187,6 +203,45 @@ export function ProjectSettingsDialog({
             <p className="text-muted-foreground text-xs">
               {t('Session choice overrides the project default.')}
             </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">{t('Follow global built-in tools')}</p>
+                  <p className="text-muted-foreground text-xs">
+                    {t(
+                      'When off, configure built-in tools for this project. They override the global setting on the next session.'
+                    )}
+                  </p>
+                </div>
+                <Switch checked={followGlobalTools} onCheckedChange={setFollowGlobalTools} />
+              </div>
+              {!followGlobalTools && (
+                <div className="space-y-2">
+                  {BUILTIN_TOOLS.map((tool) => (
+                    <div
+                      key={tool.id}
+                      className="flex items-center gap-3 rounded-md border px-3 py-2.5"
+                    >
+                      <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{t(tool.name)}</p>
+                        <p className="text-muted-foreground text-xs">{t(tool.description)}</p>
+                      </div>
+                      <Switch
+                        checked={!disabledBuiltinTools.includes(tool.id)}
+                        onCheckedChange={(checked) =>
+                          setDisabledBuiltinTools((list) =>
+                            checked
+                              ? list.filter((id) => id !== tool.id)
+                              : [...new Set([...list, tool.id])]
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>

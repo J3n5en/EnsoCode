@@ -778,6 +778,22 @@ export const useSettingsStore = create<SettingsState>()(
         }));
       },
 
+      setProjectDisabledBuiltinTools: (projectId, disabled) => {
+        set((state) => ({
+          projects: state.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            if (!disabled) {
+              const { disabledBuiltinTools: _removed, ...rest } = project;
+              return rest;
+            }
+            return {
+              ...project,
+              disabledBuiltinTools: [...new Set(disabled.filter((id) => typeof id === 'string'))],
+            };
+          }),
+        }));
+      },
+
       removeProject: async (id) => {
         const projection = await window.electronAPI.sourceAuthority.read();
         const project = projection.projects.find(
@@ -887,7 +903,7 @@ export const useSettingsStore = create<SettingsState>()(
 type ProjectEntry = SettingsState['projects'][number];
 
 /**
- * 投影里没有的字段：别名、分组、项目级默认模型只存在于渲染侧设置。
+ * 投影里没有的字段：别名、分组、项目级默认模型/内置工具只存在于渲染侧设置。
  * 重建 projects 时不原样带回就会被 source-authority 广播抹掉（新建对话必定触发一次广播）。
  */
 const LOCAL_PROJECT_KEYS = [
@@ -896,6 +912,7 @@ const LOCAL_PROJECT_KEYS = [
   'defaultModel',
   'defaultReasoningEnabled',
   'defaultThinkingLevel',
+  'disabledBuiltinTools',
 ] as const satisfies readonly (keyof ProjectEntry)[];
 
 function localProjectFields(previous: ProjectEntry | undefined): Partial<ProjectEntry> {

@@ -425,6 +425,8 @@ export interface SettingsState {
     model: DefaultModelRef | null,
     reasoning?: { reasoningEnabled: boolean; thinkingLevel: ThinkingLevel } | null
   ) => void;
+  /** null = 跟随全局；数组覆盖全局（空 = 本项目全开） */
+  setProjectDisabledBuiltinTools: (projectId: string, disabled: string[] | null) => void;
 
   /** 非法条目不写入，返回 false */
   setUsageModelPricing: (modelId: string, pricing: ModelPricing) => boolean;

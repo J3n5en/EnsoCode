@@ -224,6 +224,24 @@ function remoteConfigFor(sessionId: string): AgentRemoteConfig | undefined {
   return project.sshHost ? { host: project.sshHost, auth: 'key' } : undefined;
 }
 
+function projectIdFor(sessionId: string): string | undefined {
+  return sourceAuthority?.conversation(sessionId)?.projectId;
+}
+
+function spawnBoundSession(
+  identity: SessionIdentity,
+  request: AgentSpawnRequest,
+  credentialKeys: ReadonlySet<string>
+) {
+  return spawnSession(
+    identity,
+    request,
+    credentialKeys,
+    remoteConfigFor(request.sessionId),
+    projectIdFor(request.sessionId)
+  );
+}
+
 function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
   const request = asRecord(value);
   if (!request) return null;
@@ -422,7 +440,7 @@ function wirePairAgentBridge(): void {
       } catch {
         return { ok: false, error: 'model credentials unavailable' };
       }
-      return spawnSession(identity, request, credentialKeys, remoteConfigFor(request.sessionId));
+      return spawnBoundSession(identity, request, credentialKeys);
     },
   });
 }
@@ -487,7 +505,7 @@ export function registerAgentHandlers(): void {
       registrySnapshot: agentTypeRegistrySnapshot,
       resolveModel: resolveModelSelection,
       resolveAgentType: resolveAgentTypeSpawnConfig,
-      spawnParent: spawnSession,
+      spawnParent: spawnBoundSession,
       spawnChild: spawnChildSession,
       promptChild: promptChildSession,
       appendCustomEntry: appendSessionCustomEntry,
@@ -884,12 +902,7 @@ export function registerAgentHandlers(): void {
     if (!persistedRootSpawn(currentRequest, event.sender.id)) {
       return { ok: false, error: 'conversation authority changed' };
     }
-    return spawnSession(
-      identity,
-      currentRequest,
-      credentialKeys,
-      remoteConfigFor(parsed.sessionId)
-    );
+    return spawnBoundSession(identity, currentRequest, credentialKeys);
   });
 
   ipcMain.handle(

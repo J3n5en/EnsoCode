@@ -65,3 +65,27 @@ export function effectiveDisabledBuiltinTools(disabled: unknown): string[] {
     ? disabled.filter((id): id is string => typeof id === 'string')
     : [...DEFAULT_DISABLED_BUILTIN_TOOLS];
 }
+
+/** 项目覆盖优先于全局；未覆盖或字段不是数组则跟全局。 */
+export function resolveDisabledBuiltinTools(
+  globalDisabled: unknown,
+  project?: { disabledBuiltinTools?: unknown } | null
+): string[] {
+  return Array.isArray(project?.disabledBuiltinTools)
+    ? effectiveDisabledBuiltinTools(project.disabledBuiltinTools)
+    : effectiveDisabledBuiltinTools(globalDisabled);
+}
+
+/** 从 settings.projects 取出某项目的覆盖列表；缺项目或未覆盖返回 undefined。 */
+export function projectDisabledBuiltinTools(
+  projects: unknown,
+  projectId: string | undefined
+): unknown {
+  if (!projectId || !Array.isArray(projects)) return undefined;
+  for (const entry of projects) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const record = entry as { id?: unknown; disabledBuiltinTools?: unknown };
+    if (record.id === projectId) return record.disabledBuiltinTools;
+  }
+  return undefined;
+}
