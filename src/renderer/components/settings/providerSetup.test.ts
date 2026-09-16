@@ -15,6 +15,18 @@ describe('统一提供商向导分支', () => {
     expect(availableProviderSetupMethods(definition)).toEqual(['oauth', 'api-key']);
   });
 
+  it('Mock 只走 instant，不伪造 API Key 分支', () => {
+    expect(
+      availableProviderSetupMethods({
+        id: 'mock',
+        label: 'Mock',
+        defaultApi: 'openai-completions',
+        supportsApiKey: false,
+        instantSetup: true,
+      })
+    ).toEqual(['instant']);
+  });
+
   it('纯订阅扩展不伪造 API Key 分支', () => {
     const definition: ProviderDefinition = {
       id: 'subscription-only',

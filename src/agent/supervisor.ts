@@ -24,6 +24,7 @@ import {
 } from '@shared/builtinAgents';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
+import { isMockProviderConfig } from '@shared/mockProvider';
 import {
   findCatalogModelById,
   positiveContextWindow,
@@ -32,6 +33,7 @@ import {
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
+import { mockProviderConfig } from '@shared/providers/mock';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import type {
@@ -3635,6 +3637,19 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
   const resolved = resolveCustomModelCapabilities(catalog, model);
   const contextWindow = resolved.contextWindow ?? 128_000;
   const maxTokens = resolved.maxTokens ?? 32_000;
+  if (isMockProviderConfig(model)) {
+    runtime.registerProvider(
+      providerId,
+      mockProviderConfig({
+        modelId: model.modelId,
+        contextWindow,
+        maxTokens,
+      })
+    );
+    const mockModel = runtime.getModel(providerId, model.modelId);
+    if (!mockModel) throw new Error(`model not found after register: ${model.modelId}`);
+    return mockModel;
+  }
   runtime.registerProvider(providerId, {
     baseUrl: resolvePiProviderBaseUrl(model.api, model.baseUrl),
     api: model.api,

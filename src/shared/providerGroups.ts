@@ -59,6 +59,7 @@ const VENDOR_LABELS: Readonly<Record<string, string>> = {
   'azure-openai': 'Azure OpenAI',
   alibaba: 'Alibaba Cloud',
   volcengine: 'Volcengine',
+  mock: 'Mock',
 };
 
 /**

@@ -1,3 +1,4 @@
+import { MOCK_BASE_URL, MOCK_PROVIDER_ID } from './mockProvider';
 import type { ModelApiKind, OauthProviderInfo } from './types';
 
 export interface ProviderDefinition {
@@ -7,6 +8,8 @@ export interface ProviderDefinition {
   defaultApi?: ModelApiKind;
   defaultBaseUrl?: string;
   supportsApiKey: boolean;
+  /** 一键接入：无需填 key / 订阅，向导点选后直接入库 */
+  instantSetup?: boolean;
 }
 
 /** 各协议在未填写地址时的唯一默认值，向导与主进程请求共用。 */
@@ -36,6 +39,14 @@ export const STATIC_PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = [
     label: 'Custom',
     defaultApi: 'openai-completions',
     supportsApiKey: true,
+  },
+  {
+    id: MOCK_PROVIDER_ID,
+    label: 'Mock',
+    defaultApi: 'openai-completions',
+    defaultBaseUrl: MOCK_BASE_URL,
+    supportsApiKey: false,
+    instantSetup: true,
   },
   {
     id: 'anthropic',
