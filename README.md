@@ -126,6 +126,21 @@ pnpm install
 pnpm dev
 ```
 
+### Mock provider (no API keys)
+
+The **Mock** / Demo catalog entry is a first-class in-process provider. It streams assistant text locally and never calls a vendor.
+
+1. `pnpm dev`
+2. Settings → Providers → **Add model or provider** → **Mock** (one click; placeholder key `enso-mock` is filled for you)
+3. Start a chat. Optional: put `[[tool:read {"path":"README.md"}]]` in the prompt to demo a tool call.
+
+Isolated userData for screenshots or clean demos:
+
+```bash
+node scripts/seed-mock-env.mjs /tmp/enso-mock
+ENSO_USER_DATA_DIR=/tmp/enso-mock pnpm dev
+```
+
 ### Packaging
 
 ```bash

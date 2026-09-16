@@ -1,3 +1,4 @@
+import { isMockProviderConfig, MOCK_MODELS } from '@shared/mockProvider';
 import { positiveFiniteNumber } from '@shared/modelCatalog';
 import { DEFAULT_BASE_URLS, withVersionSegment } from '@shared/providerCatalog';
 import type {
@@ -58,6 +59,12 @@ export function toMessage(error: unknown): string {
 }
 
 export async function listModels(config: ProviderApiConfig): Promise<ListModelsResult> {
+  if (isMockProviderConfig(config)) {
+    return {
+      ok: true,
+      models: MOCK_MODELS.map((model) => ({ id: model.id })),
+    };
+  }
   const base = resolveBase(config);
   const key = config.apiKey.trim();
   try {
@@ -205,6 +212,10 @@ export async function testProvider(
   modelId?: string
 ): Promise<TestProviderResult> {
   const started = Date.now();
+  if (isMockProviderConfig(config)) {
+    const model = modelId?.trim() || MOCK_MODELS[0]?.id || 'mock-chat';
+    return { ok: true, latencyMs: Date.now() - started, message: model };
+  }
   const model = modelId?.trim();
 
   // 无模型可用时，退化为拉取模型列表做连通性检查

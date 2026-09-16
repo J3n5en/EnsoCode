@@ -1,12 +1,13 @@
 import type { ProviderDefinition } from '@shared/providerCatalog';
 import type { ProviderApiFormValue } from './ProviderApiForm';
 
-export type ProviderSetupMethod = 'oauth' | 'api-key';
+export type ProviderSetupMethod = 'oauth' | 'api-key' | 'instant';
 
 export function availableProviderSetupMethods(
   definition: ProviderDefinition
 ): ProviderSetupMethod[] {
   const methods: ProviderSetupMethod[] = [];
+  if (definition.instantSetup) methods.push('instant');
   if (definition.oauthProviderId) methods.push('oauth');
   if (definition.supportsApiKey) methods.push('api-key');
   return methods;

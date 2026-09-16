@@ -1,6 +1,7 @@
+import { createMockProviderEntry, MOCK_CHAT_MODEL_ID } from '@shared/mockProvider';
 import { mergeProviderDefinitions } from '@shared/providerCatalog';
 import type { OauthAccount, OauthProviderInfo } from '@shared/types';
-import { ArrowLeft, BadgeCheck, KeyRound, Puzzle } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, KeyRound, Puzzle, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialBootstrap';
 import { OauthLoginStep } from '@/components/oauth/OauthLoginStep';
@@ -40,6 +41,7 @@ const WIZARD_STEP_ORDER: Record<WizardStep, number> = {
 export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardProps) {
   const { t } = useI18n();
   const addProviders = useSettingsStore((state) => state.addProviders);
+  const setDefaultModel = useSettingsStore((state) => state.setDefaultModel);
   const [{ step, previousStep, transitionStarted, pageId }, setWizardPage] = React.useState<{
     step: WizardStep;
     previousStep: WizardStep | null;
@@ -173,6 +175,18 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
     onOpenChange(false);
   };
 
+  const addMockProvider = () => {
+    const provider = createMockProviderEntry(crypto.randomUUID());
+    addProviders([provider]);
+    const store = useSettingsStore.getState();
+    if (!store.defaultModel) {
+      const saved =
+        store.providers.find((entry) => entry.catalogId === provider.catalogId) ?? provider;
+      setDefaultModel({ providerId: saved.id, modelId: MOCK_CHAT_MODEL_ID });
+    }
+    close();
+  };
+
   const back = () => {
     flow.reset();
     if (step === 'method') {
@@ -247,6 +261,10 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                           className="flex min-w-0 items-center gap-3 rounded-md border px-3 py-3 text-left transition-colors hover:bg-accent"
                           onClick={() => {
                             setSelectedId(definition.id);
+                            if (methods.length === 1 && methods[0] === 'instant') {
+                              addMockProvider();
+                              return;
+                            }
                             setStep('method');
                           }}
                         >
@@ -266,6 +284,11 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                               {methods.includes('api-key') && (
                                 <Badge variant="outline" className="text-[10px]">
                                   {t('API Key')}
+                                </Badge>
+                              )}
+                              {methods.includes('instant') && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  {t('Demo')}
                                 </Badge>
                               )}
                             </span>
@@ -308,6 +331,25 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                         <span className="block text-sm font-medium">{t('API Key')}</span>
                         <span className="block text-xs text-muted-foreground">
                           {t('Configure an endpoint and key, then fetch or test its models.')}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                  {availableProviderSetupMethods(selected).includes('instant') && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition-colors hover:bg-accent"
+                      onClick={addMockProvider}
+                    >
+                      <Sparkles className="h-5 w-5 shrink-0 text-primary" />
+                      <span>
+                        <span className="block text-sm font-medium">
+                          {t('Use local Mock provider')}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t(
+                            'Adds a built-in demo model that streams replies without calling a real vendor.'
+                          )}
                         </span>
                       </span>
                     </button>

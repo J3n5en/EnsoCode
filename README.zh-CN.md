@@ -127,6 +127,21 @@ pnpm install
 pnpm dev
 ```
 
+### Mock 供应商（无需真实 API Key）
+
+向导里的 **Mock** / 演示是一等公民：进程内 `streamSimple` 本地流式回复，不访问任何厂商。
+
+1. `pnpm dev`
+2. 设置 → 供应商 → **添加模型或供应商** → **Mock**（一点即用，占位 key 为 `enso-mock`）
+3. 开聊即可。需要演示工具调用时，在提示里写 `[[tool:read {"path":"README.md"}]]`。
+
+隔离 userData（截图 / 干净演示）：
+
+```bash
+node scripts/seed-mock-env.mjs /tmp/enso-mock
+ENSO_USER_DATA_DIR=/tmp/enso-mock pnpm dev
+```
+
 ### 多端打包
 
 ```bash

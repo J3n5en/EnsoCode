@@ -1,3 +1,4 @@
+import { MOCK_API_KEY, MOCK_BASE_URL, MOCK_CHAT_MODEL_ID } from '@shared/mockProvider';
 import { withVersionSegment } from '@shared/providerCatalog';
 import type { ModelApiKind } from '@shared/types';
 import { net } from 'electron';
@@ -73,6 +74,32 @@ describe('resolveBase', () => {
 
   it('去掉首尾空白', () => {
     expect(resolveBase(cfg('  https://example.com  '))).toBe('https://example.com');
+  });
+});
+
+describe('mock provider 短路', () => {
+  afterEach(() => {
+    net.fetch = originalNetFetch;
+  });
+
+  it('list/test 不走网络，返回内置模型', async () => {
+    const fetchMock = vi.fn();
+    net.fetch = fetchMock;
+    const config = {
+      api: 'openai-completions' as const,
+      apiKey: MOCK_API_KEY,
+      baseUrl: MOCK_BASE_URL,
+    };
+    await expect(listModels(config)).resolves.toMatchObject({
+      ok: true,
+      models: expect.arrayContaining([{ id: MOCK_CHAT_MODEL_ID }]),
+    });
+    await expect(testProvider(config, MOCK_CHAT_MODEL_ID)).resolves.toMatchObject({
+      ok: true,
+      message: MOCK_CHAT_MODEL_ID,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(proxyMocks.whenReady).not.toHaveBeenCalled();
   });
 });
 

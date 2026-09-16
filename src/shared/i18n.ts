@@ -1286,6 +1286,12 @@ export const zhTranslations: Record<string, string> = {
     '同时加载项目内 .claude/.codex/.cursor 下的 skills，以及规则文件（.cursorrules、.cursor/rules、.claude/rules）',
   // Model providers · 供应商分组与删除确认
   Custom: '自定义',
+  Mock: 'Mock',
+  Demo: '演示',
+  'Local demo — no API key': '本地演示，无需 API Key',
+  'Adds a built-in demo model that streams replies without calling a real vendor.':
+    '添加内置演示模型，无需真实厂商即可流式回复。',
+  'Use local Mock provider': '使用本地 Mock 供应商',
   'Remove provider?': '删除该配置？',
   'Removing this also signs out {{name}}. Other accounts for the same vendor stay signed in.':
     '删除会同时退登「{{name}}」。同一厂商下的其他账号仍保持登录。',

@@ -42,6 +42,11 @@ describe('provider catalog', () => {
       id: '__custom',
       supportsApiKey: true,
     });
+    expect(STATIC_PROVIDER_DEFINITIONS[1]).toMatchObject({
+      id: 'mock',
+      instantSetup: true,
+      supportsApiKey: false,
+    });
   });
 
   it('运行时 OAuth 合并到同 id 静态厂商，扩展 provider 接在 custom 之后', () => {

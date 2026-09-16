@@ -1,4 +1,5 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { MOCK_API_ID, MOCK_API_KEY, MOCK_BASE_URL, MOCK_CHAT_MODEL_ID } from '@shared/mockProvider';
 import { describe, expect, it, vi } from 'vitest';
 import { resolveBaseModel, resolveBaseModelOrRefresh } from './supervisor';
 
@@ -122,6 +123,33 @@ describe('resolveBaseModel apiKey', () => {
       expect.objectContaining({
         api: 'google-generative-ai',
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      })
+    );
+  });
+
+  it('mock 哨兵配置注册 streamSimple，不走 HTTP api', () => {
+    const registerProvider = vi.fn();
+    const runtime = {
+      getModels: () => [],
+      getModel: () => ({ id: MOCK_CHAT_MODEL_ID }),
+      registerProvider,
+    } as unknown as ModelRuntime;
+
+    const resolved = resolveBaseModel(runtime, {
+      api: 'openai-completions',
+      baseUrl: MOCK_BASE_URL,
+      apiKey: MOCK_API_KEY,
+      modelId: MOCK_CHAT_MODEL_ID,
+      settingsProviderId: 'settings-provider',
+    });
+
+    expect(resolved).toEqual({ id: MOCK_CHAT_MODEL_ID });
+    expect(registerProvider).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        api: MOCK_API_ID,
+        baseUrl: MOCK_BASE_URL,
+        streamSimple: expect.any(Function),
       })
     );
   });
