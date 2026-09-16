@@ -66,6 +66,13 @@ interface ComposerProps {
   onActivate?: () => void;
   onSend: (payload: ComposerPayload) => boolean | undefined;
   onAbort: () => void;
+  /**
+   * 侧栏旁路等第二输入框：不抢主 Composer 的 insert/focus 桥，也不吃侧栏拖放。
+   * 主会话必须保持默认 false。
+   */
+  isolated?: boolean;
+  /** 覆盖默认「Type @ …」占位；slash / locked / agent 文案仍优先 */
+  placeholder?: string;
 }
 
 interface ComposerDraft {
@@ -96,6 +103,8 @@ export function Composer({
   onActivate,
   onSend,
   onAbort,
+  isolated = false,
+  placeholder: placeholderText,
 }: ComposerProps) {
   const { t } = useI18n();
   const mentionPickerId = useId();
@@ -109,11 +118,15 @@ export function Composer({
 
   // 侧栏拖入(dnd-kit):会话/项目行落到输入区插 mention chip。
   // 与 OS 文件拖入(HTML5 dnd)互不干扰:两套事件体系独立。
-  const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({ id: COMPOSER_DROP_ID });
+  const { setNodeRef: setDropRef, isOver: dndOver } = useDroppable({
+    id: isolated ? `isolated-composer:${focusKey ?? 'side'}` : COMPOSER_DROP_ID,
+    disabled: isolated,
+  });
   const [preview, setPreview] = useState<UiElementMentionCandidate | null>(null);
   const [imagePreview, setImagePreview] = useState<AttachedImage | null>(null);
   const boundIds = useRef(new Set<string>());
   useEffect(() => {
+    if (isolated) return;
     const unsubInsert = registerComposerInsert((candidate) =>
       editorRef.current?.insertMention(candidate)
     );
@@ -137,7 +150,7 @@ export function Composer({
       unsubUi();
       unsubImage();
     };
-  }, []);
+  }, [isolated]);
   const editorRef = useRef<MentionEditorHandle>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -466,6 +479,7 @@ export function Composer({
     if (isComposing) return;
     const pressed = eventToBinding(event);
     if (
+      !isolated &&
       pressed &&
       pressed === effectiveKeybindings(useSettingsStore.getState().keybindings)['switch-model']
     ) {
@@ -637,9 +651,11 @@ export function Composer({
                   ? t('Resolve the pending approval to continue')
                   : agentRecipient
                     ? t('Message the selected Agent…')
-                    : running
-                      ? t('Message will queue until this round finishes…')
-                      : t('Type @ to choose a file or Agent')
+                    : placeholderText
+                      ? placeholderText
+                      : running
+                        ? t('Message will queue until this round finishes…')
+                        : t('Type @ to choose a file or Agent')
             }
             disabled={locked}
             onStateChange={handleEditorState}

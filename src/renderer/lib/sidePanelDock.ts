@@ -111,6 +111,19 @@ export function addSidePanelBrowser(opts?: {
   });
 }
 
+export function addSidePanelBtw(opts?: { title?: string }): void {
+  const active = activeDock();
+  if (!active) return;
+  useSidePanelStore.getState().ensureOpen();
+  const count = active.api.panels.filter((panel) => panel.id.startsWith('btw:')).length;
+  active.api.addPanel({
+    id: `btw:${crypto.randomUUID()}`,
+    component: 'btw',
+    title: opts?.title ?? (count === 0 ? 'Btw' : `Btw ${count + 1}`),
+    params: { conversationId: active.conversationId, projectId: active.projectId },
+  });
+}
+
 export function closeSidePanelBrowser(conversationId: string, tabId: string): void {
   docks.get(conversationId)?.getPanel(tabId)?.api.close();
 }

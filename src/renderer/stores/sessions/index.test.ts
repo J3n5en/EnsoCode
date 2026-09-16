@@ -121,6 +121,8 @@ const hireCoworker = vi.fn(async (): Promise<{ ok: boolean; error?: string }> =>
 const summarizeTitle = vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }));
 const agentAbort = vi.fn(async (_id: string) => ({ ok: true }));
 const agentRelease = vi.fn(async (_id: string) => ({ ok: true }));
+const btwSpawn = vi.fn(async () => ({ ok: true }));
+const btwDispose = vi.fn(async () => ({ ok: true }));
 const agentRewind = vi.fn(async () => ({ ok: true }));
 const requestSnapshot = vi.fn(async () => ({ ok: true }));
 
@@ -167,6 +169,12 @@ vi.stubGlobal('window', {
       release: agentRelease,
       rewind: agentRewind,
       steer: vi.fn(async () => ({ ok: true })),
+    },
+    btw: {
+      spawn: btwSpawn,
+      dispose: btwDispose,
+      prompt: vi.fn(),
+      abort: vi.fn(),
     },
     agentDispatch: {
       bindSource,
@@ -609,11 +617,12 @@ describe('typed Agent child projection', () => {
       child: childIdentity(1),
     });
     const task = { text: 'inspect from a new chat', images: [], fileMentions: [] };
-    const result = await sessionsModule.useSessionsStore.getState().dispatchAgent(
-      'builtin:scout',
-      task,
-      { providerId: 'project-provider', modelId: 'project-model' }
-    );
+    const result = await sessionsModule.useSessionsStore
+      .getState()
+      .dispatchAgent('builtin:scout', task, {
+        providerId: 'project-provider',
+        modelId: 'project-model',
+      });
     expect(result.accepted).toBe(true);
     expect(updateConversationSelection).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3212,5 +3221,148 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
     sessionsModule.useSessionsStore.getState().rewind('coworker', 0, false);
     expect(agentSpawn).not.toHaveBeenCalled();
     expect(agentRewind).not.toHaveBeenCalled();
+  });
+});
+
+describe('btw session send', () => {
+  beforeAll(async () => {
+    settingsModule ??= await import('../settings');
+    sessionsModule ??= await import('./index');
+  });
+
+  beforeEach(async () => {
+    agentPrompt.mockClear();
+    agentSpawn.mockClear();
+    btwSpawn.mockReset().mockResolvedValue({ ok: true });
+    btwDispose.mockReset().mockResolvedValue({ ok: true });
+    nextConversationId = 'parent';
+    sourceProjection = {
+      projects: [
+        {
+          projectId: 'project',
+          canonicalPath: '/workspace',
+          state: 'active',
+          version: 1,
+        },
+      ],
+      conversations: [],
+    };
+    sessionsModule.useSessionsStore.setState({
+      conversations: {},
+      order: [],
+      activeId: null,
+      pendingAgentPrefill: undefined,
+    });
+    settingsModule.useSettingsStore.setState({
+      projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
+    });
+    await seedParent();
+  });
+
+  it('send(conversationId) 旁路会话走 btw.spawn 且不切走主会话', async () => {
+    const parentId = sessionsModule.useSessionsStore.getState().activeId!;
+    settingsModule.useSettingsStore.setState({ loadLocalSkills: false });
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        [parentId]: {
+          ...state.conversations[parentId],
+          presetId: 'coding',
+          approvalMode: 'supervised',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().ensureBtwConversation({
+      id: 'btw-1',
+      projectId: 'project',
+      btwParentId: parentId,
+      rolePrompt: 'You are aside',
+    });
+    await sessionsModule.useSessionsStore
+      .getState()
+      .send(
+        'hello aside',
+        { providerId: 'provider-1', modelId: 'model-1', cwd: '/workspace' },
+        undefined,
+        'btw-1'
+      );
+    expect(btwSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'btw-1',
+        parentConversationId: parentId,
+        rolePrompt: 'You are aside',
+        presetId: 'coding',
+        approvalMode: 'supervised',
+        loadLocalSkills: false,
+      })
+    );
+    expect(agentSpawn).not.toHaveBeenCalled();
+    expect(agentPrompt).toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().activeId).toBe(parentId);
+    expect(sessionsModule.useSessionsStore.getState().order).not.toContain('btw-1');
+  });
+
+  it('主会话前台时旁路仍应用 message-upsert，不因冷缓存丢正文', async () => {
+    const parentId = sessionsModule.useSessionsStore.getState().activeId!;
+    sessionsModule.useSessionsStore.getState().ensureBtwConversation({
+      id: 'btw-1',
+      projectId: 'project',
+      btwParentId: parentId,
+      rolePrompt: 'You are aside',
+    });
+    onAgentEvent?.({
+      type: 'message-upsert',
+      identity: { sessionId: 'btw-1', generation: 'g1' },
+      seq: 1,
+      index: 0,
+      message: { role: 'assistant', content: [{ type: 'text', text: '旁路答完了' }] },
+    });
+    const messages = sessionsModule.useSessionsStore.getState().conversations['btw-1']?.messages;
+    expect(messages?.some((message) => message.role === 'assistant')).toBe(true);
+    expect(JSON.stringify(messages)).toContain('旁路答完了');
+  });
+
+  it('旁路首条 role 前缀 user upsert 消费乐观回显并上屏助手', async () => {
+    const parentId = sessionsModule.useSessionsStore.getState().activeId!;
+    sessionsModule.useSessionsStore.getState().ensureBtwConversation({
+      id: 'btw-1',
+      projectId: 'project',
+      btwParentId: parentId,
+      rolePrompt: 'You are aside',
+    });
+    await sessionsModule.useSessionsStore
+      .getState()
+      .send(
+        '刚刚聊到什么工具',
+        { providerId: 'provider-1', modelId: 'model-1', cwd: '/workspace' },
+        undefined,
+        'btw-1'
+      );
+    expect(
+      sessionsModule.useSessionsStore
+        .getState()
+        .conversations['btw-1']?.messages.some((message) => message.optimistic)
+    ).toBe(true);
+    onAgentEvent?.({
+      type: 'message-upsert',
+      identity: { sessionId: 'btw-1', generation: 'g1' },
+      seq: 1,
+      index: 0,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '<role>\nYou are aside\n</role>\n\n刚刚聊到什么工具' }],
+      },
+    });
+    onAgentEvent?.({
+      type: 'message-upsert',
+      identity: { sessionId: 'btw-1', generation: 'g1' },
+      seq: 2,
+      index: 1,
+      message: { role: 'assistant', content: [{ type: 'text', text: '用的是 bash' }] },
+    });
+    const messages = sessionsModule.useSessionsStore.getState().conversations['btw-1']?.messages;
+    expect(messages?.some((message) => message.optimistic)).toBe(false);
+    expect(messages?.some((message) => message.role === 'assistant')).toBe(true);
+    expect(JSON.stringify(messages)).toContain('用的是 bash');
   });
 });

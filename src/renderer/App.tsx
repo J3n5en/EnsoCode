@@ -30,7 +30,11 @@ import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
-import { addSidePanelTerminal, closeActiveSidePanelTab } from '@/lib/sidePanelDock';
+import {
+  addSidePanelBtw,
+  addSidePanelTerminal,
+  closeActiveSidePanelTab,
+} from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
@@ -157,6 +161,7 @@ export default function App() {
           'toggle-side-panel',
           'toggle-side-panel-fullscreen',
           'new-side-tab',
+          'new-btw-tab',
           'close-side-tab',
           'find-in-chat',
           'search-workspace',
@@ -177,6 +182,9 @@ export default function App() {
         e.preventDefault();
         if (isEventInSidePanel(e.target)) addSidePanelTerminal();
         else startNewConversation();
+      } else if (pressed === bindings['new-btw-tab']) {
+        e.preventDefault();
+        addSidePanelBtw();
       } else if (pressed === bindings['next-tab']) {
         e.preventDefault();
         cycleTab(1);

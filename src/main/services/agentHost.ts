@@ -450,7 +450,12 @@ export function spawnSession(
   /** 由 main 从项目权威派生(渲染层不可伪造):ssh 项目的会话工具走远端执行 */
   remote?: AgentRemoteConfig,
   /** 由 main 从会话权威派生，渲染层不可伪造 */
-  projectId?: string
+  projectId?: string,
+  options?: {
+    rolePrompt?: string;
+    extraDisabledTools?: readonly string[];
+    omitDispatchTools?: boolean;
+  }
 ): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
     return { ok: false, error: '会话文件已丢失，无法恢复历史' };
@@ -475,12 +480,19 @@ export function spawnSession(
   );
   const skillPaths = enabledSkillPaths(preset);
   const mcpServers = enabledMcpServers(preset);
-  const subagentModels = configuredSubagentModels(authenticatedAccountKeys);
-  const agentTypes = configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
+  const subagentModels = options?.omitDispatchTools
+    ? []
+    : configuredSubagentModels(authenticatedAccountKeys);
+  const agentTypes = options?.omitDispatchTools
+    ? []
+    : configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0);
   const state = readSettingsState();
   const disabledTools = resolveDisabledBuiltinTools(state?.disabledBuiltinTools, {
     disabledBuiltinTools: projectDisabledBuiltinTools(state?.projects, projectId),
   });
+  for (const id of options?.extraDisabledTools ?? []) {
+    if (!disabledTools.includes(id)) disabledTools.push(id);
+  }
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const windowsLocalShell = parseWindowsLocalShell(state?.windowsLocalShell);
   const exploreFoldEnabled = state?.exploreFoldEnabled === true;
@@ -536,6 +548,7 @@ export function spawnSession(
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
     ...(instruction ? { instruction } : {}),
     ...(remote ? { remote } : {}),
+    ...(options?.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
   });
 }
 
@@ -735,14 +748,18 @@ export function isAgentWorkerReady(): boolean {
  * worker 不在 / 退出 / 超时都以 reject 收尾，调用方自己决定重试。
  */
 export function completeText(input: {
+  requestId?: string;
   systemPrompt: string;
   userText: string;
   candidates: SpawnModelConfig[];
   timeoutMs: number;
   maxTokens?: number;
+  stream?: boolean;
+  reasoning?: ThinkingLevel | 'off';
 }): Promise<string> {
   if (!worker || !workerReady) return Promise.reject(new Error('Agent worker is not running.'));
-  const requestId = randomUUID();
+  const requestId = input.requestId?.trim() || randomUUID();
+  const { requestId: _requestId, stream, reasoning, ...rest } = input;
   return new Promise<string>((resolve, reject) => {
     // 每个候选各自 timeoutMs，整体再留一点余量做兑底
     const timer = setTimeout(
@@ -750,7 +767,7 @@ export function completeText(input: {
         pendingCompletions.delete(requestId);
         reject(new Error('completion timed out'));
       },
-      input.timeoutMs * input.candidates.length + 5_000
+      rest.timeoutMs * rest.candidates.length + 5_000
     );
     pendingCompletions.set(requestId, {
       resolve: (text) => {
@@ -762,12 +779,30 @@ export function completeText(input: {
         reject(error);
       },
     });
-    const posted = sendAgentCommand({ type: 'complete-text', requestId, ...input });
+    const posted = sendAgentCommand({
+      type: 'complete-text',
+      requestId,
+      ...rest,
+      ...(stream ? { stream: true as const } : {}),
+      ...(reasoning ? { reasoning } : {}),
+    });
     if (!posted.ok) {
       pendingCompletions.get(requestId)?.reject(new Error(posted.error ?? 'post failed'));
       pendingCompletions.delete(requestId);
     }
   });
+}
+
+/** 中止一次性补全：先拒绝 Main 侧等待者，再通知 worker 停推理 */
+export function abortCompleteText(requestId: string): { ok: boolean; error?: string } {
+  const id = requestId.trim();
+  if (!id) return { ok: false, error: 'invalid request' };
+  const pending = pendingCompletions.get(id);
+  if (pending) {
+    pendingCompletions.delete(id);
+    pending.reject(new Error('aborted'));
+  }
+  return sendAgentCommand({ type: 'abort-complete-text', requestId: id });
 }
 
 /** 标题总结：一次性补全命令，不绑会话身份；worker 按序尝试 candidates，结果经 title-generated / title-failed 回流 */

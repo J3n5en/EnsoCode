@@ -14,6 +14,7 @@ export const KEYBINDING_ACTIONS = [
   'next-tab',
   'prev-tab',
   'new-side-tab',
+  'new-btw-tab',
   'close-side-tab',
 ] as const;
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
@@ -31,6 +32,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'next-tab': 'Next coworker tab',
   'prev-tab': 'Previous coworker tab',
   'new-side-tab': 'New terminal tab',
+  'new-btw-tab': 'New Btw tab',
   'close-side-tab': 'Close terminal tab',
 };
 
@@ -38,6 +40,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
 export const ACTION_HINT_KEYS: Partial<Record<KeybindingAction, string>> = {
   'switch-model': 'Only when the chat input is focused',
   'new-side-tab': 'New terminal when the side panel is focused; otherwise new conversation',
+  'new-btw-tab': 'Open a Btw tab in the side panel',
 };
 
 export function isEventInSidePanel(target: EventTarget | null): boolean {
@@ -60,6 +63,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'next-tab': IS_MAC ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': IS_MAC ? 'ctrl+shift+tab' : 'mod+shift+tab',
   'new-side-tab': 'mod+t',
+  'new-btw-tab': 'mod+shift+b',
   'close-side-tab': 'mod+w',
 };
 

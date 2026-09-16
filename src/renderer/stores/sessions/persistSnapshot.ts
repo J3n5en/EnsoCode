@@ -105,15 +105,17 @@ function persistOne(conversation: PersistableConversation): PersistableConversat
 let cached: { fingerprint: string; value: SessionsPersistSlice } | null = null;
 
 export function cachedPartializeSessions(state: SessionsPersistSlice): SessionsPersistSlice {
+  const keep = (id: string): boolean =>
+    Boolean(state.conversations[id]) && !state.conversations[id]?.btwParentId;
   const value: SessionsPersistSlice = {
     conversations: Object.fromEntries(
-      Object.entries(state.conversations).map(([id, conversation]) => [
-        id,
-        persistOne(conversation),
-      ])
+      Object.entries(state.conversations)
+        .filter(([, conversation]) => !conversation.btwParentId)
+        .map(([id, conversation]) => [id, persistOne(conversation)])
     ),
-    order: state.order,
-    activeId: state.activeId,
+    order: state.order.filter(keep),
+    activeId:
+      state.activeId && keep(state.activeId) ? state.activeId : (state.order.find(keep) ?? null),
   };
   const fingerprint = JSON.stringify(value);
   if (cached?.fingerprint === fingerprint) return cached.value;

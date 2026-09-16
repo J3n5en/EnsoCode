@@ -94,6 +94,15 @@ describe('selectChatCandidateConversations', () => {
     });
     expect(unavailable).toEqual([]);
   });
+
+  it('跳过旁路会话，即使已有 sessionFile', () => {
+    expect(
+      selectChatCandidateConversations({
+        root: conv('root', { sessionFile: '/root.jsonl' }),
+        btw: conv('btw', { btwParentId: 'root', sessionFile: '/btw.jsonl' }),
+      }).map((entry) => entry.id)
+    ).toEqual(['root']);
+  });
 });
 
 describe('selectCoworkerTabConversations', () => {

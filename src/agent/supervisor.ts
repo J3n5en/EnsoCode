@@ -525,6 +525,8 @@ export class SessionSupervisor {
   private readonly notifier = new ParentNotifier((sessionId, text) => {
     this.deliverNotification(sessionId, text);
   });
+  private readonly completeTextAborts = new Map<string, AbortController>();
+  private readonly completeTextPendingAborts = new Set<string>();
 
   private branchContextExtension(getSession: () => ManagedSession | undefined): InlineExtension {
     return workspaceBranchContextExtension(getSession, (requestId) => {
@@ -799,6 +801,12 @@ export class SessionSupervisor {
       );
       return;
     }
+    if (command.type === 'abort-complete-text') {
+      const active = this.completeTextAborts.get(command.requestId);
+      if (active) active.abort();
+      else this.completeTextPendingAborts.add(command.requestId);
+      return;
+    }
     if (command.type === 'set-proxy-env') {
       applyWorkerProxyEnv(command.env);
       return;
@@ -912,7 +920,8 @@ export class SessionSupervisor {
           command.smartCompactSummaryModel,
           command.smartCompactMode,
           command.memoryLanguage,
-          command.editMode
+          command.editMode,
+          command.rolePrompt
         );
         return;
       case 'spawn-child':
@@ -1318,7 +1327,8 @@ export class SessionSupervisor {
     smartCompactSummaryModel?: SpawnModelConfig,
     smartCompactMode?: SmartCompactMode,
     memoryLanguage?: string,
-    requestedEditMode?: EditMode
+    requestedEditMode?: EditMode,
+    rolePrompt?: string
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -1990,6 +2000,7 @@ export class SessionSupervisor {
       toolIds: customTools.map((tool) => tool.name),
       checkpoints,
     });
+    if (rolePrompt && !resumeFile) managedRef.pendingRole = rolePrompt;
     managedRef.browser = browser;
     managedRef.memory = memory;
     this.options.emit({
@@ -3412,52 +3423,131 @@ export class SessionSupervisor {
   }
 
   /**
-   * 通用一次性文本补全（记忆蒸馏）：与 summarizeTitle 同样的候选链，但不对输出做形状判定，
+   * 通用一次性文本补全（记忆蒸馏 / btw）：与 summarizeTitle 同样的候选链，但不对输出做形状判定，
    * 原文回 Main 由调用方容错解析。每个候选共用同一上限超时。
+   * stream 时走 streamSimple 并推 text-delta；记忆蒸馏不设 stream，行为不变。
    */
   private async completeText(
     command: Extract<AgentCommand, { type: 'complete-text' }>
   ): Promise<void> {
-    const runtime = await this.getRuntime();
-    const context = {
-      systemPrompt: command.systemPrompt,
-      messages: [{ role: 'user' as const, content: command.userText, timestamp: Date.now() }],
-    };
-    let lastError = 'no candidates';
-    for (const candidate of command.candidates) {
-      const label = describeTitleModel(candidate);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), command.timeoutMs);
-      try {
-        const model = await resolveBaseModelOrRefresh(runtime, candidate);
-        const message = await runtime.completeSimple(model, context, {
-          signal: controller.signal,
-          ...(command.maxTokens !== undefined ? { maxTokens: command.maxTokens } : {}),
-        });
-        if (message.stopReason === 'aborted') {
-          lastError = `${label}: timed out after ${Math.round(command.timeoutMs / 1000)}s`;
-          continue;
-        }
-        if (message.stopReason === 'error') {
-          lastError = `${label}: ${message.errorMessage?.trim() || 'model error'}`;
-          continue;
-        }
-        const text = message.content
-          .map((part) => (part.type === 'text' ? part.text : ''))
-          .join('');
-        if (!text.trim()) {
-          lastError = `${label}: empty completion`;
-          continue;
-        }
-        this.options.emit({ type: 'text-completed', requestId: command.requestId, text });
-        return;
-      } catch (error) {
-        lastError = `${label}: ${toErrorMessage(error)}`;
-      } finally {
-        clearTimeout(timer);
-      }
+    if (this.completeTextPendingAborts.delete(command.requestId)) {
+      this.options.emit({ type: 'text-failed', requestId: command.requestId, error: 'aborted' });
+      return;
     }
-    this.options.emit({ type: 'text-failed', requestId: command.requestId, error: lastError });
+    const userAbort = new AbortController();
+    this.completeTextAborts.set(command.requestId, userAbort);
+    try {
+      const runtime = await this.getRuntime();
+      const context = {
+        systemPrompt: command.systemPrompt,
+        messages: [{ role: 'user' as const, content: command.userText, timestamp: Date.now() }],
+      };
+      let lastError = 'no candidates';
+      let streamed = false;
+      for (const candidate of command.candidates) {
+        if (userAbort.signal.aborted) break;
+        if (command.stream && streamed) {
+          this.options.emit({ type: 'text-delta', requestId: command.requestId, text: '' });
+          streamed = false;
+        }
+        const label = describeTitleModel(candidate);
+        const controller = new AbortController();
+        const onAbort = () => controller.abort();
+        userAbort.signal.addEventListener('abort', onAbort);
+        const timer = setTimeout(() => controller.abort(), command.timeoutMs);
+        try {
+          const model = await resolveBaseModelOrRefresh(runtime, candidate);
+          const options = {
+            signal: controller.signal,
+            ...(command.maxTokens !== undefined ? { maxTokens: command.maxTokens } : {}),
+            ...(command.reasoning && command.reasoning !== 'off'
+              ? { reasoning: command.reasoning }
+              : {}),
+          };
+          const message = command.stream
+            ? await this.readSimpleStream(
+                runtime,
+                model,
+                context,
+                options,
+                command.requestId,
+                () => {
+                  streamed = true;
+                }
+              )
+            : await runtime.completeSimple(model, context, options);
+          if (message.stopReason === 'aborted') {
+            if (userAbort.signal.aborted) break;
+            lastError = `${label}: timed out after ${Math.round(command.timeoutMs / 1000)}s`;
+            continue;
+          }
+          if (message.stopReason === 'error') {
+            lastError = `${label}: ${message.errorMessage?.trim() || 'model error'}`;
+            continue;
+          }
+          const text = message.content
+            .map((part) => (part.type === 'text' ? part.text : ''))
+            .join('');
+          if (!text.trim()) {
+            lastError = `${label}: empty completion`;
+            continue;
+          }
+          this.options.emit({ type: 'text-completed', requestId: command.requestId, text });
+          return;
+        } catch (error) {
+          lastError = `${label}: ${toErrorMessage(error)}`;
+        } finally {
+          userAbort.signal.removeEventListener('abort', onAbort);
+          clearTimeout(timer);
+        }
+      }
+      if (userAbort.signal.aborted) {
+        this.options.emit({ type: 'text-failed', requestId: command.requestId, error: 'aborted' });
+        return;
+      }
+      this.options.emit({ type: 'text-failed', requestId: command.requestId, error: lastError });
+    } finally {
+      this.completeTextAborts.delete(command.requestId);
+      this.completeTextPendingAborts.delete(command.requestId);
+    }
+  }
+
+  private async readSimpleStream(
+    runtime: ModelRuntime,
+    model: Awaited<ReturnType<typeof resolveBaseModelOrRefresh>>,
+    context: {
+      systemPrompt: string;
+      messages: Array<{ role: 'user'; content: string; timestamp: number }>;
+    },
+    options: { signal: AbortSignal; maxTokens?: number; reasoning?: ThinkingLevel },
+    requestId: string,
+    markStreamed: () => void
+  ) {
+    const stream = runtime.streamSimple(model, context, options);
+    for await (const event of stream) {
+      if (options.signal.aborted) break;
+      if (!event || typeof event !== 'object') continue;
+      const type = (event as { type?: unknown }).type;
+      if (
+        type !== 'text_delta' &&
+        type !== 'thinking_delta' &&
+        type !== 'text_start' &&
+        type !== 'thinking_start' &&
+        type !== 'text_end' &&
+        type !== 'thinking_end'
+      ) {
+        continue;
+      }
+      const live = liveCompletionText((event as { partial?: unknown }).partial);
+      markStreamed();
+      this.options.emit({
+        type: 'text-delta',
+        requestId,
+        text: live.text,
+        ...(live.thinking ? { thinking: live.thinking } : {}),
+      });
+    }
+    return stream.result();
   }
 
   /**
@@ -3595,6 +3685,23 @@ const slugify = (value: string): string =>
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+function liveCompletionText(partial: unknown): { text: string; thinking: string } {
+  if (!partial || typeof partial !== 'object') return { text: '', thinking: '' };
+  const content = (partial as { content?: unknown }).content;
+  if (!Array.isArray(content)) return { text: '', thinking: '' };
+  let text = '';
+  let thinking = '';
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const type = (part as { type?: unknown }).type;
+    const value = (part as { text?: unknown }).text;
+    const piece = typeof value === 'string' ? value : '';
+    if (type === 'text') text += piece;
+    else if (type === 'thinking') thinking += piece;
+  }
+  return { text, thinking };
+}
 
 /**
  * worker 的 ModelRuntime 按进程常驻，订阅清单只在首次建 runtime 时联网拉一次。之后用户

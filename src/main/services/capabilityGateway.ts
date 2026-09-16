@@ -633,6 +633,7 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'next-tab': process.platform === 'darwin' ? 'ctrl+tab' : 'mod+tab',
   'prev-tab': process.platform === 'darwin' ? 'ctrl+shift+tab' : 'mod+shift+tab',
   'new-side-tab': 'mod+t',
+  'new-btw-tab': 'mod+shift+b',
   'close-side-tab': 'mod+w',
 };
 

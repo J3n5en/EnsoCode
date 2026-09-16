@@ -343,6 +343,16 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('spawn-parent 携 rolePrompt:非空字符串通过,脏值拒绝', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand({ ...base, rolePrompt: 'You are aside' })).toEqual({
+      ...base,
+      rolePrompt: 'You are aside',
+    });
+    expect(parseAgentCommand({ ...base, rolePrompt: '' })).toBeNull();
+    expect(parseAgentCommand({ ...base, rolePrompt: 1 })).toBeNull();
+  });
+
   it('subagent-stop 必须 exact identity + 非空 agentId', () => {
     const command = { type: 'subagent-stop', identity: parent, agentId: 'agent-1' };
     expect(parseAgentCommand(command)).toEqual(command);
@@ -714,6 +724,33 @@ describe('一次性文本补全命令', () => {
       expect(parseAgentCommand({ ...command, maxTokens })).toBeNull();
     }
   });
+
+  it('接受 abort-complete-text 并拒绝脏 requestId', () => {
+    const command = { type: 'abort-complete-text', requestId: 'completion-1' };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ type: 'abort-complete-text', requestId: '' })).toBeNull();
+    expect(parseAgentCommand({ type: 'abort-complete-text' })).toBeNull();
+  });
+
+  it('接受 stream 与 reasoning，拒绝脏值', () => {
+    const command = {
+      type: 'complete-text',
+      requestId: 'completion-1',
+      systemPrompt: 'system',
+      userText: 'user',
+      candidates: [model],
+      timeoutMs: 1000,
+      stream: true as const,
+      reasoning: 'high' as const,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, reasoning: 'off' })).toEqual({
+      ...command,
+      reasoning: 'off',
+    });
+    expect(parseAgentCommand({ ...command, stream: false })).toBeNull();
+    expect(parseAgentCommand({ ...command, reasoning: 'nope' })).toBeNull();
+  });
 });
 
 describe('标题总结命令与事件', () => {
@@ -920,6 +957,19 @@ describe('标题总结命令与事件', () => {
     expect(parseAgentWorkerEvent({ ...event, title: '' })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, title: 42 })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, conversationId: undefined })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
+  });
+
+  it('text-delta 允许空 text，thinking 可选，拒绝脏输入', () => {
+    const event = { type: 'text-delta', requestId: 'completion-1', text: 'hel' };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, text: '' })).toEqual({ ...event, text: '' });
+    expect(parseAgentWorkerEvent({ ...event, thinking: 'hmm' })).toEqual({
+      ...event,
+      thinking: 'hmm',
+    });
+    expect(parseAgentWorkerEvent({ ...event, thinking: 1 })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...event, requestId: '' })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, extra: true })).toBeNull();
   });
 

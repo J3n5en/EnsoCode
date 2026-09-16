@@ -307,6 +307,11 @@ export const IPC_CHANNELS = {
   NODES_MESSAGE: 'nodes:message',
 
   WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
+
+  BTW_PROMPT: 'btw:prompt',
+  BTW_ABORT: 'btw:abort',
+  BTW_SPAWN: 'btw:spawn',
+  BTW_DISPOSE: 'btw:dispose',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -204,6 +204,7 @@ const KEYBINDING_ACTIONS = [
   'next-tab',
   'prev-tab',
   'new-side-tab',
+  'new-btw-tab',
   'close-side-tab',
 ] as const;
 const PRICING_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;

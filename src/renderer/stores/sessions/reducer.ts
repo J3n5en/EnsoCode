@@ -40,8 +40,15 @@ const SKILL_SLASH = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/;
 const SKILL_BLOCK =
   /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
 
+const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
+
+function stripRolePrefix(text: string): string {
+  const match = ROLE_PREFIX.exec(text);
+  return match ? text.slice(match[0].length).trim() : text;
+}
+
 function sameUserText(optimistic: string, delivered: string): boolean {
-  if (optimistic === delivered) return true;
+  if (optimistic === delivered || optimistic === stripRolePrefix(delivered)) return true;
   const slash = SKILL_SLASH.exec(optimistic);
   const block = SKILL_BLOCK.exec(delivered);
   if (!slash || !block) return false;
@@ -235,7 +242,12 @@ const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
   // 标题总结不属于任何 worker 会话（无 identity/seq），在 store 层处理，不进投影
   if (event.type === 'title-generated' || event.type === 'title-failed') return null;
   // 通用补全结果在 Main agentHost 就已结算，不会到达渲染层；这里只为收窄联合类型
-  if (event.type === 'text-completed' || event.type === 'text-failed') return null;
+  if (
+    event.type === 'text-completed' ||
+    event.type === 'text-failed' ||
+    event.type === 'text-delta'
+  )
+    return null;
   if (event.type === 'capability-invoke') return event.child;
   return event.identity;
 };
@@ -335,7 +347,12 @@ export function applyAgentEvent(
 
   const identity = eventIdentity(event);
   if (event.type === 'title-generated' || event.type === 'title-failed') return state;
-  if (event.type === 'text-completed' || event.type === 'text-failed') return state;
+  if (
+    event.type === 'text-completed' ||
+    event.type === 'text-failed' ||
+    event.type === 'text-delta'
+  )
+    return state;
   // spawn 拒绝恒以 seq:0 发出（worker 侧此时尚未建会话，没有 seq 计数器），
   // 过不了下面的 (generation, seq) 单调守卫。一并丢弃的后果是 spawn 失败在
   // UI 上完全无声：spawning 被别处清掉、status 停在 idle、error 为空，用户

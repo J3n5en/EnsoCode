@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  btwHotSessionIds,
   chatSurfaceBusy,
   chatTimelineBusy,
   evictColdMessages,
@@ -27,6 +28,22 @@ describe('messageCache', () => {
     const last = { b: 1000 };
     expect(isMessageCacheHot('b', 'a', last, 1000 + MESSAGE_CACHE_TTL_MS - 1)).toBe(true);
     expect(isMessageCacheHot('b', 'a', last, 1000 + MESSAGE_CACHE_TTL_MS)).toBe(false);
+  });
+
+  it('extraHotIds 即使不是 viewed 也保持热', () => {
+    const extra = new Set(['btw']);
+    expect(isMessageCacheHot('btw', 'parent', {}, 1000, MESSAGE_CACHE_TTL_MS, extra)).toBe(true);
+    expect(isMessageCacheHot('other', 'parent', {}, 1000, MESSAGE_CACHE_TTL_MS, extra)).toBe(false);
+  });
+
+  it('btwHotSessionIds 收集带 btwParentId 的会话', () => {
+    expect(
+      btwHotSessionIds({
+        parent: {},
+        btw: { btwParentId: 'parent' },
+        child: { btwParentId: undefined },
+      })
+    ).toEqual(new Set(['btw']));
   });
 
   it('evicts stale message bodies, leaves hot and empty conversations', () => {

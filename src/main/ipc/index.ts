@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { registerAgentHandlers } from './agent';
 import { registerAssetHandlers } from './assets';
 import { registerBrowserHandlers } from './browser';
+import { registerBtwHandlers } from './btw';
 import { registerCapabilityHandlers } from './capabilities';
 import { registerChangesHandlers } from './changes';
 import { registerConfigSyncHandlers } from './configSync';
@@ -49,6 +50,7 @@ export function registerIpcHandlers(): void {
   registerWorkspaceSearchHandlers();
   registerUsageHandlers();
   registerMemoryHandlers();
+  registerBtwHandlers();
 
   // 所有新建窗口自动挂载状态事件
   app.on('browser-window-created', (_, win) => {

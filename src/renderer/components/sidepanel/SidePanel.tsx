@@ -13,6 +13,7 @@ import {
   GitCompare,
   Globe,
   Maximize2,
+  MessageCircle,
   Minimize2,
   Plus,
   SquareTerminal,
@@ -34,6 +35,7 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { BrowserView } from './BrowserView';
+import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { shouldSkipSidePanelWidthAnim } from './sidePanelWidthAnim';
@@ -127,6 +129,27 @@ function FilesPanel(props: IDockviewPanelProps<{ conversationId?: string; projec
   return <FilesView conversationId={conversationId} projectId={projectId} />;
 }
 
+function addBtwPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const count = api.panels.filter((panel) => panel.id.startsWith('btw:')).length;
+  api.addPanel({
+    id: `btw:${crypto.randomUUID()}`,
+    component: 'btw',
+    title: count === 0 ? label : `${label} ${count + 1}`,
+    params: { conversationId, projectId },
+  });
+}
+
+function BtwPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
+  const { conversationId } = props.params;
+  if (!conversationId) return null;
+  return <BtwView conversationId={conversationId} panelApi={props.api} />;
+}
+
 function addBrowserPanel(
   api: DockviewApi,
   conversationId: string | undefined,
@@ -201,6 +224,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         <GitCompare className="h-3 w-3 shrink-0" />
       ) : props.api.id === 'files' ? (
         <FolderOpen className="h-3 w-3 shrink-0" />
+      ) : props.api.id.startsWith('btw:') ? (
+        <MessageCircle className="h-3 w-3 shrink-0" />
       ) : isBrowser && favicon && !faviconBroken ? (
         <img
           src={favicon}
@@ -253,12 +278,14 @@ function NewTabMenu({
   onNewChanges,
   onNewFiles,
   onNewBrowser,
+  onNewBtw,
   compact,
 }: {
   onNewTerminal: () => void;
   onNewChanges: () => void;
   onNewFiles: () => void;
   onNewBrowser: () => void;
+  onNewBtw: () => void;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -292,6 +319,10 @@ function NewTabMenu({
         <MenuItem onClick={onNewBrowser}>
           <Globe className="h-4 w-4" />
           {t('Browser')}
+        </MenuItem>
+        <MenuItem onClick={onNewBtw}>
+          <MessageCircle className="h-4 w-4" />
+          {t('Btw')}
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -338,6 +369,20 @@ function SidePanelHeaderActions({
         onNewChanges={() => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))}
         onNewFiles={() => addFilesPanel(containerApi, conversationId, projectId, t('Files'))}
         onNewBrowser={() => addBrowserPanel(containerApi, conversationId, projectId, t('Browser'))}
+        onNewBtw={() => {
+          if (group) {
+            const count = containerApi.panels.filter((panel) => panel.id.startsWith('btw:')).length;
+            containerApi.addPanel({
+              id: `btw:${crypto.randomUUID()}`,
+              component: 'btw',
+              title: count === 0 ? t('Btw') : `${t('Btw')} ${count + 1}`,
+              params: { conversationId, projectId },
+              position: { referenceGroup: group },
+            });
+            return;
+          }
+          addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
+        }}
       />
     </div>
   );
@@ -369,6 +414,7 @@ function Watermark(props: IWatermarkPanelProps) {
           onNewBrowser={() =>
             addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
           }
+          onNewBtw={() => addBtwPanel(props.containerApi, conversationId, projectId, t('Btw'))}
         />
       </div>
     </div>
@@ -385,6 +431,7 @@ const DOCK_COMPONENTS = {
   changes: ChangesPanel,
   files: FilesPanel,
   browser: BrowserPanel,
+  btw: BtwPanel,
 };
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
@@ -446,6 +493,10 @@ function ConversationDock({
       if (panel.id === 'changes' || panel.id === 'files') return;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) {
         void window.electronAPI.browser.closeTab(panel.id);
+        return;
+      }
+      if (panel.id.startsWith('btw:')) {
+        void useSessionsStore.getState().disposeBtwConversation(panel.id.slice(4));
         return;
       }
       releaseTerminal(panel.id);

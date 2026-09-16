@@ -580,6 +580,10 @@ export const IPC_PRODUCT_COVERAGE = {
   MEMORY_CRYSTALLIZE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DISTILLABLE_SESSIONS: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DISTILL_SESSION: excluded('Memory desktop UI; not an Enso capability.'),
+  BTW_PROMPT: excluded('Desktop side-panel aside chat; not an Enso capability.'),
+  BTW_ABORT: excluded('Desktop side-panel aside chat abort; not an Enso capability.'),
+  BTW_SPAWN: excluded('Desktop side-panel aside chat spawn; not an Enso capability.'),
+  BTW_DISPOSE: excluded('Desktop side-panel aside chat dispose; not an Enso capability.'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

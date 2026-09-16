@@ -53,6 +53,7 @@ type Source = {
   sessionFile?: string;
   worktree?: { path?: string };
   reloading?: boolean;
+  btwParentId?: string;
 };
 
 function lastActiveAt(conversation: Source): number | undefined {
@@ -106,6 +107,7 @@ export function selectSidebarConversations(
   const prints: string[] = [];
   for (const [id, conversation] of Object.entries(conversations)) {
     if (!conversation) continue;
+    if (conversation.btwParentId) continue;
     const entry = project(
       conversation,
       conversationHasRunningChild(
@@ -155,7 +157,13 @@ export function selectChatCandidateConversations(
   if (cachedChatCandidates?.source === conversations) return cachedChatCandidates.value;
   const next: ChatCandidateConversation[] = [];
   for (const [id, conversation] of Object.entries(conversations)) {
-    if (!conversation || conversation.parentId || !conversation.sessionFile) continue;
+    if (
+      !conversation ||
+      conversation.parentId ||
+      conversation.btwParentId ||
+      !conversation.sessionFile
+    )
+      continue;
     next.push({
       id: conversation.id ?? id,
       title: conversation.title,

@@ -87,4 +87,19 @@ describe('cachedPartializeSessions', () => {
     expect(next).not.toBe(first);
     expect(next.conversations.a.title).toBe('renamed');
   });
+
+  it('omits btw conversations from persistence', () => {
+    const persisted = cachedPartializeSessions({
+      conversations: {
+        a: conv('a'),
+        btw: { ...conv('btw'), btwParentId: 'a', btwRolePrompt: 'secret' },
+      },
+      order: ['a', 'btw'],
+      activeId: 'btw',
+    });
+    expect(persisted.conversations.btw).toBeUndefined();
+    expect(persisted.conversations.a).toBeDefined();
+    expect(persisted.order).toEqual(['a']);
+    expect(persisted.activeId).toBe('a');
+  });
 });

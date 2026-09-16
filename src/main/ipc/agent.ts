@@ -228,6 +228,23 @@ function projectIdFor(sessionId: string): string | undefined {
   return sourceAuthority?.conversation(sessionId)?.projectId;
 }
 
+/** 旁路会话继承父会话工作区；路径由 Main 从权威记录推导，不采信 renderer。 */
+export function resolveConversationWorkspace(conversationId: string): {
+  cwd: string;
+  projectId: string;
+  remote?: AgentRemoteConfig;
+} | null {
+  const conversation = sourceAuthority?.conversation(conversationId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  if (!conversation || conversation.lifecycle === 'ended' || project?.state !== 'active') {
+    return null;
+  }
+  const cwd = sessionWorktree(conversationId)?.path ?? project.canonicalPath;
+  if (!cwd) return null;
+  const remote = remoteConfigFor(conversationId);
+  return { cwd, projectId: conversation.projectId, ...(remote ? { remote } : {}) };
+}
+
 function spawnBoundSession(
   identity: SessionIdentity,
   request: AgentSpawnRequest,

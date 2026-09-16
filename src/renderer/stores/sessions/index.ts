@@ -70,6 +70,7 @@ import {
   shouldSendRewindCommand,
 } from './conversationRewind';
 import {
+  btwHotSessionIds,
   evictColdMessages,
   hasAuthoritativeMessages,
   isBulkyAgentEvent,
@@ -215,6 +216,10 @@ export interface Conversation extends SessionProjection {
   approvalMode?: ApprovalMode;
   /** coworker 会话专有：父会话 id（有值则不进 order/侧栏） */
   parentId?: string;
+  /** 旁路会话：挂在主会话下，不进侧栏/持久化；关 tab 即销毁 */
+  btwParentId?: string;
+  /** 旁路隔离提示，spawn 时注入 pendingRole */
+  btwRolePrompt?: string;
   coworkerName?: string;
   agentType?: string;
   /** typed mention child 的 Main 权威 metadata；普通 coworker 无此字段。 */
@@ -336,7 +341,26 @@ interface SessionsState {
     requestId: string,
     decision: 'allow' | 'deny'
   ): Promise<void>;
-  send(text: string, target: SendTarget, images?: AttachedImage[]): Promise<string | null>;
+  send(
+    text: string,
+    target: SendTarget,
+    images?: AttachedImage[],
+    conversationId?: string
+  ): Promise<string | null>;
+  ensureBtwConversation(input: {
+    id: string;
+    projectId: string;
+    btwParentId: string;
+    rolePrompt: string;
+    lastProviderId?: string;
+    lastModelId?: string;
+    reasoningEnabled?: boolean;
+    thinkingLevel?: ThinkingLevel;
+    approvalMode?: ApprovalMode;
+    presetId?: string;
+  }): void;
+  resetBtwSession(id: string, rolePrompt: string): Promise<void>;
+  disposeBtwConversation(id: string): Promise<void>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
   resumeConversation(id: string): Promise<void>;
   /** 上滑加载更早历史：只读 jsonl，不 spawn */
@@ -363,7 +387,7 @@ interface SessionsState {
   setModel(id: string, providerId: string, modelId: string): void;
   /** 设置审批档位；已 spawn 的会话即时下发 */
   setApprovalMode(id: string, mode: ApprovalMode): void;
-  abort(): Promise<void>;
+  abort(conversationId?: string): Promise<void>;
   /** 切换聊天区 tab（undefined = 主会话） */
   selectTab(parentId: string, tabId?: string): void;
   /** 解雇 coworker：活会话删除靠 coworker-update 回流（单一数据流）；
@@ -569,6 +593,7 @@ export const useSessionsStore = create<SessionsState>()(
         if (
           !conversation ||
           conversation.parentId ||
+          conversation.btwParentId ||
           conversation.coworkerName ||
           conversation.titleLocked ||
           !conversation.title.trim() ||
@@ -811,7 +836,14 @@ export const useSessionsStore = create<SessionsState>()(
               if (snapshot) {
                 // 只看热度：手机 subscribe/history 触发的 targeted 快照也会广播到桌面，
                 // partial 就留正文会把当时的半截灌进冷会话，之后 upsert 又因冷被丢，半截常驻
-                const keepBody = isMessageCacheHot(id, viewed, lastViewedAt, now);
+                const keepBody = isMessageCacheHot(
+                  id,
+                  viewed,
+                  lastViewedAt,
+                  now,
+                  MESSAGE_CACHE_TTL_MS,
+                  btwHotSessionIds(conversations)
+                );
                 const next = applyAgentEvent(conversation, id, event);
                 const title = conversation.title || firstUserText(next) || '';
                 conversations[id] = {
@@ -974,8 +1006,13 @@ export const useSessionsStore = create<SessionsState>()(
           failTitleSummary(event.conversationId, event.error);
           return;
         }
-        // 通用补全结果在 Main 就已结算，不应到达渲染层；到了也与会话无关
-        if (event.type === 'text-completed' || event.type === 'text-failed') return;
+        // 一次性补全完成/失败在 Main 结算；text-delta 给 btw 面板，都不进会话投影
+        if (
+          event.type === 'text-completed' ||
+          event.type === 'text-failed' ||
+          event.type === 'text-delta'
+        )
+          return;
 
         const identity = event.type === 'capability-invoke' ? event.child : event.identity;
         const id = identity.sessionId;
@@ -1223,7 +1260,14 @@ export const useSessionsStore = create<SessionsState>()(
         const extractedTitle = rawUserText ? truncateTitle(rawUserText) : undefined;
         if (
           isBulkyAgentEvent(event.type) &&
-          !isMessageCacheHot(id, viewedFromState(current), lastViewedAt, Date.now())
+          !isMessageCacheHot(
+            id,
+            viewedFromState(current),
+            lastViewedAt,
+            Date.now(),
+            MESSAGE_CACHE_TTL_MS,
+            btwHotSessionIds(current.conversations)
+          )
         ) {
           if (extractedTitle && rawUserText) {
             trySummarizeTitle(id, rawUserText, extractedTitle, {
@@ -1316,7 +1360,14 @@ export const useSessionsStore = create<SessionsState>()(
             // worker 释放冷会话：冷缓存期间 upsert 已被丢，本地正文可能掉队，而回收定时器只在切会话时
             // 武装、夜里不再切就永远不清。这里直接清掉，切回时走 jsonl 尾窗；热正文可信，保留
             ...(event.type === 'parent-ended' &&
-            !isMessageCacheHot(id, viewedFromState(state), lastViewedAt, Date.now()) &&
+            !isMessageCacheHot(
+              id,
+              viewedFromState(state),
+              lastViewedAt,
+              Date.now(),
+              MESSAGE_CACHE_TTL_MS,
+              btwHotSessionIds(state.conversations)
+            ) &&
             (next.messages.length > 0 || next.customEntries.length > 0)
               ? {
                   messages: [],
@@ -2327,6 +2378,9 @@ export const useSessionsStore = create<SessionsState>()(
               void window.electronAPI.agent.dismissCoworker(id, coworkerId);
             }
           }
+          for (const [btwId, child] of Object.entries(get().conversations)) {
+            if (child?.btwParentId === id) void get().disposeBtwConversation(btwId);
+          }
           // release 内部会先 abort 再销毁 worker 侧会话树；只 abort 会让 ManagedSession
           // 留在 supervisor 的 Map 里直到 app 退出（jsonl 全量上下文常驻）
           if (conversation.started && !conversation.parentId) {
@@ -2519,14 +2573,84 @@ export const useSessionsStore = create<SessionsState>()(
           });
         },
 
-        async send(text, target, images) {
-          const submittedText = text;
-          const activeId = get().activeId;
-          if (!activeId) return 'no conversation';
-          const activeTab = get().conversations[activeId]?.activeTabId;
-          const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
+        ensureBtwConversation(input) {
+          if (get().conversations[input.id]) return;
+          const conversation: Conversation = {
+            ...emptyProjection,
+            id: input.id,
+            projectId: input.projectId,
+            title: '',
+            started: false,
+            spawning: false,
+            createdAt: Date.now(),
+            btwParentId: input.btwParentId,
+            btwRolePrompt: input.rolePrompt,
+            lastProviderId: input.lastProviderId,
+            lastModelId: input.lastModelId,
+            reasoningEnabled: input.reasoningEnabled,
+            thinkingLevel: input.thinkingLevel,
+            approvalMode: input.approvalMode ?? 'full',
+            ...(input.presetId ? { presetId: input.presetId } : {}),
+          };
+          set((state) => ({
+            conversations: { ...state.conversations, [input.id]: conversation },
+          }));
+        },
+
+        async resetBtwSession(id, rolePrompt) {
           const conversation = get().conversations[id];
-          if (conversation?.workspaceMigrating) return 'workspace operation in progress';
+          if (!conversation?.btwParentId) return;
+          set((state) =>
+            patch(state, id, { spawning: true, started: false, abortRequested: true })
+          );
+          await window.electronAPI.btw.dispose({ sessionId: id });
+          set((state) =>
+            patch(state, id, {
+              spawning: false,
+              started: false,
+              sessionFile: undefined,
+              messages: [],
+              queuedMessages: [],
+              pendingApprovals: [],
+              pendingAsks: [],
+              pendingCapabilityAsks: [],
+              backgroundTasks: [],
+              subagents: [],
+              commands: [],
+              customEntries: [],
+              error: undefined,
+              status: 'idle',
+              btwRolePrompt: rolePrompt,
+              abortRequested: false,
+            })
+          );
+        },
+
+        async disposeBtwConversation(id) {
+          const conversation = get().conversations[id];
+          if (!conversation?.btwParentId) return;
+          await window.electronAPI.btw.dispose({ sessionId: id });
+          set((state) => {
+            const conversations = { ...state.conversations };
+            delete conversations[id];
+            return { conversations };
+          });
+        },
+
+        async send(text, target, images, conversationId) {
+          const submittedText = text;
+          const id =
+            conversationId ??
+            (() => {
+              const activeId = get().activeId;
+              if (!activeId) return undefined;
+              const activeTab = get().conversations[activeId]?.activeTabId;
+              return activeTab && get().conversations[activeTab] ? activeTab : activeId;
+            })();
+          if (!id) return 'no conversation';
+          const conversation = get().conversations[id];
+          if (!conversation) return 'no conversation';
+          if (conversation.workspaceMigrating) return 'workspace operation in progress';
           // 只读回放的已结束实例：必须在乐观回显之前拦，否则会往只读历史里插一条
           // 根本没发出去的用户消息。
           if (conversation?.historyOnly) {
@@ -2633,19 +2757,37 @@ export const useSessionsStore = create<SessionsState>()(
                   extractRepresentativeTitle(text),
               })
             );
-            const result = await window.electronAPI.agent.spawn({
-              sessionId: id,
-              providerId: target.providerId,
-              modelId: target.modelId,
-              // 隔离会话一律在自己的 worktree 里跑，不信任调用方传的 cwd
-              cwd: conversation.worktree?.path ?? target.cwd,
-              resumeFile: conversation.sessionFile,
-              reasoningEnabled: conversation.reasoningEnabled,
-              thinkingLevel: conversation.thinkingLevel,
-              loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
-              presetId: conversation.presetId,
-              approvalMode: conversation.approvalMode ?? 'full',
-            });
+            const result = conversation.btwParentId
+              ? await window.electronAPI.btw.spawn({
+                  sessionId: id,
+                  parentConversationId: conversation.btwParentId,
+                  providerId: target.providerId,
+                  modelId: target.modelId,
+                  rolePrompt: conversation.btwRolePrompt ?? '',
+                  reasoningEnabled: conversation.reasoningEnabled,
+                  thinkingLevel: conversation.thinkingLevel,
+                  approvalMode:
+                    get().conversations[conversation.btwParentId]?.approvalMode ??
+                    conversation.approvalMode ??
+                    'full',
+                  presetId:
+                    get().conversations[conversation.btwParentId]?.presetId ??
+                    conversation.presetId,
+                  loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
+                })
+              : await window.electronAPI.agent.spawn({
+                  sessionId: id,
+                  providerId: target.providerId,
+                  modelId: target.modelId,
+                  // 隔离会话一律在自己的 worktree 里跑，不信任调用方传的 cwd
+                  cwd: conversation.worktree?.path ?? target.cwd,
+                  resumeFile: conversation.sessionFile,
+                  reasoningEnabled: conversation.reasoningEnabled,
+                  thinkingLevel: conversation.thinkingLevel,
+                  loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
+                  presetId: conversation.presetId,
+                  approvalMode: conversation.approvalMode ?? 'full',
+                });
             if (!result.ok) {
               // 与 deliver 失败同口径：收回回显、原文退回输入框，不留“看起来发出去了”的假象
               set((state) =>
@@ -2706,6 +2848,7 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (
             !conversation ||
+            conversation.btwParentId ||
             conversation.started ||
             conversation.spawning ||
             // 工作区迁移中：此刻 resume 会用错 cwd 把会话复活（spawning 会被 worker 事件清掉，挡不住）
@@ -2943,11 +3086,16 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        async abort() {
-          const activeId = get().activeId;
-          if (!activeId) return;
-          const activeTab = get().conversations[activeId]?.activeTabId;
-          const id = activeTab && get().conversations[activeTab] ? activeTab : activeId;
+        async abort(conversationId) {
+          const id =
+            conversationId ??
+            (() => {
+              const activeId = get().activeId;
+              if (!activeId) return undefined;
+              const activeTab = get().conversations[activeId]?.activeTabId;
+              return activeTab && get().conversations[activeTab] ? activeTab : activeId;
+            })();
+          if (!id) return;
           const conversation = get().conversations[id];
           if (!conversation?.started) return;
           // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复）
@@ -3426,7 +3574,9 @@ useSessionsStore.subscribe((state) => {
       current.conversations,
       viewedFromState(current),
       lastViewedAt,
-      Date.now()
+      Date.now(),
+      MESSAGE_CACHE_TTL_MS,
+      btwHotSessionIds(current.conversations)
     );
     if (next !== current.conversations) useSessionsStore.setState({ conversations: next });
   }, MESSAGE_CACHE_TTL_MS);

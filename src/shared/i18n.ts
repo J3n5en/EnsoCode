@@ -1520,6 +1520,14 @@ export const zhTranslations: Record<string, string> = {
     '请重新打开设置，以在此窗口载入导入后的配置。',
   'Import complete': '导入完成',
   'Backup of previous settings:': '之前设置的备份位置：',
+  Btw: '旁路',
+  Contextual: '带上下文',
+  Tangent: '独立旁路',
+  'Insert into chat': '填入主输入框',
+  'Ask aside…': '旁路提问…',
+  'Ask a side question without sending it to the main agent.': '旁路提问，不会发给主 agent。',
+  'New Btw tab': '新建旁路标签',
+  'Open a Btw tab in the side panel': '在右侧栏打开旁路对话',
 };
 
 export function normalizeLocale(input?: string): Locale {

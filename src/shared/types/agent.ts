@@ -591,6 +591,8 @@ export type AgentCommand =
       windowsLocalShell?: WindowsLocalShell;
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
+      /** 旁路会话：首条 prompt 前缀注入，消费一次 */
+      rolePrompt?: string;
     }
   | {
       type: 'spawn-child';
@@ -699,7 +701,7 @@ export type AgentCommand =
       candidates: SpawnModelConfig[];
     }
   | {
-      /** 通用一次性文本补全（记忆蒸馏用）：同 summarize-title 的候选链语义，结果经 text-completed / text-failed 按 requestId 回流 */
+      /** 通用一次性文本补全（记忆蒸馏 / btw）：同 summarize-title 的候选链语义，结果经 text-completed / text-failed 按 requestId 回流 */
       type: 'complete-text';
       requestId: string;
       systemPrompt: string;
@@ -707,6 +709,15 @@ export type AgentCommand =
       candidates: SpawnModelConfig[];
       timeoutMs: number;
       maxTokens?: number;
+      /** 为 true 时额外推 text-delta；记忆蒸馏不设 */
+      stream?: true;
+      /** 透传 streamSimple/completeSimple 的思考档；off 表示关闭 */
+      reasoning?: ThinkingLevel | 'off';
+    }
+  | {
+      /** 中止一次性文本补全（btw / 记忆蒸馏）；无会话身份，按 requestId 对准 */
+      type: 'abort-complete-text';
+      requestId: string;
     }
   | { type: 'abort-retry'; identity: SessionIdentity }
   | { type: 'retry'; identity: SessionIdentity }
@@ -1116,6 +1127,7 @@ export type AgentWorkerEvent =
     }
   | { type: 'text-completed'; requestId: string; text: string }
   | { type: 'text-failed'; requestId: string; error: string }
+  | { type: 'text-delta'; requestId: string; text: string; thinking?: string }
   | {
       type: 'task-output';
       identity: SessionIdentity;
@@ -2035,6 +2047,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'disabledTools',
           'windowsLocalShell',
           'remote',
+          'rolePrompt',
         ]) ||
         !parseSessionIdentity(value.identity) ||
         typeof value.cwd !== 'string' ||
@@ -2065,7 +2078,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           (!Array.isArray(value.subagentModels) ||
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
-          parseSpawnModelConfig(value.approvalReviewer) === null)
+          parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.rolePrompt !== undefined && !isNonEmptyString(value.rolePrompt))
       ) {
         return null;
       }
@@ -2129,23 +2143,17 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     }
     case 'complete-text':
-      return (hasExactKeys(value, [
+      return hasOnlyKeys(value, [
         'type',
         'requestId',
         'systemPrompt',
         'userText',
         'candidates',
         'timeoutMs',
-      ]) ||
-        hasExactKeys(value, [
-          'type',
-          'requestId',
-          'systemPrompt',
-          'userText',
-          'candidates',
-          'timeoutMs',
-          'maxTokens',
-        ])) &&
+        'maxTokens',
+        'stream',
+        'reasoning',
+      ]) &&
         isNonEmptyString(value.requestId) &&
         typeof value.systemPrompt === 'string' &&
         typeof value.userText === 'string' &&
@@ -2156,10 +2164,18 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           (typeof value.maxTokens === 'number' &&
             Number.isInteger(value.maxTokens) &&
             value.maxTokens > 0)) &&
+        (value.stream === undefined || value.stream === true) &&
+        (value.reasoning === undefined ||
+          value.reasoning === 'off' ||
+          THINKING_LEVELS.includes(value.reasoning as ThinkingLevel)) &&
         Array.isArray(value.candidates) &&
         value.candidates.length >= 1 &&
         value.candidates.length <= TITLE_SUMMARY_MAX_CANDIDATES &&
         value.candidates.every((candidate) => parseSpawnModelConfig(candidate))
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'abort-complete-text':
+      return hasExactKeys(value, ['type', 'requestId']) && isNonEmptyString(value.requestId)
         ? (value as unknown as AgentCommand)
         : null;
     case 'summarize-title':
@@ -2475,6 +2491,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'conversationId', 'error']) &&
       isNonEmptyString(value.conversationId) &&
       isNonEmptyString(value.error)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'text-delta') {
+    return hasOnlyKeys(value, ['type', 'requestId', 'text', 'thinking']) &&
+      isNonEmptyString(value.requestId) &&
+      typeof value.text === 'string' &&
+      (value.thinking === undefined || typeof value.thinking === 'string')
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

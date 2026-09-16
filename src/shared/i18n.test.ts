@@ -74,6 +74,8 @@ const MAPPED_I18N_KEYS = [
   'Previous coworker tab',
   'New terminal tab',
   'New terminal when the side panel is focused; otherwise new conversation',
+  'New Btw tab',
+  'Open a Btw tab in the side panel',
   'Close terminal tab',
   // fileTreeMenu.revealLabel()：按平台返回其一，t() 的实参不是字面量
   'Reveal in Finder',

@@ -1,3 +1,10 @@
+import type {
+  BtwAbortRequest,
+  BtwDisposeRequest,
+  BtwPromptRequest,
+  BtwPromptResult,
+  BtwSpawnRequest,
+} from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
 import type {
   CapabilityAskDecisionAck,
@@ -916,6 +923,16 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
     },
+  },
+  btw: {
+    prompt: (request: BtwPromptRequest): Promise<BtwPromptResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BTW_PROMPT, request),
+    abort: (request: BtwAbortRequest): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BTW_ABORT, request),
+    spawn: (request: BtwSpawnRequest): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BTW_SPAWN, request),
+    dispose: (request: BtwDisposeRequest): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BTW_DISPOSE, request),
   },
   terminal: {
     create: (request: TerminalCreateRequest): Promise<TerminalCreateResult> =>

@@ -432,6 +432,41 @@ describe('applyAgentEvent', () => {
     expect(next.lastSeq).toBe(9);
   });
 
+  it('role 前缀的 user upsert 消费同文乐观回显，后续助手可上屏', () => {
+    const withEcho: SessionProjection = {
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '刚刚聊到什么工具' }], optimistic: true },
+      ],
+    };
+    const afterUser = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: '<role>\nYou are aside\n</role>\n\n刚刚聊到什么工具',
+          },
+        ],
+      },
+    });
+    expect(afterUser.messages).toHaveLength(1);
+    expect(afterUser.messages[0]?.optimistic).toBeUndefined();
+    const afterAssistant = applyAgentEvent(afterUser, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 2,
+      index: 1,
+      message: { role: 'assistant', content: [{ type: 'text', text: '用的是 bash' }] },
+    });
+    expect(afterAssistant.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(afterAssistant.messages.some((message) => message.optimistic)).toBe(false);
+  });
+
   it('tail snapshot records its absolute base and keeps the optimistic tail', () => {
     const optimistic = {
       ...assistant('in flight'),

@@ -1,3 +1,4 @@
+import { isBtwIsolationPrompt } from '@shared/btw';
 import type { AgentSessionCustomEntry, TodoItem, TurnPerf } from '@shared/types/agent';
 import {
   Bot,
@@ -436,7 +437,7 @@ function UserText({
           {t('From main agent')}
         </p>
       )}
-      {role && (
+      {role?.[1] && !isBtwIsolationPrompt(role[1]) && (
         <div className="mb-2 rounded-md bg-background/60 px-2.5 py-1.5 text-xs text-muted-foreground">
           <span className="font-semibold">{t('Role')}</span> · {role[1]}
         </div>
