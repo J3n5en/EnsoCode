@@ -8,7 +8,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { FoldHorizontal, PanelRight, UnfoldHorizontal } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
@@ -50,7 +50,7 @@ import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
-import { SIDE_PANEL_DEFAULT_WIDTH, useSidePanelStore } from '@/stores/sidePanel';
+import { useSidePanelStore } from '@/stores/sidePanel';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
 const dndCollision: CollisionDetection = (args) => {
@@ -83,7 +83,7 @@ export default function App() {
     activeConversationId ? Boolean(s.uiByConversation[activeConversationId]?.open) : false
   );
   const sideWidth = useSidePanelStore(
-    (s) => s.uiByConversation[activeConversationId ?? '']?.width ?? SIDE_PANEL_DEFAULT_WIDTH
+    (s) => s.uiByConversation[activeConversationId ?? '']?.width ?? s.lastWidth
   );
   const sideFullscreen = useSidePanelStore((s) => s.fullscreen);
   const toggleSidePanel = useSidePanelStore((s) => s.toggleOpen);
@@ -112,8 +112,10 @@ export default function App() {
   };
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const handleSideResize = useCallback((deltaX: number) => {
-    useSidePanelStore.getState().nudgeWidth(-deltaX);
+    const workspace = workspaceRef.current;
+    if (workspace) useSidePanelStore.getState().nudgeWidth(-deltaX, workspace.clientWidth);
   }, []);
 
   useEffect(() => {
@@ -309,7 +311,10 @@ export default function App() {
               onOpenSearch={() => setSearchOpen(true)}
             />
             {!collapsed && <ResizeHandle onResize={handleResize} />}
-            <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div
+              ref={workspaceRef}
+              className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+            >
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <ChatView />
               </div>

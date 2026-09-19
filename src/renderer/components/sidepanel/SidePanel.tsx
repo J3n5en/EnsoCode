@@ -40,6 +40,11 @@ import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { sanitizeSidePanelLayout } from '@/stores/sidePanel/layoutSanitize';
+import {
+  CHAT_MIN_WIDTH,
+  resolveSidePanelWidth,
+  SIDE_PANEL_HANDLE_WIDTH,
+} from '@/stores/sidePanel/width';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
@@ -532,7 +537,13 @@ function ConversationDock({
   );
 }
 
-export function SidePanel({ width, resizing = false }: { width: number; resizing?: boolean }) {
+export function SidePanel({
+  width: preferredWidth,
+  resizing = false,
+}: {
+  width: number;
+  resizing?: boolean;
+}) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
   const open = useSidePanelStore((s) =>
@@ -571,6 +582,7 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
   );
   const [cover, setCover] = useState(fullscreen);
   const [workspaceW, setWorkspaceW] = useState(0);
+  const width = resolveSidePanelWidth(preferredWidth, workspaceW);
   const asideRef = useRef<HTMLElement>(null);
   const [widthAnim, setWidthAnim] = useState({
     id: conversationId,
@@ -621,6 +633,11 @@ export function SidePanel({ width, resizing = false }: { width: number; resizing
         data-slot="side-panel"
         initial={false}
         animate={{ width: targetW }}
+        style={
+          cover
+            ? undefined
+            : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + SIDE_PANEL_HANDLE_WIDTH}px))` }
+        }
         transition={skipWidthAnim ? { duration: 0 } : cover ? easeOutLayout : springStandard}
         onAnimationComplete={() => {
           if (!fullscreen) setCover(false);

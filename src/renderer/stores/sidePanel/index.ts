@@ -5,18 +5,23 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { ScreenRect } from '@/lib/guestViewOcclusion';
 import { useSessionsStore } from '@/stores/sessions';
 import { SIDE_PANEL_VERSION, splitLegacySnapshots } from './migrate';
+import { resizeSidePanelWidth, SIDE_PANEL_DEFAULT_WIDTH } from './width';
+
+export { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from './width';
 
 export type ChangesMode = 'all' | 'git';
-
-export const SIDE_PANEL_DEFAULT_WIDTH = 360;
-export const SIDE_PANEL_MIN_WIDTH = 280;
-export const SIDE_PANEL_MAX_WIDTH = 800;
 
 export type SidePanelUi = { open: boolean; width: number };
 
 interface SidePanelState {
   /** 铺满中间工作区;不 persist,关面板 / 切到关着的会话时清掉 */
   fullscreen: boolean;
+  /**
+   * 最近一次手动调整的宽度，仅作为尚无面板设置的会话的初始值，随会话偏好一起保存。
+   *
+   * Persist the last manually resized width as the initial value for conversations without panel settings.
+   */
+  lastWidth: number;
   uiByConversation: Record<string, SidePanelUi>;
   /** 可见的原生 guest 矩形（运行态，不持久化）：壁纸按这些矩形挖孔给垫底的 view 透出 */
   browserHoles: Record<string, ScreenRect>;
@@ -30,7 +35,7 @@ interface SidePanelState {
   snapshotsByConversation: Record<string, SessionChangeSnapshots>;
   toggleOpen: () => void;
   ensureOpen: (conversationId?: string) => void;
-  nudgeWidth: (delta: number) => void;
+  nudgeWidth: (delta: number, workspaceWidth: number) => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   saveLayout: (conversationId: string, layout: SerializedDockview) => void;
@@ -41,16 +46,12 @@ interface SidePanelState {
   setBrowserHole: (key: string, rect: ScreenRect | null) => void;
 }
 
-function clampWidth(width: number): number {
-  return Math.min(SIDE_PANEL_MAX_WIDTH, Math.max(SIDE_PANEL_MIN_WIDTH, width));
-}
-
 function activeConversationId(): string | undefined {
   return useSessionsStore.getState().activeId ?? undefined;
 }
 
 function uiFor(state: SidePanelState, id: string): SidePanelUi {
-  return state.uiByConversation[id] ?? { open: false, width: SIDE_PANEL_DEFAULT_WIDTH };
+  return state.uiByConversation[id] ?? { open: false, width: state.lastWidth };
 }
 
 function patchUi(
@@ -66,6 +67,7 @@ export const useSidePanelStore = create<SidePanelState>()(
   persist(
     (set, get) => ({
       fullscreen: false,
+      lastWidth: SIDE_PANEL_DEFAULT_WIDTH,
       uiByConversation: {},
       browserHoles: {},
       layouts: {},
@@ -88,11 +90,11 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({ uiByConversation: patchUi(get(), id, { open: true }) });
       },
 
-      nudgeWidth: (delta) => {
+      nudgeWidth: (delta, workspaceWidth) => {
         const id = activeConversationId();
         if (!id) return;
-        const width = clampWidth(uiFor(get(), id).width + delta);
-        set({ uiByConversation: patchUi(get(), id, { width }) });
+        const width = resizeSidePanelWidth(uiFor(get(), id).width, delta, workspaceWidth);
+        set({ uiByConversation: patchUi(get(), id, { width }), lastWidth: width });
       },
 
       toggleFullscreen: () => {
@@ -174,6 +176,7 @@ export const useSidePanelStore = create<SidePanelState>()(
       version: SIDE_PANEL_VERSION,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        lastWidth: state.lastWidth,
         uiByConversation: state.uiByConversation,
         layouts: state.layouts,
         changesModeByConversation: state.changesModeByConversation,
