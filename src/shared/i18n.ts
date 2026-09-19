@@ -856,6 +856,7 @@ export const zhTranslations: Record<string, string> = {
   'Show {{n}} more': '展开其余 {{n}} 条',
   'Archive {{n}} conversations': '归档 {{n}} 条会话',
   Collapse: '收起',
+  Expand: '展开',
   'Expand sidebar': '展开侧边栏',
   'Approval required': '需要审批',
   'Waiting for your answer': '等待你回答',

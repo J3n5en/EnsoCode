@@ -157,10 +157,25 @@ export function MessageTimeline({
       return next;
     });
   }, []);
+  // 轮次展开态：完结轮次默认自动折叠；expandedTurns 记录用户主动展开的轮次（会话内记忆）
+  const [expandedTurns, setExpandedTurns] = useState<ReadonlySet<string>>(new Set());
+  const toggleTurn = useCallback((key: string) => {
+    setExpandedTurns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const folded = useMemo(
-    () => foldTimeline(items, running, expandedGroups, { compact }),
-    [items, running, expandedGroups, compact]
+    () =>
+      foldTimeline(items, running, expandedGroups, {
+        compact,
+        autoCollapseCompletedTurns: true,
+        expandedTurns,
+      }),
+    [items, running, expandedGroups, compact, expandedTurns]
   );
 
   // 导航条数据：每条 user 轮次 + 其后首个回答摘要
@@ -290,6 +305,22 @@ export function MessageTimeline({
   );
   useEffect(() => () => observerRef.current?.disconnect(), []);
   const jumpTo = (key: string) => {
+    let ownerTurnKey: string | null = null;
+    let currentTurnKey: string | null = null;
+    for (const item of items) {
+      if (item.kind === 'user') currentTurnKey = item.key;
+      if (item.key === key) {
+        ownerTurnKey = currentTurnKey;
+        break;
+      }
+    }
+    if (ownerTurnKey && !expandedTurns.has(ownerTurnKey)) {
+      setExpandedTurns((prev) => {
+        const next = new Set(prev);
+        next.add(ownerTurnKey as string);
+        return next;
+      });
+    }
     if (!virtualize) {
       scrollerRef.current
         ?.querySelector(`[data-nav-key="${CSS.escape(key)}"]`)
@@ -348,7 +379,7 @@ export function MessageTimeline({
         className={cn(CHAT_COL, rowGap(item, index), '[overflow-wrap:anywhere]')}
       >
         <RowErrorBoundary itemKey={item.key}>
-          <TimelineRow item={item} onToggleGroup={toggleGroup} />
+          <TimelineRow item={item} onToggleGroup={toggleGroup} onToggleTurn={toggleTurn} />
         </RowErrorBoundary>
       </div>
     );
