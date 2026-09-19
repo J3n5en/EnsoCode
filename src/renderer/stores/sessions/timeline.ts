@@ -386,77 +386,11 @@ function findLastActivePartIndex(content: ProjectedMessage['content']): number {
 
 /** 已完成 step 的模型活跃耗时；优先采用 pi 的整段请求 duration。 */
 function completedStepRunMs(message: ProjectedMessage): number | undefined {
-  if (
-    typeof message.duration === 'number' &&
-    Number.isFinite(message.duration) &&
-    message.duration > 0
-  ) {
-    return message.duration;
-  }
   const timing = message.timing;
   if (!timing?.completedMs) return undefined;
   return typeof message.duration === 'number' && message.duration > 0
     ? message.duration
     : Math.max(0, timing.completedMs - timing.stepStartMs);
-}
-
-/**
- * 计算以 userIndex 为起点的 user 轮次活跃总耗时。
- * 仅在轮次已完结（历史轮次，或会话已非 running 且 assistant 已完结）时返回数值；
- * 仍在生成中或尚无 assistant 回复时返回 undefined。
- */
-export function computeTurnDuration(
-  messages: readonly ProjectedMessage[],
-  userIndex: number,
-  running: boolean
-): number | undefined {
-  let hasAssistant = false;
-  let activeMs = 0;
-  let lastAssistant: ProjectedMessage | null = null;
-  let nextUserIndex = messages.length;
-
-  for (let j = userIndex + 1; j < messages.length; j++) {
-    const msg = messages[j];
-    if (msg.role === 'user') {
-      nextUserIndex = j;
-      break;
-    }
-    if (msg.role === 'assistant') {
-      hasAssistant = true;
-      lastAssistant = msg;
-      const run = completedStepRunMs(msg);
-      if (run !== undefined) activeMs += run;
-    } else if (msg.role === 'toolResult') {
-      if (
-        msg.toolName !== 'ask_user' &&
-        typeof msg.toolDurationMs === 'number' &&
-        Number.isFinite(msg.toolDurationMs) &&
-        msg.toolDurationMs > 0
-      ) {
-        activeMs += msg.toolDurationMs;
-      }
-    }
-  }
-
-  if (!hasAssistant) return undefined;
-
-  const isLatestTurn = nextUserIndex === messages.length;
-  if (isLatestTurn && running) return undefined;
-  if (isLatestTurn && lastAssistant?.stopReason === 'pending') return undefined;
-
-  if (activeMs > 0) return activeMs;
-
-  const userTimestamp = messages[userIndex]?.timestamp;
-  const endTimestamp = lastAssistant?.timing?.completedMs ?? lastAssistant?.timestamp;
-  if (
-    typeof userTimestamp === 'number' &&
-    typeof endTimestamp === 'number' &&
-    endTimestamp > userTimestamp
-  ) {
-    return endTimestamp - userTimestamp;
-  }
-
-  return undefined;
 }
 
 /** 从该 step 的计时打点算 hover 操作条读数；打点不全则无对应字段。
@@ -598,12 +532,14 @@ function buildMessageTimeline(
   // 整轮计时只累计模型请求与非交互工具的真实执行耗时；用户回答、审批、排队等空档不计。
   let turnActiveMs = 0;
   let turnSteps = 0;
-  let currentTurnUserIndex = -1;
+  let turnUserTimestamp: number | undefined;
+  let turnHadAskUser = false;
   messages.forEach((message, messageIndex) => {
     const isLastMessage = messageIndex === messages.length - 1;
     const absIndex = historyBaseIndex + messageIndex;
     if (message.role === 'user') {
-      currentTurnUserIndex = messageIndex;
+      turnUserTimestamp = message.timestamp;
+      turnHadAskUser = false;
       turnActiveMs = 0;
       turnSteps = 0;
       const text = partText(message);
@@ -645,6 +581,7 @@ function buildMessageTimeline(
     }
     if (message.role === 'toolResult') {
       // ask_user 的执行期本质是等用户，不属于任务活跃用时；其余工具采用 worker 实测时长。
+      if (message.toolName === 'ask_user') turnHadAskUser = true;
       if (
         turnSteps > 0 &&
         message.toolName !== 'ask_user' &&
@@ -665,9 +602,24 @@ function buildMessageTimeline(
     const isLastStepOfTurn =
       nextTurnRole[messageIndex] === undefined || nextTurnRole[messageIndex] === 'user';
     const perfTurnActive = isLastStepOfTurn && turnSteps > 1 ? turnActiveMs : undefined;
-    const turnDurationMs = isLastStepOfTurn
-      ? computeTurnDuration(messages, currentTurnUserIndex, running)
-      : undefined;
+    const isLatestTurn = nextTurnRole[messageIndex] === undefined;
+    const turnSettled = !(isLatestTurn && (running || message.stopReason === 'pending'));
+    let turnDurationMs: number | undefined;
+    if (isLastStepOfTurn && turnSettled) {
+      if (turnActiveMs > 0) {
+        turnDurationMs = turnActiveMs;
+      } else if (!turnHadAskUser) {
+        // 缺 step 计时才用墙钟差；有 ask_user 时墙钟含等待，不能兜底
+        const endTimestamp = message.timing?.completedMs ?? message.timestamp;
+        if (
+          typeof turnUserTimestamp === 'number' &&
+          typeof endTimestamp === 'number' &&
+          endTimestamp > turnUserTimestamp
+        ) {
+          turnDurationMs = endTimestamp - turnUserTimestamp;
+        }
+      }
+    }
     // 「流式中」= 最后一个有内容的 part：pi 流式时 thinking/text 后面常已跟着
     // 空占位 part，按「最后一个 part」判会把正在生成的块误判为已完结
     const lastActiveIndex = findLastActivePartIndex(message.content);

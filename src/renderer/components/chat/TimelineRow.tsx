@@ -833,7 +833,7 @@ function UserMeta({ messageIndex, timestamp }: { messageIndex: number; timestamp
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
       <RewindButton messageIndex={messageIndex} />
-      {timestamp && <span>{formatClock(timestamp)}</span>}
+      {typeof timestamp === 'number' && <span>{formatClock(timestamp)}</span>}
     </div>
   );
 }
@@ -908,7 +908,8 @@ const secs = (ms: number): string => {
 /** 末 step 读数：本 step 耗时 · TTFT · tok/s；多 step 轮次再附「总计 Xs」= 整轮活跃用时 */
 function formatPerf(perf: TurnPerf, t: TFunction, hasTurnDuration = false): string {
   const parts: string[] = [];
-  if (!hasTurnDuration) {
+  // 单 step 的用时已由「took」展示；多 step 仍保留末 step 墙钟（turnMs 有值）
+  if (!hasTurnDuration || perf.turnMs !== undefined) {
     parts.push(`${secs(perf.runMs)}s`);
   }
   if (perf.ttftMs !== undefined) parts.push(`TTFT ${secs(perf.ttftMs)}s`);
