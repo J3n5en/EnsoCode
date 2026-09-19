@@ -93,7 +93,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   switch (a.kind) {
     case 'user': {
       if (b.kind !== 'user') return false;
-      if (a.text !== b.text || a.images.length !== b.images.length) return false;
+      if (a.text !== b.text || a.images.length !== b.images.length || a.timestamp !== b.timestamp)
+        return false;
       return a.images.every((image, i) => image === b.images[i]);
     }
     case 'text':
@@ -103,7 +104,10 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.text === b.text &&
         a.streaming === b.streaming &&
         (a.kind !== 'text' ||
-          (b.kind === 'text' && perfEqual(a.perf, b.perf) && a.timestamp === b.timestamp)) &&
+          (b.kind === 'text' &&
+            perfEqual(a.perf, b.perf) &&
+            a.timestamp === b.timestamp &&
+            a.turnDurationMs === b.turnDurationMs)) &&
         (a.kind !== 'thinking' || (b.kind === 'thinking' && a.durationMs === b.durationMs))
       );
     case 'tool':
@@ -482,7 +486,7 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
           {item.text && (
             <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
           )}
-          <RewindButton messageIndex={Number(item.key)} />
+          <UserMeta messageIndex={Number(item.key)} timestamp={item.timestamp} />
         </div>
       );
     }
@@ -825,6 +829,15 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   );
 }
 
+function UserMeta({ messageIndex, timestamp }: { messageIndex: number; timestamp?: number }) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
+      <RewindButton messageIndex={messageIndex} />
+      {timestamp && <span>{formatClock(timestamp)}</span>}
+    </div>
+  );
+}
+
 /** assistant 正文：markdown + hover 操作条（复制 / 时间 / 该轮耗时·TTFT·tok/s） */
 function TextRow({
   item,
@@ -836,6 +849,7 @@ function TextRow({
   activeNth?: number;
 }) {
   const { t } = useI18n();
+  const perfStr = item.perf ? formatPerf(item.perf, t, item.turnDurationMs !== undefined) : '';
   return (
     <div className="group text-sm">
       <Markdown
@@ -849,7 +863,12 @@ function TextRow({
           <CopyButton text={item.text} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
           {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
-          {item.perf && <span>· {formatPerf(item.perf, t)}</span>}
+          {item.turnDurationMs !== undefined && (
+            <span>
+              · {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
+            </span>
+          )}
+          {perfStr && <span>· {perfStr}</span>}
         </div>
       )}
     </div>
@@ -887,12 +906,16 @@ const secs = (ms: number): string => {
   return s < 10 ? String(Math.round(s * 10) / 10) : String(Math.round(s));
 };
 /** 末 step 读数：本 step 耗时 · TTFT · tok/s；多 step 轮次再附「总计 Xs」= 整轮活跃用时 */
-function formatPerf(perf: TurnPerf, t: TFunction): string {
-  const parts = [`${secs(perf.runMs)}s`];
+function formatPerf(perf: TurnPerf, t: TFunction, hasTurnDuration = false): string {
+  const parts: string[] = [];
+  if (!hasTurnDuration) {
+    parts.push(`${secs(perf.runMs)}s`);
+  }
   if (perf.ttftMs !== undefined) parts.push(`TTFT ${secs(perf.ttftMs)}s`);
   if (perf.tps !== undefined) parts.push(`${Math.round(perf.tps)} tok/s`);
-  if (perf.turnMs !== undefined)
+  if (!hasTurnDuration && perf.turnMs !== undefined) {
     parts.push(t('total {{duration}}', { duration: formatDuration(perf.turnMs) }));
+  }
   return parts.join(' · ');
 }
 
