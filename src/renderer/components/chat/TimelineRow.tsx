@@ -5,6 +5,7 @@ import {
   BoxSelect,
   Brain,
   Check,
+  ChevronDown,
   ChevronRight,
   Circle,
   CircleAlert,
@@ -78,6 +79,8 @@ interface TimelineRowProps {
   item: TimelineItem;
   /** tool-group 组头点击展开/收拢 */
   onToggleGroup?: (key: string) => void;
+  /** 轮次（Turn）折叠/展开 */
+  onToggleTurn?: (key: string) => void;
 }
 
 /**
@@ -93,7 +96,14 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   switch (a.kind) {
     case 'user': {
       if (b.kind !== 'user') return false;
-      if (a.text !== b.text || a.images.length !== b.images.length || a.timestamp !== b.timestamp)
+      if (
+        a.text !== b.text ||
+        a.images.length !== b.images.length ||
+        a.timestamp !== b.timestamp ||
+        a.turnDurationMs !== b.turnDurationMs ||
+        a.collapsed !== b.collapsed ||
+        a.canCollapse !== b.canCollapse
+      )
         return false;
       return a.images.every((image, i) => image === b.images[i]);
     }
@@ -464,13 +474,18 @@ export function isCompactRow(item: TimelineItem): boolean {
   );
 }
 
-export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: TimelineRowProps) {
+export const TimelineRow = memo(function TimelineRow({
+  item,
+  onToggleGroup,
+  onToggleTurn,
+}: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
   const activeNth = search.activeKey === item.key ? search.activeNth : -1;
   switch (item.kind) {
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
+      const isCollapsed = item.collapsed === true;
       return (
         <div
           className={cn('group/user flex flex-col gap-1.5', fromMain ? 'items-start' : 'items-end')}
@@ -486,7 +501,22 @@ export const TimelineRow = memo(function TimelineRow({ item, onToggleGroup }: Ti
           {item.text && (
             <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
           )}
-          <UserMeta messageIndex={Number(item.key)} timestamp={item.timestamp} />
+          {isCollapsed ? (
+            <CollapsedTurnBar
+              turnKey={item.key}
+              timestamp={item.timestamp}
+              turnDurationMs={item.turnDurationMs}
+              onToggle={onToggleTurn}
+            />
+          ) : (
+            <UserMeta
+              turnKey={item.key}
+              messageIndex={Number(item.key)}
+              timestamp={item.timestamp}
+              canCollapse={item.canCollapse}
+              onToggleTurn={onToggleTurn}
+            />
+          )}
         </div>
       );
     }
@@ -829,10 +859,65 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
   );
 }
 
-function UserMeta({ messageIndex, timestamp }: { messageIndex: number; timestamp?: number }) {
+function CollapsedTurnBar({
+  turnKey,
+  timestamp,
+  turnDurationMs,
+  onToggle,
+}: {
+  turnKey: string;
+  timestamp?: number;
+  turnDurationMs?: number;
+  onToggle?: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 select-none">
+      <button
+        type="button"
+        onClick={() => onToggle?.(turnKey)}
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground cursor-pointer border border-border/40"
+        title={t('Expand')}
+      >
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span>{t('Expand')}</span>
+      </button>
+      {typeof timestamp === 'number' && <span>{formatClock(timestamp)}</span>}
+      {turnDurationMs !== undefined && (
+        <span>· {t('took {{duration}}', { duration: formatDuration(turnDurationMs) })}</span>
+      )}
+    </div>
+  );
+}
+
+function UserMeta({
+  turnKey,
+  messageIndex,
+  timestamp,
+  canCollapse,
+  onToggleTurn,
+}: {
+  turnKey: string;
+  messageIndex: number;
+  timestamp?: number;
+  canCollapse?: boolean;
+  onToggleTurn?: (key: string) => void;
+}) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
       <RewindButton messageIndex={messageIndex} />
+      {canCollapse && onToggleTurn && (
+        <button
+          type="button"
+          onClick={() => onToggleTurn(turnKey)}
+          className={cn(userActionClass, 'cursor-pointer opacity-0 group-hover/user:opacity-100')}
+          title={t('Collapse')}
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t('Collapse')}</span>
+        </button>
+      )}
       {typeof timestamp === 'number' && <span>{formatClock(timestamp)}</span>}
     </div>
   );

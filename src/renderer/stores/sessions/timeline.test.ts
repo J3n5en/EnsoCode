@@ -225,7 +225,6 @@ describe('buildTimeline', () => {
         turnDurationMs: 2500, // 3500 - 1000
       });
     });
-
     it('最新一轮 stopReason=pending 时不展示耗时（即使 running=false）', () => {
       const timeline = buildTimeline(
         [
@@ -292,6 +291,199 @@ describe('buildTimeline', () => {
       const textItems = timeline.filter((item) => item.kind === 'text');
       expect(textItems[0]).toMatchObject({ kind: 'text', turnEnd: true });
       expect(textItems[0].kind === 'text' && textItems[0].turnDurationMs).toBeUndefined();
+    });
+
+    it('已完结轮次的 user 消息亦保留本轮任务耗时 turnDurationMs', () => {
+      const timeline = buildTimeline(
+        [
+          { role: 'user', content: [{ type: 'text', text: '写个工具' }], timestamp: 1000 },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: '完成了' }],
+            duration: 3200,
+            timing: { stepStartMs: 1000, completedMs: 4200 },
+          },
+        ],
+        false
+      );
+      const userItem = timeline.find((item) => item.kind === 'user');
+      expect(userItem).toMatchObject({
+        kind: 'user',
+        timestamp: 1000,
+        turnDurationMs: 3200,
+      });
+    });
+  });
+
+  describe('会话按轮次折叠 (Turn Collapse)', () => {
+    const fixtureMessages: ProjectedMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '问题1' }], timestamp: 1000 },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'c1', name: 'read', arguments: { path: '1.ts' } }],
+        duration: 1000,
+        timing: { stepStartMs: 1000, completedMs: 2000 },
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'c1',
+        toolName: 'read',
+        toolDurationMs: 500,
+        content: [{ type: 'text', text: 'ok' }],
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: '回答1' }],
+        duration: 1500,
+        timing: { stepStartMs: 2500, completedMs: 4000 },
+      },
+      { role: 'user', content: [{ type: 'text', text: '问题2' }], timestamp: 5000 },
+      { role: 'assistant', content: [{ type: 'text', text: '回答2' }], duration: 2000 },
+    ];
+
+    it('无回复或处于 running 的最新轮次不可折叠，有回复的历史轮次可折叠', () => {
+      const runningTimeline = buildTimeline(fixtureMessages, true);
+      const usersRunning = runningTimeline.filter((item) => item.kind === 'user');
+      expect(usersRunning[0].canCollapse).toBe(true);
+      // 最新一轮仍在生成中，不可折叠
+      expect(usersRunning[1].canCollapse).toBe(false);
+
+      // 仅一条 user 消息且无后续回复
+      const emptyReplyTimeline = buildTimeline(
+        [{ role: 'user', content: [{ type: 'text', text: '孤立消息' }] }],
+        false
+      );
+      const singleUser = emptyReplyTimeline.find((item) => item.kind === 'user')!;
+      expect(singleUser.canCollapse).toBe(false);
+    });
+
+    it('折叠指定轮次：隐藏当前消息的所有回复（tool/text），保留发送信息、时间戳与耗时', () => {
+      const timeline = buildTimeline(fixtureMessages, false);
+      const user1 = timeline[0];
+      expect(user1.kind).toBe('user');
+
+      const folded = foldTimeline(timeline, false, new Set(), {
+        collapsedTurns: new Set([user1.key]),
+      });
+
+      // 折叠后：第一轮只剩 user 项，且标注 collapsed: true，保留 timestamp 与 turnDurationMs
+      expect(folded[0]).toMatchObject({
+        kind: 'user',
+        key: user1.key,
+        text: '问题1',
+        timestamp: 1000,
+        turnDurationMs: 3000, // 1000 + 500 + 1500
+        collapsed: true,
+      });
+
+      // 验证第一轮的回复全部被隐藏，第二轮正常保留
+      const kinds = folded.map((item) => item.kind);
+      expect(kinds).toEqual(['user', 'user', 'text']);
+      expect(folded[1]).toMatchObject({
+        kind: 'user',
+        text: '问题2',
+      });
+      expect(folded[1].collapsed).toBeFalsy();
+      expect(folded[2]).toMatchObject({
+        kind: 'text',
+        text: '回答2',
+      });
+    });
+
+    it('未折叠的轮次中 user 项标记 collapsed 为 false，回复内容完整平铺', () => {
+      const timeline = buildTimeline(fixtureMessages, false);
+      const folded = foldTimeline(timeline, false, new Set(), {
+        collapsedTurns: new Set(),
+      });
+      const userItems = folded.filter((item) => item.kind === 'user');
+      expect(userItems[0].collapsed).toBeFalsy();
+      expect(userItems[1].collapsed).toBeFalsy();
+    });
+
+    it('running=true 时，正在生成的最新一轮不被折叠，确保实时输出可见', () => {
+      const timeline = buildTimeline(fixtureMessages, true);
+      const user2 = timeline.find((item) => item.kind === 'user' && item.text === '问题2')!;
+
+      // 即使 collapsedTurns 包含了最新轮次的 key
+      const folded = foldTimeline(timeline, true, new Set(), {
+        collapsedTurns: new Set([user2.key]),
+      });
+
+      const user2Folded = folded.find((item) => item.kind === 'user' && item.text === '问题2')!;
+      expect(user2Folded.collapsed).toBeFalsy();
+      // 回复内容依然可见
+      expect(folded.some((item) => item.kind === 'text' && item.text === '回答2')).toBe(true);
+    });
+
+    it('从 collapsedTurns 移除 key 时，该轮回复重新完整展开', () => {
+      const timeline = buildTimeline(fixtureMessages, false);
+      const user1 = timeline[0];
+
+      const collapsed = foldTimeline(timeline, false, new Set(), {
+        collapsedTurns: new Set([user1.key]),
+      });
+      expect(collapsed.map((item) => item.kind)).toEqual(['user', 'user', 'text']);
+
+      const expanded = foldTimeline(timeline, false, new Set(), {
+        collapsedTurns: new Set(),
+      });
+      expect(expanded.length).toBeGreaterThan(collapsed.length);
+      expect(expanded[0].collapsed).toBeFalsy();
+    });
+
+    describe('autoCollapseCompletedTurns (轮次完成后自动折叠)', () => {
+      it('进行中的本轮会话(running=true)实时保持展开，完结的历史轮次自动折叠', () => {
+        const runningTimeline = buildTimeline(fixtureMessages, true);
+        const foldedRunning = foldTimeline(runningTimeline, true, new Set(), {
+          autoCollapseCompletedTurns: true,
+        });
+
+        // 历史已完结的轮次 1 自动折叠
+        const user1 = foldedRunning.find((i) => i.kind === 'user' && i.text === '问题1')!;
+        expect(user1.collapsed).toBe(true);
+        // 第一轮的内容已折叠隐藏
+        expect(foldedRunning.some((i) => i.kind === 'text' && i.text === '回答1')).toBe(false);
+
+        // 正在运行的本轮会话 2 必须保持展开，不可被折叠
+        const user2 = foldedRunning.find((i) => i.kind === 'user' && i.text === '问题2')!;
+        expect(user2.collapsed).toBeFalsy();
+        // 本轮的回答内容可见
+        expect(foldedRunning.some((i) => i.kind === 'text' && i.text === '回答2')).toBe(true);
+      });
+
+      it('本轮会话完成后(running=false)，本轮自动变为折叠状态', () => {
+        // 当 running 变为 false，整个会话已完结
+        const completedTimeline = buildTimeline(fixtureMessages, false);
+        const foldedCompleted = foldTimeline(completedTimeline, false, new Set(), {
+          autoCollapseCompletedTurns: true,
+        });
+
+        // 此时第一轮和第二轮均已完结，自动折叠
+        const user1 = foldedCompleted.find((i) => i.kind === 'user' && i.text === '问题1')!;
+        const user2 = foldedCompleted.find((i) => i.kind === 'user' && i.text === '问题2')!;
+        expect(user1.collapsed).toBe(true);
+        expect(user2.collapsed).toBe(true);
+        // 两轮的回复内容都被折叠，只剩下 user 项
+        expect(foldedCompleted.map((i) => i.kind)).toEqual(['user', 'user']);
+      });
+
+      it('通过 expandedTurns 显式展开已折叠的轮次', () => {
+        const completedTimeline = buildTimeline(fixtureMessages, false);
+        const user1Key = completedTimeline[0].key;
+        const folded = foldTimeline(completedTimeline, false, new Set(), {
+          autoCollapseCompletedTurns: true,
+          expandedTurns: new Set([user1Key]),
+        });
+
+        const user1 = folded.find((i) => i.kind === 'user' && i.text === '问题1')!;
+        expect(user1.collapsed).toBeFalsy();
+        // 第一轮内容已展开可见
+        expect(folded.some((i) => i.kind === 'text' && i.text === '回答1')).toBe(true);
+
+        // 第二轮仍保持自动折叠
+        const user2 = folded.find((i) => i.kind === 'user' && i.text === '问题2')!;
+        expect(user2.collapsed).toBe(true);
+      });
     });
   });
 
