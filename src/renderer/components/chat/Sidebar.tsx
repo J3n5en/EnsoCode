@@ -73,6 +73,7 @@ import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
 import { reloadConversationFromMenu } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
+import { revealLabel } from '@/components/sidepanel/fileTreeMenu';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -975,6 +976,36 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
                     icon: <Settings />,
                     onSelect: () => setProjectSettingsId(project.id),
                   },
+                  ...(project.kind !== 'ssh'
+                    ? [
+                        {
+                          kind: 'item' as const,
+                          key: 'reveal',
+                          label: t(revealLabel()),
+                          icon: <FolderOpen />,
+                          onSelect: async () => {
+                            try {
+                              const result = await window.electronAPI.projects.reveal({
+                                projectId: project.id,
+                              });
+                              if (!result.ok) {
+                                addToast({
+                                  type: 'error',
+                                  title: t('Could not complete the file action.'),
+                                  description: result.error,
+                                });
+                              }
+                            } catch (error) {
+                              addToast({
+                                type: 'error',
+                                title: t('Could not complete the file action.'),
+                                description: String(error),
+                              });
+                            }
+                          },
+                        },
+                      ]
+                    : []),
                   {
                     kind: 'item',
                     key: 'import',
