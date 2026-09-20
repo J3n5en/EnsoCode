@@ -61,6 +61,7 @@ import { Markdown } from './Markdown';
 import { mentionChipClass } from './MentionChip';
 import { splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { ReadFileView } from './ReadFileView';
+import { RtkToolStatsBar } from './RtkToolStatsBar';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { TerminalOutput } from './TerminalOutput';
 import { ZoomableImage } from './ZoomableImage';
@@ -125,7 +126,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.startedAt === b.startedAt &&
         a.agentMeta === b.agentMeta &&
         a.source === b.source &&
-        a.nestedPending === b.nestedPending
+        a.nestedPending === b.nestedPending &&
+        a.rtk === b.rtk
       );
     case 'tool-group':
       return (
@@ -1327,7 +1329,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const { t } = useI18n();
   const compactReadOnly = useSettingsStore((s) => s.compactReadOnlyTools);
   const expandLiveEdits = useSettingsStore((s) => s.expandLiveEdits);
-  const compact = compactReadOnly && isReadOnlyTool(item);
+  const compact = compactReadOnly && item.name !== 'bash' && isReadOnlyTool(item);
   const hasDiff = Boolean(item.edits && item.edits.length > 0);
   const hasWrite = Boolean(item.writeContent);
   const hasFileChanges = Boolean(item.fileChanges && item.fileChanges.length > 0);
@@ -1502,6 +1504,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
               {stripAnsi(item.output ?? '')}
             </pre>
           )}
+          <RtkToolStatsBar value={item.rtk} />
         </ToolContentScroller>
       )}
     </div>

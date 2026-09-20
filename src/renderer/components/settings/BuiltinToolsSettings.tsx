@@ -31,6 +31,8 @@ export function BuiltinToolsSettings() {
   const toggle = useSettingsStore((state) => state.toggleBuiltinTool);
   const exploreFoldEnabled = useSettingsStore((state) => state.exploreFoldEnabled);
   const setExploreFoldEnabled = useSettingsStore((state) => state.setExploreFoldEnabled);
+  const rtkEnabled = useSettingsStore((state) => state.rtkEnabled);
+  const setRtkEnabled = useSettingsStore((state) => state.setRtkEnabled);
   const editMode = useSettingsStore((state) => state.editMode);
   const setEditMode = useSettingsStore((state) => state.setEditMode);
   const occupancy = useOccupancyRows(
@@ -90,6 +92,21 @@ export function BuiltinToolsSettings() {
           </p>
         </div>
         <Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />
+      </div>
+
+      <div
+        className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5"
+        data-settings-row="tools.rtkEnabled"
+      >
+        <div className="min-w-0">
+          <p className="font-medium text-sm">{t('RTK command compression')}</p>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'Compress supported command output before it enters the model context. Takes effect on new conversations.'
+            )}
+          </p>
+        </div>
+        <Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />
       </div>
 
       <div className="space-y-2 rounded-lg border px-3 py-2.5" data-settings-row="tools.editMode">

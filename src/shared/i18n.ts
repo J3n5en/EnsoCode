@@ -116,6 +116,21 @@ export const zhTranslations: Record<string, string> = {
   'No Composer for this selection': '没有可接收圈选的输入框',
   'Add to conversation': '添加到对话',
   'Browser data': '浏览器数据',
+  'RTK command compression': 'RTK 命令压缩',
+  'Compress supported command output before it enters the model context. Takes effect on new conversations.':
+    '在受支持的命令输出进入模型上下文前进行压缩。新会话生效。',
+  Compressed: '已压缩',
+  Unchanged: '未改变',
+  'Background task started': '后台任务已启动',
+  Bypassed: '已绕过',
+  Unavailable: '不可用',
+  'This is the startup receipt; see the task_output result for final statistics.':
+    '此处为启动回执，最终统计见 task_output 的结果。',
+  '~{{count}} tokens saved': '约节省 {{count}} tokens',
+  'Input estimate': '输入估算',
+  'Output estimate': '输出估算',
+  '{{count}} tokens': '{{count}} tokens',
+  Reason: '原因',
   'Cookies and site storage of the built-in browser, separate from the app itself.':
     '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',
   Cleared: '已清除',

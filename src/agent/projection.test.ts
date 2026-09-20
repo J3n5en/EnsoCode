@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { PROJECTED_FILE_CHANGE_LIMIT, PROJECTED_TEXT_LIMIT, projectMessage } from './projection';
 
 describe('projectMessage', () => {
+  it('命令统计从 details 白名单投影，历史恢复可见且内部状态不泄露', () => {
+    const rtk = {
+      status: 'compressed',
+      originalCommand: 'git status',
+      inputTokens: 100,
+      outputTokens: 20,
+    };
+    for (const toolName of ['bash', 'powershell', 'task_output']) {
+      expect(
+        projectMessage({
+          role: 'toolResult',
+          toolName,
+          content: [],
+          details: { rtk: { ...rtk, dbPath: '/secret' }, env: 'secret' },
+        })
+      ).toEqual({ role: 'toolResult', toolName, content: [], rtk });
+    }
+    expect(
+      projectMessage({ role: 'toolResult', toolName: 'read', content: [], details: { rtk } })
+    ).not.toHaveProperty('rtk');
+  });
+
   it('assistant 消息只保留白名单字段，provider 原始数据不出 worker', () => {
     const projected = projectMessage({
       role: 'assistant',

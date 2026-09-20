@@ -1,3 +1,4 @@
+import type { RtkToolStats } from '@shared/rtk';
 import type {
   AgentSessionCustomEntry,
   ApprovalRequestInfo,
@@ -68,6 +69,8 @@ export type TimelineItem =
       source?: string | null;
       /** 嵌套审批未决数（exec 脚本内 write 等） */
       nestedPending?: number;
+      /** RTK 对本次工具调用的真实处理结果；无元数据时缺省 */
+      rtk?: RtkToolStats;
     }
   | {
       kind: 'tool-group';
@@ -495,6 +498,7 @@ function buildMessageTimeline(
       editDiff: { oldText: string; newText: string } | null;
       fileChanges: ProjectedFileChange[] | null;
       applyPatchOutcome: ProjectedApplyPatchOutcome | null;
+      rtk?: RtkToolStats;
     }
   >();
   for (const message of messages) {
@@ -508,6 +512,7 @@ function buildMessageTimeline(
         editDiff: message.editDiff ?? null,
         fileChanges: message.fileChanges ?? null,
         applyPatchOutcome: message.applyPatchOutcome ?? null,
+        rtk: message.rtk,
       });
     }
   }
@@ -747,6 +752,7 @@ function buildMessageTimeline(
             todos: result?.todos ?? null,
             durationMs: result?.durationMs ?? null,
             agentMeta: result?.agentMeta ?? null,
+            ...(result?.rtk ? { rtk: result.rtk } : {}),
             ...(result || !toolStartedAt ? {} : { startedAt: toolStartedAt[part.id] ?? null }),
           });
           return;

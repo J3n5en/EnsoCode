@@ -475,6 +475,44 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...base, windowsLocalShell: true })).toBeNull();
   });
 
+  it('spawn-parent 只接受布尔 RTK 开关，兼容未配置旧会话', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand(base)).toEqual(base);
+    for (const rtkEnabled of [true, false]) {
+      expect(parseAgentCommand({ ...base, rtkEnabled })).toEqual({ ...base, rtkEnabled });
+    }
+    for (const rtkEnabled of [0, 'false', null, {}]) {
+      expect(parseAgentCommand({ ...base, rtkEnabled })).toBeNull();
+    }
+  });
+
+  it('命令结果统计在 worker 边界校验，非法计数拒绝', () => {
+    const event = {
+      type: 'message-upsert',
+      identity: parent,
+      seq: 1,
+      index: 0,
+      message: {
+        role: 'toolResult',
+        toolName: 'bash',
+        content: [],
+        rtk: {
+          status: 'compressed',
+          originalCommand: 'git status',
+          inputTokens: 100,
+          outputTokens: 10,
+        },
+      },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        message: { ...event.message, rtk: { ...event.message.rtk, inputTokens: -10 } },
+      })
+    ).toBeNull();
+  });
+
   it('spawn-parent 携 remote:合法通过,坏 shape 拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/srv/app', model };
     const withRemote = { ...base, remote: { host: 'user@dev-box', auth: 'key' } };

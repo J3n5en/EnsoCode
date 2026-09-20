@@ -22,6 +22,7 @@ import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
+import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { parseSmartCompactMode } from '../smartCompactMode';
 import { WINDOWS_LOCAL_SHELLS, type WindowsLocalShell } from '../windowsLocalShell';
 import { type EditMode, isEditMode } from './editMode';
@@ -587,6 +588,8 @@ export type AgentCommand =
       disabledTools?: string[];
       /** Windows 本地命令壳偏好；缺省 auto。远程会话忽略。 */
       windowsLocalShell?: WindowsLocalShell;
+      /** 内置 RTK；未设置时默认启用。 */
+      rtkEnabled?: boolean;
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
@@ -795,6 +798,7 @@ export interface TodoItem {
 
 /** 渲染层可见的消息投影：pi AgentMessage 的白名单克隆 */
 export interface ProjectedMessage {
+  rtk?: RtkToolStats;
   role: string;
   content: ProjectedPart[];
   /** toolResult 消息附带 */
@@ -1273,7 +1277,8 @@ function parseProjectedApplyPatchOutcome(value: unknown): ProjectedApplyPatchOut
   return value as unknown as ProjectedApplyPatchOutcome;
 }
 
-function hasValidProjectedFileChanges(value: Record<string, unknown>): boolean {
+function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
+  if (value.rtk !== undefined && !parseRtkToolStats(value.rtk)) return false;
   const fileChanges =
     value.fileChanges === undefined ? undefined : parseProjectedFileChanges(value.fileChanges);
   if (fileChanges === null) return false;
@@ -1983,9 +1988,7 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
     !parseAnySessionIdentity(value.identity) ||
     (value.status !== 'idle' && value.status !== 'running' && value.status !== 'failed') ||
     !Array.isArray(value.messages) ||
-    value.messages.some(
-      (message) => !isRecord(message) || !hasValidProjectedFileChanges(message)
-    ) ||
+    value.messages.some((message) => !isRecord(message) || !hasValidProjectedMetadata(message)) ||
     !Array.isArray(value.commands) ||
     value.commands.some(
       (command) =>
@@ -2057,6 +2060,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'subagentModels',
           'disabledTools',
           'windowsLocalShell',
+          'rtkEnabled',
           'remote',
           'rolePrompt',
           'systemPrompt',
@@ -2066,6 +2070,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         !parseSpawnModelConfig(value.model) ||
         (value.resumeFile !== undefined && !isNonEmptyString(value.resumeFile)) ||
         (value.loadHarnessAssets !== undefined && typeof value.loadHarnessAssets !== 'boolean') ||
+        (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||
         (value.windowsLocalShell !== undefined &&
           !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(
             value.windowsLocalShell as string
@@ -2554,7 +2559,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'message-upsert':
       return isSequence(value.index) &&
         isRecord(value.message) &&
-        hasValidProjectedFileChanges(value.message)
+        hasValidProjectedMetadata(value.message)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'turn-completed':

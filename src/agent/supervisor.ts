@@ -123,6 +123,7 @@ import { projectMessage } from './projection';
 import { applyWorkerProxyEnv } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
 import { projectMessages, projectResumeTail } from './resumeSnapshots';
+import { withRtkOptimization } from './rtk';
 import { RunawayGuard } from './runawayGuard';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
@@ -955,7 +956,8 @@ export class SessionSupervisor {
           command.memoryLanguage,
           command.editMode,
           command.rolePrompt,
-          command.systemPrompt
+          command.systemPrompt,
+          command.rtkEnabled
         );
         return;
       case 'spawn-child':
@@ -1373,7 +1375,8 @@ export class SessionSupervisor {
     memoryLanguage?: string,
     requestedEditMode?: EditMode,
     rolePrompt?: string,
-    systemPrompt?: string
+    systemPrompt?: string,
+    rtkEnabled = true
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -1615,12 +1618,21 @@ export class SessionSupervisor {
           'command',
           guarded(
             withBackground(
-              createSessionCommandTool({
-                cwd,
-                remote: Boolean(remoteOps),
-                preference: windowsLocalShell,
-                operations: remoteOps?.bash,
-              }) as unknown as Def,
+              withRtkOptimization(
+                createSessionCommandTool({
+                  cwd,
+                  remote: Boolean(remoteOps),
+                  preference: windowsLocalShell,
+                  operations: remoteOps?.bash,
+                }) as unknown as Def,
+                {
+                  binaryPath: process.env.ENSO_RTK_PATH,
+                  dataDir: path.join(this.options.agentDir, 'rtk'),
+                  cwd,
+                  remote: Boolean(remoteOps),
+                  enabled: rtkEnabled,
+                }
+              ),
               this.bgTasks,
               sessionId,
               cwd,

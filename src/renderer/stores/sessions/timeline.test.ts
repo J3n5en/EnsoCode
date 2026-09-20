@@ -323,6 +323,43 @@ describe('buildTimeline', () => {
     });
   });
 
+  it('把 toolResult 的 RTK 元数据完整带到对应工具行', () => {
+    const rtk = {
+      status: 'compressed' as const,
+      originalCommand: 'git status --short',
+      rewrittenCommand: 'rtk git status --short',
+      inputTokens: 800,
+      outputTokens: 200,
+      reason: 'supported command',
+    };
+    const timeline = buildTimeline(
+      [
+        user('检查状态'),
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 't1',
+              name: 'bash',
+              arguments: { command: rtk.originalCommand },
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'bash',
+          content: [{ type: 'text', text: 'clean' }],
+          rtk,
+        },
+      ],
+      false
+    );
+
+    expect(timeline[1]).toMatchObject({ kind: 'tool', rtk });
+  });
+
   it('exec 摘要用首行 JS，source 保留全文，结果 JSON 解析为 value/calls', () => {
     const code = 'const pkg = await read({ path: "package.json" });\nreturn pkg;';
     const output = JSON.stringify({

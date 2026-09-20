@@ -11,6 +11,7 @@
   "type": "module",
   "packageManager": "pnpm@10.26.2",
   "scripts": {
+    "predev": "pnpm rtk:prepare",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
@@ -18,13 +19,14 @@
     "build:win": "pnpm build && electron-builder --win",
     "build:linux": "pnpm build && electron-builder --linux",
     "generate:themes": "npx tsx scripts/generate-themes.ts",
+    "rtk:prepare": "node scripts/prepare-rtk.mjs",
     "knowledge:check": "npx tsx scripts/knowledge.ts check",
     "knowledge:clean": "npx tsx scripts/knowledge.ts clean",
     "knowledge:compact": "npx tsx scripts/knowledge.ts compact",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test": "vitest run",
+    "test": "node --test scripts/rtk.test.mjs && vitest run",
     "test:watch": "vitest",
     "format": "biome format --write .",
     "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps"

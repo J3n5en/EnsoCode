@@ -1,3 +1,4 @@
+import { parseRtkToolStats } from '@shared/rtk';
 import type { ProjectedMessage, ProjectedPart, TodoItem } from '@shared/types/agent';
 import {
   PROJECTED_APPLY_PATCH_PATH_COUNT_LIMIT,
@@ -166,6 +167,14 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (usage) projected.usage = usage;
   if (typeof value.ttft === 'number') projected.ttft = value.ttft;
   if (typeof value.duration === 'number') projected.duration = value.duration;
+  if (
+    value.role === 'toolResult' &&
+    ['bash', 'powershell', 'task_output'].includes(String(value.toolName)) &&
+    isRecord(value.details)
+  ) {
+    const rtk = parseRtkToolStats(value.details.rtk);
+    if (rtk) projected.rtk = rtk;
+  }
   if (value.role === 'toolResult' && value.toolName === 'todo') {
     const todos = projectTodos(value.details);
     if (todos) projected.todos = todos;

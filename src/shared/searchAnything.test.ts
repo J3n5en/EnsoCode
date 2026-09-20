@@ -210,6 +210,7 @@ describe('buildSettingsCatalog', () => {
     'agents.root',
     'agents.maxActiveCoworkers',
     'tools.root',
+    'tools.rtkEnabled',
     'tools.editMode',
     'skills.root',
     'mcp.root',

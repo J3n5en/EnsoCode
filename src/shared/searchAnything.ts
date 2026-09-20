@@ -186,6 +186,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
   },
   { id: 'tools.root', category: 'tools', title: 'Built-in tools' },
   {
+    id: 'tools.rtkEnabled',
+    category: 'tools',
+    title: 'RTK command compression',
+    description:
+      'Compress supported command output before it enters the model context. Takes effect on new conversations.',
+  },
+  {
     id: 'tools.editMode',
     category: 'tools',
     title: 'File edit mode',

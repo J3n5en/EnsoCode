@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "version": "0.49.0",
+  "baseUrl": "https://github.com/rtk-ai/rtk/releases/download/v0.49.0",
+  "license": "Apache-2.0",
+  "targets": {
+    "darwin-arm64": {
+      "asset": "rtk-aarch64-apple-darwin.tar.gz",
+      "sha256": "bbbfebabb22686993a80da731aa4d5d35116fb8ae24abb00608efa028e13ae01",
+      "binarySha256": "055ef1cd1aa0afb96c854bddf43d24af10dcac5a6288ed44519cb1cc10b093a9",
+      "executable": "rtk"
+    },
+    "darwin-x64": {
+      "asset": "rtk-x86_64-apple-darwin.tar.gz",
+      "sha256": "d297388f4a8a786e79abe5f55b80451725bfe8c5835b4736c05d7cff4d68f627",
+      "binarySha256": "1a28052aa71b4d865c3346de6e20216a791ad7e011845ced078b2f70745ce983",
+      "executable": "rtk"
+    },
+    "linux-arm64": {
+      "asset": "rtk-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "c8ea4b6560841e73157c134fd4a3293914c6ede42e786ee985cf491fde691ba7",
+      "binarySha256": "4fa443857061b1226a21a8503112adba078a5c7ca3f7fd5919782afacf5566ca",
+      "executable": "rtk"
+    },
+    "linux-x64": {
+      "asset": "rtk-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f",
+      "binarySha256": "a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe",
+      "executable": "rtk"
+    },
+    "win32-x64": {
+      "asset": "rtk-x86_64-pc-windows-msvc.zip",
+      "sha256": "cb971046598f0e8bd51f6c27780fcdd2c39a4c459a811bd95b0d77ba8c0d7c9f",
+      "binarySha256": "90905cbcb1f1fcd167452518386e1312950bb8c9814c5e2400d3e027f68a7d61",
+      "executable": "rtk.exe"
+    }
+  }
+}

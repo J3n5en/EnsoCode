@@ -82,6 +82,12 @@ const MAPPED_I18N_KEYS = [
   'Reveal in Finder',
   'Open Containing Folder',
   'Reveal in File Explorer',
+  // RtkToolStatsBar.STATUS_LABELS
+  'Compressed',
+  'Unchanged',
+  'Background task started',
+  'Bypassed',
+  'Unavailable',
 ] as const;
 
 const MODEL_CENTER_ENSO_I18N_KEYS = [

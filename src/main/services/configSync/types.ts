@@ -125,6 +125,7 @@ export interface ConfigSyncState {
   loadLocalSkills?: boolean;
   loadHarnessAssets?: boolean;
   exploreFoldEnabled?: boolean;
+  rtkEnabled?: boolean;
   bashInterceptEnabled?: boolean;
   editMode?: EditMode;
   /** @deprecated 仅用于读取旧配置包；校验后迁为 editMode。 */

@@ -51,6 +51,7 @@ describe('settings广播策略', () => {
   it('设置白名单同时保留 canonical editMode 与只读迁移用旧字段', async () => {
     const { CONFIG_SYNC_COMMIT_FIELDS, SETTINGS_STATE_FIELDS } = await import('./settings');
     expect(SETTINGS_STATE_FIELDS).toContain('editMode');
+    expect(SETTINGS_STATE_FIELDS).toContain('rtkEnabled');
     expect(SETTINGS_STATE_FIELDS).toContain('hashlineEditEnabled');
     expect(CONFIG_SYNC_COMMIT_FIELDS).toContain('editMode');
     expect(CONFIG_SYNC_COMMIT_FIELDS).not.toContain('hashlineEditEnabled');

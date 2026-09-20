@@ -41,3 +41,8 @@ temp/
 # Python bytecode
 __pycache__/
 *.py[cod]
+
+# 下载并校验的 RTK 官方二进制（manifest / 许可文件保留）
+resources/rtk/*/rtk
+resources/rtk/*/rtk.exe
+resources/rtk/*/rtk.tmp-*

@@ -88,7 +88,8 @@ linux:
     - AppImage
     - deb
 npmRebuild: false
-afterPack: ./src/tooling/stripPackagedNatives.mjs
+# 聚合 hook 仍会先调用 src/tooling/stripPackagedNatives.mjs，再放入目标架构 RTK。
+afterPack: ./scripts/after-pack.mjs
 publish:
   provider: github
   owner: J3n5en

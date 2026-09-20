@@ -119,6 +119,7 @@ const initialState = {
   loadHarnessAssets: false,
   windowsLocalShell: 'auto' as const,
   exploreFoldEnabled: false,
+  rtkEnabled: true,
   editMode: 'apply_patch' as import('@shared/types').EditMode,
   compactStrategy: 'standard' as import('@shared/compactStrategy').CompactStrategy,
   smartCompactEnabled: false,
@@ -256,6 +257,7 @@ export const useSettingsStore = create<SettingsState>()(
       setWindowsLocalShell: (windowsLocalShell) =>
         set({ windowsLocalShell: parseWindowsLocalShell(windowsLocalShell) }),
       setExploreFoldEnabled: (exploreFoldEnabled) => set({ exploreFoldEnabled }),
+      setRtkEnabled: (rtkEnabled) => set({ rtkEnabled }),
       setMemoryEmbeddingModel: (memoryEmbeddingModel) => set({ memoryEmbeddingModel }),
       setMemoryEmbeddingAutoDownload: (memoryEmbeddingAutoDownload) =>
         set({ memoryEmbeddingAutoDownload }),

@@ -29,6 +29,42 @@ interface Task {
   consumed: boolean;
   killedByUser: boolean;
   waiters: Array<() => void>;
+  details?: unknown;
+  finalize?: () => Promise<unknown>;
+  settling: boolean;
+}
+
+export interface PreparedBackgroundCommand {
+  command: string;
+  details?: unknown;
+  finalize?: () => Promise<unknown>;
+}
+
+export interface BackgroundCommandHooks {
+  prepare(
+    toolCallId: string,
+    command: string,
+    signal?: AbortSignal
+  ): Promise<PreparedBackgroundCommand>;
+}
+
+export const BACKGROUND_COMMAND_HOOKS = Symbol('enso.background-command-hooks');
+
+type BackgroundAwareToolDefinition = ToolDefinition & {
+  [BACKGROUND_COMMAND_HOOKS]?: BackgroundCommandHooks;
+};
+
+export function attachBackgroundCommandHooks(
+  definition: ToolDefinition,
+  hooks: BackgroundCommandHooks
+): ToolDefinition {
+  return Object.assign(definition, { [BACKGROUND_COMMAND_HOOKS]: hooks });
+}
+
+function abortedError(): Error {
+  const error = new Error('Operation aborted');
+  error.name = 'AbortError';
+  return error;
 }
 
 export interface TaskEvents {
@@ -72,7 +108,13 @@ export class BackgroundTaskManager {
     sessionId: string,
     command: string,
     cwd: string,
-    spawnOpts?: { file?: string; argsPrefix?: string[] }
+    spawnOpts?: {
+      file?: string;
+      argsPrefix?: string[];
+      displayCommand?: string;
+      details?: unknown;
+      finalize?: () => Promise<unknown>;
+    }
   ): string {
     // 配额：先清理已完成，再满则拒绝并教模型下一步
     if (this.tasks.size >= MAX_TASKS) this.pruneFinished();
@@ -103,7 +145,16 @@ export class BackgroundTaskManager {
       consumed: false,
       killedByUser: false,
       waiters: [],
-      info: { taskId, command, status: 'running', tail: '', startedAt: Date.now() },
+      details: spawnOpts?.details,
+      finalize: spawnOpts?.finalize,
+      settling: false,
+      info: {
+        taskId,
+        command: spawnOpts?.displayCommand ?? command,
+        status: 'running',
+        tail: '',
+        startedAt: Date.now(),
+      },
     };
     this.tasks.set(taskId, task);
     const append = (chunk: Buffer) => {
@@ -115,12 +166,12 @@ export class BackgroundTaskManager {
     child.stderr?.on('data', append);
     child.on('error', (error) => {
       task.output += `\n[spawn error] ${error.message}`;
-      this.finish(task, 'failed');
     });
-    child.on('exit', (code, signal) => {
-      if (task.info.status !== 'running') return;
+    // close 在 stdio 全部排空后触发；统计必须看到完整执行并晚于输出收集。
+    child.on('close', (code, signal) => {
+      if (task.info.status !== 'running' || task.settling) return;
       if (signal) task.output += `\n[terminated by ${signal}]`;
-      this.finish(task, code === 0 ? 'done' : 'failed', code ?? undefined);
+      void this.settle(task, code === 0 ? 'done' : 'failed', code ?? undefined);
     });
     this.events.onStarted(sessionId, { ...task.info });
     this.ensureTimer();
@@ -151,6 +202,16 @@ export class BackgroundTaskManager {
     if (!task.consumed) {
       this.events.onCompletionNotify(task.sessionId, this.completionText(task));
     }
+  }
+
+  private async settle(task: Task, status: 'done' | 'failed', exitCode?: number): Promise<void> {
+    task.settling = true;
+    try {
+      if (task.finalize) task.details = (await task.finalize()) ?? task.details;
+    } catch {
+      // 统计失败不能改变原命令的状态或输出。
+    }
+    this.finish(task, status, exitCode);
   }
 
   private completionText(task: Task): string {
@@ -190,7 +251,13 @@ export class BackgroundTaskManager {
   async read(
     taskId: string,
     timeoutMs = 0
-  ): Promise<{ status: string; output: string; exitCode?: number; logPath: string } | null> {
+  ): Promise<{
+    status: string;
+    output: string;
+    exitCode?: number;
+    logPath: string;
+    details?: unknown;
+  } | null> {
     const task = this.tasks.get(taskId);
     if (!task) return null;
     if (timeoutMs > 0 && task.info.status === 'running') {
@@ -209,6 +276,7 @@ export class BackgroundTaskManager {
       output: task.output,
       exitCode: task.info.exitCode,
       logPath: task.logPath,
+      details: task.details,
     };
   }
 
@@ -355,11 +423,29 @@ export function withBackground(
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
       if (record.background && typeof record.command === 'string') {
-        const launch = resolveBackgroundLaunch(definition.name, record.command, cwd, transform);
-        const taskId = manager.start(sessionId, launch.command, launch.cwd, {
-          file: launch.file,
-          argsPrefix: launch.argsPrefix,
-        });
+        const hooks = (definition as BackgroundAwareToolDefinition)[BACKGROUND_COMMAND_HOOKS];
+        const prepared = hooks
+          ? await hooks.prepare(toolCallId, record.command, signal)
+          : { command: record.command };
+        let taskId: string;
+        try {
+          if (signal?.aborted) throw abortedError();
+          const launch = resolveBackgroundLaunch(definition.name, prepared.command, cwd, transform);
+          taskId = manager.start(sessionId, launch.command, launch.cwd, {
+            file: launch.file,
+            argsPrefix: launch.argsPrefix,
+            displayCommand: hooks ? record.command : undefined,
+            details: prepared.details,
+            finalize: prepared.finalize,
+          });
+        } catch (error) {
+          try {
+            await prepared.finalize?.();
+          } catch {
+            // cleanup/finalize 失败不能覆盖原始取消或启动错误。
+          }
+          throw error;
+        }
         return {
           content: [
             {
@@ -369,7 +455,7 @@ export function withBackground(
                 `continue with other work. task_output("${taskId}") shows a snapshot, task_stop("${taskId}") stops it.`,
             },
           ],
-          details: undefined,
+          details: prepared.details,
         };
       }
       if (typeof record.command === 'string' && TRAILING_AMP.test(record.command.trim())) {
@@ -437,7 +523,7 @@ export function createTaskTools(manager: BackgroundTaskManager): ToolDefinition[
                 `${result.output.slice(-30_000) || '(no output yet)'}${hint}`,
             },
           ],
-          details: undefined,
+          details: result.details,
         };
       },
     },

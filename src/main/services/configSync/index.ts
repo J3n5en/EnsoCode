@@ -71,6 +71,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   loadHarnessAssets: { mode: 'portable' },
   windowsLocalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   exploreFoldEnabled: { mode: 'portable' },
+  rtkEnabled: { mode: 'portable' },
   editMode: { mode: 'portable' },
   hashlineEditEnabled: { mode: 'excluded', reason: 'legacy read-only edit mode migration' },
   compactStrategy: { mode: 'portable' },

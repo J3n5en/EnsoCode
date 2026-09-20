@@ -75,6 +75,7 @@ import { agentCommandDispatch } from './agentCommandDispatch';
 import { resolveGlobalInstruction } from './instructionStore';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { PendingReloadRegistry } from './pendingReloads';
+import { bundledRtkPath } from './rtkBinary';
 import { pickSubagentModelRefs } from './subagentModels';
 import { readStoredSystemPrompt } from './systemPromptStore';
 import { workspaceCommandBlocked } from './workspaceCommandGate';
@@ -143,6 +144,13 @@ export function startAgentWorker(): void {
       ...process.env,
       ENSO_AGENT_DATA_DIR: path.join(app.getPath('userData'), 'agent'),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
+      ENSO_RTK_PATH: bundledRtkPath({
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+        platform: process.platform,
+        arch: process.arch,
+      }),
     },
   });
   worker = child;
@@ -535,6 +543,7 @@ export function spawnSession(
     ...(preset || request.loadLocalSkills === false ? { loadLocalSkills: false } : {}),
     ...(loadHarnessAssets ? { loadHarnessAssets: true } : {}),
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
+    rtkEnabled: state?.rtkEnabled !== false,
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     editMode,
     ...(compactStrategy !== 'standard' ? { compactStrategy } : {}),
