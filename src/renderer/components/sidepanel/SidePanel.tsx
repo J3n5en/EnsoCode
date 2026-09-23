@@ -17,6 +17,7 @@ import {
   Minimize2,
   Plus,
   SquareTerminal,
+  Workflow,
   X,
 } from 'lucide-react';
 import { createContext, type ReactElement, useContext, useEffect, useRef, useState } from 'react';
@@ -31,6 +32,7 @@ import { useI18n } from '@/i18n';
 import { easeOutLayout, springStandard } from '@/lib/motion';
 import {
   addSidePanelBrowser,
+  addSidePanelWorkflow,
   bindSidePanelDock,
   closeSidePanelBrowser,
   disposeConversationResources,
@@ -45,6 +47,7 @@ import {
   resolveSidePanelWidth,
   SIDE_PANEL_HANDLE_WIDTH,
 } from '@/stores/sidePanel/width';
+import { useWorkflowRunsStore } from '@/stores/workflowRuns';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
@@ -52,6 +55,7 @@ import { FilesView } from './FilesView';
 import { shouldSkipSidePanelWidthAnim } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
 import { idsToClose, type TabCloseKind } from './tabCloseActions';
+import { WorkflowView } from './WorkflowView';
 import 'dockview-react/dist/styles/dockview.css';
 import './sidepanel-dock.css';
 
@@ -188,6 +192,33 @@ function BrowserPanel(props: IDockviewPanelProps<{ conversationId?: string; proj
   return <BrowserView conversationId={conversationId} panelApi={props.api} />;
 }
 
+function addWorkflowPanel(
+  api: DockviewApi,
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const existing = api.getPanel('workflow');
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({
+    id: 'workflow',
+    component: 'workflow',
+    title: label,
+    params: { conversationId, projectId },
+  });
+}
+
+function WorkflowPanel(
+  props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>
+) {
+  const { conversationId } = props.params;
+  if (!conversationId) return null;
+  return <WorkflowView conversationId={conversationId} />;
+}
+
 function closeGroupTabs(
   api: IDockviewPanelHeaderProps['api'],
   kind: Exclude<TabCloseKind, 'saved'>
@@ -237,6 +268,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         <FolderOpen className="h-3 w-3 shrink-0" />
       ) : props.api.id.startsWith('btw:') ? (
         <MessageCircle className="h-3 w-3 shrink-0" />
+      ) : props.api.id === 'workflow' ? (
+        <Workflow className="h-3 w-3 shrink-0" />
       ) : isBrowser && favicon && !faviconBroken ? (
         <img
           src={favicon}
@@ -290,6 +323,7 @@ function NewTabMenu({
   onNewFiles,
   onNewBrowser,
   onNewBtw,
+  onNewWorkflow,
   compact,
 }: {
   onNewTerminal: () => void;
@@ -297,6 +331,7 @@ function NewTabMenu({
   onNewFiles: () => void;
   onNewBrowser: () => void;
   onNewBtw: () => void;
+  onNewWorkflow: () => void;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -334,6 +369,10 @@ function NewTabMenu({
         <MenuItem onClick={onNewBtw}>
           <MessageCircle className="h-4 w-4" />
           {t('Btw')}
+        </MenuItem>
+        <MenuItem onClick={onNewWorkflow}>
+          <Workflow className="h-4 w-4" />
+          {t('Workflow')}
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -394,6 +433,9 @@ function SidePanelHeaderActions({
           }
           addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
         }}
+        onNewWorkflow={() =>
+          addWorkflowPanel(containerApi, conversationId, projectId, t('Workflow'))
+        }
       />
     </div>
   );
@@ -426,6 +468,9 @@ function Watermark(props: IWatermarkPanelProps) {
             addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
           }
           onNewBtw={() => addBtwPanel(props.containerApi, conversationId, projectId, t('Btw'))}
+          onNewWorkflow={() =>
+            addWorkflowPanel(props.containerApi, conversationId, projectId, t('Workflow'))
+          }
         />
       </div>
     </div>
@@ -443,6 +488,7 @@ const DOCK_COMPONENTS = {
   files: FilesPanel,
   browser: BrowserPanel,
   btw: BtwPanel,
+  workflow: WorkflowPanel,
 };
 
 /** 跟随应用暗色模式(applyAppTheme 切换 documentElement 的 dark class) */
@@ -566,6 +612,22 @@ export function SidePanel({
       stopClosed();
     };
   }, []);
+  useEffect(
+    () =>
+      useWorkflowRunsStore.subscribe((state, prev) => {
+        for (const [conversationId, runs] of Object.entries(state.byConversation)) {
+          if (prev.byConversation[conversationId] === runs) continue;
+          const started = runs.find((run) => run.status === 'running');
+          if (!started) continue;
+          addSidePanelWorkflow({
+            conversationId,
+            runId: started.runId,
+            title: t('Workflow'),
+          });
+        }
+      }),
+    [t]
+  );
   useEffect(
     () =>
       useSessionsStore.subscribe((state, prev) => {

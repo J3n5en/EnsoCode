@@ -14,6 +14,12 @@ export const BUILTIN_TOOLS: BuiltinToolInfo[] = [
     description:
       'Unified agents: delegate one-shot tasks or keep persistent coworkers under Main control',
   },
+  {
+    id: 'workflow',
+    name: 'Workflow',
+    description:
+      'Run a JavaScript workflow that fans work out across subagents. Live status appears in the side panel.',
+  },
   { id: 'todo', name: 'Todo', description: 'Task list: track progress on multi-step work' },
   {
     id: 'ask_user',

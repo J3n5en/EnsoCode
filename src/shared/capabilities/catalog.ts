@@ -1179,6 +1179,13 @@ export const CAPABILITY_CATALOG = {
     reason: 'Enso does not receive the general subagent tool.',
     suggestedAction: 'Ask the coding agent to delegate the coding task.',
   }),
+  'coding-tools.workflow': unavailable('coding-tools.workflow', {
+    description: 'Run a JavaScript workflow that fans work out across subagents.',
+    risk: 'dangerous',
+    targetContext: 'origin-conversation',
+    reason: 'Enso does not receive the coding-session workflow tool.',
+    suggestedAction: 'Ask the coding agent to run the workflow.',
+  }),
   'coding-tools.coworker': unavailable('coding-tools.coworker', {
     description: 'Use the unrestricted coworker tool.',
     risk: 'dangerous',

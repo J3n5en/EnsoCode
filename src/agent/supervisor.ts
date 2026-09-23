@@ -177,6 +177,7 @@ import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { transcriptMessages } from './transcript';
+import { createWorkflowTool } from './workflow';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
 import { withWritePreflight, withWriteScope } from './writeScope';
 
@@ -1910,6 +1911,23 @@ export class SessionSupervisor {
       ...(toolEnabled('todo') ? [createTodoTool()] : []),
       ...(toolEnabled('ask_user') ? [createAskTool(askManager)] : []),
       ...(toolEnabled('subagent') ? [unifiedSubagentTool] : []),
+      ...(toolEnabled('workflow') && toolEnabled('subagent')
+        ? [
+            createWorkflowTool({
+              invoke: (request, signal) => agentControl.invoke(request, signal),
+              emit: (run) => {
+                const managed = managedRef ?? this.sessions.get(sessionId);
+                if (!managed) return;
+                this.options.emit({
+                  type: 'workflow-status',
+                  identity: managed.identity,
+                  seq: ++managed.seq,
+                  run,
+                });
+              },
+            }),
+          ]
+        : []),
       ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
       ...(toolEnabled('background_tasks') ? createTaskTools(this.bgTasks) : []),
       ...(toolEnabled('goal')

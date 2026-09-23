@@ -64,7 +64,7 @@ describe('buildBtwSystemPrompt', () => {
     expect(prompt).toMatch(/background only/i);
     expect(prompt).not.toMatch(/do not call tools/i);
     expect(prompt).not.toMatch(/use workspace, file, and command tools/i);
-    expect(prompt).toMatch(/Do not spawn subagents or coworkers/i);
+    expect(prompt).toMatch(/Do not spawn subagents, coworkers, or workflows/i);
   });
 
   it('tangent 不含主会话快照', () => {
@@ -73,7 +73,7 @@ describe('buildBtwSystemPrompt', () => {
     expect(prompt).not.toContain('User: hi');
     expect(prompt).not.toMatch(/do not call tools/i);
     expect(prompt).not.toMatch(/use workspace, file, and command tools/i);
-    expect(prompt).toMatch(/Do not spawn subagents or coworkers/i);
+    expect(prompt).toMatch(/Do not spawn subagents, coworkers, or workflows/i);
   });
 });
 
@@ -220,8 +220,8 @@ describe('lastAssistantText', () => {
 
 describe('btwDisabledTools', () => {
   it('强制关闭 subagent 与 coworker，并保留已有禁用', () => {
-    expect(btwDisabledTools(['memory'])).toEqual(['memory', 'subagent', 'coworker']);
-    expect(btwDisabledTools(['coworker'])).toEqual(['coworker', 'subagent']);
+    expect(btwDisabledTools(['memory'])).toEqual(['memory', 'subagent', 'coworker', 'workflow']);
+    expect(btwDisabledTools(['coworker'])).toEqual(['coworker', 'subagent', 'workflow']);
   });
 });
 

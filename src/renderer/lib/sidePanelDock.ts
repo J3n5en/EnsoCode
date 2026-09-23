@@ -7,6 +7,13 @@ import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 const docks = new Map<string, DockviewApi>();
 const filesTabClosers = new Map<string, () => boolean>();
 const pendingBrowserReveal: { conversationId: string; tabId?: string; ownerId?: string }[] = [];
+const pendingWorkflowReveal: {
+  conversationId: string;
+  ownerId: string;
+  title: string;
+  runId: string;
+}[] = [];
+const revealedWorkflowRuns = new Set<string>();
 
 export function registerFilesTabCloser(conversationId: string, close: () => boolean): () => void {
   filesTabClosers.set(conversationId, close);
@@ -27,6 +34,21 @@ export function bindSidePanelDock(conversationId: string, api: DockviewApi): voi
     addSidePanelBrowser({
       conversationId: item.ownerId ?? item.conversationId,
       tabId: item.tabId,
+    });
+  }
+  const workflowDue = pendingWorkflowReveal.filter(
+    (item) => item.conversationId === conversationId
+  );
+  pendingWorkflowReveal.splice(
+    0,
+    pendingWorkflowReveal.length,
+    ...pendingWorkflowReveal.filter((item) => item.conversationId !== conversationId)
+  );
+  for (const item of workflowDue) {
+    addSidePanelWorkflow({
+      conversationId: item.ownerId,
+      runId: item.runId,
+      title: item.title,
     });
   }
 }
@@ -132,6 +154,38 @@ export function addSidePanelBtw(opts?: { title?: string }): void {
   });
 }
 
+export function addSidePanelWorkflow(opts: {
+  conversationId: string;
+  runId: string;
+  title?: string;
+}): void {
+  const revealKey = `${opts.conversationId}:${opts.runId}`;
+  if (revealedWorkflowRuns.has(revealKey)) return;
+  const sessions = useSessionsStore.getState();
+  const conversation = sessions.conversations[opts.conversationId];
+  if (!conversation) return;
+  const dockId = resolveSidePanelDockConversationId(sessions.conversations, opts.conversationId);
+  const api = docks.get(dockId);
+  useSidePanelStore.getState().ensureOpen(dockId);
+  if (!api) {
+    pendingWorkflowReveal.push({
+      conversationId: dockId,
+      ownerId: opts.conversationId,
+      title: opts.title ?? 'Workflow',
+      runId: opts.runId,
+    });
+    return;
+  }
+  revealedWorkflowRuns.add(revealKey);
+  if (api.getPanel('workflow')) return;
+  api.addPanel({
+    id: 'workflow',
+    component: 'workflow',
+    title: opts.title ?? 'Workflow',
+    params: { conversationId: opts.conversationId, projectId: conversation.projectId },
+  });
+}
+
 export function closeSidePanelBrowser(conversationId: string, tabId: string): void {
   const dockId = resolveSidePanelDockConversationId(
     useSessionsStore.getState().conversations,
@@ -149,6 +203,14 @@ export function disposeConversationResources(conversationId: string): void {
     pendingBrowserReveal.length,
     ...pendingBrowserReveal.filter((item) => item.conversationId !== conversationId)
   );
+  pendingWorkflowReveal.splice(
+    0,
+    pendingWorkflowReveal.length,
+    ...pendingWorkflowReveal.filter((item) => item.conversationId !== conversationId)
+  );
+  for (const runId of [...revealedWorkflowRuns]) {
+    if (runId.startsWith(`${conversationId}:`)) revealedWorkflowRuns.delete(runId);
+  }
   if (api) {
     for (const panel of [...api.panels]) {
       if (panel.id === 'changes' || panel.id === 'files') continue;

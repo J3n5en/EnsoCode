@@ -1099,6 +1099,14 @@ export const zhTranslations: Record<string, string> = {
     '长期记忆:agent 可跨会话检索、记录与归纳持久的决策、偏好与经验',
   'Run JavaScript in an isolated sandbox that can call session tools. Intermediate reads and edits stay out of the chat; only the returned value is added to the conversation.':
     '在隔离沙箱里跑 JavaScript，并可调用会话工具。中间的读取和修改不会进对话，只有返回值会留下。',
+  Workflow: '工作流',
+  'Run a JavaScript workflow that fans work out across subagents.':
+    '运行一段扇出子代理的 JavaScript 工作流。',
+  'Run a JavaScript workflow that fans work out across subagents. Live status appears in the side panel.':
+    '运行一段扇出子代理的 JavaScript 工作流。实时状态显示在右侧栏。',
+  'No workflow runs': '还没有工作流',
+  Parallel: '并行',
+  '{{count}} agents': '{{count}} 个子代理',
   'One-shot subagent: delegate a self-contained task and return a final report (parallel or async)':
     '一次性子代理:委派自包含子任务,返回最终报告(可并行、可异步)',
   'Persistent subagent: hire for multi-turn dialogue; you can watch and intervene from a tab':

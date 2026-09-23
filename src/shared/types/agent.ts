@@ -42,6 +42,7 @@ import {
   type ModelThinkingLevelOverride,
 } from './llm';
 import { type AgentDispatchTask, parseAgentDispatchTask } from './mentions';
+import { parseWorkflowRunSnapshot, type WorkflowRunSnapshot } from './workflow';
 
 export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
 export { parseChildSessionIdentity, parseSessionIdentity } from '../builtinAgents';
@@ -292,8 +293,7 @@ export type AgentActorIdentity =
       ownerId: string;
       projectId: string;
       identity: SessionIdentity | ChildSessionIdentity;
-    }
-;
+    };
 export interface AgentControlContext {
   actor: AgentActorIdentity;
   owner: AgentOwnerIdentity;
@@ -1486,6 +1486,12 @@ export type AgentWorkerEvent =
       seq: number;
       kind: 'complete' | 'blocked' | 'wait';
       note: string;
+    }
+  | {
+      type: 'workflow-status';
+      identity: SessionIdentity | ChildSessionIdentity;
+      seq: number;
+      run: WorkflowRunSnapshot;
     }
   | { type: 'task-started'; identity: SessionIdentity; seq: number; task: BackgroundTaskInfo }
   | {
@@ -3056,6 +3062,12 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         typeof value.note === 'string'
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'workflow-status': {
+      const run = parseWorkflowRunSnapshot(value.run);
+      return hasExactKeys(value, ['type', 'identity', 'seq', 'run']) && run
+        ? ({ ...value, run } as unknown as AgentWorkerEvent)
+        : null;
+    }
     case 'tool-output':
       return isNonEmptyString(value.toolCallId) &&
         typeof value.output === 'string' &&

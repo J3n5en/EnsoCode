@@ -25,6 +25,7 @@ const FORBIDDEN_GUEST_TOOLS = new Set([
   'exec',
   'wait',
   'subagent',
+  'workflow',
   'coworker',
   'message_coworker',
   'message_main_agent',

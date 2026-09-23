@@ -289,6 +289,7 @@ export const SETTINGS_ACTION_COVERAGE = {
 
 export const BUILTIN_TOOL_COVERAGE: Readonly<Record<string, CoverageDisposition>> = {
   subagent: surfaces('coding-tools.subagent'),
+  workflow: surfaces('coding-tools.workflow'),
   todo: surfaces('coding-tools.todo'),
   ask_user: surfaces('coding-tools.ask-user'),
   background_tasks: surfaces('coding-tools.background-task'),

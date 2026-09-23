@@ -8,7 +8,7 @@ import {
 
 export const BTW_SNAPSHOT_LIMIT = 40;
 export const BTW_TITLE_MAX_CHARS = 32;
-export const BTW_DISABLED_TOOLS = ['subagent', 'coworker'] as const;
+export const BTW_DISABLED_TOOLS = ['subagent', 'coworker', 'workflow'] as const;
 
 export type BtwMode = 'contextual' | 'tangent';
 
@@ -55,7 +55,7 @@ export type BtwPromptResult =
 const BTW_ISOLATION =
   'You are a side conversation attached to a coding session. The main agent cannot see this thread. ' +
   'Do not continue the main task unless the user asks you to. Follow the same tool and skill constraints as the main session. ' +
-  'Do not spawn subagents or coworkers. Answer the user directly.';
+  'Do not spawn subagents, coworkers, or workflows. Answer the user directly.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

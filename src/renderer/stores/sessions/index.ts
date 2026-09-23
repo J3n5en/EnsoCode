@@ -35,6 +35,7 @@ import {
   cleanTitleSummarySource,
   extractRepresentativeTitle,
 } from '@/components/chat/mentionComposer';
+import { useWorkflowRunsStore } from '@/stores/workflowRuns';
 
 /** 会话目标(pi-goal 式):active 时每次轮次收束自动续跑一次,直到终止信号或安全限制 */
 export interface SessionGoal {
@@ -1243,6 +1244,18 @@ export const useSessionsStore = create<SessionsState>()(
               ...next,
               goal: { ...conversation.goal, status, note: event.note },
             });
+          });
+          return;
+        }
+
+        if (event.type === 'workflow-status') {
+          set((state) => {
+            const conversation = state.conversations[id];
+            if (!conversation) return state;
+            const next = applyAgentEvent(conversation, id, event);
+            if (next === conversation) return state;
+            useWorkflowRunsStore.getState().upsert(id, event.run);
+            return patch(state, id, next);
           });
           return;
         }

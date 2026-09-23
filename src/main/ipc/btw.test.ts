@@ -193,7 +193,7 @@ describe('btw IPC', () => {
       'p',
       expect.objectContaining({
         rolePrompt: 'You are aside',
-        extraDisabledTools: ['subagent', 'coworker'],
+        extraDisabledTools: ['subagent', 'coworker', 'workflow'],
         omitDispatchTools: true,
       })
     );
