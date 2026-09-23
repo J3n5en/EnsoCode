@@ -1,8 +1,22 @@
 import { BUILTIN_TOOLS, EDIT_MODES, type EditMode, isEditMode } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
 import type { BrowserClearKind } from '@shared/types/browser';
-import { Globe, Wrench } from 'lucide-react';
-import { useState } from 'react';
+import {
+  Box,
+  Brain,
+  FilePenLine,
+  FoldVertical,
+  Globe,
+  ListTodo,
+  type LucideIcon,
+  MessageCircleQuestion,
+  Shrink,
+  SquareTerminal,
+  Users,
+  Workflow,
+  Wrench,
+} from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -25,6 +39,47 @@ const EDIT_MODE_LABEL: Record<EditMode, string> = {
   replace: 'Text replacement',
   apply_patch: 'Apply patch (default)',
 };
+
+const TOOL_ICON: Record<string, LucideIcon> = {
+  subagent: Users,
+  workflow: Workflow,
+  todo: ListTodo,
+  ask_user: MessageCircleQuestion,
+  browser: Globe,
+  background_tasks: SquareTerminal,
+  memory: Brain,
+  isolated_sandbox: Box,
+};
+
+function ToolRow({
+  icon: Icon,
+  title,
+  description,
+  control,
+  children,
+  rowId,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  control?: ReactNode;
+  children?: ReactNode;
+  rowId?: string;
+}) {
+  return (
+    <div className="rounded-md border px-3 py-2.5" data-settings-row={rowId}>
+      <div className="flex items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-muted-foreground text-xs">{description}</p>
+        </div>
+        {control}
+      </div>
+      {children ? <div className="mt-2 space-y-2 pl-7">{children}</div> : null}
+    </div>
+  );
+}
 
 export function BuiltinToolsSettings() {
   const { t } = useI18n();
@@ -75,137 +130,122 @@ export function BuiltinToolsSettings() {
 
       <div className="space-y-2">
         {BUILTIN_TOOLS.map((tool) => (
-          <div key={tool.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
-            <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{t(tool.name)}</p>
-              <p className="text-muted-foreground text-xs">{t(tool.description)}</p>
-            </div>
-            <OccupancyMark
-              row={occupancy.rows[tool.id]}
-              pending={occupancy.pending && !occupancy.rows[tool.id]}
-            />
-            <Switch
-              checked={!disabled.includes(tool.id)}
-              onCheckedChange={(checked) => toggle(tool.id, checked)}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div
-        className="space-y-3 rounded-lg border px-3 py-2.5"
-        data-settings-row="tools.subagentModes"
-      >
-        <div>
-          <p className="font-medium text-sm">{t('Unified agent modes')}</p>
-          <p className="text-muted-foreground text-xs">
-            {t('Choose which Agent modes the unified subagent tool may create in new sessions.')}
-          </p>
-        </div>
-        {(
-          [
-            ['task', 'One-shot task agents'],
-            ['coworker', 'Persistent coworkers'],
-          ] as const
-        ).map(([mode, label]) => (
-          <div key={mode} className="flex items-center justify-between gap-4">
-            <span className="text-sm">{t(label)}</span>
-            <Switch
-              checked={subagentAllowedModes.includes(mode)}
-              disabled={!subagentEnabled}
-              onCheckedChange={(checked) => setMode(mode, checked)}
-            />
-          </div>
-        ))}
-        {!subagentEnabled && (
-          <p className="text-muted-foreground text-xs">
-            {t('The unified subagent tool is off. Re-enabling it keeps this mode selection.')}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
-        <div>
-          <p className="font-medium text-sm">{t('Explore fold')}</p>
-          <p className="text-muted-foreground text-xs">
-            {t(
-              'Let the agent mark exploratory reads and keep only a short report in later model context. Timeline stays intact.'
-            )}
-          </p>
-        </div>
-        <Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />
-      </div>
-
-      <div
-        className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5"
-        data-settings-row="tools.rtkEnabled"
-      >
-        <div className="min-w-0">
-          <p className="font-medium text-sm">{t('RTK command compression')}</p>
-          <p className="text-muted-foreground text-xs">
-            {t(
-              'Compress supported command output before it enters the model context. Takes effect on new conversations.'
-            )}
-          </p>
-        </div>
-        <Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />
-      </div>
-
-      <div className="space-y-2 rounded-lg border px-3 py-2.5" data-settings-row="tools.editMode">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="font-medium text-sm">{t('File edit mode')}</p>
-            <p className="text-muted-foreground text-xs">
-              {t(
-                'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.'
-              )}
-            </p>
-          </div>
-          <Select
-            items={Object.fromEntries(EDIT_MODES.map((mode) => [mode, t(EDIT_MODE_LABEL[mode])]))}
-            value={editMode}
-            onValueChange={(value) => {
-              if (isEditMode(value)) setEditMode(value);
-            }}
+          <ToolRow
+            key={tool.id}
+            icon={TOOL_ICON[tool.id] ?? Wrench}
+            title={t(tool.name)}
+            description={t(tool.description)}
+            control={
+              <>
+                <OccupancyMark
+                  row={occupancy.rows[tool.id]}
+                  pending={occupancy.pending && !occupancy.rows[tool.id]}
+                />
+                <Switch
+                  checked={!disabled.includes(tool.id)}
+                  onCheckedChange={(checked) => toggle(tool.id, checked)}
+                />
+              </>
+            }
           >
-            <SelectTrigger className="w-44 shrink-0" aria-label={t('File edit mode')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectPopup>
-              {EDIT_MODES.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {t(EDIT_MODE_LABEL[mode])}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
-      </div>
+            {tool.id === 'subagent' ? (
+              <div className="space-y-2" data-settings-row="tools.subagentModes">
+                {(
+                  [
+                    ['task', 'One-shot task agents'],
+                    ['coworker', 'Persistent coworkers'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <div key={mode} className="flex items-center justify-between gap-4">
+                    <span className="text-sm">{t(label)}</span>
+                    <Switch
+                      checked={subagentAllowedModes.includes(mode)}
+                      disabled={!subagentEnabled}
+                      onCheckedChange={(checked) => setMode(mode, checked)}
+                    />
+                  </div>
+                ))}
+                {!subagentEnabled && (
+                  <p className="text-muted-foreground text-xs">
+                    {t(
+                      'The unified subagent tool is off. Re-enabling it keeps this mode selection.'
+                    )}
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {tool.id === 'browser' ? (
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-xs">
+                  {t(
+                    'Cookies and site storage of the built-in browser, separate from the app itself.'
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(['cookies', 'cache', 'all'] as const).map((kind) => (
+                    <Button key={kind} variant="outline" size="sm" onClick={() => void clear(kind)}>
+                      {cleared === kind
+                        ? t('Cleared')
+                        : kind === 'cookies'
+                          ? t('Clear cookies')
+                          : kind === 'cache'
+                            ? t('Clear cache')
+                            : t('Clear all browsing data')}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </ToolRow>
+        ))}
 
-      <div className="rounded-md border px-3 py-2.5">
-        <div className="flex items-center gap-3">
-          <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{t('Browser data')}</p>
-            <p className="text-muted-foreground text-xs">
-              {t('Cookies and site storage of the built-in browser, separate from the app itself.')}
-            </p>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2 pl-7">
-          {(['cookies', 'cache', 'all'] as const).map((kind) => (
-            <Button key={kind} variant="outline" size="sm" onClick={() => void clear(kind)}>
-              {cleared === kind
-                ? t('Cleared')
-                : kind === 'cookies'
-                  ? t('Clear cookies')
-                  : kind === 'cache'
-                    ? t('Clear cache')
-                    : t('Clear all browsing data')}
-            </Button>
-          ))}
-        </div>
+        <ToolRow
+          icon={FoldVertical}
+          title={t('Explore fold')}
+          description={t(
+            'Let the agent mark exploratory reads and keep only a short report in later model context. Timeline stays intact.'
+          )}
+          control={<Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />}
+        />
+
+        <ToolRow
+          rowId="tools.rtkEnabled"
+          icon={Shrink}
+          title={t('RTK command compression')}
+          description={t(
+            'Compress supported command output before it enters the model context. Takes effect on new conversations.'
+          )}
+          control={<Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />}
+        />
+
+        <ToolRow
+          rowId="tools.editMode"
+          icon={FilePenLine}
+          title={t('File edit mode')}
+          description={t(
+            'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.'
+          )}
+          control={
+            <Select
+              items={Object.fromEntries(EDIT_MODES.map((mode) => [mode, t(EDIT_MODE_LABEL[mode])]))}
+              value={editMode}
+              onValueChange={(value) => {
+                if (isEditMode(value)) setEditMode(value);
+              }}
+            >
+              <SelectTrigger className="w-44 shrink-0" aria-label={t('File edit mode')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {EDIT_MODES.map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {t(EDIT_MODE_LABEL[mode])}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
       </div>
     </div>
   );
