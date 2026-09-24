@@ -331,7 +331,7 @@ export function ChatScreen(props: Props) {
         {sessionId !== null && (
           // 浏览器里 safe-area 为 0，用 0.5rem 兜底不贴边；standalone 下取
           // home indicator 的实际高度，不再叠加，避免下方留出多余空白
-          <div className="phone-dock @container shrink-0 pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="phone-dock @container shrink-0 pt-1 pb-safe">
             <div className={CHAT_COL}>
               {/* 自动重试横幅：只展示不可取消（pair 桥无 abort-retry 通道，整轮 abort 已够用） */}
               {view?.retry && <RetryBar retry={view.retry} />}

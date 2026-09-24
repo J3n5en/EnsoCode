@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installStatusBarOverlapGuard } from './statusBarOverlap';
 import { installElectronApiShim } from './stubs/electron-api';
 import { initTheme } from './theme';
 import './styles.css';
@@ -10,6 +11,9 @@ installElectronApiShim();
 
 // 主题：本地覆盖 > 桌面下发 > 跟随系统（桌面偏好经 client 的 appearance 帧到达）
 initTheme();
+
+// iOS 独立 PWA 偶发钻到状态栏下被系统模糊盖住标题：检测到才退出 viewport-fit=cover
+installStatusBarOverlapGuard();
 
 /*
  * 不用 JS 干预视口高度：布局直接吃 CSS 的 100dvh。
