@@ -1064,6 +1064,7 @@ function resyncGuestMeta(conn: Connection, forgetCatalog = true): void {
     const next = forgetGuestSyncMeta(stableMetaByPair.get(conn.device.pairId));
     if (next) stableMetaByPair.set(conn.device.pairId, next);
     else stableMetaByPair.delete(conn.device.pairId);
+    sentProviderFp.delete(conn.device.pairId);
     conn.providersSentFp = undefined;
     conn.providersSentAt = undefined;
   }
