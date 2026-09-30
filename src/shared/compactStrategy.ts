@@ -1,4 +1,9 @@
-export const COMPACT_STRATEGIES = ['standard', 'smart', 'continuous-memory'] as const;
+export const COMPACT_STRATEGIES = [
+  'standard',
+  'smart',
+  'codex-native',
+  'continuous-memory',
+] as const;
 
 export type CompactStrategy = (typeof COMPACT_STRATEGIES)[number];
 

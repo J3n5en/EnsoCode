@@ -474,12 +474,16 @@ function createSessionResourceLoader(options: {
               mode: options.smartCompactMode,
             }),
           ]
-        : !options.noExtensions && options.compactStrategy === 'smart'
+        : !options.noExtensions &&
+            (options.compactStrategy === 'smart' || options.compactStrategy === 'codex-native')
           ? [
-              smartCompactInlineExtension({
-                summaryModel: options.smartCompactSummaryModel,
-                mode: options.smartCompactMode,
-              }),
+              smartCompactInlineExtension(
+                {
+                  summaryModel: options.smartCompactSummaryModel,
+                  mode: options.smartCompactMode,
+                },
+                options.compactStrategy === 'codex-native'
+              ),
             ]
           : []),
       ...(pluginHooks && pluginHooks.hooks.length > 0

@@ -168,12 +168,15 @@ describe('SessionSupervisor compact failure', () => {
       const factories = mocks.loaderOptions[0]?.extensionFactories as Array<{ name: string }>;
       return factories
         .map((factory) => factory.name)
-        .filter((name) => name === 'enso-compact' || name === 'enso-continuous-memory');
+        .filter((name) =>
+          ['enso-compact', 'enso-codex-compact', 'enso-continuous-memory'].includes(name)
+        );
     };
     expect(await names({ compactStrategy: 'continuous-memory' })).toEqual([
       'enso-continuous-memory',
     ]);
     expect(await names({ compactStrategy: 'smart' })).toEqual(['enso-compact']);
+    expect(await names({ compactStrategy: 'codex-native' })).toEqual(['enso-codex-compact']);
     expect(await names({ smartCompactEnabled: true })).toEqual(['enso-compact']);
     expect(await names({ compactStrategy: 'standard', smartCompactEnabled: true })).toEqual([]);
     expect(await names({})).toEqual([]);

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SpawnModelConfig } from '@shared/types/agent';
+import { createCodexCompactFactory } from './codexCompact';
 import {
   createEnsoCompactFactory,
   ensoCompactInlineExtension as defaultEnsoCompactInlineExtension,
@@ -29,19 +30,23 @@ export function parseSmartCompactSummaryRef(
   return { provider: formatted.slice(0, slash), id: formatted.slice(slash + 1) };
 }
 
-export function smartCompactInlineExtension(route?: {
-  summaryModel?: SpawnModelConfig | null;
-  mode?: 'auto' | 'fast' | 'balanced' | 'thorough';
-}) {
-  if (!route) return defaultEnsoCompactInlineExtension;
+export function smartCompactInlineExtension(
+  route?: {
+    summaryModel?: SpawnModelConfig | null;
+    mode?: 'auto' | 'fast' | 'balanced' | 'thorough';
+  },
+  codexNative = false
+) {
+  if (!route && !codexNative) return defaultEnsoCompactInlineExtension;
+  const options = {
+    mode: route?.mode,
+    summaryModel: route?.summaryModel
+      ? parseSmartCompactSummaryRef(formatSmartCompactSummaryModel(route.summaryModel))
+      : undefined,
+  };
   return {
-    name: 'enso-compact',
+    name: codexNative ? 'enso-codex-compact' : 'enso-compact',
     hidden: true as const,
-    factory: createEnsoCompactFactory({
-      mode: route.mode,
-      summaryModel: route.summaryModel
-        ? parseSmartCompactSummaryRef(formatSmartCompactSummaryModel(route.summaryModel))
-        : undefined,
-    }),
+    factory: codexNative ? createCodexCompactFactory(options) : createEnsoCompactFactory(options),
   };
 }

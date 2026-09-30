@@ -186,10 +186,11 @@ export const zhTranslations: Record<string, string> = {
   'Automatically unfold the thinking block while the model is still reasoning. It collapses again when reasoning ends.':
     '模型思考时自动展开推理内容；思考结束后仍自动收起',
   'Context compaction strategy': '上下文压缩策略',
-  'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Continuous memory records observations in the background so compact keeps more context; both fall back to default compact on failure and take effect on the next session.':
-    '标准使用默认压缩。智能压缩在压缩时用 Enso 验证式摘要。持续记忆在后台持续记录观察，压缩时保留更多上下文；两者失败都回退默认压缩，下一个会话生效。',
+  'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure and take effect on the next session.':
+    '标准使用默认压缩。智能压缩在压缩时用 Enso 验证式摘要。Codex 原生压缩在 Codex 模型上额外保存官方 Codex checkpoint，其他模型按智能压缩处理。持续记忆在后台持续记录观察，压缩时保留更多上下文；失败都回退默认压缩，下一个会话生效。',
   Standard: '标准',
   'Smart compaction': '智能压缩',
+  'Codex native compaction': 'Codex 原生压缩',
   'Continuous memory (experimental)': '持续记忆（实验性）',
   'Summary model': '摘要模型',
   'Background memory model': '后台记忆模型',

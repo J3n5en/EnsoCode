@@ -184,7 +184,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     category: 'general',
     title: 'Context compaction strategy',
     description:
-      'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Continuous memory records observations in the background so compact keeps more context; both fall back to default compact on failure and take effect on the next session.',
+      'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure and take effect on the next session.',
   },
   {
     id: 'general.generationStallTimeout',

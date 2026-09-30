@@ -28,6 +28,13 @@ const MODE_LABEL: Record<SmartCompactMode, string> = {
   thorough: 'Thorough',
 };
 
+const STRATEGY_LABEL: Record<CompactStrategy, string> = {
+  standard: 'Standard',
+  smart: 'Smart compaction',
+  'codex-native': 'Codex native compaction',
+  'continuous-memory': 'Continuous memory (experimental)',
+};
+
 /** 验证式智能压缩：开关 + 档位 + 独立摘要模型（null = 跟随当前会话模型）。 */
 export function SmartCompactPicker() {
   const { t } = useI18n();
@@ -61,16 +68,14 @@ export function SmartCompactPicker() {
           <h4 className="font-medium text-sm">{t('Context compaction strategy')}</h4>
           <p className="mt-0.5 text-muted-foreground text-xs">
             {t(
-              'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Continuous memory records observations in the background so compact keeps more context; both fall back to default compact on failure and take effect on the next session.'
+              'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure and take effect on the next session.'
             )}
           </p>
         </div>
         <Select
-          items={{
-            standard: t('Standard'),
-            smart: t('Smart compaction'),
-            'continuous-memory': t('Continuous memory (experimental)'),
-          }}
+          items={Object.fromEntries(
+            COMPACT_STRATEGIES.map((value) => [value, t(STRATEGY_LABEL[value])])
+          )}
           value={strategy}
           onValueChange={(value) => setStrategy(value as CompactStrategy)}
         >
@@ -80,18 +85,14 @@ export function SmartCompactPicker() {
           <SelectPopup>
             {COMPACT_STRATEGIES.map((value) => (
               <SelectItem key={value} value={value}>
-                {value === 'standard'
-                  ? t('Standard')
-                  : value === 'smart'
-                    ? t('Smart compaction')
-                    : t('Continuous memory (experimental)')}
+                {t(STRATEGY_LABEL[value])}
               </SelectItem>
             ))}
           </SelectPopup>
         </Select>
       </div>
 
-      {strategy === 'smart' && (
+      {(strategy === 'smart' || strategy === 'codex-native') && (
         <div className="flex items-center justify-between gap-4" data-smart-compact-mode={mode}>
           <div className="min-w-0">
             <p className="text-muted-foreground text-xs">{t('Compaction mode')}</p>
