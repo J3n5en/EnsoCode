@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
+import { chatgptPoolSources, createChatgptPoolProvider, providerDisplayName } from './chatgptPool';
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
@@ -43,6 +44,7 @@ export function ProvidersSettings() {
   const { t } = useI18n();
   const providers = useSettingsStore((state) => state.providers);
   const updateProvider = useSettingsStore((state) => state.updateProvider);
+  const addProviders = useSettingsStore((state) => state.addProviders);
   const removeProvider = useSettingsStore((state) => state.removeProvider);
   const [importOpen, setImportOpen] = React.useState(false);
   const [setupOpen, setSetupOpen] = React.useState(false);
@@ -89,7 +91,7 @@ export function ProvidersSettings() {
   const performRemove = async (provider: ModelProvider, options?: { skipLogout?: boolean }) => {
     setRemovingId(provider.id);
     setRemoveError(null);
-    if (provider.oauthAccountKey && !options?.skipLogout) {
+    if (provider.oauthAccountKey && !provider.oauthAccountPool && !options?.skipLogout) {
       try {
         await window.electronAPI.providers.oauthLogout(provider.oauthAccountKey);
         await refreshOauthCredentialState();
@@ -138,6 +140,26 @@ export function ProvidersSettings() {
       <TitleSummaryPicker />
       <ApprovalReviewerPicker />
       <SubagentModelsSettings />
+      {chatgptPoolSources(providers).length > 0 && !providers.some((p) => p.oauthAccountPool) && (
+        <div className="space-y-1.5 rounded-md border p-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const pool = createChatgptPoolProvider(providers, crypto.randomUUID());
+              if (pool && addProviders([pool]) > 0) setEditing(pool);
+            }}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('Create ChatGPT account pool')}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Pool entries do not show a single account quota. Fixed-account entries remain unchanged.'
+            )}
+          </p>
+        </div>
+      )}
 
       {providers.length === 0 ? (
         <div className="rounded-md border border-dashed px-3 py-8 text-center">
@@ -165,13 +187,16 @@ export function ProvidersSettings() {
                 <div className="mt-1.5 space-y-1 border-l pl-3">
                   {group.providers.map((provider) => {
                     const isSubscription = Boolean(provider.oauthAccountKey);
-                    const account = provider.oauthAccountKey
-                      ? oauthInfo?.accounts.find((a) => a.key === provider.oauthAccountKey)
-                      : undefined;
+                    const account =
+                      provider.oauthAccountKey && !provider.oauthAccountPool
+                        ? oauthInfo?.accounts.find((a) => a.key === provider.oauthAccountKey)
+                        : undefined;
                     // 订阅行主位放账号身份（邮箱/账号 key），不是厂商名——厂商名已经是分组标题
-                    const primaryLabel = isSubscription
-                      ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
-                      : provider.name;
+                    const primaryLabel = provider.oauthAccountPool
+                      ? providerDisplayName(provider, t)
+                      : isSubscription
+                        ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
+                        : provider.name;
                     return (
                       <React.Fragment key={provider.id}>
                         <div
@@ -215,6 +240,11 @@ export function ProvidersSettings() {
                               <span className="min-w-0 truncate text-xs text-muted-foreground">
                                 {[
                                   isSubscription ? undefined : provider.baseUrl,
+                                  provider.oauthAccountPool
+                                    ? t('{{count}} accounts', {
+                                        count: provider.oauthAccountPool.accountKeys.length,
+                                      })
+                                    : undefined,
                                   provider.models.length > 0
                                     ? t('{{count}} models', { count: provider.models.length })
                                     : undefined,
@@ -223,7 +253,7 @@ export function ProvidersSettings() {
                                   .join(' · ')}
                               </span>
                             </div>
-                            {provider.oauthAccountKey && (
+                            {provider.oauthAccountKey && !provider.oauthAccountPool && (
                               <SubscriptionUsage accountKey={provider.oauthAccountKey} />
                             )}
                           </div>
@@ -306,7 +336,7 @@ export function ProvidersSettings() {
         title={t('Remove provider?')}
         description={
           pendingRemove
-            ? pendingRemove.oauthAccountKey
+            ? pendingRemove.oauthAccountKey && !pendingRemove.oauthAccountPool
               ? t(
                   'Removing this also signs out {{name}}. Other accounts for the same vendor stay signed in.',
                   { name: pendingRemove.name }

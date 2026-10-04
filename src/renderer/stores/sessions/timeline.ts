@@ -1377,7 +1377,9 @@ export function buildTimeline(
               key:
                 entry.kind === 'capability-receipt'
                   ? `custom:receipt:${entry.receipt.receiptId}`
-                  : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
+                  : entry.kind === 'oauth-account-selected'
+                    ? `custom:${entry.kind}:${entry.accountKey}:${entry.at}:${index}`
+                    : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
               entry,
             },
             at: customEntryTime(entry),

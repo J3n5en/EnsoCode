@@ -112,6 +112,7 @@ function identityOf(
     | { type: 'text-completed' }
     | { type: 'text-failed' }
     | { type: 'text-delta' }
+    | { type: 'oauth-pool-select' }
     | McpWorkerEvent
     | WorkspaceLockEvent
   >
@@ -410,6 +411,7 @@ export class AgentSessionIndex {
     // 手动读取结果不改变会话生命周期或 seq 权威。
     if (
       event.type === 'session-reloaded' ||
+      event.type === 'oauth-pool-select' ||
       event.type === 'workspace-lock-result' ||
       event.type === 'workspace-unlock-result'
     )

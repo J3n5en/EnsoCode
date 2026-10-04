@@ -15,6 +15,20 @@ const provider = (overrides: Partial<ModelProvider>): ModelProvider => ({
 });
 
 describe('providerDedupeKey', () => {
+  it('自动接替池与锚定固定账号是不同身份，创建池不会被固定账号吞掉', () => {
+    const fixed = provider({
+      id: 'fixed',
+      oauthAccountKey: 'openai-codex',
+      apiKey: '',
+      baseUrl: '',
+    });
+    const pool = { ...fixed, id: 'pool', oauthAccountPool: { accountKeys: ['openai-codex'] } };
+    expect(applyIncomingProviders([fixed], [pool]).providers.map((entry) => entry.id)).toEqual([
+      'fixed',
+      'pool',
+    ]);
+    expect(providerDedupeKey(pool)).not.toBe(providerDedupeKey(fixed));
+  });
   it('订阅条目仍按 oauthAccountKey，避免同厂商第二账号被吞', () => {
     expect(providerDedupeKey({ oauthAccountKey: 'xai#2', baseUrl: '', apiKey: '' })).toBe(
       'oauth::xai#2'

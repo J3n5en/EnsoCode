@@ -41,6 +41,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { ContextInspector } from './ContextInspector';
 import { ContextMeter } from './ContextMeter';
 import { StatusLineSettings } from './StatusLineSettings';
+import { resolveSessionUsageAccount } from './sessionUsageAccount';
 import {
   buildUsageSegmentValues,
   CRITICAL_PERCENT,
@@ -425,8 +426,8 @@ export function StatsLine({ conversationId }: StatsLineProps) {
 
   const accountKey = useMemo(() => {
     if (!enabledSegments.includes('usage')) return undefined;
-    return providers.find((p) => p.id === conversation?.lastProviderId)?.oauthAccountKey;
-  }, [enabledSegments, providers, conversation?.lastProviderId]);
+    return resolveSessionUsageAccount(providers, conversation)?.accountKey;
+  }, [enabledSegments, providers, conversation]);
 
   // 只在真的需要走时钟的时候起 interval：duration 要 running 中才跳，sessionTime 只要启用就跳
   // （含空闲），usage 只要启用且能解析出账号就跳（驱动 TTL 到期重新拉取，不依赖"已经有数据"，

@@ -22,6 +22,7 @@ import { CHAT_COL, type MessageTimelineHandle } from '@/components/chat/MessageT
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { RetryBar } from '@/components/chat/RetryBar';
 import { StatsLine } from '@/components/chat/StatsLine';
+import { resolveSessionUsageAccount } from '@/components/chat/sessionUsageAccount';
 import { TaskBar } from '@/components/chat/TaskBar';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
@@ -277,6 +278,7 @@ export function BtwView({
             toolbar={
               <ModelPicker
                 providers={enabledProviders}
+                activeAccount={resolveSessionUsageAccount(providers, conversation ?? undefined)}
                 virtualModels={virtualModels}
                 providerId={selectedProviderId}
                 modelId={effectiveModelId}

@@ -7,6 +7,7 @@ import {
 import { parseAccentColor } from '@shared/accentColor';
 import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { parseCompactStrategy } from '@shared/compactStrategy';
+import { parseOauthAccountPool } from '@shared/oauthAccountPool';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import {
@@ -127,6 +128,7 @@ const PROVIDER_KEYS = [
   'api',
   'apiKey',
   'oauthAccountKey',
+  'oauthAccountPool',
   'baseUrl',
   'enabled',
   'models',
@@ -496,6 +498,8 @@ function validateProvider(raw: unknown): RecordValue {
   stringField(entry, 'api', 'provider');
   if (entry.apiKey !== undefined) stringField(entry, 'apiKey', 'provider', false);
   if (entry.oauthAccountKey !== undefined) stringField(entry, 'oauthAccountKey', 'provider', false);
+  if (entry.oauthAccountPool !== undefined && !parseOauthAccountPool(entry.oauthAccountPool))
+    throw new Error('Invalid provider OAuth pool');
   const baseUrl = stringField(entry, 'baseUrl', 'provider');
   validateHttpUrl(baseUrl, 'provider', true);
   booleanField(entry, 'enabled', 'provider');
@@ -707,6 +711,7 @@ function assertPlainBundle(bundle: ConfigSyncBundle): void {
       (entry) =>
         entry.apiKey !== undefined ||
         entry.oauthAccountKey !== undefined ||
+        entry.oauthAccountPool !== undefined ||
         redactEndpoint(entry.baseUrl).omissions.length > 0
     ) ||
     bundle.state.mcpServers.some(
@@ -1100,6 +1105,10 @@ export function redactBundle(bundle: ConfigSyncBundle): ConfigSyncBundle {
     if (next.oauthAccountKey !== undefined) {
       delete next.oauthAccountKey;
       omitted.add(CONFIG_SYNC_PROVIDER_OMISSIONS[1]);
+    }
+    if (next.oauthAccountPool !== undefined) {
+      delete next.oauthAccountPool;
+      omitted.add('oauthAccountPool');
     }
     const originalBaseUrl = next.baseUrl;
     const redactedBaseUrl = redactEndpoint(originalBaseUrl);

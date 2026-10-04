@@ -1,9 +1,10 @@
+import { isOauthAccountPool } from './oauthAccountPool';
 import { vendorOf } from './providerGroups';
 import type { ModelEntry, ModelProvider } from './types/llm';
 
 export type ProviderIdentityInput = Pick<
   ModelProvider,
-  'baseUrl' | 'apiKey' | 'oauthAccountKey' | 'catalogId'
+  'baseUrl' | 'apiKey' | 'oauthAccountKey' | 'oauthAccountPool' | 'catalogId'
 >;
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -18,6 +19,8 @@ function normalizeBaseUrl(baseUrl: string): string {
  *   时必须是另一条（独立供应商）；选 Custom 且 hostname 也是 Custom 才合并进已有行。
  */
 export function providerDedupeKey(provider: ProviderIdentityInput): string {
+  if (isOauthAccountPool(provider))
+    return `oauth-pool::${provider.oauthAccountPool?.accountKeys.join(',')}`;
   if (provider.oauthAccountKey) return `oauth::${provider.oauthAccountKey}`;
   return `${normalizeBaseUrl(provider.baseUrl)}::${provider.apiKey.trim()}::${vendorOf(provider)}`;
 }

@@ -184,6 +184,7 @@ describe('config sync reviewer regressions', () => {
       baseUrl: 'https://example.test',
       enabled: true,
       oauthAccountKey: 'local-account',
+      oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
       models: [{ id: 'model-1' }],
     };
     settings.patchSettingsState('providers', [localProvider]);
@@ -195,6 +196,8 @@ describe('config sync reviewer regressions', () => {
     expect(exportResult).toMatchObject({ ok: true });
     const exportedBundle = await decodeBundle(readFileSync(exported), 'correct horse');
     expect(exportedBundle.state.providers[0]?.oauthAccountKey).toBeUndefined();
+    expect(exportedBundle.state.providers[0]?.oauthAccountPool).toBeUndefined();
+    expect(exportedBundle.state.providers[0]?.omittedFields).toContain('oauthAccountPool');
 
     const imported = bundle({
       providers: [
@@ -223,11 +226,18 @@ describe('config sync reviewer regressions', () => {
     const providers = JSON.parse(readFileSync(settingsPath, 'utf8'))['enso-settings'].state
       .providers;
     expect(providers).toContainEqual(
-      expect.objectContaining({ id: 'local-oauth', oauthAccountKey: 'local-account' })
+      expect.objectContaining({
+        id: 'local-oauth',
+        oauthAccountKey: 'local-account',
+        oauthAccountPool: localProvider.oauthAccountPool,
+      })
     );
     expect(providers).toContainEqual(expect.objectContaining({ id: 'new-oauth', enabled: false }));
     expect(
       providers.find((provider: { id: string }) => provider.id === 'new-oauth').oauthAccountKey
+    ).toBeUndefined();
+    expect(
+      providers.find((provider: { id: string }) => provider.id === 'new-oauth').oauthAccountPool
     ).toBeUndefined();
   });
 });

@@ -16,6 +16,7 @@ import {
 } from '@shared/virtualModels';
 import { BadgeCheck, Brain, Check, ChevronDown, KeyRound, Shuffle } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { providerDisplayName } from '@/components/settings/chatgptPool';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +38,7 @@ import { cn } from '@/lib/utils';
 import { useModelMeta } from '@/stores/modelMeta';
 import { formatTokens } from '@/stores/sessions/stats';
 import { interceptRootCascadeEscape, markSubmenuOpen } from './modelPickerCascadeEsc';
+import { type SessionUsageAccount, usageAccountKeyForProvider } from './sessionUsageAccount';
 
 export const OPEN_CHAT_MODEL_PICKER_EVENT = 'enso:open-chat-model-picker';
 
@@ -156,6 +158,10 @@ interface ModelPickerProps {
   virtualModels?: readonly VirtualModelEntry[];
   /** 选中虚拟模型时附在触发器上的实际路由模型 */
   routedModelLabel?: string;
+  /** 当前会话真实请求的订阅账号；设置场景不传，池额度保持隐藏。
+   *
+   * Subscription account of the current session's actual request; settings omit it and keep pool usage hidden. */
+  activeAccount?: SessionUsageAccount;
   providerId: string;
   modelId: string;
   reasoningEnabled: boolean;
@@ -308,8 +314,12 @@ function ModelRowContent({
  */
 function entryLabelOf(
   provider: ModelProvider,
-  oauthAccountsByKey: Record<string, { email?: string; plan?: string }>
+  oauthAccountsByKey: Record<string, { email?: string; plan?: string }>,
+  t: (key: string) => string
 ): { primary: string; secondary?: string; plan?: string; isSubscription: boolean } {
+  if (provider.oauthAccountPool) {
+    return { primary: providerDisplayName(provider, t), isSubscription: true };
+  }
   if (provider.oauthAccountKey) {
     const account = oauthAccountsByKey[provider.oauthAccountKey];
     const email = account?.email ? sanitizeAccountText(account.email, 64) : undefined;
@@ -470,6 +480,7 @@ export function ModelPicker({
   providers,
   virtualModels,
   routedModelLabel,
+  activeAccount,
   providerId,
   modelId,
   reasoningEnabled,
@@ -540,8 +551,10 @@ export function ModelPicker({
   const triggerLabel =
     triggerLabelProp ??
     (hasSelection
-      ? formTrigger && currentProvider?.name && !currentVirtual
-        ? `${currentProvider.name} / ${modelName}`
+      ? (formTrigger || currentProvider?.oauthAccountPool) &&
+        currentProvider?.name &&
+        !currentVirtual
+        ? `${providerDisplayName(currentProvider, t)} / ${modelName}`
         : modelName
       : emptyLabel || t('Select model'));
 
@@ -557,12 +570,13 @@ export function ModelPicker({
       if (!cancelled) setOauthInfos(infos);
     });
     for (const provider of providers) {
-      if (provider.oauthAccountKey) prefetchAccountUsage(provider.oauthAccountKey);
+      const accountKey = usageAccountKeyForProvider(provider, activeAccount);
+      if (accountKey) prefetchAccountUsage(accountKey);
     }
     return () => {
       cancelled = true;
     };
-  }, [open, providers]);
+  }, [open, providers, activeAccount]);
 
   // 打开时只清搜索词。搜索框 tabIndex=-1，避免根菜单 initialFocus 落到第一个可聚焦的
   // input 上；级联态焦点必须留在 Menu item，Esc 才能逐级退。点进搜索框 / 有关键词才是
@@ -629,7 +643,8 @@ export function ModelPicker({
       for (const provider of group.providers) {
         const { primary, secondary, plan, isSubscription } = entryLabelOf(
           provider,
-          oauthAccountsByKey
+          oauthAccountsByKey,
+          t
         );
         table[provider.id] = { vendorLabel, primary, secondary, plan, isSubscription };
       }
@@ -912,6 +927,7 @@ export function ModelPicker({
                     </MenuGroupLabel>
                     {group.providers.map((provider) => {
                       const info = entryInfoByProviderId[provider.id];
+                      const accountKey = usageAccountKeyForProvider(provider, activeAccount);
                       const isSubscription =
                         info?.isSubscription ?? Boolean(provider.oauthAccountKey);
                       return (
@@ -967,9 +983,7 @@ export function ModelPicker({
                             className="w-72"
                             zIndex={zIndex}
                           >
-                            {provider.oauthAccountKey && (
-                              <SubmenuUsage accountKey={provider.oauthAccountKey} />
-                            )}
+                            {accountKey && <SubmenuUsage accountKey={accountKey} />}
                             <ProviderSubmenuList
                               provider={provider}
                               meta={metaByProvider[provider.id]}

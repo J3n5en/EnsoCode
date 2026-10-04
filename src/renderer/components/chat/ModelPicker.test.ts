@@ -1,4 +1,11 @@
-import type { ModelEntry, ModelMeta, ModelProvider, ThinkingLevel } from '@shared/types';
+import type {
+  ModelEntry,
+  ModelMeta,
+  ModelProvider,
+  OauthAccountUsage,
+  ThinkingLevel,
+} from '@shared/types';
+import { VIRTUAL_PROVIDER_ID, type VirtualModelEntry } from '@shared/virtualModels';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +25,8 @@ const harness = vi.hoisted(() => ({
   switchProps: null as Record<string, unknown> | null,
   buttons: [] as Record<string, unknown>[],
   meta: {} as Record<string, unknown>,
+  usageAccountKeys: [] as string[],
+  usageData: {} as Record<string, OauthAccountUsage>,
 }));
 
 vi.mock('@/i18n', () => ({
@@ -34,12 +43,22 @@ vi.mock('@/stores/modelMeta', () => ({
   useModelMeta: () => harness.meta,
 }));
 
+vi.mock('@/hooks/useAccountUsage', () => ({
+  prefetchAccountUsage: vi.fn(),
+  useCachedAccountUsage: (key: string) => {
+    harness.usageAccountKeys.push(key);
+    return harness.usageData[key];
+  },
+}));
+
 vi.mock('@/components/ui/menu', () => {
   const Wrap = ({ children }: WrapperProps) => createElement('div', null, children);
   const MenuItem = ({ children, onClick }: ClickWrapperProps) => {
     if (onClick) harness.menuItemClicks.push(onClick);
     return createElement('div', null, children);
   };
+  const MenuTrigger = ({ children, title }: WrapperProps & { title?: string }) =>
+    createElement('button', { type: 'button', title }, children);
   return {
     Menu: Wrap,
     MenuGroup: Wrap,
@@ -49,7 +68,7 @@ vi.mock('@/components/ui/menu', () => {
     MenuSub: Wrap,
     MenuSubPopup: Wrap,
     MenuSubTrigger: Wrap,
-    MenuTrigger: Wrap,
+    MenuTrigger,
   };
 });
 
@@ -115,12 +134,63 @@ beforeEach(() => {
   harness.switchProps = null;
   harness.buttons = [];
   harness.meta = {};
+  harness.usageAccountKeys = [];
+  harness.usageData = {};
   commonProps.onSelect.mockClear();
   commonProps.onReasoningChange.mockClear();
   commonProps.onThinkingChange.mockClear();
 });
 
 describe('ModelPicker reasoning controls mode', () => {
+  it('账号池复用普通账号额度区域并跟随当前会话实际接替账号', () => {
+    const pool = {
+      ...providers[0],
+      oauthAccountKey: 'openai-codex',
+      oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+    };
+    const activeAccount = { providerId: 'api', modelId: 'model', accountKey: 'openai-codex#2' };
+    harness.usageData = {
+      'openai-codex#2': { key: 'openai-codex#2', windows: [{ label: 'Actual', usedPercent: 73 }] },
+      'openai-codex': { key: 'openai-codex', windows: [{ label: 'Anchor', usedPercent: 12 }] },
+    };
+    const firstHtml = renderToStaticMarkup(
+      createElement(ModelPicker, { ...commonProps, providers: [pool], ...{ activeAccount } })
+    );
+    expect(firstHtml).toContain('73%');
+    expect(firstHtml).not.toContain('12%');
+    expect(harness.usageAccountKeys).toEqual(['openai-codex#2']);
+    harness.usageAccountKeys = [];
+    const switchedHtml = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: [pool],
+        ...{ activeAccount: { ...activeAccount, accountKey: 'openai-codex' } },
+      })
+    );
+    expect(harness.usageAccountKeys).toEqual(['openai-codex']);
+    expect(switchedHtml).toContain('12%');
+    expect(switchedHtml).not.toContain('73%');
+  });
+  it.each([
+    { providerId: 'other-pool', modelId: 'model', accountKey: 'openai-codex#2' },
+    { providerId: 'api', modelId: 'other-model', accountKey: 'openai-codex#2' },
+    { providerId: 'api', modelId: 'model', accountKey: 'openai-codex#3' },
+  ])('池不展示不同路由或已移除实际成员的额度：%j', (activeAccount) => {
+    renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: [
+          {
+            ...providers[0],
+            oauthAccountKey: 'openai-codex',
+            oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+          },
+        ],
+        activeAccount,
+      })
+    );
+    expect(harness.usageAccountKeys).toEqual([]);
+  });
   it('切换自定义子模型保留条目深度，不被目标模型行的上限覆盖', () => {
     const onThinkingNormalize = vi.fn();
     renderToStaticMarkup(
@@ -452,6 +522,120 @@ describe('ModelPicker reasoning controls mode', () => {
     );
     expect(html).toContain('API entry / Chosen model');
     expect(html).toContain('data-trigger-thinking="medium"');
+  });
+
+  it.each([undefined, 'form-trigger'])(
+    '主模型和子模型的自动池显示模式而非锚点账号身份或额度：%s',
+    (triggerClassName) => {
+      const html = renderToStaticMarkup(
+        createElement(ModelPicker, {
+          ...commonProps,
+          triggerClassName,
+          providers: [
+            {
+              ...providers[0],
+              name: 'anchor@example.test',
+              oauthAccountKey: 'openai-codex#2',
+              oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+            },
+          ],
+        })
+      );
+      expect(html).toContain('ChatGPT (automatic failover) / Chosen model');
+      expect(html).not.toContain('anchor@example.test');
+      expect(html).not.toContain('openai-codex#2');
+      expect(harness.usageAccountKeys).toEqual([]);
+    }
+  );
+
+  it.each([
+    { pool: false, triggerClassName: undefined, routedModelLabel: undefined },
+    { pool: false, triggerClassName: 'form-trigger', routedModelLabel: undefined },
+    { pool: true, triggerClassName: undefined, routedModelLabel: undefined },
+    { pool: true, triggerClassName: 'form-trigger', routedModelLabel: undefined },
+    { pool: false, triggerClassName: undefined, routedModelLabel: 'Routed model' },
+    { pool: false, triggerClassName: 'form-trigger', routedModelLabel: 'Routed model' },
+    { pool: true, triggerClassName: undefined, routedModelLabel: 'Routed model' },
+    { pool: true, triggerClassName: 'form-trigger', routedModelLabel: 'Routed model' },
+  ])('虚拟模型触发器保留虚拟名称与路由标签，不加主模型或账号池前缀：%j', ({ pool, ...props }) => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        ...props,
+        providers: [
+          {
+            ...providers[0],
+            ...(pool && {
+              oauthAccountKey: 'openai-codex',
+              oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+            }),
+          },
+        ],
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        virtualModels: [
+          {
+            id: 'auto',
+            name: 'Auto model',
+            enabled: true,
+            primary: { providerId: 'api', modelId: 'model' },
+            fallbacks: [],
+          },
+        ],
+      })
+    );
+    const label = props.routedModelLabel ? `Auto model · ${props.routedModelLabel}` : 'Auto model';
+    expect(html.match(/<button[^>]*title="([^"]*)"/)?.[1]).toBe(label);
+    if (pool) expect(harness.usageAccountKeys).toEqual([]);
+  });
+
+  it('虚拟模型以账号池主模型的 catalog 展示能力，选择仍返回虚拟引用', () => {
+    harness.meta = {
+      model: {
+        modelId: 'model',
+        source: 'catalog',
+        reasoning: true,
+        thinkingLevels: ['low', 'high'],
+      },
+    };
+    const virtual: VirtualModelEntry = {
+      id: 'auto',
+      name: 'Auto model',
+      enabled: true,
+      primary: { providerId: 'api', modelId: 'model' },
+      fallbacks: [],
+    };
+    renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: [
+          {
+            ...providers[0],
+            oauthAccountKey: 'openai-codex',
+            oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+          },
+        ],
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: virtual.id,
+        virtualModels: [virtual],
+        thinkingLevel: 'max',
+      })
+    );
+    expect(harness.switchProps?.checked).toBe(true);
+    expect(harness.sliderProps).toMatchObject({ min: 0, max: 1, value: 1 });
+    harness.menuItemClicks[0]();
+    expect(commonProps.onSelect).toHaveBeenCalledWith(VIRTUAL_PROVIDER_ID, virtual.id);
+    expect(harness.usageAccountKeys).toEqual([]);
+  });
+
+  it('固定账号菜单仍使用本账号额度', () => {
+    renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: [{ ...providers[0], oauthAccountKey: 'openai-codex#2' }],
+      })
+    );
+    expect(harness.usageAccountKeys).toContain('openai-codex#2');
   });
 
   it('跟随默认时表单触发器不显示推理档', () => {

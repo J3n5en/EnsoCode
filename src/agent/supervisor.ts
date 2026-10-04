@@ -32,6 +32,7 @@ import {
   positiveContextWindow,
   resolveCustomModelCapabilities,
 } from '@shared/modelCatalog';
+import { isOauthAccountPool } from '@shared/oauthAccountPool';
 import { resolveOauthCatalogModel } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import {
@@ -147,6 +148,13 @@ import { partitionMcpNamespaces } from './mcpNames';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { ParentNotifier } from './notify';
+import {
+  installOauthPoolSelector,
+  type OauthPoolSelector,
+  oauthPoolRecoveryExtension,
+  releaseOauthPoolSession,
+  resolveOauthPoolModel,
+} from './oauthAccountPool';
 import { withOpenAIResponsesRouting } from './openaiResponsesRouting';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
 import { createProjectSettingsManager } from './projectCode';
@@ -369,6 +377,7 @@ function sessionAgentsFilesOverride(
 function createSessionResourceLoader(options: {
   branchContext: InlineExtension;
   silentTurnRecovery: InlineExtension;
+  oauthPoolRecovery?: InlineExtension;
   cwd: string;
   agentDir: string;
   noSkills: boolean;
@@ -426,6 +435,7 @@ function createSessionResourceLoader(options: {
     // noExtensions 只挡磁盘上的项目/全局扩展；inline factory 不受影响，图片修剪对所有会话生效
     extensionFactories: [
       ...(options.codemode ? [options.codemode] : []),
+      ...(options.oauthPoolRecovery ? [options.oauthPoolRecovery] : []),
       options.branchContext,
       applyPatchResultExtension,
       {
@@ -551,7 +561,8 @@ function createEnsoResourceLoader(
   cwd: string,
   agentDir: string,
   branchContext: InlineExtension,
-  silentTurnRecovery: InlineExtension
+  silentTurnRecovery: InlineExtension,
+  oauthPoolRecovery?: InlineExtension
 ): DefaultResourceLoader {
   return new DefaultResourceLoader({
     cwd,
@@ -563,7 +574,12 @@ function createEnsoResourceLoader(
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
-    extensionFactories: [branchContext, applyPatchResultExtension, silentTurnRecovery],
+    extensionFactories: [
+      branchContext,
+      applyPatchResultExtension,
+      silentTurnRecovery,
+      ...(oauthPoolRecovery ? [oauthPoolRecovery] : []),
+    ],
     systemPrompt: ENSO_SYSTEM_PROMPT,
     skillsOverride: () => ({ skills: [], diagnostics: [] }),
     promptsOverride: () => ({ prompts: [], diagnostics: [] }),
@@ -669,6 +685,69 @@ export class SessionSupervisor {
   private readonly mcp = new McpManager({ emit: (event) => this.options.emit(event) });
   private readonly bgTasks: BackgroundTaskManager;
   private runtimePromise: Promise<ModelRuntime> | null = null;
+  private readonly oauthPoolPending = new Map<
+    string,
+    (command: Extract<AgentCommand, { type: 'oauth-pool-result' }>) => void
+  >();
+  private oauthPoolRecovery(): InlineExtension {
+    return oauthPoolRecoveryExtension(
+      this.selectOauthPool,
+      (sessionId, accountKey, previousAccountKey, scope) => {
+        const managed = [...this.sessions.values()].find(
+          (item) => item.session.sessionId === sessionId
+        );
+        if (!managed) return;
+        const entry: AgentSessionCustomEntry = {
+          kind: 'oauth-account-selected',
+          accountKey,
+          ...scope,
+          ...(previousAccountKey ? { previousAccountKey } : {}),
+          at: Date.now(),
+        };
+        managed.session.sessionManager.appendCustomEntry('enso-agent-session', entry);
+        managed.customEntries.push(entry);
+        this.options.emit({
+          type: 'session-custom-entry',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          entry,
+        });
+      }
+    );
+  }
+  private readonly selectOauthPool: OauthPoolSelector = (
+    settingsProviderId,
+    modelId,
+    failed,
+    signal,
+    excludedAccountKeys
+  ) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error('ChatGPT pool selection cancelled.'));
+        return;
+      }
+      const requestId = randomUUID();
+      const finish = (error?: string, key?: string) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        this.oauthPoolPending.delete(requestId);
+        if (error || !key) reject(new Error(error ?? 'ChatGPT pool selection failed.'));
+        else resolve(key);
+      };
+      const abort = () => finish('ChatGPT pool selection cancelled.');
+      const timer = setTimeout(() => finish('ChatGPT pool coordinator timed out.'), 30_000);
+      signal?.addEventListener('abort', abort, { once: true });
+      this.oauthPoolPending.set(requestId, (command) => finish(command.error, command.accountKey));
+      this.options.emit({
+        type: 'oauth-pool-select',
+        requestId,
+        settingsProviderId,
+        modelId,
+        ...(failed ? { failed } : {}),
+        ...(excludedAccountKeys ? { excludedAccountKeys: [...excludedAccountKeys] } : {}),
+      });
+    });
   /** 不可回收的会话（桌面正在查看 / 手机订阅），由 Main 全量下发 */
   private pinned: ReadonlySet<string> = new Set();
   private readonly evictionTimer: ReturnType<typeof setInterval>;
@@ -830,6 +909,7 @@ export class SessionSupervisor {
       } catch {}
       child.unsubscribe();
       try {
+        releaseOauthPoolSession(child.session.sessionId);
         child.session.dispose();
       } catch {}
       this.sessions.delete(id);
@@ -852,6 +932,7 @@ export class SessionSupervisor {
     await emitSessionShutdown(managed.session);
     managed.unsubscribe();
     try {
+      releaseOauthPoolSession(managed.session.sessionId);
       managed.session.dispose();
     } catch {}
     this.sessions.delete(parentId);
@@ -864,6 +945,10 @@ export class SessionSupervisor {
   }
 
   handleCommand(command: AgentCommand): void {
+    if (command.type === 'oauth-pool-result') {
+      this.oauthPoolPending.get(command.requestId)?.(command);
+      return;
+    }
     if (command.type === 'lock-workspace' || command.type === 'unlock-workspace') {
       const ok =
         command.type === 'lock-workspace'
@@ -1630,6 +1715,7 @@ export class SessionSupervisor {
     });
     const resourceLoader = createSessionResourceLoader({
       branchContext: this.branchContextExtension(() => managedRef),
+      oauthPoolRecovery: this.oauthPoolRecovery(),
       silentTurnRecovery: silentTurnRecoveryExtension((kind) => {
         if (!managedRef) return;
         managedRef.silentTurnNudgeUsed = true;
@@ -1997,10 +2083,17 @@ export class SessionSupervisor {
           managed.silentTurnKind = kind;
         });
         const subLoader = isLockedEnso
-          ? createEnsoResourceLoader(cwd, this.options.agentDir, branchContext, silentTurnRecovery)
+          ? createEnsoResourceLoader(
+              cwd,
+              this.options.agentDir,
+              branchContext,
+              silentTurnRecovery,
+              this.oauthPoolRecovery()
+            )
           : createSessionResourceLoader({
               branchContext,
               silentTurnRecovery,
+              oauthPoolRecovery: this.oauthPoolRecovery(),
               cwd,
               agentDir: this.options.agentDir,
               noSkills: resolved || agentType ? true : loadLocalSkills === false,
@@ -2724,6 +2817,7 @@ export class SessionSupervisor {
       } catch {}
       managed.unsubscribe();
       try {
+        releaseOauthPoolSession(managed.session.sessionId);
         managed.session.dispose();
       } catch {}
       this.sessions.delete(coworkerId);
@@ -3817,7 +3911,9 @@ export class SessionSupervisor {
         modelsPath: null,
         refreshOnCreate: false,
       });
-      return initializeWorkerRuntime(runtime);
+      await initializeWorkerRuntime(runtime);
+      installOauthPoolSelector(runtime, this.selectOauthPool);
+      return runtime;
     })();
     return this.runtimePromise;
   }
@@ -4278,6 +4374,9 @@ function listCatalogClone(runtime: ModelRuntime, model: CatalogModel): CatalogMo
  */
 export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig) {
   if (model.virtual) throw new Error('virtual model config must go through resolveSessionModel');
+  if (model.oauthAccountPool !== undefined && !isOauthAccountPool(model))
+    throw new Error('Invalid ChatGPT OAuth pool configuration.');
+  if (isOauthAccountPool(model)) return resolveOauthPoolModel(runtime, model);
   if (model.oauthAccountKey) {
     // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
     // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到

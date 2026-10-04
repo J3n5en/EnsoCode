@@ -730,6 +730,21 @@ const customValue = (value: unknown): string => {
 
 function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
   const { t } = useI18n();
+  if (entry.kind === 'oauth-account-selected') {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
+        <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+        <p className="min-w-0 break-words text-muted-foreground">
+          {entry.previousAccountKey
+            ? t('ChatGPT account switched: {{previous}} → {{current}}', {
+                previous: entry.previousAccountKey,
+                current: entry.accountKey,
+              })
+            : t('ChatGPT account selected: {{account}}', { account: entry.accountKey })}
+        </p>
+      </div>
+    );
+  }
   if (entry.kind === 'agent-dispatch') {
     return (
       <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">

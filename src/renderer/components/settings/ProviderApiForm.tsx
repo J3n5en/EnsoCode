@@ -39,6 +39,9 @@ interface ProviderApiFormProps {
   initialValue: ProviderApiFormValue;
   oauth: boolean;
   oauthAccountKey?: string;
+  extraFields?: React.ReactNode;
+  hideName?: boolean;
+  saveDisabled?: boolean;
   onCancel: () => void;
   onSave: (value: ProviderApiFormValue) => void;
 }
@@ -50,6 +53,9 @@ export function ProviderApiForm({
   initialValue,
   oauth,
   oauthAccountKey,
+  extraFields,
+  hideName = false,
+  saveDisabled = false,
   onCancel,
   onSave,
 }: ProviderApiFormProps) {
@@ -178,10 +184,13 @@ export function ProviderApiForm({
   return (
     <>
       <DialogPanel className="space-y-4">
-        <Field>
-          <FieldLabel>{t('Name')}</FieldLabel>
-          <Input value={name} onChange={(event) => setName(event.target.value)} />
-        </Field>
+        {extraFields}
+        {!hideName && (
+          <Field>
+            <FieldLabel>{t('Name')}</FieldLabel>
+            <Input value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+        )}
 
         {!oauth && (
           <>
@@ -411,7 +420,7 @@ export function ProviderApiForm({
           </Button>
           <Button
             size="sm"
-            disabled={!name.trim()}
+            disabled={saveDisabled || !name.trim()}
             onClick={() =>
               onSave({
                 name: name.trim(),

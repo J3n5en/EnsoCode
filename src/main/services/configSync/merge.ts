@@ -296,9 +296,12 @@ function providerEntry(plan: PlannedEntry, mode: MergeMode): JsonRecord {
   }
   // OAuth login state is device-local; imported keys are dropped, matched local keys kept.
   delete next.oauthAccountKey;
+  delete next.oauthAccountPool;
   if (plan.existing && plan.existing.oauthAccountKey !== undefined) {
     next.oauthAccountKey = clone(plan.existing.oauthAccountKey);
   }
+  if (plan.existing?.oauthAccountPool !== undefined)
+    next.oauthAccountPool = clone(plan.existing.oauthAccountPool);
   if (plan.existing) {
     next.baseUrl = preserveUrlParts(next.baseUrl, plan.existing.baseUrl, omitted, 'baseUrl');
   }
@@ -602,6 +605,8 @@ function addWarnings(bundle: ConfigSyncBundle): string[] {
     bundle.state.providers.some(
       (entry) =>
         entry.oauthAccountKey !== undefined ||
+        entry.oauthAccountPool !== undefined ||
+        (Array.isArray(entry.omittedFields) && entry.omittedFields.includes('oauthAccountPool')) ||
         (Array.isArray(entry.omittedFields) && entry.omittedFields.includes('oauthAccountKey'))
     )
   ) {

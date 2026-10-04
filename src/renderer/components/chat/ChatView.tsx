@@ -43,6 +43,7 @@ import { PresetPicker } from './PresetPicker';
 import { ProjectCodeTrustBar } from './ProjectCodeTrustBar';
 import { RetryBar } from './RetryBar';
 import { StatsLine } from './StatsLine';
+import { resolveSessionUsageAccount } from './sessionUsageAccount';
 import { dedupeSlashCommands } from './skillCompletion';
 import { TaskBar } from './TaskBar';
 import { TodoBar } from './TodoBar';
@@ -184,6 +185,11 @@ export function ChatView() {
     isVirtualRef(modelResolution) && chrome?.id
       ? lastReplyModel(state.conversations[chrome.id]?.messages)
       : undefined
+  );
+  const activeAccount = useSessionsStore(
+    useShallow((state) =>
+      resolveSessionUsageAccount(providers, chrome?.id ? state.conversations[chrome.id] : undefined)
+    )
   );
   const modelBlockMessage =
     modelResolution.source !== 'none'
@@ -518,6 +524,7 @@ export function ChatView() {
                       providers={enabledProviders}
                       virtualModels={virtualModels}
                       routedModelLabel={routedModelLabel}
+                      activeAccount={activeAccount}
                       providerId={selectedProviderId}
                       modelId={effectiveModelId}
                       reasoningEnabled={chrome.reasoningEnabled ?? false}

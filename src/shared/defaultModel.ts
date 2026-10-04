@@ -1,3 +1,4 @@
+import { eligibleOauthPoolAccountKeys, isOauthAccountPool } from './oauthAccountPool';
 import type { ModelProvider } from './types';
 import type { ApprovalMode, ThinkingLevel } from './types/agent';
 import { findVirtualModel, isVirtualRef, type VirtualModelEntry } from './virtualModels';
@@ -142,9 +143,21 @@ export function modelUsability(
   const model = provider.models.find((entry) => entry.id === selection.modelId);
   if (!model) return 'model-missing';
   if (model.enabled === false) return 'model-disabled';
+  if (provider.oauthAccountPool !== undefined && !isOauthAccountPool(provider))
+    return 'oauth-account-missing';
   if (!provider.oauthAccountKey) return provider.apiKey ? 'usable' : 'api-key-missing';
   if (credentials.oauthCredentials.status !== 'ready') {
     return oauthCredentialBlock(credentials)?.reason ?? 'oauth-credentials-error';
+  }
+  if (isOauthAccountPool(provider)) {
+    return eligibleOauthPoolAccountKeys(
+      provider,
+      selection.modelId,
+      providers,
+      credentials.oauthCredentials.authenticatedAccountKeys
+    ).length > 0
+      ? 'usable'
+      : 'oauth-account-missing';
   }
   return credentials.oauthCredentials.authenticatedAccountKeys.has(provider.oauthAccountKey)
     ? 'usable'

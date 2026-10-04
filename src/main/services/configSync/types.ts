@@ -20,6 +20,7 @@ import type { PricingTable } from '@shared/usage/pricing';
 export const CONFIG_SYNC_PROVIDER_OMISSIONS = [
   'apiKey',
   'oauthAccountKey',
+  'oauthAccountPool',
   'baseUrlCredentials',
   'baseUrlQuery',
   'baseUrlFragment',
@@ -36,9 +37,11 @@ export const CONFIG_SYNC_MCP_OMISSIONS = [
 export type ConfigSyncMcpOmission = (typeof CONFIG_SYNC_MCP_OMISSIONS)[number];
 
 /** 可移植 provider；明文包可省略凭证，并通过 omittedFields 记录。 */
-export interface ConfigSyncProvider extends Omit<ModelProvider, 'apiKey' | 'oauthAccountKey'> {
+export interface ConfigSyncProvider
+  extends Omit<ModelProvider, 'apiKey' | 'oauthAccountKey' | 'oauthAccountPool'> {
   apiKey?: string;
   oauthAccountKey?: string;
+  oauthAccountPool?: ModelProvider['oauthAccountPool'];
   omittedFields?: ConfigSyncProviderOmission[];
 }
 

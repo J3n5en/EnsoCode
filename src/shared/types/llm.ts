@@ -63,6 +63,12 @@ export interface ModelProvider {
    * 同一厂商的多个账号各占一条 ModelProvider，key 分别是 `anthropic`、`anthropic#2`…
    */
   oauthAccountKey?: string;
+  /**
+   * ChatGPT OAuth 顺序账号池；缺省保持固定账号。顺序只来自显式成员，不重排锚点。
+   *
+   * Sequential ChatGPT OAuth pool; absent means a fixed account. Never reorder the anchor.
+   */
+  oauthAccountPool?: { accountKeys: string[] };
 }
 
 /** provider 是否具备可用凭证（API key 或订阅账号） */

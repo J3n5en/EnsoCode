@@ -26,6 +26,8 @@ import {
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
+import { eligibleOauthPoolAccountKeys, isOauthAccountPool } from '@shared/oauthAccountPool';
+import { ensureAccountProvider } from '@shared/piAccounts';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
@@ -97,6 +99,8 @@ import { isComputerPlatformSupported } from './computer/support';
 import { resolveGlobalInstruction } from './instructionStore';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { getMcpToolCatalog } from './mcpToolCatalog';
+import { OAUTH_POOL_EXHAUSTED, OauthAccountPool } from './oauthAccountPool';
+import { getRuntime as getOauthRuntime } from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
 import { enabledPlugins, type RuntimeAgentType, withPluginAgentTypes } from './pluginRuntime';
 import { killAndWaitExit } from './processExit';
@@ -128,6 +132,53 @@ export type AgentTypeResolution =
 
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
+const oauthPools = new OauthAccountPool();
+
+/**
+ * worker 每次请求都向 Main 选号。账号成员、启用状态、模型目录和真实 OAuth 存储实时核验，失败原因只影响该账号的有限窗口。
+ *
+ * Every worker request selects through Main. Membership, enabled state, catalog and stored OAuth credentials are checked live; evidence blocks only that account for a bounded window.
+ */
+export async function selectOauthPoolAccount(
+  event: Extract<AgentWorkerEvent, { type: 'oauth-pool-select' }>
+): Promise<Extract<AgentCommand, { type: 'oauth-pool-result' }>> {
+  try {
+    const providers = providersFromSettings();
+    const provider = providers.find((entry) => entry.id === event.settingsProviderId);
+    if (!provider || !isOauthAccountPool(provider)) throw new Error(OAUTH_POOL_EXHAUSTED);
+    const runtime = await getOauthRuntime();
+    const loggedIn = new Set(
+      (await runtime.listCredentials())
+        .filter((entry) => entry.type === 'oauth')
+        .map((entry) => entry.providerId)
+    );
+    const eligible = eligibleOauthPoolAccountKeys(
+      provider,
+      event.modelId,
+      providers,
+      loggedIn
+    ).filter((key) => {
+      if (event.excludedAccountKeys?.includes(key)) return false;
+      ensureAccountProvider(runtime, key);
+      return runtime.getModel(key, event.modelId) !== undefined;
+    });
+    const accountKey = oauthPools.select(
+      provider.id,
+      provider.oauthAccountPool?.accountKeys ?? [],
+      eligible,
+      event.failed
+    );
+    return accountKey
+      ? { type: 'oauth-pool-result', requestId: event.requestId, accountKey }
+      : { type: 'oauth-pool-result', requestId: event.requestId, error: OAUTH_POOL_EXHAUSTED };
+  } catch (error) {
+    return {
+      type: 'oauth-pool-result',
+      requestId: event.requestId,
+      error: error instanceof Error ? error.message : OAUTH_POOL_EXHAUSTED,
+    };
+  }
+}
 /** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
 let workerReady = false;
 let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
@@ -218,6 +269,12 @@ export function startAgentWorker(): void {
   child.on('message', (raw) => {
     const event = parseAgentWorkerEvent(raw);
     if (event) {
+      if (event.type === 'oauth-pool-select') {
+        void selectOauthPoolAccount(event).then((result) => {
+          if (worker === child) child.postMessage(result);
+        });
+        return;
+      }
       resolveReleaseWaiters(event);
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
       // snapshot 分支会顺手改 started / 清 asks，手动刷新不能有这些副作用）
@@ -1577,6 +1634,8 @@ function spawnModelConfig(
   provider: ModelProvider,
   modelId: string
 ): SpawnModelConfig & { settingsProviderId: string } {
+  if (provider.oauthAccountPool !== undefined && !isOauthAccountPool(provider))
+    throw new Error('Invalid ChatGPT OAuth pool configuration.');
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
   return {
     api: provider.api,
@@ -1585,6 +1644,7 @@ function spawnModelConfig(
     modelId,
     settingsProviderId: provider.id,
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
+    ...(isOauthAccountPool(provider) ? { oauthAccountPool: provider.oauthAccountPool } : {}),
     ...(!provider.oauthAccountKey ? pickModelCapabilityOverrides(entry) : {}),
   };
 }

@@ -99,6 +99,59 @@ describe('groupProviders', () => {
     expect(groups[0].providers.map((p) => p.id)).toEqual(['acct1', 'acct2', 'api']);
   });
 
+  it.each(['openai-codex', 'openai-codex#2', 'openai-codex#10'])(
+    'ChatGPT 自动接替先于固定账号，不受锚点账号 %s 的排序影响',
+    (anchorKey) => {
+      const groups = groupProviders([
+        provider({ id: 'api2', catalogId: 'openai-codex' }),
+        provider({ id: 'acct2', oauthAccountKey: 'openai-codex#2' }),
+        provider({ id: 'acct10', oauthAccountKey: 'openai-codex#10' }),
+        provider({ id: 'acct1', oauthAccountKey: 'openai-codex' }),
+        provider({ id: 'api1', catalogId: 'openai-codex' }),
+        provider({
+          id: 'pool',
+          oauthAccountKey: anchorKey,
+          oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+        }),
+      ]);
+      expect(groups[0].providers.map((p) => p.id)).toEqual([
+        'pool',
+        'acct1',
+        'acct10',
+        'acct2',
+        'api2',
+        'api1',
+      ]);
+    }
+  );
+
+  it('多个自动接替入口保留原序，且不改变厂商分组顺序或输入', () => {
+    const input = [
+      provider({ id: 'custom', baseUrl: 'https://example.test' }),
+      provider({ id: 'fixed', oauthAccountKey: 'openai-codex' }),
+      provider({
+        id: 'pool2',
+        oauthAccountKey: 'openai-codex#2',
+        oauthAccountPool: { accountKeys: ['openai-codex#2'] },
+      }),
+      provider({ id: 'anthropic', oauthAccountKey: 'anthropic' }),
+      provider({
+        id: 'pool1',
+        oauthAccountKey: 'openai-codex',
+        oauthAccountPool: { accountKeys: ['openai-codex'] },
+      }),
+    ];
+    const original = [...input];
+    const groups = groupProviders(Object.freeze(input), [{ id: 'openai-codex', name: 'ChatGPT' }]);
+    expect(groups.map((group) => group.vendorId)).toEqual([
+      'anthropic',
+      'openai-codex',
+      CUSTOM_VENDOR_ID,
+    ]);
+    expect(groups[1].providers.map((p) => p.id)).toEqual(['pool2', 'pool1', 'fixed']);
+    expect(input).toEqual(original);
+  });
+
   it('组内 API-key 条目保持入参原序（用户/导入顺序稳定）', () => {
     const groups = groupProviders([
       provider({ id: 'second', baseUrl: 'https://llm.internal.corp/v1' }),

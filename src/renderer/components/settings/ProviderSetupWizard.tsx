@@ -122,7 +122,9 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
 
   const upsertOauthAccount = React.useCallback((info: OauthProviderInfo, account: OauthAccount) => {
     const store = useSettingsStore.getState();
-    const existing = store.providers.find((provider) => provider.oauthAccountKey === account.key);
+    const existing = store.providers.find(
+      (provider) => provider.oauthAccountKey === account.key && !provider.oauthAccountPool
+    );
     if (existing) {
       const known = new Set(existing.models.map((model) => model.id));
       const fresh = info.models.filter((id) => !known.has(id)).map((id) => ({ id, enabled: true }));

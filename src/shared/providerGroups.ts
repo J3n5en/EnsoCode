@@ -112,8 +112,12 @@ export interface ProviderGroup {
 /**
  * 分组 + 全确定性排序：
  * - 组间：非 `__custom` 按 label 的 localeCompare 升序；`__custom` 恒最后
- * - 组内：先订阅条目（按 oauthAccountKey 字典序，天然让裸 `anthropic` 排在 `anthropic#2` 前），
- *   再 API-key 条目（保持入参数组原序，即用户/导入顺序，稳定）
+ * - 组内：先自动接替池（保持原序，不按锚点账号排序），再固定订阅条目（按 oauthAccountKey
+ *   字典序，天然让裸 `anthropic` 排在 `anthropic#2` 前），最后 API-key 条目（保持原序）。
+ *
+ * Group deterministically: sort vendor groups by localized label, keeping `__custom` last.
+ * Within each group, list failover pools in input order regardless of anchor account, then fixed
+ * subscriptions by oauthAccountKey, and finally API-key entries in input order.
  */
 export function groupProviders(
   providers: readonly ModelProvider[],
@@ -129,14 +133,17 @@ export function groupProviders(
 
   const groups: ProviderGroup[] = [];
   for (const [vendorId, bucket] of byVendor) {
+    const pools = bucket.filter(
+      (provider) => provider.oauthAccountKey && provider.oauthAccountPool
+    );
     const subscriptions = bucket
-      .filter((provider) => provider.oauthAccountKey)
+      .filter((provider) => provider.oauthAccountKey && !provider.oauthAccountPool)
       .sort((a, b) => (a.oauthAccountKey ?? '').localeCompare(b.oauthAccountKey ?? ''));
     const apiKeys = bucket.filter((provider) => !provider.oauthAccountKey);
     groups.push({
       vendorId,
       label: vendorLabel(vendorId, oauthInfos),
-      providers: [...subscriptions, ...apiKeys],
+      providers: [...pools, ...subscriptions, ...apiKeys],
     });
   }
 
