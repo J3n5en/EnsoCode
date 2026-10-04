@@ -47,6 +47,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
+import { useOauthAccountEmails } from '@/hooks/useOauthAccountEmails';
 import { type TFunction, useI18n } from '@/i18n';
 import { diffCacheKey } from '@/lib/diffCacheKey';
 import { parseMcpToolName } from '@/lib/mcpToolName';
@@ -728,23 +729,33 @@ const customValue = (value: unknown): string => {
   }
 };
 
+function OauthAccountRow({
+  entry,
+}: {
+  entry: Extract<AgentSessionCustomEntry, { kind: 'oauth-account-selected' }>;
+}) {
+  const { t } = useI18n();
+  const emails = useOauthAccountEmails();
+  const current = emails.get(entry.accountKey);
+  const previous = entry.previousAccountKey ? emails.get(entry.previousAccountKey) : undefined;
+  const text = entry.previousAccountKey
+    ? previous && current
+      ? t('ChatGPT account switched: {{previous}} → {{current}}', { previous, current })
+      : t('ChatGPT account switched')
+    : current
+      ? t('ChatGPT account selected: {{account}}', { account: current })
+      : t('ChatGPT account selected');
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
+      <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+      <p className="min-w-0 break-words text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
 function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
   const { t } = useI18n();
-  if (entry.kind === 'oauth-account-selected') {
-    return (
-      <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
-        <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-        <p className="min-w-0 break-words text-muted-foreground">
-          {entry.previousAccountKey
-            ? t('ChatGPT account switched: {{previous}} → {{current}}', {
-                previous: entry.previousAccountKey,
-                current: entry.accountKey,
-              })
-            : t('ChatGPT account selected: {{account}}', { account: entry.accountKey })}
-        </p>
-      </div>
-    );
-  }
+  if (entry.kind === 'oauth-account-selected') return <OauthAccountRow entry={entry} />;
   if (entry.kind === 'agent-dispatch') {
     return (
       <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
