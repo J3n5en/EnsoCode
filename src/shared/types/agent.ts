@@ -975,7 +975,13 @@ export type DispatchMainEvent =
 
 /** Main → worker。所有 session 控制均携 exact generation。 */
 export type AgentCommand =
-  | { type: 'oauth-pool-result'; requestId: string; accountKey?: string; error?: string }
+  | {
+      type: 'oauth-pool-result';
+      requestId: string;
+      accountKey?: string;
+      selectionReceipt?: string;
+      error?: string;
+    }
   | { type: 'lock-workspace'; requestId: string; conversationIds: string[] }
   | { type: 'unlock-workspace'; requestId: string; conversationIds: string[]; branch?: string }
   | {
@@ -2724,10 +2730,14 @@ export function parseSessionSnapshot(value: unknown): SessionSnapshot | null {
 export function parseAgentCommand(value: unknown): AgentCommand | null {
   if (!isRecord(value) || !isNonEmptyString(value.type)) return null;
   if (value.type === 'oauth-pool-result') {
-    return hasOnlyKeys(value, ['type', 'requestId', 'accountKey', 'error']) &&
+    return hasOnlyKeys(value, ['type', 'requestId', 'accountKey', 'selectionReceipt', 'error']) &&
       isNonEmptyString(value.requestId) &&
-      ((isCodexAccountKey(value.accountKey) && value.error === undefined) ||
-        (value.accountKey === undefined && isNonEmptyString(value.error)))
+      ((isCodexAccountKey(value.accountKey) &&
+        value.error === undefined &&
+        (value.selectionReceipt === undefined || isUuid(value.selectionReceipt))) ||
+        (value.accountKey === undefined &&
+          value.selectionReceipt === undefined &&
+          isNonEmptyString(value.error)))
       ? (value as unknown as AgentCommand)
       : null;
   }

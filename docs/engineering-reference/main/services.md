@@ -31,6 +31,46 @@ worker 侧的 `SessionSupervisor` 在 `src/agent/`（与 main/renderer/shared �
 [../shared/index.md](../shared/index.md)。
 
 
+## ChatGPT 顺序账号池的额度权威
+
+`oauthProviders.getOauthQuotaCoordinator()` 持有 Main 唯一额度缓存，UI 的
+`getOauthAccountUsage` 和 `agentHost.selectOauthPoolAccount` 共用它。配置顺序决定首个账号，
+切换后一直使用当前账号，旧账号恢复不会抢回游标。只查询需要确认的候选账号：正常数据
+缓存 60 秒，未知或失败缓存 15 秒，同账号并发查询合并；未知账号先让位于已确认可用账号，
+全部未知才有限降级，并在 Main 日志保留警告、UI 查询保留 error。
+
+- 一次选号的额度查询共用 20 秒单调时钟等待预算，单次挂起也必须 bounded race；
+  预算到时不启动剩余网络请求，仍扫描本地健康/封锁证据，只有没有已确认健康候选且存在
+  unknown 时才带 warning 有限降级。超时本身不作为耗尽证据，不取消 UI/其它池共享查询；
+  后台迟到结果仍可缓存，但必须通过原有身份、查询代际及 reset 后发起校验，迟到拒绝被处理。
+- 有效窗口任一 100% 即跳过，不向 worker 下发该账号试发模型请求。最早耗尽窗口 reset
+  到期后重新查证；查询失败保留其它未过期耗尽窗口，过期证据不永久封锁。
+- 完整有效窗口均非耗尽才是健康证据；空窗口、坏窗口和网络错误不能解封仍有效的证据。
+  模型返回的结构化硬失败截止时间独立保留，晚到的健康查询也不能清除它。
+  身份或查询代际过期的结果向 UI 返回空窗口和 error；恢复查询必须在 reset 后发起，
+  reset 前发起、reset 后才完成的结果不算恢复证据。
+- `/wham/usage` 的全局 `allowed: false` / `limit_reached: true` 是额度证据，恢复时间只取
+  真正耗尽窗口；没有明确 reset 时短暂封锁并复查。额外 credits 和未匹配目标模型的窗口
+  不推导为全账号不可用，普通 429 也不作为永久耗尽证据。
+- `userData/oauth-quota-state.json` 只保存 key、身份 SHA-256 摘要、耗尽窗口和有限硬失败截止
+  时间；不进 settings/config sync，不保存 token、email 或展示标签。读入校验版本、文件大小、
+  key、身份摘要、有限时间和窗口数量，坏文件降级为重新查询；写入采用同步临时文件+rename，
+  防止并发旧快照覆盖新状态。
+- 身份由本地凭证账号 ID/用户 ID 派生，不透明凭证保守按凭证摘要失效。login/logout、
+  就地 Codex 导入和真实凭证删除均清除旧记录，即使缓存尚未初始化也必须清磁盘 sidecar，
+  因为删除最高账号号次后 `nextAccountKey` 可能复用同 key。额度网络等待结束后，host 再次
+  校验成员启用状态、模型和登录态，变更中的陈旧选号拒绝下发。
+- 每次真实请求的选号带不透明 UUID receipt，worker 在 fetch/SSE/refresh 失败中回传
+  当次票；恢复 boundary 的候选票不替代真实请求票。Main 在内存绑定池、key、身份摘要和
+  凭证代际，仅有效绑定的失败可以更新硬封锁，旧身份的迟到失败不得封锁复用 key 的新身份。
+  票不落盘、不发给 Renderer，24 小时 TTL、最多 4096 条；硬失败只更新查询代际，不撤销
+  同身份其它并发模型请求的票，凭证失效才提升凭证代际。
+- 全池耗尽返回最早可能恢复的额度复查时间（各账号耗尽窗口最大 reset 的最小值），
+  该时间不代表自动确认恢复。
+
+回归：`oauthQuotaCoordinator.test.ts`、`agentHost.oauthPool.test.ts`、
+`oauthProviders.test.ts`。测试使用依赖注入、临时目录和假网络，不读取真实用户凭据。
+
 ## 能力授权以 child generation 为单位
 
 `capabilityGateway` 的 invocation 上下文按 `generationKey(child)` 建键，
@@ -71,7 +111,7 @@ receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派�
 
 ## 对 pi 私有 API 的依赖要登记
 
-目前有一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
+目前有两处。第一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
 `SessionManager._rewriteFile()`，并在成功重写后同步其私有 `flushed` 标记。
 
 **为什么需要**：pi 的 `_persist` 在会话出现第一条 assistant 消息前一个字节不写
@@ -86,6 +126,23 @@ assistant 消息。不干预的后果是父会话文件从未创建，重启后 
 Pi 0.87.1 的 `_rewriteFile()` 不设置 `flushed`；不显式同步时，首条 assistant
 会以 `wx` 创建已有文件并抛出 `EEXIST`。回归还须覆盖物化后追加首条 assistant、
 重开 JSONL 后消息仍存在。只有重写成功后才能设置该标记。
+
+第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.0.0
+私有 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
+`agent.continue()` 绕过自动重试、`agent_before_settle` 与 `agent_settled`，手工补发
+settled 无法恢复 OAuth 池的结算前接替。空数组启动完整活动但不追加用户任务，原任务
+及已完成工具结果不重放。显式用户 retry 才复位池的 per-activity `attempted`，自动接替不复位；
+池会话与通知路由在 `agent_start` 初始化，因此恢复后直接 retry 也能获得结构化失败证据。
+入口要求 `session.isIdle`，压缩、branch summary 或其它活动中不允许续跑；保留原
+`agent.continue()` 的上下文边界：空、仅 system 或 assistant 尾部都拒绝，不发起请求。
+
+**升级 pi 必须复检第二处**：优先查找公开无消息继续 API；确认 `_runAgentPrompt([])`
+仍接受空数组、不产生用户消息，且保留完整 post-run / before-settle / settled 生命周期。
+当前 SDK 的 before-settle 位于低层 loop 结束后，`ctx.signal` 可能为空；取消由
+`session.abort()` 的活动标志和 before-settle 取消守卫阻止延迟选号后的续跑，不能自行
+补发结算或假定低层 `agent.signal` 覆盖整个活动。回归见 `oauthAccountPool.test.ts`
+（真实 SDK + supervisor retry 分支 + 假 provider：四账号顺序、活动排除复位、工具只一次、
+选号等待时取消与唯一结算）、`sessionAdapter.test.ts` 和 `supervisor.silentTurn.test.ts`。
 
 新增此类依赖前先找公开 API；确实没有时，三件事缺一不可：
 

@@ -4,6 +4,7 @@ import {
   classifyCodexPoolFailure,
   eligibleOauthPoolAccountKeys,
   parseOauthAccountPool,
+  parseOauthPoolFailure,
 } from './oauthAccountPool';
 import type { ModelProvider } from './types/llm';
 
@@ -19,6 +20,23 @@ const account = (key: string, enabled = true): ModelProvider => ({
 });
 
 describe('ChatGPT 顺序账号池可用性', () => {
+  it('failure只接收opaque UUID票据，保留无票旧协议但拒绝坏票和身份凭据', () => {
+    const legacy = { accountKey: 'openai-codex', reason: 'login-invalid' };
+    const receipt = '11111111-1111-4111-8111-111111111111';
+    expect(parseOauthPoolFailure(legacy)).toEqual(legacy);
+    expect(parseOauthPoolFailure({ ...legacy, selectionReceipt: receipt })).toEqual({
+      ...legacy,
+      selectionReceipt: receipt,
+    });
+    for (const selectionReceipt of [null, '', 1, {}, 'access-token', 'a'.repeat(36)]) {
+      expect(parseOauthPoolFailure({ ...legacy, selectionReceipt })).toBeNull();
+    }
+    for (const field of ['auth', 'identity', 'credentialGeneration', 'digest']) {
+      expect(
+        parseOauthPoolFailure({ ...legacy, selectionReceipt: receipt, [field]: 'secret' })
+      ).toBeNull();
+    }
+  });
   it('普通429、限速文案和服务器错误不是硬额度证据', () => {
     for (const body of [
       { error: { code: 'rate_limit_exceeded' } },

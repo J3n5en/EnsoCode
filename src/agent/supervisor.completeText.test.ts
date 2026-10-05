@@ -1,3 +1,4 @@
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,6 +37,10 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
       return [...this.models.values()];
     },
     getProvider: () => undefined,
+    resolveModel: vi
+      .fn<ModelRuntime['resolveModel']>()
+      .mockRejectedValue(new Error('Unexpected virtual model routing in ordinary-runtime fixture')),
+    getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
     completeSimple: mocks.completeSimple,
     streamSimple: mocks.streamSimple,

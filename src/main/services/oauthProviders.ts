@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import type {
   OauthFlowLocator,
   StartOauthResult,
 } from '@shared/capabilities/types';
+import { isCodexAccountKey } from '@shared/oauthAccountPool';
 import { expandOauthCatalog } from '@shared/oauthCatalog';
 import {
   ensureAccountProvider,
@@ -44,6 +46,7 @@ import type {
 import { IPC_CHANNELS, providerIdOfAccountKey, sanitizeOauthLabel } from '@shared/types';
 import { app, BrowserWindow, shell, type WebContents } from 'electron';
 import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
+import { OauthQuotaCoordinator } from './oauthQuotaCoordinator';
 
 // pi-ai 不在依赖树顶层，auth 交互类型从 ModelRuntime.login 签名结构化提取
 type AuthInteraction = Parameters<ModelRuntimeType['login']>[2];
@@ -76,6 +79,41 @@ function deviceIdFrom(SettingsManager: typeof SettingsManagerType): string {
 // 与 agent worker 共用同一 auth.json（pi CredentialStore 文件锁保证跨进程互斥），
 // 登录/退出在 Main 完成后，worker 侧请求时经 getAuth 直接读到新凭证
 let runtimePromise: Promise<ModelRuntimeType> | null = null;
+let quotaCoordinator: OauthQuotaCoordinator | undefined;
+
+/**
+ * 额度池与 UI 共用同一 Main 缓存。身份优先取稳定账号 ID；不透明凭证用摘要保守失效，凭证和邮箱不落额度文件。
+ *
+ * Pool selection and UI share one Main cache. Identity uses a stable account ID where possible, otherwise a conservative credential digest; credentials and emails never enter the quota file.
+ */
+export function getOauthQuotaCoordinator(): OauthQuotaCoordinator {
+  quotaCoordinator ??= new OauthQuotaCoordinator({
+    file: path.join(app.getPath('userData'), 'oauth-quota-state.json'),
+    identity: async (key) => {
+      const { readStoredCredential } = await import('@earendil-works/pi-coding-agent');
+      const credential = readStoredCredential(key, authPath());
+      if (credential?.type !== 'oauth') return undefined;
+      const accountId = storedCodexAccountId(credential);
+      const claims = decodeJwtPayload(credential.access);
+      const userId = obj(claims?.['https://api.openai.com/auth']).chatgpt_user_id ?? claims?.sub;
+      return createHash('sha256')
+        .update(
+          JSON.stringify(
+            accountId
+              ? ['account', accountId, typeof userId === 'string' ? userId : null]
+              : ['credential', credential.access, credential.refresh]
+          )
+        )
+        .digest('hex');
+    },
+    query: queryOauthAccountUsage,
+  });
+  return quotaCoordinator;
+}
+
+function invalidateOauthQuota(accountKey: string): void {
+  if (isCodexAccountKey(accountKey)) getOauthQuotaCoordinator().invalidate(accountKey);
+}
 const onlineCatalogProviderIds = new Set<string>([ANTIGRAVITY_PROVIDER_ID, DEVIN_PROVIDER_ID]);
 const onlineCatalogRefreshes = new Map<string, Promise<boolean>>();
 
@@ -353,6 +391,7 @@ export async function listOauthProviders(): Promise<OauthProviderInfo[]> {
   // 登录态以 auth.json 为准（listCredentials 读文件），兼容外部（pi CLI）写入
   await syncAccountProviders(runtime);
   const byProvider = await accountKeysOf(runtime);
+  getOauthQuotaCoordinator().reconcileKeys(new Set([...byProvider.values()].flat()));
   const { readStoredCredential } = await import('@earendil-works/pi-coding-agent');
   const meta = await readAccountMeta();
   const file = authPath();
@@ -590,6 +629,7 @@ async function runOauthLogin(
     await runtime.login(accountKey, 'oauth', interaction, {
       getDeviceId: () => deviceIdFrom(pi.SettingsManager),
     });
+    invalidateOauthQuota(accountKey);
 
     const accountIdentity = await probeIdentity(runtime, accountKey);
     if (accountIdentity.email || accountIdentity.plan) {
@@ -658,8 +698,12 @@ export async function oauthLogout(accountKey: string, sender?: WebContents): Pro
   const runtime = await getRuntime();
   // accountKey 来自 Renderer，只接受 auth.json 里真实存在的键：
   // 任意字符串都能当键传进 pi 的 logout/getAuth，先按已存凭证收窄
-  if (!(await hasStoredAccount(runtime, accountKey))) return;
+  if (!(await hasStoredAccount(runtime, accountKey))) {
+    invalidateOauthQuota(accountKey);
+    return;
+  }
   await runtime.logout(accountKey);
+  invalidateOauthQuota(accountKey);
   await syncAccountProviders(runtime);
   await writeAccountMeta((meta) => {
     delete meta[accountKey];
@@ -745,6 +789,7 @@ export async function importCodexOauthCredential(
       notify: () => {},
       prompt: () => Promise.reject(new Error('import does not prompt')),
     });
+    invalidateOauthQuota(accountKey);
   } catch (error) {
     return {
       status: 'failed',
@@ -888,6 +933,19 @@ async function codexProbe(
       label: windowLabel(window, fallback),
       usedPercent,
       resetsAt: toEpochMs(window.reset_at),
+    });
+  }
+  if (rateLimit.allowed === false || rateLimit.limit_reached === true) {
+    // 全局拒绝标志是额度证据；额外 credits 或某个模型的窗口不是全账号不可用证据。
+    //
+    // Global denial flags are quota evidence; extra credits or model-specific windows are not evidence that the entire account is unavailable.
+    const resets = probe.windows.flatMap((window) =>
+      window.usedPercent >= 100 && window.resetsAt ? [window.resetsAt] : []
+    );
+    probe.windows.push({
+      label: 'rate limit',
+      usedPercent: 100,
+      ...(resets.length ? { resetsAt: Math.max(...resets) } : {}),
     });
   }
   if (typeof data.plan_type === 'string') assignPlan(probe, data.plan_type);
@@ -1152,7 +1210,13 @@ async function probeIdentity(
 }
 
 /** 单个账号的额度详情；拉取失败填 error 而不是抛，界面才能区分「没数据」与「挂了」 */
-export async function getOauthAccountUsage(accountKey: string): Promise<OauthAccountUsage> {
+export function getOauthAccountUsage(accountKey: string): Promise<OauthAccountUsage> {
+  return isCodexAccountKey(accountKey)
+    ? getOauthQuotaCoordinator().getUsage(accountKey)
+    : queryOauthAccountUsage(accountKey);
+}
+
+async function queryOauthAccountUsage(accountKey: string): Promise<OauthAccountUsage> {
   try {
     const runtime = await getRuntime();
     // 同 oauthLogout：不收窄的话渲染层能拿任意 auth.json 键去触发 getAuth 与克隆注册

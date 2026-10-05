@@ -121,6 +121,31 @@ export function editLatestAssistantForRetry(session: AgentSession): boolean {
   return true;
 }
 
+/**
+ * 无新增消息的活动续跑：pi 1.0.0 没有公开的 session.continue，裸 agent.continue 会绕过
+ * 自动重试、agent_before_settle 和 agent_settled。空消息数组不会重放任务或工具结果，
+ * 由 SDK 管理取消与唯一结算。升级时复检私有入口及空数组语义，见 main/services.md。
+ *
+ * Continue an activity without new messages. Pi 1.0.0 exposes no session.continue;
+ * bare agent.continue bypasses retry, agent_before_settle and agent_settled. An empty
+ * array does not replay tasks/tools; the SDK owns cancellation and single settlement.
+ * Recheck the private entry and empty-array semantics on upgrades; see main/services.md.
+ */
+export async function continueSessionActivity(session: AgentSession): Promise<void> {
+  if (!session.isIdle) throw new Error('Cannot continue a busy session.');
+  const messages = session.agent.state.messages;
+  const last = messages.at(-1);
+  if (!last || messages.every((message) => message.role === 'system')) {
+    throw new Error('No messages to continue from');
+  }
+  if (last.role === 'assistant') throw new Error('Cannot continue from message role: assistant');
+  const adapter = session as unknown as { _runAgentPrompt(messages: []): Promise<void> };
+  if (typeof adapter._runAgentPrompt !== 'function') {
+    throw new Error('Pi SDK no longer supports message-free activity continuation.');
+  }
+  await adapter._runAgentPrompt([]);
+}
+
 /** context_edit 只作用于模型上下文，渲染层记录仍展示原始消息 */
 export function buildSessionDisplayMessages(
   session: AgentSession,

@@ -13,6 +13,44 @@ const model = {
 };
 
 describe('账号池 typed worker 协议', () => {
+  it('结果与failure接收opaque UUID，坏票、错误结果携票及凭据均拒绝', () => {
+    const selectionReceipt = '11111111-1111-4111-8111-111111111111';
+    const success = {
+      type: 'oauth-pool-result',
+      requestId: 'r',
+      accountKey: 'openai-codex',
+      selectionReceipt,
+    };
+    const event = {
+      type: 'oauth-pool-select',
+      requestId: 'r',
+      settingsProviderId: 'pool',
+      modelId: 'm',
+      failed: { accountKey: 'openai-codex', reason: 'login-invalid', selectionReceipt },
+    };
+    expect(parseAgentCommand(success)).toEqual(success);
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    for (const bad of [null, '', 42, {}, 'not-a-uuid', 'a'.repeat(36)]) {
+      expect(parseAgentCommand({ ...success, selectionReceipt: bad })).toBeNull();
+      expect(
+        parseAgentWorkerEvent({ ...event, failed: { ...event.failed, selectionReceipt: bad } })
+      ).toBeNull();
+    }
+    expect(
+      parseAgentCommand({
+        type: 'oauth-pool-result',
+        requestId: 'r',
+        error: 'failed',
+        selectionReceipt,
+      })
+    ).toBeNull();
+    for (const field of ['auth', 'identity', 'credentialGeneration', 'digest']) {
+      expect(parseAgentCommand({ ...success, [field]: 'secret' })).toBeNull();
+      expect(
+        parseAgentWorkerEvent({ ...event, failed: { ...event.failed, [field]: 'secret' } })
+      ).toBeNull();
+    }
+  });
   it('实际账号通知携带成对路由身份，旧历史兼容但脏 scope 被拒绝', () => {
     const notice = {
       kind: 'oauth-account-selected',

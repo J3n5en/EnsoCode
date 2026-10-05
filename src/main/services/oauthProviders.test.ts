@@ -574,6 +574,243 @@ function withAuthJson(mutate: (parsed: Record<string, unknown>) => void): () => 
   return () => writeFileSync(authFile(), original);
 }
 
+describe('ChatGPT 额度查询权威缓存', () => {
+  let ordinal = 40;
+  const setup = () => {
+    const key = `openai-codex#${ordinal++}`;
+    const restore = withAuthJson((parsed) => {
+      parsed[key] = {
+        type: 'oauth',
+        access: fakeJwt({ 'https://api.openai.com/auth': { chatgpt_account_id: key } }),
+        refresh: `refresh-${key}`,
+        expires,
+      };
+    });
+    return { key, restore };
+  };
+  it('并发及重复UI查询只请求一次额度网络', async () => {
+    const { key, restore } = setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 20,
+              reset_at: Math.floor((Date.now() + 100_000) / 1000),
+            },
+          },
+        })
+      )
+    );
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const result = await getOauthAccountUsage(key);
+      expect(result.windows[0]?.usedPercent).toBe(20);
+      await Promise.all([getOauthAccountUsage(key), getOauthAccountUsage(key)]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+  it('HTTP失败空窗口保留unknown error，不假装账号健康', async () => {
+    const { key, restore } = setup();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('', { status: 429 }));
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      expect(await getOauthAccountUsage(key)).toMatchObject({
+        windows: [],
+        error: expect.any(String),
+      });
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+  it.each([{ allowed: false }, { limit_reached: true }])(
+    '额度端点明确拒绝标志%s即使百分比未满也记录耗尽',
+    async (flag) => {
+      const { key, restore } = setup();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            rate_limit: {
+              ...flag,
+              primary_window: {
+                used_percent: 20,
+                reset_at: Math.floor((Date.now() + 100_000) / 1000),
+              },
+            },
+          })
+        )
+      );
+      try {
+        const { getOauthAccountUsage } = await import('./oauthProviders');
+        const result = await getOauthAccountUsage(key);
+        expect(result.windows.some((window) => window.usedPercent === 100)).toBe(true);
+      } finally {
+        fetchSpy.mockRestore();
+        restore();
+      }
+    }
+  );
+  it('全局拒绝的恢复时间只取真正耗尽窗口，不被健康周窗口拉长', async () => {
+    const { key, restore } = setup();
+    const shortReset = Math.floor((Date.now() + 100_000) / 1000);
+    const longReset = shortReset + 7 * 86_400;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            allowed: false,
+            primary_window: { used_percent: 100, reset_at: shortReset },
+            secondary_window: { used_percent: 20, reset_at: longReset },
+          },
+        })
+      )
+    );
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const result = await getOauthAccountUsage(key);
+      expect(result.windows.find((window) => window.label === 'rate limit')?.resetsAt).toBe(
+        shortReset * 1000
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+  it('全局拒绝但百分比无耗尽时不把健康窗口reset当恢复时间', async () => {
+    const { key, restore } = setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            allowed: false,
+            primary_window: {
+              used_percent: 20,
+              reset_at: Math.floor((Date.now() + 7 * 86_400_000) / 1000),
+            },
+          },
+        })
+      )
+    );
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      const result = await getOauthAccountUsage(key);
+      expect(result.windows.find((window) => window.label === 'rate limit')).not.toHaveProperty(
+        'resetsAt'
+      );
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+  it('同账号token轮换不失效，复用key换真实身份必须清旧额度', async () => {
+    const { key, restore } = setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            rate_limit: {
+              primary_window: {
+                used_percent: 100,
+                reset_at: Math.floor((Date.now() + 100_000) / 1000),
+              },
+            },
+          })
+        )
+    );
+    try {
+      const { getOauthAccountUsage } = await import('./oauthProviders');
+      await getOauthAccountUsage(key);
+      withAuthJson((parsed) => {
+        parsed[key] = {
+          type: 'oauth',
+          access: fakeJwt({ exp: 123, 'https://api.openai.com/auth': { chatgpt_account_id: key } }),
+          refresh: 'rotated',
+          expires,
+        };
+      });
+      expect((await getOauthAccountUsage(key)).windows[0]?.usedPercent).toBe(100);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      withAuthJson((parsed) => {
+        parsed[key] = {
+          type: 'oauth',
+          access: fakeJwt({
+            'https://api.openai.com/auth': { chatgpt_account_id: 'different-account' },
+          }),
+          refresh: 'new-person',
+          expires,
+        };
+      });
+      fetchSpy.mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              rate_limit: {
+                primary_window: {
+                  used_percent: 20,
+                  reset_at: Math.floor((Date.now() + 100_000) / 1000),
+                },
+              },
+            })
+          )
+      );
+      expect((await getOauthAccountUsage(key)).windows[0]?.usedPercent).toBe(20);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+      restore();
+    }
+  });
+  it('尚未创建Main缓存时logout也清磁盘证据，最高号复用不继承封锁', async () => {
+    const key = 'openai-codex#2';
+    const restore = withAuthJson((parsed) => {
+      for (const existing of Object.keys(parsed))
+        if (existing.startsWith('openai-codex#')) delete parsed[existing];
+      parsed[key] = {
+        type: 'oauth',
+        access: fakeJwt({ 'https://api.openai.com/auth': { chatgpt_account_id: 'reused' } }),
+        refresh: 'r',
+        expires,
+      };
+    });
+    const quotaFile = path.join(userData, 'oauth-quota-state.json');
+    writeFileSync(
+      quotaFile,
+      JSON.stringify({
+        version: 1,
+        records: [
+          {
+            key,
+            identity: 'a'.repeat(64),
+            checkedAt: Date.now(),
+            windows: [],
+            hardUntil: Date.now() + 100_000,
+          },
+        ],
+      })
+    );
+    vi.resetModules();
+    try {
+      const { oauthLogout } = await import('./oauthProviders');
+      await oauthLogout(key);
+      expect(JSON.parse(readFileSync(quotaFile, 'utf8')).records).not.toContainEqual(
+        expect.objectContaining({ key })
+      );
+      const { nextAccountKey } = await import('@shared/piAccounts');
+      expect(
+        nextAccountKey('openai-codex', Object.keys(JSON.parse(readFileSync(authFile(), 'utf8'))))
+      ).toBe(key);
+    } finally {
+      restore();
+    }
+  });
+});
+
 function withAntigravityAccess(): () => void {
   return withAuthJson((parsed) => {
     parsed['google-antigravity'] = {
@@ -1308,11 +1545,25 @@ describe('从 Codex 本地登录态导入', () => {
         },
       });
       try {
-        const { importCodexOauthCredential } = await import('./oauthProviders');
+        const { importCodexOauthCredential, getOauthQuotaCoordinator } = await import(
+          './oauthProviders'
+        );
+        const quota = getOauthQuotaCoordinator();
+        await quota.select('import-fixture', ['openai-codex#2'], ['openai-codex#2'], {
+          accountKey: 'openai-codex#2',
+          reason: 'quota-exhausted',
+          resetAt: Date.now() + 100_000,
+        });
+        expect(
+          await quota.select('import-fixture', ['openai-codex#2'], ['openai-codex#2'])
+        ).not.toHaveProperty('accountKey');
         expect(await importCodexOauthCredential(undefined, codexAuth)).toEqual({
           status: 'duplicate',
           accountKey: 'openai-codex#2',
         });
+        expect(
+          JSON.parse(readFileSync(path.join(userData, 'oauth-quota-state.json'), 'utf8')).records
+        ).not.toContainEqual(expect.objectContaining({ key: 'openai-codex#2' }));
         expect(JSON.parse(readFileSync(authFile(), 'utf8'))['openai-codex#2']).toEqual(
           codexWins
             ? {

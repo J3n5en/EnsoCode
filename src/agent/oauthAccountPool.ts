@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import {
   type Api,
@@ -9,10 +10,12 @@ import {
   type ProviderRequestOptions,
 } from '@earendil-works/pi-ai';
 import {
+  type AgentSession,
   type InlineExtension,
   type ModelRuntime,
   VIRTUAL_MODEL_STATE_ENTRY,
 } from '@earendil-works/pi-coding-agent';
+import { isUuid } from '@shared/builtinAgents';
 import {
   classifyCodexPoolFailure,
   isCodexAccountKey,
@@ -32,7 +35,15 @@ export type OauthPoolSelector = (
   failed?: OauthPoolFailure,
   signal?: AbortSignal,
   excludedAccountKeys?: readonly string[]
-) => Promise<string>;
+) => Promise<string | OauthPoolSelection>;
+export interface OauthPoolSelection {
+  accountKey: string;
+  selectionReceipt?: string;
+}
+const routing = new AsyncLocalStorage<{ selection?: OauthPoolSelection }>();
+const requestSelection = Symbol('oauth-pool-request-selection');
+type PoolRequestModel = Model<Api> & { [requestSelection]?: OauthPoolSelection };
+const boundRuntimes = new WeakSet<ModelRuntime>();
 const selectors = new WeakMap<ModelRuntime, OauthPoolSelector>();
 const adapted = new WeakSet<Provider>();
 const pooledSessions = new Set<string>();
@@ -50,10 +61,85 @@ const PREFIX = 'enso-codex-pool:';
 
 export function installOauthPoolSelector(runtime: ModelRuntime, selector: OauthPoolSelector): void {
   selectors.set(runtime, selector);
+  if (boundRuntimes.has(runtime)) return;
+  boundRuntimes.add(runtime);
+  // SDK 的公开 resolveModel 会用目录模型替换路由返回的模型，所以在公开出口按请求克隆。
+  // 私有 Symbol 经 prepareRequest 的 baseUrl spread 保留，但不进入 JSON；普通模型原样返回。
+  //
+  // Public resolveModel replaces the router's model with its catalog model, so clone at its public exit per request.
+  // A private Symbol survives prepareRequest's baseUrl spread but never enters JSON; ordinary models pass through.
+  const resolveModel = runtime.resolveModel.bind(runtime);
+  runtime.resolveModel = (model, messages, options) => {
+    if (!model.provider.startsWith(PREFIX)) return resolveModel(model, messages, options);
+    return routing.run({}, async () => {
+      const route = await resolveModel(model, messages, options);
+      const selection = routing.getStore()?.selection;
+      return selection && selection.accountKey === route.model.provider
+        ? { ...route, model: { ...route.model, [requestSelection]: selection } }
+        : route;
+    });
+  };
+  // 路由预检后 SDK 还会在真实请求准备时刷新鉴权；同一请求模型上的票据必须覆盖这次刷新失败。
+  //
+  // After routing preflight, the SDK resolves auth again while preparing the real request; its request-local model receipt must cover that refresh failure too.
+  const getAuth = runtime.getAuth.bind(runtime);
+  runtime.getAuth = (model, options) => {
+    if (typeof model === 'string') return getAuth(model, options);
+    const selection = (model as PoolRequestModel)[requestSelection];
+    if (!selection) return getAuth(model, options);
+    return (async () => {
+      try {
+        const auth = await getAuth(model, options);
+        if (!auth && !options?.signal?.aborted)
+          throw new Error(
+            recordFailure(
+              withReceipt(
+                { accountKey: model.provider, reason: 'login-invalid' },
+                selection.selectionReceipt
+              )
+            )
+          );
+        return auth;
+      } catch (error) {
+        if (options?.signal?.aborted) throw error;
+        const failure = classifyCodexRefreshFailure(error, model.provider);
+        if (!failure) throw error;
+        throw new Error(recordFailure(withReceipt(failure, selection.selectionReceipt)), {
+          cause: error,
+        });
+      }
+    })();
+  };
+}
+
+function withReceipt(failure: OauthPoolFailure, selectionReceipt?: string): OauthPoolFailure {
+  return selectionReceipt ? { ...failure, selectionReceipt } : failure;
+}
+
+function recordFailure(failure: OauthPoolFailure): string {
+  const id = randomUUID();
+  if (failures.size >= 256) failures.delete(failures.keys().next().value ?? '');
+  failures.set(id, failure);
+  return `ChatGPT account ${failure.reason}. [enso-pool-failure:${id}]`;
 }
 export function releaseOauthPoolSession(sessionId: string): void {
   pooledSessions.delete(sessionId);
   selectedAccounts.delete(sessionId);
+}
+
+/**
+ * 显式用户重试开始新活动；自动接替不调用此入口，失败账号仍在同活动内排除。
+ *
+ * An explicit user retry starts a new activity. Automatic takeover must not call
+ * this entry, so failed accounts remain excluded within the same activity.
+ */
+export function resetOauthPoolActivity(session: AgentSession): void {
+  if (!session.model?.provider.startsWith(PREFIX)) return;
+  session.sessionManager.appendCustomEntry(VIRTUAL_MODEL_STATE_ENTRY, {
+    provider: session.model.provider,
+    modelId: session.model.id,
+    state: { attempted: [] },
+  });
 }
 
 export function failureForMessage(message: {
@@ -119,10 +205,13 @@ export function withCodexPoolEvidence(provider: Provider): Provider {
   const wrap =
     (stream: Provider['streamSimple']): Provider['streamSimple'] =>
     (model, context, options) => {
-      if (!options?.sessionId || !pooledSessions.has(options.sessionId))
+      const selection = (model as PoolRequestModel)[requestSelection];
+      if (!selection && (!options?.sessionId || !pooledSessions.has(options.sessionId)))
         return stream(model, context, options);
+      const selectionReceipt = selection?.selectionReceipt;
+      options ??= {};
       if (!options.signal?.aborted) {
-        const selected = selectedAccounts.get(options.sessionId);
+        const selected = options.sessionId ? selectedAccounts.get(options.sessionId) : undefined;
         if (selected && selected.accountKey !== model.provider) {
           selected.notify?.(model.provider, selected.accountKey);
           selected.accountKey = model.provider;
@@ -188,10 +277,7 @@ export function withCodexPoolEvidence(provider: Provider): Provider {
               event.error.stopReason !== 'aborted' &&
               !options.signal?.aborted
             ) {
-              const id = randomUUID();
-              if (failures.size >= 256) failures.delete(failures.keys().next().value ?? '');
-              failures.set(id, evidence);
-              event.error.errorMessage = `ChatGPT account ${evidence.reason}. [enso-pool-failure:${id}]`;
+              event.error.errorMessage = recordFailure(withReceipt(evidence, selectionReceipt));
             }
             output.push(event);
           }
@@ -206,7 +292,11 @@ export function withCodexPoolEvidence(provider: Provider): Provider {
             timestamp: Date.now(),
             stopReason: options.signal?.aborted ? 'aborted' : 'error',
             errorMessage:
-              error instanceof Error ? error.message : 'ChatGPT provider stream failed.',
+              captured.evidence && !options.signal?.aborted
+                ? recordFailure(withReceipt(captured.evidence, selectionReceipt))
+                : error instanceof Error
+                  ? error.message
+                  : 'ChatGPT provider stream failed.',
             usage: {
               input: 0,
               output: 0,
@@ -264,7 +354,7 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
       const attempted = attemptedAccounts(request.state);
       if (failed && !attempted.includes(failed.accountKey)) attempted.push(failed.accountKey);
       for (let budget = 0; budget < 100; budget++) {
-        const key = await select(
+        const selected = await select(
           config.settingsProviderId,
           config.modelId,
           failed,
@@ -272,6 +362,13 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
           attempted
         );
         request.signal?.throwIfAborted();
+        const selection = typeof selected === 'string' ? { accountKey: selected } : selected;
+        const { accountKey: key, selectionReceipt } = selection;
+        if (
+          !isCodexAccountKey(key) ||
+          (selectionReceipt !== undefined && !isUuid(selectionReceipt))
+        )
+          throw new Error('Invalid ChatGPT pool selection.');
         if (attempted.includes(key))
           throw new Error('No available ChatGPT OAuth accounts in this activity.');
         ensurePoolProvider(runtime, key);
@@ -280,7 +377,8 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
         try {
           const auth = await runtime.getAuth(model, { signal: request.signal });
           request.signal?.throwIfAborted();
-          if (!auth) failed = { accountKey: key, reason: 'login-invalid' };
+          if (!auth)
+            failed = withReceipt({ accountKey: key, reason: 'login-invalid' }, selectionReceipt);
           else {
             if (!runtime.hasConfiguredAuth(key))
               await runtime.refresh({
@@ -289,12 +387,15 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
                 signal: request.signal,
               });
             request.signal?.throwIfAborted();
+            const scope = routing.getStore();
+            if (scope) scope.selection = { accountKey: key, selectionReceipt };
             return { model, thinkingLevel: request.thinkingLevel, state: { attempted } };
           }
         } catch (error) {
           request.signal?.throwIfAborted();
           failed = classifyCodexRefreshFailure(error, key) ?? undefined;
           if (!failed) throw error;
+          failed = withReceipt(failed, selectionReceipt);
         }
         attempted.push(key);
       }
@@ -324,7 +425,7 @@ export function oauthPoolRecoveryExtension(
     name: 'chatgpt-oauth-pool',
     hidden: true,
     factory: (pi) => {
-      pi.on('before_agent_start', (_event, ctx) => {
+      pi.on('agent_start', (_event, ctx) => {
         const id = ctx.sessionManager.getSessionId();
         if (ctx.model?.provider.startsWith(PREFIX)) {
           pooledSessions.add(id);
@@ -343,12 +444,15 @@ export function oauthPoolRecoveryExtension(
               : { ...scope };
           selected.notify = (key, previous) => onSelected?.(id, key, previous, scope);
           selectedAccounts.set(id, selected);
-          pi.appendEntry(VIRTUAL_MODEL_STATE_ENTRY, {
-            provider: ctx.model.provider,
-            modelId: ctx.model.id,
-            state: { attempted: [] },
-          });
         } else releaseOauthPoolSession(id);
+      });
+      pi.on('before_agent_start', (_event, ctx) => {
+        if (!ctx.model?.provider.startsWith(PREFIX)) return;
+        pi.appendEntry(VIRTUAL_MODEL_STATE_ENTRY, {
+          provider: ctx.model.provider,
+          modelId: ctx.model.id,
+          state: { attempted: [] },
+        });
       });
       pi.on('session_shutdown', (_event, ctx) =>
         releaseOauthPoolSession(ctx.sessionManager.getSessionId())

@@ -1,3 +1,4 @@
+import { isUuid } from './builtinAgents';
 import type { ModelProvider } from './types/llm';
 
 export const isCodexAccountKey = (key: unknown): key is string =>
@@ -7,13 +8,22 @@ export interface OauthPoolFailure {
   accountKey: string;
   reason: 'quota-exhausted' | 'login-invalid';
   resetAt?: number;
+  /**
+   * Main 签发的请求级不透明 UUID；身份和凭证代次只保存在 Main，不由 worker 推导。
+   *
+   * Main-issued request-scoped opaque UUID; identity and credential generation stay in Main and are never derived by the worker.
+   */
+  selectionReceipt?: string;
 }
 
 export function parseOauthPoolFailure(value: unknown): OauthPoolFailure | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const object = value as Record<string, unknown>;
-  return Object.keys(object).every((key) => ['accountKey', 'reason', 'resetAt'].includes(key)) &&
+  return Object.keys(object).every((key) =>
+    ['accountKey', 'reason', 'resetAt', 'selectionReceipt'].includes(key)
+  ) &&
     isCodexAccountKey(object.accountKey) &&
+    (object.selectionReceipt === undefined || isUuid(object.selectionReceipt)) &&
     (object.reason === 'quota-exhausted' || object.reason === 'login-invalid') &&
     (object.resetAt === undefined ||
       (typeof object.resetAt === 'number' && Number.isFinite(object.resetAt) && object.resetAt > 0))

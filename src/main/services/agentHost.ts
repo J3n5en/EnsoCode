@@ -99,8 +99,8 @@ import { isComputerPlatformSupported } from './computer/support';
 import { resolveGlobalInstruction } from './instructionStore';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { getMcpToolCatalog } from './mcpToolCatalog';
-import { OAUTH_POOL_EXHAUSTED, OauthAccountPool } from './oauthAccountPool';
-import { getRuntime as getOauthRuntime } from './oauthProviders';
+import { OAUTH_POOL_EXHAUSTED } from './oauthAccountPool';
+import { getOauthQuotaCoordinator, getRuntime as getOauthRuntime } from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
 import { enabledPlugins, type RuntimeAgentType, withPluginAgentTypes } from './pluginRuntime';
 import { killAndWaitExit } from './processExit';
@@ -132,7 +132,6 @@ export type AgentTypeResolution =
 
 /** 管理 agent worker（utilityProcess）的生命周期与命令下发。故障域 A：一个 worker 装全部会话。 */
 let worker: UtilityProcess | null = null;
-const oauthPools = new OauthAccountPool();
 
 /**
  * worker 每次请求都向 Main 选号。账号成员、启用状态、模型目录和真实 OAuth 存储实时核验，失败原因只影响该账号的有限窗口。
@@ -162,15 +161,65 @@ export async function selectOauthPoolAccount(
       ensureAccountProvider(runtime, key);
       return runtime.getModel(key, event.modelId) !== undefined;
     });
-    const accountKey = oauthPools.select(
+    const quota = getOauthQuotaCoordinator();
+    quota.reconcileKeys(loggedIn);
+    const failed = await quota.validateFailure(provider.id, event.failed);
+    const selected = await quota.select(
       provider.id,
       provider.oauthAccountPool?.accountKeys ?? [],
       eligible,
-      event.failed
+      failed
     );
+    const { accountKey } = selected;
+    const selectionReceipt = accountKey
+      ? await quota.issueSelectionReceipt(provider.id, accountKey)
+      : undefined;
+    if (selected.warning) console.warn(`[OAuthQuota] ${selected.warning}`);
+    if (accountKey) {
+      // 查额度期间配置或登录态可能变化；返回 worker 前再次按权威记录核验，禁止发给已停用成员。
+      //
+      // Configuration/credentials may change while querying usage; validate authoritative records again before allowing the worker to use the selected account.
+      const latestKeys = new Set(
+        (await runtime.listCredentials())
+          .filter((entry) => entry.type === 'oauth')
+          .map((entry) => entry.providerId)
+      );
+      const receiptStillCurrent =
+        selectionReceipt &&
+        (await quota.validateFailure(provider.id, {
+          accountKey,
+          reason: 'login-invalid',
+          selectionReceipt,
+        }));
+      const latestProviders = providersFromSettings();
+      const latestProvider = latestProviders.find((entry) => entry.id === event.settingsProviderId);
+      quota.reconcileKeys(latestKeys);
+      if (
+        !receiptStillCurrent ||
+        !latestProvider ||
+        !eligibleOauthPoolAccountKeys(
+          latestProvider,
+          event.modelId,
+          latestProviders,
+          latestKeys
+        ).includes(accountKey) ||
+        !runtime.getModel(accountKey, event.modelId)
+      ) {
+        return {
+          type: 'oauth-pool-result',
+          requestId: event.requestId,
+          error:
+            'OAuth pool membership changed while checking quota. Retry with the current configuration.',
+        };
+      }
+    }
     return accountKey
-      ? { type: 'oauth-pool-result', requestId: event.requestId, accountKey }
-      : { type: 'oauth-pool-result', requestId: event.requestId, error: OAUTH_POOL_EXHAUSTED };
+      ? { type: 'oauth-pool-result', requestId: event.requestId, accountKey, selectionReceipt }
+      : {
+          type: 'oauth-pool-result',
+          requestId: event.requestId,
+          error: selected.error ?? OAUTH_POOL_EXHAUSTED,
+        };
   } catch (error) {
     return {
       type: 'oauth-pool-result',

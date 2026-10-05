@@ -153,6 +153,7 @@ import {
   type OauthPoolSelector,
   oauthPoolRecoveryExtension,
   releaseOauthPoolSession,
+  resetOauthPoolActivity,
   resolveOauthPoolModel,
 } from './oauthAccountPool';
 import { withOpenAIResponsesRouting } from './openaiResponsesRouting';
@@ -166,6 +167,7 @@ import { withRtkOptimization } from './rtk';
 import { RunawayGuard } from './runawayGuard';
 import {
   buildSessionDisplayMessages,
+  continueSessionActivity,
   editLatestAssistantForRetry,
   silentTurnRecoveryExtension,
 } from './sessionAdapter';
@@ -728,17 +730,19 @@ export class SessionSupervisor {
         return;
       }
       const requestId = randomUUID();
-      const finish = (error?: string, key?: string) => {
+      const finish = (error?: string, key?: string, selectionReceipt?: string) => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
         this.oauthPoolPending.delete(requestId);
         if (error || !key) reject(new Error(error ?? 'ChatGPT pool selection failed.'));
-        else resolve(key);
+        else resolve({ accountKey: key, ...(selectionReceipt ? { selectionReceipt } : {}) });
       };
       const abort = () => finish('ChatGPT pool selection cancelled.');
       const timer = setTimeout(() => finish('ChatGPT pool coordinator timed out.'), 30_000);
       signal?.addEventListener('abort', abort, { once: true });
-      this.oauthPoolPending.set(requestId, (command) => finish(command.error, command.accountKey));
+      this.oauthPoolPending.set(requestId, (command) =>
+        finish(command.error, command.accountKey, command.selectionReceipt)
+      );
       this.options.emit({
         type: 'oauth-pool-select',
         requestId,
@@ -1305,16 +1309,15 @@ export class SessionSupervisor {
         return;
       case 'retry': {
         const managed = this.must(command.identity);
-        if (managed.session.isStreaming || managed.status === 'running') return;
+        if (!managed.session.isIdle || managed.status === 'running') return;
         const agent = managed.session.agent;
         editLatestAssistantForRetry(managed.session);
         if (agent.state.messages.at(-1)?.role === 'assistant') return;
         ensureAssistantUsage(agent.state.messages as unknown[]);
         managed.currentTurnId = randomUUID();
-        // 裸 agent.continue 绕过 pi 的 _runAgentPrompt，不会发 agent_settled，需自行补发收口
-        void agent.continue().then(
-          () => this.onSessionEvent(managed, { type: 'agent_settled' }),
-          (error) => this.failTurn(managed, toErrorMessage(error))
+        resetOauthPoolActivity(managed.session);
+        void continueSessionActivity(managed.session).catch((error) =>
+          this.failTurn(managed, toErrorMessage(error))
         );
         return;
       }

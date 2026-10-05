@@ -16,6 +16,7 @@ import { Type } from 'typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSessionDisplayMessages,
+  continueSessionActivity,
   editLatestAssistantForRetry,
   silentTurnRecoveryExtension,
 } from './sessionAdapter';
@@ -317,6 +318,27 @@ describe('Pi 0.87.1 session adapter integration', () => {
     expect(current.recoveryKinds).toEqual([]);
   });
 
+  it.each(['empty', 'system', 'assistant'] as const)(
+    '无消息继续拒绝%s上下文，不请求provider或触发结算',
+    async (shape) => {
+      const current = await harness([{ content: [{ type: 'text', text: 'not requested' }] }]);
+      current.session.agent.state.messages =
+        shape === 'empty'
+          ? []
+          : shape === 'system'
+            ? [{ role: 'system', content: 'only system', timestamp: Date.now() }]
+            : [assistant(model, { content: [{ type: 'text', text: 'already finished' }] })];
+      let settled = 0;
+      current.session.subscribe((event) => {
+        if (event.type === 'agent_settled') settled++;
+      });
+      await expect(continueSessionActivity(current.session)).rejects.toThrow();
+      expect(current.requests).toHaveLength(0);
+      expect(settled).toBe(0);
+      expect(current.session.isIdle).toBe(true);
+    }
+  );
+
   it('manual retry 用 canonical context edit 隐藏旧错误而保留原始 session entry', async () => {
     const current = await harness([{ content: [{ type: 'text', text: 'Retry succeeded.' }] }], {
       seedError: true,
@@ -324,7 +346,7 @@ describe('Pi 0.87.1 session adapter integration', () => {
 
     expect(editLatestAssistantForRetry(current.session)).toBe(true);
     expect(current.session.agent.state.messages.at(-1)?.role).toBe('user');
-    await current.session.agent.continue();
+    await continueSessionActivity(current.session);
 
     expect(current.requests).toHaveLength(1);
     expect(contextText(current.requests[0]!)).toContain('Please retry this request.');

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { childProfileShell, childProfileToolIds } from '@shared/childProfileTools';
 import { DEFAULT_PERSONA_PROMPT } from '@shared/systemPrompt';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
@@ -72,6 +72,10 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
       return [...this.models.values()];
     },
     getProvider: () => undefined,
+    resolveModel: vi
+      .fn<ModelRuntime['resolveModel']>()
+      .mockRejectedValue(new Error('Unexpected virtual model routing in ordinary-runtime fixture')),
+    getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
     completeSimple: vi.fn(async () => ({ content: [] })),
   };
