@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="zh" class="dark">
+<head>
+<meta charset="utf-8" />
+<title>成员头像状态 · 在忙什么</title>
+<style>
+:root{--bg:oklch(.145 .014 285.82);--fg:oklch(.985 0 0);--muted:oklch(.269 .014 285.82);--mfg:oklch(.708 .014 285.82);--border:oklch(.32 .014 285.82);--card:oklch(.18 .014 285.82);--info:oklch(.623 .214 259.81);--warning:oklch(.769 .189 70.08);--success:oklch(.627 .154 150.07);--danger:oklch(.637 .237 25.33)}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.45 Inter,system-ui,-apple-system,"PingFang SC",sans-serif;background:#2a2a2e;color:var(--fg)}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px}
+.lead{width:1120px;color:#ddd;font-size:12px}
+.lead b{color:#fff}
+.win{width:1120px;height:740px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 50px #0006}
+.win.gray{filter:grayscale(1)}
+.gray-pop{filter:grayscale(1)}
+.title{height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--border);flex:none}
+.dot{width:10px;height:10px;border-radius:50%;background:#555}
+.title span.name{margin-left:8px;color:var(--mfg);font-size:12px}
+.body{flex:1;display:flex;min-height:0}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;flex:none}
+.head .t{font-weight:600}
+.head .sub{color:var(--mfg);font-size:12px}
+.tl{flex:1;overflow:auto;padding:16px 20px 8px;display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;gap:8px;max-width:640px}
+.who{font-size:12px;color:var(--mfg);margin-bottom:2px}
+.who b{color:var(--fg);margin-right:6px}
+.bub{background:var(--muted);border-radius:4px 12px 12px 12px;padding:8px 12px}
+.me{align-self:flex-end}
+.me .bub{background:oklch(.32 .02 285);border-radius:12px 4px 12px 12px}
+.card{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:10px 12px;max-width:560px}
+.card .h{display:flex;gap:6px;align-items:center;color:var(--mfg);font-size:12px;flex-wrap:wrap}
+.card .h .sp{flex:1}
+.card .task{margin-top:6px;font-size:13px}
+.card .extra{margin-top:4px;color:var(--mfg);font-size:12px}
+.live{display:flex;gap:8px;align-items:flex-start;border-radius:8px;padding:4px 6px;text-align:left;background:transparent;border:0}
+.live:hover{background:oklch(1 0 0 / .04)}
+.live .sub{color:var(--mfg);font-size:12px;margin-top:2px}
+.approval{border:1px solid color-mix(in oklch,var(--warning) 70%,var(--border));background:color-mix(in oklch,var(--warning) 12%,var(--bg));border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center}
+.approval.hot{outline:2px solid var(--fg);outline-offset:2px}
+.approval .meta{flex:1}
+.approval .meta b{display:block}
+.approval .meta span{color:var(--mfg);font-size:12px}
+.composer{margin:8px 16px 12px;border:1px solid var(--border);border-radius:12px;background:var(--card);display:flex;gap:8px;padding:8px}
+.composer input{flex:1;background:transparent;border:0;outline:none}
+.send{border:0;background:var(--fg);color:var(--bg);border-radius:8px;padding:4px 10px}
+.try{display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 12px}
+.try button,.btn{border:1px solid var(--border);background:var(--bg);border-radius:7px;padding:4px 8px;font-size:12px}
+.try button:disabled{opacity:.4;cursor:default}
+.btn.ghost{background:transparent}
+.panel{width:320px;border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0;flex:none}
+.ptabs{display:flex;gap:4px;border-bottom:1px solid var(--border);padding:8px 10px 0}
+.ptabs button{border:0;background:transparent;color:var(--mfg);padding:6px 8px;border-bottom:2px solid transparent}
+.ptabs button.on{color:var(--fg);border-bottom-color:var(--fg)}
+.pbody{flex:1;overflow:auto;padding:8px 10px 16px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 10px;padding:8px 4px 10px;color:var(--mfg);font-size:12px}
+.legend span{display:inline-flex;align-items:center;gap:4px}
+.legend .mark,.pop h4 .mark{position:static}
+.mrow{display:flex;gap:8px;align-items:center;width:100%;text-align:left;border:0;background:transparent;border-radius:8px;padding:6px}
+.mrow{cursor:pointer}
+.mrow:hover,.mrow.on{background:var(--muted)}
+.mrow .meta{min-width:0;flex:1}
+.mrow .n{display:flex;gap:6px;align-items:center}
+.mrow .n b{font-weight:600}
+.tag{font-size:10px;color:var(--mfg);background:var(--muted);border-radius:4px;padding:0 4px}
+.stext{color:var(--mfg);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:650;position:relative;flex:none;border:0;padding:0}
+.av.sm{width:22px;height:22px;font-size:11px}
+.av button,.hit{border:0;background:transparent;padding:0}
+.mark{width:14px;height:14px;border-radius:50%;border:2px solid var(--bg);position:absolute;right:-3px;bottom:-3px;display:grid;place-items:center;background:var(--card)}
+.mark i{display:block}
+.mark.think i{width:8px;height:8px;border:1.5px solid var(--info);border-radius:50%}
+.mark.work{background:var(--info)}
+.mark.work i{width:6px;height:6px;background:#fff;border-radius:1px}
+.mark.wait{background:var(--warning)}
+.mark.wait i{width:6px;height:6px;background:#1c1404;transform:rotate(45deg)}
+.mark.stuck{background:var(--danger)}
+.mark.stuck i{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid #fff}
+.mark.done{background:var(--success)}
+.mark.done i{width:7px;height:4px;border-left:1.5px solid #fff;border-bottom:1.5px solid #fff;transform:rotate(-45deg) translateY(-1px)}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--muted);color:var(--fg);border-radius:5px;padding:1px 6px 1px 4px;font-size:11px}
+.chip .mark{position:static;width:12px;height:12px;border-width:0}
+.spec h3{margin:14px 0 4px;font-size:13px}
+.spec p,.spec li{margin:0;color:var(--mfg);font-size:12px}
+.spec ul{margin:4px 0 0;padding-left:1.1em}
+.spec .pri{margin:0 0 8px;color:var(--fg);font-size:12px}
+.pop{position:fixed;z-index:5;width:280px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;box-shadow:0 12px 32px #0008}
+.pop[hidden]{display:none}
+.pop h4{margin:0 0 6px;font-size:13px;display:flex;align-items:center;gap:6px}
+.kv{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px dashed var(--border)}
+.kv span{color:var(--mfg);flex:none}
+.kv b{font-weight:500;text-align:right}
+.src{margin-top:6px;color:var(--mfg);font-size:11px}
+.pop .go{margin-top:8px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="lead"><b>结论：</b>成员列表、时间线最新头像、委派卡片用同一套角标。优先级：等你 &gt; 卡住 &gt; 干 &gt; 想 &gt; 做完 &gt; 闲。形状加两个字，颜色只是附带。没有新事件，也没有动画。</div>
+  <div class="win" id="win">
+    <div class="title"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="name">EnsoCode · 成员在忙什么（设计稿）</span></div>
+    <div class="body">
+      <section class="main">
+        <header class="head">
+          <div>
+            <div class="t">发布小组</div>
+            <div class="sub" id="head-sub"></div>
+          </div>
+        </header>
+        <div class="tl" id="tl"></div>
+        <div id="bar"></div>
+        <form class="composer" id="composer">
+          <input id="draft" placeholder="发一条消息，做完的人会回到闲" />
+          <button class="send" type="submit">发送</button>
+        </form>
+        <div class="try">
+          <button type="button" id="act-allow">允许测试的审批</button>
+          <button type="button" id="act-deny">拒绝审批</button>
+          <button type="button" id="act-resume">运维恢复输出</button>
+          <button type="button" id="act-fail">运维改成超时失败</button>
+          <button type="button" id="act-gray">看灰度</button>
+          <button type="button" id="act-reset">重置</button>
+        </div>
+      </section>
+      <aside class="panel">
+        <div class="ptabs">
+          <button type="button" data-tab="members" class="on">成员</button>
+          <button type="button" data-tab="spec">六态规则</button>
+        </div>
+        <div class="pbody" id="pbody"></div>
+      </aside>
+    </div>
+  </div>
+</div>
+<div class="pop" id="pop" hidden></div>
+<script>
+const PEOPLE = {
+  lin: { name: "林经理", title: "项目经理", color: "#7c5cff", ch: "林", owner: true },
+  anran: { name: "安然", title: "产品设计", color: "#ec4899", ch: "安" },
+  jason: { name: "Jason", title: "全栈", color: "#0ea5e9", ch: "J" },
+  qa: { name: "测试", title: "测试", color: "#f97316", ch: "测" },
+  ops: { name: "运维", title: "运维", color: "#ca8a04", ch: "运" },
+  doc: { name: "文档", title: "文档", color: "#16a34a", ch: "文" },
+};
+const ORDER = ["lin", "anran", "jason", "qa", "ops", "doc"];
+const META = {
+  idle: { name: "闲" },
+  think: { name: "想" },
+  work: { name: "干" },
+  wait: { name: "等你" },
+  stuck: { name: "卡住" },
+  done: { name: "做完" },
+};
+
+const baseNow = Date.parse("2026-10-05T15:04:00");
+const minute = 60 * 1000;
+
+function seed() {
+  return {
+    now: baseNow,
+    lastHumanAt: baseNow - 20 * minute,
+    humans: ["委派之后看不到进度，不知道谁在忙。"],
+    members: {
+      lin: {},
+      anran: {
+        queue: { reason: "workspace", holder: "jason" },
+        delegation: {
+          seq: 18,
+          title: "把六态做成可点的稿",
+          from: "lin",
+          state: "queued",
+          createdAt: baseNow - 2 * minute,
+        },
+      },
+      jason: {
+        live: "tool",
+        tool: "grep",
+        detail: "BotAvatar",
+        delegation: {
+          seq: 17,
+          title: "对上现有委派事件",
+          from: "lin",
+          state: "running",
+          createdAt: baseNow - 10 * minute,
+        },
+      },
+      qa: {
+        pending: { kind: "approval", title: "pnpm test", detail: "委派子会话要跑测试" },
+        delegation: {
+          seq: 19,
+          title: "补失败路径的单测",
+          from: "lin",
+          state: "running",
+          createdAt: baseNow - 8 * minute,
+        },
+      },
+      ops: {
+        silence: { since: baseNow - 2 * minute },
+        live: "thinking",
+        delegation: {
+          seq: 15,
+          title: "看 90 秒无响应怎么标",
+          from: "lin",
+          state: "running",
+          createdAt: baseNow - 16 * minute,
+        },
+      },
+      doc: {
+        delegation: {
+          seq: 16,
+          title: "整理现有状态来源",
+          from: "lin",
+          state: "completed",
+          createdAt: baseNow - 18 * minute,
+          finishedAt: baseNow - 12 * minute,
+          result: "来源对过了：想/干用 liveActivity，等你用未决审批和提问，卡住用静默或失败。",
+        },
+      },
+    },
+  };
+}
+
+let app = seed();
+let tab = "members";
+let pinned = null;
+let hover = null;
+let pinScope = "person";
+let hoverEl = null;
+let hideTimer = 0;
+let hot = false;
+
+function presence(id) {
+  const m = app.members[id];
+  const d = m.delegation;
+  if (m.pending) return "wait";
+  if (m.silence) return "stuck";
+  if (m.live === "tool" || m.live === "typing") return "work";
+  if (m.live === "thinking" || m.live === "retrying" || m.queue) return "think";
+  if (d?.state === "running" || d?.state === "queued") return "think";
+  if (d?.state === "failed") return "stuck";
+  if (d?.state === "completed" && d.finishedAt > app.lastHumanAt) return "done";
+  return "idle";
+}
+
+function elapsed(ms) {
+  const minutes = Math.max(0, Math.round(ms / minute));
+  if (minutes < 60) return `${minutes}m`;
+  const rest = minutes % 60;
+  return rest ? `${Math.floor(minutes / 60)}h ${rest}m` : `${Math.floor(minutes / 60)}h`;
+}
+
+function taskLine(id) {
+  const d = app.members[id].delegation;
+  if (presence(id) === "idle") return "没有进行中的";
+  return d ? `#${d.seq} ${d.title}` : "没有挂任务";
+}
+
+function shortLine(id) {
+  const state = presence(id);
+  const d = app.members[id].delegation;
+  if (state === "idle") return "闲";
+  const num = d ? ` · #${d.seq}` : "";
+  const queue = state === "think" && app.members[id].queue ? " · 排队" : "";
+  return `${META[state].name}${queue}${num}`;
+}
+
+function waitingText(id) {
+  const m = app.members[id];
+  if (m.pending?.kind === "approval") return "在等你批准";
+  if (m.pending?.kind === "ask") return "在等你回答";
+  if (m.queue?.reason === "workspace") return `在等 ${PEOPLE[m.queue.holder].name} 让出工作区`;
+  if (m.queue?.reason === "turn") return "在等当前轮次结束";
+  if (m.queue?.reason === "capacity") return "在等空位（并发上限，不是某个人）";
+  return "没有";
+}
+
+function usedText(id) {
+  const d = app.members[id].delegation;
+  if (!d || presence(id) === "idle") return "—";
+  const end = d.finishedAt ?? app.now;
+  return elapsed(end - d.createdAt);
+}
+
+function sourceText(id, state) {
+  const m = app.members[id];
+  const d = m.delegation;
+  if (state === "wait")
+    return m.pending.kind === "approval"
+      ? "来源：pendingApprovals（委派子会话）。静默看门狗在 waiting 里不会报警。"
+      : "来源：pendingAsks。按钮去回答，不是去审批。";
+  if (state === "stuck" && m.silence) return "来源：BotSilence。轮次仍是 running，90 秒没有输出；这一态不中断任务。";
+  if (state === "stuck")
+    return `来源：delegation.state=failed · failure=${d?.failure || "error"}。取消不是这一态。`;
+  if (state === "work")
+    return m.live === "typing"
+      ? "来源：liveActivity=typing（正在写回复）。"
+      : `来源：liveActivity=tool · ${m.tool || "tool"}。`;
+  if (state === "think" && m.queue)
+    return `来源：liveActivity=queued · reason=${m.queue.reason}。委派还是 queued。`;
+  if (state === "think") return "来源：liveActivity=thinking（还没有工具调用或回复文本）。";
+  if (state === "done") return "来源：delegation.state=completed。人会在更晚的人类消息后回到闲，这一单的卡片仍是做完。";
+  return "来源：没有进行中的委派、轮次、排队、审批、提问或静默。";
+}
+
+function mark(state) {
+  if (state === "idle") return "";
+  return `<span class="mark ${state}" title="${META[state].name}"><i></i></span>`;
+}
+
+function chip(state) {
+  return `<span class="chip">${mark(state) || ""}<b>${META[state].name}</b></span>`;
+}
+
+function avatar(id, size) {
+  const p = PEOPLE[id];
+  const scope = arguments.length > 2 ? arguments[2] : "person";
+  const state = scope === "card" ? cardState(id) : presence(id);
+  return `<button type="button" class="av ${size || ""}" style="background:${p.color}" data-who="${id}" data-scope="${scope}" aria-label="${p.name} ${META[state].name}">${p.ch}${mark(state)}</button>`;
+}
+
+function cardState(id) {
+  const d = app.members[id].delegation;
+  if (d?.state === "completed") return "done";
+  if (d?.state === "failed") return "stuck";
+  return presence(id);
+}
+
+function esc(text) {
+  return text.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+}
+
+function clock(at) {
+  return new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function cardExtra(id) {
+  const m = app.members[id];
+  const d = m.delegation;
+  if (!d) return "";
+  if (m.pending)
+    return `<div class="extra">${m.pending.kind === "approval" ? "要你批准" : "要你回答"}：${m.pending.title}</div>`;
+  if (m.silence) return `<div class="extra">还在跑，但已经 ${elapsed(app.now - m.silence.since)} 没有输出</div>`;
+  if (d.state === "failed") {
+    const text = {
+      timeout: `超过 ${d.timeoutMinutes || 240} 分钟，已停止`,
+      denied: "已拒绝",
+      interrupted: "重启前没做完，已停止，不会重跑",
+      check: "验收没过",
+      error: d.error || "失败",
+    }[d.failure];
+    return `<div class="extra">${text}</div>`;
+  }
+  if (d.state === "completed") return `<div class="extra">${d.result || ""}</div>`;
+  if (m.live === "tool") return `<div class="extra">${m.tool} ${m.detail || ""} · 进行中</div>`;
+  if (m.live === "typing") return `<div class="extra">正在写回复</div>`;
+  if (m.queue?.reason === "workspace")
+    return `<div class="extra">排队 · 在等 ${PEOPLE[m.queue.holder].name} 让出工作区</div>`;
+  if (m.live === "thinking") return `<div class="extra">还在想，没有工具输出</div>`;
+  return "";
+}
+
+function delegationCard(id) {
+  const d = app.members[id].delegation;
+  if (!d) return "";
+  return `<article class="card">
+    <div class="h">
+      ${avatar(d.from, "sm")}
+      <span>${PEOPLE[d.from].name}</span>
+      <span>→</span>
+      ${avatar(id, "sm", "card")}
+      <span style="color:var(--fg)">${PEOPLE[id].name}</span>
+      <span>· 委派</span>
+      ${chip(cardState(id))}
+      <span>${elapsed((d.finishedAt ?? app.now) - d.createdAt)}</span>
+      <span class="sp"></span>
+      <span>${clock(d.createdAt)}</span>
+    </div>
+    <div class="task">#${d.seq} ${d.title}</div>
+    ${cardExtra(id)}
+  </article>`;
+}
+
+function renderTimeline() {
+  const cards = ORDER.filter((id) => app.members[id].delegation)
+    .sort((a, b) => app.members[a].delegation.createdAt - app.members[b].delegation.createdAt)
+    .map(delegationCard)
+    .join("");
+  const opening = `<div class="msg me"><div class="bub">${esc(app.humans[0])}</div></div>
+    <div class="msg"><div>${avatar("lin", "sm")}</div><div><div class="who"><b>林经理</b>项目经理 · ${clock(baseNow - 19 * minute)}</div><div class="bub">拆开了。每人一条，不用再去翻委派标签。</div></div></div>
+    <div class="msg"><div>${avatar("doc")}</div><div><div class="who"><b>文档</b>文档 · ${clock(app.members.doc.delegation.finishedAt)}</div><div class="bub">${esc(app.members.doc.delegation.result)}</div></div></div>`;
+  const later = app.humans.slice(1).map((text) => `<div class="msg me"><div class="bub">${esc(text)}</div></div>`).join("");
+  const jason = presence("jason");
+  const live =
+    jason === "work" || jason === "think"
+      ? `<div class="live" data-who="jason" data-scope="person">
+          ${avatar("jason")}
+          <span><b>Jason</b> 正在回复<div class="sub">${jason === "work" ? "干 · grep BotAvatar" : "想"} · ${usedText("jason")} · 查看过程</div></span>
+        </div>`
+      : "";
+  document.getElementById("tl").innerHTML = opening + cards + live + later;
+  const qa = app.members.qa;
+  document.getElementById("bar").innerHTML = qa.pending
+    ? `<div class="approval ${hot ? "hot" : ""}" id="approval">
+        <div class="meta">
+          <b>测试替林经理执行，需要你</b>
+          <span>${qa.pending.kind === "approval" ? "批准" : "回答"}：${qa.pending.title}。${qa.pending.detail}</span>
+        </div>
+        ${qa.pending.kind === "approval" ? `<button type="button" class="btn" id="act-allow-2">允许</button><button type="button" class="btn" id="act-deny-2">拒绝</button>` : `<button type="button" class="btn" id="act-allow-2">回答</button>`}
+      </div>`
+    : "";
+}
+
+function renderMembers() {
+  const legend = ["think", "work", "wait", "stuck", "done"]
+    .map((state) => `<span>${mark(state)} ${META[state].name}</span>`)
+    .join("") + "<span>闲不标</span>";
+  const rows = ORDER.map((id) => {
+    const p = PEOPLE[id];
+    return `<div class="mrow ${pinned === id && pinScope === "person" ? "on" : ""}" data-who="${id}" data-scope="person">
+      ${avatar(id)}
+      <span class="meta">
+        <span class="n"><b>${p.name}</b>${p.owner ? `<i class="tag">群主</i>` : ""}</span>
+        <span class="stext">${shortLine(id)}</span>
+      </span>
+    </div>`;
+  }).join("");
+  return `<div class="legend">${legend}<span>字和形状都在，颜色可以没有</span></div>${rows}`;
+}
+
+function renderSpec() {
+  return `<div class="spec">
+    <p class="pri">同一成员只显示一态。等你 &gt; 卡住 &gt; 干 &gt; 想 &gt; 做完 &gt; 闲。头像表示这个人此刻；委派卡片表示这一单，完成了就留着。</p>
+    <h3>○ 想</h3>
+    <ul>
+      <li>进入：没有未决审批/提问，也没有静默。liveActivity 是 thinking、retrying 或 queued。委派已 queued/running 但还没有工具或回复文本，也算想。</li>
+      <li>退出：有工具或回复文本 → 干；来了审批/提问 → 等你；静默或委派失败 → 卡住；委派 completed → 做完；轮次结束且没有这些 → 闲。</li>
+    </ul>
+    <h3>■ 干</h3>
+    <ul>
+      <li>进入：liveActivity 是 tool 或 typing，且没有审批/提问、没有静默。</li>
+      <li>退出：回到 thinking → 想；审批/提问 → 等你；静默或失败 → 卡住；完成 → 做完。</li>
+    </ul>
+    <h3>◆ 等你</h3>
+    <ul>
+      <li>进入：本人会话或进行中的委派子会话有 pendingApprovals / pendingAsks。看门狗在 waiting 非空时不报静默，所以不会和「无响应」叠在一起。</li>
+      <li>退出：批准或回答之后按剩余信号回到干/想。拒绝导致 failure=denied → 卡住。点「去审批 / 去回答」滚到现成的审批条。</li>
+    </ul>
+    <h3>▲ 卡住</h3>
+    <ul>
+      <li>进入：BotSilence（running 且 90 秒无输出），或该成员最新委派 state=failed（interrupted / timeout / denied / error / check）。</li>
+      <li>退出：有新输出，静默清掉，回到想或干。失败不因群里来了新消息而消失，要等重试出的新委派盖过它。canceled 不进这一态，人回到闲，卡片仍用现在的「已取消」。</li>
+    </ul>
+    <h3>✓ 做完</h3>
+    <ul>
+      <li>进入：委派 completed。没有委派时，会话离开 running 且时间线写下了这个人的回复。</li>
+      <li>退出：有新的排队或轮次就离开；或者出现更晚的人类消息（at &gt; finishedAt）就回到闲。卡片上的完成状态保留。</li>
+    </ul>
+    <h3>闲</h3>
+    <ul>
+      <li>进入：上面都没有。没有进行中的委派，会话不在 running 也不在排队，没有审批、提问、静默，最新委派也不是还要人看的失败；完成之后已经有人说话。</li>
+      <li>退出：任一其他态成立。</li>
+    </ul>
+    <h3>放在哪</h3>
+    <ul>
+      <li>成员列表：角标加一行「干 · #17」，不用点开也知道谁在忙。</li>
+      <li>时间线：只标这个人最新的头像（正在回复的那行）。更早的消息不标，避免一整列勾。</li>
+      <li>委派卡片：被派的人头像和状态胶囊用同一形状、同一个词。</li>
+      <li>悬停或点开头像：任务 #编号、谁派的、已用时、在等谁。等你给一键跳到审批或提问。</li>
+    </ul>
+    <h3>不做</h3>
+    <p>不新增事件，不把现有 busy 绿点换成另一种会呼吸的点。灰度下仍能分清：空心圆、方块、菱形、三角、勾。</p>
+  </div>`;
+}
+
+function renderPanel() {
+  document.getElementById("pbody").innerHTML = tab === "members" ? renderMembers() : renderSpec();
+}
+
+function render() {
+  const busy = ORDER.filter((id) => presence(id) !== "idle").length;
+  document.getElementById("head-sub").textContent = `${busy} 人不是闲的 · 示意数据`;
+  renderTimeline();
+  renderPanel();
+  document.getElementById("act-allow").disabled = !app.members.qa.pending;
+  document.getElementById("act-deny").disabled = app.members.qa.pending?.kind !== "approval";
+  document.getElementById("act-resume").disabled = !app.members.ops.silence;
+  document.getElementById("act-fail").disabled = app.members.ops.delegation.state === "failed";
+  const who = pinned || hover;
+  if (who) showPop(who, pinned ? pinScope : hoverEl?.dataset.scope || "person", pinned ? null : hoverEl);
+  else document.getElementById("pop").hidden = true;
+}
+
+function showPop(id, scope, el) {
+  const p = PEOPLE[id];
+  const d = app.members[id].delegation;
+  const state = scope === "card" ? cardState(id) : presence(id);
+  const task = scope === "card" && d ? `#${d.seq} ${d.title}` : taskLine(id);
+  const used = scope === "card" && d ? elapsed((d.finishedAt ?? app.now) - d.createdAt) : usedText(id);
+  const from = d && task !== "没有进行中的" ? PEOPLE[d.from].name : "—";
+  const go =
+    state === "wait"
+      ? `<button type="button" class="btn go" id="jump">${app.members[id].pending.kind === "approval" ? "去审批" : "去回答"}</button>`
+      : "";
+  const pop = document.getElementById("pop");
+  pop.hidden = false;
+  pop.innerHTML = `<h4>${mark(state) || ""} ${p.name} · ${META[state].name}</h4>
+    <div class="kv"><span>任务</span><b>${task}</b></div>
+    <div class="kv"><span>谁派的</span><b>${from}</b></div>
+    <div class="kv"><span>已用时</span><b>${used}</b></div>
+    <div class="kv"><span>在等谁</span><b>${state === "idle" ? "没有" : waitingText(id)}</b></div>
+    <div class="src">${sourceText(id, state)}</div>
+    ${go}`;
+  const anchor = el?.isConnected ? el : anchorFor(id, scope);
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const bounds = document.getElementById("win").getBoundingClientRect();
+  const width = 280;
+  let left = rect.right + 8;
+  if (left + width > bounds.right - 8) left = rect.left - width - 8;
+  const top = Math.min(Math.max(bounds.top + 8, rect.top), bounds.bottom - pop.offsetHeight - 8);
+  pop.style.left = `${Math.max(bounds.left + 8, left)}px`;
+  pop.style.top = `${top}px`;
+}
+
+function anchorFor(id, scope) {
+  if (scope !== "card") {
+    const row = document.querySelector(`.mrow[data-who="${id}"] .av`);
+    if (row) return row;
+  }
+  return (
+    document.querySelector(`[data-who="${id}"][data-scope="${scope}"]`) ||
+    document.querySelector(`[data-who="${id}"]`)
+  );
+}
+
+function allow() {
+  const qa = app.members.qa;
+  if (!qa.pending) return;
+  qa.pending = null;
+  qa.live = "tool";
+  qa.tool = "bash";
+  qa.detail = "pnpm test";
+  hot = false;
+  render();
+}
+
+function deny() {
+  const qa = app.members.qa;
+  if (qa.pending?.kind !== "approval") return;
+  qa.pending = null;
+  qa.live = null;
+  qa.delegation.state = "failed";
+  qa.delegation.failure = "denied";
+  qa.delegation.finishedAt = app.now;
+  hot = false;
+  render();
+}
+
+function resume() {
+  const ops = app.members.ops;
+  if (!ops.silence) return;
+  ops.silence = null;
+  ops.live = "typing";
+  render();
+}
+
+function failOps() {
+  const ops = app.members.ops;
+  ops.silence = null;
+  ops.live = null;
+  ops.delegation.state = "failed";
+  ops.delegation.failure = "timeout";
+  ops.delegation.finishedAt = app.now;
+  render();
+}
+
+function say(text) {
+  const value = text.trim();
+  if (!value) return;
+  app.humans.push(value);
+  app.lastHumanAt = app.now;
+  document.getElementById("draft").value = "";
+  render();
+  const tl = document.getElementById("tl");
+  tl.scrollTop = tl.scrollHeight;
+}
+
+document.getElementById("composer").addEventListener("submit", (event) => {
+  event.preventDefault();
+  say(document.getElementById("draft").value);
+});
+document.getElementById("act-allow").onclick = allow;
+document.getElementById("act-deny").onclick = deny;
+document.getElementById("act-resume").onclick = resume;
+document.getElementById("act-fail").onclick = failOps;
+document.getElementById("act-gray").onclick = () => {
+  document.getElementById("win").classList.toggle("gray");
+  document.getElementById("pop").classList.toggle("gray-pop");
+};
+document.getElementById("act-reset").onclick = () => {
+  app = seed();
+  pinned = null;
+  hover = null;
+  hoverEl = null;
+  hot = false;
+  document.getElementById("win").classList.remove("gray");
+  document.getElementById("pop").classList.remove("gray-pop");
+  render();
+};
+
+document.body.addEventListener("click", (event) => {
+  if (event.target.closest("#act-allow-2")) return allow();
+  if (event.target.closest("#act-deny-2")) return deny();
+  if (event.target.id === "jump") {
+    hot = true;
+    pinned = null;
+    hover = null;
+    hoverEl = null;
+    render();
+    document.getElementById("approval")?.scrollIntoView({ block: "center" });
+    return;
+  }
+  const tabBtn = event.target.closest("[data-tab]");
+  if (tabBtn) {
+    tab = tabBtn.dataset.tab;
+    document.querySelectorAll("[data-tab]").forEach((node) => node.classList.toggle("on", node === tabBtn));
+    renderPanel();
+    return;
+  }
+  const who = event.target.closest("[data-who]");
+  if (who) {
+    pinned = who.dataset.who;
+    pinScope = who.dataset.scope || "person";
+    hover = null;
+    hoverEl = null;
+    if (tab !== "members") {
+      tab = "members";
+      document.querySelectorAll("[data-tab]").forEach((node) => node.classList.toggle("on", node.dataset.tab === "members"));
+    }
+    render();
+    return;
+  }
+  if (event.target.closest("#pop")) return;
+  if (pinned) {
+    pinned = null;
+    render();
+  }
+});
+
+document.body.addEventListener("mouseover", (event) => {
+  if (event.target.closest("#pop")) {
+    clearTimeout(hideTimer);
+    return;
+  }
+  if (pinned) return;
+  const who = event.target.closest("[data-who]");
+  if (!who) return;
+  clearTimeout(hideTimer);
+  hover = who.dataset.who;
+  hoverEl = who;
+  showPop(hover, who.dataset.scope || "person", who);
+});
+document.body.addEventListener("mouseout", (event) => {
+  if (pinned) return;
+  if (!event.target.closest("[data-who], #pop")) return;
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    hover = null;
+    hoverEl = null;
+    if (!pinned) document.getElementById("pop").hidden = true;
+  }, 180);
+});
+
+render();
+</script>
+</body>
+</html>

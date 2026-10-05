@@ -2,20 +2,25 @@ import type { AskRequestInfo } from '@shared/types/agent';
 import { MessageCircleQuestion, Send } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/i18n';
+import { RequestCountdown, useRemainingMs } from './RequestCountdown';
 
 interface AskBarProps {
   asks: AskRequestInfo[];
   onAnswer: (requestId: string, answer: string) => void;
+  /** 本机时钟 − host 时钟（手机伴侣显示剩余时间用） */
+  clockOffset?: number;
 }
 
 /** composer 上方的提问条(与审批条同构):agent 经 ask_user 提问,选项一键答或自由输入 */
-export function AskBar({ asks, onAnswer }: AskBarProps) {
+export function AskBar({ asks, onAnswer, clockOffset }: AskBarProps) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [responding, setResponding] = useState<string | null>(null);
   const active = asks[0];
+  const remainingMs = useRemainingMs(active?.expiresAt, clockOffset);
   if (!active) return null;
-  const disabled = responding === active.requestId;
+  const disabled =
+    responding === active.requestId || (remainingMs !== undefined && remainingMs <= 0);
   const answer = (value: string) => {
     if (!value.trim()) return;
     setResponding(active.requestId);
@@ -30,6 +35,7 @@ export function AskBar({ asks, onAnswer }: AskBarProps) {
         <span className="min-w-0 flex-1 text-xs leading-relaxed whitespace-pre-wrap">
           {active.question}
         </span>
+        <RequestCountdown remainingMs={remainingMs} expiredLabel="Timed out · no answer" />
         {asks.length > 1 && (
           <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
             1/{asks.length}

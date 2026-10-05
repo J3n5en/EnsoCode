@@ -6,10 +6,12 @@ import {
   isEvolvesReviewState,
   isMemoryListQuery,
   isMemoryRetrievalMode,
+  isPendingMemoryWriteDecision,
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
   type MemoryStats,
+  type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
 import {
   type CrystallizeResult,
@@ -23,7 +25,9 @@ import {
 import { CRYSTALLIZE_PROMPT, INSIGHT_PROMPT, withMemoryLanguage } from '@shared/memory/prompts';
 import { IPC_CHANNELS } from '@shared/types';
 import type Database from 'better-sqlite3';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
+import { BotStore } from '../services/bots/botStore';
+import { BotChatStore } from '../services/bots/chatStore';
 import {
   cancelChatModelDownload,
   deleteChatModel,
@@ -40,6 +44,7 @@ import {
   memoriesForEntity,
   memoriesForPrompt,
 } from '../services/memory/graph';
+import { listPendingWrites, rejectPendingWrite } from '../services/memory/pending';
 import { createSearchAssist } from '../services/memory/searchLlm';
 import { getMemory } from '../services/memory/store';
 import {
@@ -57,6 +62,7 @@ import {
   toMemoryJobsSnapshot,
 } from '../services/memoryAdmin';
 import {
+  approvePendingMemoryWrite,
   distillSessionNow,
   getMemoryCompletion,
   getMemoryDistillJobs,
@@ -76,6 +82,7 @@ import {
   setEmbeddingProgressSink,
   startEmbeddingModelDownload,
 } from '../services/memoryModels';
+import { sendToAllWindows } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
 import { isSettingsWebContents } from '../windows/SettingsWindow';
 import { readSettings } from './settings';
@@ -133,9 +140,8 @@ function invalidRequest(): MemoryMutationResult {
 }
 
 function broadcast(channel: string, payload?: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload);
-  }
+  // 主窗口渲染层在 WebContentsView 里，必须经 sendToAllWindows 投递，直发 shell webContents 收不到
+  sendToAllWindows(channel, payload);
 }
 
 /** 写入路径统一走这里：记忆库变了就让所有窗口的记忆视图重拉 */
@@ -306,6 +312,46 @@ export function registerMemoryHandlers(): void {
         (db) => {
           const edge = reviewEvolvesEdge(db, id, state);
           return edge ? { ok: true, edge } : { ok: false, error: 'Evolves edge not found.' };
+        }
+      );
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_PENDING_WRITES,
+    async (event): Promise<PendingMemoryWriteDto[]> => {
+      if (!isTrustedWindow(event.sender.id)) return [];
+      const rows = withExistingDb([], listPendingWrites);
+      if (rows.length === 0) return [];
+      const label = await spaceLabeler();
+      return rows.map(({ payload: _payload, ...row }) => ({
+        ...row,
+        spaceLabel: label(row.spaceId),
+        originLabel: row.botId ? label(`bot:${row.botId}`) : '',
+      }));
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_PENDING_WRITE_REVIEW,
+    async (event, id: unknown, decision: unknown): Promise<MemoryMutationResult> => {
+      if (
+        !isTrustedWindow(event.sender.id) ||
+        typeof id !== 'string' ||
+        !id ||
+        !isPendingMemoryWriteDecision(decision)
+      ) {
+        return invalidRequest();
+      }
+      if (decision === 'approve') return approvePendingMemoryWrite(id);
+      return withExistingDb<MemoryMutationResult>(
+        { ok: false, error: 'Memory database is not available.' },
+        (db) => {
+          if (!rejectPendingWrite(db, id)) {
+            return { ok: false, error: 'Pending memory write not found.' };
+          }
+          memoryChanged();
+          return { ok: true };
         }
       );
     }
@@ -529,6 +575,7 @@ async function projectNames(): Promise<Map<string, string>> {
   const registry = getSourceAuthorityRegistry();
   const names = new Map<string, string>();
   for (const project of registry?.projection().projects ?? []) {
+    if (project.kind === 'bot-home') continue;
     names.set(project.projectId, basename(project.canonicalPath));
   }
   return names;
@@ -543,9 +590,16 @@ async function spaceLabeler(): Promise<(spaceId: string) => string> {
   const registry = getSourceAuthorityRegistry();
   const names = new Map<string, string>();
   for (const project of registry?.projection().projects ?? []) {
+    if (project.kind === 'bot-home') continue;
     names.set(project.projectId, basename(project.canonicalPath));
   }
+  const bots = new BotStore(path.join(app.getPath('userData'), 'bots'));
+  const chats = new BotChatStore(path.join(app.getPath('userData'), 'bot-chats'));
   return (spaceId) => {
+    if (spaceId.startsWith('bot:'))
+      return `成员：${bots.get(spaceId.slice(4))?.name ?? '已删除成员'}`;
+    if (spaceId.startsWith('chat:'))
+      return `群：${chats.get(spaceId.slice(5))?.title ?? '已删除群'}`;
     if (!spaceId.startsWith(PROJECT_SPACE_PREFIX)) return GLOBAL_SPACE_LABEL;
     const projectId = spaceId.slice(PROJECT_SPACE_PREFIX.length);
     return names.get(projectId) ?? projectId.slice(0, 8);

@@ -14,7 +14,7 @@ export function registerWorkspaceSearchHandlers(): void {
     if (!parsed || !registry || !isMainWebContents(event.sender.id)) {
       return { hits: [] };
     }
-    const projection = registry.projection();
+    const projection = registry.rendererProjection();
     const projectName = new Map(
       projection.projects.map((project) => {
         const base =

@@ -23,6 +23,8 @@ describe('parseSettingsDeepLink', () => {
       'tools',
       'phone',
       'ssh',
+      'experimental',
+      'bots',
     ];
     for (const category of categories) {
       expect(parseSettingsDeepLink({ category, rowId: `${category}.row` })).toEqual({

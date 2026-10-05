@@ -2,20 +2,50 @@ import type { UnitTypeSource } from '@shared/memory/classify';
 import type { EvolvesRelation, UnitType } from '@shared/memory/constants';
 import type { SearchAnalysis } from '@shared/memory/searchAssist';
 import type { TemporalPrecision } from '@shared/memory/temporal';
+import { isBotChatId, isBotId } from '@shared/types/bot';
 
 export const GLOBAL_SPACE = 'global';
 const PROJECT_SPACE_PREFIX = 'proj:';
+const BOT_SPACE_PREFIX = 'bot:';
+const CHAT_SPACE_PREFIX = 'chat:';
 
 /** 项目层 space 用 Main 权威的 Project.id（worktree 切换不变），不是路径 hash。 */
 export function projectSpaceId(projectId: string): string {
   return `${PROJECT_SPACE_PREFIX}${projectId}`;
 }
 
+/** Bot 模式：成员私有 space；id 必须是 uuid */
+export function botSpaceId(botId: string): string {
+  if (!isBotId(botId)) throw new MemoryValidationError('invalid_space', 'invalid bot id');
+  return `${BOT_SPACE_PREFIX}${botId}`;
+}
+
+/** Bot 模式：聊天共享 space；id 必须是 uuid */
+export function chatSpaceId(chatId: string): string {
+  if (!isBotChatId(chatId)) throw new MemoryValidationError('invalid_space', 'invalid chat id');
+  return `${CHAT_SPACE_PREFIX}${chatId}`;
+}
+
+export type ParsedSpaceId = { kind: 'global' } | { kind: 'project' | 'bot' | 'chat'; id: string };
+
+export function parseSpaceId(value: string): ParsedSpaceId | undefined {
+  if (value === GLOBAL_SPACE) return { kind: 'global' };
+  if (value.startsWith(PROJECT_SPACE_PREFIX) && value.length > PROJECT_SPACE_PREFIX.length) {
+    return { kind: 'project', id: value.slice(PROJECT_SPACE_PREFIX.length) };
+  }
+  if (value.startsWith(BOT_SPACE_PREFIX)) {
+    const id = value.slice(BOT_SPACE_PREFIX.length);
+    return isBotId(id) ? { kind: 'bot', id } : undefined;
+  }
+  if (value.startsWith(CHAT_SPACE_PREFIX)) {
+    const id = value.slice(CHAT_SPACE_PREFIX.length);
+    return isBotChatId(id) ? { kind: 'chat', id } : undefined;
+  }
+  return undefined;
+}
+
 export function isSpaceId(value: string): boolean {
-  return (
-    value === GLOBAL_SPACE ||
-    (value.startsWith(PROJECT_SPACE_PREFIX) && value.length > PROJECT_SPACE_PREFIX.length)
-  );
+  return parseSpaceId(value) !== undefined;
 }
 
 export type LifecycleState = 'active' | 'archived' | 'deleted';

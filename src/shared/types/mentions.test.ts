@@ -187,6 +187,15 @@ describe('Agent dispatch strict transport', () => {
         canEdit: true,
       })
     ).not.toBeNull();
+    expect(
+      parseMentionCandidate({
+        ...base,
+        id: 'bot:11111111-1111-4111-8111-111111111111',
+        typeKey: 'bot:11111111-1111-4111-8111-111111111111',
+        source: 'bot',
+        canDisable: false,
+      })
+    ).not.toBeNull();
     expect(parseMentionCandidate({ ...base, id: 'reviewer', typeKey: 'reviewer' })).toBeNull();
   });
 

@@ -3,6 +3,14 @@
 `src/main/services/` 放不依赖 `ipcMain` 的业务逻辑。三类典型：**扫描外部应用配置**、
 **对外发起网络请求**、**agent worker 的生命周期托管**（`agentHost.ts`）。
 
+## Bot 宿主的投递边界
+
+- `status: idle` 不是回合终态：worker 还会发送 session-meta、turn-completed。Bot 槽位、结果归属与队列只在终态结算；但中断、命令失败等路径只有 idle/failed，宿主在宽限期后兜底结算并 pump，无宿主轮次的会话回到 idle 时也要 pump，否则排队投递与并发槽永久挂起。
+- deliveryId 是「某会话的一次投递」的身份，按会话去重：群聊一轮里人类/例行/委派结果的 deliveryId 只给首个投递，接力一律新生成；命中去重（`duplicate`）对群当前成员按失败写 system 条目并推进，不能当作已发出。
+- 委派结果使用稳定 delegationId，worker 开始处理后确认；重启通过 jsonl 用户消息去重，不以“已入队”当作已投递。
+- 委派按目标成员自身的工具、skill、MCP 执行，审批档取双方更严并持久化，嵌套/恢复沿用该审批档；readonly 父会话的子代理仍继承 workspace_write 禁用。
+- Bot 停用先冻结投递，再取消委派和排队项、清路由、退订并停止调度；排队取消按 deliveryId 结算，不能清掉同会话另一项的审批计时器。
+
 ## agentHost：worker 生命周期与命令下发
 
 `agentHost.ts` 托管唯一的 agent worker（`utilityProcess.fork(out/main/agent.js)`，

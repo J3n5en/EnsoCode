@@ -57,6 +57,13 @@ describe('已配对设备改名', () => {
     expect(list[0].token).toBe('new-token');
     expect(list[0].deviceName).toBe('家里的手机');
   });
+
+  it('重配对保留已设的作用域', async () => {
+    const { upsertDevice } = await store();
+    let list = upsertDevice([], { ...cred('p1'), scope: 'read' });
+    list = upsertDevice(list, cred('p1', { token: 'new-token' }));
+    expect(list[0].scope).toBe('read');
+  });
 });
 
 describe('中继地址持久化', () => {

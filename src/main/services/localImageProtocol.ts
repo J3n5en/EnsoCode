@@ -1,7 +1,9 @@
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
+import { sniffImage } from '@shared/bots/cardPng';
 import {
+  BOT_AVATAR_HOST,
   isMediaPath,
   isVideoPath,
   LOCAL_IMAGE_SCHEME,
@@ -9,7 +11,19 @@ import {
   mediaExtension,
   REMOTE_FETCH_HOST,
 } from '@shared/localImage';
+import { isBotId } from '@shared/types/bot';
 import { net, protocol } from 'electron';
+
+let botAvatarResolver: (botId: string) => string | null = () => null;
+
+export function setBotAvatarResolver(resolve: (botId: string) => string | null): void {
+  botAvatarResolver = resolve;
+}
+
+/** botId → 该成员 avatar.png；非法 id / 无图返回 null */
+export function botAvatarFile(botId: string): string | null {
+  return isBotId(botId) ? botAvatarResolver(botId) : null;
+}
 
 /**
  * `local-image://` 特权协议：为渲染层提供背景图媒体能力。
@@ -65,8 +79,31 @@ export function registerLocalImageProtocolHandler(): void {
     if (url.hostname === REMOTE_FETCH_HOST) {
       return proxyRemoteImage(url);
     }
+    if (url.hostname === BOT_AVATAR_HOST) {
+      return serveBotAvatar(decodeURIComponent(url.pathname.slice(1)));
+    }
     return serveLocalMedia(url, request.headers.get('range'));
   });
+}
+
+async function serveBotAvatar(botId: string): Promise<Response> {
+  const file = botAvatarFile(botId);
+  if (!file) return new Response('Not found', { status: 404 });
+  try {
+    const data = new Uint8Array(await readFile(file));
+    const format = sniffImage(data);
+    if (!format) return new Response('Forbidden', { status: 403 });
+    // URL 带版本号，同一 URL 内容不变；CORS 供导出人物卡时 fetch 读字节
+    return new Response(data, {
+      headers: {
+        'Content-Type': `image/${format}`,
+        'Cache-Control': 'max-age=31536000',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
 }
 
 async function proxyRemoteImage(url: URL): Promise<Response> {

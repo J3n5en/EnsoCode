@@ -50,14 +50,14 @@ function addCost(current: number | null, cost: number | null): number | null {
 }
 
 /** 本地日历零点再偏移 N 天：跨 DST 也落在真正的 00:00，不用 ms×86400000 硬算 */
-function startOfLocalDay(ts: number, offsetDays = 0): number {
+export function startOfLocalDay(ts: number, offsetDays = 0): number {
   const d = new Date(ts);
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + offsetDays);
   return d.getTime();
 }
 
-function localDayKey(ts: number): string {
+export function localDayKey(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

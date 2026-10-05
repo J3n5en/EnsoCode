@@ -345,6 +345,36 @@ describe('Main-owned source authority contracts', () => {
     expect(parseConversationAuthority({ ...conversation, parentId: 'forged' })).toBeNull();
   });
 
+  it('bot-home 项目与 bot 会话绑定只在权威形状里出现，renderer 创建请求不得携带', () => {
+    const botId = '33333333-3333-4333-8333-333333333333';
+    const chatId = '44444444-4444-4444-8444-444444444444';
+    const home = { projectId, canonicalPath: '/u/bots/x/workspace', kind: 'bot-home' };
+    expect(parseProjectAuthority({ ...home, state: 'active', version: 1 })).not.toBeNull();
+    expect(
+      parseProjectAuthority({ ...home, sshHost: 'h', state: 'active', version: 1 })
+    ).toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({ requestId: 'p', path: '/x', kind: 'bot-home' })
+    ).toBeNull();
+
+    const base = { conversationId, projectId, kind: 'root', lifecycle: 'draft', version: 1 };
+    const direct = { ...base, bot: { botId, chatId } };
+    expect(parseConversationAuthority(direct)).toEqual(direct);
+    const delegated = { ...base, bot: { botId, chatId: null, delegationId: 'd-1' } };
+    expect(parseConversationAuthority(delegated)).toEqual(delegated);
+    expect(parseConversationAuthority({ ...base, bot: { botId: 'x', chatId } })).toBeNull();
+    expect(parseConversationAuthority({ ...base, bot: { botId } })).toBeNull();
+    expect(parseConversationAuthority({ ...base, bot: { botId, chatId, extra: 1 } })).toBeNull();
+    expect(
+      parseCreateConversationAuthorityRequest({
+        requestId: 'c',
+        projectId,
+        projectVersion: 1,
+        bot: { botId, chatId },
+      })
+    ).toBeNull();
+  });
+
   it('project/conversation 专用 mutations strict，id 由 Main result 生成', () => {
     expect(parseCreateProjectAuthorityRequest({ requestId: 'p1', path: '/repo' })).not.toBeNull();
     expect(
@@ -1081,6 +1111,48 @@ describe('一次性文本补全命令', () => {
     expect(parseAgentCommand(command)).toEqual(command);
     expect(parseAgentCommand({ type: 'abort-complete-text', requestId: '' })).toBeNull();
     expect(parseAgentCommand({ type: 'abort-complete-text' })).toBeNull();
+  });
+
+  it('classify-choice：校验分类器、criteria 与超时', () => {
+    const command = {
+      type: 'classify-choice',
+      requestId: 'route-1',
+      classifier: { provider: 'openrouter', modelId: 'cls', apiKey: 'k' },
+      state: { message: 'hi', history: [{ speaker: 'Human', text: 'x' }] },
+      instructions: 'who replies?',
+      criteria: { a: 'Alice', b: 'Bob' },
+      timeoutMs: 3000,
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    const { apiKey: _apiKey, ...noKey } = command.classifier;
+    expect(parseAgentCommand({ ...command, classifier: noKey })).not.toBeNull();
+    for (const bad of [
+      { ...command, requestId: '' },
+      { ...command, classifier: { provider: '', modelId: 'cls' } },
+      { ...command, classifier: { ...command.classifier, extra: 1 } },
+      { ...command, criteria: {} },
+      { ...command, criteria: { a: 1 } },
+      { ...command, state: [] },
+      { ...command, instructions: 1 },
+      { ...command, timeoutMs: 0 },
+      { ...command, extra: true },
+    ]) {
+      expect(parseAgentCommand(bad)).toBeNull();
+    }
+    expect(parseAgentCommand({ type: 'abort-classify-choice', requestId: 'route-1' })).toEqual({
+      type: 'abort-classify-choice',
+      requestId: 'route-1',
+    });
+    expect(parseAgentCommand({ type: 'abort-classify-choice', requestId: '' })).toBeNull();
+  });
+
+  it('choice-classified / choice-failed 事件', () => {
+    const done = { type: 'choice-classified', requestId: 'r', probabilities: { a: 0.7, b: 0.3 } };
+    expect(parseAgentWorkerEvent(done)).toEqual(done);
+    expect(parseAgentWorkerEvent({ ...done, probabilities: { a: 'x' } })).toBeNull();
+    const failed = { type: 'choice-failed', requestId: 'r', error: 'aborted' };
+    expect(parseAgentWorkerEvent(failed)).toEqual(failed);
+    expect(parseAgentWorkerEvent({ ...failed, error: '' })).toBeNull();
   });
 
   it('接受 stream 与 reasoning，拒绝脏值', () => {
@@ -1864,6 +1936,19 @@ describe('browser-invoke / browser-result', () => {
 });
 
 describe('memory-invoke / memory-result', () => {
+  it('delegation-invoke 接受 group_history，拒绝未知 op', () => {
+    const event = {
+      type: 'delegation-invoke',
+      identity: parent,
+      seq: 1,
+      requestId: 'd-1',
+      op: 'group_history',
+      params: { limit: 5 },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(parseAgentWorkerEvent({ ...event, op: 'group_secrets' })).toBeNull();
+  });
+
   const invoke = {
     type: 'memory-invoke',
     identity: parent,
@@ -2160,5 +2245,71 @@ describe('spawn-parent system prompt 协议', () => {
     expect(parseAgentCommand({ ...base, systemPrompt: 'custom base prompt' })).not.toBeNull();
     expect(parseAgentCommand({ ...base, systemPrompt: '' })).toBeNull();
     expect(parseAgentCommand({ ...base, systemPrompt: 1 })).toBeNull();
+  });
+});
+
+describe('受保护动作底线协议', () => {
+  it('spawn-parent 携 botWriteLock：名字与祖先会话列表齐全才通过', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(
+      parseAgentCommand({ ...base, botWriteLock: { label: 'alice', ancestors: ['p'] } })
+    ).toMatchObject({ botWriteLock: { label: 'alice', ancestors: ['p'] } });
+    expect(parseAgentCommand({ ...base, botWriteLock: { label: 'alice' } })).toBeNull();
+    expect(parseAgentCommand({ ...base, botWriteLock: { label: '', ancestors: [] } })).toBeNull();
+    expect(parseAgentCommand({ ...base, botWriteLock: { label: 'a', ancestors: [1] } })).toBeNull();
+  });
+
+  it('spawn-parent 携 protectedActions：布尔通过，脏值拒绝', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand({ ...base, protectedActions: true })).not.toBeNull();
+    expect(parseAgentCommand({ ...base, protectedActions: 'yes' })).toBeNull();
+  });
+
+  it('approval-request 的 protected 只接受已知类别', () => {
+    const event = {
+      type: 'approval-request',
+      identity: parent,
+      seq: 1,
+      request: { requestId: 'r1', tool: 'bash', kind: 'command', summary: 'rm -rf x' },
+    };
+    const withProtected = { ...event, request: { ...event.request, protected: 'delete' } };
+    expect(parseAgentWorkerEvent(withProtected)).toEqual(withProtected);
+    expect(
+      parseAgentWorkerEvent({ ...event, request: { ...event.request, protected: 'nuke' } })
+    ).toBeNull();
+  });
+});
+
+describe('等人超时协议', () => {
+  it('request-timeout 命令只接受 approval / ask 与非空 requestId', () => {
+    const base = { type: 'request-timeout', identity: parent, requestId: 'r1' };
+    expect(parseAgentCommand({ ...base, kind: 'approval' })).toEqual({ ...base, kind: 'approval' });
+    expect(parseAgentCommand({ ...base, kind: 'ask' })).not.toBeNull();
+    expect(parseAgentCommand({ ...base, kind: 'plan' })).toBeNull();
+    expect(parseAgentCommand({ ...base, kind: 'ask', requestId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...base, kind: 'ask', extra: 1 })).toBeNull();
+  });
+
+  it('approval-request / ask-request 的 expiresAt 必须是有限数字', () => {
+    const approval = {
+      type: 'approval-request',
+      identity: parent,
+      seq: 1,
+      request: { requestId: 'r1', tool: 'bash', kind: 'command', summary: 'ls', expiresAt: 5 },
+    };
+    expect(parseAgentWorkerEvent(approval)).toEqual(approval);
+    expect(
+      parseAgentWorkerEvent({ ...approval, request: { ...approval.request, expiresAt: 'x' } })
+    ).toBeNull();
+    const ask = {
+      type: 'ask-request',
+      identity: parent,
+      seq: 2,
+      ask: { requestId: 'q', question: 'q', expiresAt: 5 },
+    };
+    expect(parseAgentWorkerEvent(ask)).toEqual(ask);
+    expect(
+      parseAgentWorkerEvent({ ...ask, ask: { ...ask.ask, expiresAt: Number.NaN } })
+    ).toBeNull();
   });
 });

@@ -28,4 +28,8 @@ export interface PairedDevice {
   deviceName: string;
   relayUrl: string;
   pairedAt: number;
+  /** host 侧授权：read 只能查看，operate 可发送/审批/停止；缺省（旧记录）为 operate */
+  scope?: PairScope;
 }
+
+export type PairScope = 'read' | 'operate';

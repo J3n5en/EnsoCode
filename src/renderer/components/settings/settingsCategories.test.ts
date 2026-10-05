@@ -59,3 +59,27 @@ describe('isCategoryVisible', () => {
     expect(isCategoryVisible('memory', ['browser'])).toBe(true);
   });
 });
+
+describe('Bot mode page', () => {
+  const withBots = [
+    ...cats,
+    { id: 'experimental' as SettingsCategory },
+    { id: 'bots' as SettingsCategory },
+    { id: 'botTemplates' as SettingsCategory },
+  ];
+
+  it('is hidden until Bot mode is enabled; Experimental always stays', () => {
+    expect(visibleCategories(withBots, []).map((c) => c.id)).not.toContain('bots');
+    expect(visibleCategories(withBots, []).map((c) => c.id)).not.toContain('botTemplates');
+    expect(visibleCategories(withBots, [], false).map((c) => c.id)).toContain('experimental');
+    expect(visibleCategories(withBots, [], true).map((c) => c.id)).toContain('bots');
+    expect(visibleCategories(withBots, [], true).map((c) => c.id)).toContain('botTemplates');
+  });
+
+  it('falls back to Experimental, where the switch lives', () => {
+    expect(resolveActiveCategory('bots', [], false)).toBe('experimental');
+    expect(resolveActiveCategory('bots', [], true)).toBe('bots');
+    expect(resolveActiveCategory('botTemplates', [], false)).toBe('experimental');
+    expect(resolveActiveCategory('botTemplates', [], true)).toBe('botTemplates');
+  });
+});

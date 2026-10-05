@@ -204,6 +204,29 @@ export interface MemoryMutationResult {
   error?: string;
 }
 
+/** Bot 成员写 project / global 记忆的待审批项（批准前不在 memories 里） */
+export interface PendingMemoryWriteDto {
+  id: string;
+  kind: 'capture' | 'crystallize';
+  spaceId: string;
+  spaceLabel: string;
+  /** 发起写入的成员（Main 解析的显示名） */
+  originLabel: string;
+  title: string | null;
+  content: string;
+  botId: string | null;
+  chatId: string | null;
+  /** 写入前已把密钥替换成 [REDACTED] */
+  redacted: boolean;
+  createdAt: string;
+}
+
+export type PendingMemoryWriteDecision = 'approve' | 'reject';
+
+export function isPendingMemoryWriteDecision(value: unknown): value is PendingMemoryWriteDecision {
+  return value === 'approve' || value === 'reject';
+}
+
 export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;

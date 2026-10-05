@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>群聊按轮次撤回文件</title>
+<style>
+:root{--bg:oklch(.145 .014 285.82);--fg:oklch(.985 0 0);--muted:oklch(.269 .014 285.82);--mfg:oklch(.708 .014 285.82);--border:oklch(.32 .014 285.82);--card:oklch(.18 .014 285.82);--info:oklch(.623 .214 259.81);--warning:oklch(.769 .189 70.08);--success:oklch(.627 .154 150.07);--danger:oklch(.637 .237 25.33)}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.45 Inter,system-ui,-apple-system,"PingFang SC",sans-serif;background:#2a2a2e;color:var(--fg)}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px}
+.lead{width:1120px;color:#ddd;font-size:12px}
+.lead b{color:#fff}
+.scenes{width:1120px;display:flex;gap:6px;flex-wrap:wrap}
+.scenes button{border:1px solid #555;background:#1c1c1f;color:#eee;border-radius:8px;padding:6px 10px}
+.scenes button.on{background:#fff;color:#111;border-color:#fff}
+.win{width:1120px;height:740px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 50px #0006}
+.title{height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--border);flex:none}
+.dot{width:10px;height:10px;border-radius:50%;background:#555}
+.title span.name{margin-left:8px;color:var(--mfg);font-size:12px}
+.body{flex:1;display:flex;min-height:0}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;flex:none}
+.head .t{font-weight:600}
+.head .sub{color:var(--mfg);font-size:12px}
+.tl{flex:1;overflow:auto;padding:16px 20px 12px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:8px;max-width:680px}
+.who{font-size:12px;color:var(--mfg);margin-bottom:2px}
+.who b{color:var(--fg);margin-right:6px}
+.bub{background:var(--muted);border-radius:4px 12px 12px 12px;padding:8px 12px}
+.me{align-self:flex-end}
+.me .bub{background:oklch(.32 .02 285);border-radius:12px 4px 12px 12px}
+.files{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.file{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--mfg)}
+.file i{font-style:normal;display:inline-block;min-width:2.2em;color:var(--fg)}
+.ops{margin-top:8px;display:flex;gap:8px;align-items:center}
+.link{border:0;background:transparent;color:var(--info);padding:0;font-size:12px}
+.link:disabled{color:var(--mfg);cursor:default}
+.pill{font-size:11px;border-radius:5px;padding:1px 6px;background:oklch(.627 .154 150.07/.18);color:var(--success)}
+.pill.warn{background:oklch(.769 .189 70.08/.18);color:var(--warning)}
+.sys{align-self:center;max-width:560px;text-align:center;font-size:12px;color:var(--mfg);background:var(--muted);border-radius:10px;padding:6px 10px}
+.sys button{margin-left:6px}
+.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:650;flex:none}
+.panel{width:300px;border-left:1px solid var(--border);overflow:auto;padding:14px 14px 20px;flex:none}
+.panel h3{margin:14px 0 4px;font-size:13px}
+.panel p,.panel li{margin:0;color:var(--mfg);font-size:12px}
+.panel ul{margin:4px 0 0;padding-left:1.1em}
+.mask{position:fixed;inset:0;background:#0008;display:grid;place-items:center;z-index:5}
+.mask[hidden]{display:none}
+.dlg{width:460px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 16px 40px #000a}
+.dlg h2{margin:0 0 4px;font-size:15px}
+.dlg .sub{color:var(--mfg);font-size:12px;margin-bottom:10px}
+.dlg h3{margin:12px 0 4px;font-size:12px;color:var(--mfg);font-weight:500}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border)}
+.row b{font-weight:500}
+.note{margin-top:10px;font-size:12px;color:var(--mfg)}
+.note strong{color:var(--fg);font-weight:600}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.btn{border:1px solid var(--border);background:var(--bg);border-radius:7px;padding:6px 10px;font-size:12px}
+.btn.pr{background:var(--fg);color:var(--bg);border-color:transparent}
+.btn:disabled{opacity:.45;cursor:default}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="lead"><b>结论：</b>群里撤回只动这一轮的文件。聊天不回去。后面改了同一处就停下，列出依赖的轮次，由你决定要不要从最新一轮倒着一起撤。</div>
+  <div class="scenes" id="scenes"></div>
+  <div class="win">
+    <div class="title"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="name">EnsoCode · 群聊撤回这一轮的文件（设计稿）</span></div>
+    <div class="body">
+      <section class="main">
+        <header class="head">
+          <div>
+            <div class="t">发布小组</div>
+            <div class="sub" id="head-sub"></div>
+          </div>
+        </header>
+        <div class="tl" id="tl"></div>
+      </section>
+      <aside class="panel" id="spec"></aside>
+    </div>
+  </div>
+</div>
+<div class="mask" id="mask" hidden></div>
+
+<script>
+const PEOPLE = {
+  lin: { name: "林经理", ch: "林", color: "#7c5cff" },
+  anran: { name: "安然", ch: "安", color: "#ec4899" },
+  jason: { name: "Jason", ch: "J", color: "#0ea5e9" },
+};
+
+const SCENES = {
+  clean: {
+    label: "后面没碰到",
+    sub: "安然后来只改了文案，和 Jason 的文件不重叠",
+    busy: null,
+    turns: [
+      turn("t1", "jason", "14:02", "登录改成按会话记，迁移脚本也补上了。", [
+        file("src/auth/session.ts", "M", "修改"),
+        file("src/db/migrate.ts", "A", "新增"),
+      ], []),
+      turn("t2", "anran", "14:18", "空状态文案改成「还没有可撤回的一轮」。", [
+        file("docs/copy.md", "M", "修改"),
+      ], []),
+    ],
+  },
+  conflict: {
+    label: "同一处冲突",
+    sub: "安然后来改了 session.ts 的同一处，只撤 Jason 会被拒绝",
+    busy: null,
+    turns: [
+      turn("t1", "jason", "14:02", "登录改成按会话记，迁移脚本也补上了。", [
+        file("src/auth/session.ts", "M", "修改"),
+        file("src/db/migrate.ts", "A", "新增"),
+      ], [{ id: "t2", member: "anran", time: "14:22", path: "src/auth/session.ts" }]),
+      turn("t2", "anran", "14:22", "把会话过期的提示补进同一段登录逻辑。", [
+        file("src/auth/session.ts", "M", "修改"),
+      ], []),
+    ],
+  },
+  busy: {
+    label: "有人正在写",
+    sub: "Jason 这一轮还没结束，撤回先停着",
+    busy: "jason",
+    turns: [
+      turn("t1", "anran", "14:18", "空状态文案先改了一版。", [
+        file("docs/copy.md", "M", "修改"),
+      ], []),
+      turn("t2", "jason", "14:40", "正在改登录，这一轮还没拍完。", [
+        file("src/auth/session.ts", "M", "修改"),
+      ], [], { block: "writing" }),
+    ],
+  },
+  chain: {
+    label: "委派整链",
+    sub: "林经理派给 Jason，两个人的文件记成一轮",
+    busy: null,
+    turns: [
+      turn("t1", "jason", "15:06", "导出接口按林经理派的范围写完了。", [
+        file("src/api/export.ts", "A", "新增"),
+        file("src/api/export.test.ts", "A", "新增"),
+      ], [], { chain: ["lin", "jason"] }),
+    ],
+  },
+  huge: {
+    label: "文件不可撤",
+    sub: "超过 10MiB 的文件这一轮标成不可撤回",
+    busy: null,
+    turns: [
+      turn("t1", "jason", "15:20", "把一份大的夹具拷进了工作区。", [
+        file("fixtures/session.bin", "A", "新增"),
+      ], [], { block: "huge", reason: "fixtures/session.bin 超过 10MiB，这一轮不可撤回。" }),
+    ],
+  },
+};
+
+function file(path, status, label) {
+  return { path, status, label };
+}
+
+function turn(id, member, time, text, files, overlaps, extra) {
+  return { id, member, time, text, files, overlaps: overlaps || [], chain: extra?.chain || null, block: extra?.block || null, reason: extra?.reason || "" };
+}
+
+let sceneId = "clean";
+let reverts = [];
+let openId = null;
+
+function scene() {
+  return SCENES[sceneId];
+}
+
+function revertOf(id) {
+  return reverts.find((item) => item.ids.includes(id) && !item.undone);
+}
+
+function plan(id) {
+  const item = scene().turns.find((turn) => turn.id === id);
+  if (!item) return null;
+  if (scene().busy) {
+    return { kind: "busy", item, who: PEOPLE[scene().busy].name };
+  }
+  if (item.block === "writing") return { kind: "busy", item, who: PEOPLE[item.member].name };
+  if (item.block) return { kind: "blocked", item };
+  if (revertOf(id)) return { kind: "done", item };
+  if (item.overlaps.length) return { kind: "conflict", item };
+  return { kind: "clean", item };
+}
+
+function renderScenes() {
+  document.getElementById("scenes").innerHTML = Object.entries(SCENES).map(([id, item]) =>
+    `<button type="button" data-scene="${id}" class="${id === sceneId ? "on" : ""}">${item.label}</button>`
+  ).join("");
+}
+
+function fileList(files) {
+  return `<div class="files">${files.map((item) => `<div class="file"><i>${item.label}</i>${item.path}</div>`).join("")}</div>`;
+}
+
+function renderTimeline() {
+  const current = scene();
+  document.getElementById("head-sub").textContent = current.sub;
+  const parts = [`<div class="msg me"><div class="bub">把登录改成会话级，并补迁移。聊天记录不要动。</div></div>`];
+  if (current.busy) {
+    const who = PEOPLE[current.busy];
+    parts.push(`<div class="sys">${who.name} 正在写入这个工作区。等这一轮结束才能撤回。</div>`);
+  }
+  for (const item of current.turns) {
+    const who = PEOPLE[item.member];
+    const reverted = revertOf(item.id);
+    const blocked = item.block || current.busy;
+    const chain = item.chain ? ` · 参与 ${item.chain.map((id) => PEOPLE[id].name).join("、")}` : "";
+    parts.push(`<div class="msg">
+      <div class="av" style="background:${who.color}">${who.ch}</div>
+      <div>
+        <div class="who"><b>${who.name}</b>${item.time}${chain}</div>
+        <div class="bub">${item.text}${fileList(item.files)}
+          <div class="ops">
+            ${reverted ? `<span class="pill">文件已撤回</span>` : `<button type="button" class="link" data-open="${item.id}">撤回本轮改动</button>`}
+            ${blocked && !reverted ? `<span class="pill warn">${item.block === "huge" ? "不可撤回" : "先等写入结束"}</span>` : ""}
+          </div>
+        </div>
+      </div>
+    </div>`);
+  }
+  for (const item of reverts) {
+    if (item.scene !== sceneId) continue;
+    const names = item.ids.map((id) => PEOPLE[current.turns.find((turn) => turn.id === id).member].name);
+    const unique = [...new Set(names)].join("、");
+    if (item.undone) {
+      parts.push(`<div class="sys">已撤销刚才的撤回。${unique} 的文件回到撤回前，聊天记录没有删。</div>`);
+    } else {
+      const how = item.kind === "cascade" ? `从最新一轮倒着撤了 ${item.ids.length} 轮` : "撤回了这一轮";
+      parts.push(`<div class="sys">已${how}的文件改动（${unique}）。聊天记录还在。<button type="button" class="link" data-undo="${item.key}">撤销这次撤回</button></div>`);
+    }
+  }
+  document.getElementById("tl").innerHTML = parts.join("");
+}
+
+function renderSpec() {
+  document.getElementById("spec").innerHTML = `
+    <h3>入口</h3>
+    <p>只出现在已经结束、快照完整的成员回合上。用户消息、系统消息、正在写的一轮都没有。</p>
+    <h3>预览里必须写清</h3>
+    <ul>
+      <li>谁的一轮，什么时候。委派链把参与的人列出来，文件不按人拆。</li>
+      <li>哪些文件会回到这一轮之前。本轮新增的，撤回就是删掉。</li>
+      <li>后面没碰到的改动会留下。</li>
+      <li>聊天记录不回退。</li>
+    </ul>
+    <h3>冲突</h3>
+    <p>后面改了同一处，或改了本轮新建的文件，整轮不写，也不留冲突标记。列出依赖的轮次。级联撤回从最新一轮倒回到这一轮，一次做完；中间算失败就全部不动。</p>
+    <h3>撤回之后</h3>
+    <p>群里发一条系统消息。这次撤回自己也是一轮，可以再撤回来。成员下一轮能看到这条消息。</p>
+    <h3>明确不做</h3>
+    <ul>
+      <li>把聊天一起退回去</li>
+      <li>委派链里指出哪个文件是谁改的</li>
+      <li>强制覆盖，或自己解冲突</li>
+    </ul>`;
+}
+
+function renderDialog() {
+  const mask = document.getElementById("mask");
+  if (!openId) {
+    mask.hidden = true;
+    mask.innerHTML = "";
+    return;
+  }
+  const next = plan(openId);
+  const item = next.item;
+  const who = PEOPLE[item.member];
+  const chain = item.chain ? item.chain.map((id) => PEOPLE[id].name).join("、") : who.name;
+  let body = "";
+  let actions = `<button type="button" class="btn" data-close>先不撤</button>`;
+  if (next.kind === "busy") {
+    body = `<p class="note"><strong>${next.who} 正在写入。</strong>等这一轮结束、快照写完，才能撤回更早的文件。</p>`;
+  } else if (next.kind === "blocked") {
+    body = `<p class="note"><strong>这一轮不能撤回。</strong>${item.reason}</p>`;
+  } else if (next.kind === "conflict") {
+    const deps = item.overlaps.map((dep) => `<div class="row"><span>${PEOPLE[dep.member].name} · ${dep.time}</span><b>${dep.path}</b></div>`).join("");
+    body = `<h3>会还原，如果只看这一轮</h3>${rows(item.files)}
+      <h3>后面改了同一处，所以不能只撤这一轮</h3>${deps}
+      <p class="note">整轮不会写入。一起撤会从最新一轮倒回到 ${who.name} 的 ${item.time}，一次完成。没列在上面的文件不动。</p>`;
+    actions = `<button type="button" class="btn" data-close>先不撤</button><button type="button" class="btn pr" data-go="cascade">一起撤回这 ${1 + item.overlaps.length} 轮</button>`;
+  } else {
+    const kept = scene().turns.filter((turn) => turn.time > item.time && !item.overlaps.some((dep) => dep.id === turn.id));
+    const keep = kept.length
+      ? kept.map((turn) => `<div class="row"><span>${PEOPLE[turn.member].name} · ${turn.time}</span><b>保留</b></div>`).join("")
+      : `<p class="note">这一轮后面没有别人的文件改动。</p>`;
+    body = `<h3>会还原</h3>${rows(item.files)}<h3>会留下</h3>${keep}
+      <p class="note">聊天记录留在群里。撤错了，这次撤回自己也可以再撤回来。</p>`;
+    actions = `<button type="button" class="btn" data-close>先不撤</button><button type="button" class="btn pr" data-go="single">撤回这些文件</button>`;
+  }
+  mask.hidden = false;
+  mask.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">
+    <h2>${next.kind === "conflict" ? "这一轮现在撤不了" : next.kind === "clean" ? "撤回这一轮的文件？" : "现在不能撤回"}</h2>
+    <div class="sub">${chain} · ${item.time}${item.chain ? " · 委派算一轮" : ""}</div>
+    ${body}
+    <div class="actions">${actions}</div>
+  </div>`;
+}
+
+function rows(files) {
+  return files.map((item) => `<div class="row"><span>${item.path}</span><b>${item.status === "A" ? "删掉这个新文件" : item.status === "D" ? "把删掉的文件加回来" : "回到这一轮之前"}</b></div>`).join("");
+}
+
+function render() {
+  renderScenes();
+  renderTimeline();
+  renderSpec();
+  renderDialog();
+}
+
+document.body.addEventListener("click", (event) => {
+  const sceneBtn = event.target.closest("[data-scene]");
+  if (sceneBtn) {
+    sceneId = sceneBtn.dataset.scene;
+    openId = null;
+    render();
+    return;
+  }
+  const open = event.target.closest("[data-open]");
+  if (open && !open.disabled) {
+    openId = open.dataset.open;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-close]")) {
+    openId = null;
+    render();
+    return;
+  }
+  const go = event.target.closest("[data-go]");
+  if (go) {
+    const item = scene().turns.find((turn) => turn.id === openId);
+    const ids = go.dataset.go === "cascade" ? [item.id, ...item.overlaps.map((dep) => dep.id)] : [item.id];
+    reverts.push({ key: `${sceneId}-${reverts.length}`, scene: sceneId, ids, kind: go.dataset.go, undone: false });
+    openId = null;
+    render();
+    return;
+  }
+  const undo = event.target.closest("[data-undo]");
+  if (undo) {
+    const item = reverts.find((entry) => entry.key === undo.dataset.undo);
+    if (item) item.undone = true;
+    render();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && openId) {
+    openId = null;
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>

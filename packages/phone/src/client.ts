@@ -15,6 +15,11 @@ import {
   isPairSyncCursor,
   type NudgeReason,
   openFrame,
+  type PairBotActivity,
+  type PairBotChatSummary,
+  type PairBotEvent,
+  type PairBotInboxItem,
+  type PairBotMember,
   type PairedDevice,
   type PairSessionSync,
   type PairSyncCursor,
@@ -72,6 +77,10 @@ export type ConnState = 'connecting' | 'online' | 'host-offline' | 'unauthorized
 /** 与桌面远程节点视图共用一份投影结构 */
 export type SessionView = GuestSessionView;
 
+export type GroupTimelineFrame = Extract<HostToPhone, { type: 'group-timeline' }>;
+export type BotChatStateFrame = Extract<HostToPhone, { type: 'bot-chat-state' }>;
+export type BotSendResultFrame = Extract<HostToPhone, { type: 'bot-send-result' }>;
+
 const VOICE_TIMEOUT_MS = 60_000;
 /** 约 200ms 一块：桌面边收边识别 */
 const VOICE_CHUNK_SAMPLES = SPEECH_SAMPLE_RATE / 5;
@@ -102,6 +111,25 @@ export interface ClientEvents {
   onRtt?(ms: number): void;
   /** 桌面语音识别是否可用；断线/换主机视为不可用 */
   onVoiceInput?(available: boolean): void;
+  /** 桌面把本设备设为只读（host-info.readOnly）；host 侧另有强制拦截 */
+  onReadOnly?(readOnly: boolean): void;
+  /** 写命令被 host 拦截（如作用域刚被改成只读） */
+  onCommandRejected?(command: string, error: string): void;
+  /** Bot 模式（桌面开启时才下发；enabled=false = 已关闭） */
+  onBotCatalog?(enabled: boolean, bots: PairBotMember[]): void;
+  onBotChats?(chats: PairBotChatSummary[]): void;
+  onGroupTimeline?(frame: GroupTimelineFrame): void;
+  onBotEvent?(event: PairBotEvent): void;
+  onBotChatState?(frame: BotChatStateFrame): void;
+  onBotSendResult?(frame: BotSendResultFrame): void;
+  onBotRetryResult?(frame: Extract<HostToPhone, { type: 'bot-retry-result' }>): void;
+  /** Bot 收件箱整表（未结束且未忽略） */
+  onBotInbox?(items: PairBotInboxItem[]): void;
+  /** 成员实时运行态整表；clockOffset = 本机时钟 − host 时钟 */
+  onBotActivity?(items: PairBotActivity[], clockOffset: number): void;
+  /** 一条回复的产物卡片与 send_image 图（bot-artifacts 应答） */
+  onBotArtifacts?(frame: Extract<HostToPhone, { type: 'bot-artifacts' }>): void;
+  onBotArtifactImage?(frame: Extract<HostToPhone, { type: 'bot-artifact-image' }>): void;
 }
 
 export class PairClient {
@@ -482,6 +510,7 @@ export class PairClient {
       case 'host-info':
         this.direct.hostInfo(payload);
         this.setVoiceInput(payload.voiceInput === true);
+        this.events.onReadOnly?.(payload.readOnly === true);
         break;
       case 'voice-result': {
         const { error } = payload;
@@ -522,6 +551,55 @@ export class PairClient {
         this.scheduleCache();
         break;
       }
+      case 'bot-catalog':
+        if (Array.isArray(payload.bots)) {
+          this.events.onBotCatalog?.(payload.enabled === true, payload.bots);
+        }
+        break;
+      case 'bot-chats':
+        if (Array.isArray(payload.chats)) this.events.onBotChats?.(payload.chats);
+        break;
+      case 'group-timeline':
+        if (typeof payload.chatId === 'string' && Array.isArray(payload.entries)) {
+          this.events.onGroupTimeline?.(payload);
+        }
+        break;
+      case 'bot-event':
+        if (typeof payload.event === 'object' && payload.event !== null) {
+          this.events.onBotEvent?.(payload.event);
+        }
+        break;
+      case 'bot-chat-state':
+        if (typeof payload.chatId === 'string') this.events.onBotChatState?.(payload);
+        break;
+      case 'bot-send-result':
+        if (typeof payload.deliveryId === 'string') this.events.onBotSendResult?.(payload);
+        break;
+      case 'bot-retry-result':
+        if (typeof payload.chatId === 'string' && typeof payload.entryId === 'string')
+          this.events.onBotRetryResult?.(payload);
+        break;
+      case 'bot-inbox':
+        if (Array.isArray(payload.items)) this.events.onBotInbox?.(payload.items);
+        break;
+      case 'bot-activity':
+        if (Array.isArray(payload.items) && typeof payload.now === 'number')
+          this.events.onBotActivity?.(payload.items, Date.now() - payload.now);
+        break;
+      case 'bot-artifacts':
+        if (typeof payload.target === 'object' && payload.target !== null)
+          this.events.onBotArtifacts?.(payload);
+        break;
+      case 'bot-artifact-image':
+        if (typeof payload.requestId === 'string') this.events.onBotArtifactImage?.(payload);
+        break;
+      case 'command-rejected':
+        if (typeof payload.command === 'string')
+          this.events.onCommandRejected?.(payload.command, payload.error);
+        break;
+      default:
+        // 新桌面新增的帧：旧逻辑不认识就忽略，不能影响后续帧
+        break;
     }
   }
 

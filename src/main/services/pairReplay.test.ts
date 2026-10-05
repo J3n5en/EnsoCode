@@ -77,7 +77,14 @@ vi.mock('./pushNotifier', () => ({
   setPushSubscription: vi.fn(),
 }));
 
-import { forwardAgentEvent, setPairResumeListener, startPairHost, stopPairHost } from './pairHost';
+import {
+  forwardAgentEvent,
+  type PairBotPort,
+  setPairBotPort,
+  setPairResumeListener,
+  startPairHost,
+  stopPairHost,
+} from './pairHost';
 import { requestPairMeta } from './pairMetaFlush';
 
 function epochs(): () => string {
@@ -542,5 +549,149 @@ describe('pairHost session-sync 接线', () => {
     forwardAgentEvent(page);
     await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
     expect((await sentPayloads())[0]).toMatchObject({ type: 'history', sessionId: 's1' });
+  });
+});
+
+describe('pairHost Bot 会话接线', () => {
+  const contentKey = new Uint8Array(32).fill(9);
+  let port: PairBotPort;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    hostMocks.socket = {
+      readyState: 1,
+      binaryType: '',
+      onopen: null,
+      onmessage: null,
+      onclose: null,
+      onerror: null,
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    hostMocks.loadDevices.mockReturnValue([
+      {
+        pairId: 'pair-bot',
+        token: 'token-1',
+        contentKey: toBase64Url(contentKey),
+        deviceName: 'phone',
+        relayUrl: 'https://relay.example.com',
+        pairedAt: 1,
+      },
+    ]);
+    port = {
+      handle: vi.fn(async (_pairId, _command, reply) => {
+        await reply({ type: 'bot-chats', chats: [] });
+      }),
+      resync: vi.fn(),
+      sessionAccess: vi.fn(() => 'none' as const),
+      coldSnapshot: vi.fn(async () => null),
+      sessionTitle: vi.fn(() => undefined),
+      observe: vi.fn(),
+    };
+    setPairBotPort(port);
+    setPairResumeListener(hostMocks.resume);
+    startPairHost();
+    await vi.waitFor(() => expect(hostMocks.socket?.onmessage).toBeTypeOf('function'));
+    hostMocks.socket?.onopen?.();
+    hostMocks.socket?.onmessage?.({ data: JSON.stringify({ type: 'peer-joined' }) });
+  });
+
+  afterEach(() => {
+    stopPairHost();
+    setPairBotPort(null);
+  });
+
+  async function receive(payload: unknown): Promise<void> {
+    const frame = await sealFrame(contentKey, payload);
+    const data = frame.buffer.slice(
+      frame.byteOffset,
+      frame.byteOffset + frame.byteLength
+    ) as ArrayBuffer;
+    hostMocks.socket?.onmessage?.({ data });
+  }
+
+  async function sentPayloads(): Promise<Record<string, unknown>[]> {
+    const calls = hostMocks.socket?.send.mock.calls ?? [];
+    return Promise.all(
+      calls.map(
+        async ([data]) =>
+          (await openFrame(contentKey, new Uint8Array(data))) as Record<string, unknown>
+      )
+    );
+  }
+
+  const coldSnapshot = (count: number): RendererAgentEvent =>
+    ({
+      type: 'snapshot',
+      partial: true,
+      sessions: [
+        {
+          identity: { sessionId: 'bot-1' },
+          sessionId: 'bot-1',
+          status: 'idle',
+          messages: Array.from({ length: count }, (_, i) => ({
+            role: 'user',
+            content: [{ type: 'text', text: `m${i}` }],
+          })),
+          commands: [],
+        },
+      ],
+    }) as unknown as RendererAgentEvent;
+
+  it('进房时请 Bot 层补推目录', () => {
+    expect(port.resync).toHaveBeenCalledWith('pair-bot', expect.any(Function));
+  });
+
+  it('冷 Bot 会话：不走 renderer 恢复，用合成快照应答 session-sync，翻页也由它切', async () => {
+    vi.mocked(port.sessionAccess).mockReturnValue('cold');
+    vi.mocked(port.coldSnapshot).mockResolvedValue(coldSnapshot(300));
+    await receive({ type: 'subscribe', sessionId: 'bot-1', sync: { requestId: 'r1' } });
+    await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
+    expect(hostMocks.resume).not.toHaveBeenCalled();
+    expect(hostMocks.requestSnapshot).not.toHaveBeenCalled();
+    const [sync] = await sentPayloads();
+    expect(sync).toMatchObject({ type: 'session-sync', sessionId: 'bot-1', requestId: 'r1' });
+    const base = (sync.snapshot as { sessions: { baseIndex: number }[] }).sessions[0].baseIndex;
+    expect(base).toBeGreaterThan(0);
+
+    hostMocks.socket?.send.mockClear();
+    await receive({ type: 'history', sessionId: 'bot-1', beforeIndex: base });
+    await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
+    expect((await sentPayloads())[0]).toMatchObject({ type: 'history', sessionId: 'bot-1' });
+    expect(port.coldSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('活 Bot 会话只要 worker 快照，不请 renderer 恢复', async () => {
+    vi.mocked(port.sessionAccess).mockReturnValue('live');
+    await receive({ type: 'subscribe', sessionId: 'bot-1', sync: { requestId: 'r1' } });
+    await vi.waitFor(() => expect(hostMocks.requestSnapshot).toHaveBeenCalledWith('bot-1'));
+    expect(hostMocks.resume).not.toHaveBeenCalled();
+  });
+
+  it('Bot 模式关闭时拒绝订阅 Bot 会话', async () => {
+    vi.mocked(port.sessionAccess).mockReturnValue('deny');
+    await receive({ type: 'subscribe', sessionId: 'bot-1', sync: { requestId: 'r1' } });
+    await receive({ type: 'bot-catalog-request' });
+    await vi.waitFor(() => expect(port.handle).toHaveBeenCalled());
+    expect(hostMocks.resume).not.toHaveBeenCalled();
+    expect(hostMocks.requestSnapshot).not.toHaveBeenCalled();
+    expect(hostMocks.setPinnedSessions).not.toHaveBeenCalledWith('pair', ['bot-1']);
+  });
+
+  it('bot 命令交 Bot 层处理，应答回到同一连接', async () => {
+    await receive({ type: 'bot-chat-open', chatId: 'chat-1', junk: true });
+    await vi.waitFor(() => expect(hostMocks.socket?.send).toHaveBeenCalledTimes(1));
+    expect(port.handle).toHaveBeenCalledWith(
+      'pair-bot',
+      { type: 'bot-chat-open', chatId: 'chat-1' },
+      expect.any(Function)
+    );
+    expect((await sentPayloads())[0]).toEqual({ type: 'bot-chats', chats: [] });
+  });
+
+  it('普通会话仍走 renderer 恢复', async () => {
+    await receive({ type: 'subscribe', sessionId: 'code-1', sync: { requestId: 'r1' } });
+    await vi.waitFor(() => expect(hostMocks.requestSnapshot).toHaveBeenCalledWith('code-1'));
+    expect(hostMocks.resume).toHaveBeenCalledWith('code-1');
   });
 });

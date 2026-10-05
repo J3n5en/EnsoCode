@@ -58,7 +58,7 @@ function parseMemberRef(value: unknown): DefaultModelRef | null {
 export const sameModelRef = (a: DefaultModelRef, b: DefaultModelRef): boolean =>
   a.providerId === b.providerId && a.modelId === b.modelId;
 
-function parseClassifier(value: unknown): VirtualClassifierConfig | undefined {
+export function parseVirtualClassifier(value: unknown): VirtualClassifierConfig | undefined {
   if (!isRecord(value)) return undefined;
   const source = value.source;
   if (!VIRTUAL_CLASSIFIER_SOURCES.includes(source as VirtualClassifierSource)) return undefined;
@@ -89,7 +89,7 @@ function parseEntry(value: unknown): VirtualModelEntry | null {
     if (fallbacks.length >= FALLBACKS_MAX) break;
     fallbacks.push(ref);
   }
-  const classifier = parseClassifier(value.classifier);
+  const classifier = parseVirtualClassifier(value.classifier);
   return {
     id: value.id,
     name,

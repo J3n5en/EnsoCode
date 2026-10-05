@@ -6,6 +6,8 @@ export interface PairStatusDevice {
   pairId: string;
   deviceName: string;
   pairedAt: number;
+  /** read 只能查看，operate 可发送/审批/停止；缺省（旧 main）视为 operate */
+  scope?: 'read' | 'operate';
   /** host 与中继的 WSS 是否已连上 */
   connected: boolean;
   /** 手机是否在房间里 */

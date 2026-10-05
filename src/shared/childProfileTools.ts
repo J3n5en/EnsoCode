@@ -2,6 +2,9 @@ import { parseWindowsLocalShell } from './windowsLocalShell';
 
 export type ChildProfileShell = 'bash' | 'powershell';
 
+/** 父会话 disabledTools 里的伪 id：命中时不挂 shell 与文件写工具（与 readonly 子代理同档） */
+export const WORKSPACE_WRITE_TOOL_ID = 'workspace_write';
+
 export interface ChildProfileToolOptions {
   /** 缺省 apply_patch：只挂 apply_patch，不挂 edit/write */
   editMode?: 'replace' | 'apply_patch';
@@ -10,6 +13,7 @@ export interface ChildProfileToolOptions {
   exploreFold?: boolean;
   /** 缺省开启，与「disabledBuiltinTools 不含 isolated_sandbox」一致 */
   isolatedSandbox?: boolean;
+  workspaceWrite?: boolean;
 }
 
 /**
@@ -23,7 +27,7 @@ export function childProfileToolIds(
   const editMode = options.editMode ?? 'apply_patch';
   const shell = options.shell ?? 'bash';
   const ids = ['read', 'grep', 'find', 'ls'];
-  if (tools === 'all') {
+  if (tools === 'all' && options.workspaceWrite !== false) {
     ids.push(shell);
     if (editMode === 'apply_patch') ids.push('apply_patch');
     else ids.push('edit', 'write');

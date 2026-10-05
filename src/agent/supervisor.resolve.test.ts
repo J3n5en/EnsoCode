@@ -18,7 +18,25 @@ type CatalogRow = {
   compat?: unknown;
   api?: string;
   baseUrl?: string;
+  inputLimits?: { maxRequestBytes?: number };
 };
+
+// resolve 会装饰 native provider 的两条请求出口；纯 capability 测试不执行流。
+function providerMethods() {
+  return {
+    getProvider: vi.fn(() => ({
+      id: 'fixture',
+      models: [],
+      stream: vi.fn(() => {
+        throw new Error('unused fixture stream');
+      }),
+      streamSimple: vi.fn(() => {
+        throw new Error('unused fixture stream');
+      }),
+    })),
+    registerNativeProvider: vi.fn(),
+  };
+}
 
 function mockRuntime(options: {
   catalog?: CatalogRow[];
@@ -27,6 +45,7 @@ function mockRuntime(options: {
   const registered = new Map<string, CatalogRow>();
   const catalog = options.catalog ?? [];
   return {
+    ...providerMethods(),
     getModels: () => catalog,
     getModel: (providerId: string, modelId: string) => {
       if (options.oauthModel && providerId === 'anthropic' && modelId === options.oauthModel.id) {
@@ -74,6 +93,32 @@ describe('resolveBaseModel apiKey', () => {
         virtual: { name: 'Auto', primary: apiKeySpawn, fallbacks: [] },
       })
     ).toThrow('resolveSessionModel');
+  });
+
+  it('同协议 catalog 的请求字节限制传给注册模型，不丢掉 pi 的限制元数据', () => {
+    const runtime = mockRuntime({
+      catalog: [
+        {
+          id: 'claude-sonnet-4',
+          api: 'anthropic-messages',
+          inputLimits: { maxRequestBytes: 1024 },
+        },
+      ],
+    });
+    expect(resolveBaseModel(runtime, apiKeySpawn).inputLimits?.maxRequestBytes).toBe(1024);
+  });
+
+  it('不把同名但其他协议的请求限制抄到当前模型', () => {
+    const runtime = mockRuntime({
+      catalog: [
+        {
+          id: 'claude-sonnet-4',
+          api: 'openai-completions',
+          inputLimits: { maxRequestBytes: 999_999_999 },
+        },
+      ],
+    });
+    expect(resolveBaseModel(runtime, apiKeySpawn).inputLimits).toBeUndefined();
   });
 
   it('catalog 命中官方 id 时用 catalog，不再无条件 {max:max}', () => {
@@ -135,6 +180,7 @@ describe('resolveBaseModel apiKey', () => {
   it('google-generative-ai 缺 v1beta 时补上再注册', () => {
     const registerProvider = vi.fn();
     const runtime = {
+      ...providerMethods(),
       getModels: () => [],
       getModel: () => ({ id: 'gemini-2.5-flash' }),
       registerProvider,
@@ -285,6 +331,7 @@ describe('resolveBaseModel oauth', () => {
     };
     const registerProvider = vi.fn();
     const runtime = {
+      ...providerMethods(),
       getModels: vi.fn((providerId?: string) => {
         if (!providerId) throw new Error('oauth 不应走全局 catalog 反查');
         return [];
@@ -324,12 +371,12 @@ describe('resolveBaseModel oauth', () => {
     };
     const registerProvider = vi.fn();
     const runtime = {
+      ...providerMethods(),
       getModels: vi.fn((providerId?: string) => {
         if (providerId !== 'xai') throw new Error('oauth 不应走全局 catalog 反查');
         return [grok46];
       }),
       getModel: vi.fn(() => undefined),
-      getProvider: vi.fn(() => undefined),
       registerProvider,
     } as unknown as ModelRuntime;
 
@@ -356,9 +403,9 @@ describe('resolveBaseModel oauth', () => {
   it('xAI 手填未知 id 克隆同厂模板，其它订阅仍报缺失', () => {
     const grok46 = { id: 'grok-4.6', name: 'Grok 4.6', provider: 'xai', reasoning: true };
     const xaiRuntime = {
+      ...providerMethods(),
       getModels: vi.fn(() => [grok46]),
       getModel: vi.fn(() => undefined),
-      getProvider: vi.fn(() => undefined),
       registerProvider: vi.fn(),
     } as unknown as ModelRuntime;
     expect(
@@ -434,6 +481,7 @@ describe('resolveBaseModelOrRefresh', () => {
       return { aborted: false, errors: new Map() };
     });
     const runtime = {
+      ...providerMethods(),
       getModels: vi.fn(() => []),
       getModel: vi.fn(() => (refreshed ? late : undefined)),
       refresh,
@@ -455,6 +503,7 @@ describe('resolveBaseModelOrRefresh', () => {
       return { aborted: false, errors: new Map() };
     });
     const runtime = {
+      ...providerMethods(),
       getModels: vi.fn(() => []),
       getModel: vi.fn((providerId: string, modelId: string) =>
         providerId === 'cursor' && modelId === late.id ? catalog : undefined
@@ -496,7 +545,11 @@ describe('resolveBaseModelOrRefresh', () => {
   it('首次命中不触发刷新', async () => {
     const hit = { id: 'gemini-3.8-flash-tiered' };
     const refresh = vi.fn();
-    const runtime = { getModel: vi.fn(() => hit), refresh } as unknown as ModelRuntime;
+    const runtime = {
+      ...providerMethods(),
+      getModel: vi.fn(() => hit),
+      refresh,
+    } as unknown as ModelRuntime;
 
     await expect(resolveBaseModelOrRefresh(runtime, spawn)).resolves.toBe(hit);
     expect(refresh).not.toHaveBeenCalled();

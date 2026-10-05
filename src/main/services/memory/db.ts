@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { getLoadablePath } from 'sqlite-vec';
 import { contentHash } from './contentHash';
 
-export const MEMORY_SCHEMA_VERSION = 8;
+export const MEMORY_SCHEMA_VERSION = 9;
 
 /** 已知最大的 embedding 维度是 qwen3-8b 的 4096；留 4 倍余量，再大视为脏数据 */
 export const MAX_EMBEDDING_DIM = 16_384;
@@ -307,6 +307,21 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
       CREATE INDEX IF NOT EXISTS crystallized_from_source ON crystallized_from (source_id);
     `);
   },
+  // v9：Bot 会话写 project / global 的待审批队列；批准前不进 memories
+  `
+  CREATE TABLE IF NOT EXISTS pending_writes (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    space_id   TEXT NOT NULL,
+    title      TEXT,
+    content    TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    bot_id     TEXT,
+    chat_id    TEXT,
+    redacted   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /**

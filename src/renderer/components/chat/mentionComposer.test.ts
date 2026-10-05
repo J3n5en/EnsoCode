@@ -193,6 +193,38 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
+  it('Bot 成员单独成组：空查询为「成员」文件夹，搜索时排在 Agents 之后', () => {
+    const member = toAgentMentionCandidates([
+      {
+        typeKey: 'bot:11111111-1111-4111-8111-111111111111',
+        displayName: 'Alice',
+        description: 'Reviewer — Reviews code',
+        source: 'bot',
+        locked: false,
+        canDisable: false,
+        canEdit: false,
+      },
+    ])[0];
+    const groups = groupMentionCandidates('', [...agents, member], duplicateNames);
+    expect(groups.agents).toEqual(agents);
+    expect(groups.members).toEqual([member]);
+    expect(flattenMentionRoot(groups, '').slice(0, 2)).toEqual([
+      { type: 'folder', id: 'agents' },
+      { type: 'folder', id: 'members' },
+    ]);
+    const searched = groupMentionCandidates('e', [...agents, member], []);
+    expect(flattenMentionGroups(searched).map((item) => item.group)).toEqual([
+      'agents',
+      'agents',
+      'agents',
+      'agents',
+      'members',
+    ]);
+    expect(flattenMentionRoot(groupMentionCandidates('alice', [member], []), 'alice')).toEqual([
+      { type: 'item', group: 'members', candidate: member },
+    ]);
+  });
+
   it('keeps duplicate file names distinguishable by relative path', () => {
     expect(duplicateNames).toEqual([
       {

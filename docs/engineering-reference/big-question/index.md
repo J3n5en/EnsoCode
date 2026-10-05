@@ -15,6 +15,7 @@
 | [checkpoint-cross-session-wipe.md](checkpoint-cross-session-wipe.md) | 「回退+文件」不还原文件，无报错 |
 | [rewind-optimistic-anchor.md](rewind-optimistic-anchor.md) | 回退未确认的“继续”却撤掉上一轮，任务进度归零 |
 | [pi-auto-retry-willretry.md](pi-auto-retry-willretry.md) | 503 报错解锁输入后 agent 又自己跑起来；resume 回放重复红错 |
+| [image-context-request-body-limit.md](image-context-request-body-limit.md) | 长工具轮读图后持续 CF 502；同轮 / 压缩后图片累积，整包超过约 32 MiB（预算守卫及状态栏已双厂商真机验收） |
 | [queued-prompt-vs-compaction.md](queued-prompt-vs-compaction.md) | 排队消息 / 打断后发送报 Cannot submit a prompt while compaction is in progress |
 | [worktree-move-races.md](worktree-move-races.md) | 会话切到隔离 worktree 后，文件仍写进主工作树；新命令被 worker 静默丢弃 |
 | [cdp-hidden-window-input.md](cdp-hidden-window-input.md) | CDP 拖拽/点击时好时坏，eval/截图全正常，极易误判为产品 bug |

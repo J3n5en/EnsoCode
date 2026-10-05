@@ -17,6 +17,7 @@ export interface SessionsPersistSlice {
 function persistOne(conversation: PersistableConversation): PersistableConversation {
   const {
     messages: _messages,
+    requestBody: _requestBody,
     historyBaseIndex: _historyBaseIndex,
     commands: _commands,
     customEntries: _customEntries,

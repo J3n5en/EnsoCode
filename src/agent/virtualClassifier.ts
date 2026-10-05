@@ -1,7 +1,7 @@
 import type { Api, ClassifierModel, Message, Model } from '@earendil-works/pi-ai';
 import type { ModelRouteRequest, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { ensureAccountProvider } from '@shared/piAccounts';
-import type { VirtualSpawnClassifier } from '@shared/types';
+import type { VirtualClassifierCredentials, VirtualSpawnClassifier } from '@shared/types';
 import type {
   VirtualChooser,
   VirtualMembers,
@@ -111,18 +111,24 @@ function judgeClassify(runtime: ModelRuntime, judge: Model<Api>): Classify {
   };
 }
 
-function piClassify(
+/** 按 provider/model 取 pi 分类器模型；找不到抛错 */
+export function resolveClassifierModel(
   runtime: ModelRuntime,
-  config: NonNullable<VirtualSpawnClassifier['classifier']>
-): Classify {
+  config: VirtualClassifierCredentials
+): ClassifierModel<never> {
+  if (config.provider.includes('#')) ensureAccountProvider(runtime, config.provider);
+  const found = runtime
+    .getModelsOfType('classifier', config.provider)
+    .find((candidate) => candidate.id === config.modelId);
+  if (!found) throw new Error(`classifier not found: ${config.provider}/${config.modelId}`);
+  // 多账号克隆 provider 列出的模型仍带基础 provider id，凭证必须按克隆账号解析
+  return { ...found, provider: config.provider } as ClassifierModel<never>;
+}
+
+function piClassify(runtime: ModelRuntime, config: VirtualClassifierCredentials): Classify {
   if (config.provider.includes('#')) ensureAccountProvider(runtime, config.provider);
   return async (input, previous, signal) => {
-    const found = runtime
-      .getModelsOfType('classifier', config.provider)
-      .find((candidate) => candidate.id === config.modelId);
-    if (!found) throw new Error(`classifier not found: ${config.provider}/${config.modelId}`);
-    // 多账号克隆 provider 列出的模型仍带基础 provider id，凭证必须按克隆账号解析
-    const model = { ...found, provider: config.provider } as ClassifierModel<never>;
+    const model = resolveClassifierModel(runtime, config);
     const result = await runtime.classify(
       model,
       {

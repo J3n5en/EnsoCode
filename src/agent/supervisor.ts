@@ -25,7 +25,9 @@ import {
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
+import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
+import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import {
   findCatalogModelById,
@@ -46,6 +48,7 @@ import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import { installCodexLinkedRefresh } from '@shared/providers/codexAuth';
 import { DEVIN_PROVIDER_ID, devinProviderConfig } from '@shared/providers/devin';
+import type { RequestBodyUsage } from '@shared/requestBodyUsage';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
@@ -86,7 +89,7 @@ import {
   validateApplyPatchTargets,
 } from './applyPatch';
 import { applyPatchResultExtension } from './applyPatchResultExtension';
-import { ApprovalGate, withApproval } from './approval';
+import { ApprovalGate, withApproval, withProtectedFloor } from './approval';
 import {
   APPROVAL_REVIEW_TIMEOUT_MS,
   buildApprovalReviewSystemPrompt,
@@ -162,6 +165,8 @@ import { createProjectSettingsManager } from './projectCode';
 import { projectMessage } from './projection';
 import { applyWorkerProxyEnv } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
+import { withRequestBodyBudget } from './requestBodyBudget';
+import { runWithRequestBodyObserver } from './requestBodyTelemetry';
 import { projectMessages, projectResumeTail } from './resumeSnapshots';
 import { withRtkOptimization } from './rtk';
 import { RunawayGuard } from './runawayGuard';
@@ -213,14 +218,20 @@ import { decorateSessionTools } from './toolDecorators';
 import { ToolOutputBudget } from './toolOutputBudget';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { ComputerInvoker, createComputerTool, withComputerApproval } from './tools/computer';
+import { createDelegationTools, type DelegationOp } from './tools/delegation';
 import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
+import { createGroupHistoryTool } from './tools/groupHistory';
+import { createGroupTasksTool } from './tools/groupTasks';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
+import { createRoutineProposeTool } from './tools/routinePropose';
+import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createWebTools } from './tools/web';
-import { createVirtualChooser } from './virtualClassifier';
+import { createVirtualChooser, resolveClassifierModel } from './virtualClassifier';
 import { registerVirtualModel } from './virtualModels';
 import { createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
 import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './workflowPresets';
+import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
 import { withWritePreflight, withWriteScope } from './writeScope';
 
@@ -283,6 +294,7 @@ interface ManagedSession {
   ensoApp?: EnsoAppInvoker;
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
+  delegation?: MemoryInvoker<DelegationOp>;
   agentControl?: AgentControlInvoker;
   /** 已因不支持 adaptive 降级过的模型（虚拟模型下每个成员各降一次） */
   adaptiveDowngraded: Set<string>;
@@ -345,6 +357,7 @@ interface ManagedSession {
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
   contextUsage: ContextUsageTracker;
+  requestBody?: RequestBodyUsage;
   unsubscribe: () => void;
 }
 
@@ -686,6 +699,8 @@ export class SessionSupervisor {
   private readonly pendingCommands = new Map<string, number>();
   private readonly mcp = new McpManager({ emit: (event) => this.options.emit(event) });
   private readonly bgTasks: BackgroundTaskManager;
+  /** Bot 写成员在同一工作区的文件占用 / 全局命令独占（全部会话同进程共享） */
+  private readonly workspaceClaims = new WorkspaceClaims();
   private runtimePromise: Promise<ModelRuntime> | null = null;
   private readonly oauthPoolPending = new Map<
     string,
@@ -764,6 +779,8 @@ export class SessionSupervisor {
   });
   private readonly completeTextAborts = new Map<string, AbortController>();
   private readonly completeTextPendingAborts = new Set<string>();
+  private readonly classifyAborts = new Map<string, AbortController>();
+  private readonly classifyPendingAborts = new Set<string>();
 
   private branchContextExtension(getSession: () => ManagedSession | undefined): InlineExtension {
     return workspaceBranchContextExtension(getSession, (requestId) => {
@@ -901,6 +918,7 @@ export class SessionSupervisor {
    *  清回 false，之后可携新 cwd + resumeFile 重新 spawn（Move to worktree / 闲置回收后再点开）。 */
   private async releaseParent(managed: ManagedSession, reason: string): Promise<void> {
     const parentId = managed.identity.sessionId;
+    this.workspaceClaims.forget(parentId);
     // 先收掉整棵子会话（coworker/child 都以 `${parentId}::` 为键前缀）
     for (const [id, child] of [...this.sessions]) {
       if (!id.startsWith(`${parentId}::`)) continue;
@@ -928,6 +946,7 @@ export class SessionSupervisor {
     managed.ensoApp?.cancelAll('Session released');
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
+    managed.delegation?.cancelAll('Session released');
     managed.agentControl?.close('Session released');
     managed.computer?.cancelAll('Session released');
     try {
@@ -1056,6 +1075,22 @@ export class SessionSupervisor {
       else this.completeTextPendingAborts.add(command.requestId);
       return;
     }
+    if (command.type === 'classify-choice') {
+      void this.classifyChoice(command).catch((error) =>
+        this.options.emit({
+          type: 'choice-failed',
+          requestId: command.requestId,
+          error: toErrorMessage(error) || 'classify failed',
+        })
+      );
+      return;
+    }
+    if (command.type === 'abort-classify-choice') {
+      const active = this.classifyAborts.get(command.requestId);
+      if (active) active.abort();
+      else this.classifyPendingAborts.add(command.requestId);
+      return;
+    }
     if (command.type === 'set-proxy-env') {
       applyWorkerProxyEnv(command.env);
       return;
@@ -1077,6 +1112,7 @@ export class SessionSupervisor {
         ? command.child
         : command.type === 'browser-result' ||
             command.type === 'memory-result' ||
+            command.type === 'delegation-result' ||
             command.type === 'computer-result'
           ? command.identity
           : command.type === 'dismiss-child' ||
@@ -1181,7 +1217,12 @@ export class SessionSupervisor {
           command.planMode,
           command.trustedProjectCode,
           command.pluginCommands,
-          command.pluginHooks
+          command.pluginHooks,
+          command.botMode,
+          command.botGroupTasks,
+          command.protectedActions,
+          command.botRoutines,
+          command.botWriteLock
         );
         return;
       case 'spawn-child':
@@ -1366,6 +1407,13 @@ export class SessionSupervisor {
       case 'approval-respond':
         this.must(command.identity).gate.respond(command.requestId, command.decision);
         return;
+      case 'request-timeout': {
+        const managed = this.sessions.get(command.identity.sessionId);
+        if (!managed || !isSameGeneration(managed.identity, command.identity)) return;
+        if (command.kind === 'approval') managed.gate.expire(command.requestId);
+        else managed.asks.expire(command.requestId);
+        return;
+      }
       case 'set-approval-mode':
         this.must(command.identity).gate.mode = command.mode;
         return;
@@ -1413,6 +1461,10 @@ export class SessionSupervisor {
         if (!managed.memory?.resolve(command)) {
           console.warn(`[memory] dropped result for unknown request ${command.requestId}`);
         }
+        return;
+      }
+      case 'delegation-result': {
+        this.must(command.identity).delegation?.resolve(command);
         return;
       }
       case 'computer-result': {
@@ -1565,6 +1617,11 @@ export class SessionSupervisor {
           : [];
         this.replaceMessagesAfterRewind(managed);
         managed.plan?.refresh();
+        // 失败轮已回退掉：不再停在 failed，否则界面残留旧错误和指向上一轮的「重试」
+        if (!result.cancelled && managed.status === 'failed') {
+          managed.status = 'idle';
+          this.emitStatus(managed);
+        }
         const editorText = planFreeEditorText(result.editorText || fallbackEditorText);
         this.options.emit({
           type: 'rewind-done',
@@ -1596,6 +1653,7 @@ export class SessionSupervisor {
         managed.ensoApp?.cancelAll('Enso capability invocation aborted');
         managed.browser?.cancelAll('Browser action aborted');
         managed.memory?.cancelAll('Memory action aborted');
+        managed.delegation?.cancelAll('Delegation action aborted');
         managed.currentTurnId = undefined;
         managed.computer?.cancelAll('Computer action aborted');
         // 立即收口投影：不 await session.abort()（内部 waitForIdle 会一直等到工具/流
@@ -1648,7 +1706,12 @@ export class SessionSupervisor {
     planMode?: boolean,
     trustedProjectCode: readonly string[] = [],
     pluginCommands: readonly PluginCommandSpawn[] = [],
-    pluginHooks: readonly PluginHookSpawn[] = []
+    pluginHooks: readonly PluginHookSpawn[] = [],
+    botMode = false,
+    botGroupTasks = false,
+    protectedActions = false,
+    botRoutines = false,
+    botWriteLock?: { label: string; ancestors: string[] }
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -1779,6 +1842,8 @@ export class SessionSupervisor {
       },
       {
         review: (info, signal) => this.reviewApproval(info, signal),
+        protectedFloor: botMode || protectedActions,
+        ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
       }
     );
     const checkpoints = new CheckpointManager(
@@ -1816,7 +1881,7 @@ export class SessionSupervisor {
     const structuredById = new Map<string, unknown>();
     const wrapRead = (definition: Def): Def =>
       withReadTruncationMeta(withAgentRead(definition, () => structuredById));
-    const readOnlyTools = (): Def[] => {
+    const readOnlyTools = (toolGate: ApprovalGate): Def[] => {
       const stock =
         remoteOps && sshExecutor
           ? {
@@ -1831,7 +1896,8 @@ export class SessionSupervisor {
               read: wrapRead(createReadToolDefinition(cwd) as unknown as Def),
               grep: createGrepToolDefinition(cwd) as unknown as Def,
             };
-      const { read, grep } = stock;
+      const { grep } = stock;
+      const read = withProtectedFloor(toolGate, 'read', stock.read);
       return remoteOps && sshExecutor
         ? [
             read,
@@ -1846,6 +1912,9 @@ export class SessionSupervisor {
             createLsToolDefinition(cwd) as unknown as Def,
           ];
     };
+    // Bot 写成员（本地工作区）参与同工作区写协调
+    const writeLock = botWriteLock && !remote ? botWriteLock : undefined;
+    if (writeLock) this.workspaceClaims.register({ id: sessionId, ...writeLock });
     // 后台任务 manager 本体始终本地 spawn:远程会话把命令变换成本地 ssh 命令
     const backgroundTransform = remote
       ? (command: string, taskCwd: string) => {
@@ -1877,13 +1946,20 @@ export class SessionSupervisor {
       writeScope?: readonly string[]
     ): Def[] => {
       const guarded = (definition: Def): Def => (cp ? withCheckpoint(definition, cp) : definition);
+      const claimContext = { owner: sessionId, cwd };
+      const claimFiles = (definition: Def): Def =>
+        writeLock ? withFileClaims(definition, this.workspaceClaims, claimContext) : definition;
+      const exclusive = (definition: Def): Def =>
+        writeLock
+          ? withExclusiveCommand(definition, this.workspaceClaims, claimContext)
+          : definition;
       // scope 与完整只读预检都在审批之外；checkpoint 仅在批准后触发。
       const scoped = (
         kind: 'file-edit' | 'file-write',
         definition: Def,
         preflight?: (params: unknown, signal: AbortSignal | undefined) => Promise<unknown>
       ): Def => {
-        const approved = withApproval(toolGate, kind, guarded(definition));
+        const approved = withApproval(toolGate, kind, claimFiles(guarded(definition)));
         return withWriteScope(
           preflight ? withWritePreflight(approved, preflight) : approved,
           cwd,
@@ -1914,31 +1990,33 @@ export class SessionSupervisor {
             ]
           : [scoped('file-edit', stockEdit), scoped('file-write', stockWrite)];
       return [
-        ...readOnlyTools(),
+        ...readOnlyTools(toolGate),
         withApproval(
           toolGate,
           'command',
-          guarded(
-            withBackground(
-              withRtkOptimization(
-                createSessionCommandTool({
-                  cwd,
-                  remote: Boolean(remoteOps),
-                  preference: windowsLocalShell,
-                  operations: remoteOps?.bash,
-                }) as unknown as Def,
-                {
-                  binaryPath: process.env.ENSO_RTK_PATH,
-                  dataDir: path.join(this.options.agentDir, 'rtk'),
-                  cwd,
-                  remote: Boolean(remoteOps),
-                  enabled: rtkEnabled,
-                }
-              ),
-              this.bgTasks,
-              sessionId,
-              cwd,
-              backgroundTransform
+          exclusive(
+            guarded(
+              withBackground(
+                withRtkOptimization(
+                  createSessionCommandTool({
+                    cwd,
+                    remote: Boolean(remoteOps),
+                    preference: windowsLocalShell,
+                    operations: remoteOps?.bash,
+                  }) as unknown as Def,
+                  {
+                    binaryPath: process.env.ENSO_RTK_PATH,
+                    dataDir: path.join(this.options.agentDir, 'rtk'),
+                    cwd,
+                    remote: Boolean(remoteOps),
+                    enabled: rtkEnabled,
+                  }
+                ),
+                this.bgTasks,
+                sessionId,
+                cwd,
+                backgroundTransform
+              )
             )
           )
         ),
@@ -1957,7 +2035,9 @@ export class SessionSupervisor {
           : null;
       };
     const buildCoreTools = (): Def[] => [
-      ...buildBaseTools(gate, checkpoints),
+      ...(toolEnabled(WORKSPACE_WRITE_TOOL_ID)
+        ? buildBaseTools(gate, checkpoints)
+        : readOnlyTools(gate)),
       ...wrapMcpTools(gate),
     ];
     // 会话工厂：一次性 subagent 与持久 coworker 共用。gate 参数化——subagent 复用父门,
@@ -2049,8 +2129,10 @@ export class SessionSupervisor {
         const childTools = isLockedEnso
           ? [createEnsoCapabilitiesTool(), createEnsoAppTool(ensoApp!), createAskTool(askManager!)]
           : [
-              ...(resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
-                ? readOnlyTools()
+              ...(!toolEnabled(WORKSPACE_WRITE_TOOL_ID) ||
+              resolved?.tools === 'readonly' ||
+              agentType?.tools === 'readonly'
+                ? readOnlyTools(childGate)
                 : buildBaseTools(childGate, undefined, agentType?.writeScope)),
               ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
               ...(extraTools as Def[]),
@@ -2207,7 +2289,7 @@ export class SessionSupervisor {
         return response;
       },
     });
-    const askManager = this.createAskManager(identity);
+    const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
     // 内嵌浏览器：页面活在 Main，worker 只发 browser-invoke 事件。每个父会话一张挂起表。
     const browser = toolEnabled('browser')
       ? new BrowserInvoker(identity, (request) => {
@@ -2230,6 +2312,20 @@ export class SessionSupervisor {
           if (!managed) throw new Error('Session is not ready for memory actions.');
           this.options.emit({
             type: 'memory-invoke',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            requestId: request.requestId,
+            op: request.op,
+            params: request.params,
+          });
+        })
+      : undefined;
+    const delegation = botMode
+      ? new MemoryInvoker<DelegationOp>(identity, (request) => {
+          const managed = managedRef ?? this.sessions.get(sessionId);
+          if (!managed) throw new Error('Session is not ready for delegations.');
+          this.options.emit({
+            type: 'delegation-invoke',
             identity: managed.identity,
             seq: ++managed.seq,
             requestId: request.requestId,
@@ -2278,6 +2374,16 @@ export class SessionSupervisor {
         ? createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
         : []),
       ...(memory ? createMemoryTools(memory, { language: memoryLanguage }) : []),
+      ...(delegation ? createDelegationTools(delegation, { groupTasks: botGroupTasks }) : []),
+      ...(delegation && botGroupTasks
+        ? [createGroupTasksTool(delegation), createGroupHistoryTool(delegation)]
+        : []),
+      ...(delegation && botRoutines
+        ? [
+            createRoutineProposeTool(delegation),
+            createSendImageTool(delegation, cwd, confirmOutsideImage(gate)),
+          ]
+        : []),
       ...(toolEnabled('web') ? createWebTools() : []),
       ...(toolEnabled('todo') ? [createTodoTool((todos) => todoReminder.update(todos))] : []),
       ...(computer ? [withComputerApproval(gate, createComputerTool(computer))] : []),
@@ -2399,6 +2505,7 @@ export class SessionSupervisor {
       else this.emitPlanState(managed);
     }
     managedRef.computer = computer;
+    managedRef.delegation = delegation;
     this.options.emit({
       type: 'parent-ready',
       identity,
@@ -2409,7 +2516,7 @@ export class SessionSupervisor {
     checkpoints?.cleanupOldSessions();
   }
 
-  private createAskManager(identity: SessionIdentity): AskManager {
+  private createAskManager(identity: SessionIdentity, humanTimeoutMs?: number): AskManager {
     return new AskManager(
       (ask) => {
         const managed = this.sessions.get(identity.sessionId);
@@ -2432,7 +2539,8 @@ export class SessionSupervisor {
             requestId,
           });
         }
-      }
+      },
+      humanTimeoutMs
     );
   }
 
@@ -2486,7 +2594,7 @@ export class SessionSupervisor {
       toolStartAt: new Map(),
       toolDurations: new Map(),
       gate,
-      asks: opts.asks ?? this.createAskManager(identity),
+      asks: opts.asks ?? this.createAskManager(identity, gate.humanTimeoutMs),
       pendingTaskReminders: [],
       roundWaiters: new Set(),
       coworkers: new Map(),
@@ -2502,6 +2610,30 @@ export class SessionSupervisor {
       this.onSessionEvent(managed, event);
     });
     this.sessions.set(identity.sessionId, managed);
+    const stream = session.agent?.streamFunction;
+    if (stream) {
+      session.agent.streamFunction = (model, context, options) =>
+        runWithRequestBodyObserver(
+          (usage) => {
+            // 共享 runtime/provider 不意味着共享会话；释放、换代或换模型后的尾回调不能污染新投影。
+            if (
+              this.sessions.get(identity.sessionId) !== managed ||
+              session.model?.id !== model.id ||
+              session.model?.provider !== model.provider
+            )
+              return;
+            managed.requestBody = usage;
+            this.options.emit({
+              type: 'request-body',
+              identity: managed.identity,
+              seq: ++managed.seq,
+              usage,
+            });
+          },
+          () => stream.call(session.agent, model, context, options),
+          { sessionId: session.sessionId, signal: options?.signal }
+        );
+    }
     if (opts.resumeFile) {
       const raw = this.transcript(managed);
       const { immediate, deferFull } = projectResumeTail(raw);
@@ -2625,9 +2757,10 @@ export class SessionSupervisor {
           seq: ++managedRef.seq,
           requestId,
         });
-      }
+      },
+      parent.gate.floorOptions
     );
-    const askManager = this.createAskManager(identity);
+    const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
     const result = await factory.createChildSession({
       resolved: config,
       identity,
@@ -2755,9 +2888,10 @@ export class SessionSupervisor {
             requestId,
           });
         }
-      }
+      },
+      parent.gate.floorOptions
     );
-    const askManager = this.createAskManager(identity);
+    const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
     const { session, modelId, toolIds, runawayGuard } = await factory.createChildSession({
       agentType,
       modelOverride,
@@ -3181,13 +3315,15 @@ export class SessionSupervisor {
           state: 'start',
         });
         return;
-      case 'compaction_end':
+      case 'compaction_end': {
         // 自动压缩在 agent_end 之后异步完成：context 视图换了形，重新按完整记录对齐（历史不丢，summary 行入列）
         this.reconcileMessages(managed, this.transcript(managed));
         this.rebaseContextUsage(managed);
         managed.compaction = undefined;
+        // 被 abort 取消的压缩 pi 不带 errorMessage：按放弃收口，不能当作压完
+        const succeeded = !event.errorMessage && !event.aborted;
         // 锚点必须在对齐之后取：否则摘要消息未入列，与 guest 事件口径 maxIndex+1 差 1
-        if (!event.errorMessage) {
+        if (succeeded) {
           managed.compactionNoticeAt = managed.messages.length;
           managed.plan?.compacted();
         }
@@ -3198,8 +3334,10 @@ export class SessionSupervisor {
           seq: ++managed.seq,
           state: 'end',
           ...(event.errorMessage ? { error: event.errorMessage } : {}),
+          ...(!event.errorMessage && event.aborted ? { abandoned: true as const } : {}),
         });
         return;
+      }
       case 'agent_end': {
         this.reconcileMessages(managed, this.transcript(managed));
         // pi 将自动重试瞬态错误（随后 auto_retry_start）：非终态，不 settle、
@@ -3248,6 +3386,7 @@ export class SessionSupervisor {
         // 本轮摘要随 turn-completed 下发：renderer 冷会话没有正文，只能由 worker 切
         const digest = buildTurnDigest(managed.messages, managed.turnStartIndex);
         managed.turnStartIndex = managed.messages.length;
+        this.workspaceClaims.release(managed.identity.sessionId);
         this.options.emit({
           type: 'turn-completed',
           identity: managed.identity,
@@ -3614,6 +3753,7 @@ export class SessionSupervisor {
       });
     }
     this.emitStatus(managed, error);
+    this.workspaceClaims.release(managed.identity.sessionId);
     this.options.emit({
       type: 'turn-failed',
       identity: managed.identity,
@@ -3855,6 +3995,7 @@ export class SessionSupervisor {
         status: managed.status,
         messages: managed.messages,
         commands: managed.commands,
+        ...(managed.requestBody ? { requestBody: managed.requestBody } : {}),
         ...(managed.gate.snapshot().length > 0
           ? { pendingApprovals: managed.gate.snapshot() }
           : {}),
@@ -3896,6 +4037,7 @@ export class SessionSupervisor {
       managed.ensoApp?.cancelAll('Enso worker shutdown');
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');
+      managed.delegation?.cancelAll('Enso worker shutdown');
       managed.agentControl?.close('Enso worker shutdown');
       managed.currentTurnId = undefined;
       managed.computer?.cancelAll('Enso worker shutdown');
@@ -4074,6 +4216,73 @@ export class SessionSupervisor {
     } finally {
       this.completeTextAborts.delete(command.requestId);
       this.completeTextPendingAborts.delete(command.requestId);
+    }
+  }
+
+  /** 一次性 pi 分类器 choice 问题（群聊智能选人）：只回概率，选人与阈值由 Main 决定 */
+  private async classifyChoice(
+    command: Extract<AgentCommand, { type: 'classify-choice' }>
+  ): Promise<void> {
+    const { requestId } = command;
+    if (this.classifyPendingAborts.delete(requestId)) {
+      this.options.emit({ type: 'choice-failed', requestId, error: 'aborted' });
+      return;
+    }
+    const userAbort = new AbortController();
+    this.classifyAborts.set(requestId, userAbort);
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), command.timeoutMs);
+    const fail = (error: string) =>
+      this.options.emit({
+        type: 'choice-failed',
+        requestId,
+        error: userAbort.signal.aborted
+          ? 'aborted'
+          : timeout.signal.aborted
+            ? `timed out after ${command.timeoutMs}ms`
+            : error,
+      });
+    try {
+      const runtime = await this.getRuntime();
+      const model = resolveClassifierModel(runtime, command.classifier);
+      const result = await runtime.classify(
+        model,
+        {
+          state: command.state as never,
+          questions: {
+            choice: {
+              type: 'choice',
+              instructions: command.instructions,
+              criteria: command.criteria,
+            },
+          },
+        },
+        {
+          signal: AbortSignal.any([userAbort.signal, timeout.signal]),
+          ...(command.classifier.apiKey ? { apiKey: command.classifier.apiKey } : {}),
+        }
+      );
+      const answer = result.answers.choice;
+      if (result.stopReason !== 'stop' || answer?.type !== 'choice') {
+        fail(result.errorMessage?.trim() || `classifier ${result.stopReason}`);
+        return;
+      }
+      this.options.emit({
+        type: 'choice-classified',
+        requestId,
+        probabilities: Object.fromEntries(
+          Object.entries(answer.probabilities).filter(
+            (entry): entry is [string, number] =>
+              typeof entry[1] === 'number' && Number.isFinite(entry[1])
+          )
+        ),
+      });
+    } catch (error) {
+      fail(toErrorMessage(error) || 'classify failed');
+    } finally {
+      clearTimeout(timer);
+      this.classifyAborts.delete(requestId);
+      this.classifyPendingAborts.delete(requestId);
     }
   }
 
@@ -4396,7 +4605,11 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     if (!oauthModel) {
       throw new Error(`oauth model not found: ${model.oauthAccountKey}/${model.modelId}`);
     }
-    return exact ?? listCatalogClone(runtime, oauthModel);
+    const registered = exact ?? listCatalogClone(runtime, oauthModel);
+    const provider = runtime.getProvider(registered.provider);
+    if (!provider) throw new Error(`oauth provider not found: ${registered.provider}`);
+    runtime.registerNativeProvider(withRequestBodyBudget(provider));
+    return registered;
   }
   const providerId = providerKeyFor(model);
   const models = runtime.getModels();
@@ -4416,6 +4629,9 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     reasoning: resolved.reasoning,
     ...(resolved.thinkingLevelMap ? { thinkingLevelMap: resolved.thinkingLevelMap } : {}),
     input: ['text', 'image'],
+    ...(catalog?.api === model.api && catalog.inputLimits
+      ? { inputLimits: catalog.inputLimits }
+      : {}),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // applyExtension 原样展开定义，不填默认值；缺 contextWindow 时 pi 会把 max_tokens 钳成 NaN
     contextWindow,
@@ -4436,12 +4652,14 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     headers: { 'User-Agent': ENSO_USER_AGENT },
     models: [...known.values()],
   });
-  if (model.api === 'openai-responses') {
-    const provider = runtime.getProvider(providerId);
-    if (!provider) throw new Error(`provider not found after register: ${providerId}`);
-    // 保留鉴权与 raw/simple 两条流；注册为 native provider 后 runtime.refresh 仍保留适配。
-    runtime.registerNativeProvider(withOpenAIResponsesRouting(provider));
-  }
+  const provider = runtime.getProvider(providerId);
+  if (!provider) throw new Error(`provider not found after register: ${providerId}`);
+  // 保留鉴权与 raw/simple；预算在 caller / routing payload hook 后检查最终请求。
+  runtime.registerNativeProvider(
+    model.api === 'openai-responses'
+      ? withOpenAIResponsesRouting(withRequestBodyBudget(provider))
+      : withRequestBodyBudget(provider)
+  );
   const registered = runtime.getModel(providerId, model.modelId);
   if (!registered) throw new Error(`model not found after register: ${model.modelId}`);
   return registered;

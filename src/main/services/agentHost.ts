@@ -10,12 +10,14 @@ import {
   ENSO_LOCKED_PROFILE,
   isReservedAgentTypeName,
   type SessionIdentity,
+  visibleMemberAgentTypes,
 } from '@shared/builtinAgents';
 import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
 import {
   type ChildProfileToolOptions,
   childProfileShell,
   childProfileToolIds,
+  WORKSPACE_WRITE_TOOL_ID,
 } from '@shared/childProfileTools';
 import { resolveCompactStrategy } from '@shared/compactStrategy';
 import {
@@ -54,6 +56,7 @@ import type {
   SubagentModelOption,
   ThinkingLevel,
   TitleSummaryInput,
+  VirtualClassifierCredentials,
   VirtualSpawnClassifier,
 } from '@shared/types/agent';
 import { parseAgentWorkerEvent } from '@shared/types/agent';
@@ -94,6 +97,7 @@ import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import agentWorkerPath from '../../agent/index?modulePath';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
+import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { resolveGlobalInstruction } from './instructionStore';
@@ -328,7 +332,7 @@ export function startAgentWorker(): void {
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
       // snapshot 分支会顺手改 started / 清 asks，手动刷新不能有这些副作用）
       if (pendingReloads.settle(event) || workspaceLocks.settle(event)) return;
-      if (settleCompletion(event)) return;
+      if (settleCompletion(event) || settleChoice(event)) return;
       onEvent?.(event);
     }
   });
@@ -342,6 +346,10 @@ export function startAgentWorker(): void {
     workspaceLocks.failAll('agent worker exited');
     for (const [id, p] of pendingCompletions) {
       pendingCompletions.delete(id);
+      p.reject(new Error('agent worker exited'));
+    }
+    for (const [id, p] of pendingChoices) {
+      pendingChoices.delete(id);
       p.reject(new Error('agent worker exited'));
     }
     onEvent?.({ type: 'worker-exited' });
@@ -466,6 +474,13 @@ export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: 
   return { ok: true };
 }
 
+let memberAgentTypes: () => readonly MemberAgentType[] = () => [];
+
+/** Bot 模块注入在册成员（关闭 Bot 模式时返回空）；每次构造注册表/下发 worker 时现取 */
+export function setMemberAgentTypeSource(source: () => readonly MemberAgentType[]): void {
+  memberAgentTypes = source;
+}
+
 export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
   const state = readSettingsState();
   const disabledBuiltinAgentTypes = Array.isArray(state?.disabledBuiltinAgentTypes)
@@ -479,6 +494,7 @@ export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
     revision: settingsRevision(state),
     disabledBuiltinAgentTypes,
     customAgentTypes,
+    members: memberAgentTypes(),
   });
 }
 
@@ -563,7 +579,7 @@ function resolveVirtualModelSelection(
   };
 }
 
-function resolveVirtualClassifier(
+export function resolveVirtualClassifier(
   classifier: VirtualClassifierConfig,
   authenticatedAccountKeys: ReadonlySet<string>
 ): VirtualSpawnClassifier | undefined {
@@ -692,6 +708,8 @@ export function resolveAgentTypeSpawnConfig(
   if (typeKey.startsWith('builtin:')) {
     const name = typeKey.slice('builtin:'.length);
     definition = BUILTIN_AGENT_TYPES.find((entry) => entry.name === name);
+  } else if (typeKey.startsWith('bot:')) {
+    definition = memberAgentTypes().find((entry) => entry.typeKey === typeKey);
   } else {
     const id = typeKey.slice('custom:'.length);
     definition = withPluginAgentTypes(
@@ -731,6 +749,7 @@ export function resolveAgentTypeSpawnConfig(
     }),
     exploreFold: state?.exploreFoldEnabled === true,
     isolatedSandbox: !disabledTools.includes('isolated_sandbox'),
+    workspaceWrite: !disabledTools.includes(WORKSPACE_WRITE_TOOL_ID),
   };
   const expectedToolIds = expectedAgentTypeToolIds(definition.tools, {
     ...liveProfile,
@@ -778,6 +797,19 @@ export function spawnSession(
     rolePrompt?: string;
     extraDisabledTools?: readonly string[];
     omitDispatchTools?: boolean;
+    /** Bot 会话：人设、指令与技能/MCP 选择全由 Main 按成员档案组装，替代预设与插件资源 */
+    bot?: {
+      systemPrompt: string;
+      instruction: { path: string; content: string };
+      skillIds: string[];
+      mcpServerIds: string[];
+      /** 群聊成员会话：worker 挂 group_tasks */
+      groupTasks?: boolean;
+      /** 私聊 / 群聊成员会话（非委派）：worker 挂 routine_propose */
+      routines?: boolean;
+      /** 写成员同工作区写协调 */
+      writeLock?: { label: string; ancestors: string[] };
+    };
   }
 ): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
@@ -798,21 +830,26 @@ export function spawnSession(
     return { ok: false, error: 'Select an assistant approval model in Settings first.' };
   }
   const approvalReviewerConfig = reviewer.ok ? reviewer.selection?.config : undefined;
-  const preset = resolvePreset(request.presetId);
-  const systemPrompt = resolvePresetSystemPrompt(preset);
+  const bot = options?.bot;
+  const preset: Preset | undefined = bot
+    ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
+    : resolvePreset(request.presetId);
+  const systemPrompt = bot
+    ? { ok: true as const, content: bot.systemPrompt }
+    : resolvePresetSystemPrompt(preset);
   if (!systemPrompt.ok) {
     return { ok: false, error: '自定义系统提示词正文读取失败，请重新保存或恢复默认。' };
   }
-  const instruction = resolveGlobalInstruction(
-    preset ? { instructionId: preset.instructionId } : undefined
-  );
+  const instruction = bot
+    ? bot.instruction
+    : resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
   const plugins = enabledPlugins(state);
-  const skillPaths = [...enabledSkillPaths(preset), ...plugins.skillPaths];
+  const skillPaths = [...enabledSkillPaths(preset), ...(bot ? [] : plugins.skillPaths)];
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
-  for (const server of plugins.mcpServers) {
+  for (const server of bot ? [] : plugins.mcpServers) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
@@ -895,6 +932,11 @@ export function spawnSession(
     ...(remote ? { remote } : {}),
     ...(options?.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
     ...(systemPrompt.content ? { systemPrompt: systemPrompt.content } : {}),
+    ...(options?.bot ? { botMode: true } : {}),
+    ...(options?.bot?.groupTasks ? { botGroupTasks: true } : {}),
+    ...(options?.bot?.routines ? { botRoutines: true } : {}),
+    ...(options?.bot?.writeLock ? { botWriteLock: options.bot.writeLock } : {}),
+    ...(options?.bot || state?.protectedActionsInCode === true ? { protectedActions: true } : {}),
   });
   if (sent.ok) {
     rememberParentToolProfile(identity.sessionId, {
@@ -906,6 +948,7 @@ export function spawnSession(
       }),
       exploreFold: exploreFoldEnabled,
       isolatedSandbox: !disabledTools.includes('isolated_sandbox'),
+      workspaceWrite: !disabledTools.includes(WORKSPACE_WRITE_TOOL_ID),
     });
   }
   return sent;
@@ -1035,6 +1078,14 @@ export function sendMemoryResultToSession(
   outcome: { ok: true; result: unknown } | { ok: false; error: string }
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'memory-result', identity, requestId, ...outcome });
+}
+
+export function sendDelegationResultToSession(
+  identity: SessionIdentity,
+  requestId: string,
+  outcome: { ok: true; result: unknown } | { ok: false; error: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'delegation-result', identity, requestId, ...outcome });
 }
 
 export function sendComputerResultToSession(
@@ -1170,6 +1221,73 @@ export function completeText(input: {
     if (!posted.ok) {
       pendingCompletions.get(requestId)?.reject(new Error(posted.error ?? 'post failed'));
       pendingCompletions.delete(requestId);
+    }
+  });
+}
+
+const pendingChoices = new Map<
+  string,
+  { resolve: (probabilities: Record<string, number>) => void; reject: (error: Error) => void }
+>();
+
+function settleChoice(event: AgentWorkerEvent): boolean {
+  if (event.type !== 'choice-classified' && event.type !== 'choice-failed') return false;
+  const p = pendingChoices.get(event.requestId);
+  if (!p) return true;
+  pendingChoices.delete(event.requestId);
+  if (event.type === 'choice-classified') p.resolve(event.probabilities);
+  else p.reject(new Error(event.error));
+  return true;
+}
+
+/**
+ * 一次性 pi 分类器 choice 问题（群聊智能选人）：worker 跑 runtime.classify，按 requestId 回流概率。
+ * signal 中止时先拒绝等待者再通知 worker 停止；worker 不在 / 退出 / 超时都 reject。
+ */
+export function classifyChoice(
+  input: {
+    classifier: VirtualClassifierCredentials;
+    state: Record<string, unknown>;
+    instructions: string;
+    criteria: Record<string, string>;
+    timeoutMs: number;
+  },
+  signal?: AbortSignal
+): Promise<Record<string, number>> {
+  if (!worker || !workerReady) return Promise.reject(new Error('Agent worker is not running.'));
+  if (signal?.aborted) return Promise.reject(new Error('aborted'));
+  const requestId = randomUUID();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const timer = setTimeout(() => {
+      pendingChoices.delete(requestId);
+      cleanup();
+      reject(new Error('classify timed out'));
+    }, input.timeoutMs + 2_000);
+    const onAbort = () => {
+      if (!pendingChoices.delete(requestId)) return;
+      cleanup();
+      reject(new Error('aborted'));
+      sendAgentCommand({ type: 'abort-classify-choice', requestId });
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    pendingChoices.set(requestId, {
+      resolve: (probabilities) => {
+        cleanup();
+        resolve(probabilities);
+      },
+      reject: (error) => {
+        cleanup();
+        reject(error);
+      },
+    });
+    const posted = sendAgentCommand({ type: 'classify-choice', requestId, ...input });
+    if (!posted.ok) {
+      pendingChoices.get(requestId)?.reject(new Error(posted.error ?? 'post failed'));
+      pendingChoices.delete(requestId);
     }
   });
 }
@@ -1384,7 +1502,7 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
   return sendAgentCommand(sessionId ? { type: 'snapshot', sessionId } : { type: 'snapshot' });
 }
 
-function configuredAgentTypes(
+export function configuredAgentTypes(
   authenticatedAccountKeys: ReadonlySet<string>,
   hasSubagentModels = false,
   plugins?: ResolvedPlugins
@@ -1450,7 +1568,32 @@ function configuredAgentTypes(
         : {}),
     };
   });
-  return [...builtins, ...customs];
+  const members = visibleMemberAgentTypes(memberAgentTypes(), custom).map(
+    (entry): AgentTypeSpawnConfig => {
+      const resources = resolveAgentTypeResources(entry);
+      const bound =
+        entry.providerId && entry.modelId
+          ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+          : null;
+      return {
+        name: entry.typeKey,
+        description: memberSpawnDescription(entry),
+        systemPrompt: entry.systemPrompt,
+        tools: entry.tools,
+        allowModelOverride: false,
+        ...(resources.ok && resources.skillPaths.length > 0
+          ? { skillPaths: [...resources.skillPaths] }
+          : {}),
+        ...(resources.ok && resources.mcpServers.length > 0
+          ? { mcpServers: [...resources.mcpServers] }
+          : {}),
+        ...(bound?.ok ? { model: bound.selection.config } : {}),
+        ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
+        ...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+      };
+    }
+  );
+  return [...builtins, ...customs, ...members];
 }
 
 /** 设置页「允许子代理指定模型」列表 → 解析凭证后随 spawn-parent 下发（开关关闭/不可用静默跳过） */

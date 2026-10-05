@@ -70,6 +70,12 @@ Fill temporal only when the conversation explicitly states a date; otherwise use
 
 importance: 0.9+ critical decision/insight; 0.7-0.9 important; 0.5-0.7 useful; <0.5 omit.`;
 
+/** 群聊成员会话蒸馏的追加规则：每条带 scope，决定落群共享 space 还是成员自身 space */
+export const DISTILL_GROUP_SCOPE_RULES = `This conversation is one member's session inside a group chat. Add a "scope" field to every memory:
+- "chat": relevant to the whole group (team conventions, decisions, project background, division of work, shared terminology).
+- "self": this member's own preferences, working habits, or lessons learned.
+When unsure, use "self". Example item: {"title":"...","content":"...","importance":0.8,"scope":"chat"}`;
+
 /**
  * 记忆输出语言。缺省英文：提示词本身是英文，英文记忆在跨语言检索与去重上更稳；
  * `auto` 交给模型跟随对话语言，适合纯中文团队。空串 / 未知值当作英文。

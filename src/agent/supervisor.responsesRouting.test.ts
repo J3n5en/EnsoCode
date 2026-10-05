@@ -545,13 +545,12 @@ describe('Responses 请求出口的摘要 routing key', () => {
         },
       ],
     });
-    const provider = runtime.getProvider(accountKey);
     const accountModel = resolveBaseModel(runtime, {
       ...MODEL_CONFIG,
       apiKey: '',
       oauthAccountKey: accountKey,
     });
-    expect(runtime.getProvider(accountKey)).toBe(provider);
+    expect(accountModel.provider).toBe(accountKey);
     const response = await runtime.completeSimple(accountModel, userContext(), {
       cacheRetention: 'none',
       maxTokens: 13_107,
@@ -584,6 +583,22 @@ describe('Responses 请求出口的摘要 routing key', () => {
     expect(keys[0]).not.toBe(keys[1]);
     expect(options).toEqual(originalOptions);
   });
+
+  it.each(['raw', 'simple'] as const)(
+    '整包守卫同时覆盖 Responses $0 出口，仍保留 routing 和缓存策略',
+    async (mode) => {
+      const limited = { ...model, inputLimits: { maxRequestBytes: 1000 } };
+      const context: Context = {
+        messages: [{ role: 'user', content: 'X'.repeat(1000), timestamp: 1 }],
+      };
+      const response = await (mode === 'raw'
+        ? runtime.complete(limited, context, { maxTokens: 100, cacheRetention: 'none' })
+        : runtime.completeSimple(limited, context, { maxTokens: 100, cacheRetention: 'none' }));
+      expect(response.stopReason).toBe('error');
+      expect(response.errorMessage).toContain('request_too_large');
+      expect(requests).toHaveLength(0);
+    }
+  );
 
   it('caller 的 onPayload 异步拒绝时保留原错误，不发起任何 HTTP 请求', async () => {
     const fetchSpy = vi.fn(globalThis.fetch);

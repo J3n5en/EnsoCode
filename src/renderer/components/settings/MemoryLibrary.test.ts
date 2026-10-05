@@ -27,6 +27,7 @@ import {
   MemoryLibrary,
   MemoryRows,
   PendingReviewSection,
+  PendingWritesSection,
 } from './MemoryLibrary';
 
 const hooks = vi.hoisted(() => ({ current: null as LibraryHarness | null }));
@@ -467,6 +468,41 @@ describe('MemoryRows', () => {
 });
 
 describe('PendingReviewSection', () => {
+  it('lists Bot memory writes awaiting approval with target space and redaction note', () => {
+    expect(
+      renderToStaticMarkup(
+        createElement(PendingWritesSection, { t, writes: [], onReview: () => {} })
+      )
+    ).toBe('');
+    const html = renderToStaticMarkup(
+      createElement(PendingWritesSection, {
+        t,
+        onReview: () => {},
+        writes: [
+          {
+            id: 'p1',
+            kind: 'capture',
+            spaceId: 'global',
+            spaceLabel: 'Global',
+            originLabel: '成员：Alice',
+            title: 'Staging key',
+            content: 'api_key=[REDACTED]',
+            botId: 'b1',
+            chatId: null,
+            redacted: true,
+            createdAt: '2026-10-05T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+    expect(html).toContain('Alice');
+    expect(html).toContain('Global');
+    expect(html).toContain('api_key=[REDACTED]');
+    expect(html).toContain('Secrets redacted');
+    expect(html).toContain('Approve');
+    expect(html).toContain('Reject');
+  });
+
   it('is absent when nothing is pending', () => {
     const html = renderToStaticMarkup(
       createElement(PendingReviewSection, { t, edges: [], onReview: () => {} })

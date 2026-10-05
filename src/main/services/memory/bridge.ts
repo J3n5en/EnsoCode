@@ -1,6 +1,5 @@
 import { CRYSTAL_MIN_SOURCES } from '@shared/memory/constants';
 import {
-  type MemorySearchSpace,
   parseMemoryCaptureRequest,
   parseMemoryCrystallizeRequest,
   parseMemoryDeleteRequest,
@@ -11,37 +10,56 @@ import type Database from 'better-sqlite3';
 import { deleteMemoryPermanently } from '../memoryAdmin';
 import { createCrystal } from './crystal';
 import type { Complete } from './distill';
+import { type PendingWriteInput, queuePendingWrite } from './pending';
+import { sanitizeMemoryWrite } from './safety';
 import { searchMemories } from './search';
 import { createSearchAssist } from './searchLlm';
+import { defaultCaptureSpace, type MemorySpaceContext, resolveSpaceIds } from './space';
 import { createMemory, getMemory } from './store';
-import {
-  type Embedder,
-  GLOBAL_SPACE,
-  type Memory,
-  MemoryValidationError,
-  projectSpaceId,
-} from './types';
+import { type Embedder, GLOBAL_SPACE, type Memory, MemoryValidationError } from './types';
 
-export interface MemoryBridgeContext {
-  /** Main 权威 Project.id；会话不属于任何项目（或项目已失效）时为 null */
-  projectId: string | null;
+/** projectId：Main 权威 Project.id，会话不属于任何项目（或项目已失效）时为 null；botId/chatId 仅 Bot 模式 */
+export interface MemoryBridgeContext extends MemorySpaceContext {
   embedder?: Embedder | null;
   now?: Date;
   /** 真正新插一行后的 best-effort hook（KG 抽取排队） */
   onCreated?: (memory: Memory) => void;
   /** 删除成功后的通知（刷新记忆视图） */
   onDeleted?: (id: string) => void;
+  /** Bot 会话写 project / global 进入待审批后的通知（刷新收件箱 / 记忆审批入口） */
+  onPending?: (id: string) => void;
   /** deep 检索的 instruct LLM；不可用时检索退回本地意图 */
   complete?: (() => Complete | null | Promise<Complete | null>) | null;
 }
 
-/** 模型只说 space 语义，这里换成真实 space_id；`project` 无项目时返回空集合让调用方决定拒绝还是空结果。 */
-export function resolveSpaceIds(space: MemorySearchSpace, projectId: string | null): string[] {
-  const project = projectId ? [projectSpaceId(projectId)] : [];
-  if (space === 'global') return [GLOBAL_SPACE];
-  if (space === 'project') return project;
-  return [GLOBAL_SPACE, ...project];
+/** Bot 会话写共享空间（项目 / 全局）需用户审批；自己的 bot / chat 空间直接写 */
+function needsReview(ctx: MemoryBridgeContext, spaceId: string): boolean {
+  return Boolean(ctx.botId) && (spaceId === GLOBAL_SPACE || spaceId.startsWith('proj:'));
 }
+
+function queueForReview(
+  db: Database.Database,
+  ctx: MemoryBridgeContext,
+  input: Omit<PendingWriteInput, 'botId' | 'chatId'>
+): unknown {
+  const pending = queuePendingWrite(
+    db,
+    { ...input, botId: ctx.botId ?? null, chatId: ctx.chatId ?? null },
+    ctx.now
+  );
+  ctx.onPending?.(pending.id);
+  return {
+    status: 'pending_review',
+    written: false,
+    ...(input.redacted ? { redacted: true } : {}),
+    pendingId: pending.id,
+    message:
+      `Not written yet: writes from Bot members to the ${input.spaceId === GLOBAL_SPACE ? 'global' : 'project'} ` +
+      'memory space need user approval. It is queued in the inbox and will be saved once the user approves; do not resubmit it.',
+  };
+}
+
+const REDACTED_NOTE = 'Secrets in the content were replaced with [REDACTED] before saving.';
 
 /**
  * worker `memory-invoke` 的 Main 侧执行入口。载荷按 unknown 收窄（桥两端都归一/校验，不信任 worker），
@@ -57,7 +75,7 @@ export async function executeMemoryOp(
     const request = parseMemorySearchRequest(params);
     if (!request)
       throw new MemoryValidationError('invalid_request', 'invalid memory_search params');
-    const spaceIds = resolveSpaceIds(request.spaceId, ctx.projectId);
+    const spaceIds = resolveSpaceIds(request.spaceId, ctx);
     const assist =
       request.mode === 'deep' ? createSearchAssist((await ctx.complete?.()) ?? null) : undefined;
     const hits = await searchMemories(db, {
@@ -92,18 +110,38 @@ export async function executeMemoryOp(
     if (!request) {
       throw new MemoryValidationError('invalid_request', 'invalid memory_capture params');
     }
-    const [spaceId] = resolveSpaceIds(request.spaceId, ctx.projectId);
+    const [spaceId] = resolveSpaceIds(request.spaceId ?? defaultCaptureSpace(ctx), ctx);
     if (!spaceId) {
       throw new MemoryValidationError(
         'no_project',
         "this session has no project; use spaceId 'global' instead"
       );
     }
+    const safe = sanitizeMemoryWrite({ title: request.title ?? null, content: request.content });
+    if (needsReview(ctx, spaceId)) {
+      return queueForReview(db, ctx, {
+        kind: 'capture',
+        spaceId,
+        title: safe.title,
+        content: safe.content,
+        redacted: safe.redacted,
+        payload: {
+          unitType: request.unitType,
+          unitTypeSource: request.unitTypeSource,
+          importance: request.importance,
+          ...(request.eventStart ? { eventStart: request.eventStart } : {}),
+          ...(request.eventEnd ? { eventEnd: request.eventEnd } : {}),
+          ...(request.force ? { force: true } : {}),
+          ...(request.evolvesFromId ? { evolvesFromId: request.evolvesFromId } : {}),
+          ...(request.evolvesRelation ? { evolvesRelation: request.evolvesRelation } : {}),
+        },
+      });
+    }
     const result = await createMemory(
       db,
       {
-        content: request.content,
-        title: request.title ?? null,
+        content: safe.content,
+        title: safe.title,
         unitType: request.unitType,
         unitTypeSource: request.unitTypeSource,
         importance: request.importance,
@@ -139,6 +177,7 @@ export async function executeMemoryOp(
     return {
       status: 'inserted',
       ...(result.deduplicated ? { deduplicated: true } : {}),
+      ...(safe.redacted ? { redacted: true, note: REDACTED_NOTE } : {}),
       ...(result.evolves
         ? { evolves: { relation: result.evolves.relation, olderId: result.evolves.olderId } }
         : {}),
@@ -159,9 +198,9 @@ export async function executeMemoryOp(
         `invalid memory_crystallize params: content, title and sourceIds (>= ${CRYSTAL_MIN_SOURCES} distinct memory ids) are required`
       );
     }
-    // 模型不指定 space：源只能来自本会话可见的 space（global + 当前项目），结晶落在源所在 space；
+    // 模型不指定 space：源只能来自本会话可见的 space（all 解析结果），结晶落在源所在 space；
     // 不可见的源与“不存在”同样拒绝，不泄露其它项目的 space
-    const visible = new Set(resolveSpaceIds('all', ctx.projectId));
+    const visible = new Set(resolveSpaceIds('all', ctx));
     const spaceIds = new Set<string>();
     for (const id of request.sourceIds) {
       const source = getMemory(db, id);
@@ -180,11 +219,22 @@ export async function executeMemoryOp(
       );
     }
     const [spaceId] = spaceIds;
+    const safe = sanitizeMemoryWrite({ title: request.title, content: request.content });
+    if (needsReview(ctx, spaceId)) {
+      return queueForReview(db, ctx, {
+        kind: 'crystallize',
+        spaceId,
+        title: safe.title,
+        content: safe.content,
+        redacted: safe.redacted,
+        payload: { sourceIds: request.sourceIds, ...(request.force ? { force: true } : {}) },
+      });
+    }
     const result = await createCrystal(
       db,
       {
-        content: request.content,
-        title: request.title,
+        content: safe.content,
+        title: safe.title ?? request.title,
         sourceIds: request.sourceIds,
         spaceId,
         force: request.force,
@@ -230,7 +280,7 @@ export async function executeMemoryOp(
     }
     // 只能删本会话可见 space 的记忆；不可见与不存在同样拒绝，不泄露其它项目
     const memory = getMemory(db, request.id);
-    const visible = new Set(resolveSpaceIds('all', ctx.projectId));
+    const visible = new Set(resolveSpaceIds('all', ctx));
     if (
       !memory ||
       memory.lifecycleState === 'deleted' ||

@@ -9,6 +9,8 @@ interface TitleBarProps {
   className?: string;
   /** Optional no-drag actions; omitted props preserve the existing title bar layout. */
   actions?: React.ReactNode;
+  /** Optional no-drag content shown in place of the title. */
+  leading?: React.ReactNode;
 }
 
 export function SummonEnsoButton({ label = true }: { label?: boolean }) {
@@ -33,7 +35,7 @@ export function SummonEnsoButton({ label = true }: { label?: boolean }) {
  * - macOS: 仅作为拖拽区域（traffic lights 由系统渲染，左侧预留空间）
  * - Windows/Linux: 自绘最小化/最大化/关闭按钮
  */
-export function TitleBar({ title, className, actions }: TitleBarProps) {
+export function TitleBar({ title, className, actions, leading }: TitleBarProps) {
   const { t } = useI18n();
   const isMac = window.electronAPI.env.platform === 'darwin';
   const maximized = useWindowMaximized();
@@ -47,7 +49,11 @@ export function TitleBar({ title, className, actions }: TitleBarProps) {
         className
       )}
     >
-      <span className="text-sm font-medium text-muted-foreground">{title}</span>
+      {leading ? (
+        <div className="no-drag flex items-center">{leading}</div>
+      ) : (
+        <span className="text-sm font-medium text-muted-foreground">{title}</span>
+      )}
 
       {actions && <div className="no-drag ml-auto flex items-center gap-1">{actions}</div>}
 

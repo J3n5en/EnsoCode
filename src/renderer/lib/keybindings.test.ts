@@ -37,6 +37,15 @@ describe('send-message binding', () => {
     expect(DEFAULT_KEYBINDINGS['toggle-minimize-to-tray']).toBe(DEFAULT_TRAY_TOGGLE_BINDING);
   });
 
+  it('切换 Code / Bot 模式有默认绑定且不与其它动作冲突', () => {
+    expect(KEYBINDING_ACTIONS).toContain('toggle-app-mode');
+    const binding = DEFAULT_KEYBINDINGS['toggle-app-mode'];
+    expect(binding).toBe('mod+e');
+    expect(KEYBINDING_ACTIONS.filter((action) => DEFAULT_KEYBINDINGS[action] === binding)).toEqual([
+      'toggle-app-mode',
+    ]);
+  });
+
   it('空覆盖表示删除，不回落到默认', () => {
     expect(effectiveKeybindings({ 'toggle-minimize-to-tray': '' })['toggle-minimize-to-tray']).toBe(
       ''

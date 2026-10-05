@@ -136,15 +136,20 @@ describe('normalizeMemoryCaptureParams', () => {
     });
   });
 
-  it('spaceId 缺省 project；空 title/eventEnd 丢弃', () => {
+  it('spaceId 缺省不产出（由 Main 按会话决定）；空 title/eventEnd 丢弃', () => {
     expect(
       normalizeMemoryCaptureParams({ content: 'c', title: '  ', eventStart: '2020', eventEnd: '' })
     ).toEqual({
       content: 'c',
       importance: AGENT_CREATE_IMPORTANCE,
-      spaceId: 'project',
       eventStart: '2020',
     });
+  });
+
+  it('spaceId 接受 bot / chat', () => {
+    for (const spaceId of ['bot', 'chat', 'global', 'project']) {
+      expect(normalizeMemoryCaptureParams({ content: 'c', spaceId })).toMatchObject({ spaceId });
+    }
   });
 });
 
@@ -230,7 +235,6 @@ describe('capture 版本参数（force / evolvesFromId / evolvesRelation）', ()
     ).toEqual({
       content: 'c',
       importance: AGENT_CREATE_IMPORTANCE,
-      spaceId: 'project',
     });
 
     for (const relation of EVOLVES_RELATIONS) {
@@ -299,8 +303,28 @@ describe('parse*Request（Main 侧 unknown 收窄）', () => {
       spaceId: 'all',
     });
     expect(normalizeMemoryCaptureParams({ content: 'c', spaceId: 'proj:other' })).toMatchObject({
-      spaceId: 'project',
+      content: 'c',
     });
+    expect(
+      normalizeMemoryCaptureParams({ content: 'c', spaceId: 'proj:other' })
+    ).not.toHaveProperty('spaceId');
+    expect(parseMemorySearchRequest({ query: 'q', limit: 5, spaceId: 'bot:other' })).toBeNull();
+    expect(parseMemoryCaptureRequest({ ...cap, spaceId: 'chat:other' })).toBeNull();
+  });
+
+  it('bot / chat 语义 space：search 与 capture 都接受；capture 缺省 spaceId 保持缺省', () => {
+    for (const spaceId of ['bot', 'chat']) {
+      expect(normalizeMemorySearchParams({ query: 'q', spaceId })).toMatchObject({ spaceId });
+      expect(parseMemorySearchRequest({ query: 'q', limit: 5, spaceId })).toMatchObject({
+        spaceId,
+      });
+      expect(
+        parseMemoryCaptureRequest(normalizeMemoryCaptureParams({ content: 'c', spaceId }))
+      ).toMatchObject({ spaceId });
+    }
+    const parsed = parseMemoryCaptureRequest(normalizeMemoryCaptureParams({ content: 'c' }));
+    expect(parsed).not.toBeNull();
+    expect(parsed).not.toHaveProperty('spaceId');
   });
 
   it('capture：Main 派生 unitTypeSource：缺省 default，非法 fallback→fact，合法 explicit', () => {

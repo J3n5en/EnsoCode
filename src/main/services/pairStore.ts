@@ -32,7 +32,9 @@ export function upsertDevice(list: readonly PairedDevice[], device: PairedDevice
   const existing = list.find((d) => d.pairId === device.pairId);
   if (existing) {
     return list.map((d) =>
-      d.pairId === device.pairId ? { ...device, deviceName: d.deviceName } : d
+      d.pairId === device.pairId
+        ? { ...device, deviceName: d.deviceName, ...(d.scope ? { scope: d.scope } : {}) }
+        : d
     );
   }
   return [...list, device];

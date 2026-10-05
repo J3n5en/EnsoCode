@@ -126,6 +126,10 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
   'voiceInputEnabled',
+  'botModeEnabled',
+  'botRouteClassifier',
+  'botAssistantModel',
+  'protectedActionsInCode',
   'voiceInputDevice',
   'voiceModel',
   'voiceCorrectionEnabled',
@@ -167,6 +171,10 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryModelIdleMinutes',
   'memoryEmbeddingRemoteProviderId',
   'voiceInputEnabled',
+  'botModeEnabled',
+  'botRouteClassifier',
+  'botAssistantModel',
+  'protectedActionsInCode',
   'voiceInputDevice',
   'voiceModel',
   'voiceCorrectionEnabled',
@@ -361,6 +369,11 @@ function scheduleWrite(
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
     notifySpeechSettings(data);
+    if (settingsStateOf(previous).botModeEnabled !== settingsStateOf(data).botModeEnabled) {
+      void import('./bots')
+        .then(({ syncBotModeServices }) => syncBotModeServices())
+        .catch(() => {});
+    }
 
     // 普通 store 写排除 sender；Gateway 写显式选择 all-renderers。
     for (const win of BrowserWindow.getAllWindows()) {

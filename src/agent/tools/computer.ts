@@ -5,7 +5,7 @@ import { pixelFingerprint, screenshotCaption } from '@shared/computer/frame';
 import { normalizeComputerParams, toComputerWireParams } from '@shared/computer/params';
 import type { ComputerRunResult, ComputerScreenshot } from '@shared/computer/types';
 import type { ComputerOp, SessionIdentity } from '@shared/types/agent';
-import type { ApprovalGate } from '../approval';
+import { type ApprovalGate, throwUnlessAllowed } from '../approval';
 
 export interface ComputerInvokeRequest {
   identity: SessionIdentity | ChildSessionIdentity;
@@ -256,16 +256,9 @@ export function withComputerApproval(gate: ApprovalGate, tool: ToolDefinition): 
       assertCodeSize(normalized?.code);
       // 桌面输入不可撤回：审批展示整段脚本
       if (!normalized?.readOnly && gate.needsApproval('command', tool.name)) {
-        const result = await gate.ask(
-          tool.name,
-          'command',
-          normalized?.code ?? '',
-          signal,
-          toolCallId
+        throwUnlessAllowed(
+          await gate.ask(tool.name, 'command', normalized?.code ?? '', signal, toolCallId)
         );
-        if (result === 'block') throw new Error('Assistant approval blocked this operation');
-        if (result === 'deny') throw new Error('User denied this operation');
-        if (result === 'cancel') throw new Error('Approval cancelled');
       }
       return tool.execute(toolCallId, params, signal, onUpdate, ctx);
     },

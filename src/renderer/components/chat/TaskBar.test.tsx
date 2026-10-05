@@ -33,8 +33,12 @@ const agent = (status: SubagentInfo['status']): SubagentInfo => ({
   startedAt: 0,
 });
 
-const renderBar = (sessionId: string, tasks: BackgroundTaskInfo[], subagents: SubagentInfo[]) =>
-  renderToStaticMarkup(createElement(TaskBar, { sessionId, tasks, subagents }));
+const renderBar = (
+  sessionId: string,
+  tasks: BackgroundTaskInfo[],
+  subagents: SubagentInfo[],
+  readOnly?: boolean
+) => renderToStaticMarkup(createElement(TaskBar, { sessionId, tasks, subagents, readOnly }));
 
 describe('TaskBar', () => {
   it('首次出现即为终态的条目（重启后从快照/缓存恢复）不显示', () => {
@@ -46,6 +50,17 @@ describe('TaskBar', () => {
     const html = renderBar('live', [task('done')], [agent('done')]);
     expect(html).toContain('pnpm dev');
     expect(html).toContain('scan repo');
+  });
+
+  it('只读时仍显示运行中的条目，但不给停止按钮', () => {
+    const writable = renderBar('rw', [task('running')], [agent('running')]);
+    expect(writable).toContain('Stop task');
+    expect(writable).toContain('Stop subagent');
+    const html = renderBar('ro', [task('running')], [agent('running')], true);
+    expect(html).toContain('pnpm dev');
+    expect(html).toContain('scan repo');
+    expect(html).not.toContain('Stop task');
+    expect(html).not.toContain('Stop subagent');
   });
 });
 

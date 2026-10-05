@@ -52,6 +52,13 @@ import { app, session, WebContentsView } from 'electron';
 import { getWorkbenchView } from '../windows/createAppWindow';
 import { pinnedWorkbenchBounds } from '../windows/win32Restore';
 import { assertBrowserUrl, resolveLocalCwdForBrowser } from './browserFileRoot';
+import {
+  BROWSER_TAB_CLOSED_NOTICE,
+  BROWSER_TAKEOVER_NOTICE,
+  type BrowserActor,
+  BrowserTabClaims,
+  browserTabBusyMessage,
+} from './browserTabClaims';
 
 /**
  * 内嵌浏览器宿主：guest 页只活在 Main。独立 persist session，与编辑器 defaultSession 切开。
@@ -189,6 +196,10 @@ interface Tab {
   favicon: string | null;
   designBinding?: boolean;
   pickSeq: number;
+  /** 正在发合成输入（drag / CDP Input.*），input-event 不算用户接管 */
+  synthetic: number;
+  /** 上一个占用该 tab 的成员会话；换人后旧快照的 ref 作废 */
+  lastHolder?: string;
 }
 
 const EMPTY_STATE: BrowserTabState = {
@@ -202,6 +213,7 @@ const EMPTY_STATE: BrowserTabState = {
   locked: false,
   devtoolsOpen: false,
   designMode: false,
+  holder: null,
 };
 
 interface PageInfo {
@@ -220,9 +232,34 @@ const paramString = (params: unknown, key: string): string => {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** 会改页面或改 ref 标记的动作：成员第一次做就占用该标签 */
+const CLAIMING_OPS = new Set<BrowserOp>([
+  'navigate',
+  'snapshot',
+  'click',
+  'type',
+  'fill',
+  'press_key',
+  'scroll',
+  'select_option',
+  'click_xy',
+  'drag',
+  'cdp',
+  'close',
+  'lock',
+]);
+
+const USER_INPUT = new Set(['mouseDown', 'rawKeyDown', 'keyDown']);
+
 export class BrowserHost {
   private readonly tabs = new Map<string, Tab>();
   private readonly currentBySession = new Map<string, string>();
+  private readonly tabClaims = new BrowserTabClaims({
+    onChange: (tabId) => {
+      const tab = this.tabs.get(tabId);
+      if (tab) this.emitState(tab.ownerSessionId, tabId);
+    },
+  });
   private counter = 0;
   private guestSession?: Session;
   private hostWindow: () => BrowserWindow | null = () => null;
@@ -302,6 +339,7 @@ export class BrowserHost {
 
   private stateOf(tab: Tab): BrowserTabState {
     const contents = tab.view.webContents;
+    const holder = this.tabClaims.holder(tab.id);
     return {
       tabId: tab.id,
       url: contents.getURL(),
@@ -313,6 +351,7 @@ export class BrowserHost {
       locked: tab.locked,
       devtoolsOpen: tab.devtoolsOpen,
       designMode: tab.designMode,
+      holder: holder ? { conversationId: holder.sessionId, name: holder.name } : null,
     };
   }
 
@@ -529,6 +568,7 @@ export class BrowserHost {
     if (existing && existing.ownerSessionId !== sessionId)
       throw new Error('Browser tab owner mismatch.');
     if (!existing) this.createTab(sessionId, tabId);
+    this.tabClaims.userTookOver(tabId);
     this.currentBySession.set(sessionId, tabId);
     this.userTabs.add(tabId);
     const url = this.allowUrl(raw, sessionId);
@@ -549,6 +589,7 @@ export class BrowserHost {
       const history = tab.view.webContents.navigationHistory;
       const entry = history.getEntryAtIndex(history.getActiveIndex() - 1);
       if (!entry || !this.canNavigate(tab, entry.url)) return;
+      this.tabClaims.userTookOver(tabId);
       history.goBack();
     }
   }
@@ -559,6 +600,7 @@ export class BrowserHost {
       const history = tab.view.webContents.navigationHistory;
       const entry = history.getEntryAtIndex(history.getActiveIndex() + 1);
       if (!entry || !this.canNavigate(tab, entry.url)) return;
+      this.tabClaims.userTookOver(tabId);
       history.goForward();
     }
   }
@@ -574,7 +616,9 @@ export class BrowserHost {
 
   reload(tabId: string): void {
     const tab = this.tabs.get(tabId);
-    if (tab && this.canNavigate(tab, tab.view.webContents.getURL())) tab.view.webContents.reload();
+    if (!tab || !this.canNavigate(tab, tab.view.webContents.getURL())) return;
+    this.tabClaims.userTookOver(tabId);
+    tab.view.webContents.reload();
   }
 
   async closeTab(tabId: string): Promise<void> {
@@ -598,9 +642,12 @@ export class BrowserHost {
     this.currentBySession.delete(sessionId);
   }
 
-  /** 加锁只作用于当前 tab；释放要覆盖会话下全部 tab，否则切过 tab 会留下永远锁死的孤儿。 */
-  async setLocked(sessionId: string, locked: boolean): Promise<void> {
-    const current = this.mustTab(sessionId);
+  /**
+   * 加锁只作用于当前 tab；释放要覆盖会话下全部 tab，否则切过 tab 会留下永远锁死的孤儿。
+   * 不带 target 的释放来自面板「接管」；成员自己加 / 解锁只动它在用的 tab。
+   */
+  async setLocked(sessionId: string, locked: boolean, target?: Tab): Promise<void> {
+    const current = target ?? this.mustTab(sessionId);
     if (locked) {
       if (current.designMode) await this.setDesignMode(current.id, false);
       current.locked = true;
@@ -608,8 +655,9 @@ export class BrowserHost {
       this.emitState(sessionId, current.id);
       return;
     }
-    for (const tab of this.tabs.values()) {
+    for (const tab of target ? [target] : this.tabs.values()) {
       if (tab.ownerSessionId !== sessionId) continue;
+      if (!target && tab.locked) this.tabClaims.userTookOver(tab.id);
       // 遮罩没真删掉就不谎报 unlocked，用户可以再按一次
       if (await this.removeLockOverlay(tab)) tab.locked = false;
       this.emitState(tab.ownerSessionId, tab.id);
@@ -803,26 +851,82 @@ export class BrowserHost {
     return this.guestSession;
   }
 
-  async invoke(sessionId: string, op: BrowserOp, params: unknown): Promise<unknown> {
+  /** actor：共享浏览器里的成员会话，按标签页加锁；不传则沿用会话独占的旧行为 */
+  async invoke(
+    sessionId: string,
+    op: BrowserOp,
+    params: unknown,
+    actor?: BrowserActor
+  ): Promise<unknown> {
+    if (!actor) return this.run(sessionId, op, params, () => this.mustTab(sessionId));
+    if (this.tabClaims.takeClosed(actor.sessionId)) throw new Error(BROWSER_TAB_CLOSED_NOTICE);
+    if (op === 'tabs')
+      return this.handleTabs(
+        sessionId,
+        isRecord(params) && typeof params.action === 'string' ? params.action : 'list',
+        isRecord(params) && typeof params.index === 'number' ? params.index : undefined,
+        actor
+      );
+    const pointed = this.tabClaims.pointer(actor.sessionId);
+    const newTab = op === 'navigate' && isRecord(params) && params.newTab === true;
+    let tab = newTab
+      ? undefined
+      : ((pointed ? this.tabs.get(pointed) : undefined) ?? this.tabFor(sessionId));
+    if (!tab && op === 'navigate') tab = this.createTab(sessionId);
+    if (!tab) throw new Error('No browser tab is open. Call browser_navigate first.');
+    const target = tab;
+    let notice = false;
+    if (CLAIMING_OPS.has(op)) {
+      const claim = this.tabClaims.claim(target.id, actor);
+      if (!claim.ok) throw new Error(browserTabBusyMessage(claim.holder.name));
+      if (target.lastHolder !== actor.sessionId) target.lastSnapshot = undefined;
+      target.lastHolder = actor.sessionId;
+      if (claim.tookOver) {
+        target.lastSnapshot = undefined;
+        if (op !== 'snapshot') throw new Error(BROWSER_TAKEOVER_NOTICE);
+        notice = true;
+      }
+    } else {
+      this.tabClaims.point(actor.sessionId, target.id);
+    }
+    if (op === 'lock') {
+      await this.setLocked(sessionId, !(isRecord(params) && params.release === true), target);
+      return { locked: target.locked };
+    }
+    const result = await this.run(sessionId, op, params, () => target, target);
+    if (op === 'close') this.tabClaims.takeClosed(actor.sessionId);
+    return notice && typeof result === 'string'
+      ? `${BROWSER_TAKEOVER_NOTICE}\n\n${result}`
+      : result;
+  }
+
+  private async run(
+    sessionId: string,
+    op: BrowserOp,
+    params: unknown,
+    mustTab: () => Tab,
+    navigateTab?: Tab
+  ): Promise<unknown> {
     switch (op) {
       case 'navigate':
         return this.navigate(
           sessionId,
           paramString(params, 'url'),
-          isRecord(params) && params.newTab === true
+          isRecord(params) && params.newTab === true,
+          navigateTab
         );
       case 'snapshot':
-        return this.snapshot(this.mustTab(sessionId));
+        return this.snapshot(mustTab());
       case 'click':
-        return this.click(this.mustTab(sessionId), paramString(params, 'ref'));
+        return this.click(mustTab(), paramString(params, 'ref'));
       case 'type': {
         const text = isRecord(params) && typeof params.text === 'string' ? params.text : '';
         const submit = isRecord(params) && params.submit === true;
-        return this.type(this.mustTab(sessionId), paramString(params, 'ref'), text, submit);
+        return this.type(mustTab(), paramString(params, 'ref'), text, submit);
       }
       case 'fill':
         return this.type(
-          this.mustTab(sessionId),
+          mustTab(),
           paramString(params, 'ref'),
           isRecord(params) && typeof params.value === 'string'
             ? params.value
@@ -832,13 +936,10 @@ export class BrowserHost {
           false
         );
       case 'press_key':
-        return this.runPage(
-          this.mustTab(sessionId),
-          pagePressKeyScript(paramString(params, 'key'))
-        );
+        return this.runPage(mustTab(), pagePressKeyScript(paramString(params, 'key')));
       case 'scroll':
         return this.runPage(
-          this.mustTab(sessionId),
+          mustTab(),
           pageScrollScript({
             ...(isRecord(params) && typeof params.ref === 'string' ? { ref: params.ref } : {}),
             ...(isRecord(params) && typeof params.direction === 'string'
@@ -856,37 +957,37 @@ export class BrowserHost {
             : isRecord(params) && typeof params.value === 'string'
               ? [params.value]
               : [];
-        return this.selectOption(this.mustTab(sessionId), paramString(params, 'ref'), values);
+        return this.selectOption(mustTab(), paramString(params, 'ref'), values);
       }
       case 'click_xy': {
         const x = isRecord(params) ? Number(params.x) : Number.NaN;
         const y = isRecord(params) ? Number(params.y) : Number.NaN;
         if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('x and y are required');
-        return this.runPage(this.mustTab(sessionId), pageClickXyScript(x, y));
+        return this.runPage(mustTab(), pageClickXyScript(x, y));
       }
       case 'drag':
-        return this.drag(this.mustTab(sessionId), params);
+        return this.drag(mustTab(), params);
       case 'highlight':
         return this.runPage(
-          this.mustTab(sessionId),
+          mustTab(),
           pageHighlightScript(paramString(params, 'ref')),
           paramString(params, 'ref')
         );
       case 'bounding_box':
-        return this.boundingBox(this.mustTab(sessionId), paramString(params, 'ref'));
+        return this.boundingBox(mustTab(), paramString(params, 'ref'));
       case 'screenshot':
         return this.screenshot(
-          this.mustTab(sessionId),
+          mustTab(),
           isRecord(params) && typeof params.ref === 'string' ? params.ref : undefined
         );
       case 'cdp':
         return this.cdpCommand(
-          this.mustTab(sessionId),
+          mustTab(),
           paramString(params, 'method'),
           isRecord(params) && isRecord(params.params) ? params.params : {}
         );
       case 'close': {
-        const tab = this.mustTab(sessionId);
+        const tab = mustTab();
         await this.destroyTab(tab);
         return { closed: tab.id };
       }
@@ -900,7 +1001,7 @@ export class BrowserHost {
         const locked = !(isRecord(params) && params.release === true);
         await this.setLocked(sessionId, locked);
         // 解锁可能失败（遮罩没删掉），如实回报真实状态
-        return { locked: this.mustTab(sessionId).locked };
+        return { locked: mustTab().locked };
       }
     }
   }
@@ -911,9 +1012,15 @@ export class BrowserHost {
       .sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  private async handleTabs(sessionId: string, action: string, index?: number): Promise<unknown> {
+  private async handleTabs(
+    sessionId: string,
+    action: string,
+    index?: number,
+    actor?: BrowserActor
+  ): Promise<unknown> {
     const list = () => {
-      const current = this.currentBySession.get(sessionId);
+      const current =
+        (actor && this.tabClaims.pointer(actor.sessionId)) ?? this.currentBySession.get(sessionId);
       return this.tabsForSession(sessionId).map((tab, tabIndex) => ({
         index: tabIndex,
         ...this.stateOf(tab),
@@ -922,6 +1029,7 @@ export class BrowserHost {
     };
     if (action === 'new') {
       const tab = this.createTab(sessionId);
+      if (actor) this.tabClaims.claim(tab.id, actor);
       this.userTabs.add(tab.id);
       this.requestReveal(sessionId, tab.id);
       return { opened: tab.id, tabs: list() };
@@ -933,24 +1041,34 @@ export class BrowserHost {
       const tab = this.tabsForSession(sessionId)[index];
       if (!tab) throw new Error(`No browser tab at index ${index}`);
       this.currentBySession.set(sessionId, tab.id);
+      if (actor) this.tabClaims.point(actor.sessionId, tab.id);
       this.requestReveal(sessionId, tab.id);
       return { selected: tab.id, tabs: list() };
     }
     if (action === 'close') {
       const tabs = this.tabsForSession(sessionId);
-      const tab = index === undefined ? this.tabFor(sessionId) : tabs[index];
+      const pointed = actor ? this.tabClaims.pointer(actor.sessionId) : undefined;
+      const tab =
+        index === undefined
+          ? ((pointed ? this.tabs.get(pointed) : undefined) ?? this.tabFor(sessionId))
+          : tabs[index];
       if (!tab) throw new Error('No browser tab to close');
+      if (actor) {
+        const claim = this.tabClaims.claim(tab.id, actor);
+        if (!claim.ok) throw new Error(browserTabBusyMessage(claim.holder.name));
+      }
       await this.closeTab(tab.id);
+      if (actor) this.tabClaims.takeClosed(actor.sessionId);
       return { closed: tab.id, tabs: list() };
     }
     return { tabs: list() };
   }
 
-  async navigate(sessionId: string, raw: string, newTab = false): Promise<PageInfo> {
+  async navigate(sessionId: string, raw: string, newTab = false, target?: Tab): Promise<PageInfo> {
     const url = assertAllowedUrl(raw);
-    const tab = newTab
-      ? this.createTab(sessionId)
-      : (this.tabFor(sessionId) ?? this.createTab(sessionId));
+    const tab =
+      target ??
+      (newTab ? this.createTab(sessionId) : (this.tabFor(sessionId) ?? this.createTab(sessionId)));
     const contents = tab.view.webContents;
     tab.lastSnapshot = undefined;
     await Promise.race([
@@ -1048,7 +1166,12 @@ export class BrowserHost {
       const endY = Number(raw.to.y);
       if (![startX, startY, endX, endY].every(Number.isFinite)) throw new Error('Drag failed.');
       for (const event of dragInputEvents({ x: startX, y: startY }, { x: endX, y: endY })) {
-        contents.sendInputEvent(event);
+        tab.synthetic += 1;
+        try {
+          contents.sendInputEvent(event);
+        } finally {
+          tab.synthetic -= 1;
+        }
         await sleep(16);
       }
       await sleep(40);
@@ -1066,7 +1189,10 @@ export class BrowserHost {
   ): Promise<unknown> {
     assertDevtoolsIdle(tab.devtoolsOpen);
     assertAllowedCdpMethod(method);
-    const result = await this.cdp(tab, method, params);
+    tab.synthetic += 1;
+    const result = await this.cdp(tab, method, params).finally(() => {
+      tab.synthetic -= 1;
+    });
     if (result === undefined) {
       throw new Error(`CDP method ${method} returned no result`);
     }
@@ -1166,9 +1292,14 @@ export class BrowserHost {
       designMode: false,
       favicon: null,
       pickSeq: 0,
+      synthetic: 0,
     };
     const contents = view.webContents;
     const push = () => this.emitState(sessionId, id);
+    // 用户本人点 / 敲进页面：不受锁限制，但占用者下一次操作要知道
+    contents.on('input-event', (_event, input) => {
+      if (tab.synthetic === 0 && USER_INPUT.has(input.type)) this.tabClaims.userTookOver(id);
+    });
     contents.on('did-start-loading', push);
     contents.on('did-stop-loading', push);
     contents.on('did-navigate-in-page', push);
@@ -1219,6 +1350,7 @@ export class BrowserHost {
     });
     contents.on('destroyed', () => {
       this.tabs.delete(id);
+      this.tabClaims.closeTab(id);
       if (this.currentBySession.get(sessionId) === id) this.currentBySession.delete(sessionId);
       this.emitState(sessionId, id);
     });
@@ -1238,7 +1370,13 @@ export class BrowserHost {
   private evictIfNeeded(): void {
     if (this.tabs.size < MAX_HEADLESS_TABS) return;
     const oldest = [...this.tabs.values()]
-      .filter((tab) => !tab.locked && tab.id !== this.shown?.tabId && !this.userTabs.has(tab.id))
+      .filter(
+        (tab) =>
+          !tab.locked &&
+          tab.id !== this.shown?.tabId &&
+          !this.userTabs.has(tab.id) &&
+          !this.tabClaims.holder(tab.id)
+      )
       .sort((a, b) => a.createdAt - b.createdAt)[0];
     if (oldest) void this.destroyTab(oldest);
   }
@@ -1261,6 +1399,7 @@ export class BrowserHost {
 
   private async destroyTab(tab: Tab, opts?: { keepPersist?: boolean }): Promise<void> {
     this.tabs.delete(tab.id);
+    this.tabClaims.closeTab(tab.id);
     if (this.currentBySession.get(tab.ownerSessionId) === tab.id) {
       this.currentBySession.delete(tab.ownerSessionId);
     }
@@ -1345,7 +1484,7 @@ export class BrowserHost {
   private async hibernateIdleTabs(): Promise<void> {
     const now = Date.now();
     for (const tab of [...this.tabs.values()]) {
-      if (tab.locked || tab.id === this.shown?.tabId) continue;
+      if (tab.locked || tab.id === this.shown?.tabId || this.tabClaims.holder(tab.id)) continue;
       const seen = this.lastSeen.get(tab.id) ?? tab.createdAt;
       if (now - seen < IDLE_MS) continue;
       const state = this.stateOf(tab);
@@ -1415,6 +1554,15 @@ export class BrowserHost {
       ];
     });
     return mergeBrowserSearchTabs(live, persisted);
+  }
+
+  /** 成员本轮结束 / 被停止：放掉它占着的标签 */
+  releaseActor(actorSessionId: string): void {
+    this.tabClaims.release(actorSessionId);
+  }
+
+  forgetActor(actorSessionId: string): void {
+    this.tabClaims.forget(actorSessionId);
   }
 
   /** 进托盘：关掉所有 guest renderer，HTTP 用户 tab 的 URL 留在 persist 里。 */

@@ -1,15 +1,20 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { APPROVAL_TIMEOUT_ERROR } from '@shared/humanRequestTimeout';
 import type {
   ApprovalDecision,
   ApprovalKind,
   ApprovalMode,
   ApprovalRequestInfo,
+  ProtectedActionCategory,
 } from '@shared/types/agent';
+import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
+
+type ApprovalResult = 'allow' | 'deny' | 'block' | 'cancel' | 'timeout';
 
 interface PendingApproval {
   info: ApprovalRequestInfo;
-  settle(result: 'allow' | 'deny' | 'block' | 'cancel'): void;
+  settle(result: ApprovalResult): void;
 }
 
 export type ApprovalReviewFn = (
@@ -19,6 +24,12 @@ export type ApprovalReviewFn = (
 
 export interface ApprovalGateOptions {
   review?: ApprovalReviewFn;
+  /** 受保护动作底线：开启时对外发送 / 删除 / 付款 / 部署 / 密钥类动作无视档位与会话白名单，强制真人确认 */
+  protectedFloor?: boolean;
+  /** bot 模式：档位为 full 时底线不生效（完全放行即真放行），按当前档位实时判断 */
+  exemptFull?: boolean;
+  /** 等真人处理的时限：真人阶段的请求带 expiresAt，由 Main 到期发 request-timeout */
+  humanTimeoutMs?: number;
 }
 
 /**
@@ -37,6 +48,27 @@ export class ApprovalGate {
     private readonly options?: ApprovalGateOptions
   ) {}
 
+  get protectedFloor(): boolean {
+    if (this.options?.protectedFloor !== true) return false;
+    return !(this.options.exemptFull === true && this.mode === 'full');
+  }
+
+  /** 子会话沿用底线配置，再按自身档位判断 */
+  get floorOptions(): Pick<
+    ApprovalGateOptions,
+    'protectedFloor' | 'exemptFull' | 'humanTimeoutMs'
+  > {
+    return {
+      protectedFloor: this.options?.protectedFloor === true,
+      exemptFull: this.options?.exemptFull === true,
+      humanTimeoutMs: this.options?.humanTimeoutMs,
+    };
+  }
+
+  get humanTimeoutMs(): number | undefined {
+    return this.options?.humanTimeoutMs;
+  }
+
   needsApproval(kind: ApprovalKind, tool: string): boolean {
     if (this.mode === 'full') return false;
     if (this.mode === 'auto-edits' && (kind === 'file-edit' || kind === 'file-write')) return false;
@@ -50,20 +82,22 @@ export class ApprovalGate {
     summary: string,
     signal: AbortSignal | undefined,
     toolCallId?: string,
-    filePaths?: string[]
-  ): Promise<'allow' | 'deny' | 'block' | 'cancel'> {
+    filePaths?: string[],
+    protectedCategory?: ProtectedActionCategory
+  ): Promise<ApprovalResult> {
     const requestId = `apr-${++this.counter}-${Date.now()}`;
-    const info: ApprovalRequestInfo = {
+    let info: ApprovalRequestInfo = {
       requestId,
       tool,
       kind,
       summary,
       ...(filePaths?.length ? { filePaths: [...filePaths] } : {}),
       ...(toolCallId ? { toolCallId } : {}),
+      ...(protectedCategory ? { protected: protectedCategory } : {}),
     };
     return new Promise((resolve) => {
       let settled = false;
-      const settle = (result: 'allow' | 'deny' | 'block' | 'cancel') => {
+      const settle = (result: ApprovalResult) => {
         if (settled) return;
         settled = true;
         this.pending.delete(requestId);
@@ -72,15 +106,23 @@ export class ApprovalGate {
         resolve(result);
       };
       const onAbort = () => settle('cancel');
+      const askHuman = () => {
+        const timeoutMs = this.options?.humanTimeoutMs;
+        if (timeoutMs) info = { ...info, expiresAt: Date.now() + timeoutMs };
+        this.pending.set(requestId, { info, settle });
+        this.onRequest(info);
+      };
       this.pending.set(requestId, { info, settle });
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) {
         settle('cancel');
         return;
       }
-      const review = this.mode === 'assistant' ? this.options?.review : undefined;
+      // 受保护动作不交给代审模型放行，直接等真人
+      const review =
+        this.mode === 'assistant' && !protectedCategory ? this.options?.review : undefined;
       if (!review) {
-        this.onRequest(info);
+        askHuman();
         return;
       }
       this.onRequest({ ...info, phase: 'reviewing' });
@@ -96,11 +138,10 @@ export class ApprovalGate {
             settle('block');
             return;
           }
-          this.pending.set(requestId, { info, settle });
-          this.onRequest(info);
+          askHuman();
         })
         .catch(() => {
-          if (!settled) this.onRequest(info);
+          if (!settled) askHuman();
         });
     });
   }
@@ -109,8 +150,15 @@ export class ApprovalGate {
   respond(requestId: string, decision: ApprovalDecision): void {
     const entry = this.pending.get(requestId);
     if (!entry) return;
-    if (decision === 'allowSession') this.sessionAllowed.add(entry.info.tool);
+    if (decision === 'allowSession' && !entry.info.protected) {
+      this.sessionAllowed.add(entry.info.tool);
+    }
     entry.settle(decision === 'deny' ? 'deny' : 'allow');
+  }
+
+  /** Main 判定等人超时：按超时拒绝（区别于用户主动拒绝） */
+  expire(requestId: string): void {
+    this.pending.get(requestId)?.settle('timeout');
   }
 
   /** abort / 会话终止：全部按取消收尾 */
@@ -138,6 +186,13 @@ export function summarizeApproval(kind: ApprovalKind, params: unknown, toolName 
   }
 }
 
+export function throwUnlessAllowed(result: ApprovalResult): void {
+  if (result === 'block') throw new Error('Assistant approval blocked this operation');
+  if (result === 'deny') throw new Error('User denied this operation');
+  if (result === 'cancel') throw new Error('Approval cancelled');
+  if (result === 'timeout') throw new Error(APPROVAL_TIMEOUT_ERROR);
+}
+
 /** 给工具包一道审批门：deny/cancel 抛错（pi 转 isError 工具结果，轮继续） */
 export function withApproval(
   gate: ApprovalGate,
@@ -147,22 +202,56 @@ export function withApproval(
   return {
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      if (gate.needsApproval(kind, definition.name)) {
+      const protectedCategory = gate.protectedFloor
+        ? classifyProtectedTool(definition.name, kind, params)
+        : null;
+      if (protectedCategory || gate.needsApproval(kind, definition.name)) {
         const filePaths =
           kind === 'file-edit' || kind === 'file-write'
             ? extractWriteTargetPaths(definition.name, params)
             : undefined;
-        const result = await gate.ask(
-          definition.name,
-          kind,
-          summarizeApproval(kind, params, definition.name),
-          signal,
-          toolCallId,
-          filePaths
+        throwUnlessAllowed(
+          await gate.ask(
+            definition.name,
+            kind,
+            summarizeApproval(kind, params, definition.name),
+            signal,
+            toolCallId,
+            filePaths,
+            protectedCategory ?? undefined
+          )
         );
-        if (result === 'block') throw new Error('Assistant approval blocked this operation');
-        if (result === 'deny') throw new Error('User denied this operation');
-        if (result === 'cancel') throw new Error('Approval cancelled');
+      }
+      return definition.execute(toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
+}
+
+/** 平时免审的只读工具：只在底线开启且读取密钥文件时要求确认 */
+export function withProtectedFloor(
+  gate: ApprovalGate,
+  kind: 'read',
+  definition: ToolDefinition
+): ToolDefinition {
+  return {
+    ...definition,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const protectedCategory = gate.protectedFloor
+        ? classifyProtectedTool(definition.name, kind, params)
+        : null;
+      if (protectedCategory) {
+        const record = (params ?? {}) as Record<string, unknown>;
+        throwUnlessAllowed(
+          await gate.ask(
+            definition.name,
+            'command',
+            `${definition.name} ${String(record.path ?? record.file_path ?? '')}`,
+            signal,
+            toolCallId,
+            undefined,
+            protectedCategory
+          )
+        );
       }
       return definition.execute(toolCallId, params, signal, onUpdate, ctx);
     },

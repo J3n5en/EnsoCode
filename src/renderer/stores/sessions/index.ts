@@ -1274,6 +1274,8 @@ export const useSessionsStore = create<SessionsState>()(
         if (
           event.type === 'text-completed' ||
           event.type === 'text-failed' ||
+          event.type === 'choice-classified' ||
+          event.type === 'choice-failed' ||
           event.type === 'text-delta'
         )
           return;
@@ -1486,10 +1488,8 @@ export const useSessionsStore = create<SessionsState>()(
           );
           // 压缩不发 turn-completed：成功结束后再泵队列，否则排队消息会卡住
           if (event.state === 'end') {
-            if (get().conversations[id]?.abortRequested) {
-              set((state) => patch(state, id, { abortRequested: false }));
-              return;
-            }
+            // 放弃（中断 / 轮失败）不泵；中断标记留给被中断轮的收束消费，这里抢先清会让那一轮把队列泵出去
+            if (event.abandoned || get().conversations[id]?.abortRequested) return;
             // 已有投递在途（worker 等压完才起轮）：再泵就是并发 prompt，交给那一轮收束时泵
             if (get().conversations[id]?.messages.some((message) => message.optimistic)) return;
             flushQueue(id);
@@ -3549,10 +3549,11 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[id];
           if (!conversation?.started) return;
           // 停止 = 用户接管：本轮收束不再自动续跑，活动目标一并暂停（可手动恢复）
+          // 只有在跑的轮次会回流收束来消费中断标记；空闲压缩中停止不置，否则标记残留吞掉下一轮
           const goal = conversation.goal;
           set((state) =>
             patch(state, id, {
-              abortRequested: true,
+              ...(conversation.status === 'running' ? { abortRequested: true } : {}),
               ...(goal?.status === 'active'
                 ? { goal: { ...goal, status: 'paused' as const, note: 'stopped by user' } }
                 : {}),
@@ -3883,15 +3884,17 @@ export const useSessionsStore = create<SessionsState>()(
           const conversation = get().conversations[conversationId];
           const item = conversation?.queuedMessages?.find((message) => message.id === messageId);
           if (!conversation?.started || conversation.workspaceMigrating || !item) return;
-          if (conversation.status !== 'running') {
+          const running = conversation.status === 'running';
+          if (!running && !conversation.compaction) {
             get().sendQueuedNow(conversationId, messageId);
             return;
           }
-          // 用户接管：中断本轮不自动续跑，活动目标一并暂停（与 abort 一致）
+          // 用户接管：中断本轮不自动续跑，活动目标一并暂停（与 abort 一致）。
+          // 空闲压缩中（sendQueuedNow 会等压完）同样先中断压缩；没有轮次收束，不置中断标记
           const goal = conversation.goal;
           set((state) =>
             patch(state, conversationId, {
-              abortRequested: true,
+              ...(running ? { abortRequested: true } : {}),
               ...(goal?.status === 'active'
                 ? { goal: { ...goal, status: 'paused' as const, note: 'stopped by user' } }
                 : {}),

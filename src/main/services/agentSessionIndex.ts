@@ -111,6 +111,7 @@ function identityOf(
     | { type: 'title-failed' }
     | { type: 'text-completed' }
     | { type: 'text-failed' }
+    | { type: 'choice-classified' | 'choice-failed' }
     | { type: 'text-delta' }
     | { type: 'oauth-pool-select' }
     | McpWorkerEvent
@@ -421,6 +422,8 @@ export class AgentSessionIndex {
     if (
       event.type === 'text-completed' ||
       event.type === 'text-failed' ||
+      event.type === 'choice-classified' ||
+      event.type === 'choice-failed' ||
       event.type === 'text-delta'
     )
       return false;

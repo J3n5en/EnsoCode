@@ -17,6 +17,7 @@ import {
   Gauge,
   Hourglass,
   type LucideIcon,
+  Package,
   Repeat,
   Settings2,
   Shield,
@@ -40,6 +41,7 @@ import { computeStats, formatDuration } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextInspector } from './ContextInspector';
 import { ContextMeter } from './ContextMeter';
+import { buildRequestBodySegment } from './requestBodySegment';
 import { StatusLineSettings } from './StatusLineSettings';
 import { resolveSessionUsageAccount } from './sessionUsageAccount';
 import {
@@ -86,6 +88,7 @@ export const SEGMENT_LABEL_KEYS: Record<StatusLineSegmentId, string> = {
   tokens: 'Tokens',
   cache: 'Cache hit rate',
   context: 'Context window',
+  requestBody: 'Recent request body',
   turns: 'Turns',
   speed: 'Speed',
   duration: 'Duration',
@@ -131,6 +134,7 @@ const APPROVAL_ICONS: Record<ApprovalMode, LucideIcon> = {
 const SEGMENT_ICONS: Record<Exclude<StatusLineSegmentId, 'approval'>, LucideIcon> = {
   model: Cpu,
   context: Gauge,
+  requestBody: Package,
   turns: Repeat,
   duration: Clock,
   sessionTime: Hourglass,
@@ -274,6 +278,7 @@ function buildSegmentValues(
   const stats = computeStats(messages);
   const values: Record<StatusLineSegmentId, SegmentValue | undefined> = {
     model: undefined,
+    requestBody: buildRequestBodySegment(t, conversation.requestBody),
     turns: undefined,
     duration: undefined,
     sessionTime: undefined,

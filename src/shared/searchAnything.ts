@@ -198,6 +198,26 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     description: 'Used by model requests, the built-in browser, and agent tools',
   },
   { id: 'general.updates', category: 'general', title: 'Updates' },
+  {
+    id: 'experimental.botMode',
+    category: 'experimental',
+    title: 'Bot mode',
+    description:
+      'Adds a Code | Bot switch to the sidebar. Create members with their own persona, model and tools, and chat with them alone or in groups.',
+  },
+  {
+    id: 'bots.routeClassifier',
+    category: 'bots',
+    title: 'Group reply picker model',
+    description:
+      'When nobody is @-mentioned in a smart-routing group, this model picks which member replies.',
+  },
+  {
+    id: 'bots.assistantModel',
+    category: 'bots',
+    title: 'Bot assistant model',
+    description: 'Used for helper tasks such as auto-configuring member abilities.',
+  },
   { id: 'shortcuts.root', category: 'shortcuts', title: 'Shortcuts' },
   { id: 'appearance.theme', category: 'appearance', title: 'Theme mode' },
   { id: 'providers.root', category: 'providers', title: 'Model Providers' },

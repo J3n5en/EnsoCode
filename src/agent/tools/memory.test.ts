@@ -127,9 +127,13 @@ describe('createMemoryTools', () => {
         { query: 'pg', recordedDateFrom: '2024-01-01', recordedDateTo: '' },
         { query: 'pg', mode: 'deep' },
         { query: 'pg', mode: 'FAST' },
+        { query: 'pg', spaceId: 'bot' },
+        { query: 'pg', spaceId: 'chat' },
       ],
       memory_capture: [
         { content: 'c' },
+        { content: 'c', spaceId: 'bot' },
+        { content: 'c', spaceId: 'chat' },
         { content: 'c', unitType: 'vibe' },
         { content: 'c', title: 't', unitType: 'decision', importance: 0.9, eventStart: '2020' },
         { content: 'c', force: 'true' },
@@ -182,7 +186,6 @@ describe('createMemoryTools', () => {
       content: 'c',
       unitType: 'vibe',
       importance: 0.6,
-      spaceId: 'project',
     });
     const placeholder = prep(1, {
       content: 'c',

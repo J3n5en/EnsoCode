@@ -221,7 +221,8 @@ export function parseMentionCandidate(value: unknown): MentionCandidate | null {
     !isNonEmptyString(candidate.description) ||
     (candidate.source !== 'system' &&
       candidate.source !== 'builtin' &&
-      candidate.source !== 'custom') ||
+      candidate.source !== 'custom' &&
+      candidate.source !== 'bot') ||
     typeof candidate.locked !== 'boolean' ||
     typeof candidate.canDisable !== 'boolean' ||
     typeof candidate.canEdit !== 'boolean'

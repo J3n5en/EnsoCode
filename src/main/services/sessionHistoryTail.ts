@@ -54,3 +54,10 @@ export function projectParentHistoryTail(branch: readonly SessionEntry[]): {
   const raw = withUserEntryIds(branch.flatMap(sessionEntryToContextMessages), branch);
   return projectWindow(raw, raw.length);
 }
+
+/** 全量投影：worker 无投影的会话合成快照用（分页由快照链路按绝对 index 切） */
+export function projectParentHistoryAll(branch: readonly SessionEntry[]): ProjectedMessage[] {
+  return withUserEntryIds(branch.flatMap(sessionEntryToContextMessages), branch)
+    .map(projectMessage)
+    .filter((message): message is ProjectedMessage => message !== null);
+}

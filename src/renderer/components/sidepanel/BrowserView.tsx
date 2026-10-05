@@ -1,5 +1,4 @@
 import type { BrowserTabState } from '@shared/types/browser';
-import type { DockviewPanelApi } from 'dockview-react';
 import { ArrowLeft, ArrowRight, BoxSelect, Bug, Globe, Hand, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -27,6 +26,7 @@ const EMPTY: BrowserTabState = {
   locked: false,
   devtoolsOpen: false,
   designMode: false,
+  holder: null,
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -60,12 +60,25 @@ function readBox(el: HTMLElement | null): Rect | null {
  * 负责把自己的屏幕矩形与可见性报给 Main，并渲染地址栏。
  * 侧栏宽度动画 / 拖拽期间矩形连续变化，用 rAF 轮询比事件拼接更稳。
  */
+/** BrowserView 宿主：Code 用 dockview 面板，Bot 右侧面板用固定 tab */
+export interface BrowserSurface {
+  readonly id: string;
+  readonly isActive: boolean;
+  readonly isVisible: boolean;
+  setTitle(title: string): void;
+  getParameters(): object | undefined;
+  updateParameters(params: object): void;
+}
+
 export function BrowserView({
   conversationId,
   panelApi,
+  active,
 }: {
   conversationId: string;
-  panelApi: DockviewPanelApi;
+  panelApi: BrowserSurface;
+  /** 宿主自行判定可见时传入（Bot 面板）；缺省按 Code 侧栏与当前会话判定 */
+  active?: boolean;
 }) {
   const { t } = useI18n();
   const dockConversationId = useSessionsStore((s) =>
@@ -75,6 +88,7 @@ export function BrowserView({
     (s) => s.uiByConversation[dockConversationId]?.open ?? false
   );
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
+  const hostVisible = active ?? (sidebarOpen && isActiveConversation);
   const [state, setState] = useState<BrowserTabState>(EMPTY);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
@@ -164,8 +178,7 @@ export function BrowserView({
     const tick = () => {
       if (disposed) return;
       const visible =
-        sidebarOpen &&
-        isActiveConversation &&
+        hostVisible &&
         panelApi.isActive &&
         panelApi.isVisible &&
         document.visibilityState === 'visible';
@@ -221,7 +234,7 @@ export function BrowserView({
         void window.electronAPI.browser.setDevToolsViewport(tabId, conversationId, null);
       }
     };
-  }, [conversationId, tabId, panelApi, sidebarOpen, isActiveConversation]);
+  }, [conversationId, tabId, panelApi, hostVisible]);
 
   const submit = async () => {
     setEditing(false);

@@ -1,4 +1,9 @@
 /** 内嵌浏览器当前 tab 状态(main → renderer 推送) */
+export interface BrowserTabHolder {
+  conversationId: string;
+  name: string;
+}
+
 export interface BrowserTabState {
   /** 无 tab 时为 null */
   tabId: string | null;
@@ -15,6 +20,8 @@ export interface BrowserTabState {
   devtoolsOpen: boolean;
   /** 用户圈选 Design Mode */
   designMode: boolean;
+  /** 共享浏览器里正在操作该 tab 的成员会话 */
+  holder: BrowserTabHolder | null;
 }
 
 export type BrowserClearKind = 'cookies' | 'cache' | 'all';

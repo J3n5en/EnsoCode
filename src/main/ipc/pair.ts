@@ -14,6 +14,7 @@ import {
   getPairStatus,
   renameDevice,
   revokeDevice,
+  setDeviceScope,
   setPairQueueActionListener,
   setPairResumeListener,
   setPairSessionConfigListener,
@@ -23,6 +24,7 @@ import {
   startPairing,
   updatePairCatalog,
 } from '../services/pairHost';
+import { isPairScope } from '../services/pairScope';
 import {
   adoptPairSessionHeadless,
   applyPairQueueActionHeadless,
@@ -75,6 +77,12 @@ export function registerPairHandlers(): void {
       return { ok: false, error: 'invalid arguments' };
     }
     return renameDevice(pairId, deviceName);
+  });
+  ipcMain.handle(IPC_CHANNELS.PAIR_SET_SCOPE, (_event, pairId: unknown, scope: unknown) => {
+    if (typeof pairId !== 'string' || !pairId || !isPairScope(scope)) {
+      return { ok: false, error: 'invalid arguments' };
+    }
+    return setDeviceScope(pairId, scope);
   });
   ipcMain.handle(IPC_CHANNELS.PAIR_STATUS, () => getPairStatus());
   ipcMain.handle(IPC_CHANNELS.PAIR_SET_RELAY, (_event, url: unknown) => {

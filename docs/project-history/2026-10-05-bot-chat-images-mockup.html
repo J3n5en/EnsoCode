@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>成员在聊天里发图</title>
+<style>
+:root{--bg:oklch(.145 .014 285.82);--fg:oklch(.985 0 0);--muted:oklch(.269 .014 285.82);--mfg:oklch(.708 .014 285.82);--border:oklch(.32 .014 285.82);--card:oklch(.18 .014 285.82);--info:oklch(.623 .214 259.81);--warning:oklch(.769 .189 70.08);--danger:oklch(.637 .237 25.33)}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.45 Inter,system-ui,-apple-system,"PingFang SC",sans-serif;background:#2a2a2e;color:var(--fg)}
+button{font:inherit;color:inherit;cursor:pointer}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px}
+.lead{width:1120px;color:#ddd;font-size:12px}
+.lead b{color:#fff}
+.scenes{width:1120px;display:flex;gap:6px;flex-wrap:wrap}
+.scenes button{border:1px solid #555;background:#1c1c1f;color:#eee;border-radius:8px;padding:6px 10px}
+.scenes button.on{background:#fff;color:#111;border-color:#fff}
+.win{width:1120px;height:740px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 50px #0006}
+.title{height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--border)}
+.dot{width:10px;height:10px;border-radius:50%;background:#555}
+.title .name{margin-left:8px;color:var(--mfg);font-size:12px}
+.body{flex:1;display:flex;min-height:0}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px}
+.head .t{font-weight:600}
+.head .sub{color:var(--mfg);font-size:12px}
+.tl{flex:1;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:8px;max-width:640px}
+.me{align-self:flex-end}
+.who{font-size:12px;color:var(--mfg);margin-bottom:2px}
+.who b{color:var(--fg);margin-right:6px}
+.bub{background:var(--muted);border-radius:4px 12px 12px 12px;padding:8px 12px}
+.me .bub{background:oklch(.32 .02 285);border-radius:12px 4px 12px 12px}
+.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:650;flex:none}
+.shots{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.shot{width:120px;height:78px;border:0;border-radius:8px;padding:0;position:relative;overflow:hidden}
+.shot.fail{width:168px;height:auto;min-height:78px;background:transparent;border:1px dashed var(--danger);color:var(--danger);font-size:11px;padding:8px;text-align:left}
+.badge{position:absolute;left:4px;top:4px;font-size:10px;line-height:1.4;border-radius:4px;padding:0 4px;color:#fff;background:#000a}
+.badge.desk{background:color-mix(in oklch,var(--warning) 88%,#000);color:#1c1404}
+.cap{position:absolute;left:6px;bottom:4px;font-size:10px;color:#fff;text-shadow:0 1px 2px #000}
+.warn{margin-top:6px;color:var(--warning);font-size:12px}
+.note{margin-top:6px;color:var(--mfg);font-size:12px}
+.banner{border:1px solid color-mix(in oklch,var(--warning) 70%,var(--border));background:color-mix(in oklch,var(--warning) 12%,var(--bg));border-radius:8px;padding:8px 10px;font-size:12px}
+.phase{margin-left:8px;font-size:11px;border:1px solid var(--warning);color:var(--warning);border-radius:999px;padding:1px 8px}
+.artifact{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;background:var(--card);padding:8px 10px;max-width:420px;font-size:12px}
+.artifact .mini{width:72px;height:44px}
+.proc{margin-top:8px;border:0;background:transparent;color:var(--mfg);padding:0;font-size:12px}
+.steps{margin-top:6px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--card)}
+.step{display:flex;gap:8px;align-items:center;color:var(--mfg);font-size:12px;padding:4px 0}
+.mini{width:72px;height:44px;border-radius:6px;flex:none}
+.tag{font-size:10px;border:1px solid var(--border);border-radius:4px;padding:0 4px}
+.panel{width:300px;border-left:1px solid var(--border);overflow:auto;padding:14px 14px 20px}
+.panel h3{margin:14px 0 4px;font-size:13px}
+.panel p,.panel li{margin:0;color:var(--mfg);font-size:12px}
+.panel ul{margin:4px 0 0;padding-left:1.1em}
+.phone{width:280px;margin:24px auto;border:8px solid #111;border-radius:28px;overflow:hidden;background:var(--bg);min-height:520px;display:flex;flex-direction:column}
+.phone .tl{padding:12px}
+.mask{position:fixed;inset:0;background:#000c;display:grid;place-items:center;z-index:5}
+.mask[hidden]{display:none}
+.light{width:min(720px,92vw);background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px}
+.light .big{height:360px;border-radius:8px}
+.light .row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--mfg)}
+.btn{border:1px solid var(--border);background:var(--bg);border-radius:7px;padding:4px 8px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="lead"><b>结论：</b>成员用 send_image 主动发图，贴在这条回复下面。可以是工作区里的图片，或最近 1–3 张截图里的一张，也可以附一句说明。每条最多 4 张；单张超过 10MiB 先压缩，群图片一共 200MiB，满了就不再收。</div>
+  <div class="scenes" id="scenes"></div>
+  <div class="win">
+    <div class="title"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="name">EnsoCode · 成员把图发进聊天（设计稿）</span></div>
+    <div class="body">
+      <section class="main" id="stage"></section>
+      <aside class="panel">
+        <h3>推荐</h3>
+        <p>人贴的图、成员写出的图片文件变成产物卡片，这两样已经有了。缺的是成员用 send_image 主动把图发出来。</p>
+        <h3>怎么发</h3>
+        <ul>
+          <li>工作区里的图片文件，或最近 1–3 张截图里的一张。</li>
+          <li>可以附一句说明。跟这条文字回复在一起，点开看大图。</li>
+          <li>每条回复最多 4 张。电脑上的私聊、群聊同一套。</li>
+        </ul>
+        <h3>什么不进</h3>
+        <ul>
+          <li>没被选中的截图只留在过程里，不自动全发。</li>
+          <li>已经是产物卡片的同一个文件，不再贴一张一样的。</li>
+          <li>第五张起不进这条回复。委派结果卡片这版不做。</li>
+        </ul>
+        <h3>体积</h3>
+        <p>单张超过 10MiB 先压缩。压不下来，这一张显示「没发出去」，文字照常显示。每个群上限 200MiB，满了提示「群图片空间已满」，不再收新图，不自动删旧图。</p>
+        <h3>存储</h3>
+        <p>图片复制到这个群自己的目录。原文件后来被改或删，历史里的图不变。删群时一起删。界面不传任意磁盘路径。</p>
+        <h3>截图标记</h3>
+        <p>整桌面的图缩略图标「桌面截图」，提醒可能拍到别的窗口。浏览器截图标「网页截图」。</p>
+        <p>手机上时间线只推缩略图，点开再拉不超过 700KB 的大图，看不到原图全分辨率，要看原图得在电脑上打开。</p>
+        <h3>不做</h3>
+        <ul>
+          <li>成员自己画图</li>
+          <li>发到群外的聊天软件</li>
+          <li>在时间线里再做一套相册</li>
+        </ul>
+      </aside>
+    </div>
+  </div>
+</div>
+<div class="mask" id="mask" hidden></div>
+<script>
+const SCENES = {
+  web: { label: "网页截图", phone: false, sent: [{ label: "设置页", kind: "web" }] },
+  desk: { label: "桌面截图", phone: false, sent: [{ label: "整桌面", kind: "desk" }], deskWarn: true },
+  file: { label: "工作区的图", phone: false, sent: [{ label: "empty.png", kind: "file" }], artifact: true },
+  four: { label: "一次四张", phone: false, ask: "登录页、空状态、整桌面，还有 empty.png，一起发过来。", reply: "四张都在这条下面。截图用的是最近 3 张，再加上工作区里的一张。", sent: [{ label: "登录页", kind: "web" }, { label: "空状态", kind: "web" }, { label: "整桌面", kind: "desk" }, { label: "empty.png", kind: "file" }], deskWarn: true, capNote: "最近 3 张截图都发了，再加上工作区里的 1 张。第五张不会进这条回复。" },
+  steps: { label: "过程里的不发出", phone: false, sent: [{ label: "设置页", kind: "web" }], extra: 2 },
+  fail: { label: "压不下来", phone: false, sent: [{ label: "设置页", kind: "web" }], fail: "原图 18MiB<br>压完仍超过 10MiB<br>没发出去" },
+  full: { label: "群空间已满", phone: false, prior: [{ label: "设置页", kind: "web" }], sent: [], blocked: "登录页<br>群图片空间已满<br>没收下", banner: "群图片空间已满。已用 200 / 200 MiB，新图不再收下。旧图还在，不会自动删。" },
+  phone: { label: "手机", phone: true, sent: [{ label: "设置页", kind: "web" }, { label: "报错", kind: "web" }] },
+};
+const PALETTE = ["#0ea5e9", "#7c5cff", "#f97316", "#16a34a"];
+let sceneId = "web";
+let openSteps = false;
+let preview = null;
+
+function paint(label, w, h) {
+  const i = (label.charCodeAt(0) + label.length) % PALETTE.length;
+  return `linear-gradient(160deg, ${PALETTE[i]}, #111 70%), linear-gradient(#fff2, #fff2)`;
+}
+
+function shot(label, cls) {
+  const name = label.kind === "web" ? "网页截图" : label.kind === "desk" ? "桌面截图" : "工作区";
+  return `<button type="button" class="shot" data-shot="${label.label}" data-kind="${label.kind}" style="background:${paint(label.label)}"><span class="badge ${label.kind}">${name}</span><span class="cap">${label.label}</span></button>`;
+}
+
+function render() {
+  const scene = SCENES[sceneId];
+  document.getElementById("scenes").innerHTML = Object.entries(SCENES).map(([id, item]) =>
+    `<button type="button" data-scene="${id}" class="${id === sceneId ? "on" : ""}">${item.label}</button>`
+  ).join("");
+  const sent = scene.sent.map((item) => shot(item)).join("");
+  const failed = scene.fail || scene.blocked ? `<button type="button" class="shot fail" disabled>${scene.fail || scene.blocked}</button>` : "";
+  const warn = scene.deskWarn ? `<div class="warn">桌面截图可能拍到别的窗口里的敏感内容。</div>` : "";
+  const capNote = scene.capNote ? `<div class="note">${scene.capNote}</div>` : "";
+  const copied = scene.artifact ? `<div class="note">这张已复制到群目录。原文件后来被改或删，历史里的图不变；删群时一起删。</div>` : "";
+  const steps = scene.extra
+    ? `<button type="button" class="proc" data-steps>${openSteps ? "收起过程" : `最近 3 张里发了 1 张，还有 ${scene.extra} 张留在过程里`}</button>
+       ${openSteps ? `<div class="steps">${Array.from({ length: scene.extra }, (_, n) =>
+         `<div class="step"><i class="mini" style="background:${paint("过程" + n)}"></i><span>${n ? "滚动时截的" : "找按钮时截的"}</span><span class="tag">只在过程里</span></div>`
+       ).join("")}</div>` : ""}`
+    : "";
+  const artifact = scene.artifact ? `<div class="artifact"><i class="mini" style="background:${paint("settings.png")}"></i><div><b>产物 · settings.png</b><div class="note">同一个文件已经是这张卡片，回复里不再贴一张一样的。</div></div></div>` : "";
+  const banner = scene.banner ? `<div class="banner">${scene.banner}</div>` : "";
+  const ask = scene.ask || (scene.banner ? "再发一张登录页。" : scene.artifact ? "把刚写出的图发过来。" : scene.deskWarn && scene.sent.length === 1 ? "整个桌面截一张。" : "把设置页截一张发过来。");
+  const reply = scene.banner
+    ? "空间满了，登录页这张没收下。上面那张设置页还在，也能点开。"
+    : scene.fail
+      ? "设置页在这。另一张原图太大，压不下来，没发出去。"
+      : scene.artifact
+        ? "empty.png 在这。settings.png 已经在产物卡片里，我没有再贴。"
+        : scene.deskWarn && scene.sent.length === 1
+          ? "整桌面在这。别的窗口也可能被拍进去了。"
+          : (scene.reply || "设置页在这。深色模式开着，浏览器那栏还是关的。");
+  const thread = `
+    ${artifact}
+    ${scene.prior ? `<div class="msg"><div class="av" style="background:#0ea5e9">J</div><div><div class="who"><b>Jason</b>14:02</div><div class="bub">设置页在这。<div class="shots">${scene.prior.map((item) => shot(item)).join("")}</div></div></div></div>` : ""}
+    <div class="msg me"><div class="bub">${ask}</div></div>
+    ${banner}
+    <div class="msg">
+      <div class="av" style="background:#0ea5e9">J</div>
+      <div>
+        <div class="who"><b>Jason</b>14:12</div>
+        <div class="bub">
+          ${reply}
+          <div class="shots">${sent}${failed}</div>
+          ${warn}${capNote}${copied}
+          ${steps}
+        </div>
+      </div>
+    </div>`;
+  const sub = scene.phone
+    ? "点缩略图看大图。原图全分辨率要在电脑上打开。"
+    : scene.banner
+      ? "旧图还能点开。新图不再收下，也不会自动删旧图。"
+      : "点缩略图看大图。过程里没选中的图不会进时间线。";
+  const head = `<header class="head"><div><div class="t">${scene.phone ? "手机 · 发布小组" : "发布小组"}</div><div class="sub">${sub}</div></div></header>`;
+  document.getElementById("stage").innerHTML = scene.phone
+    ? `${head}<div class="tl"><div class="phone"><div class="tl">${thread}</div></div></div>`
+    : `${head}<div class="tl">${thread}</div>`;
+  const mask = document.getElementById("mask");
+  if (!preview) {
+    mask.hidden = true;
+    mask.innerHTML = "";
+    return;
+  }
+  mask.hidden = false;
+  mask.innerHTML = `<div class="light" role="dialog">
+    <div class="big" style="background:${paint(preview.label)}"></div>
+    <div class="row"><span>${preview.label} · ${preview.kind === "web" ? "网页截图" : preview.kind === "desk" ? "桌面截图" : "工作区副本"}</span><button type="button" class="btn" data-close>关闭</button></div>
+    ${preview.kind === "desk" ? `<div class="warn">这是整桌面截图，可能拍到其他窗口里的敏感内容。</div>` : ""}
+    ${preview.kind === "file" ? `<div class="note">复制在群目录里。原文件后来被改或删，这张不变。删群时一起删。</div>` : ""}
+  </div>`;
+}
+
+document.body.addEventListener("click", (event) => {
+  const sceneBtn = event.target.closest("[data-scene]");
+  if (sceneBtn) {
+    sceneId = sceneBtn.dataset.scene;
+    openSteps = false;
+    preview = null;
+    render();
+    return;
+  }
+  if (event.target.closest("[data-steps]")) {
+    openSteps = !openSteps;
+    render();
+    return;
+  }
+  const shotBtn = event.target.closest("[data-shot]");
+  if (shotBtn) {
+    preview = { label: shotBtn.dataset.shot, kind: shotBtn.dataset.kind };
+    render();
+    return;
+  }
+  if (event.target.closest("[data-close]") || event.target.id === "mask") {
+    preview = null;
+    render();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && preview) {
+    preview = null;
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>

@@ -208,6 +208,8 @@ describe('buildSettingsCatalog', () => {
     'general.generationStallTimeout',
     'general.proxy',
     'general.updates',
+    'experimental.botMode',
+    'bots.routeClassifier',
     'shortcuts.root',
     'appearance.theme',
     'providers.root',
@@ -231,6 +233,15 @@ describe('buildSettingsCatalog', () => {
     for (const id of staticIds) {
       expect(ids).toContain(id);
     }
+  });
+
+  it('Bot 设置迁到「实验」与「Bot 模式」页，通用页不再有旧条目', () => {
+    const catalog = buildSettingsCatalog();
+    const ids = catalog.map((e) => e.id);
+    expect(ids).not.toContain('general.botMode');
+    expect(ids).not.toContain('general.botRouteClassifier');
+    expect(catalog.find((e) => e.id === 'experimental.botMode')?.category).toBe('experimental');
+    expect(catalog.find((e) => e.id === 'bots.routeClassifier')?.category).toBe('bots');
   });
 
   it('general.language 标题包含 Language', () => {

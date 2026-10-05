@@ -22,15 +22,22 @@ const mocks = vi.hoisted(() => ({
   getMemoryCompletion: vi.fn(
     async () => null as null | ((s: string, u: string) => Promise<string>)
   ),
+  listPendingWrites: vi.fn((): unknown[] => []),
+  rejectPendingWrite: vi.fn(() => false),
+  approvePendingMemoryWrite: vi.fn(
+    async (): Promise<{ ok: boolean; error?: string }> => ({ ok: false, error: 'x' })
+  ),
   registry: null as { projection: () => unknown } | null,
   settings: null as Record<string, unknown> | null,
   send: vi.fn(),
+  shellSend: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => '/user-data') },
   BrowserWindow: {
-    getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: mocks.send } }],
+    // 主窗口是 shell + WebContentsView：直接发给 shell webContents 渲染层收不到
+    getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: mocks.shellSend } }],
   },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: any[]) => unknown) => {
@@ -45,6 +52,9 @@ vi.mock('./agent', () => ({
 vi.mock('./settings', () => ({ readSettings: () => mocks.settings }));
 vi.mock('../windows/MainWindow', () => ({ isMainWebContents: (id: number) => id === 1 }));
 vi.mock('../windows/SettingsWindow', () => ({ isSettingsWebContents: () => false }));
+vi.mock('../windows/createAppWindow', () => ({
+  sendToAllWindows: (channel: string, ...args: unknown[]) => mocks.send(channel, ...args),
+}));
 vi.mock('../services/memoryAdmin', () => ({
   openExistingMemoryDb: mocks.openExistingMemoryDb,
   listMemoriesForAdmin: mocks.listMemoriesForAdmin,
@@ -70,6 +80,11 @@ vi.mock('../services/memoryHost', () => ({
   refreshMemoryEmbedding: vi.fn(),
   getMemoryEmbeddingError: vi.fn(() => null),
   setMemoryChangeListener: vi.fn(),
+  approvePendingMemoryWrite: mocks.approvePendingMemoryWrite,
+}));
+vi.mock('../services/memory/pending', () => ({
+  listPendingWrites: mocks.listPendingWrites,
+  rejectPendingWrite: mocks.rejectPendingWrite,
 }));
 vi.mock('../services/memory/graph', () => ({
   buildMemoryGraph: vi.fn(() => ({ nodes: [], edges: [], totalEntities: 0 })),
@@ -288,5 +303,55 @@ describe('memory IPC', () => {
     mocks.clearFinishedMemoryJobs.mockReturnValue(0);
     expect(await handler(IPC_CHANNELS.MEMORY_JOBS_CLEAR)(event)).toBe(0);
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('pending writes: list labels spaces and hides internal payload', async () => {
+    mocks.listPendingWrites.mockReturnValue([
+      {
+        id: 'p1',
+        kind: 'capture',
+        spaceId: 'global',
+        title: 't',
+        content: 'c',
+        botId: 'b1',
+        chatId: null,
+        redacted: true,
+        createdAt: '2026-10-05T00:00:00.000Z',
+        payload: { importance: 0.7 },
+      },
+    ]);
+    expect(await handler(IPC_CHANNELS.MEMORY_PENDING_WRITES)({ sender: { id: 99 } })).toEqual([]);
+    expect(await handler(IPC_CHANNELS.MEMORY_PENDING_WRITES)(event)).toEqual([
+      {
+        id: 'p1',
+        kind: 'capture',
+        spaceId: 'global',
+        spaceLabel: 'Global',
+        originLabel: '成员：已删除成员',
+        title: 't',
+        content: 'c',
+        botId: 'b1',
+        chatId: null,
+        redacted: true,
+        createdAt: '2026-10-05T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('pending write review: narrows input, rejects / approves and broadcasts', async () => {
+    const review = handler(IPC_CHANNELS.MEMORY_PENDING_WRITE_REVIEW);
+    expect(await review(event, 'p1', 'maybe')).toMatchObject({ ok: false });
+    expect(await review(event, 42, 'reject')).toMatchObject({ ok: false });
+    expect(await review({ sender: { id: 99 } }, 'p1', 'approve')).toMatchObject({ ok: false });
+    expect(mocks.rejectPendingWrite).not.toHaveBeenCalled();
+    expect(mocks.approvePendingMemoryWrite).not.toHaveBeenCalled();
+
+    mocks.rejectPendingWrite.mockReturnValue(true);
+    expect(await review(event, 'p1', 'reject')).toEqual({ ok: true });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+
+    mocks.approvePendingMemoryWrite.mockResolvedValue({ ok: true });
+    expect(await review(event, 'p2', 'approve')).toEqual({ ok: true });
+    expect(mocks.approvePendingMemoryWrite).toHaveBeenCalledWith('p2');
   });
 });

@@ -15,6 +15,7 @@ import type {
   ConversationAuthority,
   ConversationAuthorityProjection,
   ConversationAuthorityRequest,
+  ConversationBotBinding,
   CreateConversationAuthorityRequest,
   CreateProjectAuthorityRequest,
   ModelRef,
@@ -64,8 +65,9 @@ const validId = (value: unknown): value is string =>
 function projectIdentity(
   project: Pick<ProjectAuthority, 'kind' | 'canonicalPath' | 'sshConnectionId'>
 ): string {
-  return project.kind === 'ssh'
-    ? `ssh:${project.sshConnectionId}:${project.canonicalPath}`
+  if (project.kind === 'ssh') return `ssh:${project.sshConnectionId}:${project.canonicalPath}`;
+  return project.kind === 'bot-home'
+    ? `bot-home:${project.canonicalPath}`
     : `local:${project.canonicalPath}`;
 }
 
@@ -115,6 +117,21 @@ export class SourceAuthorityRegistry {
     };
   }
 
+  /** renderer / 手机可见部分：不含 bot-home 项目与 bot 会话 */
+  rendererProjection(): SourceAuthorityProjection {
+    const full = this.projection();
+    return {
+      projects: full.projects.filter((project) => project.kind !== 'bot-home'),
+      conversations: full.conversations.filter((conversation) => !conversation.bot),
+    };
+  }
+
+  botConversations(): ConversationAuthorityProjection[] {
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.bot)
+      .map((conversation) => this.copyConversation(conversation));
+  }
+
   project(projectId: string): ProjectAuthority | undefined {
     const value = this.projects.get(projectId);
     return value ? this.hydrateProject(value) : undefined;
@@ -130,6 +147,9 @@ export class SourceAuthorityRegistry {
   createProject(
     request: CreateProjectAuthorityRequest
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
+    if (request.kind === 'bot-home') {
+      return { accepted: false, error: 'Project kind is reserved.' };
+    }
     try {
       return request.kind === 'ssh'
         ? this.createSshProject(request)
@@ -152,6 +172,43 @@ export class SourceAuthorityRegistry {
       state: 'active',
       version: 1,
     });
+  }
+
+  /** 仅 Main：把 Bot 工作区目录登记为隐藏项目（按路径幂等，目录不存在则创建） */
+  ensureBotHomeProject(dir: string): ProjectAuthorityProjection | undefined {
+    try {
+      mkdirSync(dir, { recursive: true });
+      const canonicalPath = realpathSync(dir);
+      const existing = this.findActiveByIdentity(`bot-home:${canonicalPath}`);
+      if (existing) return { ...existing };
+      const inserted = this.insertProject({
+        projectId: this.randomUuid(),
+        canonicalPath,
+        kind: 'bot-home',
+        state: 'active',
+        version: 1,
+      });
+      return inserted.accepted ? inserted.value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  removeBotHomeProject(projectId: string): boolean {
+    const project = this.projects.get(projectId);
+    if (project?.kind !== 'bot-home' || project.state !== 'active') return false;
+    this.markProjectRemoved(project);
+    this.commit();
+    return true;
+  }
+
+  botHomeProject(dir: string): ProjectAuthorityProjection | undefined {
+    try {
+      const existing = this.findActiveByIdentity(`bot-home:${realpathSync(dir)}`);
+      return existing ? { ...existing } : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** 远端目录存在性由 IPC handler 先行 ssh 校验（registry 保持同步契约），这里只做路径规范化与去重 */
@@ -181,7 +238,7 @@ export class SourceAuthorityRegistry {
   }
 
   notifyProjection(): void {
-    this.options.onChanged?.(this.projection());
+    this.options.onChanged?.(this.rendererProjection());
   }
 
   sshConnectionInUse(connectionId: string): boolean {
@@ -205,7 +262,10 @@ export class SourceAuthorityRegistry {
     request: SelectProjectAuthorityRequest
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     const project = this.projects.get(request.projectId);
-    return project && project.state === 'active' && project.version === request.version
+    return project &&
+      project.kind !== 'bot-home' &&
+      project.state === 'active' &&
+      project.version === request.version
       ? { accepted: true, value: this.hydrateProject(project) }
       : { accepted: false, error: 'Project authority is stale or unavailable.' };
   }
@@ -214,9 +274,19 @@ export class SourceAuthorityRegistry {
     request: RemoveProjectAuthorityRequest
   ): AuthorityMutationResult<ProjectAuthorityProjection> {
     const project = this.projects.get(request.projectId);
-    if (project?.state !== 'active' || project.version !== request.version) {
+    if (
+      project?.state !== 'active' ||
+      project.kind === 'bot-home' ||
+      project.version !== request.version
+    ) {
       return { accepted: false, error: 'Project authority is stale or unavailable.' };
     }
+    this.markProjectRemoved(project);
+    this.commit();
+    return { accepted: true, value: { ...project } };
+  }
+
+  private markProjectRemoved(project: ProjectAuthority): void {
     project.state = 'removed';
     project.version += 1;
     for (const conversation of this.conversations.values()) {
@@ -225,15 +295,17 @@ export class SourceAuthorityRegistry {
         conversation.version += 1;
       }
     }
-    this.commit();
-    return { accepted: true, value: { ...project } };
   }
 
   createConversation(
     request: CreateConversationAuthorityRequest
   ): AuthorityMutationResult<ConversationAuthorityProjection> {
     const project = this.projects.get(request.projectId);
-    if (project?.state !== 'active' || project.version !== request.projectVersion) {
+    if (
+      project?.state !== 'active' ||
+      project.kind === 'bot-home' ||
+      project.version !== request.projectVersion
+    ) {
       return { accepted: false, error: 'Project authority is stale or unavailable.' };
     }
     if (request.conversationId) {
@@ -244,7 +316,8 @@ export class SourceAuthorityRegistry {
       if (existing) {
         return existing.projectId === project.projectId &&
           existing.kind === 'root' &&
-          existing.lifecycle !== 'ended'
+          existing.lifecycle !== 'ended' &&
+          !existing.bot
           ? { accepted: true, value: this.copyConversation(existing) }
           : { accepted: false, error: 'Conversation authority is stale or unavailable.' };
       }
@@ -260,6 +333,45 @@ export class SourceAuthorityRegistry {
     this.conversations.set(value.conversationId, value);
     this.commit();
     return { accepted: true, value: this.copyConversation(value) };
+  }
+
+  /** 仅 Main：为 Bot 成员新建根会话（项目须 active 且不是 ssh） */
+  createBotConversation(
+    projectId: string,
+    bot: ConversationBotBinding
+  ): ConversationAuthorityProjection | undefined {
+    const project = this.projects.get(projectId);
+    if (project?.state !== 'active' || project.kind === 'ssh') return undefined;
+    const value: ConversationAuthority = {
+      conversationId: this.randomUuid(),
+      projectId,
+      kind: 'root',
+      lifecycle: 'draft',
+      version: 1,
+      bot: { ...bot },
+    };
+    this.conversations.set(value.conversationId, value);
+    this.commit();
+    return this.copyConversation(value);
+  }
+
+  endBotConversation(conversationId: string): ConversationAuthorityProjection | undefined {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation?.bot) return undefined;
+    if (conversation.lifecycle !== 'ended') {
+      conversation.lifecycle = 'ended';
+      conversation.version += 1;
+      this.commit();
+    }
+    return this.copyConversation(conversation);
+  }
+
+  removeBotConversation(conversationId: string): ConversationAuthorityProjection | undefined {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation?.bot) return undefined;
+    this.conversations.delete(conversationId);
+    this.commit();
+    return this.copyConversation(conversation);
   }
 
   selectConversation(
@@ -287,7 +399,7 @@ export class SourceAuthorityRegistry {
     request: ConversationAuthorityRequest
   ): AuthorityMutationResult<ConversationAuthorityProjection> {
     const conversation = this.conversations.get(request.conversationId);
-    if (!conversation || conversation.version !== request.version) {
+    if (!conversation || conversation.bot || conversation.version !== request.version) {
       return { accepted: false, error: 'Conversation authority is stale or unavailable.' };
     }
     this.conversations.delete(conversation.conversationId);
@@ -334,6 +446,7 @@ export class SourceAuthorityRegistry {
     const conversation = this.conversations.get(request.conversationId);
     const project = conversation ? this.projects.get(conversation.projectId) : undefined;
     return conversation &&
+      !conversation.bot &&
       conversation.lifecycle !== 'ended' &&
       conversation.version === request.version &&
       project?.state === 'active'
@@ -346,6 +459,7 @@ export class SourceAuthorityRegistry {
       ...value,
       ...(value.selection ? { selection: { ...value.selection } } : {}),
       ...(value.forkedFrom ? { forkedFrom: { ...value.forkedFrom } } : {}),
+      ...(value.bot ? { bot: { ...value.bot } } : {}),
     };
   }
 
@@ -359,7 +473,7 @@ export class SourceAuthorityRegistry {
     };
     writeFileSync(temporary, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
     renameSync(temporary, this.options.registryFile);
-    this.options.onChanged?.(this.projection());
+    this.options.onChanged?.(this.rendererProjection());
   }
 
   private findActiveByIdentity(identity: string): ProjectAuthority | undefined {

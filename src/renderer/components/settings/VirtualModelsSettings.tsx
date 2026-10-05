@@ -4,6 +4,7 @@ import {
   canBeVirtualMember,
   classifierProviderFor,
   VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
+  type VirtualClassifierConfig,
   type VirtualModelEntry,
 } from '@shared/virtualModels';
 import { Plus, Trash2, X } from 'lucide-react';
@@ -82,20 +83,31 @@ function Field({
   );
 }
 
-function ClassifierField({
-  entry,
+/** 分类来源：关/默认 · 快模型裁判 · pi 分类器（只在有可用分类器 provider 时出现） */
+export function ClassifierSourceField({
+  value,
+  onChange,
   providers,
   classifierProviders,
-  update,
+  offLabel,
+  judgeLabel,
+  judgeSeed,
+  description,
 }: {
-  entry: VirtualModelEntry;
+  value: VirtualClassifierConfig | undefined;
+  onChange: (next: VirtualClassifierConfig | undefined) => void;
   providers: ModelProvider[];
   classifierProviders: ModelProvider[];
-  update: (updates: Partial<Omit<VirtualModelEntry, 'id'>>) => void;
+  offLabel: string;
+  judgeLabel: string;
+  /** 切到裁判时预填的模型；缺省时等用户选定模型再保存 */
+  judgeSeed?: DefaultModelRef;
+  description: string;
 }) {
   const { t } = useI18n();
-  const classifier = entry.classifier;
-  const source = classifier?.source ?? OFF;
+  const classifier = value;
+  const [judgeDraft, setJudgeDraft] = useState(false);
+  const source = classifier?.source ?? (judgeDraft ? 'judge' : OFF);
   const piProviderId = classifier?.source === 'pi-classifier' ? classifier.model.providerId : '';
   const [piModels, setPiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [noClassifierModels, setNoClassifierModels] = useState(false);
@@ -112,55 +124,43 @@ function ClassifierField({
       cancelled = true;
     };
   }, [piProviderId]);
-  if (!entry.fast) {
-    return (
-      <p className="pt-1.5 text-[11px] text-muted-foreground">{t('Set a fast model first')}</p>
-    );
-  }
-  const fast = entry.fast;
-  // 分类器模型 id 为空的配置会被 parseVirtualModels 丢弃（跨窗口重读后跳回“关”），选来源/换 provider 时直接带上首个模型
+  // 分类器模型 id 为空的配置会被解析丢弃（跨窗口重读后跳回“关”），选来源/换 provider 时直接带上首个模型
   const pickPiClassifier = async (providerId: string) => {
     const models = await window.electronAPI.providers.classifierModels(providerId);
     const first = models[0];
     setNoClassifierModels(!first);
     if (!first) return;
-    update({
-      classifier: {
-        source: 'pi-classifier',
-        model: { providerId, modelId: first.id },
-        timeoutMs: classifier?.timeoutMs ?? VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
-      },
+    onChange({
+      source: 'pi-classifier',
+      model: { providerId, modelId: first.id },
+      timeoutMs: classifier?.timeoutMs ?? VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
     });
   };
   const setSource = (next: string) => {
     setNoClassifierModels(false);
-    if (next === OFF) return update({ classifier: undefined });
+    setJudgeDraft(next === 'judge' && !judgeSeed);
+    if (next === OFF) return onChange(undefined);
     if (next === 'judge') {
-      return update({
-        classifier: {
-          source: 'judge',
-          model: fast,
-          timeoutMs: VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
-        },
+      if (!judgeSeed) return onChange(undefined);
+      return onChange({
+        source: 'judge',
+        model: judgeSeed,
+        timeoutMs: VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
       });
     }
     const provider = classifierProviders[0];
     if (provider) void pickPiClassifier(provider.id);
   };
   const sourceItems = [
-    { value: OFF, label: t('Off') },
-    { value: 'judge', label: t('Fast model judges') },
+    { value: OFF, label: offLabel },
+    { value: 'judge', label: judgeLabel },
     ...(classifierProviders.length > 0
       ? [{ value: 'pi-classifier', label: t('Classifier model') }]
       : []),
   ];
   return (
     <div className="space-y-1">
-      <Select
-        items={sourceItems}
-        value={source}
-        onValueChange={(value) => setSource(String(value))}
-      >
+      <Select items={sourceItems} value={source} onValueChange={(next) => setSource(String(next))}>
         <SelectTrigger size="sm" className="w-48">
           <SelectValue />
         </SelectTrigger>
@@ -172,11 +172,19 @@ function ClassifierField({
           ))}
         </SelectPopup>
       </Select>
-      {classifier?.source === 'judge' && (
+      {source === 'judge' && (
         <MemberPicker
           providers={providers}
-          value={classifier.model}
-          onSelect={(model) => update({ classifier: { ...classifier, model } })}
+          value={classifier?.source === 'judge' ? classifier.model : undefined}
+          emptyLabel={t('Select model')}
+          onSelect={(model) => {
+            setJudgeDraft(false);
+            onChange({
+              source: 'judge',
+              model,
+              timeoutMs: classifier?.timeoutMs ?? VIRTUAL_CLASSIFIER_DEFAULT_TIMEOUT_MS,
+            });
+          }}
         />
       )}
       {classifier?.source === 'pi-classifier' && (
@@ -184,7 +192,7 @@ function ClassifierField({
           <Select
             items={classifierProviders.map((p) => ({ value: p.id, label: p.name }))}
             value={classifier.model.providerId}
-            onValueChange={(value) => void pickPiClassifier(String(value))}
+            onValueChange={(next) => void pickPiClassifier(String(next))}
           >
             <SelectTrigger size="sm" className="w-40">
               <SelectValue />
@@ -200,12 +208,10 @@ function ClassifierField({
           <Select
             items={piModels.map((m) => ({ value: m.id, label: m.name }))}
             value={classifier.model.modelId || null}
-            onValueChange={(value) =>
-              update({
-                classifier: {
-                  ...classifier,
-                  model: { providerId: classifier.model.providerId, modelId: String(value) },
-                },
+            onValueChange={(next) =>
+              onChange({
+                ...classifier,
+                model: { providerId: classifier.model.providerId, modelId: String(next) },
               })
             }
           >
@@ -225,12 +231,41 @@ function ClassifierField({
       {noClassifierModels && (
         <p className="text-[10px] text-destructive">{t('No classifier models available')}</p>
       )}
-      <p className="text-[10px] text-muted-foreground">
-        {t(
-          'Classifies each new turn: simple turns use the fast model, complex ones the primary model. Adds a short delay before the reply.'
-        )}
-      </p>
+      <p className="text-[10px] text-muted-foreground">{description}</p>
     </div>
+  );
+}
+
+function ClassifierField({
+  entry,
+  providers,
+  classifierProviders,
+  update,
+}: {
+  entry: VirtualModelEntry;
+  providers: ModelProvider[];
+  classifierProviders: ModelProvider[];
+  update: (updates: Partial<Omit<VirtualModelEntry, 'id'>>) => void;
+}) {
+  const { t } = useI18n();
+  if (!entry.fast) {
+    return (
+      <p className="pt-1.5 text-[11px] text-muted-foreground">{t('Set a fast model first')}</p>
+    );
+  }
+  return (
+    <ClassifierSourceField
+      value={entry.classifier}
+      onChange={(classifier) => update({ classifier })}
+      providers={providers}
+      classifierProviders={classifierProviders}
+      offLabel={t('Off')}
+      judgeLabel={t('Fast model judges')}
+      judgeSeed={entry.fast}
+      description={t(
+        'Classifies each new turn: simple turns use the fast model, complex ones the primary model. Adds a short delay before the reply.'
+      )}
+    />
   );
 }
 

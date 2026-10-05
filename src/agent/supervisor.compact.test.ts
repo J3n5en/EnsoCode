@@ -65,11 +65,16 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
     getModels() {
       return [...this.models.values()];
     },
-    getProvider: () => undefined,
     resolveModel: vi
       .fn<ModelRuntime['resolveModel']>()
       .mockRejectedValue(new Error('Unexpected virtual model routing in ordinary-runtime fixture')),
     getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
+    getProvider(providerId: string) {
+      if (![...this.models.keys()].some((key) => key.startsWith(`${providerId}/`)))
+        return undefined;
+      return { id: providerId, models: [], stream: vi.fn(), streamSimple: vi.fn() };
+    },
+    registerNativeProvider: vi.fn(),
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
     completeSimple: vi.fn(async () => ({ content: [] })),
   };
@@ -226,6 +231,44 @@ describe('SessionSupervisor compact failure', () => {
     await supervisor.shutdown();
   });
 
+  it('被中断取消的压缩按放弃收口：不报错，也不钉「已压缩」锚点', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-compact-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await waitFor(events, 'parent-ready');
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    parentSession.compact.mockImplementation(async () => {
+      parentSession.emit({ type: 'compaction_start' });
+      // pi 被 abort 取消的压缩：aborted=true 且不带 errorMessage
+      parentSession.emit({ type: 'compaction_end', aborted: true });
+      throw new Error('Compaction cancelled');
+    });
+
+    supervisor.handleCommand({ type: 'compact', identity: parent });
+    await settle();
+    await settle();
+
+    const ends = events.filter((event) => event.type === 'compaction' && event.state === 'end');
+    expect(ends).toEqual([
+      expect.objectContaining({ type: 'compaction', state: 'end', abandoned: true }),
+    ]);
+    expect(ends[0]).not.toHaveProperty('error');
+    supervisor.handleCommand({ type: 'snapshot' });
+    await settle();
+    const snapshot = events.findLast((event) => event.type === 'snapshot');
+    expect(JSON.stringify(snapshot ?? {})).not.toContain('compactionNoticeAt');
+    await supervisor.shutdown();
+  });
+
   it('compact() 直接抛错且未发 compaction_end 时仍上报一次', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
@@ -255,6 +298,53 @@ describe('SessionSupervisor compact failure', () => {
         error: 'compact unavailable',
       }),
     ]);
+    await supervisor.shutdown();
+  });
+
+  it('失败轮后回退：状态回到 idle 并清错误', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-rewind-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await waitFor(events, 'parent-ready');
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    const failedUser = { role: 'user', content: [{ type: 'text', text: 'boom' }] };
+    parentSession.emit({ type: 'agent_start' });
+    parentSession.messages = [
+      failedUser,
+      { role: 'assistant', content: [], stopReason: 'error', errorMessage: '500 upstream' },
+    ];
+    parentSession.emit({ type: 'agent_end', willRetry: false });
+    parentSession.emit({ type: 'agent_settled' });
+    await waitFor(events, 'turn-failed');
+    (mocks.managers[0] as { getBranch: () => unknown[] }).getBranch().push({
+      type: 'message',
+      message: failedUser,
+      id: 'entry-user-1',
+      timestamp: 1,
+    });
+    parentSession.navigateTree = vi.fn(async () => {
+      parentSession.messages = [];
+      return { cancelled: false, editorText: 'boom' };
+    });
+
+    events.length = 0;
+    supervisor.handleCommand({ type: 'rewind', identity: parent, userIndexFromEnd: 0 });
+    await waitFor(events, 'rewind-done');
+
+    // 失败轮已被回退掉：状态回到 idle 并清掉错误，界面不再残留红错与「重试」
+    const statusIndex = events.findIndex((event) => event.type === 'status');
+    expect(events[statusIndex]).toMatchObject({ type: 'status', status: 'idle' });
+    expect(events[statusIndex]).not.toHaveProperty('error');
+    expect(statusIndex).toBeLessThan(events.findIndex((event) => event.type === 'rewind-done'));
     await supervisor.shutdown();
   });
 

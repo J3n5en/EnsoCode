@@ -177,6 +177,8 @@ describe('CodemodeHost', () => {
         input: {},
       });
     expect(await nested('subagent', 1)).toMatchObject({ block: true });
+    // send_image 的结果只认会话里直接的 send_image 工具结果，脚本里调用发不出图
+    expect(await nested('send_image', 1)).toMatchObject({ block: true });
     expect(await nested('read', 2)).toBeUndefined();
     for (let i = 3; i <= CODEMODE_MAX_NESTED_CALLS + 1; i++) await nested('read', i);
     expect(await nested('read', 999)).toMatchObject({ block: true });

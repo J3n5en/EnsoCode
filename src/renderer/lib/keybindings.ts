@@ -5,6 +5,7 @@ import { DEFAULT_TRAY_TOGGLE_BINDING } from '@shared/keybindingAccelerator';
 
 export const KEYBINDING_ACTIONS = [
   'toggle-sidebar',
+  'toggle-app-mode',
   'toggle-side-panel',
   'toggle-side-panel-fullscreen',
   'open-settings',
@@ -26,6 +27,7 @@ export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
 
 export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'Toggle sidebar',
+  'toggle-app-mode': 'Switch between Code and Bot',
   'toggle-side-panel': 'Toggle side panel',
   'toggle-side-panel-fullscreen': 'Toggle side panel fullscreen',
   'open-settings': 'Open settings',
@@ -46,6 +48,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
 
 /** 仅部分动作需要补充生效范围，没有就不渲染 */
 export const ACTION_HINT_KEYS: Partial<Record<KeybindingAction, string>> = {
+  'toggle-app-mode': 'Only when Bot mode is enabled in Experimental settings',
   'switch-model': 'Only when the chat input is focused',
   'send-message': 'Only when the chat input is focused',
   'new-side-tab': 'New terminal when the side panel is focused; otherwise new conversation',
@@ -65,6 +68,7 @@ export const IS_MAC =
 
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'toggle-sidebar': 'mod+b',
+  'toggle-app-mode': 'mod+e',
   'toggle-side-panel': 'mod+j',
   'toggle-side-panel-fullscreen': 'mod+shift+j',
   'open-settings': 'mod+,',

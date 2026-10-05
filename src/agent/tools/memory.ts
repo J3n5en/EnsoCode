@@ -14,10 +14,10 @@ import {
 } from '@shared/memory/toolParams';
 import type { MemoryOp, SessionIdentity } from '@shared/types/agent';
 
-export interface MemoryInvokeRequest {
+export interface MemoryInvokeRequest<Op extends string = MemoryOp> {
   identity: SessionIdentity | ChildSessionIdentity;
   requestId: string;
-  op: MemoryOp;
+  op: Op;
   params: unknown;
 }
 
@@ -40,16 +40,16 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * worker ↔ Main 的记忆库挂起调用表（同 BrowserInvoker 范式）。请求经 `memory-invoke` 事件上抛，
  * 结果经 `memory-result` 命令回落；abort / 超时 / shutdown 全部 fail-closed。
  */
-export class MemoryInvoker {
+export class MemoryInvoker<Op extends string = MemoryOp> {
   private readonly pending = new Map<string, Pending>();
 
   constructor(
     private readonly identity: SessionIdentity | ChildSessionIdentity,
-    private readonly emit: (request: MemoryInvokeRequest) => void,
+    private readonly emit: (request: MemoryInvokeRequest<Op>) => void,
     private readonly options: { timeoutMs?: number } = {}
   ) {}
 
-  invoke(op: MemoryOp, params: unknown, signal?: AbortSignal): Promise<unknown> {
+  invoke(op: Op, params: unknown, signal?: AbortSignal): Promise<unknown> {
     if (signal?.aborted) return Promise.reject(new Error('Memory action aborted'));
     const requestId = randomUUID();
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
@@ -188,7 +188,8 @@ export function createMemoryTools(
             type: 'string',
             enum: [...MEMORY_SEARCH_SPACES],
             description:
-              "'all' = global + current project (default); 'global' = cross-project only; 'project' = current project only",
+              "'all' = every space visible to this session (default); 'global' = cross-project only; 'project' = current project only; " +
+              "'bot' = your own member memory, 'chat' = this group chat's shared memory (both only in Bot mode sessions)",
           },
           eventDateFrom: {
             type: 'string',
@@ -266,7 +267,9 @@ export function createMemoryTools(
             type: 'string',
             enum: [...MEMORY_CAPTURE_SPACES],
             description:
-              "'project' = only relevant to the current project (default); 'global' = applies across all projects (e.g. user preferences)",
+              "'project' = only relevant to the current project (default outside Bot mode); 'global' = applies across all projects (e.g. user preferences); " +
+              "'bot' = your own member memory: your preferences, habits, lessons (Bot mode sessions only, default there); " +
+              "'chat' = shared by this group chat: team conventions, decisions, project background, division of work, shared terms (Bot mode group chats only)",
           },
           eventStart: {
             type: 'string',

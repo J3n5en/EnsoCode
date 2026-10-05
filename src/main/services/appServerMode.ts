@@ -34,6 +34,8 @@ const FLUSH_TIMEOUT_MS = 5_000;
 const REENTER_FALLBACK_MS = 8_000;
 
 let active = false;
+/** 进/出托盘的切换代次：enter 中途有 await，期间被唤回或重入时旧的 enter 必须作废 */
+let transition = 0;
 let tray: Tray | null = null;
 
 export function isServerMode(): boolean {
@@ -178,7 +180,9 @@ export async function flushRendererPersist(): Promise<void> {
 
 export async function enterServerMode(): Promise<void> {
   if (active) return;
+  const epoch = ++transition;
   await flushRendererPersist();
+  if (epoch !== transition) return;
   flushSettings();
   active = true;
   setPairHeadless(true);
@@ -188,6 +192,8 @@ export async function enterServerMode(): Promise<void> {
   if (settings && !settings.isDestroyed()) settings.close();
   ensureTray();
   await browserHost.hibernateAll();
+  // 等待期间用户已唤回（Dock / 托盘 / 快捷键 / 二次启动）：不能再销毁窗口、隐藏 Dock
+  if (epoch !== transition) return;
   const win = getMainWindow();
   if (win && !win.isDestroyed()) {
     closeWindowWebContents(win);
@@ -199,6 +205,7 @@ export async function enterServerMode(): Promise<void> {
 }
 
 export function leaveServerMode(): void {
+  transition++;
   active = false;
   setPairHeadless(false);
   flushSettings();

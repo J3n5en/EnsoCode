@@ -5,13 +5,18 @@ export const ENSO_LOCKED_PROFILE_ID = 'enso-locked-v1' as const;
 export const ENSO_SYSTEM_PROMPT_ID = 'enso-system-v1' as const;
 export const ENSO_LOCKED_TOOL_IDS = ['enso_capabilities', 'enso_app', 'ask_user'] as const;
 
-export type AgentTypeKey = typeof ENSO_AGENT_TYPE_KEY | `builtin:${string}` | `custom:${string}`;
+export type AgentTypeKey =
+  | typeof ENSO_AGENT_TYPE_KEY
+  | `builtin:${string}`
+  | `custom:${string}`
+  | `bot:${string}`;
 
 export interface AgentTypeCandidate {
   typeKey: AgentTypeKey;
   displayName: string;
   description: string;
-  source: 'system' | 'builtin' | 'custom';
+  /** bot = Bot 模式成员（Main 动态合并，不落 settings） */
+  source: 'system' | 'builtin' | 'custom' | 'bot';
   locked: boolean;
   canDisable: boolean;
   canEdit: boolean;
@@ -56,7 +61,13 @@ const RESERVED_AGENT_NAMES: Readonly<Record<string, true>> = {
   [ENSO_LOCKED_PROFILE_ID]: true,
   [ENSO_SYSTEM_PROMPT_ID]: true,
 };
-const RESERVED_AGENT_PREFIXES = ['agent:', 'builtin:', 'custom:', 'builtin-agent:'] as const;
+const RESERVED_AGENT_PREFIXES = [
+  'agent:',
+  'builtin:',
+  'custom:',
+  'builtin-agent:',
+  'bot:',
+] as const;
 
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
@@ -101,6 +112,9 @@ export function parseAgentTypeKey(value: unknown): AgentTypeKey | null {
   }
   if (value.startsWith('custom:')) {
     return isUuid(value.slice('custom:'.length)) ? (value as AgentTypeKey) : null;
+  }
+  if (value.startsWith('bot:')) {
+    return isUuid(value.slice('bot:'.length)) ? (value as AgentTypeKey) : null;
   }
   return null;
 }
@@ -201,7 +215,8 @@ export function parseAgentTypeCandidate(value: unknown): AgentTypeCandidate | nu
     typeof candidate.description !== 'string' ||
     (candidate.source !== 'system' &&
       candidate.source !== 'builtin' &&
-      candidate.source !== 'custom') ||
+      candidate.source !== 'custom' &&
+      candidate.source !== 'bot') ||
     typeof candidate.locked !== 'boolean' ||
     typeof candidate.canDisable !== 'boolean' ||
     typeof candidate.canEdit !== 'boolean'
@@ -218,6 +233,7 @@ export function parseAgentTypeCandidate(value: unknown): AgentTypeCandidate | nu
   ) {
     return null;
   }
+  if ((candidate.source === 'bot') !== typeKey.startsWith('bot:')) return null;
   return candidate as unknown as AgentTypeCandidate;
 }
 
@@ -242,10 +258,29 @@ export function parseAgentTypeRegistrySnapshot(value: unknown): AgentTypeRegistr
   return snapshot as unknown as AgentTypeRegistrySnapshot;
 }
 
+type MemberAgentTypeInput = Pick<AgentTypeEntry, 'id' | 'name' | 'description'>;
+
+/** 成员与内置（含停用）/自定义/保留名或其他成员同名时跳过：worker 侧按名字区分不了 */
+export function visibleMemberAgentTypes<T extends MemberAgentTypeInput>(
+  members: readonly T[],
+  customAgentTypes: readonly Pick<AgentTypeEntry, 'name'>[]
+): T[] {
+  const taken = new Set(
+    [...BUILTIN_AGENT_TYPES, ...customAgentTypes].map((entry) => normalizeAgentTypeName(entry.name))
+  );
+  return members.filter((member) => {
+    const name = normalizeAgentTypeName(member.name);
+    if (!isUuid(member.id) || isReservedAgentTypeName(name) || taken.has(name)) return false;
+    taken.add(name);
+    return true;
+  });
+}
+
 export function buildAgentTypeRegistrySnapshot(input: {
   revision: number;
   disabledBuiltinAgentTypes: readonly string[];
   customAgentTypes: readonly AgentTypeEntry[];
+  members?: readonly MemberAgentTypeInput[];
 }): AgentTypeRegistrySnapshot {
   const disabled = new Set(input.disabledBuiltinAgentTypes);
   // 同名合法 custom 覆盖 builtin（仅 Enso 受 reserved 名保护）：名字在
@@ -296,6 +331,17 @@ export function buildAgentTypeRegistrySnapshot(input: {
       locked: false,
       canDisable: false,
       canEdit: true,
+    });
+  }
+  for (const member of visibleMemberAgentTypes(input.members ?? [], input.customAgentTypes)) {
+    candidates.push({
+      typeKey: `bot:${member.id}`,
+      displayName: member.name.trim(),
+      description: member.description,
+      source: 'bot',
+      locked: false,
+      canDisable: false,
+      canEdit: false,
     });
   }
   return { revision: input.revision, candidates };

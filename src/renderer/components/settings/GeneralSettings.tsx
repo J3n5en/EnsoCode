@@ -455,7 +455,7 @@ function WindowsLocalShellSection() {
   );
 }
 
-function SwitchRow({
+export function SwitchRow({
   title,
   description,
   checked,

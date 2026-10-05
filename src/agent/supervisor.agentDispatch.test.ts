@@ -71,11 +71,16 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
     getModels() {
       return [...this.models.values()];
     },
-    getProvider: () => undefined,
     resolveModel: vi
       .fn<ModelRuntime['resolveModel']>()
       .mockRejectedValue(new Error('Unexpected virtual model routing in ordinary-runtime fixture')),
     getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
+    getProvider(providerId: string) {
+      if (![...this.models.keys()].some((key) => key.startsWith(`${providerId}/`)))
+        return undefined;
+      return { id: providerId, models: [], stream: vi.fn(), streamSimple: vi.fn() };
+    },
+    registerNativeProvider: vi.fn(),
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
     completeSimple: vi.fn(async () => ({ content: [] })),
   };
@@ -701,6 +706,14 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         isolatedSandbox: false,
         tools: 'readonly' as const,
       },
+      {
+        label: '父会话 readonly + all child',
+        editMode: 'replace' as const,
+        exploreFold: false,
+        isolatedSandbox: false,
+        workspaceWrite: false,
+        tools: 'all' as const,
+      },
     ].flatMap((spec) => [false, true].map((boundMcp) => ({ ...spec, boundMcp })))
   )('$label / boundMcp=$boundMcp 的 child proof 工具与共享推导一致', async (spec) => {
     const events: AgentWorkerEvent[] = [];
@@ -716,7 +729,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       model,
       editMode: spec.editMode,
       ...(spec.exploreFold ? { exploreFoldEnabled: true } : {}),
-      ...(spec.isolatedSandbox ? {} : { disabledTools: ['isolated_sandbox'] }),
+      disabledTools: [
+        ...(spec.isolatedSandbox ? [] : ['isolated_sandbox']),
+        ...('workspaceWrite' in spec && spec.workspaceWrite === false ? ['workspace_write'] : []),
+      ],
     });
     await waitFor(events, 'parent-ready');
     const typeKey =
@@ -767,6 +783,11 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     );
     expect(ready?.type).toBe('child-ready');
     if (ready?.type !== 'child-ready') return;
+    if ('workspaceWrite' in spec && spec.workspaceWrite === false) {
+      expect(ready.proof.toolIds).not.toEqual(expect.arrayContaining(['edit', 'write']));
+      expect(ready.proof.toolIds).not.toContain('bash');
+      expect(ready.proof.toolIds).not.toContain('powershell');
+    }
     expect(ready.proof.loadedMcpBindingIds).toEqual(mcpBindingIds);
     const options = mocks.createAgentSession.mock.calls.at(-1)?.[0] as {
       customTools: ToolDefinition[];
@@ -784,6 +805,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
           shell: childProfileShell({ platform: process.platform }),
           exploreFold: spec.exploreFold,
           isolatedSandbox: spec.isolatedSandbox,
+          workspaceWrite: !('workspaceWrite' in spec && spec.workspaceWrite === false),
         }),
       ].sort()
     );

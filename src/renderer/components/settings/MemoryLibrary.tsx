@@ -10,6 +10,7 @@ import {
   type MemoryDetail,
   type MemoryListItem,
   type MemorySearchMode,
+  type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { usePendingMemoryWrites, usePendingMemoryWritesStore } from '@/stores/memoryReview';
 
 /**
  * 记忆库浏览与维护。归档是默认动作；永久删除要二次确认（禁止静默删除）。
@@ -196,6 +198,58 @@ export function PendingReviewSection({
         </div>
       ))}
     </section>
+  );
+}
+
+/** Bot 成员写项目 / 全局记忆的待审批项；批准后才真正写入 */
+export function PendingWritesSection({
+  writes,
+  onReview,
+  t,
+}: {
+  writes: PendingMemoryWriteDto[];
+  onReview: (id: string, decision: 'approve' | 'reject') => void;
+  t: (key: string) => string;
+}) {
+  if (writes.length === 0) return null;
+  return (
+    <section className="space-y-2" data-settings-row="memory.pending-writes">
+      <h3 className="text-sm font-medium">{t('Memory writes awaiting approval')}</h3>
+      <p className="text-xs text-muted-foreground">
+        {t('Bot members need your approval before writing to project or global memory.')}
+      </p>
+      {writes.map((write) => (
+        <div key={write.id} className="space-y-1 rounded-lg border px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {write.originLabel && <span className="text-foreground">{write.originLabel}</span>}
+            <span>→ {write.spaceLabel}</span>
+            {write.redacted && <span>· {t('Secrets redacted')}</span>}
+          </div>
+          {write.title && <div className="text-sm font-medium">{write.title}</div>}
+          <p className="whitespace-pre-wrap text-xs">{write.content}</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => onReview(write.id, 'approve')}>
+              {t('Approve')}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onReview(write.id, 'reject')}>
+              {t('Reject')}
+            </Button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function PendingWritesReview({ t }: { t: (key: string) => string }) {
+  const writes = usePendingMemoryWrites();
+  const review = usePendingMemoryWritesStore((s) => s.review);
+  return (
+    <PendingWritesSection
+      writes={writes}
+      t={t}
+      onReview={(id, decision) => void review(id, decision)}
+    />
   );
 }
 
@@ -530,6 +584,8 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
           </Button>
         </div>
       )}
+
+      <PendingWritesReview t={t} />
 
       <PendingReviewSection
         edges={pendingEdges}

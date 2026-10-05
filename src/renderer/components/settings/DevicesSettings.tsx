@@ -336,6 +336,24 @@ function PairedDeviceRow({ device }: { device: PairStatus['devices'][number] }) 
             {device.phoneOnline && (
               <TransportBadge transport={device.transport} rttMs={device.rttMs} />
             )}
+            <button
+              type="button"
+              title={t('Click to switch: view-only devices cannot send, approve or stop.')}
+              onClick={() =>
+                void window.electronAPI.pair.setScope(
+                  device.pairId,
+                  device.scope === 'read' ? 'operate' : 'read'
+                )
+              }
+              className={cn(
+                'shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors',
+                device.scope === 'read'
+                  ? 'bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'
+                  : 'bg-muted text-muted-foreground hover:bg-accent'
+              )}
+            >
+              {device.scope === 'read' ? t('View only') : t('Can operate')}
+            </button>
           </>
         ) : (
           <Input

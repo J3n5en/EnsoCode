@@ -12,6 +12,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
+import { BotView } from '@/components/bots/BotView';
+import { ModeSwitch } from '@/components/bots/ModeSwitch';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
 import { ChatView } from '@/components/chat/ChatView';
 import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
@@ -46,6 +48,13 @@ import {
   closeActiveSidePanelTab,
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
+import { useBotsStore } from '@/stores/bots';
+import {
+  isBotModeActive,
+  openBotNotification,
+  useAppModeStore,
+  useBotModeActive,
+} from '@/stores/bots/mode';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
@@ -90,6 +99,8 @@ export default function App() {
   );
   const sideFullscreen = useSidePanelStore((s) => s.fullscreen);
   const toggleSidePanel = useSidePanelStore((s) => s.toggleOpen);
+  const botPanelOpen = useBotsStore((s) => s.panelOpen);
+  const toggleBotPanel = useBotsStore((s) => s.togglePanel);
   useEffect(() => {
     if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
   }, [sideOpen, sideFullscreen]);
@@ -155,6 +166,29 @@ export default function App() {
   useEffect(() => useRemoteNodesStore.getState().bind(), []);
   const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
   const remoteNodeActive = activeNodeId !== 'local';
+  const botModeActive = useBotModeActive();
+  const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
+  const appMode = useAppModeStore((s) => s.mode);
+  // 关闭实验开关或切到远程节点：回到 Code（设置未水合前 botModeEnabled 恒为 false，不能据此回退）
+  useEffect(() => {
+    const hydrated = useSettingsStore.persist?.hasHydrated?.() ?? true;
+    if (appMode === 'bot' && ((hydrated && !botModeEnabled) || remoteNodeActive)) {
+      useAppModeStore.getState().setMode('code');
+    }
+  }, [appMode, botModeEnabled, remoteNodeActive]);
+
+  // Bot 模式开关打开即常驻订阅：Code 模式下也要实时计数待处理，并响应通知点击跳转
+  useEffect(() => {
+    if (!botModeEnabled) return;
+    const unbind = useBotsStore.getState().bind();
+    const offOpen = window.electronAPI.bots.onEvent((event) => {
+      if (event.kind === 'open') void openBotNotification(event);
+    });
+    return () => {
+      unbind();
+      offOpen();
+    };
+  }, [botModeEnabled]);
 
   const handleResize = useCallback((deltaX: number) => {
     setWidth((w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w + deltaX)));
@@ -184,8 +218,27 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
-      // 远程节点态：本机会话相关的快捷键不响应（新对话/tab 切换/右侧面板/查找）
-      const remote = useRemoteNodesStore.getState().activeNodeId !== 'local';
+      if (pressed === bindings['toggle-app-mode']) {
+        const settings = useSettingsStore.getState();
+        if (!settings.botModeEnabled || useRemoteNodesStore.getState().activeNodeId !== 'local')
+          return;
+        e.preventDefault();
+        const modes = useAppModeStore.getState();
+        modes.setMode(modes.mode === 'bot' ? 'code' : 'bot');
+        return;
+      }
+      // 远程节点 / Bot 模式：本机 Code 会话相关的快捷键不响应（新对话/tab 切换/右侧面板/查找）
+      const remote = useRemoteNodesStore.getState().activeNodeId !== 'local' || isBotModeActive();
+      if (isBotModeActive() && pressed === bindings['toggle-side-panel']) {
+        e.preventDefault();
+        useBotsStore.getState().togglePanel();
+        return;
+      }
+      if (isBotModeActive() && pressed === bindings['search-workspace']) {
+        e.preventDefault();
+        useBotsStore.getState().setSearchOpen(true);
+        return;
+      }
       if (
         remote &&
         [
@@ -254,6 +307,7 @@ export default function App() {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (useRemoteNodesStore.getState().activeNodeId !== 'local') return;
+      if (isBotModeActive()) return;
       e.preventDefault();
       useSidePanelStore.getState().setFullscreen(false);
     };
@@ -275,6 +329,7 @@ export default function App() {
       <OauthCredentialBootstrap />
       <TitleBar
         title="EnsoCode"
+        leading={botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : undefined}
         actions={
           <>
             <button
@@ -298,9 +353,11 @@ export default function App() {
                 type="button"
                 className={cn(
                   'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                  sideOpen ? 'text-foreground' : 'text-muted-foreground'
+                  (botModeActive ? botPanelOpen : sideOpen)
+                    ? 'text-foreground'
+                    : 'text-muted-foreground'
                 )}
-                onClick={toggleSidePanel}
+                onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
                 aria-label={t('Toggle side panel')}
                 title={t('Toggle side panel')}
               >
@@ -315,6 +372,14 @@ export default function App() {
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
           <RemoteNodeView nodeId={activeNodeId} sidebarWidth={width} />
+        ) : botModeActive ? (
+          // Bot 模式：成员/群聊侧栏 + 聊天区；Code 侧栏/会话/右侧面板卸载
+          <BotView
+            sidebarWidth={width}
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((v) => !v)}
+            onResize={handleResize}
+          />
         ) : (
           <DndContext sensors={dndSensors} collisionDetection={dndCollision}>
             <Sidebar

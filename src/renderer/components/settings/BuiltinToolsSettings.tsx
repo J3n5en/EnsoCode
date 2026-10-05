@@ -15,6 +15,7 @@ import {
   MessageCircleQuestion,
   Monitor,
   Search,
+  ShieldAlert,
   Shrink,
   SquareTerminal,
   TriangleAlert,
@@ -109,6 +110,8 @@ export function BuiltinToolsSettings() {
   const setExploreFoldEnabled = useSettingsStore((state) => state.setExploreFoldEnabled);
   const rtkEnabled = useSettingsStore((state) => state.rtkEnabled);
   const setRtkEnabled = useSettingsStore((state) => state.setRtkEnabled);
+  const protectedActionsInCode = useSettingsStore((state) => state.protectedActionsInCode);
+  const setProtectedActionsInCode = useSettingsStore((state) => state.setProtectedActionsInCode);
   const editMode = useSettingsStore((state) => state.editMode);
   const setEditMode = useSettingsStore((state) => state.setEditMode);
   const occupancy = useOccupancyRows(
@@ -339,6 +342,17 @@ export function BuiltinToolsSettings() {
             'Compress supported command output before it enters the model context. Takes effect on new conversations.'
           )}
           control={<Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />}
+        />
+
+        <ToolRow
+          icon={ShieldAlert}
+          title={t('Protected action confirmation')}
+          description={t(
+            'Even in full-access mode, ask before external sends, deletions, payments, deployments and secret-file access. Always on for Bot members not set to Full access. Takes effect on new conversations.'
+          )}
+          control={
+            <Switch checked={protectedActionsInCode} onCheckedChange={setProtectedActionsInCode} />
+          }
         />
 
         <ToolRow

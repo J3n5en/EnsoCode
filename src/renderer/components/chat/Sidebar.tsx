@@ -773,7 +773,9 @@ export function Sidebar({ width, collapsed, onToggleCollapse, onOpenSearch }: Si
       <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
         <div className="flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5">
           {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
-          <NodeSwitcher />
+          <div className="flex min-w-0 items-center gap-1">
+            <NodeSwitcher />
+          </div>
           <div className="flex items-center">
             <button
               type="button"

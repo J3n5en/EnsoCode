@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>群聊新对话与克隆 · 设计稿</title>
+<style>
+:root{--bg:oklch(.145 .014 285.82);--fg:oklch(.985 0 0);--muted:oklch(.269 .014 285.82);--mfg:oklch(.708 .014 285.82);--border:oklch(.32 .014 285.82);--card:oklch(.18 .014 285.82);--info:oklch(.623 .214 259.81);--warning:oklch(.769 .189 70.08);--success:oklch(.627 .154 150.07);--danger:oklch(.637 .237 25.33)}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.45 Inter,system-ui,-apple-system,"PingFang SC",sans-serif;background:#2a2a2e;color:var(--fg)}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+.page{min-height:100vh;display:flex;justify-content:center;padding:16px;overflow:auto}
+.win{width:1160px;height:760px;flex:none;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 50px #0006;position:relative}
+.title{height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--border);flex:none}
+.dot{width:10px;height:10px;border-radius:50%;background:#555}
+.title .name{margin-left:8px;color:var(--mfg);font-size:12px}
+.body{flex:1;display:flex;min-height:0}
+.rail{width:216px;border-right:1px solid var(--border);background:oklch(.16 .014 285.82);display:flex;flex-direction:column;min-height:0;flex:none}
+.rail h2{margin:0;padding:12px 12px 6px;font-size:11px;font-weight:600;color:var(--mfg)}
+.rail .list{padding-bottom:8px;overflow:auto}
+.row{display:flex;align-items:center;gap:2px;margin:1px 6px;border-radius:8px}
+.row.on{background:var(--muted)}
+.row .open{flex:1;min-width:0;display:flex;gap:8px;align-items:center;border:0;background:transparent;text-align:left;padding:6px;border-radius:8px}
+.row .more{width:22px;height:22px;margin-right:4px;border:0;border-radius:6px;background:transparent;color:var(--mfg);flex:none}
+.row:hover .more,.row.on .more{background:oklch(1 0 0 / .06)}
+.preview{display:block;color:var(--mfg);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.gav{width:28px;height:28px;position:relative;flex:none}
+.gav i{position:absolute;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:9px;color:#fff;border:1.5px solid oklch(.16 .014 285.82);font-style:normal;font-weight:650}
+.gav.busy:after{content:"";position:absolute;right:-2px;bottom:-2px;width:8px;height:8px;border-radius:50%;background:var(--warning);border:2px solid oklch(.16 .014 285.82)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{min-height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:8px 16px;flex:none}
+.head .t{font-weight:600}
+.head .sub{color:var(--mfg);font-size:12px}
+.head .sub .hot{color:var(--warning)}
+.sp{flex:1}
+.ws,.new{height:28px;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:7px;padding:0 8px;font-size:12px;background:transparent;color:var(--mfg)}
+.new{color:var(--fg)}
+.new:hover{background:var(--muted)}
+.banner{padding:8px 16px;background:color-mix(in oklch,var(--warning) 16%,var(--bg));color:var(--warning);font-size:12px;border-bottom:1px solid color-mix(in oklch,var(--warning) 45%,var(--border))}
+.banner[hidden]{display:none}
+.tl{flex:1;overflow:auto;padding:16px 20px 8px;display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;gap:8px;max-width:640px}
+.who{font-size:12px;color:var(--mfg);margin-bottom:2px}
+.who b{color:var(--fg);margin-right:6px}
+.bub{background:var(--muted);border-radius:4px 12px 12px 12px;padding:8px 12px}
+.me{align-self:flex-end}
+.me .bub{background:oklch(.32 .02 285);border-radius:12px 4px 12px 12px}
+.at{color:var(--info)}
+.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:650;flex:none}
+.past{display:flex;flex-direction:column;gap:12px;opacity:.72}
+.fold{display:flex;justify-content:center}
+.fold button{border:1px dashed var(--border);background:transparent;color:var(--mfg);border-radius:999px;padding:4px 12px;font-size:12px}
+.fold button:hover:not(:disabled){color:var(--fg);border-color:var(--mfg)}
+.cut{display:flex;align-items:center;gap:10px;color:var(--mfg);font-size:12px}
+.cut:before,.cut:after{content:"";height:1px;background:var(--border);flex:1}
+.empty{color:var(--mfg);font-size:12px;text-align:center;padding:28px 8px}
+.composer{margin:8px 16px 14px;border:1px solid var(--border);border-radius:12px;background:var(--card);display:flex;gap:8px;padding:8px}
+.composer input{flex:1;background:transparent;border:0;outline:none}
+.send{border:0;background:var(--fg);color:var(--bg);border-radius:8px;padding:4px 10px}
+.panel{width:300px;border-left:1px solid var(--border);overflow:auto;padding:14px 14px 24px;flex:none}
+.panel h3{margin:16px 0 4px;font-size:13px}
+.panel p,.panel li{margin:0;color:var(--mfg);font-size:12px}
+.panel ul,.panel ol{margin:4px 0 0;padding-left:1.15em}
+.panel li+li{margin-top:3px}
+.sum{margin:0;color:var(--fg);font-size:12px}
+.sum b{font-weight:650}
+.now{margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.now p{margin:0 0 3px;color:var(--fg);font-size:12px}
+.now p:last-child{margin:0}
+.now span{color:var(--mfg)}
+.proto-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.proto{border:1px dashed var(--border);background:transparent;border-radius:7px;padding:4px 8px;font-size:12px;color:var(--mfg)}
+.proto.on{border-style:solid;color:var(--fg);background:var(--muted)}
+.hint{margin-top:4px;color:var(--mfg);font-size:11px}
+.menu{position:fixed;z-index:30;width:196px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:4px;box-shadow:0 12px 32px #0008}
+.menu[hidden]{display:none}
+.menu button{display:block;width:100%;text-align:left;border:0;background:transparent;border-radius:6px;padding:6px 8px;font-size:13px}
+.menu button:hover:not(:disabled){background:var(--muted)}
+.menu button:disabled{opacity:.4}
+.menu hr{border:0;border-top:1px solid var(--border);margin:4px 2px}
+.menu .go{color:var(--fg)}
+.mask{position:fixed;inset:0;background:#0008;display:grid;place-items:center;z-index:20}
+.mask[hidden]{display:none}
+.dlg{width:440px;max-width:calc(100vw - 32px);max-height:calc(100vh - 48px);overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 16px 40px #000a}
+.dlg h2{margin:0 0 4px;font-size:15px}
+.dlg .sub{color:var(--mfg);font-size:12px}
+.dlg h3{margin:12px 0 4px;font-size:12px;color:var(--mfg);font-weight:500}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border)}
+.kv span{color:var(--mfg);flex:none}
+.kv b{font-weight:500;text-align:right}
+.skip{margin:0;padding-left:1.1em;color:var(--mfg);font-size:12px}
+.skip li+li{margin-top:2px}
+.field{display:block;margin-top:10px}
+.field span{display:block;margin-bottom:4px;color:var(--mfg);font-size:12px}
+.field input{width:100%;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--card);padding:0 8px;outline:none}
+.choice{position:relative;display:block;margin-top:6px;border:1px solid var(--border);border-radius:8px;padding:8px 8px 8px 28px;cursor:pointer}
+.choice input{position:absolute;left:10px;top:12px}
+.choice.on{border-color:var(--fg)}
+.choice b{display:block;font-weight:600;font-size:13px}
+.choice span{color:var(--mfg);font-size:12px}
+.warn{margin-top:8px;padding:8px;border-radius:8px;background:color-mix(in oklch,var(--warning) 14%,var(--bg));color:var(--warning);font-size:12px}
+.warn[hidden]{display:none}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.btn{border:1px solid var(--border);background:var(--bg);border-radius:7px;padding:6px 10px;font-size:12px}
+.btn.pr{background:var(--fg);color:var(--bg);border-color:transparent}
+.btn:disabled{opacity:.45}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--fg);color:var(--bg);border-radius:8px;padding:8px 12px;font-size:12px;z-index:40;box-shadow:0 8px 24px #0006}
+.toast[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="win">
+    <div class="title"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="name">EnsoCode · 群聊新对话 / 克隆群聊（设计稿）</span></div>
+    <div class="body">
+      <aside class="rail">
+        <h2>群聊</h2>
+        <div class="list" id="rail"></div>
+      </aside>
+      <section class="main">
+        <header class="head" id="head"></header>
+        <div class="banner" id="banner" hidden></div>
+        <div class="tl" id="tl"></div>
+        <form class="composer" id="composer">
+          <input id="draft" placeholder="@ 一位成员，或直接说…" autocomplete="off" />
+          <button class="send" type="submit">发送</button>
+        </form>
+      </section>
+      <aside class="panel" id="panel"></aside>
+    </div>
+  </div>
+</div>
+<div class="menu" id="menu" hidden></div>
+<div class="mask" id="mask" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script>
+const PEOPLE = {
+  lin: { name: "林经理", ch: "林", color: "#7c5cff" },
+  anran: { name: "安然", ch: "安", color: "#ec4899" },
+  jason: { name: "Jason", ch: "J", color: "#0ea5e9" },
+  qa: { name: "测试", ch: "测", color: "#f97316" },
+};
+const ORDER = ["lin", "anran", "jason", "qa"];
+const POS = [[0, 0], [12, 0], [0, 12], [12, 12]];
+
+let loadTimer = 0;
+let toastTimer = 0;
+let state = initial();
+
+function initial() {
+  return {
+    nid: 1,
+    clock: { h: 14, m: 21 },
+    activeId: "g1",
+    menu: null,
+    dialog: null,
+    cloneName: "",
+    cloneWs: "home",
+    groups: [{
+      id: "g1",
+      title: "发布小组",
+      owner: "lin",
+      members: ["lin", "anran", "jason", "qa"],
+      muted: ["qa"],
+      mode: "boss",
+      hops: 4,
+      turns: 2,
+      workspace: { kind: "project", name: "enso-code", key: "proj-enso" },
+      running: { jason: true, anran: true },
+      segments: [{
+        id: "s1",
+        date: "10月5日",
+        time: "14:02",
+        collapsed: false,
+        loading: false,
+        messages: [
+          { from: "me", text: "发布说明还差一版，今天能出吗？", at: "14:02" },
+          { from: "lin", text: "@Jason 先对一下安装包文案，@安然 看下群里要不要「新对话」。", at: "14:06" },
+          { from: "jason", text: "私聊顶部有这个按钮，群聊被藏掉了。我还没改。", at: "14:11" },
+          { from: "anran", text: "群里如果另开一条会话，旧记录就翻不回去。我想留在同一条时间线上。", at: "14:16" },
+          { from: "me", text: "旧的别删，我还要往上对一下今天上午的原话。", at: "14:18" },
+        ],
+      }],
+    }],
+  };
+}
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+function active() {
+  return state.groups.find((group) => group.id === state.activeId);
+}
+
+function runners(group) {
+  return ORDER.filter((id) => group.running[id]);
+}
+
+function wsLabel(group) {
+  return group.workspace.kind === "home" ? "独立工作区" : group.workspace.name;
+}
+
+function sharers(group) {
+  return state.groups.filter((item) => item.id !== group.id && item.workspace.key === group.workspace.key);
+}
+
+function stamp() {
+  const text = `${String(state.clock.h).padStart(2, "0")}:${String(state.clock.m).padStart(2, "0")}`;
+  state.clock.m += 1;
+  if (state.clock.m >= 60) {
+    state.clock.h += 1;
+    state.clock.m = 0;
+  }
+  return text;
+}
+
+function rich(text) {
+  let html = esc(text);
+  ORDER.map((id) => PEOPLE[id].name)
+    .sort((a, b) => b.length - a.length)
+    .forEach((name) => {
+      html = html.replaceAll(`@${name}`, `<span class="at">@${name}</span>`);
+    });
+  return html;
+}
+
+function gav(group) {
+  const ids = group.members.slice(0, 4);
+  const busy = runners(group).length > 0;
+  return `<span class="gav${busy ? " busy" : ""}">${ids.map((id, index) => {
+    const person = PEOPLE[id];
+    const pos = POS[index];
+    return `<i style="left:${pos[0]}px;top:${pos[1]}px;background:${person.color}">${person.ch}</i>`;
+  }).join("")}</span>`;
+}
+
+function preview(group) {
+  const message = group.segments.flatMap((seg) => seg.messages).at(-1);
+  if (!message) return "还没有消息";
+  return message.from === "me" ? message.text : `${PEOPLE[message.from].name}：${message.text}`;
+}
+
+function memberLine(group) {
+  return group.members.map((id) => {
+    const tags = [];
+    if (group.owner === id) tags.push("群主");
+    if (group.muted.includes(id)) tags.push("静音");
+    return tags.length ? `${PEOPLE[id].name}（${tags.join("、")}）` : PEOPLE[id].name;
+  }).join("、");
+}
+
+function routeLine(group) {
+  const mode = group.mode === "smart" ? "不 @ 时挑一位合适的成员" : "不 @ 时由群主回复";
+  return `${mode} · 接力 ${group.hops} · 每人 ${group.turns} 条`;
+}
+
+function msgHtml(message) {
+  if (message.from === "me") {
+    return `<div class="msg me"><div class="bub">${rich(message.text)}</div></div>`;
+  }
+  const person = PEOPLE[message.from];
+  return `<div class="msg"><div class="av" style="background:${person.color}">${person.ch}</div><div><div class="who"><b>${esc(person.name)}</b>${esc(message.at)}</div><div class="bub">${rich(message.text)}</div></div></div>`;
+}
+
+function foldHtml(group, seg) {
+  const label = seg.loading
+    ? `正在加载 ${seg.messages.length} 条…`
+    : seg.collapsed
+      ? `上一段对话 · ${seg.date} ${seg.time} · ${seg.messages.length} 条`
+      : `收起这段 · ${seg.messages.length} 条`;
+  return `<div class="fold"><button type="button" data-act="fold" data-gid="${group.id}" data-sid="${seg.id}" ${seg.loading ? "disabled" : ""}>${esc(label)}</button></div>`;
+}
+
+function timelineHtml(group) {
+  const parts = [];
+  group.segments.forEach((seg, index) => {
+    const last = index === group.segments.length - 1;
+    if (!last) {
+      parts.push(foldHtml(group, seg));
+      if (!seg.collapsed) parts.push(`<div class="past">${seg.messages.map(msgHtml).join("")}</div>`);
+      parts.push(`<div class="cut"><span>新对话 · ${esc(group.segments[index + 1].time)}</span></div>`);
+      return;
+    }
+    if (seg.messages.length === 0) {
+      parts.push(`<div class="empty">${group.segments.length === 1 ? "还没有消息" : "新的一段从这里开始"}</div>`);
+      return;
+    }
+    parts.push(seg.messages.map(msgHtml).join(""));
+  });
+  return parts.join("");
+}
+
+function segmentStatus(group) {
+  return group.segments.map((seg, index) => {
+    const current = index === group.segments.length - 1;
+    const stateText = current ? "当前，已铺开" : seg.loading ? "加载中" : seg.collapsed ? "折叠，未加载" : "已点开";
+    return `${current ? "当前段" : `上一段 ${index + 1}`} ${seg.date} ${seg.time} · ${seg.messages.length} 条 · ${stateText}`;
+  }).join("；");
+}
+
+function renderRail() {
+  document.getElementById("rail").innerHTML = state.groups.map((group) => `
+    <div class="row${group.id === state.activeId ? " on" : ""}" data-id="${group.id}">
+      <button type="button" class="open" data-act="open" data-id="${group.id}">
+        ${gav(group)}
+        <span style="min-width:0">
+          <b>${esc(group.title)}</b>
+          <span class="preview">${esc(preview(group))}</span>
+        </span>
+      </button>
+      <button type="button" class="more" data-act="menu" data-id="${group.id}" aria-label="群菜单">⋯</button>
+    </div>
+  `).join("");
+}
+
+function renderHead() {
+  const group = active();
+  const names = runners(group).map((id) => PEOPLE[id].name);
+  const current = group.segments.at(-1);
+  const title = !current.messages.length
+    ? "这一段还没有消息"
+    : names.length ? "有人在回复，点开会先确认" : "从这里切开，上面收成一行";
+  document.getElementById("head").innerHTML = `
+    ${gav(group)}
+    <div style="min-width:0">
+      <div class="t">${esc(group.title)}</div>
+      <div class="sub">${group.members.length} 名成员 · 群主 ${esc(PEOPLE[group.owner].name)} · ${esc(wsLabel(group))}${names.length ? ` · <span class="hot">${esc(names.join("、"))}正在回复</span>` : ""}</div>
+    </div>
+    <div class="sp"></div>
+    <span class="ws" title="工作区">${esc(wsLabel(group))}</span>
+    <button type="button" class="new" data-act="new" title="${esc(title)}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v6M9 10h6"/></svg>
+      新对话
+    </button>`;
+}
+
+function renderBanner() {
+  const group = active();
+  const others = sharers(group);
+  const banner = document.getElementById("banner");
+  banner.hidden = others.length === 0;
+  banner.textContent = others.length
+    ? `和${others.map((item) => `「${item.title}」`).join("、")}共用 ${wsLabel(group)}，会同时改同一批文件。`
+    : "";
+}
+
+function renderTimeline(mode) {
+  const tl = document.getElementById("tl");
+  const prevTop = tl.scrollTop;
+  const prevHeight = tl.scrollHeight;
+  tl.innerHTML = timelineHtml(active());
+  if (mode === "bottom") tl.scrollTop = tl.scrollHeight;
+  else if (mode === "anchor") tl.scrollTop = prevTop + (tl.scrollHeight - prevHeight);
+  else tl.scrollTop = prevTop;
+}
+
+function renderPanel() {
+  const group = active();
+  const names = runners(group).map((id) => PEOPLE[id].name);
+  const current = group.segments.at(-1);
+  const share = sharers(group);
+  const panel = document.getElementById("panel");
+  const top = panel.scrollTop;
+  panel.innerHTML = `
+    <p class="sum"><b>结论。</b>群聊「新对话」不另开会话：同一条时间线插分隔线，上面每段收成一行，点开才加载。成员只看线之后的内容。有人在跑要先确认，确认后停掉所有人这一轮。</p>
+    <p class="sum" style="margin-top:6px">「克隆群聊」在左侧群菜单。复制成员、群主和分派，记录是空的。群笔记、例行任务、任务板、群记忆不带。工作区默认新建独立；沿用原群时写明两边会改同一批文件。</p>
+    <h3>现在这样</h3>
+    <div class="now" id="now">
+      <p><span>当前群　</span>${esc(group.title)}</p>
+      <p><span>在跑　　</span>${names.length ? esc(names.join("、")) : "没有"}</p>
+      <p><span>时间线　</span>${esc(segmentStatus(group))}</p>
+      <p><span>工作区　</span>${esc(wsLabel(group))}${share.length ? `，与${esc(share.map((item) => item.title).join("、"))}共用` : "，没有别的群共用"}</p>
+      <p><span>点新对话</span>${!current.messages.length ? "只会提示，这一段是空的" : names.length ? "会先确认，再停掉所有人并切开" : "直接切开，不询问"}</p>
+    </div>
+    <h3>怎么试</h3>
+    <div class="proto-row">
+      <button type="button" class="proto${names.length ? " on" : ""}" data-act="run" data-on="1">设为有人在跑</button>
+      <button type="button" class="proto${!names.length ? " on" : ""}" data-act="run" data-on="0">设为都闲着</button>
+      <button type="button" class="proto" data-act="reset">重置</button>
+    </div>
+    <p class="hint">这两个开关不是产品按钮，只用来看确认分支。产品里停掉发生在确认之后。</p>
+    <ol>
+      <li>顶部「新对话」。现在有人在跑，会先问；取消则不动。</li>
+      <li>确认后上面收成一行。点那一行才出现旧消息，再点收起就卸掉。</li>
+      <li>下面发一句，再点「新对话」，会多出第二行折叠。</li>
+      <li>先点「设为都闲着」，再点「新对话」，这次不询问。</li>
+      <li>群名右侧 ⋯，或在群名上右键，选「克隆群聊」。</li>
+      <li>选「沿用原群」看警告，选「新建独立」没有这句。克隆后左侧多一个空群；回到原群，正在跑的人还在。</li>
+    </ol>
+    <h3>新对话</h3>
+    <ul>
+      <li>入口在群聊顶部，文案和私聊相同。私聊仍是停掉这一位、写入记忆、旧会话进只读历史。群聊不走那条，这张稿也不改私聊。</li>
+      <li>有成员在回复：先确认。确认后停掉所有人当前这一轮，不是只停打开按钮时看见的那一位。取消则不停、也不切。</li>
+      <li>没人在跑：直接切。</li>
+      <li>当前这段还没有消息：不再插线。</li>
+      <li>每切一次，刚结束的那段收成「上一段对话 · 日期 时间 · N 条」。默认不渲染这些消息。点开才加载，收起后从列表卸掉。更早的段各自一行，不会一次铺开。</li>
+      <li>往上翻看到的是这些行。线上的旧记录还在，给人看；成员上下文从分隔线之后重新算。</li>
+      <li>不把旧段落进记忆，也不挪到只读历史。</li>
+    </ul>
+    <h3>克隆群聊</h3>
+    <ul>
+      <li>入口在左侧群列表的菜单。置顶、未读、归档、删除只标出位置，这份稿不接通。</li>
+      <li>复制：成员（含静音）、群主、不 @ 时的分派、接力上限、每人回复上限。成员还是原来那几位，不新建一套人。</li>
+      <li>不复制：聊天记录、群笔记、例行任务、任务板、群记忆。新群是空的，避免把上一段结论带进来。</li>
+      <li>原群不动。正在回复的人不会因为克隆被停掉。</li>
+      <li>工作区二选一，默认新建独立目录。</li>
+      <li>沿用原群：确认前出现警告。建好后，两个群的时间线上方都留着「会同时改同一批文件」。</li>
+    </ul>
+    <h3>这次不做</h3>
+    <ul>
+      <li>不是已上线的界面，没有接真实会话。</li>
+      <li>不提供「顺便复制笔记 / 例行 / 任务板」的勾选。</li>
+      <li>不在克隆时改成员、群主或分派。</li>
+    </ul>`;
+  panel.scrollTop = top;
+}
+
+function render(options) {
+  const mode = options && options.timeline ? options.timeline : "keep";
+  renderRail();
+  renderHead();
+  renderBanner();
+  renderTimeline(mode);
+  renderPanel();
+}
+
+function renderMenu() {
+  const menu = document.getElementById("menu");
+  if (!state.menu) {
+    menu.hidden = true;
+    return;
+  }
+  menu.hidden = false;
+  menu.style.left = `${state.menu.x}px`;
+  menu.style.top = `${state.menu.y}px`;
+  menu.innerHTML = `
+    <button type="button" disabled>置顶</button>
+    <button type="button" disabled>标为未读</button>
+    <hr />
+    <button type="button" class="go" data-act="clone">克隆群聊</button>
+    <hr />
+    <button type="button" disabled>归档聊天</button>
+    <button type="button" disabled>删除群聊</button>`;
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+  if (rect.bottom > window.innerHeight - 8) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+}
+
+function renderDialog() {
+  const mask = document.getElementById("mask");
+  if (!state.dialog) {
+    mask.hidden = true;
+    mask.innerHTML = "";
+    return;
+  }
+  const group = state.dialog === "clone"
+    ? (state.groups.find((item) => item.id === state.cloneFrom) || active())
+    : active();
+  mask.hidden = false;
+  if (state.dialog === "new") {
+    const names = runners(group).map((id) => PEOPLE[id].name);
+    mask.innerHTML = `
+      <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+        <h2 id="dlg-title">开始新对话？</h2>
+        <p class="sub">${esc(names.join("、"))}还在这一轮。确认后会停掉所有人正在进行的回复，再插入分隔线。上面的消息还在，先收成一行；成员从分隔线之后重新开始。</p>
+        <div class="actions">
+          <button type="button" class="btn" data-act="cancel">取消</button>
+          <button type="button" class="btn pr" data-act="confirm-new">停掉并开始</button>
+        </div>
+      </div>`;
+    return;
+  }
+  mask.innerHTML = `
+    <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+      <h2 id="dlg-title">克隆群聊</h2>
+      <p class="sub">从「${esc(group.title)}」复制配置。原群保持原样，正在跑的回复也不会停。</p>
+      <label class="field"><span>名称</span><input id="clone-name" value="${esc(state.cloneName)}" autocomplete="off" /></label>
+      <h3>会复制</h3>
+      <div class="kv"><span>成员</span><b>${esc(memberLine(group))}</b></div>
+      <div class="kv"><span>群主</span><b>${esc(PEOPLE[group.owner].name)}</b></div>
+      <div class="kv"><span>分派</span><b>${esc(routeLine(group))}</b></div>
+      <h3>不复制</h3>
+      <ul class="skip">
+        <li>聊天记录（新群是空的）</li>
+        <li>群笔记</li>
+        <li>例行任务</li>
+        <li>任务板</li>
+        <li>群记忆</li>
+      </ul>
+      <h3>工作区</h3>
+      <label class="choice${state.cloneWs === "home" ? " on" : ""}">
+        <input type="radio" name="ws" value="home"${state.cloneWs === "home" ? " checked" : ""} />
+        <b>新建独立</b>
+        <span>单独一个目录，和原群互不影响。</span>
+      </label>
+      <label class="choice${state.cloneWs === "share" ? " on" : ""}">
+        <input type="radio" name="ws" value="share"${state.cloneWs === "share" ? " checked" : ""} />
+        <b>沿用原群</b>
+        <span>继续用「${esc(group.title)}」的 ${esc(wsLabel(group))}。</span>
+      </label>
+      <div class="warn" id="ws-warn"${state.cloneWs === "share" ? "" : " hidden"}>两个群会同时改同一批文件（${esc(wsLabel(group))}）。改动互相可见，也可能互相盖掉。</div>
+      <div class="actions">
+        <button type="button" class="btn" data-act="cancel">取消</button>
+        <button type="button" class="btn pr" id="clone-ok" data-act="confirm-clone"${state.cloneName.trim() ? "" : " disabled"}>克隆</button>
+      </div>
+    </div>`;
+  const input = document.getElementById("clone-name");
+  input.focus();
+  input.select();
+}
+
+function toast(text) {
+  const el = document.getElementById("toast");
+  el.hidden = false;
+  el.textContent = text;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2800);
+}
+
+function uniqueName(base) {
+  const titles = new Set(state.groups.map((group) => group.title));
+  if (!titles.has(base)) return base;
+  let index = 2;
+  while (titles.has(`${base} ${index}`)) index += 1;
+  return `${base} ${index}`;
+}
+
+function setActive(id) {
+  if (state.activeId === id) return;
+  state.activeId = id;
+  state.menu = null;
+  renderMenu();
+  document.getElementById("draft").value = "";
+  render({ timeline: "bottom" });
+}
+
+function openMenu(anchor, id) {
+  const rect = anchor.getBoundingClientRect();
+  state.menu = { id, x: Math.max(8, rect.right - 196), y: rect.bottom + 4 };
+  renderMenu();
+}
+
+function clickNew() {
+  const group = active();
+  const seg = group.segments.at(-1);
+  if (!seg.messages.length) {
+    toast(group.segments.length === 1 ? "还没有对话，不用新开一段。" : "这一段还没有消息。");
+    return;
+  }
+  if (runners(group).length) {
+    state.dialog = "new";
+    renderDialog();
+    return;
+  }
+  cut([]);
+}
+
+function cut(stopped) {
+  const group = active();
+  const seg = group.segments.at(-1);
+  if (!seg.messages.length) return;
+  const count = seg.messages.length;
+  group.running = {};
+  seg.collapsed = true;
+  seg.loading = false;
+  state.nid += 1;
+  group.segments.push({
+    id: `s${state.nid}`,
+    date: "10月5日",
+    time: stamp(),
+    collapsed: false,
+    loading: false,
+    messages: [],
+  });
+  render({ timeline: "bottom" });
+  toast(stopped.length
+    ? `已停掉${stopped.join("、")}这一轮，上面 ${count} 条先不加载。`
+    : `已切开。上面 ${count} 条先不加载。`);
+}
+
+function confirmNew() {
+  const names = runners(active()).map((id) => PEOPLE[id].name);
+  state.dialog = null;
+  renderDialog();
+  cut(names);
+}
+
+function loadSeg(gid, sid) {
+  const group = state.groups.find((item) => item.id === gid);
+  const seg = group && group.segments.find((item) => item.id === sid);
+  if (!seg || seg.loading) return;
+  const last = group.segments.at(-1);
+  if (seg === last) return;
+  if (!seg.collapsed) {
+    seg.collapsed = true;
+    render({ timeline: "anchor" });
+    return;
+  }
+  seg.loading = true;
+  render({ timeline: "keep" });
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => {
+    if (!group.segments.includes(seg)) return;
+    seg.loading = false;
+    seg.collapsed = false;
+    render({ timeline: "anchor" });
+  }, 420);
+}
+
+function openClone() {
+  state.cloneFrom = (state.menu && state.menu.id) || state.activeId;
+  const group = state.groups.find((item) => item.id === state.cloneFrom);
+  state.dialog = "clone";
+  state.cloneName = uniqueName(`${group.title} 的副本`);
+  state.cloneWs = "home";
+  state.menu = null;
+  renderMenu();
+  renderDialog();
+}
+
+function doClone() {
+  const name = state.cloneName.trim();
+  if (!name || state.dialog !== "clone") return;
+  const src = state.groups.find((item) => item.id === state.cloneFrom) || active();
+  state.nid += 1;
+  const id = `g${state.nid}`;
+  const workspace = state.cloneWs === "share"
+    ? { ...src.workspace }
+    : { kind: "home", name: "独立工作区", key: `home-${id}` };
+  state.groups.push({
+    id,
+    title: name,
+    owner: src.owner,
+    members: src.members.slice(),
+    muted: src.muted.slice(),
+    mode: src.mode,
+    hops: src.hops,
+    turns: src.turns,
+    workspace,
+    running: {},
+    segments: [{
+      id: `s${state.nid}`,
+      date: "10月5日",
+      time: stamp(),
+      collapsed: false,
+      loading: false,
+      messages: [],
+    }],
+  });
+  state.activeId = id;
+  state.dialog = null;
+  renderDialog();
+  document.getElementById("draft").value = "";
+  render({ timeline: "bottom" });
+  toast("已克隆。聊天记录是空的。");
+}
+
+function setRunning(on) {
+  active().running = on ? { jason: true, anran: true } : {};
+  render();
+}
+
+function closeDialog() {
+  state.dialog = null;
+  renderDialog();
+}
+
+function reset() {
+  clearTimeout(loadTimer);
+  clearTimeout(toastTimer);
+  document.getElementById("toast").hidden = true;
+  state = initial();
+  document.getElementById("draft").value = "";
+  renderMenu();
+  renderDialog();
+  render({ timeline: "bottom" });
+}
+
+document.body.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-act]");
+  if (!item) {
+    if (state.menu) {
+      state.menu = null;
+      renderMenu();
+    }
+    return;
+  }
+  const act = item.dataset.act;
+  if (act === "open") setActive(item.dataset.id);
+  else if (act === "menu") openMenu(item, item.dataset.id);
+  else if (act === "clone") openClone();
+  else if (act === "new") clickNew();
+  else if (act === "cancel") closeDialog();
+  else if (act === "confirm-new") confirmNew();
+  else if (act === "confirm-clone") doClone();
+  else if (act === "fold") loadSeg(item.dataset.gid, item.dataset.sid);
+  else if (act === "run") setRunning(item.dataset.on === "1");
+  else if (act === "reset") reset();
+  if (act !== "menu" && state.menu) {
+    state.menu = null;
+    renderMenu();
+  }
+});
+
+document.getElementById("rail").addEventListener("contextmenu", (event) => {
+  const row = event.target.closest(".row");
+  if (!row) return;
+  event.preventDefault();
+  state.menu = { id: row.dataset.id, x: event.clientX, y: event.clientY };
+  renderMenu();
+});
+
+document.getElementById("composer").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = document.getElementById("draft");
+  const text = input.value.trim();
+  if (!text) return;
+  active().segments.at(-1).messages.push({ from: "me", text, at: stamp() });
+  input.value = "";
+  render({ timeline: "bottom" });
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target.id !== "clone-name") return;
+  state.cloneName = event.target.value;
+  const ok = document.getElementById("clone-ok");
+  if (ok) ok.disabled = !state.cloneName.trim();
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target.name !== "ws") return;
+  state.cloneWs = event.target.value;
+  document.querySelectorAll(".choice").forEach((label) => {
+    const radio = label.querySelector("input");
+    label.classList.toggle("on", radio && radio.checked);
+  });
+  const warn = document.getElementById("ws-warn");
+  if (warn) warn.hidden = state.cloneWs !== "share";
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    state.menu = null;
+    renderMenu();
+    closeDialog();
+    return;
+  }
+  if (event.key === "Enter" && state.dialog === "clone" && event.target.id === "clone-name") {
+    event.preventDefault();
+    doClone();
+  }
+});
+
+render({ timeline: "bottom" });
+</script>
+</body>
+</html>

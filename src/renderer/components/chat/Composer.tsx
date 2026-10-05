@@ -19,7 +19,11 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { flattenMentionRoot, useMentionSearch } from '@/hooks/useMentionSearch';
+import {
+  flattenMentionRoot,
+  type MentionFolderId,
+  useMentionSearch,
+} from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, formatBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
@@ -201,7 +205,7 @@ export function Composer({
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [openFolderId, setOpenFolderId] = useState<'agents' | 'chats' | null>(null);
+  const [openFolderId, setOpenFolderId] = useState<MentionFolderId | null>(null);
   const [folderIndex, setFolderIndex] = useState(0);
   const slashListRef = useRef<HTMLDivElement>(null);
 

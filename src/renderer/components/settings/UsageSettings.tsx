@@ -1,3 +1,4 @@
+import type { BotUsageRow } from '@shared/usage/botUsage';
 import { formatCost, formatDelta, formatDurationMs, formatTokens } from '@shared/usage/format';
 import {
   USAGE_RANGE_DAYS,
@@ -10,6 +11,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/stores/settings';
 import { DailyTrendChart } from './usage/DailyTrendChart';
 import { HourlyHeatmap } from './usage/HourlyHeatmap';
 import { RankingTable } from './usage/RankingTable';
@@ -28,25 +30,34 @@ export function UsageSettings() {
   const { t } = useI18n();
   const [days, setDays] = React.useState<UsageRangeDays>(7);
   const [summary, setSummary] = React.useState<UsageSummary | null>(null);
+  const botMode = useSettingsStore((s) => s.botModeEnabled);
+  const [botRows, setBotRows] = React.useState<BotUsageRow[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   // latest-wins：快速切换周期时，慢响应不得覆盖新周期的结果
   const requestId = React.useRef(0);
 
-  const load = React.useCallback(async (range: UsageRangeDays) => {
-    const id = ++requestId.current;
-    setLoading(true);
-    const result = await window.electronAPI.usage.summary(range);
-    if (id !== requestId.current) return;
-    setLoading(false);
-    if (result.ok) {
-      setSummary(result.summary);
-      setError(null);
-    } else {
-      setSummary(null);
-      setError(result.error);
-    }
-  }, []);
+  const load = React.useCallback(
+    async (range: UsageRangeDays) => {
+      const id = ++requestId.current;
+      setLoading(true);
+      const [result, bots] = await Promise.all([
+        window.electronAPI.usage.summary(range),
+        botMode ? window.electronAPI.bots.usageSummary(range).catch(() => null) : null,
+      ]);
+      if (id !== requestId.current) return;
+      setLoading(false);
+      setBotRows(bots?.ok ? bots.rows : null);
+      if (result.ok) {
+        setSummary(result.summary);
+        setError(null);
+      } else {
+        setSummary(null);
+        setError(result.error);
+      }
+    },
+    [botMode]
+  );
 
   React.useEffect(() => {
     void load(days);
@@ -107,6 +118,20 @@ export function UsageSettings() {
               }))}
             />
           </div>
+          {botMode && botRows && (
+            <RankingTable
+              title={t('By member')}
+              countLabel={t('Sessions')}
+              emptyLabel={t('No usage in this period')}
+              rows={botRows.map((row) => ({
+                key: row.botId,
+                name: row.name || t('Deleted member'),
+                cost: row.cost,
+                tokens: row.tokens,
+                count: row.sessions,
+              }))}
+            />
+          )}
           {summary.unpricedModels.length > 0 && (
             <p className="text-xs text-muted-foreground">
               {t('No catalog price for: {{models}}. Their cost is not included.', {

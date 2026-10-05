@@ -18,6 +18,11 @@ const POSIX_HOST = 'posix';
 /** 远程图片代理的保留 host */
 export const REMOTE_FETCH_HOST = 'remote-fetch';
 
+/** 成员头像的保留 host：只按 botId 寻址，路径由 Main 推导；v 为头像版本（缓存失效） */
+export const BOT_AVATAR_HOST = 'bot-avatar';
+export const botAvatarUrl = (botId: string, version: number): string =>
+  `${LOCAL_IMAGE_SCHEME}://${BOT_AVATAR_HOST}/${encodeURIComponent(botId)}?v=${version}`;
+
 export const IMAGE_EXTENSIONS = [
   'png',
   'jpg',
@@ -75,7 +80,7 @@ export function toLocalImageUrl(filePath: string): string {
 /** local-image:// URL → 本地绝对路径；形状不合法返回 null */
 export function localImageUrlToPath(url: URL): string | null {
   const host = url.hostname;
-  if (!host || host === REMOTE_FETCH_HOST) return null;
+  if (!host || host === REMOTE_FETCH_HOST || host === BOT_AVATAR_HOST) return null;
   const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (host === POSIX_HOST) {
     return `/${segments.join('/')}`;

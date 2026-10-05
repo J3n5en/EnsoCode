@@ -22,6 +22,7 @@ export const STATUS_LINE_SEGMENT_IDS = [
   'tokens',
   'cache',
   'context',
+  'requestBody',
   'turns',
   'speed',
   'duration',
@@ -52,7 +53,17 @@ export const STATUS_LINE_PRESETS: Readonly<
   Record<StatusLinePresetId, readonly StatusLineSegmentId[]>
 > = {
   minimal: ['model', 'context'],
-  default: ['model', 'tokens', 'cache', 'context', 'turns', 'speed', 'duration', 'sessionTime'],
+  default: [
+    'model',
+    'tokens',
+    'cache',
+    'context',
+    'requestBody',
+    'turns',
+    'speed',
+    'duration',
+    'sessionTime',
+  ],
   full: STATUS_LINE_SEGMENT_IDS,
 };
 

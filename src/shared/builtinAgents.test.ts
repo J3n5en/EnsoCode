@@ -8,11 +8,13 @@ import {
   isSameChildSessionIdentity,
   isSameSessionIdentity,
   normalizeAgentTypeName,
+  parseAgentTypeCandidate,
   parseAgentTypeKey,
   parseAgentTypeRegistrySnapshot,
 } from './builtinAgents';
 
 const CUSTOM_ID = '11111111-1111-4111-8111-111111111111';
+const BOT_ID = '33333333-3333-4333-8333-333333333333';
 
 describe('agentTypeDisplayName', () => {
   const custom = [{ id: CUSTOM_ID, name: '  reviewer-x ' }];
@@ -134,16 +136,52 @@ describe('AgentType registry and locked Enso profile', () => {
     expect(parseAgentTypeKey('agent:enso')).toBe('agent:enso');
     expect(parseAgentTypeKey('builtin:scout')).toBe('builtin:scout');
     expect(parseAgentTypeKey(`custom:${CUSTOM_ID}`)).toBe(`custom:${CUSTOM_ID}`);
+    expect(parseAgentTypeKey(`bot:${BOT_ID}`)).toBe(`bot:${BOT_ID}`);
 
     for (const value of [
       'agent:worker',
       'builtin:general',
       'builtin:enso',
       'custom:enso',
+      'bot:alice',
       'scout',
     ]) {
       expect(parseAgentTypeKey(value), value).toBeNull();
     }
+  });
+
+  it('成员登记为 bot:<id>，内置/自定义同名时以它们为准并跳过成员', () => {
+    expect(isReservedAgentTypeName('bot:x')).toBe(true);
+    const member = (id: string, name: string) => ({ id, name, description: 'desc' });
+    const snapshot = buildAgentTypeRegistrySnapshot({
+      revision: 6,
+      disabledBuiltinAgentTypes: ['worker'],
+      customAgentTypes: [
+        { id: CUSTOM_ID, name: 'Helper', description: 'x', systemPrompt: 'x', tools: 'all' },
+      ],
+      members: [
+        member(BOT_ID, ' Alice '),
+        member('44444444-4444-4444-8444-444444444444', 'Worker'),
+        member('55555555-5555-4555-8555-555555555555', 'helper'),
+        member('66666666-6666-4666-8666-666666666666', 'ENSO'),
+        member('77777777-7777-4777-8777-777777777777', 'alice'),
+        member('not-a-uuid', 'Bob'),
+      ],
+    });
+    const bots = snapshot.candidates.filter((candidate) => candidate.source === 'bot');
+    expect(bots).toEqual([
+      {
+        typeKey: `bot:${BOT_ID}`,
+        displayName: 'Alice',
+        description: 'desc',
+        source: 'bot',
+        locked: false,
+        canDisable: false,
+        canEdit: false,
+      },
+    ]);
+    expect(parseAgentTypeRegistrySnapshot(snapshot)).toEqual(snapshot);
+    expect(parseAgentTypeCandidate({ ...bots[0], typeKey: 'custom:x' })).toBeNull();
   });
 
   it('generation 对比 helper 拒绝同 session 的旧 parent/child generation', () => {

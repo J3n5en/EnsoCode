@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { addToast } from '@/components/ui/toast';
+import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
 import { useSpeechStatus } from '@/hooks/useSpeechStatus';
 import { useI18n } from '@/i18n';
@@ -87,6 +88,7 @@ export function ChatView() {
     speechStatus?.state !== 'unsupported' &&
     speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
   const chrome = useSessionsStore(useShallow(selectChatChrome));
+  const memberName = useMemberName(chrome?.displayedParentId ? chrome.agentType : undefined);
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
   const candidateConversations = useSessionsStore((state) =>
     selectChatCandidateConversations(state.conversations)
@@ -543,9 +545,10 @@ export function ChatView() {
                 )}
                 {chrome.displayedParentId && (
                   <span className="text-[11px] text-muted-foreground">
-                    {chrome.agentType
-                      ? agentTypeDisplayName(chrome.agentType, customAgentTypes)
-                      : 'coworker'}
+                    {memberName ??
+                      (chrome.agentType
+                        ? agentTypeDisplayName(chrome.agentType, customAgentTypes)
+                        : 'coworker')}
                     {chrome.lastModelId
                       ? ` · ${modelDisplayName(virtualModels, chrome.lastModelId)}`
                       : ''}

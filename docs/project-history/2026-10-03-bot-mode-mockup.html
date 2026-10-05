@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh" class="dark">
+<head>
+<meta charset="utf-8" />
+<title>EnsoCode · Bot 模式设计稿</title>
+<style>
+:root{--bg:oklch(1 0 0);--fg:oklch(.145 .014 285.82);--muted:oklch(.965 .003 285.82);--mfg:oklch(.556 .014 285.82);--border:oklch(.922 .003 285.82);--card:oklch(.985 0 0);--primary:oklch(.205 .014 285.82);--pfg:oklch(.985 0 0);--success:oklch(.527 .154 150.07);--warning:oklch(.769 .189 70.08);--info:oklch(.623 .214 259.81);--danger:oklch(.577 .245 27.33)}
+.dark{--bg:oklch(.145 .014 285.82);--fg:oklch(.985 0 0);--muted:oklch(.269 .014 285.82);--mfg:oklch(.708 .014 285.82);--border:oklch(.269 .014 285.82);--card:oklch(.18 .014 285.82);--primary:oklch(.985 0 0);--pfg:oklch(.205 .014 285.82)}
+*{box-sizing:border-box}body{margin:0;font:13px/1.5 Inter,system-ui,-apple-system,"PingFang SC",sans-serif;background:oklch(.5 0 0 / .15);color:var(--fg)}
+.page{padding:20px;display:flex;flex-direction:column;gap:12px;align-items:center}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}.tabs button{border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:6px 12px;border-radius:8px;cursor:pointer}.tabs button.on{background:var(--primary);color:var(--pfg)}
+.win{width:1280px;height:800px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px oklch(0 0 0/.35)}
+.title{height:38px;display:flex;align-items:center;padding:0 14px;gap:8px;border-bottom:1px solid var(--border);flex:none}.dot{width:12px;height:12px;border-radius:50%}
+.body{flex:1;display:flex;min-height:0}
+.side{width:264px;border-right:1px solid var(--border);display:flex;flex-direction:column;flex:none}
+.seg{display:flex;margin:10px;background:var(--muted);border-radius:8px;padding:3px}.seg span{flex:1;text-align:center;padding:4px;border-radius:6px;color:var(--mfg)}.seg .on{background:var(--bg);color:var(--fg);font-weight:600;box-shadow:0 1px 2px oklch(0 0 0/.2)}
+.node{margin:0 10px 6px;display:flex;align-items:center;gap:6px;color:var(--mfg);font-size:12px}
+.sec{padding:10px 14px 4px;font-size:11px;color:var(--mfg);display:flex;justify-content:space-between}
+.row{display:flex;gap:10px;align-items:center;padding:7px 10px;margin:0 6px;border-radius:8px;cursor:default}.row:hover{background:var(--muted)}.row.on{background:var(--muted)}
+.row .meta{flex:1;min-width:0}.row .n{display:flex;justify-content:space-between;font-weight:500}.row .n small{color:var(--mfg);font-weight:400}.row .p{color:var(--mfg);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:600;color:#fff;flex:none;position:relative;font-size:13px}.av.s{width:24px;height:24px;font-size:11px}.av.l{width:64px;height:64px;font-size:24px}
+.busy::after{content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:var(--success);border:2px solid var(--bg);animation:p 1.2s infinite}@keyframes p{50%{opacity:.4}}
+.badge{background:var(--danger);color:#fff;border-radius:9px;font-size:10px;padding:0 6px;line-height:16px}
+.gav{width:32px;height:32px;position:relative;flex:none}.gav .av{position:absolute;width:20px;height:20px;font-size:9px;border:2px solid var(--bg)}.gav .av:nth-child(1){left:0;top:0}.gav .av:nth-child(2){right:0;top:4px}.gav .av:nth-child(3){left:6px;bottom:0}
+.foot{margin-top:auto;border-top:1px solid var(--border);display:flex;justify-content:space-around;padding:8px}.ib{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--mfg);position:relative}.ib:hover{background:var(--muted)}.ib .badge{position:absolute;top:-2px;right:-4px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;flex:none}.head .t{font-weight:600}.head .sub{color:var(--mfg);font-size:12px}
+.chip{border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:12px;color:var(--mfg);display:inline-flex;gap:4px;align-items:center}
+.tl{flex:1;overflow:auto;padding:16px 24px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:10px;max-width:760px}.msg .who{font-size:12px;color:var(--mfg);margin-bottom:2px}.msg .who b{color:var(--fg);font-weight:600;margin-right:6px}
+.bub{background:var(--muted);border-radius:4px 12px 12px 12px;padding:8px 12px}.me{align-self:flex-end;flex-direction:row-reverse}.me .bub{background:var(--primary);color:var(--pfg);border-radius:12px 4px 12px 12px}
+.at{color:var(--info);font-weight:500}.me .at{color:inherit;text-decoration:underline}
+.proc{margin-top:6px;font-size:12px;color:var(--mfg);display:flex;gap:8px;align-items:center;cursor:pointer}
+.proc-open{margin-top:6px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:12px/1.6 "JetBrains Mono",Menlo,monospace;color:var(--mfg);background:var(--card)}
+.sys{align-self:center;font-size:12px;color:var(--mfg);background:var(--muted);border-radius:10px;padding:2px 10px}
+.card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--card);max-width:520px}.card .h{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mfg)}.card .b{margin-top:6px}
+.st{font-size:11px;border-radius:5px;padding:1px 6px}.st.run{background:oklch(.623 .214 259.81/.18);color:var(--info)}.st.ok{background:oklch(.527 .154 150.07/.18);color:var(--success)}.st.fail{background:oklch(.577 .245 27.33/.18);color:var(--danger)}.st.wait{background:oklch(.769 .189 70.08/.2);color:var(--warning)}
+.btn{border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer}.btn.pr{background:var(--primary);color:var(--pfg);border-color:transparent}
+.typing{display:flex;gap:8px;align-items:center;color:var(--mfg);font-size:12px}.typing i{width:5px;height:5px;border-radius:50%;background:var(--mfg);display:inline-block;animation:p 1s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.approval{margin:0 24px 8px;border:1px solid oklch(.769 .189 70.08/.6);background:oklch(.769 .189 70.08/.08);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center}
+.comp{margin:0 24px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);position:relative}.comp .in{padding:12px 14px;min-height:52px;color:var(--mfg)}.comp .bar{display:flex;gap:6px;align-items:center;padding:6px 10px;border-top:1px solid var(--border)}.send{margin-left:auto;width:28px;height:28px;border-radius:8px;background:var(--primary);color:var(--pfg);display:grid;place-items:center}
+.pop{position:absolute;bottom:100%;left:14px;margin-bottom:6px;width:280px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:4px;box-shadow:0 10px 30px oklch(0 0 0/.3)}.pop .row{margin:0;padding:6px 8px}
+.panel{width:340px;border-left:1px solid var(--border);overflow:auto;flex:none;padding:16px}
+.panel h4{margin:18px 0 6px;font-size:11px;color:var(--mfg);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.field{border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:var(--card);margin-bottom:6px}.field small{display:block;color:var(--mfg);font-size:11px}
+.ta{min-height:120px;white-space:pre-wrap;font-size:12px}
+.kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--border);font-size:12px}.kv span:first-child{color:var(--mfg)}
+.tag{display:inline-block;background:var(--muted);border-radius:5px;padding:1px 7px;font-size:11px;margin:2px 4px 2px 0}
+.ptabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:12px -16px 0;padding:0 16px}.ptabs span{padding:6px 8px;color:var(--mfg);font-size:12px}.ptabs .on{color:var(--fg);border-bottom:2px solid var(--fg)}
+.center{flex:1;display:grid;place-items:center}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:720px}.tpl{border:1px solid var(--border);border-radius:12px;padding:14px;background:var(--card)}.tpl.on{outline:2px solid var(--info)}
+.note{width:1280px;color:var(--mfg);font-size:12px}
+.screen{display:none}.screen.on{display:flex}
+.ph{width:300px;height:620px;border:10px solid #111;border-radius:40px;background:var(--bg);overflow:hidden}.phs{height:100%;display:flex;flex-direction:column}.phh{display:flex;justify-content:space-between;align-items:center;padding:28px 14px 10px;border-bottom:1px solid var(--border)}
+.inbox-item{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--card);margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="tabs" id="tabs">
+    <button type="button" data-s="group" class="on">① 群聊</button>
+    <button type="button" data-s="direct">② 私聊 + 成员资料</button>
+    <button type="button" data-s="create">③ 新建成员</button>
+    <button type="button" data-s="newgroup">④ 新建群聊</button>
+    <button type="button" data-s="inbox">⑤ 收件箱</button>
+    <button type="button" data-s="code">⑥ Code 模式拉成员</button>
+    <button type="button" data-s="phone">⑦ 手机端</button>
+    <button type="button" id="theme">切换明暗</button>
+  </div>
+
+  <div class="win">
+    <div class="title"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span style="margin-left:12px;color:var(--mfg);font-size:12px" id="wtitle">EnsoCode — Bot</span></div>
+    <div class="body">
+      <!-- 侧栏：Bot 模式 -->
+      <aside class="side" id="botside">
+        <div class="seg"><span>Code</span><span class="on">Bot</span></div>
+
+        <div class="sec"><span>群聊</span><span>＋</span></div>
+        <div class="row on" data-go="group"><div class="gav"><div class="av" style="background:#7c5cff">林</div><div class="av" style="background:#0ea5e9">后</div><div class="av" style="background:#f97316">测</div></div><div class="meta"><div class="n">发布小组 <small>刚刚</small></div><div class="p">后端：迁移脚本已写好，@测试 帮忙…</div></div></div>
+        <div class="row"><div class="gav"><div class="av" style="background:#7c5cff">林</div><div class="av" style="background:#ec4899">设</div><div class="av" style="background:#22c55e">运</div></div><div class="meta"><div class="n">官网改版 <small>昨天</small></div><div class="p">设计：首屏三版稿已放进 workspace</div></div></div>
+        <div class="sec"><span>成员</span><span>＋</span></div>
+        <div class="row" data-go="direct"><div class="av" style="background:#7c5cff">林</div><div class="meta"><div class="n">林经理 <small>10:24</small></div><div class="p">本周排期我整理成表了</div></div></div>
+        <div class="row"><div class="av busy" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后 <small>工作中</small></div><div class="p">委派：给 users 表加索引</div></div></div>
+        <div class="row"><div class="av" style="background:#f97316">测</div><div class="meta"><div class="n">小测 <span class="badge">2</span></div><div class="p">需要审批：运行 pnpm test:e2e</div></div></div>
+        <div class="row"><div class="av" style="background:#22c55e">运</div><div class="meta"><div class="n">老运 <small>每天 09:00</small></div><div class="p">巡检：3 个服务正常，1 个告警</div></div></div>
+        <div class="row"><div class="av" style="background:#ec4899">设</div><div class="meta"><div class="n">小设 <small>周一</small></div><div class="p">好的，我晚点出两版对比</div></div></div>
+        <div class="foot"><span class="ib" title="新建成员">👤＋</span><span class="ib" title="新建群聊">👥</span><span class="ib" title="收件箱">📥<span class="badge">3</span></span><span class="ib" title="归档">🗄</span><span class="ib" title="设置">⚙︎</span></div>
+      </aside>
+
+      <!-- ① 群聊 -->
+      <section class="screen on main" id="s-group" style="flex-direction:row">
+        <div class="main">
+          <div class="head"><div class="gav"><div class="av" style="background:#7c5cff">林</div><div class="av" style="background:#0ea5e9">后</div><div class="av" style="background:#f97316">测</div></div><div><div class="t">发布小组</div><div class="sub">3 名成员 · 群主 林经理</div></div><span style="flex:1"></span><span class="chip">📁 enso-api（共享工作区）</span><span class="chip">接力上限 4</span><span class="chip">⋯</span></div>
+          <div class="tl">
+            <div class="sys">你创建了群聊，群内成员共享工作区 enso-api</div>
+            <div class="msg me"><div><div class="bub">v2.3 周五发布，<span class="at">@林经理</span> 排一下还剩什么</div></div></div>
+            <div class="msg"><div class="av s" style="background:#7c5cff">林</div><div><div class="who"><b>林经理</b>项目经理 · 10:21</div><div class="bub">还剩两件：① users 表迁移 ② e2e 回归。<span class="at">@阿后</span> 先做迁移，做完交给小测。</div><div class="proc">▸ 查看过程 · 读取 3 个文件 · 12s</div></div></div>
+            <div class="msg"><div class="av s" style="background:#0ea5e9">后</div><div><div class="who"><b>阿后</b>后端 · 10:23</div><div class="bub">迁移脚本已写好（<code>migrations/0042_users_idx.sql</code>），本地跑通。索引部分我委派给了 DBA 那边确认。<span class="at">@小测</span> 帮忙跑回归。</div>
+              <div class="proc">▾ 查看过程 · 编辑 2 个文件 · 运行 1 条命令 · 1m48s</div>
+              <div class="proc-open">✎ edit migrations/0042_users_idx.sql (+38)<br>✎ edit src/db/schema.ts (+4 −1)<br>$ pnpm db:migrate --dry-run   ✓ exit 0<br>⇢ delegate → 老运 「确认线上 users 表加索引是否需要低峰执行」</div>
+            </div></div>
+            <div class="card"><div class="h"><div class="av s" style="background:#0ea5e9">后</div>阿后 → <div class="av s" style="background:#22c55e">运</div>老运 · 委派 <span class="st run">进行中 3m</span><span style="flex:1"></span><button type="button" class="btn">查看</button><button type="button" class="btn">取消</button></div><div class="b">确认线上 users 表加索引是否需要低峰执行</div></div>
+            <div class="msg"><div class="av s busy" style="background:#f97316">测</div><div><div class="who"><b>小测</b>测试 · 正在回复</div><div class="typing"><i></i><i></i><i></i> 正在运行 e2e 回归…</div></div></div>
+          </div>
+          <div class="approval"><div class="av s" style="background:#f97316">测</div><div style="flex:1"><b>小测</b> 请求运行命令 <code>pnpm test:e2e --project=chromium</code><div style="color:var(--mfg);font-size:12px">工作区 enso-api · 审批档：编辑自动，命令需确认</div></div><button type="button" class="btn">拒绝</button><button type="button" class="btn">本会话总是允许</button><button type="button" class="btn pr">允许</button></div>
+          <div class="comp"><div class="pop"><div style="padding:4px 8px;font-size:11px;color:var(--mfg)">提及成员</div><div class="row on"><div class="av s" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后 <small>后端</small></div></div></div><div class="row"><div class="av s" style="background:#f97316">测</div><div class="meta"><div class="n">小测 <small>测试</small></div></div></div><div class="row"><div class="av s" style="background:#7c5cff">所</div><div class="meta"><div class="n">所有人</div></div></div></div><div class="in">@阿</div><div class="bar"><span class="chip">📎</span><span class="chip">📁 enso-api</span><span class="chip">🛡 编辑自动</span><span style="color:var(--mfg);font-size:12px;margin-left:8px">不 @ 时由群主回复 · 小测回复中，新消息会在他说完后重新分配</span><span class="send">↑</span></div></div>
+        </div>
+        <aside class="panel" style="width:280px"><div style="font-weight:600">群信息</div>
+          <h4>成员</h4>
+          <div class="row" style="margin:0"><div class="av s" style="background:#7c5cff">林</div><div class="meta"><div class="n">林经理 <span class="tag">群主</span></div><div class="p">拆分任务、协调进度</div></div></div>
+          <div class="row" style="margin:0"><div class="av s" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后</div><div class="p">Node/Postgres 后端</div></div></div>
+          <div class="row" style="margin:0"><div class="av s busy" style="background:#f97316">测</div><div class="meta"><div class="n">小测</div><div class="p">回归测试与质量</div></div></div>
+          <button type="button" class="btn" style="margin-top:6px">＋ 添加成员</button>
+          <h4>回复队列</h4><div class="kv"><span>当前</span><span>小测（@ 接力 2/4）</span></div><div class="kv"><span>排队</span><span>—</span></div><div class="kv"><span>每人上限</span><span>2 次</span></div>
+          <h4>工作区</h4><div class="field">📁 enso-api <span class="tag">Code 项目</span><small>~/project/enso-api · 所有成员共享 · <u>更换</u></small></div>
+          <h4>委派</h4><div class="kv"><span>阿后 → 老运</span><span class="st run">进行中</span></div><div class="kv"><span>林经理 → 小设</span><span class="st ok">已完成</span></div>
+          <h4>群记忆</h4><div class="field" style="font-size:12px">· 发布窗口固定周五 20:00<br>· e2e 只跑 chromium</div>
+        </aside>
+      </section>
+
+      <!-- ② 私聊 + 资料 -->
+      <section class="screen main" id="s-direct" style="flex-direction:row">
+        <div class="main">
+          <div class="head"><div class="av" style="background:#7c5cff">林</div><div><div class="t">林经理</div><div class="sub">项目经理 · Claude Opus · 空闲</div></div><span style="flex:1"></span><span class="chip">📁 林经理的工作区 ▾</span><span class="chip">新对话</span></div>
+          <div class="tl">
+            <div class="msg me"><div class="bub">把这周的排期整理成一张表，放到工作区</div></div>
+            <div class="msg"><div class="av s" style="background:#7c5cff">林</div><div><div class="who"><b>林经理</b>10:24</div><div class="bub">已整理好 <code>schedule-w40.md</code>，共 7 项，其中 2 项有风险：<br>1. users 表迁移（依赖 DBA 确认）<br>2. e2e 回归（上周 flaky 3 例）<br>要我拉阿后和小测建个群跟进吗？</div><div class="proc">▸ 查看过程 · 写入 1 个文件 · 检索记忆 2 条 · 31s</div></div></div>
+          </div>
+          <div class="comp"><div class="in">给 林经理 发消息…</div><div class="bar"><span class="chip">📎</span><span class="chip">📁 林经理的工作区</span><span class="chip">◆ Claude Opus</span><span class="chip">🛡 编辑自动</span><span class="send">↑</span></div></div>
+        </div>
+        <aside class="panel">
+          <div style="display:flex;gap:12px;align-items:center"><div class="av l" style="background:#7c5cff">林</div><div><div style="font-size:16px;font-weight:600">林经理</div><div style="color:var(--mfg)">项目经理</div><div style="margin-top:4px"><button type="button" class="btn">导出人物卡</button></div></div></div>
+          <div class="ptabs"><span class="on">资料</span><span>能力</span><span>记忆</span><span>例行</span><span>历史</span></div>
+          <h4>职责（用于路由和委派目录）</h4><div class="field">拆分需求、排期、协调成员，自己不写代码</div>
+          <h4>人设</h4><div class="field ta">你是林经理，一名务实的项目经理。说话简洁，先给结论再给依据。遇到实现类工作，交给合适的成员（delegate），自己负责跟进和汇总。</div>
+          <h4>模型与权限</h4>
+          <div class="kv"><span>模型</span><span>Claude Opus · 思考 中</span></div>
+          <div class="kv"><span>工具</span><span>只读 + 写 md</span></div>
+          <div class="kv"><span>审批档</span><span>编辑自动</span></div>
+          <div class="kv"><span>技能 / MCP</span><span><span class="tag">project-knowledge</span><span class="tag">linear</span></span></div>
+          <div class="kv"><span>工作区</span><span>自己的工作区</span></div>
+          <h4>委派</h4><div class="kv"><span>可委派给</span><span>所有成员</span></div><div class="kv"><span>接受来自</span><span>所有成员</span></div>
+          <h4>例行任务</h4><div class="field">每周一 09:00 · 汇总上周进度<small>投递到「发布小组」· 上次 ✓ 10-02</small></div>
+        </aside>
+      </section>
+
+      <!-- ③ 新建成员 -->
+      <section class="screen main" id="s-create">
+        <div class="head"><div class="t">新建成员</div></div>
+        <div class="center"><div>
+          <div style="display:flex;gap:8px;margin-bottom:14px"><button type="button" class="btn pr">从模板</button><button type="button" class="btn">空白</button><button type="button" class="btn">导入人物卡 PNG / JSON</button></div>
+          <div class="grid">
+            <div class="tpl on"><div class="av" style="background:#7c5cff">经</div><b>项目经理</b><div style="color:var(--mfg);font-size:12px">拆任务、排期、委派，只读工具</div></div>
+            <div class="tpl"><div class="av" style="background:#0ea5e9">全</div><b>全栈工程师</b><div style="color:var(--mfg);font-size:12px">读写代码、跑命令</div></div>
+            <div class="tpl"><div class="av" style="background:#22c55e">运</div><b>运维</b><div style="color:var(--mfg);font-size:12px">巡检、部署，命令一律需审批</div></div>
+            <div class="tpl"><div class="av" style="background:#f97316">测</div><b>测试</b><div style="color:var(--mfg);font-size:12px">写测试、跑回归、报缺陷</div></div>
+            <div class="tpl"><div class="av" style="background:#ec4899">设</div><b>设计</b><div style="color:var(--mfg);font-size:12px">出稿、走查 UI</div></div>
+            <div class="tpl" style="display:grid;place-items:center;color:var(--mfg)">＋ 空白成员</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px">
+            <div class="field">林经理<small>名字（群内 @ 用，唯一）</small></div><div class="field">项目经理<small>头衔</small></div>
+            <div class="field">Claude Opus ▾<small>模型</small></div><div class="field">编辑自动 ▾<small>审批档</small></div>
+          </div>
+          <div style="text-align:right;margin-top:10px"><button type="button" class="btn">取消</button> <button type="button" class="btn pr">创建并开始私聊</button></div>
+        </div></div>
+      </section>
+
+      <!-- ④ 新建群 -->
+      <section class="screen main" id="s-newgroup">
+        <div class="head"><div class="t">新建群聊</div></div>
+        <div class="center"><div style="width:520px">
+          <div class="field">发布小组<small>群名</small></div>
+          <h4 style="color:var(--mfg);font-size:11px;margin:14px 0 6px">成员（选一位群主：没人被 @ 时由群主回复）</h4>
+          <div class="row" style="margin:0"><input type="checkbox" checked><div class="av s" style="background:#7c5cff">林</div><div class="meta"><div class="n">林经理 <label style="font-size:12px;color:var(--mfg)"><input type="radio" name="b" checked> 群主</label></div></div></div>
+          <div class="row" style="margin:0"><input type="checkbox" checked><div class="av s" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后 <label style="font-size:12px;color:var(--mfg)"><input type="radio" name="b"> 群主</label></div></div></div>
+          <div class="row" style="margin:0"><input type="checkbox" checked><div class="av s" style="background:#f97316">测</div><div class="meta"><div class="n">小测 <label style="font-size:12px;color:var(--mfg)"><input type="radio" name="b"> 群主</label></div></div></div>
+          <div class="row" style="margin:0"><input type="checkbox"><div class="av s" style="background:#22c55e">运</div><div class="meta"><div class="n">老运</div></div></div>
+          <h4 style="color:var(--mfg);font-size:11px;margin:14px 0 6px">共享工作区</h4>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="tpl on"><b>◉ 基于 Code 项目</b><div style="color:var(--mfg);font-size:12px;margin:4px 0 8px">成员直接在项目目录里读写</div><div class="field" style="margin:0">📁 enso-api ▾<small>~/project/enso-api · main</small></div></div>
+            <div class="tpl"><b>○ 独立工作区</b><div style="color:var(--mfg);font-size:12px;margin-top:4px">为这个群新建一个空目录，删除群时一并清理</div></div>
+          </div>
+          <div class="approval" style="margin:8px 0">⚠︎ 群内成员共享这个目录，能和任一成员对话的人，都能经由他触达目录里的内容。创建后可在群信息里改选（成员会各开新会话）。</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="field">4<small>@ 接力上限（每条你的消息之后）</small></div><div class="field">2<small>每个成员最多回复几次</small></div></div>
+          <div style="text-align:right;margin-top:10px"><button type="button" class="btn">取消</button> <button type="button" class="btn pr">创建</button></div>
+        </div></div>
+      </section>
+
+      <!-- ⑤ 收件箱 -->
+      <section class="screen main" id="s-inbox">
+        <div class="head"><div class="t">收件箱</div><div class="sub">所有成员待你处理的事</div></div>
+        <div class="tl">
+          <div class="inbox-item"><div class="card" style="border:0;padding:0;max-width:none"><div class="h"><div class="av s" style="background:#f97316">测</div>小测 · 发布小组 <span class="st wait">审批</span><span style="flex:1"></span>1 分钟前</div><div class="b">运行命令 <code>pnpm test:e2e --project=chromium</code></div><div style="margin-top:8px;text-align:right"><button type="button" class="btn">去聊天</button> <button type="button" class="btn">拒绝</button> <button type="button" class="btn pr">允许</button></div></div></div>
+          <div class="inbox-item"><div class="card" style="border:0;padding:0;max-width:none"><div class="h"><div class="av s" style="background:#22c55e">运</div>老运 替 阿后 执行 · 发布小组 <span class="st wait">提问</span><span style="flex:1"></span>3 分钟前</div><div class="b">线上 users 表 1200 万行，加索引建议今晚 02:00 执行，可以吗？</div><div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end"><button type="button" class="btn">今晚 02:00</button><button type="button" class="btn">周五发布前</button><button type="button" class="btn">自定义回答…</button></div></div></div>
+          <div class="inbox-item"><div class="card" style="border:0;padding:0;max-width:none"><div class="h"><div class="av s" style="background:#0ea5e9">后</div>阿后 → 小设 · 委派 <span class="st fail">中断</span><span style="flex:1"></span>今天 08:12</div><div class="b">应用重启时任务未完成，已停止，不会自动重做。</div><div style="margin-top:8px;text-align:right"><button type="button" class="btn">查看会话</button> <button type="button" class="btn pr">重试</button></div></div></div>
+        </div>
+      </section>
+
+      <!-- ⑥ Code 模式 -->
+      <section class="screen main" id="s-code">
+        <div class="head"><div><div class="t">修复登录超时</div><div class="sub">enso-web · main</div></div></div>
+        <div class="tl">
+          <div class="msg me"><div class="bub"><span class="at">@小测</span> 帮我给这个修复补一组回归测试</div></div>
+          <div class="card"><div class="h"><div class="av s" style="background:#f97316">测</div>小测 · coworker（成员 bot:小测）<span class="st run">进行中</span><span style="flex:1"></span><button type="button" class="btn">打开</button></div><div class="b">用小测的人设、模型和工具，在当前会话目录 enso-web 里工作。走现有 coworker 链路。</div></div>
+        </div>
+        <div class="comp"><div class="pop"><div style="padding:4px 8px;font-size:11px;color:var(--mfg)">Agent / 成员</div><div class="row"><div class="av s" style="background:var(--muted);color:var(--fg)">E</div><div class="meta"><div class="n">enso <small>内置</small></div></div></div><div class="row on"><div class="av s" style="background:#f97316">测</div><div class="meta"><div class="n">小测 <small>成员 · 测试</small></div></div></div><div class="row"><div class="av s" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后 <small>成员 · 后端</small></div></div></div></div><div class="in">@</div><div class="bar"><span class="chip">预设</span><span class="chip">worktree</span><span class="chip">◆ GPT</span><span class="send">↑</span></div></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="screen" id="s-phone" style="gap:28px;justify-content:center;flex-wrap:wrap;max-width:100%">
+    <div class="ph"><div class="phs"><div class="phh"><b>Bot</b><span style="color:var(--mfg)">Code | <u>Bot</u></span></div>
+      <div class="sec"><span>群聊</span></div>
+      <div class="row on"><div class="gav"><div class="av" style="background:#7c5cff">林</div><div class="av" style="background:#0ea5e9">后</div><div class="av" style="background:#f97316">测</div></div><div class="meta"><div class="n">发布小组 <span class="badge">1</span></div><div class="p">小测：需要审批</div></div></div>
+      <div class="sec"><span>成员</span></div>
+      <div class="row"><div class="av" style="background:#7c5cff">林</div><div class="meta"><div class="n">林经理</div><div class="p">本周排期我整理成表了</div></div></div>
+      <div class="row"><div class="av busy" style="background:#0ea5e9">后</div><div class="meta"><div class="n">阿后</div><div class="p">工作中 · 委派给老运</div></div></div>
+      <div class="row"><div class="av" style="background:#22c55e">运</div><div class="meta"><div class="n">老运</div><div class="p">巡检：1 个告警</div></div></div>
+      <div style="margin-top:auto;padding:10px;color:var(--mfg);font-size:11px;text-align:center">新建成员 / 群聊、例行任务请在桌面端管理</div>
+    </div></div>
+    <div class="ph"><div class="phs"><div class="phh"><span>‹</span><b>发布小组</b><span>ⓘ</span></div>
+      <div class="tl" style="padding:10px;gap:10px">
+        <div class="msg"><div class="av s" style="background:#0ea5e9">后</div><div><div class="who"><b>阿后</b>10:23</div><div class="bub">迁移脚本已写好。<span class="at">@小测</span> 帮忙跑回归。</div><div class="proc">▸ 查看过程</div></div></div>
+        <div class="card" style="padding:8px"><div class="h">阿后 → 老运 <span class="st run">进行中</span><span style="flex:1"></span><button type="button" class="btn">取消</button></div></div>
+        <div class="msg"><div class="av s busy" style="background:#f97316">测</div><div><div class="who"><b>小测</b>正在回复</div><div class="typing"><i></i><i></i><i></i></div></div></div>
+      </div>
+      <div class="approval" style="margin:0 10px 8px;flex-wrap:wrap"><div style="flex:1 1 100%"><b>小测</b> 请求运行 <code>pnpm test:e2e</code></div><button type="button" class="btn">拒绝</button><button type="button" class="btn pr">允许</button></div>
+      <div class="comp" style="margin:0 10px 10px"><div class="in" style="min-height:36px;padding:8px 12px">@ 成员，或直接说…</div></div>
+    </div></div>
+  </div>
+  <div class="note" id="note"></div>
+</div>
+<script>
+const notes={
+group:'群聊：一次一人回复；@ 按顺序，未 @ 由群主答；成员互相 @ 接力，上限 4。每条成员消息 = 他会话里这一轮的最终回复，「查看过程」展开该轮工具调用。委派以卡片出现在时间线；审批条内联在输入框上方。右侧是群信息。',
+direct:'私聊：直接渲染该成员这个聊天里的根会话（复用 MessageTimeline / Composer）。顶栏可把工作区改绑到 Code 项目（会开新会话）。右侧是成员资料：职责、人设、模型与权限、委派权限、记忆、例行任务、历史会话。',
+create:'新建成员：模板 / 空白 / 导入人物卡。名字在群内 @ 用，必须唯一。',
+newgroup:'新建群聊：勾选成员并指定群主；工作区二选一：基于 Code 项目（直接在项目目录读写），或独立工作区（新建空目录，随群删除）；提示共享目录风险；设置 @ 接力上限和每人回复次数。',
+inbox:'收件箱：汇总所有成员和委派会话里待处理的审批和提问；重启中断的委派在这里可以重试。侧栏底部图标显示未处理数量。',
+phone:'手机端：通过 pair 协议新增的 Bot 帧查看成员与聊天列表、私聊、群聊（含 @ 补全、查看过程）、审批与提问、取消委派。新建/编辑成员、新建群、例行任务管理只在桌面端。',
+code:'Code 模式：在输入框里 @ 成员，或调用 subagent agent_type=bot:<id>，就会把成员拉成 coworker，在当前会话目录里工作。Code 模式其他行为不变。'};
+const title={group:'EnsoCode — Bot · 发布小组',direct:'EnsoCode — Bot · 林经理',create:'EnsoCode — Bot · 新建成员',newgroup:'EnsoCode — Bot · 新建群聊',inbox:'EnsoCode — Bot · 收件箱',code:'EnsoCode — Code · enso-web',phone:''};
+function show(s){document.querySelector('.win').style.display=s==='phone'?'none':'';setTimeout(()=>window.fit&&fit());document.querySelectorAll('.screen').forEach(e=>{e.classList.toggle('on',e.id==='s-'+s)});document.querySelectorAll('#tabs [data-s]').forEach(b=>{b.classList.toggle('on',b.dataset.s===s)});document.getElementById('note').textContent=notes[s];document.getElementById('wtitle').textContent=title[s];document.getElementById('botside').style.display=s==='code'?'none':'';}
+document.querySelectorAll('#tabs [data-s]').forEach(b=>{b.onclick=()=>show(b.dataset.s)});
+document.querySelectorAll('[data-go]').forEach(r=>{r.onclick=()=>show(r.dataset.go)});
+document.getElementById('theme').onclick=()=>document.documentElement.classList.toggle('dark');
+show('group');
+function fit(){const z=Math.min(1,(innerWidth-40)/1280);document.querySelector('.win').style.zoom=z;document.getElementById("note").style.zoom=document.querySelector(".win").style.display==="none"?1:z;}addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

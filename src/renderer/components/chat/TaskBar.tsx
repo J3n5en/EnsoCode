@@ -33,6 +33,8 @@ interface TaskBarProps {
   sessionId: string;
   tasks: BackgroundTaskInfo[];
   subagents: SubagentInfo[];
+  /** 手机只读配对：停止会被 host 拦截，不给按钮 */
+  readOnly?: boolean;
 }
 
 /** 按会话记住已收起的条目。TaskBar 用 conversation.id 当 key，切会话/coworker 会卸载重挂，组件 state 会丢。 */
@@ -62,7 +64,7 @@ const trackRunning = (sessionId: string, ids: string[]): ReadonlySet<string> => 
  * 后台任务状态行（grok-build 风）：输入框上方每任务一行；
  * 点「查看」在行下内嵌展开输出;done 5s 自动移除,failed 手动关闭。
  */
-export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
+export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps) {
   const virtualModels = useSettingsStore((state) => state.virtualModels);
   const { t } = useI18n();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(sessionId));
@@ -135,7 +137,11 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
             open={openTaskId === task.taskId}
             onToggle={() => setOpenTaskId(openTaskId === task.taskId ? null : task.taskId)}
             stopTitle={t('Stop task')}
-            onStop={() => void window.electronAPI.agent.stopTask(sessionId, task.taskId)}
+            onStop={
+              readOnly
+                ? undefined
+                : () => void window.electronAPI.agent.stopTask(sessionId, task.taskId)
+            }
             onDismiss={() => dismiss(task.taskId)}
           >
             <span
@@ -155,7 +161,11 @@ export function TaskBar({ sessionId, tasks, subagents }: TaskBarProps) {
             open={openTaskId === agent.id}
             onToggle={() => setOpenTaskId(openTaskId === agent.id ? null : agent.id)}
             stopTitle={t('Stop subagent')}
-            onStop={() => void window.electronAPI.agent.stopSubagent(sessionId, agent.id)}
+            onStop={
+              readOnly
+                ? undefined
+                : () => void window.electronAPI.agent.stopSubagent(sessionId, agent.id)
+            }
             onDismiss={() => dismiss(agent.id)}
           >
             {agent.agentType && <span className="shrink-0 font-medium">{agent.agentType}</span>}
@@ -196,7 +206,7 @@ function DockRow({
   open: boolean;
   onToggle: () => void;
   stopTitle: string;
-  onStop: () => void;
+  onStop?: () => void;
   onDismiss: () => void;
   children: ReactNode;
 }) {
@@ -219,14 +229,16 @@ function DockRow({
         <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
       </button>
       {status === 'running' ? (
-        <button
-          type="button"
-          onClick={onStop}
-          title={stopTitle}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-        >
-          <Square className="h-3 w-3" />
-        </button>
+        onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            title={stopTitle}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Square className="h-3 w-3" />
+          </button>
+        )
       ) : (
         <button
           type="button"

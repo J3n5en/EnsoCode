@@ -34,3 +34,17 @@ export function titleModelCandidates(
   }
   return candidates;
 }
+
+/** Bot 辅助任务（如自动设置能力）：Bot 助理模型 → 全局默认 */
+export function botAssistantModelCandidates(
+  state: Record<string, unknown> | undefined
+): DefaultModelRef[] {
+  const refs = [asModelRef(state?.botAssistantModel), asModelRef(state?.defaultModel)];
+  return refs.filter(
+    (ref, index): ref is DefaultModelRef =>
+      ref !== null &&
+      refs.findIndex(
+        (other) => other?.providerId === ref.providerId && other.modelId === ref.modelId
+      ) === index
+  );
+}

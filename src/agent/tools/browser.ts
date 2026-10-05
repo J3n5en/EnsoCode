@@ -3,7 +3,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { assertAllowedUrl, isLoopbackHost } from '@shared/browser/urlPolicy';
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { BrowserOp, SessionIdentity } from '@shared/types/agent';
-import type { ApprovalGate } from '../approval';
+import { type ApprovalGate, throwUnlessAllowed } from '../approval';
 
 export interface BrowserInvokeRequest {
   identity: SessionIdentity | ChildSessionIdentity;
@@ -413,15 +413,9 @@ export function withNavigateApproval(gate: ApprovalGate, tool: ToolDefinition): 
         // 非法 URL 交给 tool 本体报错
       }
       if (host && !isLoopbackHost(host) && gate.needsApproval('mcp', tool.name)) {
-        const result = await gate.ask(
-          tool.name,
-          'mcp',
-          `Open ${host} in the built-in browser`,
-          signal
+        throwUnlessAllowed(
+          await gate.ask(tool.name, 'mcp', `Open ${host} in the built-in browser`, signal)
         );
-        if (result === 'block') throw new Error('Assistant approval blocked this operation');
-        if (result === 'deny') throw new Error('User denied this operation');
-        if (result === 'cancel') throw new Error('Approval cancelled');
       }
       return tool.execute(toolCallId, params, signal, onUpdate, ctx);
     },

@@ -2,6 +2,9 @@ import { app } from 'electron';
 import { registerAgentHandlers } from './agent';
 import { registerAppBadgeHandlers } from './appBadge';
 import { registerAssetHandlers } from './assets';
+import { registerMemberAgentTypes } from './botAgentTypes';
+import { registerBotHandlers } from './bots';
+import { registerBotTemplateHandlers } from './botTemplates';
 import { registerBrowserHandlers } from './browser';
 import { registerBtwHandlers } from './btw';
 import { registerCapabilityHandlers } from './capabilities';
@@ -15,6 +18,7 @@ import { registerMcpHandlers } from './mcp';
 import { registerMemoryHandlers } from './memory';
 import { registerNodesHandlers } from './nodes';
 import { registerPairHandlers } from './pair';
+import { registerPairBotHandlers } from './pairBots';
 import { registerProjectHandlers } from './projects';
 import { registerProviderHandlers } from './providers';
 import { registerProxyHandlers } from './proxy';
@@ -57,6 +61,10 @@ export function registerIpcHandlers(): void {
   registerResourceHandlers();
   registerMemoryHandlers();
   registerBtwHandlers();
+  registerBotHandlers();
+  registerBotTemplateHandlers();
+  registerMemberAgentTypes();
+  registerPairBotHandlers();
   registerAppBadgeHandlers();
   registerSpeechHandlers();
 

@@ -2,8 +2,16 @@ import type { CatalogEntry } from '@enso/pair';
 import { localCompactionNoticeIndex } from '@shared/pair/guestProjection';
 import type { AttachedImage, ProjectedMessage, SlashCommand } from '@shared/types/agent';
 import type { StartVoiceSession } from '@shared/types/speech';
-import { Bot, ChevronDown, Loader2, MessageCircle, PanelLeft, SquarePen } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  Bot,
+  ChevronDown,
+  ChevronLeft,
+  Loader2,
+  MessageCircle,
+  PanelLeft,
+  SquarePen,
+} from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Composer } from '@/components/chat/Composer';
@@ -21,9 +29,12 @@ import { TaskBar } from '@/components/chat/TaskBar';
 import { TodoBar } from '@/components/chat/TodoBar';
 import { cn } from '@/lib/utils';
 import { buildTimeline } from '@/stores/sessions/timeline';
+import { BotArtifacts } from './BotArtifacts';
+import { phoneChatHost } from './chatHost';
 import type { ConnState, SessionView } from './client';
-import { compressImage } from './image';
+import { compressWithin, imageBudget } from './image';
 import { appendEchoMessages, type QueueSendEcho } from './queueSendEcho';
+import { readOnlyBanner } from './readOnly';
 import { SessionStatsLine } from './SessionStatsLine';
 import { setDisplayedConversation } from './stubs/sessions-store';
 
@@ -34,6 +45,8 @@ interface Props {
   /** 工具执行目录：项目内绝对路径在时间线里收成相对路径 */
   cwd?: string;
   view: SessionView | null;
+  /** 本机时钟 − host 时钟（审批 / 提问卡剩余时间） */
+  clockOffset?: number;
   connState: ConnState;
   stateLabel: string;
   /** 订阅会话同步中：标题旁状态灯用 amber pulse */
@@ -68,6 +81,14 @@ interface Props {
   onAbort(): void;
   onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
   onAsk(requestId: string, answer: string): void;
+  /** Bot 成员会话：发送走 bot-send，无回退/重试/斜杠命令；readOnly = 群聊「查看过程」 */
+  bot?: { readOnly?: boolean; onBack?(): void; notice?: string | null; outbox?: ReactNode };
+  /** Bot 私聊：每轮最终回复下方挂产物卡片与 send_image 图 */
+  artifacts?: { chatId: string; conversationId: string };
+  /** 桌面把本设备设为只读：只能查看，隐藏输入/审批/回答等写操作 */
+  deviceReadOnly?: boolean;
+  /** 有写操作刚被桌面以只读拦下 */
+  readOnlyRejected?: boolean;
 }
 
 /** 会话页：复用桌面的时间线 / 审批条 / 输入框，保持与桌面一致的渲染 */
@@ -95,11 +116,31 @@ export function ChatScreen(props: Props) {
     }
   }, [sessionId, props.tabGroup]);
   const running = view?.status === 'running';
+  const bot = props.bot;
+  const readOnly = Boolean(bot?.readOnly || props.deviceReadOnly);
+  const artifactChatId = props.artifacts?.chatId;
+  const artifactConversationId = props.artifacts?.conversationId;
   const host = useMemo(
-    () => ({ sessionId, canRewind: true, canRetry: true, canFork: false }),
-    [sessionId]
+    () => ({
+      ...phoneChatHost({ sessionId, bot, deviceReadOnly: props.deviceReadOnly }),
+      ...(artifactChatId && artifactConversationId
+        ? {
+            turnFooter: (messageIndex: number) => (
+              <BotArtifacts
+                target={{
+                  chatId: artifactChatId,
+                  conversationId: artifactConversationId,
+                  messageIndex,
+                }}
+              />
+            ),
+          }
+        : {}),
+    }),
+    [sessionId, bot, props.deviceReadOnly, artifactChatId, artifactConversationId]
   );
   const slashCommands = useMemo<SlashCommand[]>(() => {
+    if (bot) return [];
     const base: SlashCommand[] = [
       {
         name: '/goal',
@@ -114,7 +155,7 @@ export function ChatScreen(props: Props) {
       (command) => command.name !== '/goal' && command.name !== '/compact'
     );
     return [...base, ...extra];
-  }, [props.slashCommands]);
+  }, [props.slashCommands, bot]);
 
   const entries = useMemo(
     () => (view ? [...view.messages.entries()].sort((a, b) => a[0] - b[0]) : []),
@@ -204,9 +245,10 @@ export function ChatScreen(props: Props) {
 
   const send = async (text: string, images: AttachedImage[]) => {
     // 手机拍照动辄数 MB，压到单帧上限内再发
+    const budget = imageBudget(images.length);
     const compressed: AttachedImage[] = [];
     for (const image of images) {
-      compressed.push(await compressImageIfNeeded(image));
+      compressed.push(await compressImageIfNeeded(image, budget));
     }
     props.onSend(text, compressed);
     timelineRef.current?.scrollToBottom();
@@ -218,11 +260,15 @@ export function ChatScreen(props: Props) {
         <header className="flex shrink-0 items-center gap-1 border-b bg-background px-2 py-2 pt-safe">
           <button
             type="button"
-            onClick={props.onOpenDrawer}
-            aria-label="打开会话列表"
+            onClick={bot?.onBack ?? props.onOpenDrawer}
+            aria-label={bot?.onBack ? '返回群聊' : '打开会话列表'}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <PanelLeft className="h-4.5 w-4.5" />
+            {bot?.onBack ? (
+              <ChevronLeft className="h-4.5 w-4.5" />
+            ) : (
+              <PanelLeft className="h-4.5 w-4.5" />
+            )}
           </button>
           <div className="min-w-0 flex-1 text-center">
             <p className="flex min-w-0 items-center justify-center gap-1.5">
@@ -245,15 +291,19 @@ export function ChatScreen(props: Props) {
               {props.projectName || props.stateLabel}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={props.onNewSession}
-            disabled={!props.canCreate}
-            aria-label="新建会话"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-          >
-            <SquarePen className="h-4.5 w-4.5" />
-          </button>
+          {bot ? (
+            <span className="h-9 w-9 shrink-0" />
+          ) : (
+            <button
+              type="button"
+              onClick={props.onNewSession}
+              disabled={!props.canCreate}
+              aria-label="新建会话"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            >
+              <SquarePen className="h-4.5 w-4.5" />
+            </button>
+          )}
         </header>
 
         {props.connState === 'host-offline' && (
@@ -349,11 +399,13 @@ export function ChatScreen(props: Props) {
               {/* 自动重试横幅：只展示不可取消（pair 桥无 abort-retry 通道，整轮 abort 已够用） */}
               {view?.retry && <RetryBar retry={view.retry} />}
               {/* 排队区：复用桌面组件，编辑/删除/立即发送/打断并发送经桩发 pair 命令 */}
-              <MessageQueue
-                conversationId={sessionId}
-                queued={(props.queued ?? []).map((q) => ({ id: q.id, text: q.text }))}
-              />
-              {props.goal && (
+              {!readOnly && (
+                <MessageQueue
+                  conversationId={sessionId}
+                  queued={(props.queued ?? []).map((q) => ({ id: q.id, text: q.text }))}
+                />
+              )}
+              {props.goal && !readOnly && (
                 <GoalBar conversationId={sessionId} goal={{ ...props.goal, noProgressRuns: 0 }} />
               )}
               <TodoBar key={sessionId} conversationId={sessionId} />
@@ -362,41 +414,68 @@ export function ChatScreen(props: Props) {
                 sessionId={sessionId}
                 tasks={view?.tasks ?? []}
                 subagents={view?.subagents ?? []}
+                readOnly={props.deviceReadOnly}
               />
-              <ApprovalBar approvals={view?.approvals ?? []} onRespond={props.onApproval} />
-              <AskBar asks={view?.asks ?? []} onAnswer={props.onAsk} />
-              <Composer
-                commands={slashCommands}
-                running={running}
-                busy={running}
-                locked={(view?.approvals ?? []).length > 0}
-                focusKey={sessionId}
-                // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
-                autoFocus={false}
-                // 软键盘的「换行」就是 Enter：Enter 只换行，发送必须点按钮
-                enterToSend={false}
-                toolbar={
-                  props.modelLabel && props.onOpenConfig ? (
-                    <button
-                      type="button"
-                      onClick={props.onOpenConfig}
-                      className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <span className="truncate">{props.modelLabel}</span>
-                      <ChevronDown className="h-3 w-3 shrink-0" />
-                    </button>
-                  ) : undefined
-                }
-                onSend={(payload) => {
-                  // 手机端不支持 @mention 派发，只取文本与图片
-                  void send(payload.text, payload.images);
-                  return undefined;
-                }}
-                onAbort={props.onAbort}
-                voice={props.voice}
-                voiceMode="hold"
-              />
-              <SessionStatsLine usageTotals={props.usageTotals} context={props.context} />
+              {bot?.outbox}
+              {bot?.notice && (
+                <p className="mb-1 rounded-md bg-destructive/10 px-2 py-1 text-destructive text-xs">
+                  {bot.notice}
+                </p>
+              )}
+              {props.deviceReadOnly ? (
+                <p className="mb-1 rounded-md bg-muted px-2 py-1 text-center text-muted-foreground text-xs">
+                  {readOnlyBanner(props.readOnlyRejected)}
+                </p>
+              ) : (
+                <>
+                  <ApprovalBar
+                    approvals={view?.approvals ?? []}
+                    onRespond={props.onApproval}
+                    clockOffset={props.clockOffset}
+                  />
+                  <AskBar
+                    asks={view?.asks ?? []}
+                    onAnswer={props.onAsk}
+                    clockOffset={props.clockOffset}
+                  />
+                </>
+              )}
+              {!readOnly && (
+                <Composer
+                  commands={slashCommands}
+                  running={running}
+                  busy={running}
+                  locked={(view?.approvals ?? []).length > 0}
+                  focusKey={sessionId}
+                  // 移动端不自动聚焦：一进会话就弹键盘会挡住消息
+                  autoFocus={false}
+                  // 软键盘的「换行」就是 Enter：Enter 只换行，发送必须点按钮
+                  enterToSend={false}
+                  toolbar={
+                    props.modelLabel && props.onOpenConfig ? (
+                      <button
+                        type="button"
+                        onClick={props.onOpenConfig}
+                        className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="truncate">{props.modelLabel}</span>
+                        <ChevronDown className="h-3 w-3 shrink-0" />
+                      </button>
+                    ) : undefined
+                  }
+                  onSend={(payload) => {
+                    // 手机端不支持 @mention 派发，只取文本与图片
+                    void send(payload.text, payload.images);
+                    return undefined;
+                  }}
+                  onAbort={props.onAbort}
+                  voice={props.voice}
+                  voiceMode="hold"
+                />
+              )}
+              {!readOnly && (
+                <SessionStatsLine usageTotals={props.usageTotals} context={props.context} />
+              )}
             </div>
           </div>
         )}
@@ -413,9 +492,9 @@ function tabClass(active: boolean): string {
   );
 }
 
-/** Composer 已把图片读成 base64，这里只在超限时再压一轮 */
-async function compressImageIfNeeded(image: AttachedImage): Promise<AttachedImage> {
-  if (image.data.length * 0.75 <= 700_000) return image;
+/** Composer 已把图片读成 base64，这里只在超出本张预算（整帧按张数均分）时再压一轮 */
+async function compressImageIfNeeded(image: AttachedImage, budget: number): Promise<AttachedImage> {
+  if (image.data.length * 0.75 <= budget) return image;
   const blob = await (await fetch(`data:${image.mimeType};base64,${image.data}`)).blob();
-  return compressImage(new File([blob], 'image', { type: image.mimeType }));
+  return compressWithin(new File([blob], 'image', { type: image.mimeType }), budget);
 }

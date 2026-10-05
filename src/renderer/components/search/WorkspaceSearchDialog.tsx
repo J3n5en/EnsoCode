@@ -1,3 +1,4 @@
+import { botBrowserChatId } from '@shared/bots/browser';
 import { projectDisplayName } from '@shared/projectName';
 import type { BrowserSearchTab, SettingsSearchEntry } from '@shared/searchAnything';
 import {
@@ -87,6 +88,9 @@ const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   usage: 'Usage',
   resources: 'Resources',
   voice: 'Voice input',
+  experimental: 'Experimental',
+  bots: 'Bot mode',
+  botTemplates: 'Bot templates',
 };
 
 function Highlighted({ text, query }: { text: string; query: string }) {
@@ -252,7 +256,7 @@ export function WorkspaceSearchDialog({
     }
     void window.electronAPI.browser
       .listSearchableTabs()
-      .then(setBrowserTabs)
+      .then((tabs) => setBrowserTabs(tabs.filter((tab) => !botBrowserChatId(tab.conversationId))))
       .catch(() => {
         setBrowserTabs([]);
       });

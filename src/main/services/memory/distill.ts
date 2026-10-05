@@ -10,6 +10,7 @@ import {
   isUnitType,
 } from '@shared/memory/constants';
 import {
+  DISTILL_GROUP_SCOPE_RULES,
   DISTILL_THREAD_PROMPT,
   distillChunkPrompt,
   distillConsolidatePrompt,
@@ -17,6 +18,7 @@ import {
 } from '@shared/memory/prompts';
 import { normalizeTemporalDate } from '@shared/memory/temporal';
 import type Database from 'better-sqlite3';
+import { scanMemoryInjection } from './injectionScan';
 import { createMemory } from './store';
 import type { CreateMemoryInput, Embedder, Memory } from './types';
 
@@ -39,6 +41,8 @@ export type Complete = (
 export interface TranscriptMessage {
   role: 'user' | 'assistant';
   text: string;
+  /** 来源会话 entry id；增量蒸馏按它切水位，缺省读取器之外可不提供 */
+  entryId?: string;
 }
 
 /** 解析后的蒸馏条目（尚未映射到写入输入） */
@@ -49,6 +53,28 @@ export interface DistilledMemory {
   confidence: number | null;
   unitType: string | null;
   temporal: { start: string | null; end: string | null } | null;
+  /** 群聊蒸馏的归属：chat = 整个群共享，self = 成员自身；缺省 / 未知按 self */
+  scope?: DistillScope | null;
+}
+
+export type DistillScope = 'chat' | 'self';
+
+const CHAT_SCOPES = new Set(['chat', 'group', 'team', 'shared']);
+const SELF_SCOPES = new Set(['self', 'bot', 'member', 'personal', 'own']);
+
+export function parseDistillScope(value: unknown): DistillScope | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toLowerCase();
+  return CHAT_SCOPES.has(v) ? 'chat' : SELF_SCOPES.has(v) ? 'self' : null;
+}
+
+/** 条目落库 space：只有 scope=chat 且会话有群 space 时进群，其余进自身 space */
+export function distillTargetSpace(
+  m: Pick<DistilledMemory, 'scope'>,
+  spaceId: string,
+  chatSpaceId?: string
+): string {
+  return m.scope === 'chat' && chatSpaceId ? chatSpaceId : spaceId;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +142,23 @@ export function buildTranscript(messages: readonly TranscriptMessage[]): string 
     parts.push(`${m.role === 'user' ? 'User' : 'Assistant'}: ${redactSecrets(text)}`);
   }
   return parts.join(MESSAGE_SEP);
+}
+
+/**
+ * 增量蒸馏切片：取 (fromEntryId, toEntryId]。起点不在当前分支（切过分支）时退回全量，宁可重复也不丢；
+ * 水位 = 切片里最后一个 entryId，切片为空或无 entryId 时保持起点。
+ */
+export function sliceTranscript(
+  messages: readonly TranscriptMessage[],
+  fromEntryId?: string,
+  toEntryId?: string
+): { messages: TranscriptMessage[]; watermark: string | undefined } {
+  const from =
+    fromEntryId === undefined ? -1 : messages.findLastIndex((m) => m.entryId === fromEntryId);
+  const to = toEntryId === undefined ? -1 : messages.findLastIndex((m) => m.entryId === toEntryId);
+  const slice = messages.slice(from + 1, to > from ? to + 1 : messages.length);
+  const watermark = slice.findLast((m) => m.entryId !== undefined)?.entryId ?? fromEntryId;
+  return { messages: slice, watermark };
 }
 
 /** 按消息边界切块，每块 ≤ max；单条超长消息硬切。`chunks.join('\n\n')` 恒等于原文（单条硬切除外）。 */
@@ -277,9 +320,11 @@ export function parseDistillResponse(raw: string): DistilledMemory[] | null {
     const content = str(o.content);
     const importance = num(o.importance);
     if (!content || importance === null) continue;
+    const title = str(o.title);
+    // 蒸馏输入来自会话正文，可能夹带外部网页 / 文件里的注入文本；命中就整条丢弃
+    if (scanMemoryInjection(`${title ?? ''}\n${content}`).length > 0) continue;
     const t =
       o.temporal && typeof o.temporal === 'object' ? (o.temporal as Record<string, unknown>) : null;
-    const title = str(o.title);
     out.push({
       title: title === null ? null : redactSecrets(title),
       content: redactSecrets(content),
@@ -288,6 +333,8 @@ export function parseDistillResponse(raw: string): DistilledMemory[] | null {
       unitType: str(o.unit_type) ?? str(o.unitType),
       temporal: t && (str(t.start) || str(t.end)) ? { start: str(t.start), end: str(t.end) } : null,
     });
+    const scope = parseDistillScope(o.scope);
+    if (scope) out[out.length - 1].scope = scope;
   }
   return out;
 }
@@ -347,11 +394,19 @@ class DistillTruncatedError extends Error {
 export async function distillTranscript(
   transcript: string,
   complete: Complete,
-  opts: { maxChunkChars?: number; language?: unknown; extractMaxTokens?: number } = {}
+  opts: {
+    maxChunkChars?: number;
+    language?: unknown;
+    extractMaxTokens?: number;
+    /** 群聊成员会话：要求每条带 scope（chat / self） */
+    groupScope?: boolean;
+  } = {}
 ): Promise<DistilledMemory[]> {
   const chunks = chunkTranscript(transcript, opts.maxChunkChars);
   const extractMaxTokens = opts.extractMaxTokens ?? DISTILL_SINGLE_EXTRACT_MAX_TOKENS;
-  const systemPrompt = withMemoryLanguage(DISTILL_THREAD_PROMPT, opts.language);
+  const scoped = (prompt: string) =>
+    opts.groupScope ? `${prompt}\n\n${DISTILL_GROUP_SCOPE_RULES}` : prompt;
+  const systemPrompt = scoped(withMemoryLanguage(DISTILL_THREAD_PROMPT, opts.language));
   const infer = async (
     system: string,
     user: string,
@@ -433,13 +488,13 @@ export async function distillTranscript(
   const listing = collected
     .map(
       (m, i) =>
-        `${i + 1}. [${m.unitType ?? 'unknown'} | importance ${m.importance}] ${m.title ?? ''}\n${m.content}` +
+        `${i + 1}. [${m.unitType ?? 'unknown'} | importance ${m.importance}${opts.groupScope ? ` | scope ${m.scope ?? 'self'}` : ''}] ${m.title ?? ''}\n${m.content}` +
         (m.temporal ? `\n(temporal: ${m.temporal.start ?? '?'} → ${m.temporal.end ?? '?'})` : '')
     )
     .join('\n\n');
   try {
     const merged = await parseWithTruncationRetry(
-      DISTILL_THREAD_PROMPT,
+      scoped(DISTILL_THREAD_PROMPT),
       distillConsolidatePrompt(collected.length, listing),
       {
         maxTokens:
@@ -474,6 +529,14 @@ export interface DistillPayload {
   /** 会话 jsonl 相对 sessions 根目录的路径（Main 权威）；重启续跑时据此重读 */
   sessionFile: string;
   projectId: string | null;
+  /** Bot 模式会话：蒸馏落 bot:<botId>（与 capture 缺省一致） */
+  botId?: string;
+  /** 群聊成员会话：scope=chat 的条目落 chat:<chatId>；私聊 / 委派子会话没有 */
+  chatId?: string;
+  /** 增量蒸馏起点（不含）：上次返回的水位；缺省从头 */
+  fromEntryId?: string;
+  /** 增量终点（含）：建任务时盖章，续跑时据此复原同一段，不吞之后新增的内容 */
+  toEntryId?: string;
 }
 
 /** 每条被丢弃 / 未写入的蒸馏结果的结构化原因；设置页可直接展示 */
@@ -603,6 +666,17 @@ export function ensureDistillJob(
     .immediate();
 }
 
+/** 该会话最近一次蒸馏任务盖章的终点水位；没有任务或旧任务未盖章时返回 undefined（调用方按全量处理） */
+export function lastDistillWatermark(db: Database.Database, sessionId: string): string | undefined {
+  const prefix = `${sessionId}#`;
+  const row = db
+    .prepare(
+      'SELECT * FROM memory_jobs WHERE kind = ? AND substr(target, 1, ?) = ? ORDER BY id DESC LIMIT 1'
+    )
+    .get(KIND, prefix.length, prefix) as JobRow | undefined;
+  return row ? toJob(row).payload.toEntryId : undefined;
+}
+
 /** 重启后要续跑的任务：pending 与上次进程死在半路的 running */
 export function listResumableDistillJobs(db: Database.Database): DistillJob[] {
   return (
@@ -630,6 +704,8 @@ export interface RunDistillOptions {
   embedder?: Embedder | null;
   now?: Date;
   spaceId?: string;
+  /** 有值时按群聊分流：提示词要求 scope，scope=chat 的条目写这里 */
+  chatSpaceId?: string;
   /** 透传 createMemory 的 on_memory_created hook（蒸馏出的记忆同样要排 KG 抽取） */
   onCreated?: (memory: Memory) => void;
 }
@@ -693,6 +769,7 @@ export async function runDistillJob(
     distilled = await distillTranscript(opts.transcript, opts.complete, {
       language: jobLanguage ?? 'en',
       extractMaxTokens: attempts >= 2 ? DISTILL_MAX_OUTPUT_TOKENS : undefined,
+      groupScope: Boolean(opts.chatSpaceId),
     });
   } catch (error) {
     const message = `distill failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -711,7 +788,7 @@ export async function runDistillJob(
     notes.push({ kind, title: m.title ?? m.content.slice(0, 40), detail });
   let written = 0;
   for (const m of distilled) {
-    const input = toCreateInput(m, spaceId);
+    const input = toCreateInput(m, distillTargetSpace(m, spaceId, opts.chatSpaceId));
     if (!input) {
       note('low_importance', m, `importance ${m.importance} < ${DISTILL_MIN_IMPORTANCE}`);
       continue;

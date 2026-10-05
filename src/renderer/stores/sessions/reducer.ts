@@ -220,6 +220,8 @@ export function isVisibleGenerationOutput(
 }
 
 export interface SessionProjection {
+  /** 发送出口的最近实测，独立于 token 占用；不持久化。 */
+  requestBody?: RequestBodyUsage;
   generation?: string;
   status: NodeStatus;
   error?: string;
@@ -284,6 +286,8 @@ const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
   if (
     event.type === 'text-completed' ||
     event.type === 'text-failed' ||
+    event.type === 'choice-classified' ||
+    event.type === 'choice-failed' ||
     event.type === 'text-delta'
   )
     return null;
@@ -367,6 +371,7 @@ export function applyAgentEvent(
       messages: tail.length > 0 ? [...authoritative, ...tail] : authoritative,
       customEntries: snapshot.customEntries ?? [],
       commands: snapshot.commands,
+      requestBody: snapshot.requestBody,
       dispatchMainEvents: {},
       lastSeq: 0,
       activeMs: sameGeneration ? (running ? state.activeMs : settleTiming(state, now).activeMs) : 0,
@@ -391,6 +396,8 @@ export function applyAgentEvent(
   if (
     event.type === 'text-completed' ||
     event.type === 'text-failed' ||
+    event.type === 'choice-classified' ||
+    event.type === 'choice-failed' ||
     event.type === 'text-delta'
   )
     return state;
@@ -430,6 +437,8 @@ export function applyAgentEvent(
   const current = state.generation ? state : { ...state, generation: identity.generation };
 
   switch (event.type) {
+    case 'request-body':
+      return { ...current, lastSeq: event.seq, requestBody: event.usage };
     case 'parent-ready':
     case 'child-ready':
       return {
@@ -757,3 +766,5 @@ function settleTiming(state: SessionProjection, now: number): SessionProjection 
     lastOutputAt: undefined,
   };
 }
+
+import type { RequestBodyUsage } from '@shared/requestBodyUsage';

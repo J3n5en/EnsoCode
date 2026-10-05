@@ -1,10 +1,12 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { ASK_TIMEOUT_ERROR } from '@shared/humanRequestTimeout';
 import type { AskRequestInfo } from '@shared/types/agent';
 
 interface PendingAsk {
   info: AskRequestInfo;
   resolve(answer: string): void;
   reject(error: Error): void;
+  expire(): void;
 }
 
 let counter = 0;
@@ -15,7 +17,9 @@ export class AskManager {
 
   constructor(
     private readonly onRequest: (info: AskRequestInfo) => void,
-    private readonly onResolved: (requestId: string) => void
+    private readonly onResolved: (requestId: string) => void,
+    /** 等真人回答的时限：提问带 expiresAt，由 Main 到期发 request-timeout */
+    readonly humanTimeoutMs?: number
   ) {}
 
   ask(
@@ -28,6 +32,7 @@ export class AskManager {
       requestId,
       question,
       ...(options && options.length > 0 ? { options } : {}),
+      ...(this.humanTimeoutMs ? { expiresAt: Date.now() + this.humanTimeoutMs } : {}),
     };
     return new Promise<string>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -41,6 +46,14 @@ export class AskManager {
         info,
         resolve: (answer) => settle(() => resolve(answer)),
         reject: (error) => settle(() => reject(error)),
+        expire: () => {
+          opts.signal?.removeEventListener('abort', onAbort);
+          settle(() =>
+            opts.defaultAnswer
+              ? resolve(`${opts.defaultAnswer} (auto-selected: no response in 10 minutes)`)
+              : reject(new Error(ASK_TIMEOUT_ERROR))
+          );
+        },
       });
       const onAbort = () => settle(() => reject(new Error('question cancelled')));
       opts.signal?.addEventListener('abort', onAbort, { once: true });
@@ -65,6 +78,11 @@ export class AskManager {
     this.pending.delete(requestId);
     this.onResolved(requestId);
     entry.resolve(answer);
+  }
+
+  /** Main 判定等人超时：按未回答收尾 */
+  expire(requestId: string): void {
+    this.pending.get(requestId)?.expire();
   }
 
   /** abort/dismiss 时取消全部挂起提问(fail-closed) */

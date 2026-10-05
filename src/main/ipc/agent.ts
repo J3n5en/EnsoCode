@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { browserSessionKey } from '@shared/bots/browser';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { resolveSshTarget } from '@shared/ssh';
 import {
@@ -35,13 +36,14 @@ import {
   parseUpdateConversationSelectionRequest,
   THINKING_LEVELS,
 } from '@shared/types/agent';
+import { parseTaskCheck } from '@shared/types/bot';
 import { effectiveSubagentAllowedModes } from '@shared/types/builtinTools';
 import {
   parseAgentDispatchRequest,
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
-import { app, ipcMain, type WebContents, webContents } from 'electron';
+import { app, ipcMain, powerMonitor, type WebContents, webContents } from 'electron';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
@@ -76,6 +78,7 @@ import {
   sendAgentCommand,
   sendBrowserResultToSession,
   sendComputerResultToSession,
+  sendDelegationResultToSession,
   sendMemoryResultToSession,
   setAgentEventListener,
   setPinnedSessions,
@@ -93,8 +96,10 @@ import {
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
+import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
 import { pickBrowserFileRoot, setBrowserFileRootResolver } from '../services/browserFileRoot';
 import { browserHost } from '../services/browserHost';
+import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { computerHost } from '../services/computerHost';
 import { reloadConversation } from '../services/conversationReload';
@@ -110,19 +115,21 @@ import { toStoredTokens } from '../services/mcpOAuth';
 import { getMcpOAuthStore } from '../services/mcpOAuthStore';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import type { Complete } from '../services/memory/distill';
+import { memorySpaceContext } from '../services/memory/space';
 import {
   configureMemoryDistill,
   invokeMemory,
   rootSessionId,
   scheduleMemoryDistill,
 } from '../services/memoryHost';
-import { maybeNotify, setViewedSession } from '../services/notifications';
+import { maybeNotify, maybeNotifyBot, setViewedSession } from '../services/notifications';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { forwardAgentEvent, setPairAgentBridge } from '../services/pairHost';
 import {
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
 } from '../services/pairSessionHost';
+import { remoteCandidates } from '../services/remoteModels';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
   projectParentHistoryPage,
@@ -142,6 +149,15 @@ import { titleModelCandidates } from '../services/titleSummary';
 import { ingestSessionJsonl } from '../services/usage/ledgerStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { isMainWebContents } from '../windows/MainWindow';
+import {
+  botModeEnabled,
+  botScreenshots,
+  getBotServices,
+  groupHistoryTool,
+  groupTasksTool,
+  routineProposeTool,
+  sendImageTool,
+} from './bots';
 import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
 import { readSettings, readSshTimeoutSeconds } from './settings';
 import {
@@ -190,6 +206,8 @@ const pendingAgentControl = new Map<string, AbortController>();
 const pendingComputer = new Map<string, AbortController>();
 let sourceBindings: ActiveConversationRegistry | null = null;
 let sourceAuthority: SourceAuthorityRegistry | null = null;
+let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null =
+  null;
 const selectionClockOwners = new WeakSet<WebContents>();
 
 function watchSelectionClock(sender: WebContents): void {
@@ -213,13 +231,36 @@ export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
   return sourceAuthority;
 }
 
+/** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
+export function setBotWorkerEventObserver(
+  observer: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null
+): void {
+  botWorkerObserver = observer;
+}
+
 function broadcastAgentEvent(event: RendererAgentEvent): void {
   try {
     sendToAllWindows(IPC_CHANNELS.AGENT_EVENT, event);
   } catch {
     // renderer 已崩但 webContents 对象还在：Render frame was disposed
   }
-  maybeNotify(event);
+  const conversationId =
+    'identity' in event && event.identity ? rootSessionId(event.identity) : undefined;
+  const binding = conversationId ? sourceAuthority?.conversation(conversationId)?.bot : undefined;
+  if (
+    binding &&
+    conversationId &&
+    (event.type === 'approval-request' || event.type === 'ask-request')
+  ) {
+    const enabled = botModeEnabled();
+    void maybeNotifyBot(event, {
+      enabled,
+      chatId: binding.chatId,
+      conversationId,
+      name: (enabled ? getBotServices()?.bots.get(binding.botId)?.name : undefined) ?? '成员',
+    }).catch((error) => console.warn('[bots] notification failed', error));
+    // bot 会话的回合完成 / 失败由 Bot 服务按聊天发带成员名的通知（群接力整批合并）
+  } else if (!binding) maybeNotify(event);
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
@@ -307,6 +348,10 @@ function spawnBoundSession(
   request: AgentSpawnRequest,
   credentialKeys: ReadonlySet<string>
 ) {
+  // bot 会话的人设 / 工作区只能由 Main 的 BotSessionHost 组装，通用 spawn 路径一律拒绝
+  if (sourceAuthority?.conversation(request.sessionId)?.bot) {
+    return { ok: false, error: 'bot conversation must be spawned by bot host' };
+  }
   return spawnSession(
     identity,
     request,
@@ -423,26 +468,6 @@ async function remoteDistillCompletion(
     });
 }
 
-/** 功能单独选的远程模型排最前，其后是标题模型的回退链 */
-async function remoteCandidates(
-  state: Record<string, unknown>,
-  preferred: unknown
-): Promise<SpawnModelConfig[]> {
-  const credentialKeys = await readStoredOauthCredentialKeys();
-  const chain = [
-    ...(preferred && typeof preferred === 'object'
-      ? [preferred as { providerId: string; modelId: string }]
-      : []),
-    ...titleModelCandidates(state),
-  ];
-  const candidates: SpawnModelConfig[] = [];
-  for (const candidate of chain) {
-    const resolved = resolveModelSelection(candidate.providerId, candidate.modelId, credentialKeys);
-    if (resolved.ok && resolved.selection) candidates.push(resolved.selection.config);
-  }
-  return candidates;
-}
-
 const VOICE_CORRECTION_TIMEOUT_MS = 15_000;
 
 /** 语音纠错：本地 GGUF 走 llama.cpp；远程用单独选的模型，未选跟随标题模型。不可用返 null，保留原文 */
@@ -473,6 +498,14 @@ async function readParentHistoryTail(
   const persisted = agentSessionIndex.persistedConversation(conversationId);
   const sessionFile =
     typeof persisted?.sessionFile === 'string' ? persisted.sessionFile : undefined;
+  return readSessionHistoryFile(sessionFile, beforeIndex);
+}
+
+/** 根会话 pi jsonl 的尾窗 / 分页投影；路径须落在 sessions 目录内 */
+export async function readSessionHistoryFile(
+  sessionFile: string | undefined,
+  beforeIndex?: number
+): Promise<ParentHistoryTailResult> {
   const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
   const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
   if (!resolved) {
@@ -509,13 +542,78 @@ async function readParentHistoryTail(
  * 准入是策略，留在本文件（与渲染层走同一套 exactIdentity / persistedRootSpawn 守卫）；
  * pairHost 只做传输。解析不出身份就丢弃命令，不降级成按 sessionId 盲发。
  */
+/**
+ * 会话结束 / 闲置回收 / 压缩完成：从权威 jsonl 异步蒸馏长期记忆（开关、幂等、水位、失败全在
+ * memoryHost / BotMemoryService 内收口）。返回 bot 绑定供调用方做后续处理。
+ */
+function distillSessionMemory(identity: SessionIdentity) {
+  const conversation = sourceAuthority?.conversation(identity.sessionId);
+  const sessionFile = agentSessionIndex.sessionFile(identity);
+  if (sessionFile) {
+    const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+    if (conversation?.bot) void getBotServices()?.memory.distill({ ...conversation, sessionFile });
+    else
+      void scheduleMemoryDistill(
+        {
+          sessionId: identity.sessionId,
+          sessionFile,
+          projectId: project?.state === 'active' ? project.projectId : null,
+        },
+        { continueFromLastJob: true }
+      );
+  }
+  return conversation?.bot;
+}
+
+function botControlError(sessionId: unknown): { ok: false; error: string } | undefined {
+  return typeof sessionId === 'string' && sourceAuthority?.conversation(sessionId)?.bot
+    ? { ok: false, error: 'Bot sessions must use Bot services for execution and policy changes.' }
+    : undefined;
+}
+
+/** 浏览器会话键：Bot 聊天（含委派子会话）共享一个，其余按会话隔离 */
+function browserKeyFor(sessionId: string): string {
+  return browserSessionKey(sessionId, sourceAuthority?.conversation(sessionId)?.bot, (id) =>
+    getBotServices()?.delegations.chatIdOf(id)
+  );
+}
+
+const sharesBrowser = (sessionId: string) => browserKeyFor(sessionId) !== sessionId;
+
+/** 共享浏览器里按成员会话加标签锁；委派子会话按它自己的会话占用 */
+function browserActorFor(sessionId: string): BrowserActor | undefined {
+  if (!sharesBrowser(sessionId)) return undefined;
+  const botId = sourceAuthority?.conversation(sessionId)?.bot?.botId;
+  const name = botId ? getBotServices()?.bots.get(botId)?.name : undefined;
+  return { sessionId, name: name ?? 'Another member' };
+}
+
+/** Bot 会话的截图留最近 3 张给 send_image（子会话截的图归到父会话）；非 Bot 会话不缓存 */
+function cacheBotScreenshots(
+  identity: SessionIdentity | ChildSessionIdentity,
+  shots: readonly unknown[],
+  source: 'web' | 'desktop'
+): void {
+  const sessionId = rootSessionId(identity);
+  if (!sourceAuthority?.conversation(sessionId)?.bot) return;
+  for (const shot of shots) {
+    const data = shot && typeof shot === 'object' ? (shot as { data?: unknown }).data : undefined;
+    if (typeof data === 'string' && data)
+      botScreenshots.push(sessionId, { data: Buffer.from(data, 'base64'), source });
+  }
+}
+
 function wirePairAgentBridge(): void {
   setPairAgentBridge({
     prompt: (sessionId, text, images) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) promptSession(identity, text, images);
     },
     steer: (sessionId, text, images) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) steerSession(identity, text, images);
     },
@@ -569,10 +667,14 @@ function wirePairSessionHost(): void {
       return spawnBoundSession(identity, request, credentialKeys);
     },
     prompt: (sessionId, text, images) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) promptSession(identity, text, images);
     },
     steer: (sessionId, text, images) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) steerSession(identity, text, images);
     },
@@ -581,6 +683,8 @@ function wirePairSessionHost(): void {
       if (identity) abortSession(identity);
     },
     setModel: (sessionId, providerId, modelId) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = rootIdentity(sessionId);
       if (!identity) return;
       void readStoredOauthCredentialKeys()
@@ -588,6 +692,8 @@ function wirePairSessionHost(): void {
         .catch(() => {});
     },
     setReasoning: (sessionId, enabled, level) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity) return;
       const thinking =
@@ -597,19 +703,27 @@ function wirePairSessionHost(): void {
       setSessionReasoning(identity, enabled, thinking);
     },
     setThinking: (sessionId, level) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity || !(THINKING_LEVELS as readonly string[]).includes(level)) return;
       setSessionThinking(identity, level as ThinkingLevel);
     },
     compact: (sessionId, instructions) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) compactSession(identity, instructions);
     },
     rewind: (sessionId, userIndexFromEnd, restoreFiles) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) rewindSession(identity, userIndexFromEnd, restoreFiles);
     },
     retry: (sessionId) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (identity) retrySession(identity);
     },
@@ -882,6 +996,15 @@ export function registerAgentHandlers(): void {
     },
   });
 
+  const humanTimeouts = new HumanRequestTimeouts({
+    now: Date.now,
+    expire: (identity, kind, requestId) => {
+      sendAgentCommand({ type: 'request-timeout', identity, kind, requestId });
+    },
+  });
+  setInterval(() => humanTimeouts.check(), 1000).unref();
+  powerMonitor.on('resume', () => humanTimeouts.check());
+
   setAgentEventListener((workerEvent) => {
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
@@ -916,6 +1039,8 @@ export function registerAgentHandlers(): void {
       return;
     dispatchService?.observe(workerEvent);
     agentService?.observe(workerEvent);
+    botWorkerObserver?.(workerEvent);
+    humanTimeouts.observe(workerEvent);
     if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
       const file = agentSessionIndex.sessionFile(workerEvent.identity);
       if (file) {
@@ -986,35 +1111,54 @@ export function registerAgentHandlers(): void {
       return;
     }
     // 回合结束：agent 开的无头 tab 关掉（用户正看的 / 锁住的不动）；parent-ended 强关
-    if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
+    // Bot 聊天的浏览器由成员共享，随聊天删除才关
+    if (
+      (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') &&
+      !sharesBrowser(workerEvent.identity.sessionId)
+    ) {
       void browserHost.closeForSession(workerEvent.identity.sessionId);
+    }
+    if (workerEvent.type === 'turn-completed' || workerEvent.type === 'turn-failed') {
+      browserHost.releaseActor(workerEvent.identity.sessionId);
     }
     if (workerEvent.type === 'parent-ended') {
       forgetParentToolProfile(workerEvent.identity.sessionId);
-      void browserHost.closeForSession(workerEvent.identity.sessionId, { force: true });
+      browserHost.forgetActor(workerEvent.identity.sessionId);
+      if (!sharesBrowser(workerEvent.identity.sessionId))
+        void browserHost.closeForSession(workerEvent.identity.sessionId, { force: true });
       computerHost.close(workerEvent.identity.sessionId);
-      // 会话结束 / 闲置回收：从权威 jsonl 异步蒸馏长期记忆（开关、幂等、失败全部在 memoryHost 内收口）
-      const sessionFile = agentSessionIndex.sessionFile(workerEvent.identity);
-      if (sessionFile) {
-        const conversation = sourceAuthority?.conversation(workerEvent.identity.sessionId);
-        const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-        void scheduleMemoryDistill({
-          sessionId: workerEvent.identity.sessionId,
-          sessionFile,
-          projectId: project?.state === 'active' ? project.projectId : null,
-        });
-      }
+      distillSessionMemory(workerEvent.identity);
+    }
+    // 压缩成功：jsonl 原文仍在，按水位提前整理记忆；群聊成员下次投递补群状态
+    if (
+      workerEvent.type === 'compaction' &&
+      workerEvent.state === 'end' &&
+      !workerEvent.error &&
+      !workerEvent.abandoned
+    ) {
+      const bot = distillSessionMemory(workerEvent.identity);
+      if (bot?.chatId)
+        getBotServices()?.groups.markCompacted(
+          bot.chatId,
+          bot.botId,
+          workerEvent.identity.sessionId
+        );
     }
     if (workerEvent.type === 'browser-invoke') {
       const { identity, requestId, op, params } = workerEvent;
-      void browserHost.invoke(identity.sessionId, op, params).then(
-        (result) => sendBrowserResultToSession(identity, requestId, { ok: true, result }),
-        (error: unknown) =>
-          sendBrowserResultToSession(identity, requestId, {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          })
-      );
+      void browserHost
+        .invoke(browserKeyFor(identity.sessionId), op, params, browserActorFor(identity.sessionId))
+        .then(
+          (result) => {
+            if (op === 'screenshot') cacheBotScreenshots(identity, [result], 'web');
+            sendBrowserResultToSession(identity, requestId, { ok: true, result });
+          },
+          (error: unknown) =>
+            sendBrowserResultToSession(identity, requestId, {
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            })
+        );
       return;
     }
     if (workerEvent.type === 'memory-invoke') {
@@ -1023,6 +1167,13 @@ export function registerAgentHandlers(): void {
       const conversation = sourceAuthority?.conversation(rootSessionId(identity));
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
       const projectId = project?.state === 'active' ? project.projectId : null;
+      const memory = conversation?.bot
+        ? getBotServices()?.memory.context({ ...conversation, projectId })
+        : { enabled: true, context: memorySpaceContext({ projectId }) };
+      if (!memory?.enabled) {
+        sendMemoryResultToSession(identity, requestId, { ok: false, error: '该成员已关闭记忆' });
+        return;
+      }
       const state = readSettingsState() ?? {};
       const disabled = resolveDisabledBuiltinTools(state.disabledBuiltinTools, {
         disabledBuiltinTools: projectDisabledBuiltinTools(state.projects, projectId ?? undefined),
@@ -1034,7 +1185,7 @@ export function registerAgentHandlers(): void {
         });
         return;
       }
-      void invokeMemory(op, params, projectId).then(
+      void invokeMemory(op, params, memory.context).then(
         (result) => sendMemoryResultToSession(identity, requestId, { ok: true, result }),
         (error: unknown) =>
           sendMemoryResultToSession(identity, requestId, {
@@ -1042,6 +1193,83 @@ export function registerAgentHandlers(): void {
             error: error instanceof Error ? error.message : String(error),
           })
       );
+      return;
+    }
+    if (workerEvent.type === 'delegation-invoke') {
+      const { identity, requestId, op, params } = workerEvent;
+      try {
+        const conversation = sourceAuthority?.conversation(identity.sessionId);
+        const services =
+          botModeEnabled() && conversation?.bot && agentSessionIndex.isCurrent(identity)
+            ? getBotServices()
+            : undefined;
+        const service = services?.delegations;
+        if (!service || !params || typeof params !== 'object' || Array.isArray(params)) {
+          sendDelegationResultToSession(identity, requestId, {
+            ok: false,
+            error: botModeEnabled()
+              ? 'Bot delegation unavailable or invalid arguments.'
+              : 'disabled',
+          });
+          return;
+        }
+        const input = params as Record<string, unknown>;
+        let result: unknown;
+        if (op === 'group_tasks' && conversation?.bot) {
+          result = groupTasksTool(services, identity.sessionId, conversation.bot, input);
+        } else if (op === 'group_history' && conversation?.bot) {
+          result = groupHistoryTool(services, identity.sessionId, conversation.bot, input);
+        } else if (op === 'routine_propose' && conversation?.bot) {
+          result = routineProposeTool(services, identity.sessionId, conversation.bot, input);
+        } else if (op === 'send_image' && conversation?.bot) {
+          result = sendImageTool(services, identity.sessionId, conversation.bot, input);
+        } else if (
+          op === 'delegate' &&
+          typeof input.to === 'string' &&
+          typeof input.task === 'string' &&
+          (input.context === undefined || typeof input.context === 'string') &&
+          (input.taskId === undefined || typeof input.taskId === 'string') &&
+          (input.deadlineMinutes === undefined || typeof input.deadlineMinutes === 'number') &&
+          (input.keep === undefined || typeof input.keep === 'boolean') &&
+          (input.check === undefined || parseTaskCheck(input.check))
+        ) {
+          const check = parseTaskCheck(input.check);
+          result = service.delegate(identity.sessionId, {
+            to: input.to,
+            task: input.task,
+            ...(typeof input.context === 'string' ? { context: input.context } : {}),
+            ...(typeof input.taskId === 'string' ? { taskId: input.taskId } : {}),
+            ...(typeof input.deadlineMinutes === 'number'
+              ? { deadlineMinutes: input.deadlineMinutes }
+              : {}),
+            ...(input.keep === true ? { keep: true } : {}),
+            ...(check ? { check } : {}),
+          });
+        } else if (
+          op === 'check_delegation' &&
+          (input.id === undefined || typeof input.id === 'string') &&
+          (input.cancel === undefined || typeof input.cancel === 'boolean')
+        ) {
+          result = service.check(identity.sessionId, {
+            ...(typeof input.id === 'string' ? { id: input.id } : {}),
+            ...(typeof input.cancel === 'boolean' ? { cancel: input.cancel } : {}),
+          });
+        } else result = { ok: false, error: 'Invalid delegation arguments.' };
+        void Promise.resolve(result).then(
+          (value) =>
+            sendDelegationResultToSession(identity, requestId, { ok: true, result: value }),
+          (error: unknown) =>
+            sendDelegationResultToSession(identity, requestId, {
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            })
+        );
+      } catch (error) {
+        sendDelegationResultToSession(identity, requestId, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
     if (workerEvent.type === 'computer-cancel') {
@@ -1080,7 +1308,10 @@ export function registerAgentHandlers(): void {
       void computerHost
         .invoke(identity.sessionId, op, params, controller.signal)
         .then(
-          (result) => sendComputerResultToSession(identity, requestId, { ok: true, result }),
+          (result) => {
+            cacheBotScreenshots(identity, result.screenshots, 'desktop');
+            sendComputerResultToSession(identity, requestId, { ok: true, result });
+          },
           (error: unknown) =>
             sendComputerResultToSession(identity, requestId, {
               ok: false,
@@ -1132,7 +1363,7 @@ export function registerAgentHandlers(): void {
     broadcastAgentEvent(workerEvent);
   });
 
-  ipcMain.handle(IPC_CHANNELS.SOURCE_AUTHORITY_READ, () => sourceAuthority!.projection());
+  ipcMain.handle(IPC_CHANNELS.SOURCE_AUTHORITY_READ, () => sourceAuthority!.rendererProjection());
 
   ipcMain.handle(IPC_CHANNELS.SOURCE_CONVERSATION_CREATE, (event, request: unknown) => {
     if (!isMainWebContents(event.sender.id))
@@ -1390,6 +1621,8 @@ export function registerAgentHandlers(): void {
       images?: unknown,
       deliveryId?: unknown
     ): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (
         !identity ||
@@ -1416,6 +1649,8 @@ export function registerAgentHandlers(): void {
       images?: unknown,
       deliveryId?: unknown
     ): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (
         !identity ||
@@ -1451,6 +1686,8 @@ export function registerAgentHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_RETRY, (_event, sessionId: unknown): AgentActionResult => {
+    const rejected = botControlError(sessionId);
+    if (rejected) return rejected;
     const identity = exactIdentity(sessionId);
     return identity
       ? retrySession(identity)
@@ -1534,6 +1771,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_MODEL,
     async (_event, sessionId: unknown, providerId: unknown, modelId: unknown) => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity || 'parent' in identity) {
         return { ok: false, error: 'invalid session or stale generation' };
@@ -1554,6 +1793,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_THINKING,
     (_event, sessionId: unknown, level: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity || !THINKING_LEVELS.includes(level as ThinkingLevel)) {
         return { ok: false, error: 'invalid thinking level or stale generation' };
@@ -1565,6 +1806,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_REASONING,
     (_event, sessionId: unknown, enabled: unknown, level?: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity || typeof enabled !== 'boolean') {
         return { ok: false, error: 'invalid reasoning input or stale generation' };
@@ -1594,6 +1837,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_APPROVAL_MODE,
     async (_event, sessionId: unknown, mode: unknown): Promise<AgentActionResult> => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (!identity || !APPROVAL_MODES.includes(mode as ApprovalMode)) {
         return { ok: false, error: 'invalid approval mode or stale generation' };
@@ -1609,6 +1854,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_PLAN_MODE,
     (_event, sessionId: unknown, active: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       const command = identity && parseAgentCommand({ type: 'set-plan-mode', identity, active });
       if (!command) return { ok: false, error: 'invalid plan mode or stale generation' };
@@ -1644,6 +1891,7 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_COMPACT,
     (_event, sessionId: unknown, instructions: unknown): AgentActionResult => {
+      // 压缩不改执行与策略（忙碌时 worker 排队），桌面端对 bot 会话放行；手机 pair 仍拒绝
       const identity = exactIdentity(sessionId);
       if (
         !identity ||
@@ -1659,6 +1907,8 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_REWIND,
     (_event, sessionId: unknown, entryId: unknown, restoreFiles: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       if (
         !identity ||
@@ -1680,6 +1930,8 @@ export function registerAgentHandlers(): void {
       targetConversationId: unknown,
       anchor: unknown
     ): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
       const record = asRecord(anchor);
       const entryId = typeof record?.entryId === 'string' ? record.entryId : undefined;

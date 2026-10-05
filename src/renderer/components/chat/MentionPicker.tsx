@@ -1,13 +1,17 @@
 import type { MentionCandidate } from '@shared/types/mentions';
-import { Bot, ChevronRight, FileText, Folder, History } from 'lucide-react';
+import { Bot, ChevronRight, FileText, Folder, History, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { flattenMentionRoot, type MentionSearchGroups } from '@/hooks/useMentionSearch';
+import {
+  flattenMentionRoot,
+  type MentionFolderId,
+  type MentionSearchGroups,
+} from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { distinguishingPathLabels } from './mentionPathLabel';
 
-type FolderId = 'agents' | 'chats';
+type FolderId = MentionFolderId;
 
 interface MentionPickerProps {
   groups: MentionSearchGroups;
@@ -58,12 +62,16 @@ export function MentionPicker({
   }, [openFolderId, folderIndex]);
 
   if (items.length === 0) return null;
-  const folderLabels: Record<FolderId, string> = { agents: t('Agents'), chats: t('Chats') };
-  const folderIcons: Record<FolderId, typeof Bot> = { agents: Bot, chats: History };
+  const folderLabels: Record<FolderId, string> = {
+    agents: t('Agents'),
+    members: t('Members'),
+    chats: t('Chats'),
+  };
+  const folderIcons: Record<FolderId, typeof Bot> = { agents: Bot, members: Users, chats: History };
   const folderItems = openFolderId ? groups[openFolderId] : [];
   let flatIndex = 0;
 
-  const renderGroup = (group: 'agents' | 'chats' | 'files', pad: boolean) => {
+  const renderGroup = (group: FolderId | 'files', pad: boolean) => {
     const candidates = groups[group];
     if (candidates.length === 0) return null;
     const label = group === 'files' ? t('Files') : folderLabels[group as FolderId];
@@ -164,8 +172,12 @@ export function MentionPicker({
         ) : (
           <>
             {renderGroup('agents', false)}
-            {renderGroup('chats', groups.agents.length > 0)}
-            {renderGroup('files', groups.agents.length > 0 || groups.chats.length > 0)}
+            {renderGroup('members', groups.agents.length > 0)}
+            {renderGroup('chats', groups.agents.length + groups.members.length > 0)}
+            {renderGroup(
+              'files',
+              groups.agents.length + groups.members.length + groups.chats.length > 0
+            )}
           </>
         )}
       </div>
@@ -220,7 +232,9 @@ function MentionOption({
   const directory = isDirectoryMention(candidate);
   const Icon =
     candidate.kind === 'agent-type'
-      ? Bot
+      ? candidate.source === 'bot'
+        ? Users
+        : Bot
       : candidate.kind === 'chat'
         ? History
         : directory
@@ -258,7 +272,9 @@ function MentionOption({
                     ? 'System'
                     : candidate.source === 'builtin'
                       ? 'Built-in'
-                      : 'Custom'
+                      : candidate.source === 'bot'
+                        ? 'Member'
+                        : 'Custom'
                 )
               : candidate.kind === 'chat'
                 ? t('Chat')
@@ -278,7 +294,9 @@ function MentionOption({
           title={candidate.kind === 'file' ? candidate.relativePath : undefined}
         >
           {candidate.kind === 'agent-type'
-            ? t(candidate.description)
+            ? candidate.source === 'bot'
+              ? candidate.description
+              : t(candidate.description)
             : candidate.kind === 'chat'
               ? candidate.sessionFile.split('/').at(-1)
               : candidate.kind === 'file'

@@ -9,33 +9,38 @@ import { useEffect, useMemo, useState } from 'react';
 
 export interface MentionSearchGroups {
   agents: AgentTypeMentionCandidate[];
+  /** Bot 模式成员（source = bot），与 agent 类型分组展示 */
+  members: AgentTypeMentionCandidate[];
   files: FileMentionCandidate[];
   chats: ChatMentionCandidate[];
 }
 
+export type MentionFolderId = 'agents' | 'members' | 'chats';
+
 export interface MentionPickerItem {
   candidate: MentionCandidate;
-  group: 'agents' | 'files' | 'chats';
+  group: MentionFolderId | 'files';
 }
 
 export type MentionRootItem =
-  | { type: 'folder'; id: 'agents' | 'chats' }
-  | { type: 'item'; candidate: MentionCandidate; group: 'agents' | 'files' | 'chats' };
+  | { type: 'folder'; id: MentionFolderId }
+  | { type: 'item'; candidate: MentionCandidate; group: MentionFolderId | 'files' };
+
+const FOLDER_IDS: readonly MentionFolderId[] = ['agents', 'members', 'chats'];
 
 export function flattenMentionGroups(groups: MentionSearchGroups): MentionPickerItem[] {
   return [
-    ...groups.agents.map((candidate) => ({ candidate, group: 'agents' as const })),
-    ...groups.chats.map((candidate) => ({ candidate, group: 'chats' as const })),
+    ...FOLDER_IDS.flatMap((group) => groups[group].map((candidate) => ({ candidate, group }))),
     ...groups.files.map((candidate) => ({ candidate, group: 'files' as const })),
   ];
 }
 
-/** 空查询把 Agents/Chats 各收成一级文件夹；有关键词时摊平，保证 @enso 仍能直接命中。 */
+/** 空查询把 Agents/成员/Chats 各收成一级文件夹；有关键词时摊平，保证 @enso 仍能直接命中。 */
 export function flattenMentionRoot(groups: MentionSearchGroups, query: string): MentionRootItem[] {
-  if (!query.trim() && (groups.agents.length > 0 || groups.chats.length > 0)) {
+  const folders = FOLDER_IDS.filter((id) => groups[id].length > 0);
+  if (!query.trim() && folders.length > 0) {
     return [
-      ...(groups.agents.length > 0 ? [{ type: 'folder' as const, id: 'agents' as const }] : []),
-      ...(groups.chats.length > 0 ? [{ type: 'folder' as const, id: 'chats' as const }] : []),
+      ...folders.map((id) => ({ type: 'folder' as const, id })),
       ...groups.files.map((candidate) => ({
         type: 'item' as const,
         candidate,
@@ -50,7 +55,7 @@ export function flattenMentionRoot(groups: MentionSearchGroups, query: string): 
   }));
 }
 
-interface FileHit {
+export interface FileHit {
   relativePath: string;
   name: string;
 }
@@ -145,21 +150,35 @@ export function groupMentionCandidates(
   const matchingChats = normalized
     ? chats.filter((candidate) => candidate.label.toLocaleLowerCase().includes(normalized))
     : [...chats];
-  return { agents: matchingAgents, files: matchingFiles, chats: matchingChats };
+  return {
+    agents: matchingAgents.filter((candidate) => candidate.source !== 'bot'),
+    members: matchingAgents.filter((candidate) => candidate.source === 'bot'),
+    files: matchingFiles,
+    chats: matchingChats,
+  };
+}
+
+export interface MentionSearchOptions {
+  /** 替代按 cwd 搜索（Bot 输入框：Main 按 chatId 推导根目录）；须是稳定引用 */
+  searchFiles?: (query: string) => Promise<readonly FileHit[]>;
+  /** false = 不拉 agent 类型候选 */
+  agents?: boolean;
 }
 
 /** Agent candidates come from Main's registry snapshot; file search remains cwd-bound. */
 export function useMentionSearch(
   cwd: string | undefined,
   query: string | null,
-  chats: readonly ChatMentionCandidate[] = []
+  chats: readonly ChatMentionCandidate[] = [],
+  options: MentionSearchOptions = {}
 ): MentionSearchGroups {
   const [agents, setAgents] = useState<AgentTypeMentionCandidate[]>([]);
   const [files, setFiles] = useState<FileMentionCandidate[]>([]);
   const pickerOpen = query !== null;
+  const { searchFiles, agents: withAgents = true } = options;
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen || !withAgents) return;
     setAgents([]);
     let cancelled = false;
     void window.electronAPI.agentRegistry
@@ -176,17 +195,16 @@ export function useMentionSearch(
     return () => {
       cancelled = true;
     };
-  }, [pickerOpen]);
+  }, [pickerOpen, withAgents]);
 
   useEffect(() => {
-    if (query === null || !cwd) {
+    if (query === null || (!cwd && !searchFiles)) {
       setFiles([]);
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      window.electronAPI.files
-        .search(cwd, query)
+      (searchFiles ? searchFiles(query) : window.electronAPI.files.search(cwd as string, query))
         .then((hits) => {
           if (!cancelled) setFiles(toFileMentionCandidates(hits));
         })
@@ -198,12 +216,12 @@ export function useMentionSearch(
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [cwd, query]);
+  }, [cwd, query, searchFiles]);
 
   return useMemo(
     () =>
       query === null
-        ? { agents: [], files: [], chats: [] }
+        ? { agents: [], members: [], files: [], chats: [] }
         : groupMentionCandidates(query, agents, files, chats),
     [agents, files, chats, query]
   );

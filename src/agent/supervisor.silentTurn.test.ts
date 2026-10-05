@@ -75,11 +75,16 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
     getModels() {
       return [...this.models.values()];
     },
-    getProvider: () => undefined,
     resolveModel: vi
       .fn<ModelRuntime['resolveModel']>()
       .mockRejectedValue(new Error('Unexpected virtual model routing in ordinary-runtime fixture')),
     getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
+    getProvider(providerId: string) {
+      if (![...this.models.keys()].some((key) => key.startsWith(`${providerId}/`)))
+        return undefined;
+      return { id: providerId, models: [], stream: vi.fn(), streamSimple: vi.fn() };
+    },
+    registerNativeProvider: vi.fn(),
     refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
     completeSimple: vi.fn(async () => ({ content: [] })),
   };
@@ -277,6 +282,44 @@ describe('SessionSupervisor terminal turn handling', () => {
     await settle();
     expect(projection).not.toHaveBeenCalled();
     expect(parentSession.agent.continue).not.toHaveBeenCalled();
+    await supervisor.shutdown();
+  });
+
+  it('手动重试再遇限流：由 SDK 重试并在最终失败时收口', async () => {
+    const { events, supervisor, parentSession } = await spawn();
+    Object.assign(mocks.managers[0]!, {
+      buildSessionProjection: vi.fn(() => ({
+        entries: parentSession.messages.map((message, index) => ({
+          sourceEntry: { type: 'message', id: `m${index}`, message },
+          messages: [message],
+        })),
+      })),
+    });
+    parentSession.messages.push({ role: 'user', content: [{ type: 'text', text: 'hi' }] });
+    Object.assign(parentSession, {
+      _runAgentPrompt: vi.fn(async () => {
+        parentSession.emit({ type: 'agent_start' });
+        parentSession.messages.push({
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: '429 rate limited',
+        });
+        parentSession.emit({ type: 'agent_end', willRetry: false });
+        parentSession.emit({ type: 'agent_settled' });
+      }),
+    });
+
+    supervisor.handleCommand({ type: 'retry', identity: parent });
+    await waitFor(events, 'turn-failed');
+    expect(events.find((event) => event.type === 'turn-failed')).toMatchObject({
+      error: '429 rate limited',
+    });
+    expect(events.filter((event) => event.type === 'status').at(-1)).toMatchObject({
+      status: 'failed',
+    });
+    expect(events.some((event) => event.type === 'messages-truncated')).toBe(false);
+
     await supervisor.shutdown();
   });
 

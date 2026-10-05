@@ -1,3 +1,4 @@
+import { botBrowserChatId } from '@shared/bots/browser';
 import type {
   DockviewApi,
   DockviewReadyEvent,
@@ -619,6 +620,7 @@ export function SidePanel({
   const fullscreen = useSidePanelStore((s) => s.fullscreen);
   useEffect(() => {
     const stopReveal = window.electronAPI.browser.onReveal((event) => {
+      if (botBrowserChatId(event.conversationId)) return;
       addSidePanelBrowser({
         conversationId: event.conversationId,
         tabId: event.tabId,

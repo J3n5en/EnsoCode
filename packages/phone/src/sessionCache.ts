@@ -631,6 +631,7 @@ function parseApprovals(value: unknown): GuestSessionView['approvals'] | null {
       summary: item.summary,
       ...(typeof item.toolCallId === 'string' ? { toolCallId: item.toolCallId } : {}),
       ...(item.phase === 'reviewing' ? { phase: 'reviewing' as const } : {}),
+      ...(typeof item.expiresAt === 'number' ? { expiresAt: item.expiresAt } : {}),
     };
   });
 }
@@ -647,6 +648,7 @@ function parseAsks(value: unknown): GuestSessionView['asks'] | null {
       requestId: item.requestId,
       question: item.question,
       ...(options ? { options } : {}),
+      ...(typeof item.expiresAt === 'number' ? { expiresAt: item.expiresAt } : {}),
     };
   });
 }

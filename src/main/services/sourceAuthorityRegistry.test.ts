@@ -15,6 +15,97 @@ afterEach(() => {
 });
 
 describe('SourceAuthorityRegistry', () => {
+  const botId = '33333333-3333-4333-8333-333333333333';
+  const chatId = '44444444-4444-4444-8444-444444444444';
+
+  it('bot-home 项目由 Main 幂等登记，renderer 投影与 renderer 操作都看不到它', () => {
+    const root = temporary();
+    const changes: unknown[] = [];
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+      onChanged: (projection) => changes.push(projection),
+    });
+    const home = path.join(root, 'bots', botId, 'workspace');
+    const first = registry.ensureBotHomeProject(home);
+    expect(first?.kind).toBe('bot-home');
+    expect(registry.ensureBotHomeProject(home)?.projectId).toBe(first?.projectId);
+    if (!first) return;
+
+    const local = registry.createProject({ requestId: 'p', path: home });
+    expect(local.accepted && local.value.projectId).not.toBe(first.projectId);
+
+    expect(registry.rendererProjection().projects.map((p) => p.kind)).not.toContain('bot-home');
+    expect(changes.at(-1)).toEqual(registry.rendererProjection());
+    expect(
+      registry.createConversation({ requestId: 'c', projectId: first.projectId, projectVersion: 1 })
+        .accepted
+    ).toBe(false);
+    expect(
+      registry.selectProject({ requestId: 's', projectId: first.projectId, version: 1 }).accepted
+    ).toBe(false);
+    expect(
+      registry.removeProject({ requestId: 'r', projectId: first.projectId, version: 1 }).accepted
+    ).toBe(false);
+  });
+
+  it('bot 会话只由 Main 创建/结束，renderer 投影和通用会话操作拒绝它', () => {
+    const root = temporary();
+    const registryFile = path.join(root, 'registry.json');
+    const registry = new SourceAuthorityRegistry({ registryFile });
+    const project = registry.ensureBotHomeProject(path.join(root, 'home'));
+    if (!project) throw new Error('no project');
+    const conversation = registry.createBotConversation(project.projectId, { botId, chatId });
+    expect(conversation?.bot).toEqual({ botId, chatId });
+    if (!conversation) return;
+    expect(registry.projection().conversations).toHaveLength(1);
+    expect(registry.rendererProjection().conversations).toHaveLength(0);
+    expect(registry.botConversations().map((c) => c.conversationId)).toEqual([
+      conversation.conversationId,
+    ]);
+
+    const request = {
+      requestId: 'x',
+      conversationId: conversation.conversationId,
+      version: conversation.version,
+    };
+    expect(registry.selectConversation(request).accepted).toBe(false);
+    expect(registry.endConversation(request).accepted).toBe(false);
+    expect(registry.removeConversation(request).accepted).toBe(false);
+    expect(
+      registry.updateSelection({ ...request, selection: { providerId: 'p', modelId: 'm' } })
+        .accepted
+    ).toBe(false);
+
+    const reloaded = new SourceAuthorityRegistry({ registryFile });
+    expect(reloaded.conversation(conversation.conversationId)?.bot).toEqual({ botId, chatId });
+
+    expect(registry.endBotConversation(conversation.conversationId)?.lifecycle).toBe('ended');
+    expect(registry.removeBotConversation(conversation.conversationId)?.conversationId).toBe(
+      conversation.conversationId
+    );
+    expect(registry.conversation(conversation.conversationId)).toBeUndefined();
+  });
+
+  it('Main 移除 bot-home 项目时结束其会话；bot 会话也可挂在本地 Code 项目下', () => {
+    const root = temporary();
+    const registry = new SourceAuthorityRegistry({ registryFile: path.join(root, 'r.json') });
+    const home = registry.ensureBotHomeProject(path.join(root, 'home'));
+    if (!home) throw new Error('no project');
+    const conversation = registry.createBotConversation(home.projectId, { botId, chatId });
+    expect(registry.removeBotHomeProject(home.projectId)).toBe(true);
+    expect(registry.conversation(conversation!.conversationId)?.lifecycle).toBe('ended');
+    expect(registry.createBotConversation(home.projectId, { botId, chatId })).toBeUndefined();
+
+    const codePath = path.join(root, 'code');
+    mkdirSync(codePath);
+    const code = registry.createProject({ requestId: 'p', path: codePath });
+    if (!code.accepted) throw new Error('no code project');
+    expect(registry.removeBotHomeProject(code.value.projectId)).toBe(false);
+    expect(registry.createBotConversation(code.value.projectId, { botId, chatId })?.projectId).toBe(
+      code.value.projectId
+    );
+  });
+
   it('atomically owns project/conversation target and ignores later generic settings forgery', () => {
     const root = temporary();
     const projectPath = path.join(root, 'project');

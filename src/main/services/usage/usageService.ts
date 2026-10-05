@@ -119,6 +119,16 @@ function getPricingTable(now: number): Promise<PricingTable> {
 
 let sessionsInflight: Promise<ParsedSession[]> | null = null;
 
+/** 用量页同一份有效单价表（catalog + 本地补丁 + 用户覆盖），供成员用量 / 预算复用 */
+export async function getUsagePricing(now = Date.now()): Promise<PricingTable> {
+  return mergePricingTable(await getPricingTable(now), loadUsageModelPricing());
+}
+
+/** 单个会话文件的用量记录，复用用量页的解析缓存 */
+export function loadUsageSession(file: string): Promise<ParsedSession | null> {
+  return loadParsedSession(file, usageCacheDir(sessionDir()));
+}
+
 /** 连点周期 pill 只触发一次全量扫描 */
 function loadSessionsOnce(): Promise<ParsedSession[]> {
   const dir = sessionDir();

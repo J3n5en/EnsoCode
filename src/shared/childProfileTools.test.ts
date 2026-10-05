@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { childProfileShell, childProfileToolIds } from './childProfileTools';
 
 describe('childProfileToolIds', () => {
+  it('父会话关闭 workspace_write 时 all 子代理也不能取得写工具', () => {
+    expect(childProfileToolIds('all', { workspaceWrite: false })).toEqual(
+      childProfileToolIds('readonly')
+    );
+  });
+
   it('apply_patch 的 all 只有 apply_patch，默认带沙箱 exec', () => {
     expect(childProfileToolIds('all')).toEqual([
       'read',

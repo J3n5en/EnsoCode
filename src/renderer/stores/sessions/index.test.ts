@@ -2251,6 +2251,32 @@ describe('typed Agent child projection', () => {
     ).toHaveLength(0);
   });
 
+  it('interruptAndSendQueued 在空闲压缩中：中断压缩并立即投递，不留中断标记', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          compaction: 'running',
+          queuedMessages: [{ id: 'q1', text: 'urgent' }],
+        },
+      },
+    }));
+    agentAbort.mockClear();
+    agentPrompt.mockClear();
+
+    await sessionsModule.useSessionsStore.getState().interruptAndSendQueued('parent', 'q1');
+
+    expect(agentAbort).toHaveBeenCalledWith('parent');
+    expect(agentPrompt).toHaveBeenCalledWith('parent', 'urgent', undefined, expect.any(String));
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conversation.queuedMessages).toHaveLength(0);
+    expect(conversation.messages.some((message) => message.optimistic)).toBe(true);
+    expect(conversation.abortRequested).not.toBe(true);
+  });
+
   it('removeConversation releases a started idle parent so the worker drops it', () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {
@@ -2542,6 +2568,64 @@ describe('typed Agent child projection', () => {
     expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
       { id: 'q2', text: 'next' },
     ]);
+  });
+
+  it('运行中压缩时用户中断：压缩放弃收口不吞中断标记，被中断轮收束时也不泵队列', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'running' as const,
+          generation: 'pg1',
+          compaction: 'running',
+          queuedMessages: [{ id: 'q1', text: 'keep queued' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+    await sessionsModule.useSessionsStore.getState().abort('parent');
+    const identity = { sessionId: 'parent', generation: 'pg1' };
+    onAgentEvent?.({ type: 'status', identity, seq: 1, status: 'idle' });
+    onAgentEvent?.({ type: 'compaction', identity, seq: 2, state: 'end', abandoned: true });
+    onAgentEvent?.({ type: 'turn-completed', identity, seq: 3, turnId: 't1' });
+    await Promise.resolve();
+
+    expect(agentPrompt).not.toHaveBeenCalled();
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(conversation.queuedMessages).toEqual([{ id: 'q1', text: 'keep queued' }]);
+    expect(conversation.abortRequested).toBe(false);
+  });
+
+  it('空闲压缩中停止：不留中断标记（无轮次收束可消费），下一轮完成照常泵队列', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          compaction: 'running',
+          queuedMessages: [{ id: 'q1', text: 'later' }],
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+    await sessionsModule.useSessionsStore.getState().abort('parent');
+    const identity = { sessionId: 'parent', generation: 'pg1' };
+    onAgentEvent?.({ type: 'compaction', identity, seq: 1, state: 'end', abandoned: true });
+    await Promise.resolve();
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.abortRequested).not.toBe(
+      true
+    );
+
+    onAgentEvent?.({ type: 'turn-completed', identity, seq: 2, turnId: 't2' });
+    await vi.waitFor(() =>
+      expect(agentPrompt).toHaveBeenCalledWith('parent', 'later', undefined, expect.any(String))
+    );
   });
 
   it('轮次结束时压缩仍在排队则不投递，等压缩结束再发', async () => {

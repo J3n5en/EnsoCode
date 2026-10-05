@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { titleModelCandidates } from './titleSummary';
+import { botAssistantModelCandidates, titleModelCandidates } from './titleSummary';
 
 const state = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   titleSummaryEnabled: true,
@@ -92,5 +92,26 @@ describe('titleModelCandidates：标题模型 → 全局默认 → 会话模型�
         modelId: 'm',
       } as never)
     ).toEqual([]);
+  });
+});
+
+describe('botAssistantModelCandidates：Bot 助理模型 → 全局默认', () => {
+  it('配置了助理模型时排在默认模型之前，不走标题模型', () => {
+    expect(
+      botAssistantModelCandidates(state({ botAssistantModel: { providerId: 'a', modelId: 'b' } }))
+    ).toEqual([
+      { providerId: 'a', modelId: 'b' },
+      { providerId: 'default-p', modelId: 'default-m' },
+    ]);
+  });
+  it('未配置或配置坏掉时只用默认模型，且去重', () => {
+    expect(botAssistantModelCandidates(state({ botAssistantModel: { providerId: 1 } }))).toEqual([
+      { providerId: 'default-p', modelId: 'default-m' },
+    ]);
+    expect(
+      botAssistantModelCandidates(
+        state({ botAssistantModel: { providerId: 'default-p', modelId: 'default-m' } })
+      )
+    ).toEqual([{ providerId: 'default-p', modelId: 'default-m' }]);
   });
 });

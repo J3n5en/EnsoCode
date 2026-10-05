@@ -9,9 +9,12 @@ import {
   type UnitType,
 } from './constants';
 
-/** 模型侧只说 space 语义，不持有 Project.id；`project` 由 Main 按会话权威解析成 `proj:<id>`。 */
-export const MEMORY_SEARCH_SPACES = ['all', 'global', 'project'] as const;
-export const MEMORY_CAPTURE_SPACES = ['global', 'project'] as const;
+/**
+ * 模型侧只说 space 语义，不持有 id；`project` / `bot` / `chat` 由 Main 按会话权威解析成
+ * `proj:<id>` / `bot:<id>` / `chat:<id>`，后两者仅 Bot 模式会话可用。
+ */
+export const MEMORY_SEARCH_SPACES = ['all', 'global', 'project', 'bot', 'chat'] as const;
+export const MEMORY_CAPTURE_SPACES = ['global', 'project', 'bot', 'chat'] as const;
 export const MEMORY_SEARCH_MODES = ['fast', 'deep'] as const;
 export type MemorySearchSpace = (typeof MEMORY_SEARCH_SPACES)[number];
 export type MemoryCaptureSpace = (typeof MEMORY_CAPTURE_SPACES)[number];
@@ -44,7 +47,8 @@ export interface MemoryCaptureRequest {
   unitType: UnitType;
   unitTypeSource: UnitTypeSource;
   importance: number;
-  spaceId: MemoryCaptureSpace;
+  /** 缺省由 Main 按会话决定：bot 会话写 bot，否则 project */
+  spaceId?: MemoryCaptureSpace;
   eventStart?: string;
   eventEnd?: string;
   /** 看过候选后仍要写入 */
@@ -146,7 +150,8 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
       importance !== null && importance >= 0 && importance <= 1
         ? importance
         : AGENT_CREATE_IMPORTANCE,
-    spaceId: (MEMORY_CAPTURE_SPACES as readonly string[]).includes(space) ? space : 'project',
+    // 缺省 / 非法不产出：worker 不知道会话是否 Bot 模式，由 Main 决定缺省 space
+    ...((MEMORY_CAPTURE_SPACES as readonly string[]).includes(space) ? { spaceId: space } : {}),
     ...(eventStart ? { eventStart } : {}),
     ...(eventEnd ? { eventEnd } : {}),
     ...(force ? { force } : {}),
@@ -298,7 +303,8 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     typeof record.importance !== 'number' ||
     record.importance < 0 ||
     record.importance > 1 ||
-    !(MEMORY_CAPTURE_SPACES as readonly unknown[]).includes(record.spaceId) ||
+    (record.spaceId !== undefined &&
+      !(MEMORY_CAPTURE_SPACES as readonly unknown[]).includes(record.spaceId)) ||
     (record.eventStart !== undefined && typeof record.eventStart !== 'string') ||
     (record.eventEnd !== undefined && typeof record.eventEnd !== 'string') ||
     (record.force !== undefined && typeof record.force !== 'boolean') ||
@@ -325,7 +331,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     unitType,
     unitTypeSource,
     importance: record.importance,
-    spaceId: record.spaceId as MemoryCaptureSpace,
+    ...(record.spaceId !== undefined ? { spaceId: record.spaceId as MemoryCaptureSpace } : {}),
     ...(record.eventStart !== undefined ? { eventStart: record.eventStart } : {}),
     ...(record.eventEnd !== undefined ? { eventEnd: record.eventEnd } : {}),
     ...(record.force !== undefined ? { force: record.force } : {}),
