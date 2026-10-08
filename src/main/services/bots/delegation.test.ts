@@ -43,6 +43,46 @@ describe('delegation policy', () => {
     expect(parseDelegation({ ...record, keep: 'true' })).not.toHaveProperty('keep');
     expect(parseDelegation({ ...record, keep: false })).not.toHaveProperty('keep');
   });
+  it('keeps retry chain / auto-retry / result fields and drops malformed values', () => {
+    const parsed = parseDelegation({
+      ...record,
+      retryBy: 'delegator',
+      retryNote: 'n'.repeat(3000),
+      autoRetryAt: 5,
+      transient: true,
+      resultSeq: 7,
+    });
+    expect(parsed).toMatchObject({
+      retryBy: 'delegator',
+      autoRetryAt: 5,
+      transient: true,
+      resultSeq: 7,
+    });
+    expect(parsed?.retryNote).toHaveLength(2000);
+    const bad = parseDelegation({
+      ...record,
+      retryBy: 'robot',
+      retryNote: '',
+      autoRetryAt: -1,
+      transient: 'yes',
+      resultSeq: 0,
+    });
+    for (const key of ['retryBy', 'retryNote', 'autoRetryAt', 'transient', 'resultSeq'])
+      expect(bad).not.toHaveProperty(key);
+  });
+  it('keeps the pending group-result marker (with optional turnId) and drops malformed ones', () => {
+    expect(
+      parseDelegation({ ...record, pendingResultEntry: { turnId: 't1' } })?.pendingResultEntry
+    ).toEqual({ turnId: 't1' });
+    expect(parseDelegation({ ...record, pendingResultEntry: {} })?.pendingResultEntry).toEqual({});
+    expect(
+      parseDelegation({ ...record, pendingResultEntry: { turnId: 3 } })?.pendingResultEntry
+    ).toEqual({});
+    for (const bad of [true, 'yes', null, []])
+      expect(parseDelegation({ ...record, pendingResultEntry: bad })).not.toHaveProperty(
+        'pendingResultEntry'
+      );
+  });
   it('rejects self, archived, denied, out-of-group, depth and concurrency', () => {
     const parent = profile(a),
       target = profile(b);

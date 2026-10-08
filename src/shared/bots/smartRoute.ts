@@ -23,6 +23,8 @@ export interface SmartRouteDecision {
   failure?: string;
   /** 选中了忙碌成员，但消息是独立新任务：排到其当前任务之后，不插话 */
   separate?: true;
+  /** 人类点名全员（「大家 / everyone」）规则直出；smart 群据此进入讨论模式 */
+  everyone?: true;
 }
 
 /** 发给忙碌成员的消息：continue 补充其当前任务（插话），new 独立新任务（排队） */

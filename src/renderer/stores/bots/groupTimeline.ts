@@ -51,8 +51,13 @@ export type TimelineRow =
   | { kind: 'entry'; key: string; entry: GroupEntry; continued: boolean };
 
 const dayOf = (at: number) => new Date(at).toDateString();
+/** 委派结果消息自带头部（「委派结果」标签在头部），不与同一成员的前后消息合并 */
 const authorOf = (entry: GroupEntry): string | null =>
-  entry.kind === 'human' ? 'human' : entry.kind === 'bot' ? `bot:${entry.botId}` : null;
+  entry.kind === 'human'
+    ? 'human'
+    : entry.kind === 'bot' && !entry.delegationId
+      ? `bot:${entry.botId}`
+      : null;
 
 /** 日期分隔 + 同一作者 5 分钟内连续消息合并头像 */
 export function buildRows(entries: readonly GroupEntry[]): TimelineRow[] {
@@ -122,6 +127,15 @@ export function anchorDelegations<T extends Pick<Delegation, 'createdAt' | 'pare
     else after.set(anchor.id, [...(after.get(anchor.id) ?? []), item]);
   }
   return { head, after };
+}
+
+/** 委派结果消息 →「委派结果」标签跳转目标：已加载范围里该委派的卡片条目 seq */
+export function delegationCardSeq(
+  entries: readonly GroupEntry[],
+  delegationId: string
+): number | undefined {
+  return entries.find((entry) => entry.kind === 'delegation' && entry.delegationId === delegationId)
+    ?.seq;
 }
 
 const textOf = (message: ProjectedMessage): string =>

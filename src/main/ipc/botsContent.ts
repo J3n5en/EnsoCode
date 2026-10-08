@@ -14,6 +14,7 @@ import type {
 } from '@shared/types/botIpc';
 import {
   artifactCandidates,
+  entrySessionInChat,
   isOpenableArtifact,
   parseArtifactTarget,
   resolveArtifactFile,
@@ -24,6 +25,7 @@ import {
 import type { BotSessionHost } from '../services/bots/botSessionHost';
 import { parseChatSearchQuery, searchBotChats } from '../services/bots/chatSearch';
 import type { BotChatStore } from '../services/bots/chatStore';
+import type { DelegationService } from '../services/bots/delegationService';
 import { mediaFile } from '../services/bots/media';
 import { fitDataUrl, mediaMime } from '../services/bots/mediaImage';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';
@@ -33,6 +35,8 @@ import { getSourceAuthorityRegistry } from './agent';
 interface ContentServices {
   chats: BotChatStore;
   host: BotSessionHost;
+  /** 委派结果条目的子会话归属按委派记录判断 */
+  delegations?: Pick<DelegationService, 'list'>;
 }
 
 const INVALID = { ok: false as const, error: 'invalid' };
@@ -88,7 +92,7 @@ interface TurnContent {
 
 /** 由聊天 + 条目 / 会话消息标识推导该轮消息与工作区根；会话必须属于该聊天 */
 async function artifactsOf(
-  { chats }: ContentServices,
+  { chats, delegations }: ContentServices,
   request: unknown
 ): Promise<TurnContent | null> {
   const target = parseArtifactTarget(request);
@@ -97,6 +101,7 @@ async function artifactsOf(
   let conversationId: string;
   let locate: (messages: readonly ProjectedMessage[]) => { start: number; end: number } | null;
   let fallback: readonly ProjectedMessage[] = [];
+  let delegationId: string | undefined;
   if ('entryId' in target) {
     if (chat.kind !== 'group') return null;
     const entry = chats.findEntry(chat.id, target.entryId);
@@ -113,6 +118,7 @@ async function artifactsOf(
     }
     if (entry?.kind !== 'bot') return null;
     conversationId = entry.conversationId;
+    delegationId = entry.delegationId;
     locate = (messages) => turnOfReply(messages, entry.text);
     fallback = [{ role: 'assistant', content: [{ type: 'text', text: entry.text }] }];
   } else {
@@ -122,7 +128,16 @@ async function artifactsOf(
   }
   const authority = getSourceAuthorityRegistry();
   const conversation = authority?.conversation(conversationId);
-  if (conversation?.bot?.chatId !== chat.id) return null;
+  if (
+    !entrySessionInChat(
+      conversation?.bot ?? undefined,
+      chat.id,
+      { conversationId, ...(delegationId ? { delegationId } : {}) },
+      (id) => delegations?.list(chat.id).find((record) => record.id === id)
+    )
+  )
+    return null;
+  if (!conversation) return null;
   const project = authority?.project(conversation.projectId);
   if (!project) return null;
   let turn = fallback;

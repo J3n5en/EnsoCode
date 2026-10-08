@@ -63,6 +63,19 @@ describe('buildBotModeInstruction', () => {
     expect(text).toMatch(/outside your responsibility/i);
     expect(text).toMatch(/human @mentions you directly.*reply/i);
   });
+
+  it('群聊：讨论类问题优先在群里公开 @ 接力，委派只用于耗时长、需要单独会话的执行任务', () => {
+    expect(buildBotModeInstruction({ self: alice, kind: 'direct', roster: [] })).toContain(
+      'retry_delegation({id, note?})'
+    );
+    const text = buildBotModeInstruction({ self: alice, kind: 'group', roster: [alice, bob] });
+    expect(text).toMatch(/discussion.*openly in the group.*@Name/i);
+    expect(text).toMatch(
+      /delegate only for long-running execution tasks that need a separate session/i
+    );
+    const direct = buildBotModeInstruction({ self: alice, kind: 'direct', roster: [] });
+    expect(direct).not.toMatch(/openly in the group/i);
+  });
 });
 
 describe('mergeBotInstruction', () => {

@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import {
+  buildDiscussNextInput,
+  DISCUSS_NOTE,
+  type DiscussNextDecision,
+  type DiscussNextInput,
+} from '../../../shared/bots/discussRoute';
 import { retryableGroupFailures } from '../../../shared/bots/groupRetry';
 import { parseMentions } from '../../../shared/bots/mentions';
 import {
   buildSummaryNote,
+  discussPick,
+  discussStep,
   type HumanEntry,
   isSkipReply,
   mergePending,
@@ -71,6 +79,8 @@ interface Round {
   stopping?: BotId[];
   /** 进行中的智能选人；abort 同时充当本次结果的身份 */
   routing?: { entry: HumanEntry; abort: AbortController; parallelOptions?: BotDeliverOptions };
+  /** 讨论模式进行中的「下一位 / 结束」判断；abort 同时充当本次结果的身份 */
+  deciding?: { abort: AbortController };
   /** 本轮由智能选人选出、尚未发言的成员；其发言标 routedBy */
   smartPicked?: string[];
   /** 本批（一条人类消息 / 例行任务引发的整串接力）已结束的发言，批次结束时合并通知 */
@@ -87,12 +97,16 @@ interface AutonomousReply {
   text: string;
   title: string | undefined;
   options: BotDeliverOptions;
+  /** 随 text 给过全文的委派结果，增量里不再重复 */
+  hideDelegationIds?: readonly string[];
   resolve: (result: BotSendResult) => void;
 }
 /** 智能选人：返回意图与有序成员 id 名单（1–3 位，build 只 1 位）；空名单交给群主。超时由 GroupChatService 统一兜底 */
 export interface GroupResponderSelector {
   timeoutMs(): number;
   select(input: SmartRouteInput, signal: AbortSignal): Promise<SmartRouteDecision>;
+  /** 讨论模式：单选下一位或结束；超时同样由 GroupChatService 兜底 */
+  next(input: DiscussNextInput, signal: AbortSignal): Promise<DiscussNextDecision>;
 }
 export interface GroupBatchSettled {
   chatId: string;
@@ -148,6 +162,40 @@ const isDecision = (value: unknown): value is SmartRouteDecision =>
   typeof value === 'object' &&
   Array.isArray((value as SmartRouteDecision).ids) &&
   (value as SmartRouteDecision).ids.every((id) => typeof id === 'string');
+const isDiscussDecision = (value: unknown): value is DiscussNextDecision => {
+  if (!value || typeof value !== 'object') return false;
+  const decision = value as Record<string, unknown>;
+  return (
+    typeof decision.next === 'string' ||
+    decision.end === true ||
+    typeof decision.failure === 'string'
+  );
+};
+
+/** 选人 / 讨论判断共用：不占锁地跑模型，超时或取消时立即放弃（不等模型返回），出错转成 fallback(error) */
+async function raceSelector<T>(
+  timeoutMs: number,
+  abort: AbortController,
+  run: (signal: AbortSignal) => Promise<T>,
+  fallback: (error?: unknown) => T
+): Promise<{ result: T; timedOut: boolean }> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), timeoutMs);
+  const signal = AbortSignal.any([abort.signal, timeout.signal]);
+  try {
+    const cut = new Promise<T>((resolve) => {
+      if (signal.aborted) resolve(fallback());
+      signal.addEventListener('abort', () => resolve(fallback()), { once: true });
+    });
+    const running = Promise.resolve()
+      .then(() => run(signal))
+      .catch((error): T => fallback(signal.aborted ? undefined : error));
+    const result = await Promise.race([running, cut]);
+    return { result, timedOut: timeout.signal.aborted && !abort.signal.aborted };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** 每群串行归并；router.json 只用于崩溃恢复，不重放未完成的工作。 */
 export class GroupChatService {
@@ -248,6 +296,7 @@ export class GroupChatService {
         round.state.current ||
         round.parallel.size ||
         round.routing ||
+        round.deciding ||
         round.stopping ||
         round.pending.length
       )
@@ -317,7 +366,7 @@ export class GroupChatService {
   state(chatId: string): BotChatStateResult {
     if (this.deps.chats.get(chatId)?.kind !== 'group')
       return { ok: false, error: 'group-not-found' };
-    const { state, pending, routing } = this.round(chatId);
+    const { state, pending, routing, deciding } = this.round(chatId);
     return {
       ok: true,
       current: state.current,
@@ -325,7 +374,7 @@ export class GroupChatService {
       hops: state.hops,
       turnsByBot: { ...state.turnsByBot },
       pendingHuman: pending.length > 0,
-      routing: Boolean(routing),
+      routing: Boolean(routing || deciding),
     };
   }
 
@@ -358,6 +407,8 @@ export class GroupChatService {
       });
       if (entry?.kind !== 'human') return { ok: false, error: 'timeline-write-failed' };
       const round = this.round(chatId);
+      // 讨论判断进行中来了人类消息：取消判断，按新消息重开（与任何一条新人类消息一样重新路由、重算上限）
+      if (round.deciding) this.cancelDeciding(round);
       if (round.routing) {
         // 选人期间又来人类消息：放弃本次结果，对合并后的消息重新判定
         const merged = mergePending([round.routing.entry, entry]) ?? entry;
@@ -398,7 +449,8 @@ export class GroupChatService {
     botId: string,
     text: string,
     title: string | undefined,
-    options: BotDeliverOptions = {}
+    options: BotDeliverOptions = {},
+    extra: { hideDelegationIds?: readonly string[] } = {}
   ): Promise<BotSendResult> {
     return new Promise((resolve) => {
       void this.lock(chatId, async () => {
@@ -416,7 +468,16 @@ export class GroupChatService {
           return;
         }
         const jobs = this.autonomous.get(chatId) ?? [];
-        jobs.push({ botId, text, title, options, resolve });
+        jobs.push({
+          botId,
+          text,
+          title,
+          options,
+          resolve,
+          ...(extra.hideDelegationIds?.length
+            ? { hideDelegationIds: [...extra.hideDelegationIds] }
+            : {}),
+        });
         this.autonomous.set(chatId, jobs);
         if (!this.round(chatId).state.current) await this.dispatch(chatId);
       }).catch((error) => resolve({ ok: false, error: String(error) }));
@@ -442,6 +503,7 @@ export class GroupChatService {
       delete round.batch;
       delete round.retrying;
       this.cancelRouting(round);
+      this.cancelDeciding(round);
       this.clearSmart(round);
       for (const job of this.autonomous.get(chatId) ?? [])
         job.resolve({ ok: false, error: 'chat-stopped' });
@@ -527,7 +589,13 @@ export class GroupChatService {
     }
     this.recordBatch(round, event);
     if (parallel && event.deliveryId) {
+      // 讨论中并行发言者本回合发起了委派：讨论同样就此结束（丢掉剩余候选、取消进行中的判断）
+      const cancelledJudge =
+        event.turnKey !== undefined &&
+        Boolean(this.deps.delegatedTargets?.(event.conversationId, event.turnKey)?.length) &&
+        this.endDiscussion(round);
       this.persist(chat.id);
+      if (cancelledJudge) await this.dispatch(chat.id);
       this.settleBatch(chat.id);
       return;
     }
@@ -573,6 +641,7 @@ export class GroupChatService {
       round.state.current ||
       round.parallel.size > 0 ||
       round.routing ||
+      round.deciding ||
       round.pending.length > 0 ||
       this.autonomous.get(chatId)?.length
     )
@@ -605,6 +674,8 @@ export class GroupChatService {
       return;
     }
     round.state = startRound(chat, members, entry);
+    if (round.state.current && parseMentions(entry.text, members).all && this.canDiscuss(chat))
+      round.state = { ...round.state, discuss: true };
     if (!round.state.current) this.system(chat.id, '请先指定群主');
     await this.dispatch(chat.id);
   }
@@ -735,32 +806,21 @@ export class GroupChatService {
     input: SmartRouteInput,
     abort: AbortController
   ): Promise<void> {
-    const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), responder.timeoutMs());
-    const signal = AbortSignal.any([abort.signal, timeout.signal]);
     let decision: SmartRouteDecision = { ids: [] };
-    try {
-      const cut = new Promise<SmartRouteDecision>((resolve) => {
-        if (signal.aborted) resolve({ ids: [] });
-        signal.addEventListener('abort', () => resolve({ ids: [] }), { once: true });
-      });
-      const selecting = Promise.resolve()
-        .then(() => responder.select(input, signal))
-        .catch((error): SmartRouteDecision => {
-          if (!signal.aborted) {
-            console.warn('[bots] smart routing failed', error);
-            return { ids: [], failure: briefErrorReason(error) };
-          }
-          return { ids: [] };
-        });
-      const result = await Promise.race([selecting, cut]);
-      if (isDecision(result)) decision = result;
-      if (timeout.signal.aborted && !abort.signal.aborted && decision.ids.length === 0) {
-        console.warn('[bots] smart routing timed out');
-        decision = { ids: [], failure: '选人超时' };
+    const { result, timedOut } = await raceSelector<SmartRouteDecision>(
+      responder.timeoutMs(),
+      abort,
+      (signal) => responder.select(input, signal),
+      (error) => {
+        if (error === undefined) return { ids: [] };
+        console.warn('[bots] smart routing failed', error);
+        return { ids: [], failure: briefErrorReason(error) };
       }
-    } finally {
-      clearTimeout(timer);
+    );
+    if (isDecision(result)) decision = result;
+    if (timedOut && decision.ids.length === 0) {
+      console.warn('[bots] smart routing timed out');
+      decision = { ids: [], failure: '选人超时' };
     }
     if (abort.signal.aborted) return;
     await this.lock(chatId, async () => {
@@ -783,6 +843,8 @@ export class GroupChatService {
       }
       const picked = decision.ids;
       round.state = startRound(chat, this.members(chat), routing.entry, picked);
+      if ((decision.intent === 'discuss' || decision.everyone) && this.canDiscuss(chat))
+        round.state = { ...round.state, discuss: true };
       const order = [round.state.current, ...round.state.queue];
       const smart = [...new Set(picked)].filter((botId) => order.includes(botId));
       // 只剩群主一人时等同兜底，不标
@@ -805,6 +867,127 @@ export class GroupChatService {
     delete round.routing;
   }
 
+  private cancelDeciding(round: Round): void {
+    round.deciding?.abort.abort();
+    delete round.deciding;
+  }
+
+  /** 讨论模式只在 smart 群、有判断后端、且至少两位可发言成员时生效 */
+  private canDiscuss(chat: BotChat): boolean {
+    if (!this.deps.responder || chat.routing.mode !== 'smart') return false;
+    const muted = chat.routing.muted ?? [];
+    return (
+      this.members(chat).filter((bot) => bot.archivedAt === undefined && !muted.includes(bot.id))
+        .length >= 2
+    );
+  }
+
+  /** 讨论中一位成员说完、无人排队：异步判断下一位或结束（不占锁），结果回来在锁内应用 */
+  private startJudge(chat: BotChat, candidates: readonly BotId[], lastBotId: BotId): void {
+    const responder = this.deps.responder;
+    const round = this.round(chat.id);
+    if (!responder) return;
+    const rootSeq = round.state.rootEntrySeq;
+    const entries = this.deps.chats.readAfter(chat.id, Math.max(rootSeq - 1, chat.epochSeq ?? 0));
+    const root = entries.find(
+      (entry): entry is HumanEntry => entry.seq === rootSeq && entry.kind === 'human'
+    );
+    if (!root) {
+      // 只在时间线损坏或被外部截断时出现；除正常 END 外的结束都要提示
+      console.warn('[bots] discuss judge skipped: root message not found');
+      this.system(chat.id, '讨论判断不可用（找不到开场消息），讨论结束');
+      return;
+    }
+    const abort = new AbortController();
+    round.deciding = { abort };
+    const input = buildDiscussNextInput(
+      this.members(chat),
+      candidates,
+      round.state.turnsByBot,
+      root,
+      entries,
+      lastBotId
+    );
+    void this.judgeNext(chat.id, responder, input, abort, lastBotId);
+  }
+
+  private async judgeNext(
+    chatId: string,
+    responder: GroupResponderSelector,
+    input: DiscussNextInput,
+    abort: AbortController,
+    lastBotId: BotId
+  ): Promise<void> {
+    const { result, timedOut } = await raceSelector<DiscussNextDecision>(
+      responder.timeoutMs(),
+      abort,
+      (signal) => responder.next(input, signal),
+      (error) => {
+        if (error === undefined) return { end: true };
+        console.warn('[bots] discuss judge failed', error);
+        return { failure: briefErrorReason(error) };
+      }
+    );
+    let decision: DiscussNextDecision = isDiscussDecision(result)
+      ? result
+      : { failure: '判断结果无法识别' };
+    if (timedOut && !('next' in decision)) {
+      console.warn('[bots] discuss judge timed out');
+      decision = { failure: '判断超时' };
+    }
+    // 先校验是否属于送去判断的名单，再校验当前是否可用：名单外的人即使等待期间变为可选也不接受
+    if ('next' in decision) {
+      const pickedId = decision.next;
+      if (!input.candidates.some((candidate) => candidate.id === pickedId)) {
+        console.warn('[bots] discuss judge picked a member outside the roster');
+        decision = { failure: '判断结果无法识别' };
+      }
+    }
+    if (abort.signal.aborted) return;
+    await this.lock(chatId, async () => {
+      const round = this.rounds.get(chatId);
+      if (this.disposed || !round || round.deciding?.abort !== abort) return;
+      delete round.deciding;
+      const chat = this.deps.chats.get(chatId);
+      if (chat?.kind === 'group' && chat.archivedAt === undefined) {
+        if ('failure' in decision)
+          this.system(chatId, `讨论判断不可用（${decision.failure}），讨论结束`);
+        else if ('next' in decision) {
+          // 判断期间成员可能被静音 / 归档 / 移出：按当前群况重新校验
+          const members = this.members(chat);
+          const picked = discussPick(round.state, chat, members, decision.next, lastBotId);
+          if (picked) {
+            round.state = picked;
+            round.smartPicked = [...(round.smartPicked ?? []), decision.next];
+            round.smartIntent = 'discuss';
+          } else this.repickDiscussion(chat, lastBotId);
+        }
+      }
+      await this.dispatch(chatId);
+      this.persist(chatId);
+      this.settleBatch(chatId);
+    }).catch((error) => console.warn('[bots] discuss judge failed', error));
+  }
+
+  /**
+   * 判断选中的人（已确认在送去判断的名单里）在判断期间失效（静音 / 归档 / 移出 / 上限变化）：
+   * 按当前群况重走 discussStep，还有人可选就用新名单再判断一次，到上限或没人可选就结束并给出对应提示。
+   * 讨论已不在进行（无讨论标记或已有人在说话）时不处理。
+   */
+  private repickDiscussion(chat: BotChat, lastBotId: BotId): void {
+    const round = this.round(chat.id);
+    if (round.pending.length > 0) return;
+    const step = discussStep(round.state, chat, this.members(chat), {
+      lastBotId,
+      mentioned: false,
+      delegated: false,
+      pendingHuman: false,
+    });
+    if (step.kind === 'none') return;
+    if (step.kind === 'judge') this.startJudge(chat, step.candidates, lastBotId);
+    else if (step.notice) this.system(chat.id, step.notice);
+  }
+
   private clearSmart(round: Round): void {
     delete round.allSkipped;
     delete round.smartPicked;
@@ -813,10 +996,26 @@ export class GroupChatService {
     delete round.summary;
   }
 
+  /** 结束讨论：去掉讨论标记，丢掉还没发言的讨论候选，取消进行中的判断；返回是否取消了判断 */
+  private endDiscussion(round: Round): boolean {
+    if (!round.state.discuss) return false;
+    const { discuss: _discuss, ...rest } = round.state;
+    const dropped = rest.queue;
+    round.state = { ...rest, queue: [] };
+    if (round.smartPicked)
+      round.smartPicked = round.smartPicked.filter((id) => !dropped.includes(id));
+    if (!round.deciding) return false;
+    this.cancelDeciding(round);
+    return true;
+  }
+
   private advance(chat: BotChat, text: string, delegated?: readonly string[], seq?: number): void {
     const round = this.round(chat.id);
     const members = this.members(chat);
     const botId = round.state.current!;
+    // 讨论中本回合发起了委派：讨论就此结束，丢掉还没发言的讨论候选；回复里的 @ 仍按普通接力处理
+    const delegationEnded = Boolean(round.state.discuss && delegated?.length);
+    if (delegationEnded) this.endDiscussion(round);
     const result = onReply(round.state, chat, members, {
       botId,
       text,
@@ -830,13 +1029,35 @@ export class GroupChatService {
         note: buildSummaryNote(members, result.summary.reports),
       };
     for (const notice of result.notices) this.system(chat.id, notice);
+    if (delegationEnded) {
+      // 委派即结束讨论：即使回的是 [skip] 也不走普通 skip 的群主兜底，委派结果会另行回到群里
+      delete round.allSkipped;
+      return;
+    }
     if (result.skipped) round.allSkipped?.botIds.push(botId);
     else delete round.allSkipped;
     const skipped = round.allSkipped;
-    if (!skipped?.botIds.length || round.state.current || round.pending.length > 0) return;
-    const names = skipped.botIds
+    const names = (skipped?.botIds ?? [])
       .map((id) => `「${members.find((m) => m.id === id)?.name ?? id}」`)
       .join('');
+    if (round.state.discuss && !round.state.current && round.pending.length === 0) {
+      // 讨论中全员 [skip]：直接结束，不交给群主兜底
+      if (skipped?.botIds.length) {
+        delete round.allSkipped;
+        this.system(chat.id, `${names}已跳过，本轮无人回复。`);
+        return;
+      }
+      const step = discussStep(round.state, chat, members, {
+        lastBotId: botId,
+        mentioned: result.mentioned,
+        delegated: Boolean(delegated?.length),
+        pendingHuman: false,
+      });
+      if (step.kind === 'judge') this.startJudge(chat, step.candidates, botId);
+      else if (step.kind === 'end' && step.notice) this.system(chat.id, step.notice);
+      return;
+    }
+    if (!skipped?.botIds.length || round.state.current || round.pending.length > 0) return;
     const boss = members.find((m) => m.id === chat.bossBotId && m.archivedAt === undefined);
     if (
       boss &&
@@ -864,7 +1085,12 @@ export class GroupChatService {
 
   private async dispatch(chatId: string): Promise<void> {
     const round = this.round(chatId);
-    if (this.disposed || (round.routing && round.routing.parallelOptions === undefined)) return;
+    if (
+      this.disposed ||
+      round.deciding ||
+      (round.routing && round.routing.parallelOptions === undefined)
+    )
+      return;
     if (!round.state.current) {
       const job = this.autonomous.get(chatId)?.shift();
       if (job) {
@@ -892,7 +1118,8 @@ export class GroupChatService {
           job.botId,
           { ...round.options, deliveryId: round.deliveryId },
           undefined,
-          job.text
+          job.text,
+          job.hideDelegationIds
         );
         job.resolve(sent);
         round.options = relayOptions(round.options);
@@ -924,7 +1151,13 @@ export class GroupChatService {
       this.persist(chatId);
       const summary = round.summary?.botId === botId ? round.summary.note : undefined;
       if (summary !== undefined) round.summary = { botId };
-      const note = round.buildNote === botId ? SMART_ROUTE_BUILD_NOTE : summary;
+      const note =
+        [
+          round.buildNote === botId ? SMART_ROUTE_BUILD_NOTE : summary,
+          round.state.discuss ? DISCUSS_NOTE : undefined,
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined;
       delete round.buildNote;
       round.deliveryId = round.options?.deliveryId ?? randomUUID();
       const sent = await this.deliver(
@@ -992,7 +1225,8 @@ export class GroupChatService {
     botId: string,
     options?: BotDeliverOptions,
     note?: string,
-    lead?: string
+    lead?: string,
+    hideDelegationIds?: readonly string[]
   ) {
     const cursor = chat.sessions[botId]?.cursor ?? 0;
     // 排队尚未提交水位，但后续投递不能再次携带已排队的消息。
@@ -1009,6 +1243,7 @@ export class GroupChatService {
       floor,
       members: this.members(chat),
       chatTitle: chat.title,
+      ...(hideDelegationIds?.length ? { hideDelegationIds } : {}),
     });
     const sessionId = chat.sessions[botId]?.conversationId;
     const compacted = sessionId !== undefined && this.compacted.has(sessionId);
@@ -1065,6 +1300,7 @@ export class GroupChatService {
       for (const job of this.autonomous.get(id) ?? [])
         job.resolve({ ok: false, error: 'canceled' });
       this.cancelRouting(this.round(id));
+      this.cancelDeciding(this.round(id));
       this.rounds.set(id, { state: empty(), pending: [], generation: 0, parallel: new Map() });
       this.persist(id);
     }
@@ -1079,7 +1315,10 @@ export class GroupChatService {
       job.resolve({ ok: false, error: 'canceled' });
     this.autonomous.delete(chatId);
     const round = this.rounds.get(chatId);
-    if (round) this.cancelRouting(round);
+    if (round) {
+      this.cancelRouting(round);
+      this.cancelDeciding(round);
+    }
     this.rounds.delete(chatId);
     for (const [id, cursor] of this.cursors) if (cursor.chatId === chatId) this.cursors.delete(id);
     this.clearCompacted({ chatId });

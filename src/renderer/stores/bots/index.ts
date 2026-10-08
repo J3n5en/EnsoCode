@@ -226,6 +226,8 @@ interface BotsState {
   setSearchOpen: (open: boolean) => void;
   /** 打开命中所在聊天并请求滚动定位、短暂高亮 */
   focusHit: (hit: BotSearchHit, query: string) => void;
+  /** 打开群聊并按时间线 seq 定位、短暂高亮（委派卡片 ↔ 结果消息互跳） */
+  focusSeq: (chatId: string, seq: number) => void;
   clearFocus: (nonce: number) => void;
 }
 
@@ -477,6 +479,14 @@ export const useBotsStore = create<BotsState>()((set, get) => {
       offClosed();
       offState();
     };
+  };
+
+  /** 打开目标聊天（群线程先展开所属群）并请求时间线定位；时间线消费后按 nonce 清掉 */
+  const focusAt = (chatId: string, locator: BotFocus['locator'], query: string) => {
+    const chat = get().chats.find((item) => item.id === chatId);
+    if (chat?.kind === 'group') get().openThread(chat.parentId ?? chat.id, chat.id);
+    get().setView({ kind: 'chat', chatId });
+    set({ searchOpen: false, focus: { chatId, locator, query, nonce: Date.now() } });
   };
 
   return {
@@ -1067,15 +1077,9 @@ export const useBotsStore = create<BotsState>()((set, get) => {
 
     setSearchOpen: (searchOpen) => set({ searchOpen }),
 
-    focusHit: (hit, query) => {
-      const chat = get().chats.find((item) => item.id === hit.chatId);
-      if (chat?.kind === 'group') get().openThread(chat.parentId ?? chat.id, chat.id);
-      get().setView({ kind: 'chat', chatId: hit.chatId });
-      set({
-        searchOpen: false,
-        focus: { chatId: hit.chatId, locator: hit.locator, query, nonce: Date.now() },
-      });
-    },
+    focusHit: (hit, query) => focusAt(hit.chatId, hit.locator, query),
+
+    focusSeq: (chatId, seq) => focusAt(chatId, { kind: 'timeline', seq }, ''),
 
     clearFocus: (nonce) => {
       if (get().focus?.nonce === nonce) set({ focus: null });

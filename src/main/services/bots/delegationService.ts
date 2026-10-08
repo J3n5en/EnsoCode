@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { isSkipReply } from '../../../shared/bots/router';
 import { checkFailureText, checkPassed } from '../../../shared/bots/taskCheck';
 import type { ProjectedMessage } from '../../../shared/types/agent';
 import {
@@ -8,8 +9,10 @@ import {
   DELEGATION_APPENDS_MAX,
   DELEGATION_BLOCKED_NEED_MAX,
   DELEGATION_BLOCKED_STOP_MINUTES,
+  DELEGATION_NOTE_MAX,
   DELEGATION_TIMEOUT_MINUTES,
   type Delegation,
+  type DelegationRetryBy,
   type DelegationTrigger,
   type TaskCheck,
 } from '../../../shared/types/bot';
@@ -25,13 +28,22 @@ import {
 import type { BotStore } from './botStore';
 import type { BotChatStore } from './chatStore';
 import {
+  AUTO_RETRY_MAX,
+  type AutoRetryKind,
   isActiveDelegation as active,
+  autoRetryKind,
   batchDeliveryId,
   batchResultText,
   batchWaitingNotice,
+  DELEGATOR_RETRY_LIMIT,
+  defaultAutoRetryDelayMs,
   delegationBatches,
   delegationResultBody,
+  delegatorRetries,
   escapeXml,
+  pendingAutoRetry,
+  supersededIds,
+  trailingAutoRetries,
 } from './delegationBatch';
 import { delegatedBotPermissions, delegationPolicy } from './delegationPolicy';
 import type { DelegationStore } from './delegationStore';
@@ -48,6 +60,8 @@ interface Deps {
   emit: (event: BotEvent) => void;
   /** 一分钟的毫秒数，测试用来压缩时限 */
   minuteMs?: number;
+  autoRetryDelayMs?: (kind: AutoRetryKind, attempt: number) => number;
+  /** 群任务看板联动：taskId 校验与每次落盘后的状态同步 */
   /** 群任务看板联动：taskId 校验、自动建卡与每次落盘后的状态同步 */
   tasks?: {
     gate(
@@ -71,7 +85,9 @@ interface Deps {
   deliverGroupResult?: (
     record: Delegation,
     text: string,
-    deliveryId: string
+    deliveryId: string,
+    /** 本次回传的整批委派：其结果条目已在 text 里给过全文，群增量不再重复 */
+    batch: readonly Delegation[]
   ) => Promise<BotSendResult>;
 }
 export interface DelegateInput {
@@ -101,6 +117,9 @@ export type DelegateResult =
     }
   | { ok: false; error: string };
 export type DelegationRetryMode = 'resume' | 'restart';
+export type DelegatorRetryResult =
+  | { ok: true; delegationId: string; retriesLeft: number; warning?: string }
+  | { ok: false; error: string };
 
 /** 续跑没成但会话本身没坏：照常记失败，不退回从头 */
 const RESUME_TRANSIENT = new Set(['session-busy', 'disabled', BOT_BUDGET_ERROR]);
@@ -109,6 +128,8 @@ interface Resume {
   conversationId: string;
   /** 验收没过：在原会话补一条未通过原因，而不是从最后一步续跑 */
   checkFailed: boolean;
+  /** 委派人重试附的补充说明：作为一条新消息补进原会话，而不是原样重跑最后一步 */
+  note?: string;
 }
 
 /** 投递任务时的看板信息：#N、是否接着原会话、改派时带的退回理由 */
@@ -124,6 +145,10 @@ interface TurnOutcome {
   ok: boolean;
   text: string;
   error?: string;
+  /** 产出结果的子会话回合（结果入群定位用） */
+  turnId?: string;
+  /** 瞬态失败（可自动重试） */
+  transient?: true;
 }
 
 /** 执行结束时还没跑完的追加一律记失败 */
@@ -155,6 +180,8 @@ export class DelegationService {
   private readonly blockTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 卡住时由排队投递转成的下一次执行：自己没有投递，排队的投递都没跑起来就记失败 */
   private readonly rollovers = new Set<string>();
+  /** 已排定的自动重试；只在内存，重启后按记录里的 autoRetryAt 重排 */
+  private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly delivering = new Set<string>();
   private readonly unsubscribe: () => void;
   private readonly unsubscribeDiscard: () => void;
@@ -211,17 +238,35 @@ export class DelegationService {
       }
     });
     for (const record of deps.store.list()) {
-      if (active(record))
+      if (!active(record)) continue;
+      // 登记过卡住的按卡住收尾，其余记中断（中断可按规则排定自动重试）
+      if (record.blocked) {
         this.save({
           ...record,
           ...closeAppends(record),
-          // 登记过卡住的按卡住收尾，其余记中断
-          ...(record.blocked
-            ? { state: 'blocked' as const }
-            : { state: 'failed' as const, failure: 'interrupted' as const }),
+          state: 'blocked',
           finishedAt: Date.now(),
         });
+        continue;
+      }
+      const interrupted: Delegation = {
+        ...record,
+        ...closeAppends(record),
+        state: 'failed',
+        failure: 'interrupted',
+        finishedAt: Date.now(),
+      };
+      const delay = this.autoRetryDelay(interrupted);
+      this.save(
+        delay === undefined ? interrupted : { ...interrupted, autoRetryAt: Date.now() + delay }
+      );
     }
+    // 完成后、结果入群前崩溃：在回传之前补写（或从时间线回填 resultSeq）；只认待入群标记，旧数据不补发
+    for (const record of deps.store.list()) if (record.pendingResultEntry) this.postResult(record);
+    // 等待自动重试期间重启：按持久化的时刻重排（过点的立即执行）
+    const records = deps.store.list();
+    for (const record of records)
+      if (pendingAutoRetry(record, records)) this.scheduleAutoRetry(record);
     this.unsubscribe = deps.host.onTurnFinished((event) => {
       if (event.stopped && event.turnKey) this.stopBatch(event.conversationId, event.turnKey);
       if (event.delegationId) this.turnEnded(event);
@@ -251,7 +296,11 @@ export class DelegationService {
     input: DelegateInput,
     options: {
       standalone?: boolean;
+      /** 自动重试沿用原批次：等它有结果再和同批其他委派一起回传 */
+      batchId?: string;
       retryOf?: string;
+      retryBy?: DelegationRetryBy;
+      retryNote?: string;
       resume?: Resume;
       trigger?: DelegationTrigger;
       /** 不续用任务会话（手动「从头重试」） */
@@ -356,7 +405,9 @@ export class DelegationService {
     }
     const taskId = task?.taskId;
     const id = randomUUID();
-    const batchId = options.standalone ? undefined : this.deps.host.turnKey(parentConversationId);
+    const batchId =
+      options.batchId ??
+      (options.standalone ? undefined : this.deps.host.turnKey(parentConversationId));
     const projectId = conversation.projectId;
     // 同一任务同一成员才续会话：会话由看板按任务真实 id + 成员给出，这里再核对归属与可用性
     const session = after?.childConversationId ?? task?.session;
@@ -422,6 +473,8 @@ export class DelegationService {
       ...(taskId ? { taskId } : {}),
       // 返工 / 追加不挂 retryOf：验收只认本次执行开始后的证据
       ...(retryOf ? { retryOf } : {}),
+      ...(options.retryBy ? { retryBy: options.retryBy } : {}),
+      ...(options.retryNote ? { retryNote: options.retryNote.slice(0, DELEGATION_NOTE_MAX) } : {}),
       ...(input.keep ? { keep: true } : {}),
       ...(check ? { check: { kind: check.kind, text: check.text } } : {}),
       timeoutMinutes,
@@ -665,6 +718,8 @@ export class DelegationService {
       ok: event.ok,
       text: event.text,
       ...(event.error ? { error: event.error } : {}),
+      ...(event.turnId ? { turnId: event.turnId } : {}),
+      ...(event.transient ? { transient: true as const } : {}),
     };
     const id = event.deliveryId;
     if (id && !this.deps.host.hasStartedDelivery(event.conversationId, id)) {
@@ -717,14 +772,18 @@ export class DelegationService {
     if (record.blocked) this.block(record, outcome.text ? outcome : (stored ?? outcome));
     else if (outcome.ok && record.check) {
       this.settling.add(record.id);
-      void this.verify(record, record.check, outcome.text);
+      void this.verify(record, record.check, outcome.text, outcome.turnId);
     } else
       this.finish(
         record,
         outcome.ok ? 'completed' : 'failed',
         outcome.ok ? undefined : 'error',
         outcome.text,
-        outcome.error
+        outcome.error,
+        {
+          ...(outcome.turnId ? { turnId: outcome.turnId } : {}),
+          ...(outcome.transient ? { transient: true as const } : {}),
+        }
       );
   }
 
@@ -828,18 +887,21 @@ export class DelegationService {
     const acceptance = record.check
       ? `\n<acceptance-check>Passes only if one of your final tool outputs (e.g. a command's output) contains: ${escapeXml(record.check.text)}</acceptance-check>`
       : '';
+    const note = record.retryNote
+      ? `\n<retry-note>${escapeXml(record.retryNote)}</retry-note>`
+      : '';
     const runs = record.taskId ? this.taskRuns(record.taskId) : [];
     const index = runs.findIndex((item) => item.id === record.id);
     let text: string;
     if (info.incremental && info.seq !== undefined && index >= 0) {
       const context = record.context ? `\n<context>${escapeXml(record.context)}</context>` : '';
-      text = `<delegation-task id="${record.id}" from="${escapeXml(from)}" task="#${info.seq}" run="${index + 1}" trigger="${record.trigger ?? 'delegate'}">\n${escapeXml(record.task)}${context}${acceptance}\n</delegation-task>`;
+      text = `<delegation-task id="${record.id}" from="${escapeXml(from)}" task="#${info.seq}" run="${index + 1}" trigger="${record.trigger ?? 'delegate'}">\n${escapeXml(record.task)}${context}${acceptance}${note}\n</delegation-task>`;
     } else {
       const previous = previousRunsText(index >= 0 ? runs.slice(0, index) : [], {
         name: (id) => this.deps.bots.get(id)?.name ?? id,
         ...(info.returnReason ? { returnReason: info.returnReason } : {}),
       });
-      text = `<delegation-task id="${record.id}" from="${escapeXml(from)}">\n${escapeXml(record.task)}\n<context>${escapeXml(record.context)}</context>${acceptance}${previous ? `\n${previous}` : ''}\n</delegation-task>`;
+      text = `<delegation-task id="${record.id}" from="${escapeXml(from)}">\n${escapeXml(record.task)}\n<context>${escapeXml(record.context)}</context>${acceptance}${note}${previous ? `\n${previous}` : ''}\n</delegation-task>`;
     }
     return this.deps.host.deliverConversation(record.childConversationId, text, {
       deliveryId: record.id,
@@ -856,14 +918,22 @@ export class DelegationService {
     from: string,
     info: TaskInfo
   ): Promise<BotDeliverResult> {
+    const note = resume.note ? `\nNote from ${escapeXml(from)}: ${escapeXml(resume.note)}` : '';
+    const options = { deliveryId: record.id, queueIfBusy: true, source: 'bot' as const };
     const sent =
       resume.checkFailed && record.check
         ? await this.deps.host.deliverConversation(
             resume.conversationId,
-            `<delegation-check-failed id="${record.id}">\nThe acceptance check failed: none of your final tool outputs contained: ${escapeXml(record.check.text)}\nFix the work and finish again; this delegation passes only if one of your final tool outputs contains it.\n</delegation-check-failed>`,
-            { deliveryId: record.id, queueIfBusy: true, source: 'bot' }
+            `<delegation-check-failed id="${record.id}">\nThe acceptance check failed: none of your final tool outputs contained: ${escapeXml(record.check.text)}\nFix the work and finish again; this delegation passes only if one of your final tool outputs contains it.${note}\n</delegation-check-failed>`,
+            options
           )
-        : await this.deps.host.retryConversation(resume.conversationId, { delegation: true });
+        : resume.note
+          ? await this.deps.host.deliverConversation(
+              resume.conversationId,
+              `<delegation-retry id="${record.id}">\nYour previous attempt at this delegated task did not finish. Continue from where you stopped.${note}\n</delegation-retry>`,
+              options
+            )
+          : await this.deps.host.retryConversation(resume.conversationId, { delegation: true });
     if (sent.ok || RESUME_TRANSIENT.has(sent.error)) return sent;
     const current = this.deps.store.get(record.id);
     if (!current || !active(current)) return sent;
@@ -902,7 +972,11 @@ export class DelegationService {
   cancel(id: string): { ok: boolean; error?: string } {
     const record = this.deps.store.get(id);
     if (!record) return { ok: false, error: 'Delegation not found.' };
-    if (!active(record)) return { ok: true };
+    if (!active(record)) {
+      // 等待自动重试的视同进行中：取消即放弃自动重试，最终失败照常交回委派人
+      if (pendingAutoRetry(record, this.deps.store.list())) this.abandonAutoRetry(record.id);
+      return { ok: true };
+    }
     const held = this.held.has(id);
     this.finish(record, 'canceled');
     // 排着的下一次执行还没投递：子会话属于正在跑的那次，不能停
@@ -911,7 +985,12 @@ export class DelegationService {
   }
 
   /** 默认从断点续跑；手动取消的须由用户选 resume / restart，子会话丢失或文件不在才从头 */
-  retry(id: string, mode?: DelegationRetryMode): DelegateResult {
+  retry(
+    id: string,
+    mode?: DelegationRetryMode,
+    options: { by?: DelegationRetryBy; note?: string } = {}
+  ): DelegateResult {
+    const by = options.by ?? 'human';
     const record = this.deps.store.get(id);
     if (!record || (record.state !== 'failed' && record.state !== 'canceled'))
       return {
@@ -932,11 +1011,22 @@ export class DelegationService {
     const file = child && child.lifecycle !== 'ended' ? child.sessionFile : undefined;
     const resume =
       mode !== 'restart' && file && existsSync(file)
-        ? { conversationId: record.childConversationId, checkFailed: record.failure === 'check' }
+        ? {
+            conversationId: record.childConversationId,
+            checkFailed: record.failure === 'check',
+            ...(options.note ? { note: options.note } : {}),
+          }
         : undefined;
-    // 重试是用户在轮次之外的操作，不并入原批次，也不并入父会话当前轮次；群里开过新对话就从委派人的新会话发起
-    return this.delegate(
-      this.delegatorSession(record) ?? record.parentConversationId,
+    // 自动重试沿用原批次；等待自动重试时人工点重试也接替进原批次（不先把失败交回委派人）；
+    // 委派人重试并入其当前轮次；其余界面重试是用户在轮次之外的操作，自成一批，
+    // 群里开过新对话就从委派人的新会话发起
+    const takeOver =
+      by === 'auto' || (by === 'human' && pendingAutoRetry(record, this.deps.store.list()));
+    const note = options.note ?? (by === 'auto' ? record.retryNote : undefined);
+    const sent = this.delegate(
+      by === 'human' && !takeOver
+        ? (this.delegatorSession(record) ?? record.parentConversationId)
+        : record.parentConversationId,
       {
         to: record.targetBotId,
         task: record.task,
@@ -944,14 +1034,108 @@ export class DelegationService {
         ...(taskId ? { taskId } : {}),
         ...(record.timeoutMinutes ? { deadlineMinutes: record.timeoutMinutes } : {}),
         ...(record.check ? { check: { kind: record.check.kind, text: record.check.text } } : {}),
+        // 重试延续原任务的停止策略：keep 的不随父回合停止而取消
+        ...(record.keep ? { keep: true } : {}),
       },
       {
-        standalone: true,
+        standalone: by === 'human',
+        ...(takeOver ? { batchId: record.batchId ?? record.id } : {}),
         retryOf: id,
+        retryBy: by,
+        ...(note ? { retryNote: note } : {}),
         ...(resume ? { resume } : {}),
         ...(mode === 'restart' ? { fresh: true } : {}),
       }
     );
+    // 接替成功才撤掉原来排定的自动重试；接替失败时原记录仍按时自动重试
+    if (sent.ok && takeOver) {
+      clearTimeout(this.retryTimers.get(id));
+      this.retryTimers.delete(id);
+    }
+    return sent;
+  }
+
+  /**
+   * retry_delegation：委派人在自己的会话里重试一条失败 / 取消的委派（相当于 Grok 的 Task resume）。
+   * 只认本会话发起的委派；同一条链最多 DELEGATOR_RETRY_LIMIT 次（界面重试不计入、不受限）。
+   */
+  retryAsDelegator(parentConversationId: string, id: string, note?: string): DelegatorRetryResult {
+    const record = this.deps.store.get(id);
+    if (!record || record.parentConversationId !== parentConversationId)
+      return { ok: false, error: 'Delegation not found in this parent session.' };
+    const used = delegatorRetries(record, (key) => this.deps.store.get(key));
+    if (used >= DELEGATOR_RETRY_LIMIT)
+      return {
+        ok: false,
+        error: `Retry limit reached: you have already retried this delegation chain ${DELEGATOR_RETRY_LIMIT} times. Delegate it to another member, skip it, or end it explicitly.`,
+      };
+    if (pendingAutoRetry(record, this.deps.store.list()))
+      return { ok: false, error: 'An automatic retry is already scheduled for this delegation.' };
+    const trimmed = note?.trim().slice(0, DELEGATION_NOTE_MAX);
+    const result = this.retry(id, record.state === 'canceled' ? 'resume' : undefined, {
+      by: 'delegator',
+      ...(trimmed ? { note: trimmed } : {}),
+    });
+    return result.ok ? { ...result, retriesLeft: DELEGATOR_RETRY_LIMIT - used - 1 } : result;
+  }
+
+  /** 失败后是否、隔多久自动重试；不满足条件返回 undefined（直接交回委派人） */
+  private autoRetryDelay(record: Delegation): number | undefined {
+    const kind = autoRetryKind(record);
+    if (!kind || this.disposed) return undefined;
+    // 有没跑完的追加：重试只带原任务，会丢掉这些追加；交回委派人，由它看结果里的清单决定
+    if (record.appends?.some((item) => item.ok === false)) return undefined;
+    const attempt = trailingAutoRetries(record, (key) => this.deps.store.get(key)) + 1;
+    if (attempt > AUTO_RETRY_MAX) return undefined;
+    const parent = this.deps.authority.conversation(record.parentConversationId);
+    const target = this.deps.bots.get(record.targetBotId);
+    const chat = record.chatId ? this.deps.chats.get(record.chatId) : undefined;
+    if (
+      !parent ||
+      parent.lifecycle === 'ended' ||
+      !target ||
+      target.archivedAt !== undefined ||
+      (record.chatId && (!chat || chat.archivedAt !== undefined))
+    )
+      return undefined;
+    return Math.max(0, (this.deps.autoRetryDelayMs ?? defaultAutoRetryDelayMs)(kind, attempt));
+  }
+
+  private scheduleAutoRetry(record: Delegation): void {
+    if (this.disposed || record.autoRetryAt === undefined) return;
+    clearTimeout(this.retryTimers.get(record.id));
+    const timer = setTimeout(
+      () => this.runAutoRetry(record.id),
+      Math.max(0, record.autoRetryAt - Date.now())
+    );
+    timer.unref?.();
+    this.retryTimers.set(record.id, timer);
+  }
+
+  /** 到点：在原子会话上续跑（会话恢复不了才从头）；发不出去就放弃，最终失败交回委派人 */
+  private runAutoRetry(id: string): void {
+    this.retryTimers.delete(id);
+    if (this.disposed) return;
+    const current = this.deps.store.get(id);
+    if (!current || !pendingAutoRetry(current, this.deps.store.list())) return;
+    const result = this.retry(id, undefined, { by: 'auto' });
+    if (!result.ok) {
+      console.warn('[bots] delegation auto-retry failed', result.error);
+      this.abandonAutoRetry(id);
+    }
+  }
+
+  /** 放弃排定的自动重试：清掉 autoRetryAt，该记录随即按最终失败处理 */
+  private abandonAutoRetry(id: string): void {
+    clearTimeout(this.retryTimers.get(id));
+    this.retryTimers.delete(id);
+    const latest = this.deps.store.get(id);
+    if (!latest || latest.autoRetryAt === undefined) return;
+    const { autoRetryAt: _at, ...rest } = latest;
+    this.save(rest);
+    queueMicrotask(() => {
+      void this.deliverPending(latest.parentConversationId);
+    });
   }
 
   /**
@@ -1158,12 +1342,17 @@ export class DelegationService {
         );
     this.discarding = true;
     try {
-      for (const record of batch()) if (active(record) && !record.keep) this.cancel(record.id);
+      const all = this.deps.store.list();
+      for (const record of batch())
+        if ((active(record) || pendingAutoRetry(record, all)) && !record.keep)
+          this.cancel(record.id);
     } finally {
       this.discarding = false;
     }
     const rest = batch();
-    if (rest.length && !rest.some(active)) this.delivered(rest);
+    const all = this.deps.store.list();
+    if (rest.length && !rest.some((record) => active(record) || pendingAutoRetry(record, all)))
+      this.delivered(rest);
   }
 
   /** 群开新对话：未 keep 的取消，已结束未投递的只落时间线；keep 的跑完后父会话已结束，同样只落时间线 */
@@ -1171,11 +1360,18 @@ export class DelegationService {
     const records = () => this.deps.store.list().filter((record) => record.chatId === chatId);
     this.discarding = true;
     try {
-      for (const record of records()) if (active(record) && !record.keep) this.cancel(record.id);
+      const all = this.deps.store.list();
+      for (const record of records())
+        if ((active(record) || pendingAutoRetry(record, all)) && !record.keep)
+          this.cancel(record.id);
     } finally {
       this.discarding = false;
     }
-    const done = records().filter((record) => !active(record) && record.deliveredAt === undefined);
+    const all = this.deps.store.list();
+    const done = records().filter(
+      (record) =>
+        !active(record) && !pendingAutoRetry(record, all) && record.deliveredAt === undefined
+    );
     if (done.length) this.delivered(done);
   }
 
@@ -1237,11 +1433,14 @@ export class DelegationService {
 
   async deliverPending(parentConversationId?: string): Promise<void> {
     if (this.disposed) return;
-    for (const batch of delegationBatches(this.list())) {
+    const all = this.list();
+    for (const batch of delegationBatches(all)) {
       const head = batch[0];
       const deliveryId = batchDeliveryId(batch);
       if (
         batch.some(active) ||
+        // 等待自动重试：视同未结束，不唤醒委派人
+        batch.some((record) => pendingAutoRetry(record, all)) ||
         batch.every((record) => record.deliveredAt !== undefined) ||
         this.delivering.has(deliveryId) ||
         (parentConversationId && head.parentConversationId !== parentConversationId) ||
@@ -1284,12 +1483,19 @@ export class DelegationService {
       }
       this.delivering.add(deliveryId);
       try {
-        const text = batchResultText(batch, (id) => this.deps.bots.get(id)?.name ?? id);
+        const text = batchResultText(batch, (id) => this.deps.bots.get(id)?.name ?? id, {
+          inGroup: Boolean(head.chatId && this.deps.chats.get(head.chatId)?.kind === 'group'),
+          retriesLeft: (record) =>
+            Math.max(
+              0,
+              DELEGATOR_RETRY_LIMIT - delegatorRetries(record, (key) => this.deps.store.get(key))
+            ),
+        });
         const sent =
           parent.bot?.chatId &&
           this.deps.chats.get(parent.bot.chatId)?.kind === 'group' &&
           this.deps.deliverGroupResult
-            ? await this.deps.deliverGroupResult(head, text, deliveryId)
+            ? await this.deps.deliverGroupResult(head, text, deliveryId, batch)
             : await this.deps.host.deliverConversation(head.parentConversationId, text, {
                 onlyIfIdle: true,
                 source: 'bot',
@@ -1318,6 +1524,8 @@ export class DelegationService {
       clearTimeout(timer);
     this.timers.clear();
     this.blockTimers.clear();
+    for (const timer of this.retryTimers.values()) clearTimeout(timer);
+    this.retryTimers.clear();
   }
 
   disable(): void {
@@ -1331,7 +1539,8 @@ export class DelegationService {
     state: Delegation['state'],
     failure?: Delegation['failure'],
     result?: string,
-    error?: string
+    error?: string,
+    extra: { turnId?: string; transient?: true } = {}
   ): void {
     clearTimeout(this.timers.get(record.id));
     this.timers.delete(record.id);
@@ -1343,7 +1552,7 @@ export class DelegationService {
       state !== 'blocked' &&
       (record.appends?.some((item) => item.ok === undefined) ||
         this.deps.host.hasPendingDeliveries(record.childConversationId));
-    const finished: Delegation = {
+    let finished: Delegation = {
       ...record,
       ...closeAppends(record),
       state,
@@ -1351,7 +1560,18 @@ export class DelegationService {
       ...(failure ? { failure } : {}),
       ...(result !== undefined ? { result } : {}),
       ...(error ? { error } : {}),
+      ...(state === 'failed' && failure === 'error' && extra.transient
+        ? { transient: true as const }
+        : {}),
     };
+    const delay = this.autoRetryDelay(finished);
+    if (delay !== undefined) finished = { ...finished, autoRetryAt: Date.now() + delay };
+    // 待入群标记与终态同一行落盘：之后任一步崩溃，重启都能据此补写
+    if (!this.disposed && this.resultChatId(finished))
+      finished = {
+        ...finished,
+        pendingResultEntry: extra.turnId ? { turnId: extra.turnId } : {},
+      };
     this.save(finished);
     this.outcomes.delete(record.id);
     this.settling.delete(record.id);
@@ -1364,14 +1584,22 @@ export class DelegationService {
     // 结束时子会话里还排着本次执行的追加 / 插话：一并撤掉，不留成无主回合
     if (orphaned) void this.abort(record.childConversationId);
     this.releaseHeld(finished);
-    this.noticeWaiting(finished);
+    if (finished.pendingResultEntry) this.postResult(finished);
+    // 排定了自动重试的不算结束：不发「谁结束了」提示，等接替记录有结果
+    if (finished.autoRetryAt !== undefined) this.scheduleAutoRetry(finished);
+    else this.noticeWaiting(finished);
     queueMicrotask(() => {
       void this.deliverPending(record.parentConversationId);
     });
   }
 
   /** 委派开始后子会话的最终工具结果里找验收文本；读失败按未通过 */
-  private async verify(record: Delegation, check: TaskCheck, text: string): Promise<void> {
+  private async verify(
+    record: Delegation,
+    check: TaskCheck,
+    text: string,
+    turnId?: string
+  ): Promise<void> {
     let passed = false;
     try {
       const messages = await this.deps.sessionMessages?.(record.childConversationId);
@@ -1385,8 +1613,83 @@ export class DelegationService {
       return;
     }
     const checked = { ...current, check: { ...check, passed } };
-    if (passed) this.finish(checked, 'completed', undefined, text);
+    if (passed) this.finish(checked, 'completed', undefined, text, undefined, { turnId });
     else this.finish(checked, 'failed', 'check', text, checkFailureText(check));
+  }
+
+  /**
+   * 结果该写进的群：第一层委派（发起方就是该成员当前的群会话）completed、群 / 话题仍在且未归档。
+   * 第二层的结果由第一层成员整合进自己的结果，不入群。
+   */
+  private resultChatId(record: Delegation): string | undefined {
+    if (
+      record.state !== 'completed' ||
+      !record.chatId ||
+      !record.result?.trim() ||
+      isSkipReply(record.result)
+    )
+      return undefined;
+    const chat = this.deps.chats.get(record.chatId);
+    if (chat?.kind !== 'group' || chat.archivedAt !== undefined) return undefined;
+    if (chat.sessions[record.parentBotId]?.conversationId !== record.parentConversationId)
+      return undefined;
+    return record.chatId;
+  }
+
+  /**
+   * 处理待入群标记：结果以被委派成员名义写进群时间线，记下 resultSeq 并清掉标记。
+   * 条目 id 固定、先查后写保证幂等（已写过只回填 resultSeq）；它直接落时间线、不经 GroupChatService，
+   * 不触发 @ 接力或讨论判断，也不唤醒发起人。发起人已随回传收到全文的（重启补写才会出现），条目标 hiddenFrom。
+   * 群 / 话题已删除、已归档或发起方会话已换：不写，只清标记；写时抛错则保留标记，下次启动再补。
+   */
+  private postResult(record: Delegation): void {
+    if (this.disposed || !record.pendingResultEntry) return;
+    const id = `delegation-result:${record.id}`;
+    let seq: number | undefined;
+    try {
+      const chatId = this.resultChatId(record);
+      if (chatId && this.deps.chats.hasEntry(chatId, id))
+        seq = this.deps.chats.findEntry(chatId, id)?.seq;
+      else if (chatId) {
+        const saved = this.deps.chats.appendEntry(chatId, {
+          kind: 'bot',
+          id,
+          at: Date.now(),
+          botId: record.targetBotId,
+          text: record.result ?? '',
+          conversationId: record.childConversationId,
+          turnId: record.pendingResultEntry.turnId || record.id,
+          delegationId: record.id,
+          ...(this.resultSeen(record) ? { hiddenFrom: record.parentBotId } : {}),
+        });
+        if (saved) {
+          seq = saved.seq;
+          this.deps.emit({ kind: 'timeline', chatId, seq: saved.seq });
+        } else {
+          // 群有效时只有条目校验失败才会返回 undefined；校验是确定性的，保留标记只会每次启动重试同样失败
+          console.warn('[bots] delegation result entry rejected, not retrying:', record.id);
+        }
+      }
+    } catch (cause) {
+      console.warn('[bots] delegation result post failed', cause);
+      return;
+    }
+    const latest = this.deps.store.get(record.id);
+    if (!latest) return;
+    const { pendingResultEntry: _pending, ...rest } = latest;
+    this.save(seq === undefined ? rest : { ...rest, resultSeq: seq });
+  }
+
+  /** 发起人是否已随委派回传收到过这条结果的全文 */
+  private resultSeen(record: Delegation): boolean {
+    if (this.deps.store.get(record.id)?.deliveredAt !== undefined) return true;
+    const batch = delegationBatches(this.deps.store.list()).find((items) =>
+      items.some((item) => item.id === record.id)
+    );
+    return Boolean(
+      batch &&
+        this.deps.host.hasStartedDelivery(record.parentConversationId, batchDeliveryId(batch))
+    );
   }
 
   /** 同一子会话上的续跑链从最初那次委派起算 */
@@ -1424,10 +1727,23 @@ export class DelegationService {
   }
 
   private delivered(batch: readonly Delegation[]): void {
+    const superseded = supersededIds(batch);
     for (const record of batch) {
-      const latest = this.deps.store.get(record.id);
+      let latest = this.deps.store.get(record.id);
       if (!latest || latest.deliveredAt !== undefined) continue;
-      if (record.chatId && this.deps.chats.get(record.chatId)?.kind === 'group') {
+      // 结果已被消费 / 作废：排定中的自动重试一并放弃
+      if (latest.autoRetryAt !== undefined && pendingAutoRetry(latest, this.deps.store.list())) {
+        clearTimeout(this.retryTimers.get(latest.id));
+        this.retryTimers.delete(latest.id);
+        const { autoRetryAt: _at, ...rest } = latest;
+        latest = rest;
+      }
+      // 被自动重试接替的中间记录不单独出卡片，卡片只给接替链最后那条
+      if (
+        !superseded.has(record.id) &&
+        record.chatId &&
+        this.deps.chats.get(record.chatId)?.kind === 'group'
+      ) {
         if (!this.deps.chats.hasEntry(record.chatId, `delegation:${record.id}`))
           this.deps.chats.appendEntry(record.chatId, {
             kind: 'delegation',
@@ -1437,7 +1753,10 @@ export class DelegationService {
             from: record.parentBotId,
             to: record.targetBotId,
             state: record.state,
-            summary: delegationResultBody(record).slice(0, 500),
+            // 结果全文已作为成员消息入群：卡片不再带摘要，避免上下文里重复出现
+            ...(latest.resultSeq === undefined
+              ? { summary: delegationResultBody(record).slice(0, 500) }
+              : {}),
             ...(record.taskId ? { taskId: record.taskId } : {}),
           });
         this.deps.emit({ kind: 'timeline', chatId: record.chatId });

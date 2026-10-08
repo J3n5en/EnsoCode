@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   anchorDelegations,
   buildRows,
+  delegationCardSeq,
   locateTurn,
   mergeLatest,
   mergeNewer,
@@ -113,6 +114,40 @@ describe('buildRows', () => {
     const rows = buildRows([bot(1, 'x', 1000), system, bot(3, 'x', 2000)]);
     const entries = rows.filter((row) => row.kind === 'entry');
     expect(entries.map((row) => row.continued)).toEqual([false, false, false]);
+  });
+
+  it('委派结果消息自带头部：不并进同一成员的前一条，后一条也不并进它', () => {
+    const result: GroupEntry = {
+      ...(bot(2, 'x', 1500) as Extract<GroupEntry, { kind: 'bot' }>),
+      id: 'delegation-result:d1',
+      delegationId: 'd1',
+    };
+    const rows = buildRows([bot(1, 'x', 1000), result, bot(3, 'x', 2000), bot(4, 'x', 2500)]);
+    const entries = rows.filter((row) => row.kind === 'entry');
+    expect(entries.map((row) => row.continued)).toEqual([false, false, false, true]);
+  });
+});
+
+describe('delegationCardSeq', () => {
+  const card = (seq: number, delegationId: string): GroupEntry => ({
+    kind: 'delegation',
+    seq,
+    id: `delegation:${delegationId}`,
+    at: seq * 1000,
+    delegationId,
+    from: 'a',
+    to: 'b',
+    state: 'completed',
+  });
+
+  it('按 delegationId 找已加载的委派卡片条目，结果消息本身不算', () => {
+    const result: GroupEntry = {
+      ...(bot(2, 'b') as Extract<GroupEntry, { kind: 'bot' }>),
+      delegationId: 'd1',
+    };
+    const entries = [human(1), result, card(3, 'd0'), card(4, 'd1')];
+    expect(delegationCardSeq(entries, 'd1')).toBe(4);
+    expect(delegationCardSeq([human(1), result], 'd1')).toBeUndefined();
   });
 });
 

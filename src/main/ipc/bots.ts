@@ -628,18 +628,21 @@ export function getBotServices(): BotServices | null {
     emit: emitBotEvent,
     tasks,
     sessionMessages: conversationMessages,
-    deliverGroupResult: async (record, text, deliveryId) => {
+    deliverGroupResult: async (record, text, deliveryId, batch) => {
       if (
         !record.chatId ||
         chats.get(record.chatId)?.sessions[record.parentBotId]?.conversationId !==
           record.parentConversationId
       )
         return { ok: false, error: 'parent-session-changed' };
-      return groups.runAs(record.chatId, record.parentBotId, text, undefined, {
-        onlyIfIdle: true,
-        source: 'bot',
-        deliveryId,
-      });
+      return groups.runAs(
+        record.chatId,
+        record.parentBotId,
+        text,
+        undefined,
+        { onlyIfIdle: true, source: 'bot', deliveryId },
+        { hideDelegationIds: batch.map((item) => item.id) }
+      );
     },
   });
   delegationsRef = delegations;

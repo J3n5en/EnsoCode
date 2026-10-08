@@ -9,9 +9,13 @@ import {
   delegationOwners,
   delegationRunMarks,
   formatElapsed,
+  isAutoRetrying,
+  isAwaitingAutoRetry,
   isRetried,
   openTarget,
   pendingOwners,
+  retryAttempt,
+  retrySource,
 } from './delegations';
 import { pendingItems } from './selectors';
 
@@ -82,6 +86,86 @@ describe('activeDelegations', () => {
       record({ id: 'd', chatId: 'c2' }),
     ];
     expect(activeDelegations(list, 'c1').map((item) => item.id)).toEqual(['b', 'a']);
+  });
+
+  it('等待自动重试的失败记录视同未结束；已被接替或放弃自动重试的不算', () => {
+    const list = [
+      record({ id: 'w', createdAt: 5, state: 'failed', autoRetryAt: 99 }),
+      record({ id: 'x', createdAt: 6, state: 'failed', autoRetryAt: 99 }),
+      record({ id: 'x2', createdAt: 40, state: 'running', retryOf: 'x', retryBy: 'auto' }),
+      record({ id: 'f', createdAt: 7, state: 'failed' }),
+    ];
+    expect(activeDelegations(list, 'c1').map((item) => item.id)).toEqual(['w', 'x2']);
+  });
+});
+
+describe('isAwaitingAutoRetry', () => {
+  it('失败、排了 autoRetryAt、且没有记录以 retryOf 接替它', () => {
+    const waiting = record({ state: 'failed', failure: 'error', autoRetryAt: 50 });
+    expect(isAwaitingAutoRetry(waiting, [waiting])).toBe(true);
+    const next = record({ id: 'd2', retryOf: 'd1', retryBy: 'auto' });
+    expect(isAwaitingAutoRetry(waiting, [waiting, next])).toBe(false);
+    // 人工接替同样算已接替
+    const human = record({ id: 'd3', retryOf: 'd1', retryBy: 'human', state: 'queued' });
+    expect(isAwaitingAutoRetry(waiting, [waiting, human])).toBe(false);
+  });
+
+  it('没有 autoRetryAt（放弃自动重试 / 不可自动重试）或非失败态都不算', () => {
+    const final = record({ state: 'failed', failure: 'timeout' });
+    expect(isAwaitingAutoRetry(final, [final])).toBe(false);
+    for (const state of ['queued', 'running', 'completed', 'canceled'] as const) {
+      const item = record({ state, autoRetryAt: 50 });
+      expect(isAwaitingAutoRetry(item, [item])).toBe(false);
+    }
+  });
+});
+
+describe('isAutoRetrying', () => {
+  it('接替记录由自动重试发起且仍在排队 / 进行', () => {
+    expect(isAutoRetrying(record({ retryOf: 'd0', retryBy: 'auto' }))).toBe(true);
+    expect(isAutoRetrying(record({ retryOf: 'd0', retryBy: 'auto', state: 'queued' }))).toBe(true);
+    expect(isAutoRetrying(record({ retryOf: 'd0', retryBy: 'auto', state: 'completed' }))).toBe(
+      false
+    );
+    expect(isAutoRetrying(record({ retryOf: 'd0', retryBy: 'delegator' }))).toBe(false);
+    // 旧数据没有 retryBy：按人工处理
+    expect(isAutoRetrying(record({ retryOf: 'd0' }))).toBe(false);
+  });
+});
+
+describe('retryAttempt / retrySource', () => {
+  const chain = [
+    record({ id: 'a', state: 'failed' }),
+    record({ id: 'b', state: 'failed', retryOf: 'a', retryBy: 'auto' }),
+    record({ id: 'c', state: 'failed', retryOf: 'b', retryBy: 'delegator' }),
+    record({ id: 'd', state: 'running', retryOf: 'c' }),
+  ];
+  const get = (id: string) => chain.find((item) => item.id === id)!;
+
+  it('沿 retryOf 往上数：原始委派是 0，每接替一次加一', () => {
+    expect(['a', 'b', 'c', 'd'].map((id) => retryAttempt(get(id), chain))).toEqual([0, 1, 2, 3]);
+  });
+
+  it('上游记录已不在列表里时，按已知部分计（至少算一次）', () => {
+    expect(retryAttempt(get('c'), [get('c')])).toBe(1);
+    expect(retryAttempt(get('d'), [get('c'), get('d')])).toBe(2);
+  });
+
+  it('retryOf 成环时不死循环', () => {
+    const loop = [
+      record({ id: 'x', retryOf: 'y', retryBy: 'auto' }),
+      record({ id: 'y', retryOf: 'x', retryBy: 'auto' }),
+    ];
+    expect(retryAttempt(loop[0], loop)).toBe(2);
+  });
+
+  it('重试来源：非重试记录没有来源，旧数据缺省视为手动', () => {
+    expect(['a', 'b', 'c', 'd'].map((id) => retrySource(get(id)))).toEqual([
+      undefined,
+      'auto',
+      'delegator',
+      'human',
+    ]);
   });
 });
 

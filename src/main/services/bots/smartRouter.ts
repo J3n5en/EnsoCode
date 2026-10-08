@@ -1,4 +1,13 @@
 import {
+  DISCUSS_JUDGE_MAX_TOKENS,
+  type DiscussNextDecision,
+  type DiscussNextInput,
+  discussNextPrompt,
+  discussNextQuestion,
+  parseDiscussNext,
+  pickDiscussNext,
+} from '../../../shared/bots/discussRoute';
+import {
   addressesEveryone,
   decideSmartRoute,
   guessSmartRouteIntent,
@@ -47,7 +56,8 @@ export interface SmartRouterDeps {
     question:
       | ReturnType<typeof smartRouteQuestion>
       | ReturnType<typeof smartRouteIntentQuestion>
-      | ReturnType<typeof smartRouteTaskQuestion>,
+      | ReturnType<typeof smartRouteTaskQuestion>
+      | ReturnType<typeof discussNextQuestion>,
     signal: AbortSignal
   ) => Promise<Record<string, number> | null>;
 }
@@ -79,7 +89,7 @@ export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector
     async select(input: SmartRouteInput, signal: AbortSignal) {
       // 点名全员时规则直出，不受模型挑人上限与置信度影响
       if (addressesEveryone(input.message))
-        return { ids: input.candidates.map((candidate) => candidate.id) };
+        return { ids: input.candidates.map((candidate) => candidate.id), everyone: true };
       try {
         const current = config();
         if (current?.source === 'pi-classifier') {
@@ -126,6 +136,44 @@ export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector
         if (signal.aborted) return { ids: [] };
         console.warn('[bots] smart routing failed', error);
         return { ids: [], failure: briefErrorReason(error) };
+      }
+    },
+    /**
+     * 讨论判断与选人共用同一后端设置与时限规则（smartRouteTimeoutMs）：未设置 / judge 走 judge 回退链，
+     * pi-classifier 走分类器（含 end 选项）
+     */
+    async next(input: DiscussNextInput, signal: AbortSignal): Promise<DiscussNextDecision> {
+      try {
+        const current = config();
+        if (current?.source === 'pi-classifier') {
+          const probabilities = await deps.classify(current, discussNextQuestion(input), signal);
+          if (!probabilities) return { failure: '判断模型不可用' };
+          const picked = pickDiscussNext(probabilities, input);
+          if ('failure' in picked)
+            console.warn(
+              '[bots] discuss classifier result not understood:',
+              JSON.stringify(probabilities).slice(0, 120)
+            );
+          return picked;
+        }
+        const text = await deps.judge(
+          {
+            ...discussNextPrompt(input),
+            preferred: current?.model,
+            timeoutMs: current?.timeoutMs ?? SMART_ROUTE_DEFAULT_TIMEOUT_MS,
+            maxTokens: DISCUSS_JUDGE_MAX_TOKENS,
+          },
+          signal
+        );
+        if (text === null) return { failure: '判断模型不可用' };
+        const decision = parseDiscussNext(text, input);
+        if (!decision)
+          console.warn('[bots] discuss judge reply not understood:', text.slice(0, 80));
+        return decision ?? { failure: '判断结果无法识别' };
+      } catch (error) {
+        if (signal.aborted) return { end: true };
+        console.warn('[bots] discuss judge failed', error);
+        return { failure: briefErrorReason(error) };
       }
     },
   };

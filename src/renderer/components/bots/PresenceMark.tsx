@@ -15,6 +15,8 @@ const LABELS: Record<Presence, string> = {
   done: 'Finished',
 };
 
+const EMPTY: readonly Delegation[] = [];
+
 const MARKS: Record<Exclude<Presence, 'idle'>, { box: string; glyph: string }> = {
   think: { box: 'bg-card', glyph: 'h-[7px] w-[7px] rounded-full border-[1.5px] border-info' },
   work: { box: 'bg-info', glyph: 'h-[5px] w-[5px] rounded-[1px] bg-white' },
@@ -65,6 +67,7 @@ export function useDelegationPresence(record: Delegation | undefined): PresenceI
   const child = useBotsStore((s) => (record ? s.sessions[record.childConversationId] : undefined));
   const queue = useBotsStore((s) => s.queue);
   const silences = useBotsStore((s) => s.silences);
+  const delegations = useBotsStore((s) => s.delegations) ?? EMPTY;
   return useMemo(
     () =>
       record &&
@@ -74,8 +77,9 @@ export function useDelegationPresence(record: Delegation | undefined): PresenceI
         queue,
         silences,
         delegation: record,
+        delegations,
         clearedAt: Number.NEGATIVE_INFINITY,
       }),
-    [record, child, queue, silences]
+    [record, child, queue, silences, delegations]
   );
 }

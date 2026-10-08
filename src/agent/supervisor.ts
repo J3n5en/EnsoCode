@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { type AssistantMessage, isRetryableAssistantError } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
   createAgentSession,
@@ -383,6 +384,8 @@ interface ManagedSession {
   lastRetryError?: string;
   /** 无人值守开关翻转后待告知模型的一条提示（只追加，不重开会话） */
   unattendedNote?: string;
+  /** 本轮 pi 已做过回合内自动重试；轮次收口时清掉 */
+  turnRetried?: boolean;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
   /** 当前用户轮已做过一次空回复自动续跑 */
@@ -2191,6 +2194,7 @@ export class SessionSupervisor {
         if (retrying) {
           this.failTurn(managed, managed.lastRetryError ?? 'Auto-retry cancelled.');
         } else {
+          managed.turnRetried = false;
           managed.status = 'idle';
           this.emitStatus(managed);
         }
@@ -4227,6 +4231,7 @@ export class SessionSupervisor {
       }
       case 'auto_retry_start':
         managed.lastRetryError = event.errorMessage || 'Unknown error';
+        managed.turnRetried = true;
         this.options.emit({
           type: 'turn-retry',
           identity: managed.identity,
@@ -4410,7 +4415,14 @@ export class SessionSupervisor {
           return;
         }
         if (lastAssistant?.stopReason === 'error') {
-          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.');
+          // pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx）：标给 Main 做外层自动重试
+          const exhausted =
+            managed.turnRetried === true &&
+            isRetryableAssistantError({
+              stopReason: 'error',
+              errorMessage: lastAssistant.errorMessage,
+            } as AssistantMessage);
+          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', false, exhausted);
           return;
         }
         if (this.tryRefusalRetry(managed, lastAssistant)) return;
@@ -4427,6 +4439,7 @@ export class SessionSupervisor {
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
+    managed.turnRetried = false;
     // 预算只管一次 Run：收口即清零，之后用户自己发起的回合不计数
     managed.requestBudget?.disarm();
     managed.status = 'idle';
@@ -4848,9 +4861,15 @@ export class SessionSupervisor {
     }
   }
 
-  private failTurn(managed: ManagedSession, error: string, undelivered = false): void {
+  private failTurn(
+    managed: ManagedSession,
+    error: string,
+    undelivered = false,
+    retryExhausted = false
+  ): void {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
+    managed.turnRetried = false;
     managed.settlePending = false;
     managed.requestBudget?.disarm();
     managed.contextUsage.setPendingSnapshot(undefined);
@@ -4880,6 +4899,7 @@ export class SessionSupervisor {
       turnId,
       error,
       ...(undelivered ? { undelivered: true } : {}),
+      ...(retryExhausted ? { retryExhausted: true } : {}),
     });
     this.flushPendingReminders(managed);
   }

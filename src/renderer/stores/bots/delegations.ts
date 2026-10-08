@@ -1,4 +1,10 @@
-import type { BotChat, Delegation, DelegationState, DelegationTrigger } from '@shared/types/bot';
+import type {
+  BotChat,
+  Delegation,
+  DelegationRetryBy,
+  DelegationState,
+  DelegationTrigger,
+} from '@shared/types/bot';
 import { type SessionOwner, sessionOwners } from './selectors';
 
 export const isActiveDelegation = (state: DelegationState) =>
@@ -26,12 +32,17 @@ export function pendingOwners(
   return { ...sessionOwners(chats), ...delegationOwners(delegations) };
 }
 
+/** 排队 / 进行中，或失败后正在等自动重试（Main 视同未结束：不回传、不唤醒委派人） */
 export function activeDelegations(
   delegations: readonly Delegation[],
   chatId: string
 ): Delegation[] {
   return delegations
-    .filter((item) => item.chatId === chatId && isActiveDelegation(item.state))
+    .filter(
+      (item) =>
+        item.chatId === chatId &&
+        (isActiveDelegation(item.state) || isAwaitingAutoRetry(item, delegations))
+    )
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
@@ -81,6 +92,34 @@ export function delegationRunMarks(
 /** 已有委派以 retryOf 指向它（Main 也据此拒绝再次重试） */
 export function isRetried(item: Delegation, delegations: readonly Delegation[]): boolean {
   return delegations.some((other) => other.retryOf === item.id);
+}
+
+/** 失败后已排定自动重试、接替记录还没出现：显示「将自动重试」，不是最终失败（与 Main pendingAutoRetry 同一判定） */
+export function isAwaitingAutoRetry(item: Delegation, delegations: readonly Delegation[]): boolean {
+  return item.state === 'failed' && item.autoRetryAt !== undefined && !isRetried(item, delegations);
+}
+
+/** 由自动重试发起的接替记录，仍在排队 / 进行 */
+export function isAutoRetrying(item: Delegation): boolean {
+  return Boolean(item.retryOf) && item.retryBy === 'auto' && isActiveDelegation(item.state);
+}
+
+/** 第几次重试：沿 retryOf 往上数（原始委派为 0）；上游已不在列表里按已知部分计，成环即停 */
+export function retryAttempt(item: Delegation, delegations: readonly Delegation[]): number {
+  let count = 0;
+  const seen = new Set<string>();
+  for (let current: Delegation | undefined = item; current?.retryOf && !seen.has(current.id); ) {
+    seen.add(current.id);
+    count++;
+    const previous: string = current.retryOf;
+    current = delegations.find((other) => other.id === previous);
+  }
+  return count;
+}
+
+/** 重试来源；非重试记录返回 undefined，旧数据没有 retryBy 视为界面手动重试 */
+export function retrySource(item: Delegation): DelegationRetryBy | undefined {
+  return item.retryOf ? (item.retryBy ?? 'human') : undefined;
 }
 
 /** 失败的从断点重试；手动取消的由用户在「继续」「重新开始」之间选 */

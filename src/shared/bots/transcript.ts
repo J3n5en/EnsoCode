@@ -135,9 +135,13 @@ export function buildGroupStateBlock(input: {
   return `${open}${body}${close}`;
 }
 
-function message(attrs: { from: string; role?: string; seq: number }, body: string): string {
+function message(
+  attrs: { from: string; role?: string; seq: number; delegation?: string },
+  body: string
+): string {
   const role = attrs.role ? ` role="${escapeXml(attrs.role)}"` : '';
-  return `<group-message from="${escapeXml(attrs.from)}"${role} seq="${attrs.seq}">${escapeXml(body)}</group-message>`;
+  const delegation = attrs.delegation ? ` delegation="${escapeXml(attrs.delegation)}"` : '';
+  return `<group-message from="${escapeXml(attrs.from)}"${role} seq="${attrs.seq}"${delegation}>${escapeXml(body)}</group-message>`;
 }
 
 function render(entry: GroupEntry, find: (id: BotId) => TranscriptMember | undefined): string {
@@ -151,7 +155,12 @@ function render(entry: GroupEntry, find: (id: BotId) => TranscriptMember | undef
     case 'bot': {
       const member = find(entry.botId);
       return message(
-        { from: member?.name ?? TRANSCRIPT_LABELS.deleted, role: member?.title, seq: entry.seq },
+        {
+          from: member?.name ?? TRANSCRIPT_LABELS.deleted,
+          role: member?.title,
+          seq: entry.seq,
+          ...(entry.delegationId ? { delegation: entry.delegationId } : {}),
+        },
         entry.text
       );
     }
@@ -194,7 +203,7 @@ function intro(
 }
 
 /**
- * 成员轮到发言时的群聊增量：cursor 之后、非本人的条目，超出 limit 只留最后 limit 条。
+ * 成员轮到发言时的群聊增量：cursor 之后、非本人发言的条目（本人交付的委派结果照常给；hiddenFrom 指向本人的不给），超出 limit 只留最后 limit 条。
  * 返回的 cursor 推进到这批的最大 seq（包括本人的条目）；首次（cursor=0）附群简介。
  */
 export function buildGroupDelta(input: {
@@ -206,6 +215,8 @@ export function buildGroupDelta(input: {
   limit?: number;
   /** 读取下限（群「新对话」分隔线 seq）：之前的条目不进上下文 */
   floor?: number;
+  /** 已随本次投递开头的 <delegation-result> 给过全文的委派：其结果条目不再重复（cursor 照常推进） */
+  hideDelegationIds?: readonly string[];
 }): { text: string; cursor: number } {
   const { botId, chatTitle } = input;
   const cursor = Number.isSafeInteger(input.cursor) && input.cursor > 0 ? input.cursor : 0;
@@ -226,7 +237,15 @@ export function buildGroupDelta(input: {
     .filter((e) => e && typeof e === 'object' && Number.isSafeInteger(e.seq) && e.seq > after)
     .sort((a, b) => a.seq - b.seq);
   const nextCursor = fresh.at(-1)?.seq ?? after;
-  const visible = fresh.filter((e) => !(e.kind === 'bot' && e.botId === botId));
+  const hidden = new Set(Array.isArray(input.hideDelegationIds) ? input.hideDelegationIds : []);
+  const visible = fresh.filter(
+    (e) =>
+      !(
+        e.kind === 'bot' &&
+        (e.hiddenFrom === botId ||
+          (e.delegationId ? hidden.has(e.delegationId) : e.botId === botId))
+      )
+  );
   if (visible.length === 0) return { text: '', cursor: nextCursor };
   const omitted = Math.max(0, visible.length - limit);
   const lines = [

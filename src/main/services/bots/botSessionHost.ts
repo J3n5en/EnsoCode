@@ -189,6 +189,8 @@ export interface BotTurnFinished {
   estimated?: true;
   /** 最后一条 assistant 消息的模型 id */
   model?: string;
+  /** 失败是 pi 回合内自动重试用尽后的瞬态错误（网络 / 限流 / 5xx）；委派据此做外层自动重试 */
+  transient?: true;
 }
 
 interface Delivery extends BotDeliverOptions {
@@ -1223,7 +1225,17 @@ export class BotSessionHost {
       case 'turn-failed':
         if (!this.turnActive(id)) return;
         this.running.delete(id);
-        this.finish(id, event.turnId, false, event.error, this.lastAssistant.get(id)?.text ?? '');
+        this.finish(
+          id,
+          event.turnId,
+          false,
+          event.error,
+          this.lastAssistant.get(id)?.text ?? '',
+          undefined,
+          false,
+          false,
+          event.retryExhausted === true
+        );
         this.lastAssistant.delete(id);
         this.release(id);
         return;
@@ -2045,7 +2057,8 @@ export class BotSessionHost {
     text = '',
     deliveryId: string | null | undefined = this.activeDeliveries.get(conversationId),
     stopped = false,
-    estimated = false
+    estimated = false,
+    transient = false
   ): void {
     const binding = this.binding(conversationId);
     if (!binding) return;
@@ -2065,6 +2078,7 @@ export class BotSessionHost {
       ...(stopped ? { stopped: true as const } : {}),
       ...(estimated ? { estimated: true as const } : {}),
       ...(model ? { model } : {}),
+      ...(transient ? { transient: true as const } : {}),
     };
     if (deliveryId === this.activeDeliveries.get(conversationId))
       this.activeDeliveries.delete(conversationId);

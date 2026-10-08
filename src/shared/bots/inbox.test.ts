@@ -47,6 +47,8 @@ describe('delegationInboxItems', () => {
       delegationInboxItems([interrupted, record({ id: 'r', retryOf: 'd1', state: 'failed' })])
     ).toEqual([]);
     expect(delegationInboxItems([{ ...interrupted, chatId: null }])).toEqual([]);
+    // 等待自动重试期间不提示，放弃自动重试后（autoRetryAt 被清掉）才提示
+    expect(delegationInboxItems([{ ...interrupted, autoRetryAt: 60 }])).toEqual([]);
   });
 });
 

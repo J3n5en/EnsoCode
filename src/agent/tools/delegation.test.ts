@@ -1,3 +1,4 @@
+import { type ToolCall, validateToolArguments } from '@earendil-works/pi-ai';
 import { expect, it } from 'vitest';
 import { createDelegationTools, normalizeDelegationParams } from './delegation';
 import { MemoryInvoker } from './memory';
@@ -44,7 +45,11 @@ it('normalizes optional nulls and boolean text before full typed schema validati
   const tools = createDelegationTools(
     new MemoryInvoker({ sessionId: 's', generation: 'g' }, () => {})
   );
-  expect(tools.map((tool) => tool.name)).toEqual(['delegate', 'check_delegation']);
+  expect(tools.map((tool) => tool.name)).toEqual([
+    'delegate',
+    'check_delegation',
+    'retry_delegation',
+  ]);
   expect(Object.keys((tools[0].parameters as { properties: object }).properties)).toEqual([
     'to',
     'task',
@@ -100,4 +105,66 @@ it('report_blocked 只挂在看板任务的委派会话，schema 带完整类型
   });
   expect(tool.description).toContain('does not count as blocked');
   expect(normalizeDelegationParams({ need: 'x', waitFor: null })).toEqual({ need: 'x' });
+});
+
+it('retry_delegation：完整类型的 schema，只要求 id；归一化在 schema 校验之前', () => {
+  const tools = createDelegationTools(
+    new MemoryInvoker({ sessionId: 's', generation: 'g' }, () => {})
+  );
+  const retry = tools.find((tool) => tool.name === 'retry_delegation')!;
+  const schema = retry.parameters as unknown as {
+    properties: Record<string, { type: string; maxLength?: number }>;
+    required: string[];
+    additionalProperties: boolean;
+  };
+  expect(Object.keys(schema.properties)).toEqual(['id', 'note']);
+  expect(schema.properties.id.type).toBe('string');
+  expect(schema.properties.note).toMatchObject({ type: 'string', maxLength: 2000 });
+  expect(schema.required).toEqual(['id']);
+  expect(schema.additionalProperties).toBe(false);
+  expect(retry.description).toMatch(/original child session/);
+  expect(retry.description).toMatch(/3/);
+  expect(normalizeDelegationParams({ id: 'd1', note: null })).toEqual({ id: 'd1' });
+  expect(normalizeDelegationParams({ id: 'd1', note: '   ' })).toEqual({ id: 'd1' });
+  expect(normalizeDelegationParams({ id: 'd1', note: ' 先读 README ' })).toEqual({
+    id: 'd1',
+    note: '先读 README',
+  });
+});
+
+it('群聊里的 delegate 说明：讨论在群里接力，委派只用于耗时长的执行任务', () => {
+  const [group] = createDelegationTools(
+    new MemoryInvoker({ sessionId: 's', generation: 'g' }, () => {}),
+    { groupTasks: true }
+  );
+  expect(group.description).toMatch(/long-running execution/);
+  const [direct] = createDelegationTools(
+    new MemoryInvoker({ sessionId: 's', generation: 'g' }, () => {})
+  );
+  expect(direct.description).not.toMatch(/long-running execution/);
+});
+
+it('retry_delegation 使用实际 schema 校验归一化后的参数，并拒绝错误类型和超长说明', () => {
+  const retry = createDelegationTools(
+    new MemoryInvoker({ sessionId: 's', generation: 'g' }, () => {})
+  ).find((tool) => tool.name === 'retry_delegation')!;
+  const validate = (args: ToolCall['arguments']) =>
+    validateToolArguments(retry, {
+      type: 'toolCall',
+      id: 'call-1',
+      name: retry.name,
+      arguments: retry.prepareArguments!(args) as ToolCall['arguments'],
+    });
+  expect(validate({ id: 'd1', note: null })).toEqual({ id: 'd1' });
+  expect(validate({ id: 'd1', note: '   ' })).toEqual({ id: 'd1' });
+  expect(validate({ id: 'd1', note: ' 继续验证 ' })).toEqual({ id: 'd1', note: '继续验证' });
+  // pi 的真实校验器会将标量转换成 schema 类型；断言转换结果，而不是误报成校验绕过。
+  expect(validate({ id: 'd1', note: 1 })).toEqual({ id: 'd1', note: '1' });
+  const invalid: ToolCall['arguments'][] = [
+    {},
+    { id: [] },
+    { id: 'd1', note: {} },
+    { id: 'd1', note: 'x'.repeat(2001) },
+  ];
+  for (const args of invalid) expect(() => validate(args)).toThrow();
 });

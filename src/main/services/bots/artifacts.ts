@@ -28,6 +28,23 @@ register(
   'txt log csv tsv json jsonl yaml yml toml xml ini conf ts tsx js jsx mjs cjs py rb go rs java kt swift c h cpp hpp cs php sh bash zsh sql css scss less vue svelte lua dart diff patch'
 );
 
+/**
+ * 群条目对应的会话是否属于该群：成员本群会话；或委派结果条目——子会话正是该群发起的那条委派的子会话
+ * （子会话本身 chatId 为 null，归属以委派记录为准）。
+ */
+export function entrySessionInChat(
+  binding: { chatId: string | null; delegationId?: string } | undefined,
+  chatId: string,
+  entry: { conversationId: string; delegationId?: string },
+  delegation: (id: string) => { chatId: string | null; childConversationId: string } | undefined
+): boolean {
+  if (!binding) return false;
+  if (binding.chatId === chatId) return true;
+  if (!entry.delegationId) return false;
+  const record = delegation(entry.delegationId);
+  return record?.chatId === chatId && record.childConversationId === entry.conversationId;
+}
+
 export function artifactKind(name: string): BotArtifactKind {
   const ext = path.extname(name).slice(1).toLowerCase();
   return KINDS[ext] ?? 'other';

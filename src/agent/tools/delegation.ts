@@ -5,6 +5,7 @@ import type { MemoryInvoker } from './memory';
 export type DelegationOp =
   | 'delegate'
   | 'check_delegation'
+  | 'retry_delegation'
   | 'group_tasks'
   | 'group_history'
   | 'routine_propose'
@@ -14,8 +15,22 @@ export type DelegationOp =
 export function normalizeDelegationParams(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const params = { ...raw } as Record<string, unknown>;
-  for (const key of ['id', 'context', 'cancel', 'taskId', 'deadlineMinutes', 'keep', 'waitFor'])
+  for (const key of [
+    'id',
+    'context',
+    'cancel',
+    'taskId',
+    'deadlineMinutes',
+    'keep',
+    'waitFor',
+    'note',
+  ])
     if (params[key] === null) delete params[key];
+  if (typeof params.note === 'string') {
+    const note = params.note.trim();
+    if (note) params.note = note;
+    else delete params.note;
+  }
   for (const key of ['cancel', 'keep']) {
     if (params[key] === 'true') params[key] = true;
     if (params[key] === 'false') params[key] = false;
@@ -83,7 +98,8 @@ export function createDelegationTools(
       "Delegate a task to another member by name or id. Returns immediately; results arrive asynchronously. Context is truncated to 8000 characters. The delegation fails with a timeout after deadlineMinutes (capped by the member's own limit, 240 minutes by default). If the user stops or interrupts your current turn, delegations started in it are canceled unless keep is true." +
         " With check, the delegation passes only if one of the member's final tool outputs contains check.text; otherwise it ends as failed with 'acceptance check failed'." +
         (options.groupTasks
-          ? ' Pass taskId (e.g. "#3") to hand a group board task to the member: the task becomes doing with them as assignee; when the delegation succeeds it goes to review (done directly only if the member created the task) for the task creator or a human to accept or reject with group_tasks; on cancel it returns to todo.' +
+          ? ' In a group chat, handle discussion openly in the group with @mentions; delegate only long-running execution tasks that need a separate session.' +
+            ' Pass taskId (e.g. "#3") to hand a group board task to the member: the task becomes doing with them as assignee; when the delegation succeeds it goes to review (done directly only if the member created the task) for the task creator or a human to accept or reject with group_tasks; on cancel it returns to todo.' +
             ' If the run fails (error, timeout, interrupted, denied or check failed) the task becomes blocked (run failed) with the same assignee: delegate the same taskId to them again to retry, or to another member to hand it over.' +
             ' If the member reports they are blocked, the result has status="blocked" and says what they need; the task becomes blocked. Answer by delegating the same taskId to them again with the answer (they continue in the same session); if you are not sure of the answer, ask the human in the group instead of guessing. After 3 blocked reports in a row from the same member on a task, only a human can answer it (on the task card).' +
             ' The same member keeps one session per task: delegating a taskId they worked on before (retry, or adding to a task awaiting review) continues that session, so send only what is new; another member starts fresh with a summary of the earlier runs.' +
@@ -120,5 +136,14 @@ export function createDelegationTools(
           ),
         ]
       : []),
+    define(
+      'retry_delegation',
+      'Retry one of your own failed or canceled delegations after its final failure was reported to you. It resumes on the original child session from where it stopped (the member keeps its context); pass note to add instructions for this attempt. Only if that session cannot be resumed does it start the task over in a new session (the note is included). You can retry the same delegation chain at most 3 times; after that, delegate to another member, skip it, or end the work explicitly. Returns the new delegationId and retriesLeft; the result arrives later like any delegation.',
+      {
+        id: { type: 'string', minLength: 1 },
+        note: { type: 'string', minLength: 1, maxLength: 2000 },
+      },
+      ['id']
+    ),
   ];
 }

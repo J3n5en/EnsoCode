@@ -103,6 +103,17 @@ describe('chatDelegationGroups', () => {
     expect(groups.completed.map((d) => d.id)).toEqual(['c2', 'c1']);
     expect(groups.failed.map((d) => d.id)).toEqual(['x1', 'f1']);
   });
+
+  it('等待自动重试的失败记录归进行中，不进失败组；接替出现后回到失败组', () => {
+    const waiting = delegation('w1', 'failed', 2, { finishedAt: 4, autoRetryAt: 9 });
+    const groups = chatDelegationGroups([delegation('r1', 'running', 3), waiting], 'g');
+    expect(groups.active.map((d) => d.id)).toEqual(['w1', 'r1']);
+    expect(groups.failed).toEqual([]);
+    const next = delegation('w2', 'running', 10, { retryOf: 'w1', retryBy: 'auto' });
+    const after = chatDelegationGroups([waiting, next], 'g');
+    expect(after.active.map((d) => d.id)).toEqual(['w2']);
+    expect(after.failed.map((d) => d.id)).toEqual(['w1']);
+  });
 });
 
 describe('taskRunRows', () => {

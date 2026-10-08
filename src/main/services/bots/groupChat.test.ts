@@ -2,11 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DiscussNextDecision, DiscussNextInput } from '../../../shared/bots/discussRoute';
 import type { SmartRouteDecision, SmartRouteInput } from '../../../shared/bots/smartRoute';
 import type { BotTurnFinished } from './botSessionHost';
 import { BotStore } from './botStore';
 import { BotChatStore } from './chatStore';
 import { GroupChatService } from './groupChat';
+import { createSmartRouter } from './smartRouter';
 
 let root: string;
 let bots: BotStore;
@@ -778,6 +780,9 @@ describe('smart routing', () => {
   };
   const select =
     vi.fn<(input: SmartRouteInput, signal: AbortSignal) => Promise<SmartRouteDecision>>();
+  const next = vi.fn<
+    (input: DiscussNextInput, signal: AbortSignal) => Promise<DiscussNextDecision>
+  >(async () => ({ end: true }));
   let timeoutMs = 1000;
   const useResponder = () => {
     group.dispose();
@@ -786,11 +791,12 @@ describe('smart routing', () => {
       chats,
       host,
       emit,
-      responder: { timeoutMs: () => timeoutMs, select },
+      responder: { timeoutMs: () => timeoutMs, select, next },
     });
   };
   beforeEach(() => {
     select.mockReset();
+    next.mockReset().mockResolvedValue({ end: true });
     timeoutMs = 1000;
     useResponder();
   });
@@ -1461,4 +1467,505 @@ it('a member reply run on its own (delegation result, routine) also catches up o
   expect(text).not.toContain('#5 is done');
   expect(chats.get(id)!.sessions[a].cursor).toBeGreaterThan(cursor);
   expect(chats.get(id)!.sessions[a].cursor).toBe(chats.lastSeq(id));
+});
+
+describe('讨论模式', () => {
+  let c: string;
+  const select =
+    vi.fn<(input: SmartRouteInput, signal: AbortSignal) => Promise<SmartRouteDecision>>();
+  const next =
+    vi.fn<(input: DiscussNextInput, signal: AbortSignal) => Promise<DiscussNextDecision>>();
+  const settledBatch = vi.fn();
+  let delegated: string[] = [];
+  let timeoutMs = 1000;
+  const to = () => deliver.mock.calls.map((call) => call[1]);
+  const systems = () =>
+    entries()
+      .filter((e) => e.kind === 'system')
+      .map((e) => e.text);
+  const make = () => {
+    group.dispose();
+    group = new GroupChatService({
+      bots,
+      chats,
+      host,
+      emit,
+      onBatchSettled: settledBatch,
+      delegatedTargets: () => delegated,
+      responder: { timeoutMs: () => timeoutMs, select, next },
+    });
+  };
+  const finishTurn = async (botId: string, text: string, ok = true) => {
+    finish({
+      chatId: id,
+      botId,
+      conversationId: botId,
+      turnId: String(entries().length),
+      turnKey: `k-${entries().length}`,
+      text,
+      ok,
+      ...(ok ? {} : { error: 'broken' }),
+    });
+    await group.settled(id);
+  };
+  const deferredNext = () => {
+    let resolve!: (value: DiscussNextDecision) => void;
+    const promise = new Promise<DiscussNextDecision>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  };
+  beforeEach(() => {
+    const carol = bots.create({ name: 'Carol' }, []);
+    if (!carol.ok) throw new Error('fixture');
+    c = carol.bot.id;
+    chats.update(id, (chat) => ({ ...chat, members: [a, b, c] }));
+    select.mockReset();
+    next.mockReset().mockResolvedValue({ end: true });
+    settledBatch.mockReset();
+    delegated = [];
+    timeoutMs = 1000;
+    make();
+  });
+
+  it('discuss：首轮说完由判断选下一位（附讨论 note、标 smart:discuss），END 时安静结束', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论下方案');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    expect(deliver.mock.calls[0][2]).toContain('在本回合内直接完成，不要委派');
+    next.mockResolvedValueOnce({ next: c });
+    await finishTurn(b, '我建议先做 A');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(to()).toEqual([b, c]);
+    const judged = next.mock.calls[0][0];
+    expect(judged.candidates.map((m) => m.id)).toEqual([a, c]);
+    expect(judged.topic).toBe('讨论下方案');
+    expect(judged.lastSpeaker).toBe('Bob');
+    expect(deliver.mock.calls[1][2]).toContain('我建议先做 A');
+    expect(deliver.mock.calls[1][2]).toContain('没有新内容就回 [skip]');
+    expect(group.state(id)).toMatchObject({ current: c, hops: 1 });
+    await finishTurn(c, '同意');
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(group.state(id)).toMatchObject({ routing: false }));
+    expect(next.mock.calls[1][0].candidates.map((m) => m.id)).toEqual([a, b]);
+    expect(entries().filter((e) => e.kind === 'bot')).toMatchObject([
+      { botId: b, routedBy: 'smart:discuss' },
+      { botId: c, routedBy: 'smart:discuss' },
+    ]);
+    expect(systems()).toEqual([]);
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+    expect(settledBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('判断期间 routing 为 true，批次不提前结算，例行任务等讨论结束才跑', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论下方案');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    expect(group.state(id)).toMatchObject({ routing: true, current: null });
+    expect(settledBatch).not.toHaveBeenCalled();
+    const job = group.runAs(id, a, 'routine', '日报');
+    await group.settled(id);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    pending.resolve({ end: true });
+    await job;
+    await group.settled(id);
+    expect(to()).toEqual([b, a]);
+    expect(deliver.mock.calls[1][2]).toContain('routine');
+  });
+
+  it('判断超时、失败、无法识别：结束并在群里提示，不交给群主', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    timeoutMs = 20;
+    make();
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, 'q1');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    next.mockImplementationOnce(() => new Promise(() => {}));
+    await finishTurn(b, 'x');
+    await vi.waitFor(() => expect(systems()).toContain('讨论判断不可用（判断超时），讨论结束'));
+    expect(to()).toEqual([b]);
+    timeoutMs = 1000;
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, 'q2');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    next.mockResolvedValueOnce({ failure: '判断结果无法识别' });
+    await finishTurn(b, 'y');
+    await vi.waitFor(() =>
+      expect(systems()).toContain('讨论判断不可用（判断结果无法识别），讨论结束')
+    );
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, 'q3');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(3));
+    next.mockRejectedValueOnce(new Error('模型 x：鉴权失败'));
+    await finishTurn(b, 'z');
+    await vi.waitFor(() =>
+      expect(systems()).toContain('讨论判断不可用（模型 x：鉴权失败），讨论结束')
+    );
+    expect(to()).toEqual([b, b, b]);
+    warn.mockRestore();
+  });
+
+  it('到 hops 上限时直接结束并提示一次，不再调用判断', async () => {
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, maxHops: 1 } }));
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    next.mockResolvedValueOnce({ next: c });
+    await finishTurn(b, 'x');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    await finishTurn(c, 'y');
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(systems()).toEqual(['本轮讨论已达接力上限（1 次），讨论结束。']);
+  });
+
+  it.each(['judge', 'pi-classifier'] as const)(
+    '%s 后端不响应：群层超时取消请求，晚到结果不能再开启下一位',
+    async (source) => {
+      let complete!: (value: never) => void;
+      const pending = new Promise<never>((resolve) => {
+        complete = resolve;
+      });
+      const judge = vi.fn(() => pending);
+      const classify = vi.fn(() => pending);
+      const responder = createSmartRouter({
+        settings: () => ({
+          botRouteClassifier: {
+            source,
+            model: { providerId: 'p', modelId: 'm' },
+            timeoutMs: 20,
+          },
+        }),
+        judge,
+        classify,
+      });
+      group.dispose();
+      group = new GroupChatService({ bots, chats, host, emit, responder });
+      // 显式全员绕过初始选人，只测真实 next 后端的超时与取消。
+      await group.send(id, '@所有人 讨论方案');
+      await finishTurn(a, 'A');
+      await finishTurn(b, 'B');
+      await finishTurn(c, 'C');
+      await vi.waitFor(() => expect(systems()).toContain('讨论判断不可用（判断超时），讨论结束'));
+      const backend = source === 'judge' ? judge : classify;
+      expect(backend).toHaveBeenCalledTimes(1);
+      const call = backend.mock.calls[0] as unknown as unknown[];
+      expect((call.at(-1) as AbortSignal).aborted).toBe(true);
+      complete((source === 'judge' ? 'NEXT: Alice' : { [a]: 1 }) as never);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await group.settled(id);
+      expect(to()).toEqual([a, b, c]);
+      expect(group.state(id)).toMatchObject({ current: null, routing: false });
+      group.dispose();
+    }
+  );
+
+  it('回复里的 @ 优先，不判断', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await finishTurn(b, '@Carol 你怎么看');
+    expect(to()).toEqual([b, c]);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('讨论中本回合发起了委派：讨论就此结束，不判断', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    delegated = [c];
+    await finishTurn(b, '我让 Carol 去查一下');
+    expect(next).not.toHaveBeenCalled();
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+    expect(systems()).toEqual([]);
+  });
+
+  it('讨论中全员 [skip]：直接结束，不交给群主兜底', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await finishTurn(b, '[skip]');
+    await finishTurn(c, '[skip]');
+    expect(to()).toEqual([b, c]);
+    expect(next).not.toHaveBeenCalled();
+    expect(systems()).toEqual(['「Bob」「Carol」已跳过，本轮无人回复。']);
+  });
+
+  it('讨论中首位发起委派后立即结束，不继续投递原有候选队列', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    delegated = [a];
+    await finishTurn(b, '已委派 Alice 查证');
+    expect(to()).toEqual([b]);
+    expect(next).not.toHaveBeenCalled();
+    expect(group.state(id)).toMatchObject({ current: null, queue: [], routing: false });
+  });
+
+  it('成员失败只当没开口，讨论继续由判断决定', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    next.mockResolvedValueOnce({ next: a });
+    await finishTurn(b, '', false);
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(to()).toEqual([b, a]);
+  });
+
+  it('answer / build 不进入讨论', async () => {
+    for (const intent of ['answer', 'build'] as const) {
+      select.mockResolvedValueOnce({ ids: [b], intent });
+      await group.send(id, `q-${intent}`);
+      await vi.waitFor(() => expect(to().at(-1)).toBe(b));
+      await finishTurn(b, 'done');
+    }
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('smart 模式 @所有人 与「大家」进入讨论；boss 模式 @所有人 不判断', async () => {
+    await group.send(id, '@所有人 说说看法');
+    await finishTurn(a, 'a');
+    await finishTurn(b, 'b');
+    await finishTurn(c, 'c');
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+    await group.settled(id);
+    select.mockResolvedValueOnce({ ids: [a, b, c], everyone: true });
+    await group.send(id, '大家说说');
+    await vi.waitFor(() => expect(to().length).toBe(4));
+    await finishTurn(a, 'a2');
+    await finishTurn(b, 'b2');
+    await finishTurn(c, 'c2');
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2));
+    await group.settled(id);
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, mode: 'boss' } }));
+    await group.send(id, '@所有人 再说一次');
+    await finishTurn(a, 'a3');
+    await finishTurn(b, 'b3');
+    await finishTurn(c, 'c3');
+    expect(next).toHaveBeenCalledTimes(2);
+  });
+
+  it('判断进行中来了人类消息：取消判断，按新消息重开一轮', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, 'x');
+    select.mockResolvedValueOnce({ ids: [c], intent: 'answer' });
+    await group.send(id, '先回答我一个问题');
+    expect(next.mock.calls[0][1].aborted).toBe(true);
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(select.mock.calls[1][0].message).toBe('先回答我一个问题');
+    pending.resolve({ next: a });
+    await group.settled(id);
+    expect(to()).toEqual([b, c]);
+    expect(group.state(id)).toMatchObject({ current: c, hops: 0 });
+  });
+
+  it('Grok 式重开：有人正在说话时来了没 @ 的消息，等他说完放弃剩下的讨论，按新消息重开', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await group.send(id, '换个话题：午饭吃什么');
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(group.state(id)).toMatchObject({ current: b, pendingHuman: true });
+    select.mockResolvedValueOnce({ ids: [a], intent: 'answer' });
+    await finishTurn(b, '我说完了');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(select.mock.calls[1][0].message).toBe('换个话题：午饭吃什么');
+    expect(to()).toEqual([b, a]);
+    expect(next).not.toHaveBeenCalled();
+    expect(group.state(id)).toMatchObject({
+      current: a,
+      queue: [],
+      hops: 0,
+      turnsByBot: { [a]: 1 },
+    });
+  });
+
+  it('停止取消进行中的判断', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, 'x');
+    expect(await group.stop(id)).toEqual({ ok: true });
+    expect(next.mock.calls[0][1].aborted).toBe(true);
+    pending.resolve({ next: a });
+    await group.settled(id);
+    expect(to()).toEqual([b]);
+    expect(group.state(id)).toMatchObject({ routing: false });
+  });
+
+  it('dispose 取消讨论判断，迟到结果不能重新投递或写时间线', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    const before = entries();
+    group.dispose();
+    expect(next.mock.calls[0][1].aborted).toBe(true);
+    pending.resolve({ next: c });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await group.settled(id);
+    expect(to()).toEqual([b]);
+    expect(entries()).toEqual(before);
+  });
+
+  it('讨论成员委派后回 skip 也必须结束，不能重新交给群主兜底', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    delegated = [c];
+    await finishTurn(b, '[skip]');
+    expect(to()).toEqual([b]);
+    expect(group.state(id)).toMatchObject({ current: null, queue: [], routing: false });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('讨论期间并行发言者发起委派也要结束讨论，不再投递剩余候选', async () => {
+    select.mockResolvedValueOnce({ ids: [b, a], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await group.send(id, '@Carol 帮忙查一下');
+    const deliveryId = deliver.mock.calls[1][3].deliveryId;
+    delegated = [a];
+    finish({
+      chatId: id,
+      botId: c,
+      conversationId: c,
+      deliveryId,
+      turnId: 'parallel-delegate',
+      turnKey: 'parallel-key',
+      text: '已委派查证',
+      ok: true,
+    });
+    await group.settled(id);
+    delegated = [];
+    await finishTurn(b, '当前发言结束');
+    expect(to()).toEqual([b, c]);
+    expect(group.state(id)).toMatchObject({ current: null, queue: [], routing: false });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('判断期间其他成员全部不可用：结束并提示没人可选', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [c] } }));
+    bots.setArchived(a, true);
+    pending.resolve({ next: c });
+    await vi.waitFor(() => expect(group.state(id)).toMatchObject({ routing: false }));
+    expect(to()).toEqual([b]);
+    expect(systems()).toContain('没有其他可接话的成员，讨论结束。');
+  });
+
+  it('判断期间选中的人被静音但还有别人可选：按当前名单重新判断，不静默结束', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    expect(next.mock.calls[0][0].candidates.map((m) => m.id)).toEqual([a, c]);
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [c] } }));
+    next.mockResolvedValueOnce({ next: a });
+    pending.resolve({ next: c });
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(next.mock.calls[1][0].candidates.map((m) => m.id)).toEqual([a]);
+    expect(to()).toEqual([b, a]);
+    expect(group.state(id)).toMatchObject({ current: a, hops: 1 });
+  });
+
+  it('判断返回名单外的成员：按判断结果无法识别结束并提示', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    next.mockResolvedValueOnce({ next: 'ghost' });
+    await finishTurn(b, '观点');
+    await vi.waitFor(() =>
+      expect(systems()).toContain('讨论判断不可用（判断结果无法识别），讨论结束')
+    );
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(to()).toEqual([b]);
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+  });
+
+  it('判断返回本次名单外、但等待期间变为可选的成员：仍按无法识别结束，不投递', async () => {
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [c] } }));
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    expect(next.mock.calls[0][0].candidates.map((m) => m.id)).toEqual([a]);
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [] } }));
+    pending.resolve({ next: c });
+    await vi.waitFor(() => expect(group.state(id)).toMatchObject({ routing: false }));
+    expect(to()).toEqual([b]);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(systems()).toContain('讨论判断不可用（判断结果无法识别），讨论结束');
+    expect(group.state(id)).toMatchObject({ current: null });
+  });
+
+  it('找不到开场的人类消息：不调用判断，提示后结束', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    // 模拟时间线损坏 / 被外部截断：读出的时间线里没有开场消息
+    const readAfter = chats.readAfter.bind(chats);
+    const spy = vi
+      .spyOn(chats, 'readAfter')
+      .mockImplementation((chatId, afterSeq) =>
+        readAfter(chatId, afterSeq).filter((entry) => entry.kind !== 'human')
+      );
+    await finishTurn(b, '观点');
+    spy.mockRestore();
+    expect(next).not.toHaveBeenCalled();
+    expect(to()).toEqual([b]);
+    expect(systems()).toContain('讨论判断不可用（找不到开场消息），讨论结束');
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+  });
+
+  it('判断期间并行成员发起委派：取消判断，迟到结果不再开启下一位', async () => {
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await group.send(id, '@Carol 帮忙查一下');
+    const deliveryId = deliver.mock.calls[1][3].deliveryId;
+    const pending = deferredNext();
+    next.mockReturnValueOnce(pending.promise);
+    await finishTurn(b, '观点');
+    expect(group.state(id)).toMatchObject({ routing: true });
+    delegated = [a];
+    finish({
+      chatId: id,
+      botId: c,
+      conversationId: c,
+      deliveryId,
+      turnId: 'parallel-delegate',
+      turnKey: 'parallel-key',
+      text: '已委派查证',
+      ok: true,
+    });
+    await group.settled(id);
+    expect(next.mock.calls[0][1].aborted).toBe(true);
+    pending.resolve({ next: a });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await group.settled(id);
+    expect(to()).toEqual([b, c]);
+    expect(group.state(id)).toMatchObject({ current: null, queue: [], routing: false });
+  });
 });

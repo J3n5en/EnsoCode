@@ -1933,6 +1933,27 @@ describe('BotSessionHost 私聊回退与重试', () => {
     expect(control.spawns).toHaveLength(1);
   });
 
+  it('turn-failed 的 retryExhausted 透出为 BotTurnFinished.transient', async () => {
+    make();
+    const alice = bot('Alice');
+    const chat = direct(alice.id);
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const sent = await host.deliver(chat.id, alice.id, 'first');
+    if (!sent.ok) throw new Error(sent.error);
+    const id = sent.conversationId;
+    host.observe(ev({ type: 'status', status: 'running' }, id));
+    host.observe(
+      ev({ type: 'turn-failed', turnId: 't1', error: 'socket hang up', retryExhausted: true }, id)
+    );
+    expect(finished.at(-1)).toMatchObject({ ok: false, error: 'socket hang up', transient: true });
+    expect(await host.deliver(chat.id, alice.id, 'second')).toMatchObject({ ok: true });
+    host.observe(ev({ type: 'status', status: 'running' }, id));
+    host.observe(ev({ type: 'turn-failed', turnId: 't2', error: 'boom' }, id));
+    expect(finished.at(-1)).toMatchObject({ ok: false, error: 'boom' });
+    expect(finished.at(-1)).not.toHaveProperty('transient');
+  });
+
   it('重试占用回合：新 turnKey、正常结算并上报完成', async () => {
     make();
     const alice = bot('Alice');

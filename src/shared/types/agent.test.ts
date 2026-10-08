@@ -2377,6 +2377,28 @@ describe('memory-invoke / memory-result', () => {
     expect(parseAgentWorkerEvent({ ...event, op: 'group_secrets' })).toBeNull();
   });
 
+  it('delegation-invoke 接受 retry_delegation；turn-failed 只接受字面 true 的 retryExhausted', () => {
+    const event = {
+      type: 'delegation-invoke',
+      identity: parent,
+      seq: 1,
+      requestId: 'd-2',
+      op: 'retry_delegation',
+      params: { id: 'd1', note: 'again' },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    const failed = {
+      type: 'turn-failed',
+      identity: parent,
+      seq: 2,
+      turnId: 't',
+      error: 'socket hang up',
+      retryExhausted: true,
+    };
+    expect(parseAgentWorkerEvent(failed)).toEqual(failed);
+    expect(parseAgentWorkerEvent({ ...failed, retryExhausted: 'yes' })).toBeNull();
+  });
+
   const invoke = {
     type: 'memory-invoke',
     identity: parent,

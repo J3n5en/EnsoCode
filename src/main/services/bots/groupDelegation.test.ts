@@ -131,17 +131,22 @@ function fixture(
       host,
       store,
       emit: () => {},
+      autoRetryDelayMs: () => 0,
       ...(minuteMs ? { minuteMs } : {}),
       ...(tasks ? { tasks } : {}),
       ...(sessionMessages ? { sessionMessages } : {}),
-      deliverGroupResult: async (record, text, deliveryId) =>
+      deliverGroupResult: async (record, text, deliveryId, batch) =>
         record.chatId &&
         chats.get(record.chatId)?.sessions[record.parentBotId]?.conversationId ===
           record.parentConversationId
-          ? groups.runAs(record.chatId, record.parentBotId, text, undefined, {
-              onlyIfIdle: true,
-              deliveryId,
-            })
+          ? groups.runAs(
+              record.chatId,
+              record.parentBotId,
+              text,
+              undefined,
+              { onlyIfIdle: true, deliveryId },
+              { hideDelegationIds: batch.map((item) => item.id) }
+            )
           : { ok: false, error: 'parent-session-changed' },
     });
     return current;
@@ -179,7 +184,13 @@ function fixture(
     authority.markReady(conversationId, file, { providerId: 'p', modelId: 'm' });
     return file;
   };
-  const fail = (id: string) => observe(id, { type: 'turn-failed', turnId: 'fail', error: 'boom' });
+  // 不带 error：只发一次失败回合（看板用例）；带 error：先置 failed 状态再发失败回合（结果入群用例）
+  const fail = (id: string, error?: string) => {
+    if (error === undefined)
+      return observe(id, { type: 'turn-failed', turnId: 'fail', error: 'boom' });
+    observe(id, { type: 'status', status: 'failed' });
+    observe(id, { type: 'turn-failed', turnId: `turn-${++index}`, error });
+  };
   return {
     authority,
     bots,
@@ -192,6 +203,7 @@ function fixture(
     ids,
     chat,
     chats,
+    store,
     entries,
     prompts,
     host,
@@ -349,21 +361,32 @@ it('still relays to members mentioned but not delegated in that turn', async () 
   f.groups.dispose();
 });
 
-it('delivers a finished-but-undelivered batch once after restart', async () => {
+it('after restart the interrupted one is auto-retried first, then the batch is delivered once', async () => {
   const f = fixture(['吴经理', '小设', '阿全']);
   const { boss, sent, children } = await bossDelegatesBoth(f)();
   f.reply(children[0], '设计稿完成');
   await settle();
   expect(f.to(boss)).toHaveLength(1);
   f.delegations.dispose();
+  f.observe(children[1], { type: 'worker-exited' });
   const restarted = f.makeDelegations();
   await settle();
-  expect(restarted.list().find((r) => r.id === sent[1])).toMatchObject({
+  const interrupted = restarted.list().find((r) => r.id === sent[1]);
+  expect(interrupted).toMatchObject({
     state: 'failed',
     failure: 'interrupted',
   });
+  // 等待 / 进行自动重试期间不唤醒群主
+  const retry = restarted.list().find((r) => r.retryOf === sent[1])!;
+  expect(retry).toMatchObject({ retryBy: 'auto', batchId: interrupted?.batchId });
+  expect(f.to(boss)).toHaveLength(1);
+  f.start(retry.childConversationId);
+  f.reply(retry.childConversationId, '代码完成');
+  await settle();
   expect(f.to(boss)).toHaveLength(2);
   expect(f.to(boss)[1].text).toContain('<delegation-results ');
+  expect(f.to(boss)[1].text).toContain(`<delegation-result id="${retry.id}"`);
+  expect(f.to(boss)[1].text).not.toContain(`<delegation-result id="${sent[1]}"`);
   f.start(boss);
   await settle();
   expect(restarted.list().every((record) => record.deliveredAt !== undefined)).toBe(true);
@@ -1554,5 +1577,328 @@ it('卡住转出的下一次执行：排队的投递都没跑起来就记失败�
     failure: 'error',
   });
   f.delegations.dispose();
+  f.groups.dispose();
+});
+
+it('委派完成：结果以被委派成员身份写进群时间线（幂等、不路由），卡片不再带摘要，发起人不重复看到', async () => {
+  const f = fixture(['吴经理', '小设']);
+  await f.groups.send(f.chat.id, '出一版设计', { deliveryId: 'human-1' });
+  await settle();
+  const boss = f.conversation(f.ids[0]);
+  f.start(boss);
+  const sent = f.delegations.delegate(boss, { to: '小设', task: '设计' });
+  if (!sent.ok) throw new Error(sent.error);
+  await settle();
+  const child = f.child(sent.delegationId);
+  f.start(child);
+  f.reply(boss, '已安排');
+  await settle();
+  f.reply(child, '设计稿完成，见 design.md');
+  await settle();
+  const result = f.entries().find((e) => e.id === `delegation-result:${sent.delegationId}`);
+  expect(result).toMatchObject({
+    kind: 'bot',
+    botId: f.ids[1],
+    conversationId: child,
+    turnId: expect.stringMatching(/^turn-/),
+    delegationId: sent.delegationId,
+    text: '设计稿完成，见 design.md',
+  });
+  const record = f.delegations.list().find((r) => r.id === sent.delegationId)!;
+  expect(record.resultSeq).toBe(result!.seq);
+  expect(record).not.toHaveProperty('pendingResultEntry');
+  // 结果不经群路由：没有新的成员群会话被投递
+  expect(f.chats.get(f.chat.id)?.sessions[f.ids[1]]).toBeUndefined();
+  const lead = f.to(boss).at(-1)!.text;
+  expect(lead.startsWith(`<delegation-result id="${sent.delegationId}"`)).toBe(true);
+  expect(lead).not.toContain(`seq="${result!.seq}"`);
+  f.start(boss);
+  f.reply(boss, '收到');
+  await settle();
+  const card = f.entries().find((e) => e.kind === 'delegation');
+  expect(card).toMatchObject({ delegationId: sent.delegationId, state: 'completed' });
+  expect(card).not.toHaveProperty('summary');
+  expect(f.entries().filter((e) => e.id === `delegation-result:${sent.delegationId}`)).toHaveLength(
+    1
+  );
+  // 被委派者本人的群会话能看到自己交付的结果
+  await f.groups.send(f.chat.id, '@小设 再看下细节', { deliveryId: 'human-2' });
+  await settle();
+  const own = f.to(f.conversation(f.ids[1])).at(-1)!.text;
+  expect(own).toContain(`delegation="${sent.delegationId}"`);
+  expect(own).toContain('设计稿完成，见 design.md');
+  f.delegations.dispose();
+  f.groups.dispose();
+});
+
+it('失败的委派和第二层委派的结果不写进群时间线', async () => {
+  const f = fixture(['吴经理', '小设', '阿全', '阿测']);
+  await f.groups.send(f.chat.id, '开工', { deliveryId: 'human-1' });
+  await settle();
+  const boss = f.conversation(f.ids[0]);
+  f.start(boss);
+  const first = f.delegations.delegate(boss, { to: '小设', task: '设计' });
+  const second = f.delegations.delegate(boss, { to: '阿全', task: '代码' });
+  if (!first.ok || !second.ok) throw new Error('delegate');
+  await settle();
+  const designer = f.child(first.delegationId);
+  const coder = f.child(second.delegationId);
+  f.start(designer);
+  f.start(coder);
+  f.reply(boss, '已安排');
+  await settle();
+  // 第二层：小设的子会话再委派阿测
+  const nested = f.delegations.delegate(designer, { to: '阿测', task: '帮我切图' });
+  if (!nested.ok) throw new Error(nested.error);
+  await settle();
+  const nestedChild = f.child(nested.delegationId);
+  f.start(nestedChild);
+  f.reply(nestedChild, '切好了');
+  await settle();
+  f.fail(coder, 'compile error');
+  await settle();
+  const results = f.entries().filter((e) => e.id.startsWith('delegation-result:'));
+  expect(results).toEqual([]);
+  expect(f.delegations.list().find((r) => r.id === nested.delegationId)).toMatchObject({
+    state: 'completed',
+  });
+  expect(f.delegations.list().find((r) => r.id === nested.delegationId)).not.toHaveProperty(
+    'resultSeq'
+  );
+  expect(f.delegations.list().find((r) => r.id === nested.delegationId)).not.toHaveProperty(
+    'pendingResultEntry'
+  );
+  f.delegations.dispose();
+  f.groups.dispose();
+});
+
+/**
+ * 群主委派小设、小设的子会话已开工；随后服务停掉（模拟崩溃），
+ * 记录按 finish 的样子落盘为 completed + 待入群标记，群条目还没写。
+ */
+async function crashAfterFinish(
+  f: ReturnType<typeof fixture>,
+  options: { chatId?: string; marker?: boolean } = {}
+) {
+  const chatId = options.chatId ?? f.chat.id;
+  await f.groups.send(chatId, '出一版设计', { deliveryId: 'human-1' });
+  await settle();
+  const boss = f.chats.get(chatId)!.sessions[f.ids[0]].conversationId;
+  f.start(boss);
+  const sent = f.delegations.delegate(boss, { to: '小设', task: '设计' });
+  if (!sent.ok) throw new Error(sent.error);
+  await settle();
+  const child = f.child(sent.delegationId);
+  f.start(child);
+  f.reply(boss, '已安排');
+  await settle();
+  f.delegations.dispose();
+  const record = f.store.get(sent.delegationId)!;
+  f.store.save({
+    ...record,
+    state: 'completed',
+    result: '设计稿完成，见 design.md',
+    finishedAt: Date.now(),
+    ...(options.marker === false ? {} : { pendingResultEntry: { turnId: 'turn-crash' } }),
+  });
+  return { boss, child, id: sent.delegationId, chatId };
+}
+
+const resultEntries = (f: ReturnType<typeof fixture>, chatId: string, id: string) =>
+  f.chats
+    .readEntries(chatId, { limit: Number.MAX_SAFE_INTEGER })
+    .filter((entry) => entry.id === `delegation-result:${id}`);
+const mentions = (text: string, needle: string) => text.split(needle).length - 1;
+
+it('崩溃点 1：记录已落盘、群条目未写——重启补写这条成员结果，发起人只随回传看一次全文', async () => {
+  const f = fixture(['吴经理', '小设']);
+  const { boss, child, id } = await crashAfterFinish(f);
+  expect(resultEntries(f, f.chat.id, id)).toEqual([]);
+  const before = f.to(boss).length;
+  const restarted = f.makeDelegations();
+  await settle();
+  const entries = resultEntries(f, f.chat.id, id);
+  expect(entries).toHaveLength(1);
+  expect(entries[0]).toMatchObject({
+    kind: 'bot',
+    botId: f.ids[1],
+    conversationId: child,
+    turnId: 'turn-crash',
+    delegationId: id,
+    text: '设计稿完成，见 design.md',
+  });
+  expect(entries[0]).not.toHaveProperty('hiddenFrom');
+  const record = f.store.get(id)!;
+  expect(record.resultSeq).toBe(entries[0].seq);
+  expect(record).not.toHaveProperty('pendingResultEntry');
+  // 补写不经群路由；发起人收到一次回传（之前没收到过），全文只出现一次
+  expect(f.chats.get(f.chat.id)?.sessions[f.ids[1]]).toBeUndefined();
+  expect(f.to(boss)).toHaveLength(before + 1);
+  const lead = f.to(boss).at(-1)!.text;
+  expect(lead.startsWith(`<delegation-result id="${id}"`)).toBe(true);
+  expect(mentions(lead, '设计稿完成，见 design.md')).toBe(1);
+  f.start(boss);
+  f.reply(boss, '收到');
+  await settle();
+  restarted.dispose();
+  // 重复启动：不再写、不再回传
+  const again = f.makeDelegations();
+  await settle();
+  expect(resultEntries(f, f.chat.id, id)).toHaveLength(1);
+  expect(f.to(boss)).toHaveLength(before + 1);
+  again.dispose();
+  f.groups.dispose();
+});
+
+it('崩溃点 2：群条目已写、resultSeq 未存——重启从时间线回填 resultSeq，不重复写条目', async () => {
+  const f = fixture(['吴经理', '小设']);
+  const { boss, child, id } = await crashAfterFinish(f);
+  const written = f.chats.appendEntry(f.chat.id, {
+    kind: 'bot',
+    id: `delegation-result:${id}`,
+    at: Date.now(),
+    botId: f.ids[1],
+    text: '设计稿完成，见 design.md',
+    conversationId: child,
+    turnId: 'turn-crash',
+    delegationId: id,
+  })!;
+  const restarted = f.makeDelegations();
+  await settle();
+  expect(resultEntries(f, f.chat.id, id)).toHaveLength(1);
+  const record = f.store.get(id)!;
+  expect(record.resultSeq).toBe(written.seq);
+  expect(record).not.toHaveProperty('pendingResultEntry');
+  const lead = f.to(boss).at(-1)!.text;
+  expect(lead.startsWith(`<delegation-result id="${id}"`)).toBe(true);
+  expect(mentions(lead, '设计稿完成，见 design.md')).toBe(1);
+  f.start(boss);
+  f.reply(boss, '收到');
+  await settle();
+  // resultSeq 已回填：卡片不再带摘要
+  const card = f.entries().find((e) => e.kind === 'delegation');
+  expect(card).toMatchObject({ delegationId: id, state: 'completed' });
+  expect(card).not.toHaveProperty('summary');
+  restarted.dispose();
+  const again = f.makeDelegations();
+  await settle();
+  expect(resultEntries(f, f.chat.id, id)).toHaveLength(1);
+  expect(f.store.get(id)!.resultSeq).toBe(written.seq);
+  again.dispose();
+  f.groups.dispose();
+});
+
+it('旧数据不补发：没有待入群标记的已完成委派，升级后首次启动不写进群', async () => {
+  const f = fixture(['吴经理', '小设']);
+  const { id } = await crashAfterFinish(f, { marker: false });
+  const restarted = f.makeDelegations();
+  await settle();
+  expect(resultEntries(f, f.chat.id, id)).toEqual([]);
+  expect(f.store.get(id)).not.toHaveProperty('resultSeq');
+  restarted.dispose();
+  const again = f.makeDelegations();
+  await settle();
+  expect(resultEntries(f, f.chat.id, id)).toEqual([]);
+  again.dispose();
+  f.groups.dispose();
+});
+
+it('群已归档 / 群已删除 / 话题已删除：重启不补写，并清掉待入群标记', async () => {
+  const archived = fixture(['吴经理', '小设']);
+  const a = await crashAfterFinish(archived);
+  archived.chats.update(a.chatId, (draft) => ({ ...draft, archivedAt: Date.now() }));
+  archived.makeDelegations().dispose();
+  expect(resultEntries(archived, a.chatId, a.id)).toEqual([]);
+  expect(archived.store.get(a.id)).not.toHaveProperty('pendingResultEntry');
+  expect(archived.store.get(a.id)).not.toHaveProperty('resultSeq');
+  archived.groups.dispose();
+  rmSync(root, { recursive: true, force: true });
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'group-delegation-')));
+
+  const removed = fixture(['吴经理', '小设']);
+  const r = await crashAfterFinish(removed);
+  removed.chats.remove(r.chatId);
+  removed.makeDelegations().dispose();
+  expect(resultEntries(removed, r.chatId, r.id)).toEqual([]);
+  expect(removed.store.get(r.id)).not.toHaveProperty('pendingResultEntry');
+  removed.groups.dispose();
+  rmSync(root, { recursive: true, force: true });
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'group-delegation-')));
+
+  const topic = fixture(['吴经理', '小设']);
+  const thread = topic.chats.createThread(topic.chat.id, '设计话题')!;
+  const t = await crashAfterFinish(topic, { chatId: thread.id });
+  expect(topic.store.get(t.id)?.chatId).toBe(thread.id);
+  topic.chats.remove(thread.id);
+  topic.makeDelegations().dispose();
+  expect(resultEntries(topic, thread.id, t.id)).toEqual([]);
+  expect(resultEntries(topic, topic.chat.id, t.id)).toEqual([]);
+  expect(topic.store.get(t.id)).not.toHaveProperty('pendingResultEntry');
+  topic.groups.dispose();
+});
+
+it('写群条目失败但回传已送达：重启补写给其他成员看，发起人的群增量里不再出现', async () => {
+  const f = fixture(['吴经理', '小设', '阿全']);
+  await f.groups.send(f.chat.id, '出一版设计', { deliveryId: 'human-1' });
+  await settle();
+  const boss = f.conversation(f.ids[0]);
+  f.start(boss);
+  const sent = f.delegations.delegate(boss, { to: '小设', task: '设计' });
+  if (!sent.ok) throw new Error(sent.error);
+  await settle();
+  const child = f.child(sent.delegationId);
+  f.start(child);
+  f.reply(boss, '已安排');
+  await settle();
+  // 写结果条目时磁盘出错（只这一次）
+  const append = f.chats.appendEntry.bind(f.chats);
+  let broken = true;
+  f.chats.appendEntry = (chatId, input) => {
+    if (broken && input.id.startsWith('delegation-result:')) {
+      broken = false;
+      throw new Error('EIO');
+    }
+    return append(chatId, input);
+  };
+  f.reply(child, '设计稿完成，见 design.md');
+  await settle();
+  expect(resultEntries(f, f.chat.id, sent.delegationId)).toEqual([]);
+  expect(f.store.get(sent.delegationId)).toMatchObject({
+    state: 'completed',
+    pendingResultEntry: expect.any(Object),
+  });
+  // 回传照常送达发起人
+  expect(f.to(boss).at(-1)!.text.startsWith(`<delegation-result id="${sent.delegationId}"`)).toBe(
+    true
+  );
+  f.start(boss);
+  f.reply(boss, '收到');
+  await settle();
+  expect(f.store.get(sent.delegationId)?.deliveredAt).toBeDefined();
+  const delivered = f.to(boss).length;
+  f.delegations.dispose();
+  const restarted = f.makeDelegations();
+  await settle();
+  const entries = resultEntries(f, f.chat.id, sent.delegationId);
+  expect(entries).toHaveLength(1);
+  expect(entries[0]).toMatchObject({ botId: f.ids[1], hiddenFrom: f.ids[0] });
+  expect(f.store.get(sent.delegationId)).not.toHaveProperty('pendingResultEntry');
+  // 补写不唤醒发起人
+  expect(f.to(boss)).toHaveLength(delivered);
+  // 其他成员能看到；发起人下一次群增量里没有
+  await f.groups.send(f.chat.id, '@阿全 看下设计', { deliveryId: 'human-2' });
+  await settle();
+  const quan = f.conversation(f.ids[2]);
+  expect(f.to(quan).at(-1)!.text).toContain(`delegation="${sent.delegationId}">设计稿完成`);
+  f.start(quan);
+  f.reply(quan, '看过了');
+  await settle();
+  await f.groups.send(f.chat.id, '@吴经理 汇总一下', { deliveryId: 'human-3' });
+  await settle();
+  expect(f.to(boss)).toHaveLength(delivered + 1);
+  expect(f.to(boss).at(-1)!.text).toContain('看过了');
+  // 补写的成员结果条目不进发起人上下文（此前已有的委派卡片摘要是既有行为，不在此列）
+  expect(f.to(boss).at(-1)!.text).not.toContain(`delegation="${sent.delegationId}"`);
+  restarted.dispose();
   f.groups.dispose();
 });

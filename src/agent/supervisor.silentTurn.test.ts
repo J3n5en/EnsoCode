@@ -341,6 +341,52 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it('回合内自动重试用尽后仍是瞬态错误：turn-failed 标 retryExhausted；未重试或非瞬态错误不标', async () => {
+    const { events, supervisor, parentSession } = await spawn();
+    const failTurn = async (retried: boolean, finalError: string) => {
+      parentSession.emit({ type: 'agent_start' });
+      if (retried) {
+        parentSession.messages.push({
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: 'Connection error.',
+        });
+        parentSession.emit({ type: 'agent_end', willRetry: true });
+        parentSession.emit({
+          type: 'auto_retry_start',
+          attempt: 1,
+          maxAttempts: 1,
+          delayMs: 10,
+          errorMessage: 'Connection error.',
+        });
+        await settle();
+      }
+      parentSession.messages.push({
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: finalError,
+      });
+      parentSession.emit({ type: 'agent_end', willRetry: false });
+      parentSession.emit({ type: 'agent_settled' });
+      await settle();
+      return events.filter((event) => event.type === 'turn-failed').at(-1);
+    };
+    expect(await failTurn(true, 'socket hang up')).toMatchObject({ retryExhausted: true });
+    expect(await failTurn(false, 'socket hang up')).not.toHaveProperty('retryExhausted');
+    expect(await failTurn(true, '401 invalid api key')).not.toHaveProperty('retryExhausted');
+    for (const error of [
+      '429 insufficient_quota',
+      '429 Monthly usage limit reached',
+      '503 billing quota exceeded',
+      'subscription_sharing_usage_limit_exceeded',
+    ])
+      expect(await failTurn(true, error)).not.toHaveProperty('retryExhausted');
+    expect(events.filter((event) => event.type === 'turn-failed')).toHaveLength(7);
+    await supervisor.shutdown();
+  });
+
   it('agent_end 后 pi 续跑（排队消息/扩展续跑）：等 agent_settled 才收口，全程同一轮', async () => {
     const { events, supervisor, parentSession } = await spawn();
     parentSession.emit({ type: 'agent_start' });

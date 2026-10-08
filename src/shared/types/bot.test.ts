@@ -500,4 +500,43 @@ describe('parseGroupEntry', () => {
     expect(parseGroupEntry({ ...base, model: '' })).toEqual(base);
     expect(parseGroupEntry({ ...base, model: 3 })).toEqual(base);
   });
+
+  it('bot 条目保留委派结果的 delegationId，非法值丢弃', () => {
+    const base = {
+      seq: 2,
+      id: 'delegation-result:d1',
+      at: 2,
+      kind: 'bot',
+      botId: BOT_A,
+      text: 'done',
+      conversationId: 'child',
+      turnId: 't1',
+    };
+    expect(parseGroupEntry({ ...base, delegationId: 'd1' })).toEqual({
+      ...base,
+      delegationId: 'd1',
+    });
+    expect(parseGroupEntry({ ...base, delegationId: '' })).toEqual(base);
+    expect(parseGroupEntry({ ...base, delegationId: 7 })).toEqual(base);
+  });
+
+  it('bot 条目保留合法的 hiddenFrom，非法值丢弃', () => {
+    const base = {
+      seq: 2,
+      id: 'delegation-result:d1',
+      at: 2,
+      kind: 'bot',
+      botId: BOT_A,
+      text: 'done',
+      conversationId: 'child',
+      turnId: 't1',
+      delegationId: 'd1',
+    };
+    expect(parseGroupEntry({ ...base, hiddenFrom: BOT_A })).toEqual({
+      ...base,
+      hiddenFrom: BOT_A,
+    });
+    expect(parseGroupEntry({ ...base, hiddenFrom: '' })).toEqual(base);
+    expect(parseGroupEntry({ ...base, hiddenFrom: 7 })).toEqual(base);
+  });
 });

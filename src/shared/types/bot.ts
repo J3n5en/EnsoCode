@@ -139,6 +139,10 @@ export interface DelegationAppend {
   deliveryId: string;
   ok?: boolean;
 }
+export const DELEGATION_RETRY_BY = ['auto', 'delegator', 'human'] as const;
+export type DelegationRetryBy = (typeof DELEGATION_RETRY_BY)[number];
+/** retry_delegation 补充说明的长度上限 */
+export const DELEGATION_NOTE_MAX = 2000;
 
 export function isDelegationTimeoutMinutes(value: unknown): value is number {
   return (
@@ -181,6 +185,14 @@ export interface Delegation {
   taskId?: string;
   /** 由哪条委派重试而来；被指向的记录视为已重试，不能再次重试 */
   retryOf?: string;
+  /** 这次重试由谁发起：auto 自动重试 / delegator 委派人用 retry_delegation / human 界面上点的；旧数据缺省视为 human */
+  retryBy?: DelegationRetryBy;
+  /** 委派人重试时附的补充说明（从头重发时一并带上） */
+  retryNote?: string;
+  /** 失败后已排定自动重试的时刻（等待期间不唤醒委派人）；接替记录出现前持久化，重启后据此重排 */
+  autoRetryAt?: number;
+  /** failure 为 error 时：pi 回合内自动重试已用尽的瞬态错误（网络 / 限流 / 5xx） */
+  transient?: true;
   /** 本次委派的时限（分钟）：发起方 deadlineMinutes 与目标上限取小 */
   timeoutMinutes?: number;
   /** 发起方要求父回合被停止 / 中断后仍继续 */
@@ -194,6 +206,13 @@ export interface Delegation {
   appends?: DelegationAppend[];
   /** report_blocked 登记；本轮结束时执行记为 blocked */
   blocked?: DelegationBlocked;
+  /** 结果写进群时间线的那条成员消息的 seq（仅 completed 且发起方是成员当前群会话的第一层委派） */
+  resultSeq?: number;
+  /**
+   * 结果待写进群时间线：finish 时与 completed 终态同一行落盘，写入（或确认不写）后清除。
+   * 重启时据此补写 / 回填 resultSeq；功能上线前完成的记录没有此标记，不补发。turnId 为产出结果的子会话回合
+   */
+  pendingResultEntry?: { turnId?: string };
 }
 
 export function parseDelegation(value: unknown): Delegation | undefined {
@@ -239,9 +258,19 @@ export function parseDelegation(value: unknown): Delegation | undefined {
   if (isText(value.batchId)) record.batchId = value.batchId;
   if (isBotId(value.taskId)) record.taskId = value.taskId;
   if (isText(value.retryOf)) record.retryOf = value.retryOf;
+  if (DELEGATION_RETRY_BY.includes(value.retryBy as DelegationRetryBy))
+    record.retryBy = value.retryBy as DelegationRetryBy;
+  if (isText(value.retryNote)) record.retryNote = value.retryNote.slice(0, DELEGATION_NOTE_MAX);
+  if (isTime(value.autoRetryAt)) record.autoRetryAt = value.autoRetryAt;
+  if (value.transient === true) record.transient = true;
   if (typeof value.timeoutMinutes === 'number' && value.timeoutMinutes > 0)
     record.timeoutMinutes = value.timeoutMinutes;
   if (value.keep === true) record.keep = true;
+  if (isSeq(value.resultSeq) && value.resultSeq > 0) record.resultSeq = value.resultSeq;
+  if (isObject(value.pendingResultEntry))
+    record.pendingResultEntry = isText(value.pendingResultEntry.turnId)
+      ? { turnId: value.pendingResultEntry.turnId }
+      : {};
   const check = parseTaskCheck(value.check);
   if (check) record.check = check;
   if (DELEGATION_TRIGGERS.includes(value.trigger as never))
@@ -347,6 +376,10 @@ export type GroupEntry =
       routedBy?: BotRoutedBy;
       /** 产出该回复的模型 id（虚拟模型为实际路由到的真实模型） */
       model?: string;
+      /** 委派结果：系统以被委派成员名义写入，conversationId 为委派子会话；不参与群路由 */
+      delegationId?: string;
+      /** 不进该成员的群增量：重启补写的委派结果，发起人此前已随委派回传收到过全文 */
+      hiddenFrom?: BotId;
     })
   | (GroupEntryBase & {
       kind: 'delegation';
@@ -651,6 +684,8 @@ export function parseGroupEntry(value: unknown): GroupEntry | undefined {
               ? { routedBy: value.routedBy as BotRoutedBy }
               : {}),
             ...(typeof value.model === 'string' && value.model ? { model: value.model } : {}),
+            ...(isText(value.delegationId) ? { delegationId: value.delegationId } : {}),
+            ...(isBotId(value.hiddenFrom) ? { hiddenFrom: value.hiddenFrom } : {}),
           }
         : undefined;
     case 'delegation': {

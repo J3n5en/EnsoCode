@@ -36,11 +36,12 @@ import { useI18n } from '@/i18n';
 import { toolLabel } from '@/lib/toolLabels';
 import { cn } from '@/lib/utils';
 import { type ChatRuntime, type TimelineState, useBotsStore } from '@/stores/bots';
-import { isRetried } from '@/stores/bots/delegations';
+import { activeDelegations, isRetried } from '@/stores/bots/delegations';
 import { windowFocusStep } from '@/stores/bots/focus';
 import {
   anchorDelegations,
   buildRows,
+  delegationCardSeq,
   locateTurn,
   type TimelineDelegation,
   type TurnStep,
@@ -119,6 +120,25 @@ export function GroupTimeline({
   const anchorRef = useRef<{ seq: number; top: number } | null>(null);
   const wasHistoryRef = useRef(false);
   const loaded = timeline?.entries ?? [];
+  // 「委派结果」标签定位卡片：读最新的已加载条目与委派记录，回调保持稳定以免整列重渲染
+  const locateRef = useRef({ chatId: chat.id, loaded, delegations });
+  locateRef.current = { chatId: chat.id, loaded, delegations };
+  const locateDelegation = useCallback(
+    (delegationId: string) => {
+      const { chatId, loaded, delegations } = locateRef.current;
+      const seq = delegationCardSeq(loaded, delegationId);
+      if (seq !== undefined) return useBotsStore.getState().focusSeq(chatId, seq);
+      const record = delegations.find((item) => item.id === delegationId);
+      addToast({
+        type: 'info',
+        title:
+          record && record.deliveredAt === undefined
+            ? t('The delegation card is posted after the delegator receives the result.')
+            : t('The delegation card is not in the loaded messages.'),
+      });
+    },
+    [t]
+  );
   const retryable = retryableGroupFailures(loaded, chat.epochSeq ?? 0);
   const history = timeline?.history;
   // 最近一条「新对话」分隔线之前默认收起，点开才往上加载；历史窗口（跳转）时全部显示
@@ -158,13 +178,8 @@ export function GroupTimeline({
       ),
     [delegations]
   );
-  const active = useMemo(
-    () =>
-      delegations
-        .filter((item) => item.state === 'queued' || item.state === 'running')
-        .sort((a, b) => a.createdAt - b.createdAt),
-    [delegations]
-  );
+  // 进行中与等待自动重试的委派还没有卡片条目，按时间挂进时间线
+  const active = useMemo(() => activeDelegations(delegations, chat.id), [delegations, chat.id]);
   const placed = useMemo(
     () => anchorDelegations(entries, timelineDelegations(active)),
     [entries, active]
@@ -387,6 +402,7 @@ export function GroupTimeline({
                       bots={bots}
                       records={records}
                       onOpenConversation={openConversation}
+                      onLocateDelegation={locateDelegation}
                     />
                   </div>
                   {placed.after.get(row.entry.id)?.map(card)}
@@ -475,6 +491,7 @@ const EntryRow = memo(function EntryRow({
   bots,
   records,
   onOpenConversation,
+  onLocateDelegation,
   retryable,
   retryBusy,
 }: {
@@ -488,6 +505,8 @@ const EntryRow = memo(function EntryRow({
   bots: Map<string, BotProfile>;
   records: Map<string, { record: Delegation; retried: boolean }>;
   onOpenConversation: (conversationId: string, title: string) => void;
+  /** 委派结果消息 → 定位对应的委派卡片 */
+  onLocateDelegation: (delegationId: string) => void;
 }) {
   const { t } = useI18n();
   const [retrying, setRetrying] = useState(false);
@@ -596,6 +615,16 @@ const EntryRow = memo(function EntryRow({
                   <span className="ml-1.5 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]">
                     {entry.model}
                   </span>
+                )}
+                {entry.delegationId && (
+                  <button
+                    type="button"
+                    title={t('Locate the delegation card')}
+                    onClick={() => entry.delegationId && onLocateDelegation(entry.delegationId)}
+                    className="ml-1.5 rounded bg-info/15 px-1 py-px text-[10px] text-info hover:bg-info/25"
+                  >
+                    {t('Delegation result')}
+                  </button>
                 )}
                 {entry.routedBy && (
                   <span

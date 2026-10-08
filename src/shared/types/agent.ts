@@ -1912,6 +1912,8 @@ export type AgentWorkerEvent =
       error: string;
       /** 消息从未提交给 pi（僵尸轮超时等）：renderer 应收回乐观回显并把文本退回输入框 */
       undelivered?: true;
+      /** pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx） */
+      retryExhausted?: true;
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -2031,6 +2033,7 @@ export type AgentWorkerEvent =
       op:
         | 'delegate'
         | 'check_delegation'
+        | 'retry_delegation'
         | 'group_tasks'
         | 'group_history'
         | 'routine_propose'
@@ -4326,6 +4329,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         isNonEmptyString(value.requestId) &&
         (value.op === 'delegate' ||
           value.op === 'check_delegation' ||
+          value.op === 'retry_delegation' ||
           value.op === 'group_tasks' ||
           value.op === 'group_history' ||
           value.op === 'routine_propose' ||
@@ -4425,7 +4429,8 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'turn-failed':
       return isNonEmptyString(value.turnId) &&
         isNonEmptyString(value.error) &&
-        (value.undelivered === undefined || value.undelivered === true)
+        (value.undelivered === undefined || value.undelivered === true) &&
+        (value.retryExhausted === undefined || value.retryExhausted === true)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'turn-retry':

@@ -329,16 +329,25 @@ it.each(['chat', 'initiator', 'target'] as const)(
     f.service.dispose();
   }
 );
-it('marks unfinished work interrupted on restart without replaying it', async () => {
+it('marks unfinished work interrupted on restart and auto-retries it later instead of reporting it', async () => {
   const f = fixture();
   const sent = f.service.delegate(f.parent, { to: 'Bob', task: 'work' });
   if (!sent.ok) throw new Error(sent.error);
   await vi.advanceTimersByTimeAsync(0);
   f.service.dispose();
   const restarted = new DelegationService(f.deps);
-  expect(f.store.get(sent.delegationId)).toMatchObject({ state: 'failed', failure: 'interrupted' });
+  expect(f.store.get(sent.delegationId)).toMatchObject({
+    state: 'failed',
+    failure: 'interrupted',
+    autoRetryAt: expect.any(Number),
+  });
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.prompts.filter((p) => p.text.includes('<delegation-result'))).toHaveLength(1);
+  expect(f.prompts.filter((p) => p.text.includes('<delegation-result'))).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(f.store.list().find((r) => r.retryOf === sent.delegationId)).toMatchObject({
+    retryBy: 'auto',
+  });
+  expect(f.prompts.filter((p) => p.text.includes('<delegation-result'))).toHaveLength(0);
   restarted.dispose();
 });
 
@@ -410,6 +419,14 @@ it('重启后回传给委派父会话仍按原聊天归属，不受其他聊天�
   const nested = f.service.delegate(parent, { to: 'Carol', task: 'inner' });
   if (!nested.ok) throw new Error(nested.error);
   await vi.advanceTimersByTimeAsync(0);
+  // 内层在重启前已最终失败（不可自动重试），重启后只需把它回传给外层子会话
+  f.store.save({
+    ...f.store.get(nested.delegationId)!,
+    state: 'failed',
+    failure: 'error',
+    error: 'boom',
+    finishedAt: Date.now(),
+  });
   f.service.dispose();
   f.host.dispose();
 
@@ -491,10 +508,21 @@ it('recovers a batch after restart: finished-but-undelivered batches are deliver
   await vi.advanceTimersByTimeAsync(0);
   expect(results(f)).toHaveLength(0);
   f.service.dispose();
+  // 真实重启时 worker 一并退出，宿主里旧子会话的活轮随之结束
+  f.host.observe({ type: 'worker-exited' });
   const restarted = new DelegationService(f.deps);
   expect(f.store.get(b.id)).toMatchObject({ state: 'failed', failure: 'interrupted' });
   await vi.advanceTimersByTimeAsync(0);
+  // 中断的那条先自动重试，等它有结果再整批回传一次
+  expect(results(f)).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(5000);
+  const retried = f.store.list().find((record) => record.retryOf === b.id)!;
+  expect(retried).toMatchObject({ retryBy: 'auto', batchId: a.batchId });
+  f.finish(retried.childConversationId);
+  await vi.advanceTimersByTimeAsync(0);
   expect(results(f)).toMatchObject([{ deliveryId: a.batchId }]);
+  expect(results(f)[0].text).toContain(`<delegation-result id="${retried.id}"`);
+  expect(results(f)[0].text).not.toContain(`<delegation-result id="${b.id}"`);
   expect(f.store.get(a.id)?.deliveredAt).toBeDefined();
   expect(f.store.get(b.id)?.deliveredAt).toBeDefined();
   restarted.dispose();
@@ -517,7 +545,7 @@ it('keeps a retried delegation out of the original batch', async () => {
   await vi.advanceTimersByTimeAsync(0);
   f.service.dispose();
 });
-it('publishes only a delegation summary in groups without duplicating a bot message', async () => {
+it('publishes the result as the member message plus a summary-free card in groups, without duplicates', async () => {
   const f = fixture();
   const members = f.deps.bots.list().map((bot) => bot.id);
   const alice = f.deps.bots.list().find((bot) => bot.name === 'Alice')!;
@@ -543,8 +571,16 @@ it('publishes only a delegation summary in groups without duplicating a bot mess
   } as Parameters<BotSessionHost['observe']>[0]);
   await vi.advanceTimersByTimeAsync(0);
   expect(f.deps.chats.readEntries(chat.id)).toEqual([
-    expect.objectContaining({ kind: 'delegation', summary: 'result summary' }),
+    expect.objectContaining({
+      kind: 'bot',
+      botId: f.bob,
+      text: 'result summary',
+      delegationId: record.id,
+      conversationId: record.childConversationId,
+    }),
+    expect.not.objectContaining({ summary: expect.anything() }),
   ]);
+  expect(f.deps.chats.readEntries(chat.id)[1]).toMatchObject({ kind: 'delegation' });
   f.service.dispose();
   const completed = f.store.get(record.id)!;
   f.store.save({ ...completed, deliveredAt: undefined });
@@ -554,7 +590,7 @@ it('publishes only a delegation summary in groups without duplicating a bot mess
   await vi.advanceTimersByTimeAsync(0);
   expect(deliverGroupResult).not.toHaveBeenCalled();
   expect(f.store.get(record.id)?.deliveredAt).toBeDefined();
-  expect(f.deps.chats.readEntries(chat.id)).toHaveLength(1);
+  expect(f.deps.chats.readEntries(chat.id)).toHaveLength(2);
   restarted.dispose();
 });
 it('group new conversation: cancels non-keep delegations; kept results only land on the timeline', async () => {
@@ -1193,5 +1229,357 @@ describe('stopping the parent turn', () => {
     );
     expect(tasks.sync).not.toHaveBeenCalledWith(expect.objectContaining({ id: kept.delegationId }));
     service.dispose();
+  });
+});
+
+describe('委派失败：自动重试', () => {
+  const toParent = (f: ReturnType<typeof fixture>) =>
+    f.prompts.filter((p) => p.id === f.parent && p.text.includes('<delegation-result'));
+  const failChild = (f: ReturnType<typeof fixture>, child: string, transient: boolean) =>
+    f.host.observe({
+      type: 'turn-failed',
+      identity: { sessionId: child, generation: 'g' },
+      seq: 1,
+      turnId: 'turn',
+      error: transient ? 'socket hang up' : 'model refused',
+      ...(transient ? { retryExhausted: true } : {}),
+    } as never);
+  const make = (f: ReturnType<typeof fixture>) =>
+    new DelegationService({ ...f.deps, autoRetryDelayMs: (_kind, attempt) => attempt * 1000 });
+
+  it('等待期间人工重试校验失败后，原自动重试不能永久悬空', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    try {
+      const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+      if (!sent.ok) throw new Error(sent.error);
+      await vi.advanceTimersByTimeAsync(0);
+      const child = f.store.get(sent.delegationId)!.childConversationId;
+      f.persist(child);
+      failChild(f, child, true);
+      await vi.advanceTimersByTimeAsync(0);
+      const registration = vi.spyOn(f.host, 'registerDelegation').mockReturnValueOnce(false);
+      expect(service.retry(sent.delegationId).ok).toBe(false);
+      registration.mockRestore();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(f.retries).toEqual([child]);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('自动重试保留 keep，父回合停止后接替记录仍继续执行', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    try {
+      await f.host.deliverConversation(f.parent, 'go');
+      await vi.advanceTimersByTimeAsync(0);
+      const sent = service.delegate(f.parent, { to: 'Bob', task: 'work', keep: true });
+      if (!sent.ok) throw new Error(sent.error);
+      await vi.advanceTimersByTimeAsync(0);
+      const child = f.store.get(sent.delegationId)!.childConversationId;
+      f.persist(child);
+      failChild(f, child, true);
+      await vi.advanceTimersByTimeAsync(1000);
+      const retry = f.store.list().find((r) => r.retryOf === sent.delegationId)!;
+      await f.host.abortConversation(f.parent);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.store.get(retry.id)?.state).toBe('running');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('回合内重试用尽的瞬态错误：按退避在原子会话上续跑，等待期间不唤醒委派人，成功后只回传一次', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    failChild(f, child, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(sent.delegationId)).toMatchObject({
+      state: 'failed',
+      failure: 'error',
+      transient: true,
+      autoRetryAt: expect.any(Number),
+    });
+    expect(toParent(f)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.retries).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.retries).toEqual([child]);
+    const retry = f.store.list().find((r) => r.retryOf === sent.delegationId)!;
+    expect(retry).toMatchObject({ retryBy: 'auto', childConversationId: child, state: 'running' });
+    f.finish(child);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(1);
+    expect(toParent(f)[0].text).toContain(`<delegation-result id="${retry.id}"`);
+    expect(toParent(f)[0].text).toContain('status="completed"');
+    expect(toParent(f)[0].text).not.toContain(`<delegation-result id="${sent.delegationId}"`);
+    expect(f.store.list().every((r) => r.deliveredAt !== undefined)).toBe(true);
+    service.dispose();
+  });
+
+  it('自动重试有次数上限；用尽后带失败类型和处理方式交回委派人', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      failChild(f, child, true);
+      await vi.advanceTimersByTimeAsync(attempt * 1000);
+    }
+    expect(f.retries).toEqual([child, child]);
+    const chain = f.store.list();
+    expect(chain).toHaveLength(3);
+    expect(chain.filter((r) => r.retryBy === 'auto')).toHaveLength(2);
+    expect(chain.at(-1)).not.toHaveProperty('autoRetryAt');
+    expect(toParent(f)).toHaveLength(1);
+    const text = toParent(f)[0].text;
+    expect(text).toContain('failure="error"');
+    expect(text).toContain('automatic retries exhausted');
+    expect(text).toContain('retry_delegation');
+    expect(text).toContain('3 of 3 retries left');
+    expect(text).toContain('Untrusted error summary');
+    service.dispose();
+  });
+
+  it('超时、非瞬态错误、取消不自动重试，直接交给委派人', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    const late = service.delegate(f.parent, { to: 'Bob', task: 'slow', deadlineMinutes: 10 });
+    if (!late.ok) throw new Error(late.error);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(f.store.get(late.delegationId)).toMatchObject({ state: 'failed', failure: 'timeout' });
+    expect(f.store.get(late.delegationId)).not.toHaveProperty('autoRetryAt');
+    f.finish(f.parent);
+    await vi.advanceTimersByTimeAsync(0);
+    const broken = service.delegate(f.parent, { to: 'Bob', task: 'broken' });
+    if (!broken.ok) throw new Error(broken.error);
+    await vi.advanceTimersByTimeAsync(0);
+    failChild(f, f.store.get(broken.delegationId)!.childConversationId, false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(broken.delegationId)).not.toHaveProperty('autoRetryAt');
+    const dropped = service.delegate(f.parent, { to: 'Bob', task: 'dropped' });
+    if (!dropped.ok) throw new Error(dropped.error);
+    service.cancel(dropped.delegationId);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.retries).toEqual([]);
+    expect(f.store.list().some((r) => r.retryBy === 'auto')).toBe(false);
+    expect(toParent(f).length).toBeGreaterThan(0);
+    service.dispose();
+  });
+
+  it('重启：运行中的委派标 interrupted 后自动续跑；等待期间再重启按持久化时刻重排，不唤醒委派人', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    service.dispose();
+    f.host.observe({ type: 'worker-exited' });
+    service = make(f);
+    expect(f.store.get(sent.delegationId)).toMatchObject({
+      state: 'failed',
+      failure: 'interrupted',
+      autoRetryAt: expect.any(Number),
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    service.dispose();
+    service = make(f);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.retries).toEqual([]);
+    expect(toParent(f)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.retries).toEqual([child]);
+    expect(f.store.list().find((r) => r.retryOf === sent.delegationId)).toMatchObject({
+      retryBy: 'auto',
+    });
+    service.dispose();
+  });
+
+  it('重启后失败通知不丢：未投递的最终失败由新实例补投一次', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    await f.host.deliverConversation(f.parent, 'busy');
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    failChild(f, f.store.get(sent.delegationId)!.childConversationId, false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(sent.delegationId)?.deliveredAt).toBeUndefined();
+    service.dispose();
+    f.finish(f.parent);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(0);
+    service = make(f);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(1);
+    expect(toParent(f)[0].text).toContain('final failure');
+    expect(f.store.get(sent.delegationId)?.deliveredAt).toBeDefined();
+    service.dispose();
+    service = make(f);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(1);
+    service.dispose();
+  });
+
+  it('等待自动重试时人工点重试：接替进原批次，不先把失败交回委派人，自动重试不再执行', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    failChild(f, child, true);
+    await vi.advanceTimersByTimeAsync(0);
+    const human = service.retry(sent.delegationId);
+    if (!human.ok) throw new Error(human.error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(0);
+    expect(f.store.get(human.delegationId)).toMatchObject({ retryBy: 'human' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.retries).toEqual([child]);
+    f.finish(child);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toParent(f)).toHaveLength(1);
+    expect(toParent(f)[0].text).toContain(`<delegation-result id="${human.delegationId}"`);
+    expect(toParent(f)[0].text).not.toContain(`<delegation-result id="${sent.delegationId}"`);
+    service.dispose();
+  });
+
+  it('等待自动重试时父回合被停止：放弃自动重试，不再唤醒父会话', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const service = make(f);
+    await f.host.deliverConversation(f.parent, 'go');
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    failChild(f, f.store.get(sent.delegationId)!.childConversationId, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(sent.delegationId)?.autoRetryAt).toBeDefined();
+    await f.host.abortConversation(f.parent);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.retries).toEqual([]);
+    expect(f.store.get(sent.delegationId)).not.toHaveProperty('autoRetryAt');
+    expect(f.store.get(sent.delegationId)?.deliveredAt).toBeDefined();
+    expect(toParent(f)).toHaveLength(0);
+    service.dispose();
+  });
+});
+
+describe('retry_delegation：委派人自己重试', () => {
+  const failChild = (f: ReturnType<typeof fixture>, child: string) =>
+    f.host.observe({
+      type: 'turn-failed',
+      identity: { sessionId: child, generation: 'g' },
+      seq: 1,
+      turnId: 'turn',
+      error: 'model refused',
+    } as never);
+
+  it('在原子会话上续跑：带说明时补一条消息，不带说明时从断点重跑', async () => {
+    const f = fixture();
+    const sent = f.service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    failChild(f, child);
+    await vi.advanceTimersByTimeAsync(0);
+    const first = f.service.retryAsDelegator(f.parent, sent.delegationId, '换个思路：先读 README');
+    if (!first.ok) throw new Error(first.error);
+    expect(first.retriesLeft).toBe(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(first.delegationId)).toMatchObject({
+      retryOf: sent.delegationId,
+      retryBy: 'delegator',
+      retryNote: '换个思路：先读 README',
+      childConversationId: child,
+    });
+    const note = f.prompts.filter((p) => p.deliveryId === first.delegationId);
+    expect(note).toMatchObject([{ id: child }]);
+    expect(note[0].text).toContain('<delegation-retry');
+    expect(note[0].text).toContain('换个思路：先读 README');
+    expect(f.retries).toEqual([]);
+    failChild(f, child);
+    await vi.advanceTimersByTimeAsync(0);
+    const second = f.service.retryAsDelegator(f.parent, first.delegationId);
+    if (!second.ok) throw new Error(second.error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.retries).toEqual([child]);
+    expect(f.prompts.filter((p) => p.text.includes('<delegation-task'))).toHaveLength(1);
+    f.service.dispose();
+  });
+
+  it('子会话无法恢复时才从头重发任务，并带上说明', async () => {
+    const f = fixture();
+    const sent = f.service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    failChild(f, child);
+    await vi.advanceTimersByTimeAsync(0);
+    const retried = f.service.retryAsDelegator(f.parent, sent.delegationId, '注意编码');
+    if (!retried.ok) throw new Error(retried.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const record = f.store.get(retried.delegationId)!;
+    expect(record.childConversationId).not.toBe(child);
+    const task = f.prompts.filter((p) => p.id === record.childConversationId);
+    expect(task[0].text).toContain('<delegation-task');
+    expect(task[0].text).toContain('<retry-note>注意编码</retry-note>');
+    f.service.dispose();
+  });
+
+  it('同一条链委派人最多重试 3 次，超出拒绝并说明；只能重试自己的委派；界面重试不受限', async () => {
+    const f = fixture();
+    const sent = f.service.delegate(f.parent, { to: 'Bob', task: 'work' });
+    if (!sent.ok) throw new Error(sent.error);
+    await vi.advanceTimersByTimeAsync(0);
+    const child = f.store.get(sent.delegationId)!.childConversationId;
+    f.persist(child);
+    failChild(f, child);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.service.retryAsDelegator('someone-else', sent.delegationId)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('not found'),
+    });
+    let id = sent.delegationId;
+    for (let i = 0; i < 3; i++) {
+      const retried = f.service.retryAsDelegator(f.parent, id);
+      if (!retried.ok) throw new Error(retried.error);
+      expect(retried.retriesLeft).toBe(2 - i);
+      id = retried.delegationId;
+      await vi.advanceTimersByTimeAsync(0);
+      failChild(f, child);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const refused = f.service.retryAsDelegator(f.parent, id);
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('3 times') });
+    expect(f.store.list().filter((r) => r.retryBy === 'delegator')).toHaveLength(3);
+    const human = await f.service.retry(id);
+    expect(human.ok).toBe(true);
+    if (human.ok) expect(f.store.get(human.delegationId)?.retryBy).toBe('human');
+    f.service.dispose();
   });
 });

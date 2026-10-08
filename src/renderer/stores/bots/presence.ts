@@ -3,7 +3,7 @@ import type { ApprovalRequestInfo, AskRequestInfo } from '@shared/types/agent';
 import type { Delegation, GroupEntry } from '@shared/types/bot';
 import type { BotQueueItem, BotQueueReason, BotSilence } from '@shared/types/botIpc';
 import type { BrowserTabHolder } from '@shared/types/browser';
-import { isActiveDelegation } from './delegations';
+import { isActiveDelegation, isAwaitingAutoRetry } from './delegations';
 
 /** 成员头像六态；同时成立时按 等你 > 卡住 > 干 > 想 > 做完 > 闲 取一个 */
 export type Presence = 'idle' | 'think' | 'work' | 'wait' | 'stuck' | 'done';
@@ -37,6 +37,8 @@ export interface PresenceInput {
   queue: readonly BotQueueItem[];
   silences: readonly BotSilence[];
   delegation?: Delegation;
+  /** 全部委派：判定 delegation 是否在等自动重试（接替记录是否已出现） */
+  delegations: readonly Delegation[];
   /** 做完 / 失败只显示到此后（下一条人类消息）；委派卡片传 -Infinity 一直保留 */
   clearedAt: number;
 }
@@ -89,18 +91,22 @@ function sessionState(
 }
 
 export function presenceOf(input: PresenceInput): PresenceInfo {
-  const { delegation, clearedAt } = input;
+  const { delegation, delegations, clearedAt } = input;
   let best: PresenceInfo | undefined;
   for (const id of input.conversationIds) {
     const info = sessionPresence(id, input.sessions[id], input);
     if (info && (!best || RANK[info.state] > RANK[best.state])) best = info;
   }
   const fresh = (delegation?.finishedAt ?? 0) > clearedAt;
+  // 等自动重试：Main 视同未结束（pendingAutoRetry），按排队一样算「想」，不是最终失败
+  const pending =
+    delegation &&
+    (isActiveDelegation(delegation.state) || isAwaitingAutoRetry(delegation, delegations));
   const state: Presence =
     best?.state ??
     (!delegation
       ? 'idle'
-      : isActiveDelegation(delegation.state)
+      : pending
         ? 'think'
         : delegation.state === 'failed' && fresh
           ? 'stuck'
@@ -139,7 +145,7 @@ export function lastHumanAt(entries: readonly GroupEntry[]): number {
   return 0;
 }
 
-/** 成员在该聊天的会话 + 进行中委派的子会话；委派取进行中最早的，否则最近一条 */
+/** 成员在该聊天的会话 + 进行中委派的子会话；委派取进行中最早的，其次等自动重试最早的，否则最近一条 */
 export function memberSources(
   botId: string,
   chat: { id: string; sessions: Readonly<Record<string, { conversationId: string }>> },
@@ -149,8 +155,9 @@ export function memberSources(
     .filter((item) => item.chatId === chat.id && item.targetBotId === botId)
     .sort((a, b) => a.createdAt - b.createdAt);
   const active = mine.filter((item) => isActiveDelegation(item.state));
+  const awaiting = mine.find((item) => isAwaitingAutoRetry(item, delegations));
   const own = chat.sessions[botId]?.conversationId;
-  const delegation = active[0] ?? mine.at(-1);
+  const delegation = active[0] ?? awaiting ?? mine.at(-1);
   return {
     conversationIds: [...(own ? [own] : []), ...active.map((item) => item.childConversationId)],
     ...(delegation ? { delegation } : {}),
@@ -162,7 +169,6 @@ export type MemberPresence = PresenceInfo & { browserTab?: string };
 /** 计算成员状态所需的聊天快照（均来自现有 store，不另设状态源） */
 export interface PresenceContext extends Omit<PresenceInput, 'conversationIds' | 'delegation'> {
   chat: { id: string; sessions: Readonly<Record<string, { conversationId: string }>> };
-  delegations: readonly Delegation[];
   holders: Readonly<Record<string, BrowserTabHolder | null | undefined>>;
   tabIds: readonly string[];
 }

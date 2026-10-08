@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DiscussNextInput } from '../../../shared/bots/discussRoute';
 import type { SmartRouteInput } from '../../../shared/bots/smartRoute';
 import { createSmartRouter } from './smartRouter';
 
@@ -39,6 +40,7 @@ describe('createSmartRouter', () => {
     ])
       expect(await router().select({ ...input, message }, signal)).toEqual({
         ids: ['a', 'b', 'c'],
+        everyone: true,
       });
     expect(judge).not.toHaveBeenCalled();
     expect(classify).not.toHaveBeenCalled();
@@ -260,4 +262,118 @@ describe('createSmartRouter', () => {
       intent: 'build',
     });
   });
+});
+
+describe('讨论判断 next()', () => {
+  const discuss: DiscussNextInput = {
+    candidates: [
+      { id: 'b', name: 'Bob', title: '', scope: 'backend', turns: 1 },
+      { id: 'c', name: 'Carol', title: '', scope: 'frontend', turns: 0 },
+    ],
+    topic: '讨论下方案',
+    recent: [{ speaker: 'Alice', text: '我先说' }],
+    lastSpeaker: 'Alice',
+  };
+
+  it('未设置时走 judge 回退链：NEXT / END，默认超时 15s、限输出', async () => {
+    judge.mockResolvedValueOnce('NEXT: Carol').mockResolvedValueOnce('END');
+    expect(await router().next(discuss, signal)).toEqual({ next: 'c' });
+    expect(await router().next(discuss, signal)).toEqual({ end: true });
+    expect(judge.mock.calls[0][0]).toMatchObject({
+      preferred: undefined,
+      timeoutMs: 15_000,
+      maxTokens: 128,
+    });
+    expect(judge.mock.calls[0][0].userText).toContain('NEXT: <name>');
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: '未设置', classifier: undefined, expected: 15_000 },
+    { label: '旧版默认 3000 未明确设置', classifier: { timeoutMs: 3000 }, expected: 15_000 },
+    { label: '明确设成 3000', classifier: { timeoutMs: 3000, timeoutSet: true }, expected: 3000 },
+    { label: '自定义 12s', classifier: { timeoutMs: 12_000 }, expected: 12_000 },
+    // 上限随 4afd25f8 放宽到 30 秒（CLASSIFIER_TIMEOUT_MAX_MS）
+    { label: '超过上限', classifier: { timeoutMs: 60_000, timeoutSet: true }, expected: 30_000 },
+    { label: '低于下限', classifier: { timeoutMs: 100, timeoutSet: true }, expected: 500 },
+  ])(
+    '讨论判断与首轮选人同一套超时规则（judge）：$label → $expected',
+    async ({ classifier, expected }) => {
+      settings = classifier
+        ? { botRouteClassifier: { source: 'judge', model: judgeModel, ...classifier } }
+        : {};
+      judge.mockResolvedValueOnce('Bob').mockResolvedValueOnce('END');
+      await router().select(input, signal);
+      await router().next(discuss, signal);
+      expect(router().timeoutMs()).toBe(expected);
+      expect(judge.mock.calls.map((call) => call[0].timeoutMs)).toEqual([expected, expected]);
+      expect(judge.mock.calls.map((call) => call[0].maxTokens)).toEqual([128, 128]);
+    }
+  );
+
+  it.each([
+    { classifier: { timeoutMs: 3000 }, expected: 15_000 },
+    { classifier: { timeoutMs: 3000, timeoutSet: true }, expected: 3000 },
+    { classifier: { timeoutMs: 60_000, timeoutSet: true }, expected: 30_000 },
+    { classifier: { timeoutMs: 100, timeoutSet: true }, expected: 500 },
+  ])('讨论判断与首轮选人同一套超时规则（pi 分类器）：%j', async ({ classifier, expected }) => {
+    settings = {
+      botRouteClassifier: { source: 'pi-classifier', model: judgeModel, ...classifier },
+    };
+    classify
+      .mockResolvedValueOnce({ a: 0.1, b: 0.9, c: 0 })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ b: 0.1, c: 0.8, end: 0.1 });
+    await router().select(input, signal);
+    expect(await router().next(discuss, signal)).toEqual({ next: 'c' });
+    expect(router().timeoutMs()).toBe(expected);
+    expect(classify.mock.calls.map((call) => call[0].timeoutMs)).toEqual([
+      expected,
+      expected,
+      expected,
+    ]);
+  });
+
+  it('judge 不可用、回复无法识别、抛错都返回 failure', async () => {
+    judge.mockResolvedValueOnce(null);
+    expect(await router().next(discuss, signal)).toEqual({ failure: '判断模型不可用' });
+    judge.mockResolvedValueOnce('Carol 吧');
+    expect(await router().next(discuss, signal)).toEqual({ failure: '判断结果无法识别' });
+    judge.mockRejectedValueOnce(new Error('boom'));
+    expect(await router().next(discuss, signal)).toMatchObject({ failure: expect.any(String) });
+  });
+
+  it('设成 pi 分类器时用分类器，选项含保留键 end', async () => {
+    settings = {
+      botRouteClassifier: { source: 'pi-classifier', model: judgeModel, timeoutMs: 4000 },
+    };
+    classify.mockResolvedValueOnce({ b: 0.1, c: 0.8, end: 0.1 });
+    expect(await router().next(discuss, signal)).toEqual({ next: 'c' });
+    expect(Object.keys(classify.mock.calls[0][1].criteria)).toEqual(['b', 'c', 'end']);
+    classify.mockResolvedValueOnce({ b: 0.1, c: 0.2, end: 0.7 });
+    expect(await router().next(discuss, signal)).toEqual({ end: true });
+    classify.mockResolvedValueOnce(null);
+    expect(await router().next(discuss, signal)).toEqual({ failure: '判断模型不可用' });
+    expect(judge).not.toHaveBeenCalled();
+  });
+
+  it('取消时不报 failure', async () => {
+    const abort = new AbortController();
+    judge.mockImplementationOnce(async () => {
+      abort.abort();
+      throw new Error('aborted');
+    });
+    expect(await router().next(discuss, abort.signal)).toEqual({ end: true });
+  });
+
+  it.each([{}, { ghost: 1 }, { b: Number.NaN, c: Number.POSITIVE_INFINITY }, { b: -1, c: 2 }])(
+    '分类器无法识别的概率结果 %j 必须报 failure，不能当成正常 END 或 NEXT',
+    async (probabilities) => {
+      settings = {
+        botRouteClassifier: { source: 'pi-classifier', model: judgeModel, timeoutMs: 4000 },
+      };
+      classify.mockResolvedValueOnce(probabilities);
+      expect(await router().next(discuss, signal)).toMatchObject({ failure: expect.any(String) });
+    }
+  );
 });

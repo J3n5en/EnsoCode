@@ -39,6 +39,39 @@ describe('buildGroupDelta', () => {
     expect(r.cursor).toBe(3);
   });
 
+  it('委派结果条目：本人也能看到并标 delegation；指定隐藏的委派结果不重复出现但 cursor 照常推进', () => {
+    const result = (seq: number, botId: string, delegationId: string): GroupEntry => ({
+      ...(bot(seq, botId, `结果${seq}`) as Extract<GroupEntry, { kind: 'bot' }>),
+      delegationId,
+    });
+    const own = buildGroupDelta({ ...base, cursor: 0, entries: [result(2, 'me', 'd1')] });
+    expect(own.text).toContain(
+      '<group-message from="阿后" role="后端" seq="2" delegation="d1">结果2</group-message>'
+    );
+    const hidden = buildGroupDelta({
+      ...base,
+      botId: 'fe',
+      cursor: 1,
+      entries: [result(2, 'me', 'd1'), result(3, 'me', 'd2')],
+      hideDelegationIds: ['d1'],
+    });
+    expect(hidden.text).not.toContain('结果2');
+    expect(hidden.text).toContain('delegation="d2"');
+    expect(hidden.cursor).toBe(3);
+  });
+
+  it('hiddenFrom：补写的委派结果对已收到全文的发起人隐藏（cursor 照常推进），对其他成员照常可见', () => {
+    const backfilled: GroupEntry = {
+      ...(bot(2, 'fe', '补写的结果') as Extract<GroupEntry, { kind: 'bot' }>),
+      delegationId: 'd1',
+      hiddenFrom: 'me',
+    };
+    const delegator = buildGroupDelta({ ...base, cursor: 1, entries: [backfilled] });
+    expect(delegator).toEqual({ text: '', cursor: 2 });
+    const other = buildGroupDelta({ ...base, botId: 'x', cursor: 1, entries: [backfilled] });
+    expect(other.text).toContain('补写的结果');
+  });
+
   it('读取下限：新对话分隔线之前的不进上下文，没有会话时仍带群介绍', () => {
     const entries = [human(1, '旧事'), human(2, '分隔线'), human(3, '新事')];
     const fresh = buildGroupDelta({ ...base, cursor: 0, floor: 2, entries });

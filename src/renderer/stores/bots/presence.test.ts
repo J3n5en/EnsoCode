@@ -53,6 +53,7 @@ const input = (patch: Partial<PresenceInput> = {}): PresenceInput => ({
   sessions: {},
   queue: [],
   silences: [],
+  delegations: [],
   clearedAt: 0,
   ...patch,
 });
@@ -169,6 +170,34 @@ describe('presenceOf', () => {
     expect(presenceOf(input({ delegation: canceled })).state).toBe('idle');
   });
 
+  it('等待自动重试的失败委派算「想」，不算卡住，且不因下一条人类消息清掉', () => {
+    const waiting = delegation({
+      state: 'failed',
+      failure: 'error',
+      finishedAt: 200,
+      autoRetryAt: 300,
+    });
+    for (const clearedAt of [150, 250]) {
+      const info = presenceOf(
+        input({ conversationIds: [], delegation: waiting, delegations: [waiting], clearedAt })
+      );
+      expect(info).toMatchObject({ state: 'think', delegation: waiting, conversationId: 'child' });
+    }
+  });
+
+  it('最终失败（没有 autoRetryAt，或已有接替记录）仍显示卡住', () => {
+    const final = delegation({ state: 'failed', failure: 'error', finishedAt: 200 });
+    expect(
+      presenceOf(input({ delegation: final, delegations: [final], clearedAt: 150 })).state
+    ).toBe('stuck');
+    const superseded = delegation({ state: 'failed', finishedAt: 200, autoRetryAt: 300 });
+    const next = delegation({ id: 'd2', state: 'failed', retryOf: 'd1', retryBy: 'auto' });
+    expect(
+      presenceOf(input({ delegation: superseded, delegations: [superseded, next], clearedAt: 150 }))
+        .state
+    ).toBe('stuck');
+  });
+
   it('lets a live turn win over an older failed delegation', () => {
     const failed = delegation({ state: 'failed', finishedAt: 200 });
     expect(
@@ -198,6 +227,19 @@ describe('memberSources', () => {
     const sources = memberSources('b1', chat, [last, first]);
     expect(sources.conversationIds).toEqual(['c1']);
     expect(sources.delegation?.id).toBe('l');
+  });
+
+  it('等待自动重试的委派优先于之后已结束的委派，但其子会话已结束不纳入', () => {
+    const waiting = delegation({ id: 'w', state: 'failed', createdAt: 1, autoRetryAt: 50 });
+    const later = delegation({
+      id: 'l',
+      state: 'completed',
+      createdAt: 9,
+      childConversationId: 'k',
+    });
+    const sources = memberSources('b1', chat, [later, waiting]);
+    expect(sources.conversationIds).toEqual(['c1']);
+    expect(sources.delegation?.id).toBe('w');
   });
 });
 
@@ -303,6 +345,12 @@ describe('忙碌条', () => {
 
   it('全部空闲时为空', () => {
     expect(busyMembers(['b1', 'b2'], ctx())).toEqual([]);
+  });
+
+  it('等待自动重试的成员列为「想」，不是卡住', () => {
+    const waiting = delegation({ state: 'failed', finishedAt: 200, autoRetryAt: 300 });
+    const list = busyMembers(['b1', 'b2'], ctx({ delegations: [waiting], clearedAt: 250 }));
+    expect(list.map((item) => [item.botId, item.info.state])).toEqual([['b1', 'think']]);
   });
 
   it('带上成员占用的浏览器标签', () => {

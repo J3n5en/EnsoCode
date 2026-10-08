@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   artifactCandidates,
   artifactKind,
+  entrySessionInChat,
   isOpenableArtifact,
   parseArtifactTarget,
   resolveArtifactFile,
@@ -14,6 +15,37 @@ import {
   turnBounds,
   turnOfReply,
 } from './artifacts';
+
+describe('entrySessionInChat', () => {
+  const records = new Map([
+    ['d1', { chatId: 'g1', childConversationId: 'child-1' }],
+    ['d2', { chatId: 'g2', childConversationId: 'child-2' }],
+  ]);
+  const lookup = (id: string) => records.get(id);
+
+  it('成员本群会话的条目属于该群', () => {
+    expect(entrySessionInChat({ chatId: 'g1' }, 'g1', { conversationId: 'c' }, lookup)).toBe(true);
+    expect(entrySessionInChat({ chatId: 'g2' }, 'g1', { conversationId: 'c' }, lookup)).toBe(false);
+    expect(entrySessionInChat(undefined, 'g1', { conversationId: 'c' }, lookup)).toBe(false);
+  });
+
+  it('委派结果条目：子会话由该群发起的委派创建时才属于该群', () => {
+    const child = { chatId: null, delegationId: 'd0' };
+    expect(
+      entrySessionInChat(child, 'g1', { conversationId: 'child-1', delegationId: 'd1' }, lookup)
+    ).toBe(true);
+    expect(
+      entrySessionInChat(child, 'g1', { conversationId: 'child-2', delegationId: 'd1' }, lookup)
+    ).toBe(false);
+    expect(
+      entrySessionInChat(child, 'g1', { conversationId: 'child-2', delegationId: 'd2' }, lookup)
+    ).toBe(false);
+    expect(
+      entrySessionInChat(child, 'g1', { conversationId: 'child-1', delegationId: 'ghost' }, lookup)
+    ).toBe(false);
+    expect(entrySessionInChat(child, 'g1', { conversationId: 'child-1' }, lookup)).toBe(false);
+  });
+});
 
 const text = (role: string, value: string): ProjectedMessage => ({
   role,

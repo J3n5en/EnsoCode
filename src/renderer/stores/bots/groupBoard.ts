@@ -7,7 +7,7 @@ import type {
   GroupTaskStatus,
 } from '@shared/types/bot';
 import { GROUP_TASK_BLOCKED_STREAK_MAX, stalledTaskRun, taskBlock } from '@shared/types/bot';
-import { isActiveDelegation } from './delegations';
+import { isActiveDelegation, isAwaitingAutoRetry } from './delegations';
 
 /** 看板分栏：待办 / 进行中 / 待验收按编号，已完成 / 已取消新的在前 */
 export function taskColumns(tasks: readonly GroupTask[]): Record<GroupTaskStatus, GroupTask[]> {
@@ -49,15 +49,16 @@ export function chatDelegationGroups(
   chatId: string
 ): { active: Delegation[]; completed: Delegation[]; failed: Delegation[] } {
   const mine = delegations.filter((item) => item.chatId === chatId);
+  // 等待自动重试视同未结束，归进行中
+  const live = (item: Delegation) =>
+    isActiveDelegation(item.state) || isAwaitingAutoRetry(item, delegations);
   return {
-    active: mine
-      .filter((item) => isActiveDelegation(item.state))
-      .sort((a, b) => a.createdAt - b.createdAt),
+    active: mine.filter(live).sort((a, b) => a.createdAt - b.createdAt),
     completed: mine
       .filter((item) => item.state === 'completed')
       .sort((a, b) => finished(b) - finished(a)),
     failed: mine
-      .filter((item) => ['failed', 'canceled', 'blocked'].includes(item.state))
+      .filter((item) => ['failed', 'canceled', 'blocked'].includes(item.state) && !live(item))
       .sort((a, b) => finished(b) - finished(a)),
   };
 }

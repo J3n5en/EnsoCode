@@ -95,7 +95,7 @@ beforeEach(() => {
     host,
     emit: () => {},
     onBatchSettled: settled,
-    responder: { timeoutMs: () => 1000, select },
+    responder: { timeoutMs: () => 1000, select, next: async () => ({ end: true as const }) },
   });
 });
 afterEach(() => {

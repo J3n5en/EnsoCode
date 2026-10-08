@@ -36,6 +36,8 @@ export function delegationInboxItems(delegations: readonly Delegation[]): BotInb
         item.chatId !== null &&
         item.state === 'failed' &&
         item.failure === 'interrupted' &&
+        // 等待自动重试期间不提示；放弃自动重试会清掉 autoRetryAt
+        item.autoRetryAt === undefined &&
         !superseded(item, delegations)
     )
     .map((item) => ({

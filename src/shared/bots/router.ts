@@ -20,6 +20,8 @@ export interface RouterState {
   waiting?: BotId[];
   /** 已回复的派单成员；[skip] / 未能回复的没有 seq */
   reports?: SummaryReport[];
+  /** 讨论模式（仅 smart 群）：成员说完且没 @ 人时，由判断模型决定下一位或结束 */
+  discuss?: true;
 }
 
 export interface SummaryReport {
@@ -36,6 +38,8 @@ export interface ReplyResult {
   notices: string[];
   /** 本次追加了一跳群主汇总提醒 */
   summary?: { botId: BotId; reports: SummaryReport[] };
+  /** 回复里解析出了别的成员的 @（含被上限拦下的）；讨论模式据此不再判断 */
+  mentioned: boolean;
 }
 
 export type HumanDecision =
@@ -181,7 +185,7 @@ export function onReply(
   reply: { botId: BotId; text: string; delegated?: readonly BotId[]; seq?: number }
 ): ReplyResult {
   if (state.current === null || reply.botId !== state.current) {
-    return { state, next: state.current, skipped: false, notices: [] };
+    return { state, next: state.current, skipped: false, notices: [], mentioned: false };
   }
   const skipped = isSkipReply(reply.text);
   const queue = [...state.queue];
@@ -263,7 +267,78 @@ export function onReply(
     turnsByBot,
     ...(waiting.length > 0 ? { waiting, reports } : {}),
   });
-  return { state: next, next: next.current, skipped, notices, ...(summary ? { summary } : {}) };
+  return {
+    state: next,
+    next: next.current,
+    skipped,
+    notices,
+    mentioned: targets.some((id) => id !== reply.botId),
+    ...(summary ? { summary } : {}),
+  };
+}
+
+export type DiscussStep =
+  | { kind: 'none' }
+  | { kind: 'judge'; candidates: BotId[] }
+  | { kind: 'end'; notice?: string };
+
+/** 讨论中可接话的成员：在群、未归档、未静音、本轮发言未满，且不是刚说完的那位 */
+function discussCandidates(
+  state: RouterState,
+  chat: RouterChat,
+  members: readonly RouterMember[],
+  lastBotId: BotId
+): { candidates: BotId[]; others: number } {
+  const others = activeMembers(chat, members, true).filter((m) => m.id !== lastBotId);
+  const candidates = others
+    .filter((m) => (state.turnsByBot[m.id] ?? 0) < chat.routing.maxTurnsPerBot)
+    .map((m) => m.id);
+  return { candidates, others: others.length };
+}
+
+/**
+ * 讨论中一位成员说完、接力队列已空：回复里 @ 了人 / 本回合委派了 / 有待处理的人类消息时不判断；
+ * 到 hops 上限或没人可选时直接结束（附一句提示），否则交给判断模型从 candidates 里选下一位或结束。
+ */
+export function discussStep(
+  state: RouterState,
+  chat: RouterChat,
+  members: readonly RouterMember[],
+  input: { lastBotId: BotId; mentioned: boolean; delegated: boolean; pendingHuman: boolean }
+): DiscussStep {
+  if (!state.discuss || state.current !== null || state.queue.length > 0) return { kind: 'none' };
+  if (input.mentioned || input.delegated || input.pendingHuman) return { kind: 'none' };
+  if (state.hops >= chat.routing.maxHops)
+    return {
+      kind: 'end',
+      notice: `本轮讨论已达接力上限（${chat.routing.maxHops} 次），讨论结束。`,
+    };
+  const { candidates, others } = discussCandidates(state, chat, members, input.lastBotId);
+  if (candidates.length > 0) return { kind: 'judge', candidates };
+  return {
+    kind: 'end',
+    notice:
+      others > 0 ? '成员本轮发言次数都已达上限，讨论结束。' : '没有其他可接话的成员，讨论结束。',
+  };
+}
+
+/** 应用判断结果：按当前群况重新校验选中的人，计一跳与一次发言；不合法返回 null（讨论结束） */
+export function discussPick(
+  state: RouterState,
+  chat: RouterChat,
+  members: readonly RouterMember[],
+  botId: BotId,
+  lastBotId: BotId
+): RouterState | null {
+  if (!state.discuss || state.current !== null || state.hops >= chat.routing.maxHops) return null;
+  if (!discussCandidates(state, chat, members, lastBotId).candidates.includes(botId)) return null;
+  return {
+    ...state,
+    queue: [],
+    current: botId,
+    hops: state.hops + 1,
+    turnsByBot: { ...state.turnsByBot, [botId]: (state.turnsByBot[botId] ?? 0) + 1 },
+  };
 }
 
 export function buildSummaryNote(
@@ -293,7 +368,8 @@ export function onHumanMessage(
     return { action: 'start', state: startRound(chat, members, humanEntry) };
   const parsed = parseMentions(humanEntry.text, inChatMembers(chat, members));
   if (!humanEntry.mentions?.length && !parsed.all && !parsed.ids.length)
-    return { action: 'route-parallel' };
+    // 讨论中不打断正在说话的成员：等他说完放弃剩下的讨论，按新消息重开（与 Grok 的 epoch 取消一致）
+    return state.discuss ? { action: 'restart-after-current' } : { action: 'route-parallel' };
   const targets = humanTargets(chat, members, humanEntry);
   const others = targets.filter((id) => id !== state.current);
   if (others.length) return { action: 'parallel', targets };

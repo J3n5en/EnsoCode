@@ -41,7 +41,7 @@ import {
   parseUpdateConversationSelectionRequest,
   THINKING_LEVELS,
 } from '@shared/types/agent';
-import { parseTaskCheck } from '@shared/types/bot';
+import { DELEGATION_NOTE_MAX, parseTaskCheck } from '@shared/types/bot';
 import { effectiveSubagentAllowedModes } from '@shared/types/builtinTools';
 import {
   parseAgentDispatchRequest,
@@ -1506,6 +1506,18 @@ export function registerAgentHandlers(): void {
             ...(typeof input.id === 'string' ? { id: input.id } : {}),
             ...(typeof input.cancel === 'boolean' ? { cancel: input.cancel } : {}),
           });
+        } else if (
+          op === 'retry_delegation' &&
+          typeof input.id === 'string' &&
+          input.id.length > 0 &&
+          (input.note === undefined ||
+            (typeof input.note === 'string' && input.note.length <= DELEGATION_NOTE_MAX))
+        ) {
+          result = service.retryAsDelegator(
+            identity.sessionId,
+            input.id,
+            typeof input.note === 'string' ? input.note : undefined
+          );
         } else result = { ok: false, error: 'Invalid delegation arguments.' };
         void Promise.resolve(result).then(
           (value) =>

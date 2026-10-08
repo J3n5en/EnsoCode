@@ -4,6 +4,7 @@ import type { TaskCheck } from '../types/bot';
 const COORDINATION_TOOLS = new Set([
   'delegate',
   'check_delegation',
+  'retry_delegation',
   'group_tasks',
   'group_history',
   'routine_propose',
