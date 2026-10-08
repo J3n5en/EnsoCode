@@ -144,9 +144,13 @@ function BotRouteClassifierRow() {
         classifierProviders={classifierProviders}
         offLabel={t('Default (title model)')}
         judgeLabel={t('Fast chat model')}
-        description={t('Falls back to the group owner on timeout, error or an unclear answer.')}
+        description={t(
+          'First pick: the group owner replies on timeout, error or an unclear answer. During a discussion, picking the next speaker ends the discussion in these cases.'
+        )}
         effectiveTimeoutMs={value ? smartRouteTimeoutMs(value) : undefined}
-        timeoutHint={t('Handed to the group owner on timeout.')}
+        timeoutHint={t(
+          'First pick: handed to the group owner on timeout. Next speaker in a discussion: the discussion ends on timeout.'
+        )}
       />
     </div>
   );

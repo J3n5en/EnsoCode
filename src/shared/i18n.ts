@@ -2910,9 +2910,10 @@ export const zhTranslations: Record<string, string> = {
     '在「智能选人」的群里没人被 @ 时，用这个模型选出回复的成员。',
   'Default (title model)': '默认（跟随标题总结模型）',
   'Fast chat model': '快速聊天模型',
-  'Falls back to the group owner on timeout, error or an unclear answer.':
-    '超时、出错或回答不明确时由群主回复。',
-  'Handed to the group owner on timeout.': '超时就交给群主处理。',
+  'First pick: the group owner replies on timeout, error or an unclear answer. During a discussion, picking the next speaker ends the discussion in these cases.':
+    '首轮选人遇到超时、出错或回答不明确时由群主回复；讨论中判断下一位遇到这些情况时，结束本轮讨论。',
+  'First pick: handed to the group owner on timeout. Next speaker in a discussion: the discussion ends on timeout.':
+    '首轮选人超时交给群主回复；讨论中判断下一位超时则结束本轮讨论。',
   'Uses the primary model on timeout.': '超时就用主模型。',
   Timeout: '超时',
   'Without @': '不 @ 时',
