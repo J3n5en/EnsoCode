@@ -81,6 +81,7 @@ import type {
   NodeStatus,
   ProjectedMessage,
   ResolvedAgentTypeSpawnConfig,
+  RetrySkippedReason,
   SessionSnapshot,
   SlashCommand,
   SpawnModelConfig,
@@ -1603,7 +1604,8 @@ export class SessionSupervisor {
         if (!managed || !isSameGeneration(managed.identity, identity)) {
           // 会话已不在 worker（驱逐 / 释放 / 换代）而 renderer 仍认为 started：静默丢弃会让
           // 后续每次发送都绕过 spawn 直发到空会话。按拒绝回流，让 renderer 清 started 并报错。
-          if (command.type === 'prompt' || command.type === 'steer') {
+          // retry 同理：静默丢弃会让等着这次续跑的宿主轮次只能干等
+          if (command.type === 'prompt' || command.type === 'steer' || command.type === 'retry') {
             // 命令类型声明为 SessionIdentity，但 coworker tab 发来的是完整 ChildSessionIdentity
             const target = command.identity as SessionIdentity | ChildSessionIdentity;
             this.options.emit(
@@ -1614,6 +1616,7 @@ export class SessionSupervisor {
           }
           return;
         }
+        // 通用异常只标 failed，不保证该会话当前活动已终止；failed 之后的终态不一定会出现（见 #41、#43）
         managed.status = 'failed';
         this.emitStatus(managed, message);
       });
@@ -1811,10 +1814,18 @@ export class SessionSupervisor {
         return;
       case 'retry': {
         const managed = this.must(command.identity);
-        if (!managed.session.isIdle || managed.status === 'running') return;
+        // 没开出新轮的两条路都要回执：Main 的 bot 宿主据此结算等着这次续跑的轮次，
+        // 不回执就只能靠计时器猜，猜早了晚到的 running 会变成无主运行（#29）
+        if (!managed.session.isIdle || managed.status === 'running') {
+          this.emitRetrySkipped(managed, 'busy');
+          return;
+        }
         const agent = managed.session.agent;
         editLatestAssistantForRetry(managed.session);
-        if (agent.state.messages.at(-1)?.role === 'assistant') return;
+        if (agent.state.messages.at(-1)?.role === 'assistant') {
+          this.emitRetrySkipped(managed, 'nothing-to-retry');
+          return;
+        }
         ensureAssistantUsage(agent.state.messages as unknown[]);
         managed.currentTurnId = randomUUID();
         resetOauthPoolActivity(managed.session);
@@ -4864,6 +4875,15 @@ export class SessionSupervisor {
       // observe() 已切阶段；abort 结束后 agent_settled 按阶段决定是补交报告还是收口
       void managed.session.abort().catch(() => {});
     }
+  }
+
+  private emitRetrySkipped(managed: ManagedSession, reason: RetrySkippedReason): void {
+    this.options.emit({
+      type: 'retry-skipped',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      reason,
+    });
   }
 
   private failTurn(

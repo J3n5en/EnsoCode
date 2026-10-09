@@ -1994,6 +1994,25 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentWorkerEvent(withoutError)).toBeNull();
   });
 
+  it('retry-skipped 回执只认 busy / nothing-to-retry，缺字段、多字段或取值不符拒绝', () => {
+    const skipped = { type: 'retry-skipped', identity: parent, seq: 4, reason: 'nothing-to-retry' };
+    expect(parseAgentWorkerEvent(skipped)).toEqual(skipped);
+    expect(parseAgentWorkerEvent({ ...skipped, reason: 'busy' })).toEqual({
+      ...skipped,
+      reason: 'busy',
+    });
+    expect(parseAgentWorkerEvent({ ...skipped, identity: child })).toEqual({
+      ...skipped,
+      identity: child,
+    });
+    expect(parseAgentWorkerEvent({ ...skipped, reason: 'other' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...skipped, reason: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...skipped, error: 'x' })).toBeNull();
+    const { reason: _reason, ...withoutReason } = skipped;
+    expect(parseAgentWorkerEvent(withoutReason)).toBeNull();
+    expect(parseAgentWorkerEvent({ ...skipped, seq: -1 })).toBeNull();
+  });
+
   it('session-meta 可带 usageTotals；脏统计只丢统计不丢事件', () => {
     const usageTotals = { inputTokens: 300, outputTokens: 10, cacheHitPercent: 63 };
     const withTotals = { type: 'session-meta', identity: parent, seq: 5, usageTotals };

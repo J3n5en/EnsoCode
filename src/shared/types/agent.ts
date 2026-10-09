@@ -1867,6 +1867,10 @@ export type PluginMcpResultEvent =
   | { type: 'plugin-mcp-result'; requestId: string; ok: true; value: unknown }
   | { type: 'plugin-mcp-result'; requestId: string; ok: false; error: string };
 
+/** retry-skipped 的原因：busy = 会话不空闲；nothing-to-retry = 最后一条仍是已完成的 assistant */
+export const RETRY_SKIPPED_REASONS = ['busy', 'nothing-to-retry'] as const;
+export type RetrySkippedReason = (typeof RETRY_SKIPPED_REASONS)[number];
+
 export type AgentWorkerEvent =
   /** 会话外（辅助补全 / compaction）的脱敏记录，Main 写 ledger */
   | { type: 'privacy-mask-ledger'; record: PrivacyMaskRecord }
@@ -1932,6 +1936,17 @@ export type AgentWorkerEvent =
       maxAttempts: number;
       delayMs: number;
       error: string;
+    }
+  | {
+      /**
+       * retry 命令没有开出新轮的明确回执：会话忙（压缩 / 分支摘要等非空闲状态）或最后一条仍是
+       * 已完成的 assistant（没有可重试的）。Main 据此结算等着这次续跑的轮次，不再靠计时器猜。
+       * worker 与 Main 同包发布，不存在「旧 worker 不发回执」的版本错配。
+       */
+      type: 'retry-skipped';
+      identity: SessionIdentity;
+      seq: number;
+      reason: RetrySkippedReason;
     }
   /** 工具执行中的输出快照（pi tool_execution_update 节流下发）：工具行运行中即可展开查看 */
   | {
@@ -4449,6 +4464,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         (value.maxAttempts as number) >= 0 &&
         isSequence(value.delayMs) &&
         isNonEmptyString(value.error)
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'retry-skipped':
+      return hasExactKeys(value, ['type', 'identity', 'seq', 'reason']) &&
+        RETRY_SKIPPED_REASONS.includes(value.reason as RetrySkippedReason)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'messages-truncated':

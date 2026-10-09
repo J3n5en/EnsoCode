@@ -489,6 +489,13 @@ describe('下行过滤', () => {
     expect(shouldForward({ type: 'messages-truncated', sessionId: 'a' }, 'a')).toBe(true);
     expect(shouldForward({ type: 'messages-truncated', sessionId: 'b' }, 'a')).toBe(false);
   });
+
+  it('retry-skipped 回执不进始终转发白名单，只按会话归属转发', () => {
+    const id = (sessionId: string) => ({ sessionId, generation: 'g1' });
+    expect(shouldForward({ type: 'retry-skipped', identity: id('a') }, 'a')).toBe(true);
+    expect(shouldForward({ type: 'retry-skipped', identity: id('b') }, 'a')).toBe(false);
+    expect(shouldForward({ type: 'retry-skipped', identity: id('a') }, null)).toBe(false);
+  });
 });
 
 describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {

@@ -225,8 +225,11 @@ type Workspace = { ok: true; cwd: string; projectId: string } | Fail;
 export class BotSessionHost {
   private readonly live = new Set<string>();
   private readonly running = new Set<string>();
-  /** 由本宿主发起、尚未结束的轮次；sawRunning 防止 spawn 后的 idle 误释放 */
-  private readonly slots = new Map<string, { sawRunning: boolean }>();
+  /**
+   * 由本宿主发起、尚未结束的轮次；sawRunning 防止 spawn 后的 idle 误释放；
+   * retry 标记这一格等的是 retry 命令开轮，只有它认 worker 的 retry-skipped 回执
+   */
+  private readonly slots = new Map<string, { sawRunning: boolean; retry?: true }>();
   private readonly stopping = new Map<string, string>();
   private readonly epochs = new Map<string, number>();
   private readonly tasks = new Map<string, string>();
@@ -1166,7 +1169,11 @@ export class BotSessionHost {
           return;
         }
         this.running.delete(id);
-        // idle 先于 turn-completed 到达，正常由后者结算；中断等路径只有 idle/failed，到期兜底
+        // idle 先于 turn-completed 到达，正常由后者结算；中断等路径只有 idle/failed，到期兜底。
+        // worker 的 abort 只发 idle、命令异常只发 failed，没有逐轮终态回执，所以这里仍按宽限兜底。
+        // 只有 abort 产生 idle 的路径能保证本轮已终止：兜底后晚到的 running 是另起的一轮（没有占位），
+        // 由它自己的 idle / turn-* / parent-ended 补出队。failed 来自 supervisor 的通用异常处理，
+        // 不保证当前活动已终止，failed 之后的终态不一定会出现（见 #41、#43）
         if (slot && (slot.sawRunning || event.status === 'failed'))
           this.scheduleSettle(id, slot, event.status === 'failed' ? event.error : undefined);
         else if (!slot) this.pump();
@@ -1210,6 +1217,20 @@ export class BotSessionHost {
         if (this.turnActive(id)) this.retrying.add(id);
         this.emitQueueChanges();
         return;
+      case 'retry-skipped': {
+        // 只认等 retry 开轮的那一格；续跑已经开始（running）或普通投递的轮次不受影响
+        const slot = this.slots.get(id);
+        if (!slot?.retry || slot.sawRunning || this.running.has(id)) return;
+        this.finish(
+          id,
+          undefined,
+          false,
+          event.reason === 'busy' ? 'session-busy' : 'nothing-to-retry'
+        );
+        this.lastAssistant.delete(id);
+        this.release(id);
+        return;
+      }
       case 'turn-completed': {
         if (!this.turnActive(id)) return;
         this.deliveryStarted(id);
@@ -1257,7 +1278,7 @@ export class BotSessionHost {
         if (hadSlot) {
           this.finish(id, undefined, false, event.reason);
           this.release(id);
-        }
+        } else this.pump();
         return;
       }
       default:
@@ -1493,9 +1514,13 @@ export class BotSessionHost {
     )
       return fail('canceled');
     if (delivery.retry) {
+      // 这里不挂计时器：worker 要么开轮（running 落在这一格、沿用本轮 turnKey），要么回执 retry-skipped，
+      // 要么开轮失败发 turn-failed / 会话不在时发 parent-rejected。worker 与 Main 同包发布，
+      // 不存在不发回执的旧 worker。worker 一直不回时由 worker-exited、parent-ended、委派超时
+      // （abortConversation）、手动停止兜底，静默看门狗也照常提醒（#29）。
+      this.slots.get(conversationId)!.retry = true;
       const sent = this.deps.runtime.retry?.(conversationId);
       if (!sent?.ok) return fail(sent?.error ?? 'retry-failed');
-      this.scheduleSettle(conversationId, this.slots.get(conversationId)!, 'nothing-to-retry');
       this.modelNotice(delivery, bot, fallback);
       return { ok: true, conversationId };
     }
@@ -1766,9 +1791,11 @@ export class BotSessionHost {
     this.retrying.delete(conversationId);
     this.turnKeys.delete(conversationId);
     this.quiet(conversationId);
-    if (!this.slots.delete(conversationId)) return;
-    const botId = this.binding(conversationId)?.botId;
-    if (botId) void this.refreshModel(botId);
+    if (this.slots.delete(conversationId)) {
+      const botId = this.binding(conversationId)?.botId;
+      if (botId) void this.refreshModel(botId);
+    }
+    // 宿主没占位的运行（worker 自发 / 晚于结算宽限才开始）结束时调用方已移出 running：同样可能放出同成员的排队投递
     this.pump();
   }
 

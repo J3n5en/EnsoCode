@@ -1121,6 +1121,45 @@ describe('BotSessionHost.deliver', () => {
     expect(runtime.steers).toHaveLength(0);
   });
 
+  it.each(['turn-completed', 'turn-failed', 'parent-ended'] as const)(
+    '宿主没占位的运行（如续跑晚于结算宽限才开始）以 %s 结束时补一次出队：同成员同聊天的排队投递开始',
+    async (type) => {
+      const alice = bot('Alice');
+      const bob = bot('Bob');
+      const chat = direct(alice.id);
+      const parent = host.ensureSession(chat.id, alice.id);
+      if (!parent.ok) throw new Error(parent.error);
+      const projectId = registry.conversation(parent.conversationId)!.projectId;
+      const child = (delegationId: string) => {
+        const created = registry.createBotConversation(projectId, {
+          botId: bob.id,
+          chatId: null,
+          delegationId,
+        })!;
+        const origin = { parentConversationId: parent.conversationId, chatId: chat.id };
+        expect(host.registerDelegation(created.conversationId, bob, origin)).toBe(true);
+        return created.conversationId;
+      };
+      const orphan = child('d1');
+      const next = child('d2');
+      host.observe(ev({ type: 'status', status: 'running' }, orphan));
+      expect(host.turnKey(orphan)).toBeUndefined();
+      expect(
+        await host.deliverConversation(next, 'task two', { deliveryId: 'd2', queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      expect(host.queueState()).toMatchObject([{ conversationId: next, reason: 'member-serial' }]);
+      const ended = {
+        'turn-completed': { type, turnId: 't' },
+        'turn-failed': { type, turnId: 't', error: 'boom' },
+        'parent-ended': { type, reason: 'released' },
+      }[type];
+      host.observe(ev(ended, orphan));
+      await flush();
+      expect(runtime.prompts.map((item) => item.text)).toEqual(['task two']);
+      expect(host.queueState()).toEqual([]);
+    }
+  );
+
   it('stop aborts the active turn, drops queued work and preserves the resumable conversation', async () => {
     host = new BotSessionHost({
       bots,
@@ -1899,7 +1938,7 @@ describe('BotSessionHost 私聊回退与重试', () => {
     }
   }
   let control: ControlRuntime;
-  const make = (budget?: BotSessionHostDeps['budget']) => {
+  const make = (budget?: BotSessionHostDeps['budget'], extra: Partial<BotSessionHostDeps> = {}) => {
     control = new ControlRuntime();
     host = new BotSessionHost({
       bots,
@@ -1908,8 +1947,205 @@ describe('BotSessionHost 私聊回退与重试', () => {
       runtime: control,
       emit: () => {},
       budget,
+      ...extra,
     });
   };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** 同一成员、同一聊天下的两个委派子会话（同成员串行） */
+  const memberChildren = () => {
+    const boss = bot('Boss');
+    const member = bot('Member');
+    const chat = direct(boss.id);
+    const parent = host.ensureSession(chat.id, boss.id);
+    if (!parent.ok) throw new Error(parent.error);
+    const projectId = registry.conversation(parent.conversationId)!.projectId;
+    return (delegationId: string) => {
+      const created = registry.createBotConversation(projectId, {
+        botId: member.id,
+        chatId: null,
+        delegationId,
+      })!;
+      const origin = { parentConversationId: parent.conversationId, chatId: chat.id };
+      expect(host.registerDelegation(created.conversationId, member, origin)).toBe(true);
+      return created.conversationId;
+    };
+  };
+
+  it('#29 worker 退出后续跑晚于结算宽限才开始：沿用本轮占位与 turnKey，不判 nothing-to-retry；同成员新委派在续跑结束后出队', async () => {
+    make(undefined, { settleGraceMs: 5 });
+    const child = memberChildren();
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+
+    // 第一份委派在跑，worker 进程退出
+    const first = child('d1');
+    expect(
+      await host.deliverConversation(first, 'task one', { deliveryId: 'd1', queueIfBusy: true })
+    ).toMatchObject({ ok: true });
+    host.observe(ev({ type: 'status', status: 'running' }, first));
+    host.observe({ type: 'worker-exited' });
+    expect(finished.map((event) => event.error)).toEqual(['worker-exited']);
+
+    // 卡片上点重试：冷会话恢复后发 retry；新 worker 准备（MCP 工具加载等）超过结算宽限才 agent_start
+    expect(await host.retryConversation(first, { delegation: true })).toMatchObject({ ok: true });
+    expect(control.retries).toEqual([first]);
+    const key = host.turnKey(first);
+    expect(key).toBeTruthy();
+    await sleep(30);
+    expect(finished.map((event) => event.error)).toEqual(['worker-exited']);
+    expect(host.turnKey(first)).toBe(key);
+    host.observe(ev({ type: 'status', status: 'running' }, first));
+    expect(host.turnKey(first)).toBe(key);
+
+    // 之后发给同一成员、同一聊天的新委派：续跑在跑时排队，续跑结束后出队
+    const second = child('d2');
+    expect(
+      await host.deliverConversation(second, 'task two', { deliveryId: 'd2', queueIfBusy: true })
+    ).toMatchObject({ ok: true, queued: true });
+    await sleep(30);
+    expect(host.queueState()).toMatchObject([{ conversationId: second }]);
+    host.observe(ev({ type: 'turn-completed', turnId: 't-retry' }, first));
+    await flush();
+    expect(finished.at(-1)).toMatchObject({ conversationId: first, ok: true, turnKey: key });
+    expect(control.prompts.map((item) => item.text)).toEqual(['task one', 'task two']);
+    expect(host.queueState()).toEqual([]);
+  });
+
+  it.each([
+    ['nothing-to-retry', 'nothing-to-retry'],
+    ['busy', 'session-busy'],
+  ] as const)(
+    'worker 回执 retry-skipped(%s)：本轮结算为 %s、释放占位并放出同成员排队',
+    async (reason, error) => {
+      make();
+      const child = memberChildren();
+      const finished: BotTurnFinished[] = [];
+      host.onTurnFinished((event) => finished.push(event));
+      const first = child('d1');
+      expect(await host.retryConversation(first, { delegation: true })).toMatchObject({
+        ok: true,
+      });
+      const key = host.turnKey(first);
+      const second = child('d2');
+      expect(
+        await host.deliverConversation(second, 'task two', { deliveryId: 'd2', queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      host.observe(ev({ type: 'retry-skipped', reason }, first));
+      expect(finished.at(-1)).toMatchObject({
+        conversationId: first,
+        ok: false,
+        error,
+        turnKey: key,
+      });
+      expect(finished.at(-1)).not.toHaveProperty('stopped');
+      expect(host.isBusy(first)).toBe(false);
+      await flush();
+      expect(control.prompts.map((item) => item.text)).toEqual(['task two']);
+      expect(host.queueState()).toEqual([]);
+    }
+  );
+
+  it.each(['worker-exited', 'parent-ended', 'parent-rejected', 'abort'] as const)(
+    '#29 复审：retry 未见 running 时 %s 释放成员并让下一委派出队',
+    async (type) => {
+      make();
+      const child = memberChildren();
+      const first = child('review-first');
+      const second = child('review-second');
+      expect(await host.retryConversation(first, { delegation: true })).toMatchObject({ ok: true });
+      expect(
+        await host.deliverConversation(second, 'review-next', { queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      if (type === 'abort') await host.abortConversation(first);
+      else if (type === 'worker-exited') host.observe({ type });
+      else host.observe(ev({ type, reason: 'released' }, first));
+      await flush();
+      expect(control.prompts.map((item) => item.text)).toEqual(['review-next']);
+      expect(host.queueState()).toEqual([]);
+    }
+  );
+
+  it('#29 复审：worker 无回执且 release 超时仍阻挡同成员，直到真实 worker-exited', async () => {
+    make(undefined, { settleGraceMs: 5 });
+    const child = memberChildren();
+    const first = child('review-first');
+    const second = child('review-second');
+    expect(await host.retryConversation(first, { delegation: true })).toMatchObject({ ok: true });
+    expect(
+      await host.deliverConversation(second, 'review-next', { queueIfBusy: true })
+    ).toMatchObject({ ok: true, queued: true });
+    control.release = async () => {
+      throw new Error('release timed out');
+    };
+    await expect(host.abortConversation(first)).rejects.toThrow('release timed out');
+    await sleep(30);
+    expect(control.prompts).toEqual([]);
+    expect(host.queueState()).toMatchObject([{ conversationId: second }]);
+    host.observe({ type: 'worker-exited' });
+    await flush();
+    expect(control.prompts.map((item) => item.text)).toEqual(['review-next']);
+    expect(host.queueState()).toEqual([]);
+  });
+
+  it('续跑已开始后到达的 retry-skipped 不结算本轮', async () => {
+    make();
+    const child = memberChildren();
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const first = child('d1');
+    expect(await host.retryConversation(first, { delegation: true })).toMatchObject({ ok: true });
+    const key = host.turnKey(first);
+    host.observe(ev({ type: 'status', status: 'running' }, first));
+    host.observe(ev({ type: 'retry-skipped', reason: 'busy' }, first));
+    expect(finished).toEqual([]);
+    expect(host.turnKey(first)).toBe(key);
+    host.observe(ev({ type: 'turn-completed', turnId: 't' }, first));
+    expect(finished.at(-1)).toMatchObject({ conversationId: first, ok: true, turnKey: key });
+  });
+
+  it('普通投递的轮次不认 retry-skipped', async () => {
+    make();
+    const child = memberChildren();
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const first = child('d1');
+    expect(
+      await host.deliverConversation(first, 'task one', { deliveryId: 'd1', queueIfBusy: true })
+    ).toMatchObject({ ok: true });
+    host.observe(ev({ type: 'retry-skipped', reason: 'nothing-to-retry' }, first));
+    expect(finished).toEqual([]);
+    expect(host.isBusy(first)).toBe(true);
+  });
+
+  it('只收到 idle、按 interrupted 兜底结算后，晚到的 running 只在真实运行期间占住成员，结束即放出排队', async () => {
+    make(undefined, { settleGraceMs: 5 });
+    const child = memberChildren();
+    const finished: BotTurnFinished[] = [];
+    host.onTurnFinished((event) => finished.push(event));
+    const first = child('d1');
+    expect(
+      await host.deliverConversation(first, 'task one', { deliveryId: 'd1', queueIfBusy: true })
+    ).toMatchObject({ ok: true });
+    host.observe(ev({ type: 'status', status: 'running' }, first));
+    host.observe(ev({ type: 'status', status: 'idle' }, first));
+    await sleep(30);
+    expect(finished.at(-1)).toMatchObject({
+      conversationId: first,
+      error: 'interrupted',
+      stopped: true,
+    });
+    // worker 自发的新一轮（如后台任务提醒）：宿主没有占位
+    host.observe(ev({ type: 'status', status: 'running' }, first));
+    expect(host.turnKey(first)).toBeUndefined();
+    const second = child('d2');
+    expect(
+      await host.deliverConversation(second, 'task two', { deliveryId: 'd2', queueIfBusy: true })
+    ).toMatchObject({ ok: true, queued: true });
+    host.observe(ev({ type: 'status', status: 'idle' }, first));
+    await flush();
+    expect(control.prompts.map((item) => item.text)).toEqual(['task one', 'task two']);
+    expect(host.queueState()).toEqual([]);
+  });
 
   it('rechecks capacity when the limit drops while a retry is preparing', async () => {
     let preparing = Promise.resolve();
