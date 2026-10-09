@@ -116,6 +116,8 @@ interface LiveSessionTimelineProps {
   controls?: ChatHost['botControls'];
   /** 委派子会话多次执行的分隔线（须稳定引用） */
   runDividers?: RunDividers;
+  /** 时间线列作用域：私聊传 'bot-timeline'，列内 bot-card 跟随输入框透明度；弹窗不传，保持透明 */
+  dataSlot?: string;
 }
 
 /** 成员会话的实时投影（私聊正文、群里正在回复的成员） */
@@ -130,6 +132,7 @@ export function LiveSessionTimeline({
   turnFooter,
   controls,
   runDividers,
+  dataSlot,
 }: LiveSessionTimelineProps) {
   const projection = useBotsStore((s) => s.sessions[conversationId]);
   const historyLoading = useBotsStore((s) => Boolean(s.sessionHistoryLoading[conversationId]));
@@ -184,7 +187,10 @@ export function LiveSessionTimeline({
 
   return (
     <ChatHostContext.Provider value={host}>
-      <div className={cn('@container flex min-h-0 flex-1 flex-col', className)}>
+      <div
+        data-slot={dataSlot}
+        className={cn('@container flex min-h-0 flex-1 flex-col', className)}
+      >
         <MessageTimeline
           key={conversationId}
           ref={timelineRef}

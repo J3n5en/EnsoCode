@@ -172,6 +172,8 @@ interface DelegationCardProps {
   /** 并入 record 这次执行的追加：标「已并入」，不单独显示状态与结果 */
   append?: DelegationAppend;
   taskSeq?: number;
+  /** 群聊时间线：铺满 CHAT_COL 内容盒，与底部输入框同宽；其他位置（看板、私聊顶栏）保留 max-w-lg */
+  fill?: boolean;
   bots: Map<string, BotProfile>;
   onOpenConversation: (conversationId: string, title: string) => void;
 }
@@ -209,6 +211,7 @@ export function DelegationCard({
   retried,
   append,
   taskSeq,
+  fill,
   bots,
   onOpenConversation,
 }: DelegationCardProps) {
@@ -262,10 +265,14 @@ export function DelegationCard({
         />
       )}
       <BotAvatar bot={from} size="xs" />
-      <span className="text-foreground">{from?.name ?? t('Deleted member')}</span>
+      <span className="min-w-0 truncate text-foreground" title={from?.name}>
+        {from?.name ?? t('Deleted member')}
+      </span>
       <span>→</span>
       <BotAvatar bot={to} size="xs" presence={presence?.state} />
-      <span className="text-foreground">{to?.name ?? t('Deleted member')}</span>
+      <span className="min-w-0 truncate text-foreground" title={to?.name}>
+        {to?.name ?? t('Deleted member')}
+      </span>
       <span>· {t('Delegation')}</span>
       {append ? (
         <span className="rounded bg-info/15 px-1.5 text-[11px] text-info">
@@ -294,7 +301,10 @@ export function DelegationCard({
     'flex flex-wrap items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs';
   const task = append?.text ?? record?.task;
   return (
-    <div data-slot="bot-card" className="max-w-lg rounded-xl border bg-card px-3 py-2.5">
+    <div
+      data-slot="bot-card"
+      className={cn('rounded-xl border bg-card px-3 py-2.5', fill ? 'w-full min-w-0' : 'max-w-lg')}
+    >
       {collapsible ? (
         <button
           type="button"
@@ -309,12 +319,14 @@ export function DelegationCard({
         <div className={headerClass}>{header}</div>
       )}
       {!open && task && <div className="mt-1 truncate text-muted-foreground text-xs">{task}</div>}
-      {open && task && <div className="mt-1.5 line-clamp-3 text-sm">{task}</div>}
+      {open && task && (
+        <div className="mt-1.5 line-clamp-3 text-sm [overflow-wrap:anywhere]">{task}</div>
+      )}
       {open && (
         <>
           {record?.check && !append && <CheckBadge check={record.check} className="mt-1.5" />}
           {summary && (
-            <div className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-muted-foreground text-xs">
+            <div className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-muted-foreground text-xs [overflow-wrap:anywhere]">
               {summary}
             </div>
           )}
@@ -352,7 +364,7 @@ export function DelegationCard({
             </button>
           )}
           {record && (
-            <div className="mt-2 flex justify-end gap-1.5">
+            <div className="mt-2 flex flex-wrap justify-end gap-1.5">
               <Button
                 size="xs"
                 variant="ghost"

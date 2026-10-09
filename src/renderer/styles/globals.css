@@ -326,6 +326,15 @@ html.bg-image-enabled [data-slot='bot-notice'] {
 html.bg-image-enabled [data-slot='bot-card-button']:not(:hover) {
   background-color: transparent;
 }
+/*
+ * 群聊 / 私聊时间线里的卡片（委派、产物、例程提议、查看过程）：与底部输入框同一档不透明度，
+ * 跟随设置项 --bg-composer-alpha。时间线列与输入框都直接叠在聊天主栏同一层 bg-background 上，
+ * 中间没有别的面板层，叠出的深度一致。私聊顶栏进行中委派条、侧栏、看板、收件箱、实时查看弹窗里的
+ * bot-card 与系统提示条仍走上面的透明规则。
+ */
+html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
+  background-color: oklch(from var(--card) l c h / var(--bg-composer-alpha, 0.6));
+}
 
 @keyframes settings-row-flash {
   0%, 100% { box-shadow: none; }

@@ -195,6 +195,7 @@ export function GroupTimeline({
       record={record}
       append={append}
       taskSeq={append && tasks?.find((task) => task.id === record.taskId)?.seq}
+      fill
       bots={bots}
       onOpenConversation={onOpenConversation}
     />
@@ -340,7 +341,7 @@ export function GroupTimeline({
         className="min-h-0 flex-1 select-text overflow-y-auto"
       >
         <div className="@container">
-          <div className={cn(CHAT_COL, 'flex flex-col gap-3 py-4')}>
+          <div data-slot="bot-timeline" className={cn(CHAT_COL, 'flex flex-col gap-3 py-4')}>
             {timeline?.loading && (
               <div className="flex justify-center py-1 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -588,6 +589,7 @@ const EntryRow = memo(function EntryRow({
           record={records.get(entry.delegationId)?.record}
           retried={records.get(entry.delegationId)?.retried}
           entry={entry}
+          fill
           bots={bots}
           onOpenConversation={onOpenConversation}
         />

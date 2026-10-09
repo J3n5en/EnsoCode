@@ -624,6 +624,7 @@ function DirectTimeline({
       onFocusDone={onFocusDone}
       turnFooter={turnFooter}
       controls={controls}
+      dataSlot="bot-timeline"
     />
   );
 }
