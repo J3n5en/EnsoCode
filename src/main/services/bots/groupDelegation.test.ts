@@ -773,7 +773,11 @@ it('执行失败：任务保留负责人；重试与群主再派同一成员都�
     retryOf: sent.delegationId,
     childConversationId: child,
   });
-  expect(f.to(child).at(-1)?.text).toBe('<retry>');
+  // 同一会话续跑；委派之后群里新增了群主的「已安排」，按群背景增量补上（没有新增时才走 <retry>）
+  const resumed = f.to(child).at(-1)?.text ?? '';
+  expect(resumed).toContain(`<delegation-retry id="${retried.delegationId}">`);
+  expect(resumed).toContain('<group-message from="林经理" seq="2">已安排</group-message>');
+  expect(resumed).not.toContain('<delegation-task');
   expect(task1(f)).toMatchObject({ delegationId: retried.delegationId, assigneeBotId: f.hou });
   f.start(child);
   f.fail(child);

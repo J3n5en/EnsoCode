@@ -355,11 +355,12 @@ function createRuntime(botsRoot: string): BotRuntimePort {
         }
       );
     },
-    prompt(conversationId, text, images, deliveryId) {
+    prompt(conversationId, text, images, deliveryId, resume) {
       const identity = rootIdentity(conversationId);
-      return identity
-        ? promptSession(identity, text, images, deliveryId)
-        : { ok: false, error: 'stale session generation' };
+      if (!identity) return { ok: false, error: 'stale session generation' };
+      return resume
+        ? promptSession(identity, text, images, deliveryId, resume)
+        : promptSession(identity, text, images, deliveryId);
     },
     steer(conversationId, text, images, deliveryId) {
       const identity = rootIdentity(conversationId);

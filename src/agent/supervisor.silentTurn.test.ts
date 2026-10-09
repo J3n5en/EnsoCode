@@ -290,6 +290,45 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it.each([true, false])(
+    'resume prompt（%s）：空闲时先把未完成的 assistant 移出上下文再 prompt；普通 prompt 不动',
+    async (resume) => {
+      const { supervisor, parentSession } = await spawn();
+      const order: string[] = [];
+      const unfinished = { role: 'assistant', content: [], stopReason: 'aborted' };
+      parentSession.messages.push(
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        unfinished
+      );
+      Object.assign(mocks.managers[0]!, {
+        buildSessionProjection: vi.fn(() => ({
+          entries: parentSession.messages.map((message, index) => ({
+            sourceEntry: { type: 'message', id: `m${index}`, message },
+            messages: [message],
+          })),
+        })),
+        appendContextEdit: vi.fn((targetId: string) => {
+          order.push(`edit:${targetId}`);
+          parentSession.messages.pop();
+        }),
+      });
+      Object.assign(parentSession, { refreshContext: vi.fn() });
+      parentSession.prompt.mockImplementation(async () => {
+        order.push('prompt');
+      });
+      supervisor.handleCommand({
+        type: 'prompt',
+        identity: parent,
+        text: '<delegation-retry id="d">continue</delegation-retry>',
+        deliveryId: 'd',
+        ...(resume ? { resume: true as const } : {}),
+      });
+      for (let i = 0; i < 10 && !order.includes('prompt'); i++) await settle();
+      expect(order).toEqual(resume ? ['edit:m1', 'prompt'] : ['prompt']);
+      await supervisor.shutdown();
+    }
+  );
+
   it('compaction/branch summary等非idle状态拒绝retry，不编辑上下文', async () => {
     const { supervisor, parentSession } = await spawn();
     const projection = vi.fn(() => ({ entries: [] }));

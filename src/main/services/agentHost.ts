@@ -1544,7 +1544,9 @@ export function promptSession(
   identity: SessionIdentity,
   text: string,
   images?: AttachedImage[],
-  deliveryId?: string
+  deliveryId?: string,
+  /** 带新消息的断点续跑：worker 先移出未完成的最后一条 assistant 再 prompt */
+  resume?: true
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({
     type: 'prompt',
@@ -1552,6 +1554,7 @@ export function promptSession(
     text,
     ...(images?.length ? { images } : {}),
     ...(deliveryId ? { deliveryId } : {}),
+    ...(resume ? { resume } : {}),
   });
 }
 

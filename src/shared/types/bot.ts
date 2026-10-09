@@ -222,6 +222,12 @@ export interface Delegation {
    * 没在跑（崩溃 / 重启）则标 interrupted 按自动重试续跑整合轮，不用暂存文本；进入终态时同样清除。
    */
   waiting?: { since: number; text: string; turnId?: string };
+  /**
+   * 已作为只读背景送进子会话的群消息水位（群 / 话题时间线 seq；群里还没消息时为 0）。
+   * 同一子会话上的续跑 / 重试 / 被下层结果唤醒只补此后的新增；换新子会话从头再给最近的。
+   * 功能上线前的记录没有此字段：下次往原子会话补背景时按首次处理（给最近的），之后照常增量。
+   */
+  groupContextSeq?: number;
 }
 
 export function parseDelegation(value: unknown): Delegation | undefined {
@@ -276,6 +282,7 @@ export function parseDelegation(value: unknown): Delegation | undefined {
     record.timeoutMinutes = value.timeoutMinutes;
   if (value.keep === true) record.keep = true;
   if (isSeq(value.resultSeq) && value.resultSeq > 0) record.resultSeq = value.resultSeq;
+  if (isSeq(value.groupContextSeq)) record.groupContextSeq = value.groupContextSeq;
   if (isObject(value.pendingResultEntry))
     record.pendingResultEntry = isText(value.pendingResultEntry.turnId)
       ? { turnId: value.pendingResultEntry.turnId }

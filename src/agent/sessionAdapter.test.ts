@@ -19,6 +19,7 @@ import {
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
+  editUnfinishedAssistantForResume,
   silentTurnRecoveryExtension,
   steerActiveSession,
 } from './sessionAdapter';
@@ -95,7 +96,7 @@ type Harness = {
 
 async function createHarness(
   plans: Array<ReplyPlan | 'wait-for-abort'>,
-  options: { seedError?: boolean; extensions?: InlineExtension[] } = {}
+  options: { seedError?: boolean; extensions?: InlineExtension[]; tools?: ToolDefinition[] } = {}
 ): Promise<Harness> {
   const root = mkdtempSync(path.join(tmpdir(), 'enso-session-adapter-'));
   const cwd = path.join(root, 'workspace');
@@ -195,7 +196,7 @@ async function createHarness(
       compaction: { enabled: false },
     }),
     noTools: 'builtin',
-    customTools: [testTool],
+    customTools: options.tools ?? [testTool],
   });
 
   return {
@@ -218,7 +219,7 @@ afterEach(() => {
 
 async function harness(
   plans: Array<ReplyPlan | 'wait-for-abort'>,
-  options?: { seedError?: boolean; extensions?: InlineExtension[] }
+  options?: { seedError?: boolean; extensions?: InlineExtension[]; tools?: ToolDefinition[] }
 ): Promise<Harness> {
   const current = await createHarness(plans, options);
   activeHarnesses.push(current);
@@ -468,6 +469,202 @@ describe('Pi session adapter integration', () => {
       expect(current.session.isIdle).toBe(true);
     }
   );
+
+  it.each(['error', 'aborted'] as const)(
+    '审查回归：附群背景的新 prompt 应与断点 retry 一样移除未完成的 %s assistant',
+    async (stopReason) => {
+      const current = await harness([{ content: [{ type: 'text', text: 'Retry succeeded.' }] }]);
+      const control = await harness([{ content: [{ type: 'text', text: 'Retry succeeded.' }] }]);
+      for (const h of [current, control]) {
+        h.manager.appendMessage({
+          role: 'user',
+          content: 'Please retry this request.',
+          timestamp: Date.now(),
+        });
+        h.manager.appendMessage(
+          assistant(model, {
+            content: [
+              { type: 'toolCall', id: 'unfinished', name: 'adapter_test_tool', arguments: {} },
+            ],
+            stopReason,
+          })
+        );
+        h.session.refreshContext();
+      }
+      expect(editLatestAssistantForRetry(control.session)).toBe(true);
+      await continueSessionActivity(control.session);
+      expect(control.requests[0]!.messages.some((message) => message.role === 'assistant')).toBe(
+        false
+      );
+      // 续跑入口：worker 收到 resume prompt 时先做这一步（supervisor promptFresh），再照常 prompt
+      expect(editUnfinishedAssistantForResume(current.session)).toBe(true);
+      await current.session.prompt(
+        '<delegation-retry id="review">Continue from where you stopped.</delegation-retry>\n<group-context>\n用户补充\n</group-context>'
+      );
+      expect(current.requests).toHaveLength(1);
+      expect(contextText(current.requests[0]!)).toContain('Please retry this request.');
+      expect(
+        current.requests[0]!.messages.some(
+          (message) =>
+            message.role === 'assistant' &&
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === 'toolCall' && part.id === 'unfinished')
+        )
+      ).toBe(false);
+    }
+  );
+
+  /** 被 abort 前一直挂起的工具：计执行次数，中断时按工具失败返回 */
+  function countedTool(mode: 'finish' | 'until-abort') {
+    const state = { runs: 0, started: Promise.withResolvers<void>() };
+    const tool: ToolDefinition = {
+      ...testTool,
+      execute: async (_id, _params, signal) => {
+        state.runs++;
+        state.started.resolve();
+        if (mode === 'until-abort')
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) resolve();
+            else signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+        if (signal?.aborted) throw new Error('Operation aborted');
+        return { content: [{ type: 'text', text: 'tool finished' }], details: undefined };
+      },
+    };
+    return { state, tool };
+  }
+  const toolCall = (id: string): ReplyPlan => ({
+    content: [{ type: 'toolCall', id, name: 'adapter_test_tool', arguments: {} }],
+    stopReason: 'toolUse',
+  });
+  const shape = (context: TranscriptContext) =>
+    context.messages
+      .filter((message) => message.role !== 'system')
+      .map((message) =>
+        message.role === 'assistant'
+          ? `assistant:${message.stopReason}:${message.content.flatMap((part) => (part.type === 'toolCall' ? [part.id] : [])).join(',')}`
+          : message.role === 'toolResult'
+            ? `toolResult:${message.toolCallId}`
+            : message.role
+      );
+
+  it.each(['error', 'aborted'] as const)(
+    '执行次数：工具已执行、本轮随后 %s 中断，带新消息续跑与断点 retry 一致，工具只执行一次、不丢步',
+    async (reason) => {
+      const run = async (resume: boolean) => {
+        const counted = countedTool(reason === 'aborted' ? 'until-abort' : 'finish');
+        const h = await harness(
+          [
+            toolCall('call-1'),
+            reason === 'error'
+              ? { content: [], stopReason: 'error', errorMessage: '503 upstream unavailable' }
+              : { content: [], stopReason: 'aborted' },
+            { content: [{ type: 'text', text: 'Resumed and done.' }] },
+          ],
+          { tools: [counted.tool] }
+        );
+        const first = h.session.prompt('Use the tool, then report.');
+        if (reason === 'aborted') {
+          await counted.state.started.promise;
+          await h.session.abort();
+        }
+        await first;
+        expect(counted.state.runs).toBe(1);
+        const before = h.requests.length;
+        if (resume) {
+          expect(editUnfinishedAssistantForResume(h.session)).toBe(true);
+          await h.session.prompt(
+            '<delegation-retry id="d">Continue from where you stopped.</delegation-retry>'
+          );
+        } else {
+          expect(editLatestAssistantForRetry(h.session)).toBe(true);
+          await continueSessionActivity(h.session);
+        }
+        const request = h.requests.at(-1)!;
+        expect(h.requests).toHaveLength(before + 1);
+        expect(counted.state.runs).toBe(1);
+        return { shape: shape(request), last: h.session.agent.state.messages.at(-1) };
+      };
+      const resumed = await run(true);
+      const retried = await run(false);
+      expect(retried.shape).toEqual(['user', 'assistant:toolUse:call-1', 'toolResult:call-1']);
+      // 续跑只比断点 retry 多出那条新消息：工具调用和结果都在，未完成的 assistant 已移出
+      expect(resumed.shape).toEqual([...retried.shape, 'user']);
+      expect(textOf(resumed.last)).toBe('Resumed and done.');
+    }
+  );
+
+  it.each(['error', 'aborted'] as const)(
+    '执行次数：带工具调用的 assistant 本身 %s 未完成（工具未执行），续跑后由模型重新发起，工具只执行一次',
+    async (reason) => {
+      const counted = countedTool('finish');
+      const h = await harness(
+        [
+          {
+            content: [{ type: 'toolCall', id: 'broken', name: 'adapter_test_tool', arguments: {} }],
+            stopReason: reason,
+            ...(reason === 'error' ? { errorMessage: 'stream reset mid tool call' } : {}),
+          },
+          toolCall('call-2'),
+          { content: [{ type: 'text', text: 'Done.' }] },
+        ],
+        { tools: [counted.tool] }
+      );
+      await h.session.prompt('Use the tool, then report.');
+      expect(counted.state.runs).toBe(0);
+      expect(editUnfinishedAssistantForResume(h.session)).toBe(true);
+      await h.session.prompt('<delegation-retry id="d">Continue.</delegation-retry>');
+      expect(counted.state.runs).toBe(1);
+      expect(shape(h.requests[1]!)).toEqual(['user', 'user']);
+      expect(shape(h.requests[2]!)).toEqual([
+        'user',
+        'user',
+        'assistant:toolUse:call-2',
+        'toolResult:call-2',
+      ]);
+    }
+  );
+
+  it.each([false, true])(
+    '审查回归：toolUse 尾部按工具结果是否存在决定清理（已有结果=%s）',
+    async (hasResult) => {
+      const h = await harness([{ content: [{ type: 'text', text: 'Done.' }] }]);
+      h.manager.appendMessage({ role: 'user', content: 'Use tool.', timestamp: Date.now() });
+      h.manager.appendMessage(assistant(model, toolCall('saved-call')));
+      if (hasResult) {
+        h.manager.appendMessage({
+          role: 'toolResult',
+          toolCallId: 'saved-call',
+          toolName: 'adapter_test_tool',
+          content: [{ type: 'text', text: 'saved result' }],
+          isError: false,
+          timestamp: Date.now(),
+        });
+      }
+      h.session.refreshContext();
+      expect(editUnfinishedAssistantForResume(h.session)).toBe(!hasResult);
+      await h.session.prompt('Continue with new context.');
+      expect(shape(h.requests[0]!)).toEqual(
+        hasResult
+          ? ['user', 'assistant:toolUse:saved-call', 'toolResult:saved-call', 'user']
+          : ['user', 'user']
+      );
+    }
+  );
+
+  it('续跑清理只动未完成的 assistant：正常结束的（如验收没过后补原因）保留', async () => {
+    const h = await harness([{ content: [{ type: 'text', text: 'Fixed.' }] }]);
+    h.manager.appendMessage({ role: 'user', content: 'Do it.', timestamp: Date.now() });
+    h.manager.appendMessage(
+      assistant(model, { content: [{ type: 'text', text: 'Finished once.' }] })
+    );
+    h.session.refreshContext();
+    expect(editUnfinishedAssistantForResume(h.session)).toBe(false);
+    await h.session.prompt(
+      '<delegation-check-failed id="d">The acceptance check failed.</delegation-check-failed>'
+    );
+    expect(shape(h.requests[0]!)).toEqual(['user', 'assistant:stop:', 'user']);
+  });
 
   it('manual retry 用 canonical context edit 隐藏旧错误而保留原始 session entry', async () => {
     const current = await harness([{ content: [{ type: 'text', text: 'Retry succeeded.' }] }], {

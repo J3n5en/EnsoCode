@@ -1,5 +1,5 @@
 import type { BotInjectedMessage } from '@shared/bots/injectedMessage';
-import { ClipboardList, Clock, CornerDownRight, MessagesSquare } from 'lucide-react';
+import { ClipboardList, Clock, CornerDownRight, MessagesSquare, RotateCcw } from 'lucide-react';
 import { useI18n } from '@/i18n';
 
 export function InjectedMessageCard({ message }: { message: BotInjectedMessage }) {
@@ -18,7 +18,9 @@ export function InjectedMessageCard({ message }: { message: BotInjectedMessage }
         ? MessagesSquare
         : message.kind === 'delegation-task'
           ? ClipboardList
-          : CornerDownRight;
+          : message.kind === 'delegation-retry' || message.kind === 'delegation-check-failed'
+            ? RotateCcw
+            : CornerDownRight;
   const title =
     message.kind === 'routine'
       ? `${message.dryRun ? t('Routine dry run') : t('Routine task')} · ${message.title}`
@@ -28,7 +30,11 @@ export function InjectedMessageCard({ message }: { message: BotInjectedMessage }
           ? t('Task from {{name}}', { name: message.from })
           : message.kind === 'delegation-results'
             ? t('Delegation results')
-            : t('Result from {{name}}', { name: message.from });
+            : message.kind === 'delegation-retry'
+              ? t('Continue delegated task')
+              : message.kind === 'delegation-check-failed'
+                ? t('Acceptance check not passed')
+                : t('Result from {{name}}', { name: message.from });
   return (
     <div
       data-bot-injection={message.kind}
@@ -46,7 +52,9 @@ export function InjectedMessageCard({ message }: { message: BotInjectedMessage }
           ? message.prompt
           : message.kind === 'delegation-task'
             ? message.task
-            : message.kind === 'delegation-result'
+            : message.kind === 'delegation-result' ||
+                message.kind === 'delegation-retry' ||
+                message.kind === 'delegation-check-failed'
               ? message.text
               : message.kind === 'delegation-results'
                 ? message.results.map((item, index) => (

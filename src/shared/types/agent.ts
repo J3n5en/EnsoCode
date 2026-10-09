@@ -1345,6 +1345,13 @@ export type AgentCommand =
       deliveryId?: string;
       /** Bot 插话仅允许进入活轮；不再忙时交回 Main 重新准入。 */
       activeOnly?: true;
+      /**
+       * 仅 prompt：带新消息的断点续跑（委派续跑附说明 / 验收原因 / 群背景新增）。worker 在空闲会话上开新轮前
+       * 先按 retry 的语义把未完成（error / aborted / 停在工具调用）的最后一条 assistant 移出模型上下文；
+       * 会话仍在流式时照常插话。旧 worker 不认此字段会整条拒收；worker 由 Main 经 `?modulePath` 随同一次构建
+       * 打进同一应用包、启动时 fork，随应用退出，不存在跨版本组合。
+       */
+      resume?: true;
     }
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
   | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
@@ -3727,6 +3734,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         'images',
         'deliveryId',
         'activeOnly',
+        'resume',
       ]) &&
         parseAnySessionIdentity(value.identity) &&
         typeof value.text === 'string' &&
@@ -3736,6 +3744,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           (value.type === 'steer' &&
             value.activeOnly === true &&
             isDeliveryId(value.deliveryId))) &&
+        (value.resume === undefined || (value.type === 'prompt' && value.resume === true)) &&
         (value.deliveryId === undefined || isDeliveryId(value.deliveryId))
         ? (value as unknown as AgentCommand)
         : null;

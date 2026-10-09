@@ -7,7 +7,10 @@ type LeadMessage =
   | { kind: 'routine'; title: string; prompt: string; dryRun?: true }
   | { kind: 'delegation-task'; from: string; task: string; context: string }
   | { kind: 'delegation-result'; from: string; status: string; text: string }
-  | { kind: 'delegation-results'; results: { from: string; status: string; text: string }[] };
+  | { kind: 'delegation-results'; results: { from: string; status: string; text: string }[] }
+  /** 委派在原子会话上续跑：中途失败接着做（可带委派人说明）/ 验收没过补原因 */
+  | { kind: 'delegation-retry'; text: string }
+  | { kind: 'delegation-check-failed'; text: string };
 
 /** group：群聊里委派结果 / 例行任务后面补上的、该成员还没看过的群消息；note 为分派提示，refs 为附带的 @聊天 */
 export type BotInjectedMessage =
@@ -45,7 +48,7 @@ export function parseBotInjectedMessage(text: string): BotInjectedMessage | null
   const whole = parseSource(source);
   if (whole || source.startsWith('<group') || source.startsWith('（')) return whole;
   for (const split of source.matchAll(
-    /\n(?=<group-info>|<group-state>|<group-message |（省略了 \d+ 条)/g
+    /\n(?=<group-info>|<group-state>|<group-context>\n|<group-message |（省略了 \d+ 条)/g
   )) {
     const lead = parseSource(source.slice(0, split.index).trim());
     const tail = parseSource(source.slice(split.index).trim());
@@ -57,6 +60,16 @@ export function parseBotInjectedMessage(text: string): BotInjectedMessage | null
 
 function parseSource(source: string): BotInjectedMessage | null {
   const omittedPattern = /^（省略了 \d+ 条更早的消息）\s*/;
+  // 委派子会话的群背景：开头的说明行不进消息，块内只能有群消息
+  const groupContext = /^<group-context>\n([\s\S]*)\n<\/group-context>$/.exec(source);
+  if (groupContext) {
+    const start = groupContext[1].search(/^(?:<group-message |（省略了 \d+ 条)/m);
+    if (start < 0) return null;
+    const parsed = parseSource(groupContext[1].slice(start).replace(omittedPattern, '').trim());
+    return parsed?.kind === 'group' && !parsed.instruction && !parsed.note && !parsed.refs
+      ? { kind: 'group', messages: parsed.messages, instruction: '' }
+      : null;
+  }
   if (
     source.startsWith('<group-info>') ||
     source.startsWith('<group-state>') ||
@@ -103,13 +116,19 @@ function parseSource(source: string): BotInjectedMessage | null {
     }
     return results.length ? { kind: 'delegation-results', results } : null;
   }
-  const match = /^<(routine|delegation-task|delegation-result)(\s[^>]*)?>([\s\S]*)<\/\1>$/.exec(
-    source
-  );
+  const match =
+    /^<(routine|delegation-task|delegation-result|delegation-retry|delegation-check-failed)(\s[^>]*)?>([\s\S]*)<\/\1>$/.exec(
+      source
+    );
   if (!match) return null;
   const attrs = attributes(match[2] ?? '');
   if (!attrs) return null;
   const body = match[3].trim();
+  if (match[1] === 'delegation-retry' || match[1] === 'delegation-check-failed') {
+    // 正文由 Main 转义后写入，块内不应再有标签
+    if (!attrs.id || /[<>]/.test(body)) return null;
+    return { kind: match[1], text: decode(body) };
+  }
   if (match[1] === 'routine') {
     if (!attrs.title) return null;
     if (attrs['dry-run'] !== 'true')

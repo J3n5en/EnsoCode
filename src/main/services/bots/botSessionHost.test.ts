@@ -44,7 +44,7 @@ class FakeRuntime implements BotRuntimePort {
     return this.modelResult;
   }
   spawns: BotSpawnSpec[] = [];
-  prompts: Array<{ id: string; text: string }> = [];
+  prompts: Array<{ id: string; text: string; resume?: true }> = [];
   steers: Array<{ id: string; text: string }> = [];
   released: string[] = [];
   aborted: string[] = [];
@@ -54,8 +54,8 @@ class FakeRuntime implements BotRuntimePort {
     this.spawns.push(spec);
     return this.spawnResult;
   }
-  prompt(id: string, text: string) {
-    this.prompts.push({ id, text });
+  prompt(id: string, text: string, _images?: unknown, _deliveryId?: string, resume?: true) {
+    this.prompts.push({ id, text, ...(resume ? { resume } : {}) });
     return { ok: true };
   }
   steer(id: string, text: string) {
@@ -164,6 +164,32 @@ describe('BotSessionHost live capacity', () => {
     await flush();
     expect(runtime.prompts.map((item) => item.text)).toEqual(['first', 'second', 'third']);
     expect(host.runningCount()).toBe(1);
+  });
+});
+
+describe('BotSessionHost resume delivery', () => {
+  it('passes the resume flag only on the prompt that starts the resumed turn, including after queueing', async () => {
+    const alice = bot('Alice');
+    const chat = direct(alice.id);
+    const first = await host.deliver(chat.id, alice.id, 'first');
+    if (!first.ok) throw new Error(first.error);
+    expect(
+      await host.deliver(chat.id, alice.id, 'resumed', {
+        deliveryId: 'd1',
+        queueIfBusy: true,
+        resume: true,
+      })
+    ).toMatchObject({ ok: true, queued: true });
+    host.observe(ev({ type: 'turn-completed', turnId: 't1' }, first.conversationId));
+    await flush();
+    host.observe(ev({ type: 'turn-completed', turnId: 't2' }, first.conversationId));
+    await flush();
+    await host.deliver(chat.id, alice.id, 'plain');
+    expect(runtime.prompts).toEqual([
+      { id: first.conversationId, text: 'first' },
+      { id: first.conversationId, text: 'resumed', resume: true },
+      { id: first.conversationId, text: 'plain' },
+    ]);
   });
 });
 

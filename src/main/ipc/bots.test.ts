@@ -369,6 +369,32 @@ describe('bots IPC', () => {
     expect(mocks.promptSession).toHaveBeenCalledWith(identity, 'hello', undefined, 'd1');
   });
 
+  it('审查回归：resume 投递经真实 runtime 透传到 agentHost.promptSession', async () => {
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const { getBotServices } = await import('./bots');
+    const services = getBotServices()!;
+    const session = services.host.ensureSession(chatId, alice);
+    if (!session.ok) throw new Error(session.error);
+    const result = await services.host.deliverConversation(session.conversationId, '继续断点', {
+      deliveryId: 'review-resume',
+      resume: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(mocks.promptSession).toHaveBeenCalledWith(
+      mocks.identities.get(session.conversationId),
+      '继续断点',
+      undefined,
+      'review-resume',
+      true
+    );
+  });
+
   it('输入框引用：越权与不存在的标识在发给 worker 之前拒绝；技能与聊天摘录由 Main 展开', async () => {
     const alice = await createBot('Alice');
     const bob = await createBot('Bob');

@@ -81,6 +81,9 @@ export function messagePreview(message: ProjectedMessage): string {
       return plain(`${injected.from}: ${injected.text}`);
     case 'delegation-results':
       return plain(injected.results.map((item) => `${item.from}: ${item.text}`).join(' · '));
+    case 'delegation-retry':
+    case 'delegation-check-failed':
+      return plain(injected.text);
   }
 }
 

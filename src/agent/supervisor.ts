@@ -232,6 +232,7 @@ import {
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
+  editUnfinishedAssistantForResume,
   silentTurnRecoveryExtension,
   steerActiveSession,
 } from './sessionAdapter';
@@ -1763,9 +1764,10 @@ export class SessionSupervisor {
         managed.plan?.supersede();
         const images = command.images?.map((image) => ({ type: 'image' as const, ...image }));
         if (await this.interruptRetryIfAny(managed)) {
-          this.promptFresh(managed, command.text, images, command.deliveryId);
+          this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
           return;
         }
+        // 活轮还在（含 resume）：照常插话；resume 只对空闲会话开新轮时生效
         if (managed.status === 'running') {
           await this.steerTracked(managed, command.text, images, command.deliveryId);
           this.bgTasks.backgroundAllForeground(managed.identity.sessionId, 'steer');
@@ -1782,7 +1784,7 @@ export class SessionSupervisor {
           );
           return;
         }
-        this.promptFresh(managed, command.text, images, command.deliveryId);
+        this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
         return;
       }
       case 'steer': {
@@ -4713,7 +4715,9 @@ export class SessionSupervisor {
     managed: ManagedSession,
     text: string,
     images?: { type: 'image'; data: string; mimeType: string }[],
-    deliveryId?: string
+    deliveryId?: string,
+    /** 带新消息的续跑：先按断点重试移出未完成的最后一条 assistant 再 prompt（正在流式时照常插话） */
+    resume?: true
   ): void {
     this.flushPendingMcpTools(managed);
     this.flushPendingBuiltinTools(managed);
@@ -4723,6 +4727,7 @@ export class SessionSupervisor {
       });
       return;
     }
+    if (resume) editUnfinishedAssistantForResume(managed.session);
     managed.currentTurnId = randomUUID();
     ensureAssistantUsage(managed.session.messages as unknown[]);
     void this.promptTracked(

@@ -2,6 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { isSkipReply } from '../../../shared/bots/router';
 import { checkFailureText, checkPassed } from '../../../shared/bots/taskCheck';
+import {
+  buildDelegationGroupContext,
+  DELEGATION_CONTEXT_LIMIT,
+  delegationContextVisible,
+} from '../../../shared/bots/transcript';
 import type { ProjectedMessage } from '../../../shared/types/agent';
 import {
   type BotPermissions,
@@ -14,6 +19,7 @@ import {
   type Delegation,
   type DelegationRetryBy,
   type DelegationTrigger,
+  type GroupEntry,
   type TaskCheck,
 } from '../../../shared/types/bot';
 import type { BotEvent, BotSendResult } from '../../../shared/types/botIpc';
@@ -133,6 +139,8 @@ interface Resume {
   checkFailed: boolean;
   /** 委派人重试附的补充说明：作为一条新消息补进原会话，而不是原样重跑最后一步 */
   note?: string;
+  /** 原子会话已收到的群背景水位；旧记录没有时按首次处理 */
+  groupContextSeq?: number;
 }
 
 /** 投递任务时的看板信息：#N、是否接着原会话、改派时带的退回理由 */
@@ -186,6 +194,11 @@ export class DelegationService {
   /** 已排定的自动重试；只在内存，重启后按记录里的 autoRetryAt 重排 */
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly delivering = new Set<string>();
+  /**
+   * 带群背景、已被宿主接受但还没确认被子会话消费的投递（键见 contextKey）。只在内存：
+   * 重启时仍在队列里的投递随之作废，水位保持原样，下次续跑再补。
+   */
+  private readonly pendingContext = new Map<string, { recordId: string; cursor: number }>();
   private readonly unsubscribe: () => void;
   private readonly unsubscribeDiscard: () => void;
   private readonly unsubscribeStarted: () => void;
@@ -209,6 +222,8 @@ export class DelegationService {
 
   constructor(private readonly deps: Deps) {
     this.unsubscribeStarted = deps.host.onDeliveryStarted((event) => {
+      // 先推进群背景水位：下面按最新记录改写 waiting，不能用推进前的快照覆盖
+      this.consumeContext(this.contextKey(event.conversationId, event.deliveryId));
       // 等待下层的第一层被唤醒的一轮开始了：不再处于等待
       const waiting = delegationOwner(deps.store.list(), event.conversationId);
       if (waiting?.waiting && active(waiting)) {
@@ -495,6 +510,10 @@ export class DelegationService {
       ...(check ? { check: { kind: check.kind, text: check.text } } : {}),
       timeoutMinutes,
       trigger,
+      // 续跑沿用原子会话：先继承已送过的群背景水位，送出新增后再推进
+      ...(options.resume?.groupContextSeq !== undefined
+        ? { groupContextSeq: options.resume.groupContextSeq }
+        : {}),
     };
     this.save(record);
     const info: TaskInfo = {
@@ -925,14 +944,140 @@ export class DelegationService {
       });
       text = `<delegation-task id="${record.id}" from="${escapeXml(from)}">\n${escapeXml(record.task)}\n<context>${escapeXml(record.context)}</context>${acceptance}${note}${previous ? `\n${previous}` : ''}\n</delegation-task>`;
     }
-    return this.deps.host.deliverConversation(record.childConversationId, text, {
-      deliveryId: record.id,
-      queueIfBusy: true,
-      source: 'bot',
+    // 附发起时所在群 / 话题的消息作为只读背景（独立块，放在任务之后）：新子会话取最近若干条，
+    // 接着同一子会话（任务会话续用）只补上次送过之后的增量
+    const group = this.groupContext(
+      record,
+      record.groupContextSeq ?? this.sessionContextSeq(record)
+    );
+    const full = `${text}${group?.text ? `\n${group.text}` : ''}`;
+    return this.sendWithContext(record.id, record.childConversationId, record.id, group, () =>
+      this.deps.host.deliverConversation(record.childConversationId, full, {
+        deliveryId: record.id,
+        queueIfBusy: true,
+        source: 'bot',
+      })
+    );
+  }
+
+  /**
+   * 委派子会话的群背景：record.chatId 是委派发起时所在的群或话题（第二层继承同一个群）。
+   * cursor 缺省为首次（最近 DELEGATION_CONTEXT_LIMIT 条），给了只取之后的增量。私聊委派、群已不在时返回 undefined。
+   */
+  private groupContext(
+    record: Delegation,
+    cursor?: number
+  ): { text: string; cursor: number } | undefined {
+    const chat = record.chatId ? this.deps.chats.get(record.chatId) : undefined;
+    if (chat?.kind !== 'group') return undefined;
+    const floor = chat.epochSeq ?? 0;
+    let entries: GroupEntry[];
+    if (cursor === undefined) {
+      // 首次只倒读到够数为止，不读整条时间线
+      entries = [];
+      let seen = 0;
+      for (const entry of this.deps.chats.backward(chat.id, undefined, floor)) {
+        entries.push(entry);
+        if (
+          delegationContextVisible(entry, record.targetBotId) &&
+          ++seen >= DELEGATION_CONTEXT_LIMIT
+        )
+          break;
+      }
+    } else entries = this.deps.chats.readAfter(chat.id, Math.max(cursor, floor));
+    return buildDelegationGroupContext({
+      entries,
+      botId: record.targetBotId,
+      members: this.deps.bots.list(),
+      chatTitle: this.deps.chats.rootOf(chat.id)?.title ?? chat.title,
+      ...(chat.parentId ? { threadTitle: chat.threadTitle ?? '' } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+      floor,
     });
   }
 
-  /** 沿用原子会话：中途失败从最后一步续跑，验收没过补一条原因；会话恢复不了才换新子会话从头发任务 */
+  /** 群背景已送进子会话：记下水位（按最新记录写，不覆盖其间的状态变化；只前进不后退） */
+  private injected(id: string, cursor: number): void {
+    const latest = this.deps.store.get(id);
+    if (latest && (latest.groupContextSeq === undefined || cursor > latest.groupContextSeq))
+      this.save({ ...latest, groupContextSeq: cursor });
+  }
+
+  /** 同一子会话里之前几次执行已送过的群背景水位（任务会话续用时只补增量）；新子会话返回 undefined */
+  private sessionContextSeq(record: Delegation): number | undefined {
+    let seq: number | undefined;
+    for (const item of this.deps.store.list())
+      if (
+        item.id !== record.id &&
+        item.childConversationId === record.childConversationId &&
+        item.groupContextSeq !== undefined &&
+        (seq === undefined || item.groupContextSeq > seq)
+      )
+        seq = item.groupContextSeq;
+    return seq;
+  }
+
+  private contextKey(conversationId: string, deliveryId: string): string {
+    return `${conversationId}\n${deliveryId}`;
+  }
+
+  /** 带群背景的那条投递确认开始（已被子会话消费）：推进对应记录的水位 */
+  private consumeContext(key: string): void {
+    const pending = this.pendingContext.get(key);
+    if (!pending) return;
+    this.pendingContext.delete(key);
+    this.injected(pending.recordId, pending.cursor);
+  }
+
+  /**
+   * 投递附带群背景：宿主接受（入队 / 已发给 worker）不等于子会话读到了。只有这条投递确认开始
+   * （onDeliveryStarted，或返回时 hasStartedDelivery 已成立）才推进水位；发送失败、重复投递、
+   * 排队后被取消 / 丢弃、重启时仍在队列里的都不推进，下次往原子会话续跑时照样补上。
+   * 没有可见新增（text 为空）时游标只越过不收的条目，不会漏消息，送出即推进。
+   */
+  private async sendWithContext<T extends BotDeliverResult | BotSendResult>(
+    recordId: string,
+    conversationId: string,
+    deliveryId: string,
+    group: { text: string; cursor: number } | undefined,
+    send: () => Promise<T>
+  ): Promise<T> {
+    if (!group) return send();
+    if (!group.text) {
+      const sent = await send();
+      if (sent.ok) this.injected(recordId, group.cursor);
+      return sent;
+    }
+    const key = this.contextKey(conversationId, deliveryId);
+    const pending = { recordId, cursor: group.cursor };
+    // 先登记再发送：开始事件可能在 send 返回前就到达
+    this.pendingContext.set(key, pending);
+    let sent: T;
+    try {
+      sent = await send();
+    } catch (cause) {
+      if (this.pendingContext.get(key) === pending) this.pendingContext.delete(key);
+      throw cause;
+    }
+    // 已被开始事件消费，或被同一投递的后一次尝试接替
+    if (this.pendingContext.get(key) !== pending) return sent;
+    if (!sent.ok || sent.duplicate) this.pendingContext.delete(key);
+    else if (this.deps.host.hasStartedDelivery(conversationId, deliveryId))
+      this.consumeContext(key);
+    return sent;
+  }
+
+  /** 记录进入终态：它名下还没确认消费的群背景不再等（排队的投递已随取消丢弃） */
+  private dropPendingContext(recordId: string): void {
+    for (const [key, pending] of this.pendingContext)
+      if (pending.recordId === recordId) this.pendingContext.delete(key);
+  }
+
+  /**
+   * 沿用原子会话：中途失败从最后一步续跑，验收没过补一条原因；会话恢复不了才换新子会话从头发任务。
+   * 带说明 / 验收原因 / 群背景新增的续跑是一条新消息，按 resume 投递：worker 先像断点重试那样
+   * 把未完成的最后一条 assistant 移出模型上下文，再带着新消息继续；什么都不补时照常断点重跑。
+   */
   private async resume(
     record: Delegation,
     resume: Resume,
@@ -941,27 +1086,39 @@ export class DelegationService {
     info: TaskInfo
   ): Promise<BotDeliverResult> {
     const note = resume.note ? `\nNote from ${escapeXml(from)}: ${escapeXml(resume.note)}` : '';
-    const options = { deliveryId: record.id, queueIfBusy: true, source: 'bot' as const };
-    const sent =
+    const options = {
+      deliveryId: record.id,
+      queueIfBusy: true,
+      source: 'bot' as const,
+      resume: true as const,
+    };
+    // 原子会话已有之前给过的背景：只补其后的新增；没有新增就照常续跑，不发空块
+    const group = this.groupContext(record, resume.groupContextSeq);
+    const extra = group?.text ? `\n${group.text}` : '';
+    const text =
       resume.checkFailed && record.check
-        ? await this.deps.host.deliverConversation(
-            resume.conversationId,
-            `<delegation-check-failed id="${record.id}">\nThe acceptance check failed: none of your final tool outputs contained: ${escapeXml(record.check.text)}\nFix the work and finish again; this delegation passes only if one of your final tool outputs contains it.${note}\n</delegation-check-failed>`,
-            options
-          )
-        : resume.note
-          ? await this.deps.host.deliverConversation(
-              resume.conversationId,
-              `<delegation-retry id="${record.id}">\nYour previous attempt at this delegated task did not finish. Continue from where you stopped.${note}\n</delegation-retry>`,
-              options
-            )
-          : await this.deps.host.retryConversation(resume.conversationId, { delegation: true });
+        ? `<delegation-check-failed id="${record.id}">\nThe acceptance check failed: none of your final tool outputs contained: ${escapeXml(record.check.text)}\nFix the work and finish again; this delegation passes only if one of your final tool outputs contains it.${note}\n</delegation-check-failed>${extra}`
+        : resume.note || extra
+          ? `<delegation-retry id="${record.id}">\nYour previous attempt at this delegated task did not finish. Continue from where you stopped.${note}\n</delegation-retry>${extra}`
+          : undefined;
+    const sent = await this.sendWithContext(
+      record.id,
+      resume.conversationId,
+      record.id,
+      group,
+      text === undefined
+        ? () => this.deps.host.retryConversation(resume.conversationId, { delegation: true })
+        : () => this.deps.host.deliverConversation(resume.conversationId, text, options)
+    );
+    // 没送出去：水位保持原子会话已收到的（创建记录时已沿用），下次续跑再补
     if (sent.ok || RESUME_TRANSIENT.has(sent.error)) return sent;
     const current = this.deps.store.get(record.id);
     if (!current || !active(current)) return sent;
     const conversationId = freshChild();
     if (!conversationId) return { ok: false, error: 'Delegation workspace unavailable.' };
-    const fresh = { ...current, childConversationId: conversationId };
+    // 新子会话什么都没收到过：从头给任务和最近的群背景
+    const { groupContextSeq: _seq, ...rest } = current;
+    const fresh = { ...rest, childConversationId: conversationId };
     this.save(fresh);
     return this.sendTask(fresh, from, { ...info, incremental: false });
   }
@@ -1037,6 +1194,9 @@ export class DelegationService {
             conversationId: record.childConversationId,
             checkFailed: record.failure === 'check',
             ...(options.note ? { note: options.note } : {}),
+            ...(record.groupContextSeq !== undefined
+              ? { groupContextSeq: record.groupContextSeq }
+              : {}),
           }
         : undefined;
     // 自动重试沿用原批次；等待自动重试时人工点重试也接替进原批次（不先把失败交回委派人）；
@@ -1596,9 +1756,14 @@ export class DelegationService {
         )
           continue;
       }
+      // 唤醒第一层：结果之后补上它上次收到背景以来群里的新增（没有新增不附）
+      const owner = parent.bot?.delegationId
+        ? delegationOwner(all, parent.conversationId)
+        : undefined;
+      const group = owner ? this.groupContext(owner, owner.groupContextSeq) : undefined;
       this.delivering.add(deliveryId);
       try {
-        const text = batchResultText(batch, (id) => this.deps.bots.get(id)?.name ?? id, {
+        const results = batchResultText(batch, (id) => this.deps.bots.get(id)?.name ?? id, {
           inGroup: Boolean(head.chatId && this.deps.chats.get(head.chatId)?.kind === 'group'),
           retriesLeft: (record) =>
             Math.max(
@@ -1606,16 +1771,23 @@ export class DelegationService {
               DELEGATOR_RETRY_LIMIT - delegatorRetries(record, (key) => this.deps.store.get(key))
             ),
         });
-        const sent =
+        // 结果必须在最前：是否已投递靠开头的 <delegation-result id> 判断
+        const text = group?.text ? `${results}\n${group.text}` : results;
+        const send = (): Promise<BotDeliverResult | BotSendResult> =>
           parent.bot?.chatId &&
           this.deps.chats.get(parent.bot.chatId)?.kind === 'group' &&
           this.deps.deliverGroupResult
-            ? await this.deps.deliverGroupResult(head, text, deliveryId, batch)
-            : await this.deps.host.deliverConversation(head.parentConversationId, text, {
+            ? this.deps.deliverGroupResult(head, text, deliveryId, batch)
+            : this.deps.host.deliverConversation(head.parentConversationId, text, {
                 onlyIfIdle: true,
                 source: 'bot',
                 deliveryId,
               });
+        // 水位在确认消费时推进（sendWithContext 返回前或开始事件里），先于下面落第一层状态：
+        // integrating 可能标中断并排续跑，续跑记录要继承新水位
+        const sent = owner
+          ? await this.sendWithContext(owner.id, head.parentConversationId, deliveryId, group, send)
+          : await send();
         if (sent.ok && this.deps.host.hasStartedDelivery(head.parentConversationId, deliveryId)) {
           this.integrating(head.parentConversationId);
           this.delivered(batch);
@@ -1643,6 +1815,7 @@ export class DelegationService {
     this.blockTimers.clear();
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
+    this.pendingContext.clear();
   }
 
   disable(): void {
@@ -1669,6 +1842,7 @@ export class DelegationService {
       state !== 'blocked' &&
       (record.appends?.some((item) => item.ok === undefined) ||
         this.deps.host.hasPendingDeliveries(record.childConversationId));
+    this.dropPendingContext(record.id);
     const { waiting: _waiting, ...base } = record;
     let finished: Delegation = {
       ...base,

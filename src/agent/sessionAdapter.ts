@@ -160,8 +160,8 @@ export function silentTurnRecoveryExtension(
   };
 }
 
-/** 手动重试：把最新 assistant 从模型上下文拿掉，jsonl 原条目保留 */
-export function editLatestAssistantForRetry(session: AgentSession): boolean {
+/** 模型上下文里最后一条可见条目是 assistant 时返回它的源条目 */
+function latestVisibleAssistant(session: AgentSession) {
   const projection = session.sessionManager.buildSessionProjection();
   const latestVisible = [...projection.entries]
     .reverse()
@@ -171,10 +171,32 @@ export function editLatestAssistantForRetry(session: AgentSession): boolean {
     latestVisible.sourceEntry.message.role !== 'assistant' ||
     latestVisible.messages.at(-1)?.role !== 'assistant'
   ) {
-    return false;
+    return undefined;
   }
+  return { id: latestVisible.sourceEntry.id, message: latestVisible.sourceEntry.message };
+}
 
-  session.sessionManager.appendContextEdit(latestVisible.sourceEntry.id, null);
+/** 手动重试：把最新 assistant 从模型上下文拿掉，jsonl 原条目保留 */
+export function editLatestAssistantForRetry(session: AgentSession): boolean {
+  const latest = latestVisibleAssistant(session);
+  if (!latest) return false;
+  session.sessionManager.appendContextEdit(latest.id, null);
+  session.refreshContext();
+  return true;
+}
+
+/** 未完成的 assistant：出错 / 被中断，或停在工具调用上却没有任何工具结果跟在后面 */
+const UNFINISHED_STOP_REASONS: ReadonlySet<string> = new Set(['error', 'aborted', 'toolUse']);
+
+/**
+ * 带新消息的续跑（resume prompt）：先按断点重试的语义把未完成的最后一条 assistant 移出模型上下文
+ * （jsonl 原条目保留），再由调用方照常 prompt 新消息。最后一条 assistant 已正常完成（如验收没过后补原因）
+ * 时不动它。只在会话空闲时调用；返回是否移除了。
+ */
+export function editUnfinishedAssistantForResume(session: AgentSession): boolean {
+  const latest = latestVisibleAssistant(session);
+  if (!latest || !UNFINISHED_STOP_REASONS.has(String(latest.message.stopReason))) return false;
+  session.sessionManager.appendContextEdit(latest.id, null);
   session.refreshContext();
   return true;
 }

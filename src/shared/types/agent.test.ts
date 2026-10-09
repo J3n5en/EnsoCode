@@ -243,6 +243,16 @@ describe('agent control tool protocol', () => {
       expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
   });
 
+  it('resume 只允许取值 true 的 prompt，不能用于 steer', () => {
+    const command = { type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd', resume: true };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(
+      parseAgentCommand({ type: 'prompt', identity: parent, text: 'hi', resume: true })
+    ).not.toBeNull();
+    for (const patch of [{ type: 'steer' }, { resume: false }, { resume: 'true' }, { resume: 1 }])
+      expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
+  });
+
   it.each(['delivery-settled', 'delivery-rejected', 'delivery-deferred'])(
     '%s 只接受精确 identity、seq 与 deliveryId',
     (type) => {

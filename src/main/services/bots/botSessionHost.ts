@@ -85,7 +85,9 @@ export interface BotRuntimePort {
     conversationId: string,
     text: string,
     images?: AttachedImage[],
-    deliveryId?: string
+    deliveryId?: string,
+    /** 带新消息的断点续跑（见 BotDeliverOptions.resume） */
+    resume?: true
   ): ActionResult;
   steer(
     conversationId: string,
@@ -152,6 +154,11 @@ export interface BotDeliverOptions {
   /** 缺省 bot：人类插话才加补充说明 */
   source?: BotDeliverySource;
   onlyIfIdle?: boolean;
+  /**
+   * 带新消息的断点续跑（委派续跑附说明 / 验收原因 / 群背景新增）：开新轮时 worker 先按 retry 的语义
+   * 移出未完成的最后一条 assistant 再 prompt。只对开新轮生效，插话（steer）不带。
+   */
+  resume?: true;
 }
 
 export type BotDeliverResult =
@@ -1492,12 +1499,15 @@ export class BotSessionHost {
       this.modelNotice(delivery, bot, fallback);
       return { ok: true, conversationId };
     }
-    const sent = this.deps.runtime.prompt(
-      conversationId,
-      notes.text,
-      delivery.images,
-      delivery.deliveryId
-    );
+    const sent = delivery.resume
+      ? this.deps.runtime.prompt(
+          conversationId,
+          notes.text,
+          delivery.images,
+          delivery.deliveryId,
+          true
+        )
+      : this.deps.runtime.prompt(conversationId, notes.text, delivery.images, delivery.deliveryId);
     if (!sent.ok) return fail(sent.error ?? 'prompt-failed');
     this.modelNotice(delivery, bot, fallback);
     this.retryTasks.set(conversationId, this.tasks.get(conversationId) ?? '');
