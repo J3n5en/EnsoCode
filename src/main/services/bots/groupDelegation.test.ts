@@ -1520,6 +1520,20 @@ it('软停止：登记卡住后 5 分钟没收尾只中止当前回合；排队�
   expect(await pending).toMatchObject({ merged: true, delivery: 'accepted' });
   f.reply(child, '拿到密码，做完了');
   await settle();
+  // #12：这一轮结束时它转派的子委派还没结束，执行保持进行中等下层结果（追加已在本轮跑完）
+  expect(f.delegations.list().find((record) => record.id === next.id)).toMatchObject({
+    state: 'running',
+    waiting: { text: '拿到密码，做完了' },
+    appends: [{ ok: true }],
+  });
+  const grandchild = f.child(nested.delegationId);
+  f.start(grandchild);
+  f.reply(grandchild, '配置没问题');
+  await settle();
+  expect(f.to(child).at(-1)?.text).toContain(`<delegation-result id="${nested.delegationId}"`);
+  f.start(child);
+  f.reply(child, '配置也确认了，做完了');
+  await settle();
   expect(f.delegations.list().find((record) => record.id === next.id)).toMatchObject({
     state: 'completed',
     appends: [{ ok: true }],
@@ -1669,6 +1683,60 @@ it('失败的委派和第二层委派的结果不写进群时间线', async () =
     'pendingResultEntry'
   );
   f.delegations.dispose();
+  f.groups.dispose();
+});
+
+it('嵌套委派：第一层等下层结果整合完才交回并入群；群里只有第一层的结果，只写一次', async () => {
+  const f = fixture(['吴经理', '小设', '阿测']);
+  await f.groups.send(f.chat.id, '出一版设计', { deliveryId: 'human-1' });
+  await settle();
+  const boss = f.conversation(f.ids[0]);
+  f.start(boss);
+  const sent = f.delegations.delegate(boss, { to: '小设', task: '设计' });
+  if (!sent.ok) throw new Error(sent.error);
+  await settle();
+  const designer = f.child(sent.delegationId);
+  f.start(designer);
+  f.reply(boss, '已安排');
+  await settle();
+  const nested = f.delegations.delegate(designer, { to: '阿测', task: '切图' });
+  if (!nested.ok) throw new Error(nested.error);
+  await settle();
+  const nestedChild = f.child(nested.delegationId);
+  f.start(nestedChild);
+  const results = () => f.entries().filter((e) => e.id.startsWith('delegation-result:'));
+  const toBoss = () => f.to(boss).filter((p) => p.text.includes('<delegation-result'));
+  f.reply(designer, '设计稿初版好了，等阿测切图');
+  await settle();
+  expect(f.store.get(sent.delegationId)?.state).toBe('running');
+  expect(results()).toEqual([]);
+  expect(toBoss()).toHaveLength(0);
+  f.reply(nestedChild, '切好了');
+  await settle();
+  expect(f.to(designer).at(-1)!.text).toContain(`<delegation-result id="${nested.delegationId}"`);
+  expect(results()).toEqual([]);
+  f.start(designer);
+  f.reply(designer, '设计稿和切图都完成');
+  await settle();
+  expect(results()).toHaveLength(1);
+  expect(results()[0]).toMatchObject({
+    id: `delegation-result:${sent.delegationId}`,
+    botId: f.ids[1],
+    conversationId: designer,
+    text: '设计稿和切图都完成',
+  });
+  expect(toBoss()).toHaveLength(1);
+  expect(toBoss()[0].text).toContain('设计稿和切图都完成');
+  expect(toBoss()[0].text).not.toContain('等阿测切图');
+  f.start(boss);
+  f.reply(boss, '收到');
+  await settle();
+  f.delegations.dispose();
+  const again = f.makeDelegations();
+  await settle();
+  expect(results()).toHaveLength(1);
+  expect(toBoss()).toHaveLength(1);
+  again.dispose();
   f.groups.dispose();
 });
 

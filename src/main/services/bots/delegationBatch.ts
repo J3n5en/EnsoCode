@@ -39,7 +39,7 @@ export const escapeXml = (text: string) =>
     .replaceAll('"', '&quot;');
 
 /** 批次 = 同一父会话同一轮（batchId）发起的委派；无 batchId 的记录各自成批 */
-const batchKey = (record: Delegation) =>
+export const batchKey = (record: Delegation) =>
   `${record.parentConversationId}\n${record.batchId ?? record.id}`;
 
 /** 从 record 沿 retryOf 往上（含自身）；遇到环即停 */
@@ -73,6 +73,34 @@ export const pendingAutoRetry = (record: Delegation, records: readonly Delegatio
   record.state === 'failed' &&
   record.autoRetryAt !== undefined &&
   !records.some((item) => item.retryOf === record.id);
+
+/** 子会话当前归属的委派：续跑链沿用同一子会话，取其中最新的一条；不是委派子会话时为空 */
+export function delegationOwner(
+  records: readonly Delegation[],
+  conversationId: string
+): Delegation | undefined {
+  let owner: Delegation | undefined;
+  for (const record of records)
+    if (
+      record.childConversationId === conversationId &&
+      (!owner || record.createdAt >= owner.createdAt)
+    )
+      owner = record;
+  return owner;
+}
+
+/** 某会话发起、还没结束的下层委派：排队 / 运行 / 等待自动重试 / 已结束但结果还没送回该会话 */
+export const unfinishedDownstream = (
+  records: readonly Delegation[],
+  conversationId: string
+): Delegation[] =>
+  records.filter(
+    (record) =>
+      record.parentConversationId === conversationId &&
+      (isActiveDelegation(record) ||
+        pendingAutoRetry(record, records) ||
+        record.deliveredAt === undefined)
+  );
 
 /** 同批次里已被重试接替的记录（自动重试沿用原批次）：不再单独回传 */
 export function supersededIds(batch: readonly Delegation[]): Set<string> {

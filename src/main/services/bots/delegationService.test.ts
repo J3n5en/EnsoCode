@@ -419,7 +419,12 @@ it('重启后回传给委派父会话仍按原聊天归属，不受其他聊天�
   const nested = f.service.delegate(parent, { to: 'Carol', task: 'inner' });
   if (!nested.ok) throw new Error(nested.error);
   await vi.advanceTimersByTimeAsync(0);
-  // 内层在重启前已最终失败（不可自动重试），重启后只需把它回传给外层子会话
+  // 外层这一轮已结束、在等内层；内层在重启前已最终失败（不可自动重试），重启后只需把它回传给外层子会话
+  f.store.save({
+    ...f.store.get(first.delegationId)!,
+    state: 'running',
+    waiting: { since: Date.now(), text: '等内层' },
+  });
   f.store.save({
     ...f.store.get(nested.delegationId)!,
     state: 'failed',
@@ -1581,5 +1586,890 @@ describe('retry_delegation：委派人自己重试', () => {
     expect(human.ok).toBe(true);
     if (human.ok) expect(f.store.get(human.delegationId)?.retryBy).toBe('human');
     f.service.dispose();
+  });
+});
+
+describe('嵌套委派：第一层等下层结果整合完才交回', () => {
+  let index = 0;
+  const wake = (f: ReturnType<typeof fixture>) =>
+    f.prompts.filter((p) => p.id === f.parent && p.text.includes('<delegation-result'));
+  const toChild = (f: ReturnType<typeof fixture>, id: string) =>
+    f.prompts.filter((p) => p.id === id && p.text.includes('<delegation-result'));
+  const reply = (f: ReturnType<typeof fixture>, id: string, text: string) => {
+    f.host.observe({
+      type: 'message-upsert',
+      identity: { sessionId: id, generation: 'g' },
+      seq: 1,
+      index: ++index,
+      message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' },
+    } as never);
+    f.finish(id);
+  };
+  const failChild = (f: ReturnType<typeof fixture>, id: string) =>
+    f.host.observe({
+      type: 'turn-failed',
+      identity: { sessionId: id, generation: 'g' },
+      seq: 1,
+      turnId: 'turn',
+      error: 'model refused',
+    } as never);
+  const member = (f: ReturnType<typeof fixture>, name: string) => {
+    const created = f.deps.bots.create({ name }, []);
+    if (!created.ok) throw new Error(name);
+    return created.bot.id;
+  };
+  type ServiceDeps = ConstructorParameters<typeof DelegationService>[0];
+  type Input = Parameters<DelegationService['delegate']>[1];
+  const make = (f: ReturnType<typeof fixture>, extra: Partial<ServiceDeps> = {}) =>
+    new DelegationService({
+      ...f.deps,
+      autoRetryDelayMs: (_kind, attempt) => attempt * 100,
+      ...extra,
+    });
+  const ok = (sent: ReturnType<DelegationService['delegate']>) => {
+    if (!sent.ok) throw new Error(sent.error);
+    return sent.delegationId;
+  };
+  /** Alice → Bob（第一层，子会话 c1）→ Carol（第二层，子会话 c2） */
+  async function nested(
+    f: ReturnType<typeof fixture>,
+    service: DelegationService = f.service,
+    lead: Partial<Input> = {}
+  ) {
+    member(f, 'Carol');
+    const leadId = ok(service.delegate(f.parent, { to: 'Bob', task: 'lead', ...lead }));
+    await vi.advanceTimersByTimeAsync(0);
+    const c1 = f.store.get(leadId)!.childConversationId;
+    const subId = ok(service.delegate(c1, { to: 'Carol', task: 'review' }));
+    await vi.advanceTimersByTimeAsync(0);
+    return { lead: leadId, sub: subId, c1, c2: f.store.get(subId)!.childConversationId };
+  }
+  const restart = (f: ReturnType<typeof fixture>, service: DelegationService) => {
+    service.dispose();
+    f.host.observe({ type: 'worker-exited' });
+    return make(f);
+  };
+
+  it('下层未结束时第一层不交回；下层结果送回第一层子会话、那一轮结束后才以那一轮的输出完成', async () => {
+    const f = fixture();
+    const registered = vi.spyOn(f.host, 'registerDelegation');
+    const n = await nested(f);
+    reply(f, n.c1, '已请 Carol 复审，等结果');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'running',
+      waiting: { text: '已请 Carol 复审，等结果', turnId: 'turn' },
+    });
+    expect(wake(f)).toHaveLength(0);
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    reply(f, n.c2, '复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    expect(toChild(f, n.c1)[0].text).toContain(`<delegation-result id="${n.sub}"`);
+    expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+    // 被唤醒的这一轮已开始：仍是进行中，不再处于等待
+    expect(f.store.get(n.lead)?.state).toBe('running');
+    expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+    // 第一层子会话按委派时的权限继续工作，不被降成只读
+    const tools = f.store.get(n.lead)!.effectivePermissions!.tools;
+    expect(tools).toBe('all');
+    for (const [conversationId, bot] of registered.mock.calls)
+      if (conversationId === n.c1) expect(bot.tools).toBe(tools);
+    reply(f, n.c1, '整合：复审通过，可以交付');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'completed',
+      result: '整合：复审通过，可以交付',
+    });
+    expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+    expect(wake(f)).toHaveLength(1);
+    expect(wake(f)[0].text).toContain('整合：复审通过，可以交付');
+    expect(wake(f)[0].text).not.toContain('等结果');
+    f.service.dispose();
+  });
+
+  it('下层最终失败照常交回第一层，第一层用 retry_delegation 重试后正常完成', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    f.persist(n.c2);
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(0);
+    failChild(f, n.c2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)?.state).toBe('running');
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    expect(toChild(f, n.c1)[0].text).toContain('final failure');
+    expect(wake(f)).toHaveLength(0);
+    // 第一层在被唤醒的这一轮里自己重试
+    const retried = f.service.retryAsDelegator(n.c1, n.sub, '再看一遍');
+    if (!retried.ok) throw new Error(retried.error);
+    reply(f, n.c1, '已重试，等结果');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'running',
+      waiting: { text: '已重试，等结果' },
+    });
+    reply(f, n.c2, '复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(2);
+    expect(toChild(f, n.c1)[1].text).toContain(`<delegation-result id="${retried.delegationId}"`);
+    reply(f, n.c1, '最终：重试后复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'completed',
+      result: '最终：重试后复审通过',
+    });
+    expect(wake(f)).toHaveLength(1);
+    f.service.dispose();
+  });
+
+  it('等待期间第一层改派 / 再发新的下层委派：同样纳入等待，全部回来后才完成，只交回一次', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    member(f, 'Dave');
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(0);
+    failChild(f, n.c2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    const moved = ok(f.service.delegate(n.c1, { to: 'Dave', task: '改由你复审' }));
+    await vi.advanceTimersByTimeAsync(0);
+    reply(f, n.c1, '改请 Dave 复审');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'running',
+      waiting: { text: '改请 Dave 复审' },
+    });
+    expect(wake(f)).toHaveLength(0);
+    reply(f, f.store.get(moved)!.childConversationId, 'Dave：通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(2);
+    expect(toChild(f, n.c1)[1].text).toContain(`<delegation-result id="${moved}"`);
+    reply(f, n.c1, '最终：Dave 复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'completed',
+      result: '最终：Dave 复审通过',
+    });
+    expect(wake(f)).toHaveLength(1);
+    await f.service.deliverPending();
+    expect(wake(f)).toHaveLength(1);
+    f.service.dispose();
+  });
+
+  it('第一层超时计入等待下层的时间；超时后级联取消未结束的下层，keep 的跑完只落记录、不再唤醒第一层', async () => {
+    const f = fixture();
+    member(f, 'Carol');
+    member(f, 'Dave');
+    const lead = ok(f.service.delegate(f.parent, { to: 'Bob', task: 'lead', deadlineMinutes: 10 }));
+    await vi.advanceTimersByTimeAsync(0);
+    const c1 = f.store.get(lead)!.childConversationId;
+    const kept = ok(f.service.delegate(c1, { to: 'Carol', task: 'kept', keep: true }));
+    const drop = ok(f.service.delegate(c1, { to: 'Dave', task: 'drop' }));
+    await vi.advanceTimersByTimeAsync(0);
+    reply(f, c1, '等结果');
+    await vi.advanceTimersByTimeAsync(9);
+    expect(f.store.get(lead)?.state).toBe('running');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.get(lead)).toMatchObject({ state: 'failed', failure: 'timeout' });
+    expect(f.store.get(lead)).not.toHaveProperty('waiting');
+    expect(f.store.get(drop)?.state).toBe('canceled');
+    expect(f.abort).toHaveBeenCalledWith(f.store.get(drop)!.childConversationId);
+    expect(f.store.get(kept)?.state).toBe('running');
+    expect(wake(f)).toHaveLength(1);
+    expect(wake(f)[0].text).toContain('failure="timeout"');
+    reply(f, f.store.get(kept)!.childConversationId, 'kept done');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(kept)).toMatchObject({
+      state: 'completed',
+      deliveredAt: expect.any(Number),
+    });
+    expect(f.store.get(drop)?.deliveredAt).toBeDefined();
+    expect(toChild(f, c1)).toHaveLength(0);
+    f.service.dispose();
+  });
+
+  it.each(['cancel', 'stop-parent'] as const)(
+    '第一层被取消 / 父回合被停止（%s）：未结束的下层级联取消，不再唤醒第一层',
+    async (how) => {
+      const f = fixture();
+      await f.host.deliverConversation(f.parent, 'go');
+      await vi.advanceTimersByTimeAsync(0);
+      const n = await nested(f);
+      reply(f, n.c1, '等 Carol');
+      await vi.advanceTimersByTimeAsync(0);
+      if (how === 'cancel') f.service.cancel(n.lead);
+      else await f.host.abortConversation(f.parent);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.store.get(n.lead)?.state).toBe('canceled');
+      expect(f.store.get(n.sub)?.state).toBe('canceled');
+      expect(f.abort).toHaveBeenCalledWith(n.c2);
+      expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      f.service.dispose();
+    }
+  );
+
+  it('等待中的下层被外部作废（群开新对话）：没有可等的了，第一层以暂存的那一轮输出完成', async () => {
+    const f = fixture();
+    const n = await nested(f, f.service, { keep: true });
+    reply(f, n.c1, '阶段结果：初稿已完成');
+    await vi.advanceTimersByTimeAsync(0);
+    f.service.startOver(f.store.get(n.lead)!.chatId!);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.sub)).toMatchObject({
+      state: 'canceled',
+      deliveredAt: expect.any(Number),
+    });
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'completed',
+      result: '阶段结果：初稿已完成',
+    });
+    expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    f.service.dispose();
+  });
+
+  it('验收在最终那一轮上判定：等待下层期间不验收', async () => {
+    const f = fixture();
+    f.service.dispose();
+    const output = (text: string) => ({
+      role: 'toolResult',
+      toolCallId: 'a',
+      toolName: 'bash',
+      isError: false,
+      timestamp: Date.now(),
+      content: [{ type: 'text' as const, text }],
+    });
+    let messages = [output('not yet')];
+    const read = vi.fn(async (_conversationId: string) => messages as never);
+    const service = make(f, { sessionMessages: read });
+    const check = { kind: 'output-contains' as const, text: 'XYZ_PASS' };
+    const n = await nested(f, service, { check });
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).not.toHaveBeenCalled();
+    expect(f.store.get(n.lead)?.state).toBe('running');
+    reply(f, n.c2, '复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    messages = [output('XYZ_PASS')];
+    reply(f, n.c1, '完成');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'completed',
+      result: '完成',
+      check: { ...check, passed: true },
+    });
+    service.dispose();
+  });
+
+  it('重启：等待中的第一层保持 running、不标中断；下层中断后自动续跑，结果送回第一层再完成', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    const n = await nested(f, service);
+    f.persist(n.c1);
+    f.persist(n.c2);
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(0);
+    service = restart(f, service);
+    expect(f.store.get(n.lead)).toMatchObject({ state: 'running', waiting: { text: '等 Carol' } });
+    expect(f.store.get(n.sub)).toMatchObject({ state: 'failed', failure: 'interrupted' });
+    const registered = vi.spyOn(f.host, 'registerDelegation');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.retries).toEqual([n.c2]);
+    const subRetry = f.store.list().find((r) => r.retryOf === n.sub)!;
+    reply(f, n.c2, '复审通过');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    expect(toChild(f, n.c1)[0].text).toContain(`<delegation-result id="${subRetry.id}"`);
+    // 重启后第一层子会话按委派时的权限重新注册，不被降成只读
+    const tools = f.store.get(n.lead)!.effectivePermissions!.tools;
+    const c1Tools = registered.mock.calls.filter(([id]) => id === n.c1).map(([, bot]) => bot.tools);
+    expect(c1Tools.length).toBeGreaterThan(0);
+    expect(c1Tools.every((value) => value === tools)).toBe(true);
+    reply(f, n.c1, '整合完成');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({ state: 'completed', result: '整合完成' });
+    expect(f.store.list().some((r) => r.retryOf === n.lead)).toBe(false);
+    expect(wake(f)).toHaveLength(1);
+    service.dispose();
+  });
+
+  it('审查：第一层最终错误不进入等待，取消下层且不再唤醒', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    failChild(f, n.c1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({ state: 'failed', failure: 'error' });
+    expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+    expect(f.store.get(n.sub)).toMatchObject({
+      state: 'canceled',
+      deliveredAt: expect.any(Number),
+    });
+    reply(f, n.c2, '迟到的结果');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    expect(wake(f)).toHaveLength(1);
+    f.service.dispose();
+  });
+
+  it('审查：旧记录缺权限快照时回传仍按只读和 supervised 注册', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    const { effectivePermissions: _permissions, ...legacy } = f.store.get(n.lead)!;
+    f.store.save(legacy);
+    reply(f, n.c1, '等待');
+    await vi.advanceTimersByTimeAsync(0);
+    const registered = vi.spyOn(f.host, 'registerDelegation');
+    reply(f, n.c2, '完成');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(registered).toHaveBeenCalledWith(
+      n.c1,
+      expect.objectContaining({ tools: 'readonly', approvalMode: 'supervised' }),
+      expect.objectContaining({ parentConversationId: f.parent })
+    );
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    f.service.dispose();
+  });
+
+  it('审查：重启时下层已作废，暂存结果只完成和交回一次', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    reply(f, n.c1, '可交付的阶段结果');
+    await vi.advanceTimersByTimeAsync(0);
+    f.store.save({ ...f.store.get(n.sub)!, state: 'canceled', deliveredAt: Date.now() });
+    const service = restart(f, f.service);
+    await vi.advanceTimersByTimeAsync(0);
+    await service.deliverPending();
+    expect(f.store.get(n.lead)).toMatchObject({ state: 'completed', result: '可交付的阶段结果' });
+    expect(wake(f)).toHaveLength(1);
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    service.dispose();
+  });
+
+  it('审查：下层结果已落入子会话但主进程未确认开始就崩溃，不能交回暂存文本', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    reply(f, n.c1, '尚未整合的初稿');
+    await vi.advanceTimersByTimeAsync(0);
+    f.persist(n.c1);
+    const sub = f.store.get(n.sub)!;
+    f.store.save({
+      ...sub,
+      state: 'completed',
+      result: '需要修复严重问题',
+      finishedAt: Date.now(),
+    });
+    // worker 已持久化结果消息，但 Main 的 onDeliveryStarted 还没落盘便退出。
+    writeFileSync(
+      join(root, `${n.c1}.jsonl`),
+      `${JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `<delegation-result id="${sub.id}">需要修复严重问题</delegation-result>`,
+            },
+          ],
+        },
+      })}\n`
+    );
+    const service = restart(f, f.service);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await service.deliverPending();
+      expect(wake(f)).toHaveLength(0);
+      expect(f.store.get(n.lead)?.state).not.toBe('completed');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('下层结果已落入子会话但未确认开始就崩溃：重启后标中断，从断点续跑整合轮，整合完才交回', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    const n = await nested(f, service);
+    reply(f, n.c1, '尚未整合的初稿');
+    await vi.advanceTimersByTimeAsync(0);
+    f.persist(n.c1);
+    const sub = f.store.get(n.sub)!;
+    f.store.save({
+      ...sub,
+      state: 'completed',
+      result: '需要修复严重问题',
+      finishedAt: Date.now(),
+    });
+    writeFileSync(
+      join(root, `${n.c1}.jsonl`),
+      `${JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `<delegation-result id="${sub.id}">需要修复严重问题</delegation-result>`,
+            },
+          ],
+        },
+      })}\n`
+    );
+    service = restart(f, service);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'failed',
+      failure: 'interrupted',
+      autoRetryAt: expect.any(Number),
+    });
+    expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+    expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+    expect(wake(f)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(100);
+    // 结果已在子会话里：从断点续跑，不重送结果
+    expect(f.retries).toEqual([n.c1]);
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    const leadRetry = f.store.list().find((r) => r.retryOf === n.lead)!;
+    reply(f, n.c1, '整合：已修复复审指出的严重问题');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(leadRetry.id)).toMatchObject({
+      state: 'completed',
+      result: '整合：已修复复审指出的严重问题',
+    });
+    expect(wake(f)).toHaveLength(1);
+    expect(wake(f)[0].text).toContain('整合：已修复复审指出的严重问题');
+    expect(wake(f)[0].text).not.toContain('尚未整合的初稿');
+    service.dispose();
+  });
+
+  it.each(['disabled', 'exhausted'] as const)(
+    '复审21：整合续跑最终失败闭合（%s），取消下层且不再唤醒 c1',
+    async (mode) => {
+      const f = fixture();
+      const n = await nested(f);
+      f.persist(n.c1);
+      f.persist(n.c2);
+      let service = restart(f, f.service);
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wake(f)).toHaveLength(0);
+        expect(f.store.get(n.sub)?.state).not.toBe('canceled');
+        expect(toChild(f, n.c1)).toHaveLength(0);
+        if (mode === 'disabled') {
+          const retry = f.host.retryConversation.bind(f.host);
+          vi.spyOn(f.host, 'retryConversation').mockImplementation((id, options) =>
+            id === n.c1 ? Promise.resolve({ ok: false, error: 'disabled' }) : retry(id, options)
+          );
+          await vi.advanceTimersByTimeAsync(100);
+          // 下层也因重启处于 failed + autoRetryAt：cancel 按既有契约放弃重试，不改写为 canceled。
+          expect(f.store.get(n.sub)).toMatchObject({ state: 'failed' });
+          expect(f.store.get(n.sub)).not.toHaveProperty('autoRetryAt');
+          expect(f.retries).not.toContain(n.c2);
+        } else {
+          await vi.advanceTimersByTimeAsync(100);
+          service = restart(f, service);
+          await vi.advanceTimersByTimeAsync(200);
+          service = restart(f, service);
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        const lead = f.store
+          .list()
+          .filter((r) => r.childConversationId === n.c1)
+          .at(-1)!;
+        expect(lead.state).toBe('failed');
+        expect(lead.autoRetryAt).toBeUndefined();
+        expect(wake(f)).toHaveLength(1);
+        expect(wake(f)[0].text).toContain('final failure');
+        expect(
+          f.store
+            .list()
+            .filter((r) => r.parentConversationId === n.c1)
+            .every((r) => r.deliveredAt !== undefined)
+        ).toBe(true);
+        reply(f, n.c2, '迟到结果');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(toChild(f, n.c1)).toHaveLength(0);
+        expect(f.host.queueState()).toEqual([]);
+      } finally {
+        vi.restoreAllMocks();
+        service.dispose();
+      }
+    }
+  );
+
+  it.each(['cleared-waiting', 'interrupted', 'settle-waiting'] as const)(
+    '复审21：持久化写入间崩溃（%s）不交回初稿',
+    async (window) => {
+      const f = fixture();
+      const n = await nested(f);
+      reply(f, n.c1, '尚未整合的初稿');
+      await vi.advanceTimersByTimeAsync(0);
+      f.persist(n.c1);
+      const { waiting: _waiting, ...lead } = f.store.get(n.lead)!;
+      // 重建对应两次持久化写入之间的可观察磁盘状态，不调用私有方法。
+      f.store.save(
+        window === 'interrupted'
+          ? { ...lead, state: 'failed', failure: 'interrupted', autoRetryAt: Date.now() + 100 }
+          : lead
+      );
+      f.store.save({
+        ...f.store.get(n.sub)!,
+        state: window === 'settle-waiting' ? 'canceled' : 'completed',
+        result: '复审意见',
+        ...(window === 'settle-waiting' ? { deliveredAt: Date.now() } : {}),
+      });
+      if (window !== 'settle-waiting')
+        writeFileSync(
+          join(root, `${n.c1}.jsonl`),
+          `${JSON.stringify({
+            type: 'message',
+            message: {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `<delegation-result id="${n.sub}">复审意见</delegation-result>`,
+                },
+              ],
+            },
+          })}\n`
+        );
+      const service = restart(f, f.service);
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wake(f)).toHaveLength(0);
+        expect(f.store.get(n.lead)).not.toHaveProperty('waiting');
+        await vi.advanceTimersByTimeAsync(100);
+        expect(f.retries).toEqual([n.c1]);
+        reply(f, n.c1, '恢复后最终结果');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wake(f)).toHaveLength(1);
+        expect(wake(f)[0].text).toContain('恢复后最终结果');
+        expect(wake(f)[0].text).not.toContain('尚未整合的初稿');
+      } finally {
+        service.dispose();
+      }
+    }
+  );
+
+  it('复审21：补认第一批后等待自动重试，不得用旧快照把第二批送进无主整合轮', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    member(f, 'Dave');
+    const extra = ok(
+      f.service.delegate(n.c1, { to: 'Dave', task: '第二批' }, { standalone: true })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    reply(f, n.c1, '尚未整合的初稿');
+    await vi.advanceTimersByTimeAsync(0);
+    f.persist(n.c1);
+    for (const id of [n.sub, extra])
+      f.store.save({ ...f.store.get(id)!, state: 'completed', result: id, finishedAt: Date.now() });
+    writeFileSync(
+      join(root, `${n.c1}.jsonl`),
+      `${JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `<delegation-result id="${n.sub}">第一批</delegation-result>` },
+          ],
+        },
+      })}\n`
+    );
+    const service = restart(f, f.service);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.store.get(n.lead)).toMatchObject({
+        state: 'failed',
+        failure: 'interrupted',
+        autoRetryAt: expect.any(Number),
+      });
+      expect(wake(f)).toHaveLength(0);
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      expect(f.store.get(extra)?.deliveredAt).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(f.retries).toEqual([n.c1]);
+      reply(f, n.c1, '第一批整合完成，等第二批');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      reply(f, n.c1, '两批已整合');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(wake(f)).toHaveLength(1);
+      expect(wake(f)[0].text).toContain('两批已整合');
+      expect(wake(f)[0].text).not.toContain('尚未整合的初稿');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('复审23：补认第一批后，第二批等续跑接替记录那一轮结束才送达，且只送一次；第一层整合后交回', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    member(f, 'Dave');
+    const extra = ok(
+      f.service.delegate(n.c1, { to: 'Dave', task: '第二批' }, { standalone: true })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    reply(f, n.c1, '尚未整合的初稿');
+    await vi.advanceTimersByTimeAsync(0);
+    f.persist(n.c1);
+    for (const id of [n.sub, extra])
+      f.store.save({
+        ...f.store.get(id)!,
+        state: 'completed',
+        result: `结果-${id}`,
+        finishedAt: Date.now(),
+      });
+    writeFileSync(
+      join(root, `${n.c1}.jsonl`),
+      `${JSON.stringify({
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `<delegation-result id="${n.sub}">第一批</delegation-result>` },
+          ],
+        },
+      })}\n`
+    );
+    const service = restart(f, f.service);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await service.deliverPending();
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      expect(f.store.get(extra)?.deliveredAt).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(100);
+      const leadRetry = f.store.list().find((r) => r.retryOf === n.lead)!;
+      expect(leadRetry.childConversationId).toBe(n.c1);
+      // 接替记录那一轮还没结束：c1 正忙，第二批不送
+      await service.deliverPending();
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      reply(f, n.c1, '第一批整合完成，等第二批');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      expect(toChild(f, n.c1)[0].text).toContain(`结果-${extra}`);
+      expect(toChild(f, n.c1)[0].text).not.toContain(`结果-${n.sub}`);
+      expect(f.store.get(extra)?.deliveredAt).toBeDefined();
+      reply(f, n.c1, '两批已整合');
+      await vi.advanceTimersByTimeAsync(0);
+      await service.deliverPending();
+      expect(f.store.get(leadRetry.id)).toMatchObject({ state: 'completed', result: '两批已整合' });
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      expect(wake(f)).toHaveLength(1);
+      expect(wake(f)[0].text).toContain('两批已整合');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('复审23：投递 await 期间别的扫描已作废下层结果，恢复后不得按旧快照再送进第一层', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(0);
+    member(f, 'Dave');
+    // 排在下层批次之前、回给 Alice 的另一批（Alice → Dave），投递时卡在 await 上
+    const other = ok(
+      f.service.delegate(f.parent, { to: 'Dave', task: '旁支' }, { standalone: true })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = f.store.get(n.sub)!;
+    const early = f.store.get(other)!;
+    f.store.save({ ...early, createdAt: sub.createdAt - 1 });
+    f.store.save({ ...f.store.get(n.lead)!, createdAt: sub.createdAt - 2 });
+    for (const id of [other, n.sub])
+      f.store.save({ ...f.store.get(id)!, state: 'completed', result: id, finishedAt: Date.now() });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deliver = f.host.deliverConversation.bind(f.host);
+    const spy = vi
+      .spyOn(f.host, 'deliverConversation')
+      .mockImplementation(async (id, text, options) => {
+        if (id === f.parent && text.includes(`id="${other}"`)) await gate;
+        return deliver(id, text, options);
+      });
+    const service = restart(f, f.service);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spy).toHaveBeenCalledWith(f.parent, expect.stringContaining(other), expect.anything());
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      // await 期间第一层被取消：下层结果随之作废（只落记录，不再送进 c1）
+      service.cancel(n.lead);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(0);
+    } finally {
+      vi.restoreAllMocks();
+      service.dispose();
+    }
+  });
+
+  it('复审复核23：同一批投递挂起时并发扫描不会再次调用宿主，确认开始后也不重送', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    reply(f, n.c1, '等待复审');
+    await vi.advanceTimersByTimeAsync(0);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deliver = f.host.deliverConversation.bind(f.host);
+    const spy = vi
+      .spyOn(f.host, 'deliverConversation')
+      .mockImplementation(async (id, text, options) => {
+        if (id === n.c1 && text.includes('<delegation-result')) await gate;
+        return deliver(id, text, options);
+      });
+    try {
+      reply(f, n.c2, '复审完成');
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.all([f.service.deliverPending(), f.service.deliverPending()]);
+      expect(spy.mock.calls.filter(([id]) => id === n.c1)).toHaveLength(1);
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+      reply(f, n.c1, '最终整合');
+      await vi.advanceTimersByTimeAsync(0);
+      await f.service.deliverPending();
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      expect(wake(f)).toHaveLength(1);
+    } finally {
+      release();
+      vi.restoreAllMocks();
+      f.service.dispose();
+    }
+  });
+
+  it('复审复核23：前批 await 中后批出现自动接替，重建整批等接替结束且只送链尾一次', async () => {
+    const f = fixture();
+    const n = await nested(f);
+    f.persist(n.c2);
+    failChild(f, n.c2);
+    await vi.advanceTimersByTimeAsync(0);
+    member(f, 'Dave');
+    const other = ok(
+      f.service.delegate(f.parent, { to: 'Dave', task: '旁支' }, { standalone: true })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = f.store.get(n.sub)!;
+    f.store.save({
+      ...f.store.get(other)!,
+      state: 'completed',
+      result: '旁支结果',
+      createdAt: sub.createdAt - 1,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deliver = f.host.deliverConversation.bind(f.host);
+    const spy = vi
+      .spyOn(f.host, 'deliverConversation')
+      .mockImplementation(async (id, text, options) => {
+        if (id === f.parent && text.includes(`id="${other}"`)) await gate;
+        return deliver(id, text, options);
+      });
+    try {
+      reply(f, n.c1, '等复审结果');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spy).toHaveBeenCalledWith(f.parent, expect.stringContaining(other), expect.anything());
+      const retry = ok(f.service.retry(n.sub, 'resume', { by: 'auto' }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.store.get(retry)?.childConversationId).toBe(n.c2);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(0);
+      expect(f.store.get(n.sub)?.deliveredAt).toBeUndefined();
+      reply(f, n.c2, '接替后的复审结果');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toChild(f, n.c1)).toHaveLength(1);
+      expect(toChild(f, n.c1)[0].text).toContain(`<delegation-result id="${retry}"`);
+      expect(toChild(f, n.c1)[0].text).not.toContain(`<delegation-result id="${n.sub}"`);
+      expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+      expect(f.store.get(retry)?.deliveredAt).toBeDefined();
+      await f.service.deliverPending();
+      expect(toChild(f, n.c1)).toHaveLength(1);
+    } finally {
+      release();
+      vi.restoreAllMocks();
+      f.service.dispose();
+    }
+  });
+
+  it('重启后等待中的第一层重新计时，超时后放弃下层排定的自动重试', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    const n = await nested(f, service, { deadlineMinutes: 50 });
+    f.persist(n.c2);
+    reply(f, n.c1, '等 Carol');
+    await vi.advanceTimersByTimeAsync(30);
+    service = restart(f, service);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(f.store.get(n.lead)?.state).toBe('running');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.store.get(n.lead)).toMatchObject({ state: 'failed', failure: 'timeout' });
+    expect(f.store.get(n.sub)).not.toHaveProperty('autoRetryAt');
+    expect(f.store.get(n.sub)?.deliveredAt).toBeDefined();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.retries).toEqual([]);
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    service.dispose();
+  });
+
+  it('重启时第一层正在跑一轮：标中断并自动续跑；下层结果等第一层续跑那一轮结束再送回', async () => {
+    const f = fixture();
+    f.service.dispose();
+    let service = make(f);
+    const n = await nested(f, service);
+    f.persist(n.c1);
+    // 下层在重启前已最终失败（不可自动重试）、结果还没送回
+    f.store.save({
+      ...f.store.get(n.sub)!,
+      state: 'failed',
+      failure: 'error',
+      error: 'boom',
+      finishedAt: Date.now(),
+    });
+    service = restart(f, service);
+    expect(f.store.get(n.lead)).toMatchObject({
+      state: 'failed',
+      failure: 'interrupted',
+      autoRetryAt: expect.any(Number),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    // 第一层等待自动重试：不往它的子会话里送结果
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    expect(f.store.get(n.sub)?.deliveredAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.retries).toEqual([n.c1]);
+    const leadRetry = f.store.list().find((r) => r.retryOf === n.lead)!;
+    expect(toChild(f, n.c1)).toHaveLength(0);
+    reply(f, n.c1, '续跑完，等 Carol 的结果');
+    await vi.advanceTimersByTimeAsync(0);
+    // 续跑那一轮结束时下层结果还没送回：进入等待，随即送回并唤醒新一轮
+    expect(f.store.get(leadRetry.id)?.state).toBe('running');
+    expect(toChild(f, n.c1)).toHaveLength(1);
+    expect(toChild(f, n.c1)[0].text).toContain('final failure');
+    reply(f, n.c1, '复审失败，跳过复审直接交付');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.store.get(leadRetry.id)).toMatchObject({
+      state: 'completed',
+      result: '复审失败，跳过复审直接交付',
+    });
+    expect(wake(f)).toHaveLength(1);
+    expect(wake(f)[0].text).toContain(`<delegation-result id="${leadRetry.id}"`);
+    service.dispose();
   });
 });

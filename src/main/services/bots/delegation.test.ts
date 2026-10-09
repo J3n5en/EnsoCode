@@ -70,6 +70,21 @@ describe('delegation policy', () => {
     for (const key of ['retryBy', 'retryNote', 'autoRetryAt', 'transient', 'resultSeq'])
       expect(bad).not.toHaveProperty(key);
   });
+  it('keeps the waiting-for-downstream marker (the stashed turn output) and drops malformed ones', () => {
+    expect(
+      parseDelegation({
+        ...record,
+        state: 'running',
+        waiting: { since: 5, text: '等复审', turnId: 't1' },
+      })?.waiting
+    ).toEqual({ since: 5, text: '等复审', turnId: 't1' });
+    expect(parseDelegation({ ...record, waiting: { since: 5, text: '' } })?.waiting).toEqual({
+      since: 5,
+      text: '',
+    });
+    for (const bad of [true, { since: -1, text: '' }, { since: 5 }, { since: 5, text: 3 }])
+      expect(parseDelegation({ ...record, waiting: bad })).not.toHaveProperty('waiting');
+  });
   it('keeps the pending group-result marker (with optional turnId) and drops malformed ones', () => {
     expect(
       parseDelegation({ ...record, pendingResultEntry: { turnId: 't1' } })?.pendingResultEntry

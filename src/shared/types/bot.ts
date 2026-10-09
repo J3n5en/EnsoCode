@@ -213,6 +213,15 @@ export interface Delegation {
    * 重启时据此补写 / 回填 resultSeq；功能上线前完成的记录没有此标记，不补发。turnId 为产出结果的子会话回合
    */
   pendingResultEntry?: { turnId?: string };
+  /**
+   * 子会话这一轮已结束，但它发起的下层委派还没结束（排队 / 运行 / 等待自动重试 / 结果还没送回）：
+   * 委派保持 running、不交回，等下层结果送回子会话、被唤醒的那一轮结束后再判定。
+   * text / turnId 为这一轮的输出。只有一种情况拿它当完成时的回退文本：仍在等待、子会话空闲，
+   * 而下层全部被外部作废（群开新对话 / 回退 / 停止等，结果不会再送回子会话）。
+   * 下层结果一旦送进子会话（含重启后从 jsonl 认出）即清除：整合轮在跑就等它结束判定，
+   * 没在跑（崩溃 / 重启）则标 interrupted 按自动重试续跑整合轮，不用暂存文本；进入终态时同样清除。
+   */
+  waiting?: { since: number; text: string; turnId?: string };
 }
 
 export function parseDelegation(value: unknown): Delegation | undefined {
@@ -271,6 +280,16 @@ export function parseDelegation(value: unknown): Delegation | undefined {
     record.pendingResultEntry = isText(value.pendingResultEntry.turnId)
       ? { turnId: value.pendingResultEntry.turnId }
       : {};
+  if (
+    isObject(value.waiting) &&
+    isTime(value.waiting.since) &&
+    typeof value.waiting.text === 'string'
+  )
+    record.waiting = {
+      since: value.waiting.since,
+      text: value.waiting.text,
+      ...(isText(value.waiting.turnId) ? { turnId: value.waiting.turnId } : {}),
+    };
   const check = parseTaskCheck(value.check);
   if (check) record.check = check;
   if (DELEGATION_TRIGGERS.includes(value.trigger as never))

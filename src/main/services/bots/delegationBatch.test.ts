@@ -8,10 +8,12 @@ import {
   batchWaitingNotice,
   DELEGATION_ERROR_SUMMARY_MAX,
   delegationBatches,
+  delegationOwner,
   delegatorRetries,
   pendingAutoRetry,
   trailingAutoRetries,
   turnDelegationTargets,
+  unfinishedDownstream,
 } from './delegationBatch';
 
 const rec = (id: string, patch: Partial<Delegation> = {}): Delegation => ({
@@ -246,5 +248,36 @@ describe('turnDelegationTargets', () => {
     ];
     expect(turnDelegationTargets(records, 'p', 'turn-1')).toEqual(['bot-a', 'bot-b']);
     expect(turnDelegationTargets(records, 'p', 'missing')).toEqual([]);
+  });
+});
+
+describe('嵌套委派：子会话的归属与未结束的下层', () => {
+  it('子会话归属取沿用它的最新一条记录（续跑链）；不是委派子会话时为空', () => {
+    const records = [
+      rec('a', { childConversationId: 'c1', state: 'failed', createdAt: 1 }),
+      rec('b', { childConversationId: 'c1', state: 'running', retryOf: 'a', createdAt: 2 }),
+      rec('c', { childConversationId: 'c2', createdAt: 3 }),
+    ];
+    expect(delegationOwner(records, 'c1')?.id).toBe('b');
+    expect(delegationOwner(records, 'c2')?.id).toBe('c');
+    expect(delegationOwner(records, 'p')).toBeUndefined();
+  });
+
+  it('排队 / 运行 / 等待自动重试 / 已结束但结果没送回该会话，都算未结束；只看该会话发起的', () => {
+    const records = [
+      rec('q', { parentConversationId: 'c1', state: 'queued' }),
+      rec('r', { parentConversationId: 'c1', state: 'running' }),
+      rec('w', { parentConversationId: 'c1', state: 'failed', autoRetryAt: 5 }),
+      rec('u', { parentConversationId: 'c1', state: 'completed' }),
+      rec('d', { parentConversationId: 'c1', state: 'completed', deliveredAt: 3 }),
+      rec('o', { parentConversationId: 'other', state: 'running' }),
+    ];
+    expect(unfinishedDownstream(records, 'c1').map((record) => record.id)).toEqual([
+      'q',
+      'r',
+      'w',
+      'u',
+    ]);
+    expect(unfinishedDownstream(records.slice(4), 'c1')).toEqual([]);
   });
 });

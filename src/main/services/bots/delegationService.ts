@@ -33,17 +33,20 @@ import {
   isActiveDelegation as active,
   autoRetryKind,
   batchDeliveryId,
+  batchKey,
   batchResultText,
   batchWaitingNotice,
   DELEGATOR_RETRY_LIMIT,
   defaultAutoRetryDelayMs,
   delegationBatches,
+  delegationOwner,
   delegationResultBody,
   delegatorRetries,
   escapeXml,
   pendingAutoRetry,
   supersededIds,
   trailingAutoRetries,
+  unfinishedDownstream,
 } from './delegationBatch';
 import { delegatedBotPermissions, delegationPolicy } from './delegationPolicy';
 import type { DelegationStore } from './delegationStore';
@@ -206,6 +209,12 @@ export class DelegationService {
 
   constructor(private readonly deps: Deps) {
     this.unsubscribeStarted = deps.host.onDeliveryStarted((event) => {
+      // 等待下层的第一层被唤醒的一轮开始了：不再处于等待
+      const waiting = delegationOwner(deps.store.list(), event.conversationId);
+      if (waiting?.waiting && active(waiting)) {
+        const { waiting: _waiting, ...rest } = waiting;
+        this.save(rest);
+      }
       const batch = delegationBatches(
         deps.store.list().filter((record) => record.parentConversationId === event.conversationId)
       ).find((items) => batchDeliveryId(items) === event.deliveryId);
@@ -239,6 +248,13 @@ export class DelegationService {
     });
     for (const record of deps.store.list()) {
       if (!active(record)) continue;
+      // 这一轮已结束、在等下层结果：不算中断，继续等（时限从重启时重新起算）；下层自己的中断按各自规则自动续跑。
+      // 下层结果其实已写进子会话（Main 未确认开始就崩溃）的，由 deliverPending 认出后经 integrating 标中断续跑；
+      // 下层全部被外部作废的，才由 settleNested 按暂存的输出判定
+      if (record.state === 'running' && record.waiting) {
+        this.arm({ ...record, startedAt: Date.now() });
+        continue;
+      }
       // 登记过卡住的按卡住收尾，其余记中断（中断可按规则排定自动重试）
       if (record.blocked) {
         this.save({
@@ -770,6 +786,12 @@ export class DelegationService {
     this.outcomes.delete(record.id);
     // 软停止中止的回合没有正文：用原回合暂存的结果
     if (record.blocked) this.block(record, outcome.text ? outcome : (stored ?? outcome));
+    // 第一层这一轮结束时还有它发起的下层没结束：不交回，等下层结果送回、被唤醒的那一轮结束再判定
+    else if (
+      outcome.ok &&
+      unfinishedDownstream(this.deps.store.list(), record.childConversationId).length
+    )
+      this.wait(record, outcome.text, outcome.turnId);
     else if (outcome.ok && record.check) {
       this.settling.add(record.id);
       void this.verify(record, record.check, outcome.text, outcome.turnId);
@@ -1408,6 +1430,7 @@ export class DelegationService {
 
   /** 到期时刻 = startedAt + timeoutMinutes（追加会把它往后推） */
   private arm(record: Delegation): void {
+    if (this.disposed) return;
     clearTimeout(this.timers.get(record.id));
     const at =
       (record.startedAt ?? Date.now()) +
@@ -1431,10 +1454,100 @@ export class DelegationService {
     void this.abort(current.childConversationId);
   }
 
+  /** 第一层这一轮已结束、下层还没结束：保持 running，记下这一轮的输出 */
+  private wait(record: Delegation, text: string, turnId?: string): void {
+    this.save({
+      ...record,
+      waiting: { since: Date.now(), text, ...(turnId ? { turnId } : {}) },
+    });
+  }
+
+  /**
+   * 第一层已有最终结果（完成 / 最终失败 / 取消 / 超时，且不在等自动重试）：它发起的下层没人整合了。
+   * 未 keep 的级联取消；已结束的整批只落记录（群里出卡片），不再唤醒第一层的子会话。
+   * 反过来，等待中的第一层若已没有可等的下层，以暂存的那一轮输出判定。能走到这里说明下层全是被外部作废的
+   * （群开新对话 / 回退 / 停止等，结果不会再送回）：凡是结果真正送进子会话的，integrating 都已先清掉 waiting。
+   */
+  private settleNested(): void {
+    const all = this.deps.store.list();
+    const owners = new Map<string, Delegation>();
+    for (const record of all) {
+      const owner = owners.get(record.childConversationId);
+      if (!owner || record.createdAt >= owner.createdAt)
+        owners.set(record.childConversationId, record);
+    }
+    const orphaned = (conversationId: string) => {
+      const owner = owners.get(conversationId);
+      return Boolean(owner && !active(owner) && !pendingAutoRetry(owner, all));
+    };
+    const records = all.filter((record) => orphaned(record.parentConversationId));
+    this.discarding = true;
+    try {
+      for (const record of records)
+        if (!record.keep && (active(record) || pendingAutoRetry(record, all)))
+          this.cancel(record.id);
+    } finally {
+      this.discarding = false;
+    }
+    const latest = this.deps.store.list();
+    for (const batch of delegationBatches(
+      latest.filter((record) => orphaned(record.parentConversationId))
+    ))
+      if (
+        !batch.some((record) => active(record) || pendingAutoRetry(record, latest)) &&
+        batch.some((record) => record.deliveredAt === undefined)
+      )
+        this.delivered(batch);
+    for (const stale of owners.values()) {
+      // 上面的级联取消可能已改过这条记录：按最新状态判定，避免用旧快照把已结束的记录写回进行中
+      const owner = this.deps.store.get(stale.id);
+      if (
+        owner?.waiting &&
+        active(owner) &&
+        !this.deps.host.isBusy(owner.childConversationId) &&
+        !unfinishedDownstream(latest, owner.childConversationId).length
+      )
+        this.settleWaiting(owner);
+    }
+  }
+
+  /** 等待结束且没有新的一轮：按暂存的那一轮输出走正常完成流程（有验收的照常验收） */
+  private settleWaiting(record: Delegation): void {
+    const { waiting, ...rest } = record;
+    if (!waiting) return;
+    // 先清掉等待标记再判定：验收是异步的，避免重复进入
+    this.save(rest);
+    if (rest.check) void this.verify(rest, rest.check, waiting.text, waiting.turnId);
+    else
+      this.finish(rest, 'completed', undefined, waiting.text, undefined, {
+        ...(waiting.turnId ? { turnId: waiting.turnId } : {}),
+      });
+  }
+
+  /**
+   * 下层结果已确认送进第一层子会话：第一层不再处于等待，暂存文本作废。
+   * 整合轮正在跑：交给它结束时判定。没在跑（结果已写进 jsonl、Main 未确认开始就崩溃，重启后 worker 里已没有这一轮）：
+   * 与「第一层在跑一轮时重启」一致，标 interrupted 并按自动重试规则从断点续跑整合轮（结果已在会话里，不重送）。
+   * 必须在给下层记 deliveredAt 之前调用：反过来中间崩溃，重启后会被当成下层已作废而交回暂存文本。
+   */
+  private integrating(conversationId: string): void {
+    const owner = delegationOwner(this.deps.store.list(), conversationId);
+    if (!owner?.waiting || !active(owner)) return;
+    if (this.deps.host.isBusy(conversationId)) {
+      const { waiting: _waiting, ...rest } = owner;
+      this.save(rest);
+    } else this.finish(owner, 'failed', 'interrupted');
+  }
+
   async deliverPending(parentConversationId?: string): Promise<void> {
     if (this.disposed) return;
-    const all = this.list();
-    for (const batch of delegationBatches(all)) {
+    this.settleNested();
+    const keys = delegationBatches(this.list()).map((batch) => batchKey(batch[0]));
+    for (const key of keys) {
+      // 前面批次的 integrating / delivered、以及投递时的 await 都会改记录：每批都按最新记录判定，不沿用开头的快照
+      const all = this.list();
+      const batch = delegationBatches(all.filter((record) => batchKey(record) === key))[0];
+      if (!batch) continue;
       const head = batch[0];
       const deliveryId = batchDeliveryId(batch);
       if (
@@ -1454,29 +1567,31 @@ export class DelegationService {
         continue;
       }
       if (this.deps.host.hasStartedDelivery(head.parentConversationId, deliveryId)) {
+        // 结果已在子会话里但 Main 没确认开始（崩溃窗口）：先落第一层的状态，再给下层记 deliveredAt
+        this.integrating(head.parentConversationId);
         this.delivered(batch);
         continue;
       }
       if (parent.bot?.delegationId) {
-        const bot = this.deps.bots.get(head.parentBotId);
-        const record = this.executionOf(parent.conversationId);
-        // 执行人卡住在等答复：子委派结果先不回送，免得在卡住的会话里起一轮无主回合
-        if (record?.state === 'blocked') continue;
-        const saved = record?.effectivePermissions;
-        // Interrupted delegation parents must not be restarted with their original task.
+        // 只往仍在进行（含等待下层）的第一层子会话送：卡住在等答复、已结束或等自动重试的先不送，
+        // 免得在这些会话里起一轮无主回合；等续跑那一轮结束再送
+        const owner = delegationOwner(all, parent.conversationId);
+        if (!owner || !active(owner)) continue;
+        const bot = this.deps.bots.get(owner.targetBotId);
+        const saved = owner.effectivePermissions;
+        // 重启后宿主不再有子会话的注册：按委派时的权限快照重新注册（缺快照的旧数据按只读）
         if (
           !bot ||
           !this.deps.host.registerDelegation(
             parent.conversationId,
+            saved
+              ? { ...bot, ...saved }
+              : { ...bot, tools: 'readonly', approvalMode: 'supervised' },
             {
-              ...bot,
-              ...(saved ? { skillIds: saved.skillIds, mcpServerIds: saved.mcpServerIds } : {}),
-              tools: 'readonly',
-              approvalMode: 'supervised',
-            },
-            record
-              ? { parentConversationId: record.parentConversationId, chatId: record.chatId }
-              : undefined
+              parentConversationId: owner.parentConversationId,
+              chatId: owner.chatId,
+              ...(owner.taskId && owner.depth === 1 ? { task: true as const } : {}),
+            }
           )
         )
           continue;
@@ -1501,8 +1616,10 @@ export class DelegationService {
                 source: 'bot',
                 deliveryId,
               });
-        if (sent.ok && this.deps.host.hasStartedDelivery(head.parentConversationId, deliveryId))
+        if (sent.ok && this.deps.host.hasStartedDelivery(head.parentConversationId, deliveryId)) {
+          this.integrating(head.parentConversationId);
           this.delivered(batch);
+        }
       } catch (cause) {
         console.warn('[bots] delegation delivery failed', cause);
       } finally {
@@ -1552,8 +1669,9 @@ export class DelegationService {
       state !== 'blocked' &&
       (record.appends?.some((item) => item.ok === undefined) ||
         this.deps.host.hasPendingDeliveries(record.childConversationId));
+    const { waiting: _waiting, ...base } = record;
     let finished: Delegation = {
-      ...record,
+      ...base,
       ...closeAppends(record),
       state,
       finishedAt: Date.now(),

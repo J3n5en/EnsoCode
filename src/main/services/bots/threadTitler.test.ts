@@ -211,6 +211,11 @@ describe('threadWorkPending：话题内是否还有成员在工作', () => {
     expect(threadWorkPending(chat, work)).toBe(true);
     delegations = [delegation({ chatId: chat.id, state: 'running' })];
     expect(threadWorkPending(chat, work)).toBe(true);
+    // 第一层这一轮已结束、在等它发起的下层委派：仍是 running，算没结束
+    delegations = [
+      delegation({ chatId: chat.id, state: 'running', waiting: { since: 1, text: '等下层' } }),
+    ];
+    expect(threadWorkPending(chat, work)).toBe(true);
     delegations = [delegation({ chatId: chat.id, state: 'completed', result: 'ok' })];
     expect(threadWorkPending(chat, work)).toBe(true);
     delegations = [delegation({ chatId: chat.id, state: 'completed', deliveredAt: 5 })];
