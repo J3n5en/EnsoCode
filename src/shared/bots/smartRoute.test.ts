@@ -16,6 +16,7 @@ import {
   smartRouteIntentQuestion,
   smartRouteJudgePrompt,
   smartRouteQuestion,
+  smartRouteReplyLeadsWithOwner,
   smartRouteReplyNamesBoss,
   smartRouteTaskQuestion,
 } from './smartRoute';
@@ -401,6 +402,52 @@ describe('parseSmartRouteReply', () => {
     expect(smartRouteReplyNamesBoss('Boss Li')).toBe(false);
     expect(smartRouteReplyNamesBoss('BossBot')).toBe(false);
   });
+
+  it('smartRouteReplyLeadsWithOwner：名单首位解析出来是群主才算，BOSS 与群主名字等价', () => {
+    for (const reply of [
+      'BOSS',
+      'INTENT: build\nBOSS',
+      'INTENT: build\n1. BOSS.\n2. 前端',
+      'BOSS, 前端',
+      'nobody\nBOSS\nBackend',
+      // 用群主本人的名字点名，与回 BOSS 是一个意思
+      '老板',
+      'INTENT: build\n老板\n前端',
+      '老板, BOSS',
+    ])
+      expect(smartRouteReplyLeadsWithOwner(reply, input)).toBe(true);
+    for (const reply of [
+      '前端, BOSS',
+      '前端, 老板',
+      'INTENT: build\nBackend\nBOSS',
+      'I cannot identify the boss',
+      'BOSS (group owner)',
+      'INTENT: build',
+      '',
+      null as never,
+    ])
+      expect(smartRouteReplyLeadsWithOwner(reply, input)).toBe(false);
+    expect(smartRouteReplyLeadsWithOwner('BOSS', { ...input, bossBotId: null })).toBe(false);
+    expect(smartRouteReplyLeadsWithOwner('老板', { ...input, bossBotId: null })).toBe(false);
+  });
+
+  it('smartRouteReplyLeadsWithOwner：成员就叫 Boss 时 BOSS 是该成员，不是群主；群主就叫 Boss 时仍是群主', () => {
+    const named = buildSmartRouteInput(
+      { members: [...chat.members, 'bm'], bossBotId: 'boss' },
+      [...members, member('bm', 'Boss')],
+      [],
+      human(1, 'hi')
+    );
+    expect(smartRouteReplyLeadsWithOwner('BOSS', named)).toBe(false);
+    expect(smartRouteReplyLeadsWithOwner('老板, Boss', named)).toBe(true);
+    const ownerNamedBoss = buildSmartRouteInput(
+      chat,
+      members.map((m) => (m.id === 'boss' ? { ...m, name: 'Boss' } : m)),
+      [],
+      human(1, 'hi')
+    );
+    expect(smartRouteReplyLeadsWithOwner('BOSS', ownerNamedBoss)).toBe(true);
+  });
 });
 
 describe('smartRouteQuestion', () => {
@@ -598,6 +645,77 @@ describe('decideSmartRoute', () => {
       ids: [],
       intent: 'build',
       noWriter: true,
+    });
+  });
+
+  describe('ownerFirst：judge 名单首位是群主', () => {
+    const ownerFirst = { ownerFirst: true };
+
+    it('build 且群主只读、有人能动手：以群主为准，名单留空交给群主（不附执行提示）', () => {
+      expect(decideSmartRoute(input, 'build', ['boss'], undefined, ownerFirst)).toEqual({
+        ids: [],
+        intent: 'build',
+      });
+      expect(decideSmartRoute(input, 'build', ['boss', 'fe'], undefined, ownerFirst)).toEqual({
+        ids: [],
+        intent: 'build',
+      });
+    });
+
+    it('首位不是群主时 ownerFirst 不生效，照 build 规则选能动手者', () => {
+      expect(decideSmartRoute(input, 'build', ['fe', 'boss'], undefined, ownerFirst)).toEqual({
+        ids: ['fe'],
+        intent: 'build',
+      });
+    });
+
+    it('群主能动手时与原规则一致：选群主', () => {
+      const capable = buildSmartRouteInput(
+        chat,
+        members.map((m) => ({ ...m, tools: 'all' as const })),
+        [],
+        human(1, 'hi')
+      );
+      expect(decideSmartRoute(capable, 'build', ['boss', 'fe'], undefined, ownerFirst)).toEqual({
+        ids: ['boss'],
+        intent: 'build',
+      });
+    });
+
+    it('没有任何能动手的成员时仍标 noWriter', () => {
+      const readonly = buildSmartRouteInput(
+        chat,
+        members.map((m) => ({ ...m, tools: 'readonly' as const })),
+        [],
+        human(1, 'hi')
+      );
+      expect(decideSmartRoute(readonly, 'build', ['boss'], undefined, ownerFirst)).toEqual({
+        ids: [],
+        intent: 'build',
+        noWriter: true,
+      });
+    });
+
+    it('answer / discuss / 无意图不受影响，名单原样保留', () => {
+      expect(decideSmartRoute(input, 'answer', ['boss', 'fe'], undefined, ownerFirst)).toEqual({
+        ids: ['boss', 'fe'],
+        intent: 'answer',
+      });
+      expect(decideSmartRoute(input, 'discuss', ['boss'], undefined, ownerFirst)).toEqual({
+        ids: ['boss'],
+        intent: 'discuss',
+      });
+      expect(decideSmartRoute(input, undefined, ['boss'], undefined, ownerFirst)).toEqual({
+        ids: ['boss'],
+      });
+    });
+
+    it('没有群主时 ownerFirst 不生效', () => {
+      const noOwner = { ...input, bossBotId: null };
+      expect(decideSmartRoute(noOwner, 'build', [], undefined, ownerFirst)).toEqual({
+        ids: ['fe'],
+        intent: 'build',
+      });
     });
   });
 });

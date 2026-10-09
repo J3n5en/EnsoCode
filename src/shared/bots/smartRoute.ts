@@ -16,6 +16,7 @@ export const SMART_ROUTE_INTENTS = ['build', 'answer', 'discuss'] as const;
 export type SmartRouteIntent = (typeof SMART_ROUTE_INTENTS)[number];
 
 export interface SmartRouteDecision {
+  /** 空名单交给群主兜底；build 且名单恰为一位时投递端才附 SMART_ROUTE_BUILD_NOTE */
   ids: BotId[];
   intent?: SmartRouteIntent;
   /** build 但没有能动手的成员：交给群主 */
@@ -274,6 +275,14 @@ export function parseSmartRouteReply(text: string, input: SmartRouteInput): BotI
 }
 
 /**
+ * judge 名单首位是否是群主（解析规则同 parseSmartRouteReply）：回 BOSS 和回群主本人的名字都算明确点名群主。
+ * 群里没有群主、首位是其他成员（含本身就叫 Boss 的成员）时是 false。
+ */
+export function smartRouteReplyLeadsWithOwner(text: string, input: SmartRouteInput): boolean {
+  return !!input.bossBotId && parseSmartRouteReply(text, input)[0] === input.bossBotId;
+}
+
+/**
  * judge 回复（INTENT 行之外）是否有一段明确是 BOSS（规则同 parseSmartRouteReply，见 BOSS_SEGMENT）；
  * 与群里有没有群主无关，用来区分「交给群主」和「无法识别」
  */
@@ -437,15 +446,30 @@ export function guessSmartRouteIntent(message: string): SmartRouteIntent {
 /**
  * 落定名单：build 只留一位能动手的成员（先按 preferred 顺序，再按群成员顺序），
  * 没有能动手的成员时清空名单交给群主并标 noWriter；其余意图原样保留。
+ *
+ * ownerFirst（judge 名单首位是群主，回 BOSS 或群主名字都算，见 smartRouteReplyLeadsWithOwner）：明确点名群主
+ * 优先于「build 交给能动手的人」，以群主为准，由群主再委派或分派，后面跟的成员名一并不用。群主只读但有人能动手时清空名单交给群主
+ * （不填群主 id，投递端就不附 SMART_ROUTE_BUILD_NOTE，免得让只读群主「先动手完成」）；
+ * 群主能动手、或没有任何能动手的成员（noWriter）时与原规则一致。
  */
 export function decideSmartRoute(
   input: SmartRouteInput,
   intent: SmartRouteIntent | undefined,
   picked: readonly BotId[],
-  preferred: readonly BotId[] = picked
+  preferred: readonly BotId[] = picked,
+  options: { ownerFirst?: boolean } = {}
 ): SmartRouteDecision {
   if (intent !== 'build') return { ids: [...picked], ...(intent ? { intent } : {}) };
   const writers = input.candidates.filter((c) => c.canAct).map((c) => c.id);
+  const owner = input.bossBotId;
+  if (
+    options.ownerFirst &&
+    owner &&
+    picked[0] === owner &&
+    !writers.includes(owner) &&
+    writers.length > 0
+  )
+    return { ids: [], intent };
   const writer = [...preferred, ...picked, ...writers].find((id) => writers.includes(id));
   return writer ? { ids: [writer], intent } : { ids: [], intent, noWriter: true };
 }

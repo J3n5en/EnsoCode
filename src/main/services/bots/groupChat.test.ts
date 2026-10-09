@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DiscussNextDecision, DiscussNextInput } from '../../../shared/bots/discussRoute';
-import type { SmartRouteDecision, SmartRouteInput } from '../../../shared/bots/smartRoute';
+import {
+  SMART_ROUTE_BUILD_NOTE,
+  type SmartRouteDecision,
+  type SmartRouteInput,
+} from '../../../shared/bots/smartRoute';
 import type { BotTurnFinished } from './botSessionHost';
 import { BotStore } from './botStore';
 import { BotChatStore } from './chatStore';
@@ -1274,6 +1278,89 @@ describe('smart routing', () => {
     expect(deliver.mock.calls[0][2]).not.toContain('先动手完成');
     expect(entries().find((e) => e.kind === 'system')).toMatchObject({
       text: expect.stringContaining('没有能改代码或执行命令的成员'),
+    });
+  });
+
+  describe('judge 名单首位是群主且意图是 build（真实 createSmartRouter）', () => {
+    const judge = vi.fn<SmartRouterDeps['judge']>();
+    const systems = () =>
+      entries()
+        .filter((e) => e.kind === 'system')
+        .map((e) => e.text);
+    const setup = (ownerTools: 'all' | 'readonly') => {
+      const updated = bots.update(a, { tools: ownerTools }, []);
+      if (!updated.ok) throw new Error('fixture');
+      judge.mockReset();
+      group.dispose();
+      group = new GroupChatService({
+        bots,
+        chats,
+        host,
+        emit,
+        responder: createSmartRouter({
+          settings: () => ({}),
+          judge,
+          classify: vi.fn<SmartRouterDeps['classify']>(async () => null),
+        }),
+      });
+    };
+    /** 串行：空闲时选人；旁路：主轮进行中选人，走并行投递 */
+    const sendBuild = async (path: '串行' | '旁路', reply: string) => {
+      if (path === '旁路') await group.send(id, '@Alice @Bob start');
+      const before = deliver.mock.calls.length;
+      judge.mockResolvedValueOnce(reply);
+      await group.send(id, '把 README 标题改成 X');
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(before + 1));
+      expect(judge).toHaveBeenCalledTimes(1);
+      return deliver.mock.calls[before];
+    };
+    const cases = [
+      ['串行', 'INTENT: build\nBOSS'],
+      ['串行', 'INTENT: build\nAlice\nBob'],
+      ['旁路', 'INTENT: build\nBOSS'],
+      ['旁路', 'INTENT: build\nAlice\nBob'],
+    ] as const;
+
+    it('只读群主优先不进入讨论，回复不标 smart', async () => {
+      setup('readonly');
+      const call = await sendBuild('串行', 'INTENT: build\nAlice, Bob');
+      expect(call[1]).toBe(a);
+      expect(call[2]).not.toContain(SMART_ROUTE_BUILD_NOTE);
+      await done(a, '交给我安排');
+      expect(group.state(id)).toMatchObject({ current: null, queue: [] });
+      expect(judge).toHaveBeenCalledTimes(1);
+      expect(entries().at(-1)).toMatchObject({ kind: 'bot', botId: a });
+      expect(entries().at(-1)).not.toHaveProperty('routedBy');
+    });
+
+    it('群主不能被静音：存储归一化剔除群主静音项，能执行时仍附执行提示', async () => {
+      setup('all');
+      chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [a] } }));
+      expect(chats.get(id)?.routing.muted ?? []).not.toContain(a);
+      const call = await sendBuild('串行', 'INTENT: build\nBOSS');
+      expect(call[1]).toBe(a);
+      expect(call[2]).toContain(SMART_ROUTE_BUILD_NOTE);
+    });
+
+    it.each(cases)(
+      '群主只读（%s，judge 回 %j）：投递给群主，不附执行提示、不提示选人不可用',
+      async (path, reply) => {
+        setup('readonly');
+        const call = await sendBuild(path, reply);
+        expect(call[1]).toBe(a);
+        expect(call[2]).not.toContain(SMART_ROUTE_BUILD_NOTE);
+        // 不改派给能动手的 Bob（旁路时 Bob 只在主轮排队，尚未投递）
+        expect(deliver.mock.calls.some((c) => c[1] === b)).toBe(false);
+        expect(systems().filter((text) => text.includes('智能选人不可用'))).toEqual([]);
+      }
+    );
+
+    it.each(cases)('群主能执行（%s，judge 回 %j）：投递给群主并附执行提示', async (path, reply) => {
+      setup('all');
+      const call = await sendBuild(path, reply);
+      expect(call[1]).toBe(a);
+      expect(call[2]).toContain(SMART_ROUTE_BUILD_NOTE);
+      expect(systems().filter((text) => text.includes('智能选人不可用'))).toEqual([]);
     });
   });
 

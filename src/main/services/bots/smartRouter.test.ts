@@ -219,12 +219,19 @@ describe('createSmartRouter', () => {
     expect(await router().select(input, signal)).toEqual({ ids: ['a'], intent: 'discuss' });
   });
 
-  it('judge 判定 build 时只留一位能动手的成员；缺 INTENT 行按关键词兜底', async () => {
-    judge.mockResolvedValueOnce('INTENT: build\nAlice\nCarol\nBob');
+  it('judge 判定 build 时只留一位能动手的成员；首位用群主名字点到只读群主则交给群主；缺 INTENT 行按关键词兜底', async () => {
+    judge.mockResolvedValueOnce('INTENT: build\nCarol\nAlice\nBob');
     expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'build' });
-    judge.mockResolvedValueOnce('Alice, Bob');
+    judge.mockResolvedValueOnce('INTENT: build\nAlice\nCarol\nBob');
+    expect(await router().select(input, signal)).toEqual({ ids: [], intent: 'build' });
+    judge.mockResolvedValueOnce('Bob, Carol');
     expect(await router().select({ ...input, message: '把 README 标题改成 X' }, signal)).toEqual({
       ids: ['b'],
+      intent: 'build',
+    });
+    judge.mockResolvedValueOnce('Alice, Bob');
+    expect(await router().select({ ...input, message: '把 README 标题改成 X' }, signal)).toEqual({
+      ids: [],
       intent: 'build',
     });
   });
@@ -258,6 +265,121 @@ describe('createSmartRouter', () => {
     judge.mockResolvedValueOnce('BOSS');
     const noBoss = await router().select({ ...input, bossBotId: null }, signal);
     expect(noBoss).toEqual({ ids: [], intent: 'answer' });
+  });
+
+  describe('judge 名单首位是群主（BOSS 或群主名字）且意图是 build：以群主为准', () => {
+    it('群主名字是普通词时沿用成员解析，不额外收紧或扩大名单匹配', async () => {
+      const named = {
+        ...input,
+        candidates: input.candidates.map((c) => (c.owner ? { ...c, name: '前端' } : c)),
+      };
+      // 既有解析器允许成员名出现在句中；需求以解析后的名单首位为准。
+      judge.mockResolvedValueOnce('INTENT: build\n建议前端处理');
+      expect(await router().select(named, signal)).toEqual({ ids: [], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\nBob, 前端');
+      expect(await router().select(named, signal)).toEqual({ ids: ['b'], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\n未知成员');
+      expect(await router().select(named, signal)).toEqual({
+        ids: [],
+        failure: '判断结果无法识别',
+      });
+    });
+
+    it('群主只读、有人能动手：交给群主（名单留空，不附执行提示），不改派给能动手的人', async () => {
+      for (const reply of [
+        'INTENT: build\nBOSS',
+        'INTENT: build\n1. BOSS.',
+        'BOSS',
+        'INTENT: build\nAlice',
+        'INTENT: build\n1. alice.',
+        'Alice',
+      ]) {
+        judge.mockResolvedValueOnce(reply);
+        expect(
+          await router().select({ ...input, message: '把 README 标题改成 X' }, signal)
+        ).toEqual({ ids: [], intent: 'build' });
+      }
+    });
+
+    it('「BOSS / 群主名, 成员」整个交给群主；「成员, BOSS / 群主名」照 build 规则选首位能动手者', async () => {
+      judge.mockResolvedValueOnce('INTENT: build\nBOSS, Carol');
+      expect(await router().select(input, signal)).toEqual({ ids: [], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\nAlice, Carol');
+      expect(await router().select(input, signal)).toEqual({ ids: [], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\nCarol, BOSS');
+      expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\nCarol, Alice');
+      expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'build' });
+    });
+
+    it('成员本身叫 Boss 时 BOSS 指该成员：照 build 规则选它，不当作点名群主', async () => {
+      const named = {
+        ...input,
+        candidates: [
+          ...input.candidates,
+          { id: 'm', name: 'Boss', title: '', scope: '', canAct: true, owner: false },
+        ],
+      };
+      judge.mockResolvedValueOnce('INTENT: build\nBOSS\nBob');
+      expect(await router().select(named, signal)).toEqual({ ids: ['m'], intent: 'build' });
+    });
+
+    it('群主能动手时行为不变：选群主', async () => {
+      const capable = {
+        ...input,
+        candidates: input.candidates.map((c) => (c.owner ? { ...c, canAct: true } : c)),
+      };
+      judge.mockResolvedValueOnce('INTENT: build\nBOSS\nCarol');
+      expect(await router().select(capable, signal)).toEqual({ ids: ['a'], intent: 'build' });
+      judge.mockResolvedValueOnce('INTENT: build\nAlice\nCarol');
+      expect(await router().select(capable, signal)).toEqual({ ids: ['a'], intent: 'build' });
+    });
+
+    it('没有任何能动手的成员时仍提示 noWriter', async () => {
+      const readonly = {
+        ...input,
+        candidates: input.candidates.map((c) => ({ ...c, canAct: false })),
+      };
+      judge.mockResolvedValueOnce('INTENT: build\nBOSS');
+      expect(await router().select(readonly, signal)).toEqual({
+        ids: [],
+        intent: 'build',
+        noWriter: true,
+      });
+      judge.mockResolvedValueOnce('INTENT: build\nAlice');
+      expect(await router().select(readonly, signal)).toEqual({
+        ids: [],
+        intent: 'build',
+        noWriter: true,
+      });
+    });
+
+    it('answer / discuss 行为不变', async () => {
+      judge.mockResolvedValueOnce('INTENT: answer\nBOSS\nCarol');
+      expect(await router().select(input, signal)).toEqual({ ids: ['a', 'c'], intent: 'answer' });
+      judge.mockResolvedValueOnce('INTENT: discuss\nBOSS');
+      expect(await router().select(input, signal)).toEqual({ ids: ['a'], intent: 'discuss' });
+    });
+
+    it('没有群主时行为不变：BOSS 不报无法识别，build 照规则选能动手者', async () => {
+      judge.mockResolvedValueOnce('INTENT: build\nBOSS');
+      expect(await router().select({ ...input, bossBotId: null }, signal)).toEqual({
+        ids: ['b'],
+        intent: 'build',
+      });
+    });
+
+    it('pi 分类器没有 BOSS 选项：群主概率最高也照 build 规则选能动手者', async () => {
+      settings = {
+        botRouteClassifier: { source: 'pi-classifier', model: judgeModel, timeoutMs: 3000 },
+      };
+      classify.mockImplementation(async (_config, question) =>
+        'build' in question.criteria
+          ? { build: 0.9, answer: 0.05, discuss: 0.05 }
+          : { a: 0.8, c: 0.15, b: 0.05 }
+      );
+      expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'build' });
+    });
   });
 
   it('judge 抛错时透出归类原因', async () => {

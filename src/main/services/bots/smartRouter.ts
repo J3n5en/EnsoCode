@@ -27,6 +27,7 @@ import {
   smartRouteIntentQuestion,
   smartRouteJudgePrompt,
   smartRouteQuestion,
+  smartRouteReplyLeadsWithOwner,
   smartRouteReplyNamesBoss,
   smartRouteTaskQuestion,
   smartRouteTimeoutMs,
@@ -141,10 +142,14 @@ export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector
           console.warn('[bots] smart routing reply not understood:', text.slice(0, 80));
           return unrecognized();
         }
+        // judge 名单是模型明确点的名（BOSS 或群主名字排第一都算点名群主）；pi 分类器里群主是带「默认人选」
+        // 说明的普通候选，概率最高也不算明确点名
         const decision = decideSmartRoute(
           input,
           parseSmartRouteIntent(text) ?? guessSmartRouteIntent(input.message),
-          picked
+          picked,
+          picked,
+          { ownerFirst: smartRouteReplyLeadsWithOwner(text, input) }
         );
         return markSeparate(input, decision, parseSmartRouteTask(text));
       } catch (error) {
