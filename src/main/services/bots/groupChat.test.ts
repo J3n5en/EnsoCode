@@ -8,7 +8,7 @@ import type { BotTurnFinished } from './botSessionHost';
 import { BotStore } from './botStore';
 import { BotChatStore } from './chatStore';
 import { GroupChatService } from './groupChat';
-import { createSmartRouter } from './smartRouter';
+import { createSmartRouter, type SmartRouterDeps } from './smartRouter';
 
 let root: string;
 let bots: BotStore;
@@ -861,6 +861,57 @@ describe('smart routing', () => {
     expect(deliver.mock.calls[1][1]).toBe(a);
     warn.mockRestore();
   });
+
+  it.each(['judge', 'pi-classifier'] as const)(
+    '%s 返回无法识别的结果：提示「判断结果无法识别」后交给群主；明确选群主不提示',
+    async (source) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const judge = vi
+        .fn<SmartRouterDeps['judge']>()
+        .mockResolvedValueOnce('INTENT: build\nmaybe Dave')
+        .mockResolvedValueOnce('INTENT: answer\nBOSS');
+      let memberCalls = 0;
+      const classify = vi.fn<SmartRouterDeps['classify']>(async (_config, question) => {
+        if ('build' in question.criteria) return null;
+        memberCalls += 1;
+        return memberCalls === 1 ? { ghost: 1 } : { [a]: 0.9, [b]: 0.1 };
+      });
+      group.dispose();
+      group = new GroupChatService({
+        bots,
+        chats,
+        host,
+        emit,
+        responder: createSmartRouter({
+          settings: () => ({
+            botRouteClassifier: {
+              source,
+              model: { providerId: 'p', modelId: 'm' },
+              timeoutMs: 3000,
+            },
+          }),
+          judge,
+          classify,
+        }),
+      });
+      const systems = () =>
+        entries()
+          .filter((e) => e.kind === 'system')
+          .map((e) => e.text);
+      await group.send(id, 'one');
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+      expect(deliver.mock.calls[0][1]).toBe(a);
+      expect(systems()).toEqual(['智能选人不可用（判断结果无法识别），已交给群主']);
+      await done(a, 'ok');
+      await group.send(id, 'two');
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+      expect(deliver.mock.calls[1][1]).toBe(a);
+      expect(systems()).toEqual(['智能选人不可用（判断结果无法识别），已交给群主']);
+      await done(a, 'ok');
+      expect(source === 'judge' ? judge : classify).toHaveBeenCalled();
+      warn.mockRestore();
+    }
+  );
 
   it('选人模型实测失败时提示原因并兜底群主', async () => {
     select.mockResolvedValueOnce({ ids: [], failure: '模型 gpt-5：调用超时' });

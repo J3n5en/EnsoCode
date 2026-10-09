@@ -23,9 +23,11 @@ import {
   type SmartRouteDecision,
   type SmartRouteInput,
   type SmartRouteTask,
+  smartRouteChoiceRecognized,
   smartRouteIntentQuestion,
   smartRouteJudgePrompt,
   smartRouteQuestion,
+  smartRouteReplyNamesBoss,
   smartRouteTaskQuestion,
   smartRouteTimeoutMs,
 } from '../../../shared/bots/smartRoute';
@@ -36,6 +38,9 @@ import {
 } from '../../../shared/virtualModels';
 import type { GroupResponderSelector } from './groupChat';
 import { briefErrorReason } from './modelProbe';
+
+/** 选人模型回了结果但认不出名单：群里提示「智能选人不可用（判断结果无法识别）」后交给群主 */
+const unrecognized = (): SmartRouteDecision => ({ ids: [], failure: '判断结果无法识别' });
 
 export interface SmartRouterDeps {
   settings: () => Record<string, unknown> | undefined;
@@ -77,7 +82,8 @@ const firstBusy = (input: SmartRouteInput, ids: readonly string[]) =>
 
 /**
  * 全局「群聊选人模型」：未设置走 judge + 标题模型回退链；judge 指定快模型；pi-classifier 走 worker 分类
- * （成员与意图各问一次）。判不出意图时用关键词兜底。
+ * （成员与意图各问一次）。判不出意图（含意图概率表不合法）时用关键词兜底，不算失败；
+ * 成员概率表不合法、judge 回复既没有名单也不是 BOSS 时报「判断结果无法识别」，交给群主。
  */
 export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector {
   const config = () => {
@@ -100,6 +106,13 @@ export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector
               .catch(() => null),
           ]);
           if (!probabilities) return { ids: [], failure: '选人模型不可用' };
+          if (!smartRouteChoiceRecognized(probabilities, input)) {
+            console.warn(
+              '[bots] smart routing classifier result not understood:',
+              JSON.stringify(probabilities).slice(0, 120)
+            );
+            return unrecognized();
+          }
           const decision = decideSmartRoute(
             input,
             pickSmartRouteIntent(intents) ?? guessSmartRouteIntent(input.message),
@@ -124,8 +137,10 @@ export function createSmartRouter(deps: SmartRouterDeps): GroupResponderSelector
         );
         if (text === null) return { ids: [], failure: '选人模型不可用' };
         const picked = parseSmartRouteReply(text, input);
-        if (picked.length === 0)
+        if (picked.length === 0 && !smartRouteReplyNamesBoss(text)) {
           console.warn('[bots] smart routing reply not understood:', text.slice(0, 80));
+          return unrecognized();
+        }
         const decision = decideSmartRoute(
           input,
           parseSmartRouteIntent(text) ?? guessSmartRouteIntent(input.message),

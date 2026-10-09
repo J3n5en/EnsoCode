@@ -6,6 +6,7 @@ import {
   botNameKey,
   type GroupEntry,
 } from '../types/bot';
+import { validChoiceProbabilities } from './choiceProbabilities';
 import type { HumanEntry } from './router';
 
 /** 智能选人：不 @ 的人类消息由便宜模型（judge）或 pi 分类器判定意图并从成员里选 1–3 位回复人（有序） */
@@ -203,6 +204,24 @@ const ASCII_WORD = /[A-Za-z0-9_-]/;
 const SEGMENT_SPLIT = /[\n,，、;；]/;
 const INTENT_LINE = /^\s*intent\s*[:：]\s*(\w+)/i;
 const TASK_LINE = /^\s*task\s*[:：]\s*(\w+)/i;
+/**
+ * 明确点名群主：一整段（按 SEGMENT_SPLIT 切分、去首尾空白）就是 BOSS，大小写不敏感。
+ * 只额外容忍两类修饰：行首列表标记（- * • 或「数字.」「数字)」）与行尾一个 . 或 。；
+ * 其余写法（散文、括注、引号、加粗、其他标点）都不算，避免「I cannot identify the boss」被当成交给群主。
+ */
+const BOSS_SEGMENT = /^(?:(?:[-*•]|\d+[.)])\s*)?boss[.。]?$/i;
+
+const isBossSegment = (segment: string): boolean => BOSS_SEGMENT.test(segment.trim());
+
+/** INTENT / TASK 行之外的回复正文按换行/逗号/顿号/分号切成名单段 */
+const replySegments = (text: string): string[] =>
+  text
+    .split('\n')
+    .filter((line) => !INTENT_LINE.test(line) && !TASK_LINE.test(line))
+    .join('\n')
+    .normalize('NFC')
+    .toLowerCase()
+    .split(SEGMENT_SPLIT);
 
 /** judge 回复里的 INTENT 行；没有或不认识返回 undefined */
 export function parseSmartRouteIntent(text: string): SmartRouteIntent | undefined {
@@ -224,21 +243,18 @@ export function parseSmartRouteTask(text: string): SmartRouteTask | undefined {
   return undefined;
 }
 
-/** 按换行/逗号/顿号分段，每段取最先出现的成员名（大小写不敏感）或 BOSS；去重后取前 3 个 */
+/**
+ * 按换行/逗号/顿号/分号分段，每段取最先出现的成员名（大小写不敏感）；没有成员名且整段是 BOSS（见 BOSS_SEGMENT）
+ * 时取群主。成员名优先于 BOSS 保留词（成员就叫 Boss 时按成员处理）。去重后取前 3 个。
+ */
 export function parseSmartRouteReply(text: string, input: SmartRouteInput): BotId[] {
   if (typeof text !== 'string') return [];
-  const keys = [
-    ...input.candidates.map((c) => ({ key: botNameKey(c.name), id: c.id })),
-    ...(input.bossBotId ? [{ key: 'boss', id: input.bossBotId }] : []),
-  ]
+  const keys = input.candidates
+    .map((c) => ({ key: botNameKey(c.name), id: c.id }))
     .filter(({ key }) => key.length > 0)
     .sort((a, b) => b.key.length - a.key.length);
   const picked: BotId[] = [];
-  const names = text
-    .split('\n')
-    .filter((line) => !INTENT_LINE.test(line) && !TASK_LINE.test(line))
-    .join('\n');
-  for (const segment of names.normalize('NFC').toLowerCase().split(SEGMENT_SPLIT)) {
+  for (const segment of replySegments(text)) {
     let best: { at: number; id: BotId } | null = null;
     for (const { key, id } of keys) {
       for (let at = segment.indexOf(key); at !== -1; at = segment.indexOf(key, at + 1)) {
@@ -250,10 +266,20 @@ export function parseSmartRouteReply(text: string, input: SmartRouteInput): BotI
         break;
       }
     }
-    if (best && !picked.includes(best.id)) picked.push(best.id);
+    const id = best?.id ?? (input.bossBotId && isBossSegment(segment) ? input.bossBotId : null);
+    if (id && !picked.includes(id)) picked.push(id);
     if (picked.length >= SMART_ROUTE_MAX_PICKS) break;
   }
   return picked;
+}
+
+/**
+ * judge 回复（INTENT 行之外）是否有一段明确是 BOSS（规则同 parseSmartRouteReply，见 BOSS_SEGMENT）；
+ * 与群里有没有群主无关，用来区分「交给群主」和「无法识别」
+ */
+export function smartRouteReplyNamesBoss(text: string): boolean {
+  if (typeof text !== 'string') return false;
+  return replySegments(text).some(isBossSegment);
 }
 
 export function smartRouteQuestion(input: SmartRouteInput): {
@@ -276,7 +302,21 @@ export function smartRouteQuestion(input: SmartRouteInput): {
   };
 }
 
-/** choice 概率达到阈值的候选按概率降序，最多 3 位；都不达标返回空（交给群主） */
+/**
+ * 成员题是一道单选 choice 题：键是每位候选的 id（群主也是普通候选，没有 BOSS 保留键）。
+ * 合法性规则同讨论判断，见 validChoiceProbabilities；不合法时选人与排序都为空，调用方据此报「判断结果无法识别」。
+ */
+export function smartRouteChoiceRecognized(
+  probabilities: unknown,
+  input: SmartRouteInput
+): boolean {
+  return validChoiceProbabilities(probabilities, candidateKeys(input)) !== null;
+}
+
+/**
+ * choice 概率达到阈值的候选按概率降序，最多 3 位；都不达标返回空（交给群主）。
+ * 合法的单选分布里至多两位能达到 0.4，上限 3 只是防御。
+ */
 export function pickSmartRouteChoice(probabilities: unknown, input: SmartRouteInput): BotId[] {
   return ranked(probabilities, input)
     .filter(({ p }) => p >= SMART_ROUTE_MIN_CONFIDENCE)
@@ -284,19 +324,18 @@ export function pickSmartRouteChoice(probabilities: unknown, input: SmartRouteIn
     .map(({ id }) => id);
 }
 
-/** 全部候选按 choice 概率降序（build 时从中找第一位能动手的） */
+/** 已返回概率的候选按 choice 概率降序（build 时从中找第一位能动手的） */
 export function rankSmartRouteChoice(probabilities: unknown, input: SmartRouteInput): BotId[] {
   return ranked(probabilities, input).map(({ id }) => id);
 }
 
+const candidateKeys = (input: SmartRouteInput): string[] => input.candidates.map((c) => c.id);
+
 function ranked(probabilities: unknown, input: SmartRouteInput): Array<{ id: BotId; p: number }> {
-  if (!probabilities || typeof probabilities !== 'object') return [];
-  const values = probabilities as Record<string, unknown>;
+  const values = validChoiceProbabilities(probabilities, candidateKeys(input));
+  if (!values) return [];
   return input.candidates
-    .flatMap((c) => {
-      const p = values[c.id];
-      return typeof p === 'number' && Number.isFinite(p) ? [{ id: c.id, p }] : [];
-    })
+    .flatMap((c) => (Object.hasOwn(values, c.id) ? [{ id: c.id, p: values[c.id]! }] : []))
     .sort((a, b) => b.p - a.p);
 }
 
@@ -314,14 +353,15 @@ export function smartRouteIntentQuestion(input: SmartRouteInput): {
   };
 }
 
-/** 意图概率最高者达到 0.5 才采信 */
+/** 意图概率最高者达到 0.5 才采信；概率表不合法（规则同 validChoiceProbabilities）返回 undefined，交给关键词兜底 */
 export function pickSmartRouteIntent(probabilities: unknown): SmartRouteIntent | undefined {
-  if (!probabilities || typeof probabilities !== 'object') return undefined;
-  const values = probabilities as Record<string, unknown>;
+  const values = validChoiceProbabilities(probabilities, SMART_ROUTE_INTENTS);
+  if (!values) return undefined;
   let best: { intent: SmartRouteIntent; p: number } | undefined;
   for (const intent of SMART_ROUTE_INTENTS) {
     const p = values[intent];
-    if (typeof p === 'number' && Number.isFinite(p) && (!best || p > best.p)) best = { intent, p };
+    if (p !== undefined && Object.hasOwn(values, intent) && (!best || p > best.p))
+      best = { intent, p };
   }
   return best && best.p >= SMART_ROUTE_INTENT_MIN_CONFIDENCE ? best.intent : undefined;
 }

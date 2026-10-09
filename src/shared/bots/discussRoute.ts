@@ -1,4 +1,5 @@
 import { type BotId, botNameKey, type GroupEntry } from '../types/bot';
+import { validChoiceProbabilities } from './choiceProbabilities';
 import type { HumanEntry } from './router';
 import type { SmartRouteMember } from './smartRoute';
 
@@ -32,10 +33,6 @@ export const DISCUSS_NOTE =
 export const DISCUSS_END_KEY = 'end';
 /** 分类器最高成员概率不到此值视为该结束 */
 export const DISCUSS_MIN_CONFIDENCE = 0.4;
-/** 每个返回值按两位小数四舍五入时的最大舍入误差（应用层推定，非协议保证） */
-const ROUNDING_SLACK_PER_VALUE = 0.005;
-/** 浮点累加误差余量 */
-const FLOAT_EPSILON = 1e-9;
 export const DISCUSS_HISTORY = 12;
 /** judge 只回一行 NEXT: <名字> 或 END；与首轮选人的 judge 同一上限 */
 export const DISCUSS_JUDGE_MAX_TOKENS = 128;
@@ -173,46 +170,20 @@ export function discussNextQuestion(input: DiscussNextInput): {
 }
 
 /**
- * 规则要对 pi 的所有分类器后端成立。分三层看：
- *
- * 1. 协议要求：choice 是单选概率分布。TypeSafe 文档写明值是 "floats that sum to 1"
- *    （api.md）/ "The sum of all values is 1"（choice.md）；Cloudflare 的 JSON schema 只约束
- *    每个值在 [0, 1]，但 schema 表达不了跨字段约束，不能理解成允许总和超过 1。
- * 2. adapter 实际行为：llama-cpp-classify 本地对全部选项做 softmax，键表完整、和为 1（只有浮点误差）；
- *    System One 系（TypeSafe / OpenRouter / Vercel / OpenCode / Cloudflare）原样透传服务端概率表，
- *    不补键、不归一化、不校验总和。透传只说明 adapter 宽松，不说明服务端会返回超额表。
- * 3. 应用层容差策略：
- *    - 只认本题选项（每位候选 + end）的键：名单外的键说明回答与题目对不上；
- *    - 每个值必须是 [0, 1] 内的有限数；缺的选项按 0；至少要有一个选项的概率大于 0；
- *    - 总和上限 = 1 + 0.005 × 已返回的选项数 + 1e-9。推导：文档示例值是两位小数，
- *      假设每个值按两位小数四舍五入，单值最大误差 0.005，n 个值累计最多 0.005n；1e-9 吸收浮点累加误差。
- *      这是按舍入推出来的应用层容差，文档并没有明写精度保证。三项表上限 1.015：0.99、1.01 接受，1.1、2、3 拒绝；
- *    - 不设下限：稀疏表缺的概率去向未知，总和小于 1 合法；
- *    - 不补键、不重新归一化：按原值比较阈值更保守（偏向结束）。
- * 不合法报 failure，不能当成 END 或 NEXT。
+ * 合法性规则见 validChoiceProbabilities（本题选项 = 每位候选 + end）；
+ * 不补键、不重新归一化：按原值比较阈值更保守（偏向结束）。不合法报 failure，不能当成 END 或 NEXT。
  * 合法时：end 概率不低于最高的成员，或最高的成员不到 0.4，都判为结束。
  */
 export function pickDiscussNext(
   probabilities: unknown,
   input: DiscussNextInput
 ): DiscussNextDecision {
-  const unrecognized = { failure: '判断结果无法识别' };
-  if (!probabilities || typeof probabilities !== 'object' || Array.isArray(probabilities))
-    return unrecognized;
-  const values = probabilities as Record<string, unknown>;
-  const keys = new Set<string>([...input.candidates.map((c) => c.id), DISCUSS_END_KEY]);
-  const returned = Object.keys(values);
-  let mass = 0;
-  for (const key of returned) {
-    if (!keys.has(key)) return unrecognized;
-    const value = values[key];
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)
-      return unrecognized;
-    mass += value;
-  }
-  if (mass <= 0 || mass > 1 + ROUNDING_SLACK_PER_VALUE * returned.length + FLOAT_EPSILON)
-    return unrecognized;
-  const p = (key: string) => (Object.hasOwn(values, key) ? (values[key] as number) : 0);
+  const values = validChoiceProbabilities(probabilities, [
+    ...input.candidates.map((c) => c.id),
+    DISCUSS_END_KEY,
+  ]);
+  if (!values) return { failure: '判断结果无法识别' };
+  const p = (key: string) => (Object.hasOwn(values, key) ? values[key]! : 0);
   let best: { id: BotId; p: number } | undefined;
   for (const c of input.candidates) if (!best || p(c.id) > best.p) best = { id: c.id, p: p(c.id) };
   if (!best || best.p < DISCUSS_MIN_CONFIDENCE || p(DISCUSS_END_KEY) >= best.p)

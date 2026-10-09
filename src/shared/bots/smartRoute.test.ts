@@ -12,9 +12,11 @@ import {
   pickSmartRouteTask,
   rankSmartRouteChoice,
   SMART_ROUTE_MIN_CONFIDENCE,
+  smartRouteChoiceRecognized,
   smartRouteIntentQuestion,
   smartRouteJudgePrompt,
   smartRouteQuestion,
+  smartRouteReplyNamesBoss,
   smartRouteTaskQuestion,
 } from './smartRoute';
 
@@ -301,6 +303,104 @@ describe('parseSmartRouteReply', () => {
     expect(parseSmartRouteReply('', input)).toEqual([]);
     expect(parseSmartRouteReply('Backends', input)).toEqual([]);
   });
+
+  it('smartRouteReplyNamesBoss：明确回 BOSS（不论群里有没有群主）才算点了群主', () => {
+    expect(smartRouteReplyNamesBoss('BOSS')).toBe(true);
+    expect(smartRouteReplyNamesBoss('INTENT: discuss\nboss.')).toBe(true);
+    expect(smartRouteReplyNamesBoss('Backend, BOSS')).toBe(true);
+    expect(parseSmartRouteReply('BOSS', { ...input, bossBotId: null })).toEqual([]);
+    expect(smartRouteReplyNamesBoss('INTENT: build')).toBe(false);
+    expect(smartRouteReplyNamesBoss('bossy, Bosses')).toBe(false);
+    expect(smartRouteReplyNamesBoss('maybe Dave')).toBe(false);
+    expect(smartRouteReplyNamesBoss('')).toBe(false);
+    expect(smartRouteReplyNamesBoss(null as never)).toBe(false);
+  });
+
+  it('BOSS 只认整段：按换行、逗号、顿号、分号切分后整段等于 BOSS（大小写不敏感）', () => {
+    for (const reply of [
+      'BOSS',
+      '  boss  ',
+      'Boss',
+      'Backend；BOSS',
+      '前端、boss',
+      'INTENT: build\nBOSS',
+    ])
+      expect(smartRouteReplyNamesBoss(reply)).toBe(true);
+    for (const reply of [
+      'I cannot identify the boss',
+      'INTENT: build\nI cannot identify the boss',
+      'the boss should reply',
+      'ask boss',
+      'BOSS (group owner)',
+      'Boss Li',
+      'BOSS BOSS',
+    ])
+      expect(smartRouteReplyNamesBoss(reply)).toBe(false);
+  });
+
+  it('BOSS 段允许的修饰只有：行首列表标记 - * • 或「数字.」「数字)」，行尾一个 . 或 。', () => {
+    for (const reply of [
+      'BOSS.',
+      'boss。',
+      '- BOSS',
+      '* BOSS',
+      '• BOSS',
+      '1. BOSS',
+      '2) BOSS',
+      '3.BOSS.',
+    ])
+      expect(smartRouteReplyNamesBoss(reply)).toBe(true);
+    for (const reply of [
+      'BOSS!',
+      'BOSS！',
+      'BOSS:',
+      '**BOSS**',
+      '"BOSS"',
+      '`BOSS`',
+      'BOSS..',
+      '(BOSS)',
+      '# BOSS',
+    ])
+      expect(smartRouteReplyNamesBoss(reply)).toBe(false);
+  });
+
+  it('有群主时 parseSmartRouteReply 与 smartRouteReplyNamesBoss 同一规则：散文里的 boss 不算点名群主', () => {
+    expect(parseSmartRouteReply('I cannot identify the boss', input)).toEqual([]);
+    expect(parseSmartRouteReply('INTENT: answer\nthe boss should reply', input)).toEqual([]);
+    expect(parseSmartRouteReply('ask the boss, Backend', input)).toEqual(['be']);
+    expect(parseSmartRouteReply('BOSS (group owner)', input)).toEqual([]);
+    expect(parseSmartRouteReply('INTENT: answer\n1. BOSS\n2. 前端', input)).toEqual(['boss', 'fe']);
+    expect(parseSmartRouteReply('- 前端\n- boss。', input)).toEqual(['fe', 'boss']);
+  });
+
+  it('成员名就是 Boss 时按成员名处理，优先于 BOSS 保留词；群主仍可用群主名点到', () => {
+    const named = buildSmartRouteInput(
+      { members: [...chat.members, 'bm'], bossBotId: 'boss' },
+      [...members, member('bm', 'Boss')],
+      [],
+      human(1, 'hi')
+    );
+    expect(parseSmartRouteReply('BOSS', named)).toEqual(['bm']);
+    expect(parseSmartRouteReply('boss.', named)).toEqual(['bm']);
+    expect(parseSmartRouteReply('老板, Boss', named)).toEqual(['boss', 'bm']);
+    const noOwner = { ...named, bossBotId: null };
+    expect(parseSmartRouteReply('Boss', noOwner)).toEqual(['bm']);
+  });
+
+  it('成员名含 boss 时：整段 BOSS 仍是群主，含 boss 的成员名按名字匹配，散文里的 boss 不误判', () => {
+    const named = buildSmartRouteInput(
+      { members: [...chat.members, 'bl', 'bb'], bossBotId: 'boss' },
+      [...members, member('bl', 'Boss Li'), member('bb', 'BossBot')],
+      [],
+      human(1, 'hi')
+    );
+    expect(parseSmartRouteReply('BOSS', named)).toEqual(['boss']);
+    expect(parseSmartRouteReply('boss li', named)).toEqual(['bl']);
+    expect(parseSmartRouteReply('bossbot\nBOSS', named)).toEqual(['bb', 'boss']);
+    expect(parseSmartRouteReply('the boss is busy', named)).toEqual([]);
+    expect(smartRouteReplyNamesBoss('Boss Li')).toBe(false);
+    expect(smartRouteReplyNamesBoss('BossBot')).toBe(false);
+  });
 });
 
 describe('smartRouteQuestion', () => {
@@ -333,24 +433,52 @@ describe('pickSmartRouteChoice', () => {
     expect(pickSmartRouteChoice({ fe: 0.4 }, input)).toEqual(['fe']);
   });
 
-  it('最多 3 人', () => {
+  it('最多 3 人：合法单选分布里至多两位能达到 0.4，4 人都 ≥ 0.4 的超额表整表无效', () => {
     const four = buildSmartRouteInput(
       { members: [...chat.members, 'qa'], bossBotId: 'boss' },
       [...members, member('qa', 'QA')],
       [],
       human(1, 'hi')
     );
-    expect(pickSmartRouteChoice({ boss: 0.5, fe: 0.6, be: 0.7, qa: 0.8 }, four)).toEqual([
-      'qa',
-      'be',
+    expect(pickSmartRouteChoice({ boss: 0.1, fe: 0.41, be: 0.4, qa: 0.09 }, four)).toEqual([
       'fe',
+      'be',
     ]);
+    const loose = { boss: 0.5, fe: 0.6, be: 0.7, qa: 0.8 };
+    expect(smartRouteChoiceRecognized(loose, four)).toBe(false);
+    expect(pickSmartRouteChoice(loose, four)).toEqual([]);
   });
 
-  it('忽略非候选键与非法值', () => {
-    expect(pickSmartRouteChoice({ old: 0.9, fe: Number.NaN, be: 0.5 }, input)).toEqual(['be']);
-    expect(pickSmartRouteChoice(null, input)).toEqual([]);
-    expect(pickSmartRouteChoice({ fe: '0.9' }, input)).toEqual([]);
+  it('合法：只含本题键、值在 [0,1] 的有限数、总和 > 0 且不超过两位小数舍入上限；完整表与稀疏表都认', () => {
+    for (const probabilities of [
+      { boss: 0.2, fe: 0.7, be: 0.1 },
+      { boss: 0.34, fe: 0.33, be: 0.34 },
+      { fe: 0.9 },
+      { be: 0.3 },
+      { boss: 0, fe: 0.01, be: 0 },
+      { boss: 1, fe: 0, be: 0 },
+    ])
+      expect(smartRouteChoiceRecognized(probabilities, input), JSON.stringify(probabilities)).toBe(
+        true
+      );
+  });
+
+  it.each<[string, unknown]>([
+    ['空表', {}],
+    ['只有名单外键', { ghost: 1 }],
+    ['名单外键混在合法值里（含已归档成员）', { old: 0.9, be: 0.05 }],
+    ['负数与大于 1', { fe: -1, be: 2 }],
+    ['NaN', { fe: Number.NaN, be: 0.5 }],
+    ['Infinity', { fe: Number.POSITIVE_INFINITY }],
+    ['全 0', { boss: 0, fe: 0, be: 0 }],
+    ['总和超过舍入上限', { boss: 0.7, fe: 0.2, be: 0.2 }],
+    ['非数字', { fe: '0.9' }],
+    ['null', null],
+    ['数组', [0.9]],
+  ])('无法识别：%s → 不合法，选人与排序都为空', (_label, probabilities) => {
+    expect(smartRouteChoiceRecognized(probabilities, input)).toBe(false);
+    expect(pickSmartRouteChoice(probabilities, input)).toEqual([]);
+    expect(rankSmartRouteChoice(probabilities, input)).toEqual([]);
   });
 });
 
@@ -410,12 +538,29 @@ describe('意图', () => {
     expect(pickSmartRouteIntent(null)).toBeUndefined();
   });
 
-  it('rankSmartRouteChoice 按概率降序列出全部候选', () => {
-    expect(rankSmartRouteChoice({ boss: 0.2, fe: 0.1, be: 0.7, old: 0.9 }, input)).toEqual([
+  it('意图概率表不合法时返回 undefined（交给关键词兜底），稀疏合法表照常采信', () => {
+    for (const probabilities of [
+      {},
+      { ghost: 1 },
+      { build: -1, answer: 2 },
+      { build: Number.NaN, answer: 0.6 },
+      { build: Number.POSITIVE_INFINITY },
+      { build: 0, answer: 0, discuss: 0 },
+      { build: 0.6, answer: 0.6, discuss: 0 },
+      { build: 5 },
+    ])
+      expect(pickSmartRouteIntent(probabilities), JSON.stringify(probabilities)).toBeUndefined();
+    expect(pickSmartRouteIntent({ discuss: 0.8 })).toBe('discuss');
+    expect(pickSmartRouteIntent({ build: 0.51, answer: 0.25, discuss: 0.25 })).toBe('build');
+  });
+
+  it('rankSmartRouteChoice 按概率降序列出已返回的候选', () => {
+    expect(rankSmartRouteChoice({ boss: 0.2, fe: 0.1, be: 0.7 }, input)).toEqual([
       'be',
       'boss',
       'fe',
     ]);
+    expect(rankSmartRouteChoice({ fe: 0.3, be: 0.1 }, input)).toEqual(['fe', 'be']);
   });
 });
 

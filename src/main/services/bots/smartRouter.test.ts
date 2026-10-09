@@ -172,6 +172,53 @@ describe('createSmartRouter', () => {
     expect(await router().select(input, signal)).toEqual({ ids: ['c', 'b'], intent: 'discuss' });
   });
 
+  it('judge 三名有效成员照常保留，第四名截断', async () => {
+    judge.mockResolvedValueOnce('INTENT: discuss\nCarol\nBob\nAlice\nDave');
+    const four = {
+      ...input,
+      candidates: [
+        ...input.candidates,
+        { id: 'd', name: 'Dave', title: '', scope: '', canAct: true, owner: false },
+      ],
+    };
+    expect(await router().select(four, signal)).toEqual({
+      ids: ['c', 'b', 'a'],
+      intent: 'discuss',
+    });
+  });
+
+  it('合法表所有成员低于 0.4：answer 不提示，build 按概率找能动手者', async () => {
+    settings = {
+      botRouteClassifier: { source: 'pi-classifier', model: judgeModel, timeoutMs: 3000 },
+    };
+    classify.mockImplementation(async (_config, question) =>
+      'build' in question.criteria ? null : { a: 0.35, b: 0.3, c: 0.34 }
+    );
+    expect(await router().select(input, signal)).toEqual({ ids: [], intent: 'answer' });
+    expect(await router().select({ ...input, message: 'please fix the api' }, signal)).toEqual({
+      ids: ['c'],
+      intent: 'build',
+    });
+  });
+
+  it('没有群主时 judge 仅在否定句提到 boss，不算明确点名，不得按 build 擅自挑人', async () => {
+    judge.mockResolvedValueOnce('INTENT: build\nI cannot identify the boss');
+    expect(await router().select({ ...input, bossBotId: null }, signal)).toEqual({
+      ids: [],
+      failure: '判断结果无法识别',
+    });
+  });
+
+  it('有群主时 judge 仅在散文里提到 boss 同样报无法识别；整段 BOSS（含允许的列表标记与句点）照常交给群主', async () => {
+    judge.mockResolvedValueOnce('INTENT: build\nI think the boss should handle this');
+    expect(await router().select(input, signal)).toEqual({
+      ids: [],
+      failure: '判断结果无法识别',
+    });
+    judge.mockResolvedValueOnce('INTENT: discuss\n1. BOSS.');
+    expect(await router().select(input, signal)).toEqual({ ids: ['a'], intent: 'discuss' });
+  });
+
   it('judge 判定 build 时只留一位能动手的成员；缺 INTENT 行按关键词兜底', async () => {
     judge.mockResolvedValueOnce('INTENT: build\nAlice\nCarol\nBob');
     expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'build' });
@@ -182,13 +229,35 @@ describe('createSmartRouter', () => {
     });
   });
 
-  it('judge 回复不认识时返回空名单；没有可用模型时带失败原因', async () => {
+  it('judge 回复不认识时报「判断结果无法识别」；没有可用模型时带失败原因', async () => {
     judge.mockResolvedValueOnce('maybe Dave');
-    expect((await router().select(input, signal)).ids).toEqual([]);
+    expect(await router().select(input, signal)).toEqual({
+      ids: [],
+      failure: '判断结果无法识别',
+    });
     judge.mockResolvedValueOnce(null);
     const failed = await router().select(input, signal);
     expect(failed.ids).toEqual([]);
     expect(failed.failure).toBeTruthy();
+  });
+
+  it.each(['', 'maybe Dave', 'INTENT: build', 'INTENT: discuss\n', 'bossy'])(
+    'judge 回复 %j 既没有名单也不是 BOSS：报无法识别、不带意图，不按意图挑人',
+    async (reply) => {
+      judge.mockResolvedValueOnce(reply);
+      expect(await router().select({ ...input, message: '把 README 标题改成 X' }, signal)).toEqual({
+        ids: [],
+        failure: '判断结果无法识别',
+      });
+    }
+  );
+
+  it('judge 明确回 BOSS：正常交给群主，不报 failure（群里没有群主时也一样）', async () => {
+    judge.mockResolvedValueOnce('INTENT: discuss\nBOSS');
+    expect(await router().select(input, signal)).toEqual({ ids: ['a'], intent: 'discuss' });
+    judge.mockResolvedValueOnce('BOSS');
+    const noBoss = await router().select({ ...input, bossBotId: null }, signal);
+    expect(noBoss).toEqual({ ids: [], intent: 'answer' });
   });
 
   it('judge 抛错时透出归类原因', async () => {
@@ -222,6 +291,62 @@ describe('createSmartRouter', () => {
     classify.mockResolvedValueOnce(null);
     expect((await router().select(input, signal)).failure).toBeTruthy();
     expect(judge).not.toHaveBeenCalled();
+  });
+
+  describe('pi-classifier 成员概率表的合法性', () => {
+    const withClassifier = (members: unknown, intents: unknown = null) => {
+      settings = {
+        botRouteClassifier: { source: 'pi-classifier', model: judgeModel, timeoutMs: 3000 },
+      };
+      classify.mockImplementation(async (_config, question) =>
+        'build' in question.criteria ? intents : members
+      );
+    };
+
+    it.each<[string, Record<string, number>]>([
+      ['空表', {}],
+      ['只有名单外键', { ghost: 1 }],
+      ['越界值', { b: -1, c: 2 }],
+      ['NaN', { a: Number.NaN, b: 0.9 }],
+      ['Infinity', { b: Number.POSITIVE_INFINITY }],
+      ['全 0', { a: 0, b: 0, c: 0 }],
+      ['总和超上限', { a: 0.7, b: 0.2, c: 0.2 }],
+    ])('%s：报「判断结果无法识别」交给群主，build 意图也不按意图挑人', async (_label, members) => {
+      withClassifier(members, { build: 0.9, answer: 0.05, discuss: 0.05 });
+      expect(await router().select(input, signal)).toEqual({
+        ids: [],
+        failure: '判断结果无法识别',
+      });
+      expect(console.warn).toHaveBeenCalled();
+      expect(judge).not.toHaveBeenCalled();
+    });
+
+    it('合法的完整表与稀疏表照常选人，不报 failure', async () => {
+      withClassifier({ a: 0.2, b: 0.7, c: 0.1 });
+      expect(await router().select(input, signal)).toEqual({ ids: ['b'], intent: 'answer' });
+      withClassifier({ c: 0.9 });
+      expect(await router().select(input, signal)).toEqual({ ids: ['c'], intent: 'answer' });
+      withClassifier({ a: 0.34, b: 0.33, c: 0.34 });
+      expect(await router().select(input, signal)).toEqual({ ids: [], intent: 'answer' });
+    });
+
+    it('意图概率表不合法：走关键词兜底，不算失败、不提示', async () => {
+      for (const intents of [
+        {},
+        { ghost: 1 },
+        { build: -1, answer: 2 },
+        { build: Number.NaN },
+        { build: 0, answer: 0, discuss: 0 },
+        { build: 0.9, answer: 0.9, discuss: 0 },
+      ]) {
+        withClassifier({ a: 0.1, b: 0.8, c: 0.1 }, intents);
+        expect(await router().select({ ...input, message: 'please fix the api' }, signal)).toEqual({
+          ids: ['b'],
+          intent: 'build',
+        });
+        expect(await router().select(input, signal)).toEqual({ ids: ['b'], intent: 'answer' });
+      }
+    });
   });
 
   it('pi-classifier 抛错时透出原因给群里', async () => {
