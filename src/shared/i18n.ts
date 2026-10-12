@@ -2910,6 +2910,13 @@ export const zhTranslations: Record<string, string> = {
     '在「智能选人」的群里没人被 @ 时，用这个模型选出回复的成员。',
   'Default (title model)': '默认（跟随标题总结模型）',
   'Fast chat model': '快速聊天模型',
+  'Falls back to the group owner on timeout, error or an unclear answer.':
+    '超时、出错或回答不明确时由群主回复。',
+  'Handed to the group owner on timeout.': '超时就交给群主处理。',
+  'Discussion mode': '讨论模式',
+  'Experimental feature': '实验性',
+  'Off: group chats work the same as the stable release. On: in smart-routing groups, discussion-style messages let the judge model pick who speaks next.':
+    '关闭时，群聊流程与正式版一致。打开后，智能选人的群里遇到讨论类消息，会由判断模型挑选下一位发言人。',
   'First pick: the group owner replies on timeout, error or an unclear answer. During a discussion, picking the next speaker ends the discussion in these cases.':
     '首轮选人遇到超时、出错或回答不明确时由群主回复；讨论中判断下一位遇到这些情况时，结束本轮讨论。',
   'First pick: handed to the group owner on timeout. Next speaker in a discussion: the discussion ends on timeout.':

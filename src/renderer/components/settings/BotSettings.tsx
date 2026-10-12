@@ -3,6 +3,7 @@ import { smartRouteTimeoutMs } from '@shared/bots/smartRoute';
 import { canBeVirtualMember } from '@shared/virtualModels';
 import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
   useUsableClassifierProviders,
@@ -32,7 +34,38 @@ export function BotSettings() {
       </div>
       <BotAssistantModelRow />
       <BotRouteClassifierRow />
+      <BotDiscussModeRow />
       <BotMaxRunningTurnsRow />
+    </div>
+  );
+}
+
+/** 讨论模式总开关（实验性，默认关）；Bot 模式没开时不显示 */
+function BotDiscussModeRow() {
+  const { t } = useI18n();
+  const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
+  const enabled = useSettingsStore((s) => s.botDiscussModeEnabled);
+  const setEnabled = useSettingsStore((s) => s.setBotDiscussModeEnabled);
+  if (!botModeEnabled) return null;
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="bots.discussMode"
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm">{t('Discussion mode')}</p>
+          <Badge variant="warning" size="sm" data-experimental-badge="">
+            {t('Experimental feature')}
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Off: group chats work the same as the stable release. On: in smart-routing groups, discussion-style messages let the judge model pick who speaks next.'
+          )}
+        </p>
+      </div>
+      <Switch checked={enabled} onCheckedChange={(value) => setEnabled(value === true)} />
     </div>
   );
 }
@@ -126,6 +159,7 @@ function BotRouteClassifierRow() {
   const { t } = useI18n();
   const value = useSettingsStore((s) => s.botRouteClassifier);
   const setValue = useSettingsStore((s) => s.setBotRouteClassifier);
+  const discussModeEnabled = useSettingsStore((s) => s.botDiscussModeEnabled);
   const usable = useUsableProviders();
   const candidates = React.useMemo(() => usable.filter(canBeVirtualMember), [usable]);
   const classifierProviders = useUsableClassifierProviders();
@@ -144,13 +178,21 @@ function BotRouteClassifierRow() {
         classifierProviders={classifierProviders}
         offLabel={t('Default (title model)')}
         judgeLabel={t('Fast chat model')}
-        description={t(
-          'First pick: the group owner replies on timeout, error or an unclear answer. During a discussion, picking the next speaker ends the discussion in these cases.'
-        )}
+        description={
+          discussModeEnabled
+            ? t(
+                'First pick: the group owner replies on timeout, error or an unclear answer. During a discussion, picking the next speaker ends the discussion in these cases.'
+              )
+            : t('Falls back to the group owner on timeout, error or an unclear answer.')
+        }
         effectiveTimeoutMs={value ? smartRouteTimeoutMs(value) : undefined}
-        timeoutHint={t(
-          'First pick: handed to the group owner on timeout. Next speaker in a discussion: the discussion ends on timeout.'
-        )}
+        timeoutHint={
+          discussModeEnabled
+            ? t(
+                'First pick: handed to the group owner on timeout. Next speaker in a discussion: the discussion ends on timeout.'
+              )
+            : t('Handed to the group owner on timeout.')
+        }
       />
     </div>
   );
