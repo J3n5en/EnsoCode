@@ -189,6 +189,7 @@ const initialState = {
   botRouteClassifier: null as VirtualClassifierConfig | null,
   botAssistantModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   botMaxRunningTurns: DEFAULT_BOT_MAX_RUNNING_TURNS,
+  botDiscussModeEnabled: false,
   voiceInputDevice: SYSTEM_MICROPHONE,
   voiceModel: DEFAULT_SPEECH_MODEL_ID,
   voiceCorrectionEnabled: false,
@@ -374,6 +375,8 @@ export const useSettingsStore = create<SettingsState>()(
       setBotAssistantModel: (botAssistantModel) => set({ botAssistantModel }),
       setBotMaxRunningTurns: (value) =>
         set({ botMaxRunningTurns: normalizeBotMaxRunningTurns(value) }),
+      setBotDiscussModeEnabled: (botDiscussModeEnabled) =>
+        set({ botDiscussModeEnabled: botDiscussModeEnabled === true }),
       setVoiceInputDevice: (voiceInputDevice) => set({ voiceInputDevice }),
       setVoiceModel: (voiceModel) => set({ voiceModel }),
       setVoiceCorrectionEnabled: (voiceCorrectionEnabled) => set({ voiceCorrectionEnabled }),
@@ -1177,6 +1180,9 @@ export const useSettingsStore = create<SettingsState>()(
         const botMaxRunningTurns = normalizeBotMaxRunningTurns(s.botMaxRunningTurns);
         if (botMaxRunningTurns !== s.botMaxRunningTurns) {
           useSettingsStore.setState({ botMaxRunningTurns });
+        }
+        if (typeof s.botDiscussModeEnabled !== 'boolean') {
+          useSettingsStore.setState({ botDiscussModeEnabled: false });
         }
         const sshTimeoutSeconds = normalizeSshTimeoutSeconds(s.sshTimeoutSeconds);
         if (sshTimeoutSeconds !== s.sshTimeoutSeconds) {

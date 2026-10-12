@@ -11,7 +11,7 @@ import { isSkipReply } from '@shared/bots/router';
 import { assignTeamNames } from '@shared/bots/team';
 import type { SessionIdentity } from '@shared/builtinAgents';
 import { BUILTIN_AGENT_TYPES, IPC_CHANNELS } from '@shared/types';
-import { type AttachedImage, isDeliveryId } from '@shared/types/agent';
+import { type AgentWorkerEvent, type AttachedImage, isDeliveryId } from '@shared/types/agent';
 import type { SkillEntry } from '@shared/types/assets';
 import {
   type BotChat,
@@ -216,6 +216,11 @@ export function botModeEnabled(): boolean {
   return readSettingsState()?.botModeEnabled === true;
 }
 
+/** 讨论模式（实验性）总开关；非布尔值一律按关闭 */
+function botDiscussModeEnabled(): boolean {
+  return readSettingsState()?.botDiscussModeEnabled === true;
+}
+
 export function emitBotEvent(event: BotEvent): void {
   if (event.kind === 'catalog' || event.kind === 'chat') services?.scheduler.refresh();
   if (event.kind === 'chat') services?.snooze.refresh();
@@ -278,6 +283,55 @@ function botModelIssue(engine: BotEngine | undefined, keys: ReadonlySet<string>)
     : '未配置可用模型';
 }
 
+/**
+ * Bot 父会话最近一次 spawn 成功的实例：sessionId → { 实例号, 是否还没见到它的结束 }。
+ * 会话索引在 status:failed 时也把 alive 置 false，但 failed 只说明回合出错：supervisor 里的实例没销毁，
+ * 也不保证随后发 parent-ended。只凭 isAlive 跳过 release，下次同 identity spawn 会命中旧实例直接回
+ * parent-ready，说明重建形同虚设。只有回显本实例号的 parent-ended / parent-rejected、worker-exited 或 release
+ * 成功才算结束；这些之后 worker 里确实没有该实例，release-parent 不会有回执，跳过可免空等超时。
+ * 归属只看实例号（宿主每次 spawn 生成、worker 回显）：旧实例命令的拒绝回显旧号，不会关掉新实例的登记。
+ */
+const instances = new Map<string, { instanceId: string; open: boolean }>();
+/**
+ * 正在等 releaseParentSession 的调用。agentHost 见到同会话的第一条 parent-ended / parent-rejected 就唤醒
+ * 等待者，不看它属于哪个实例；这里按实例号记下唤醒它的那条事件是不是要释放的实例。agentHost 先唤醒、再把同一条
+ * 事件同步交给 Bot 观察者，release 的后续代码在微任务里执行，此时 trackInstanceEnd 已记好。
+ * 唤醒者若是旧实例的拒绝，新实例的 release-parent 还排在 worker 里，不能当作已释放。
+ */
+const releaseWatches = new Map<string, Set<{ instanceId: string; stale?: boolean }>>();
+
+function trackInstanceEnd(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
+  if (event.type === 'worker-exited') {
+    instances.clear();
+    return;
+  }
+  if (event.type !== 'parent-ended' && event.type !== 'parent-rejected') return;
+  const id = event.identity.sessionId;
+  for (const watch of releaseWatches.get(id) ?? [])
+    watch.stale ??= event.instanceId !== watch.instanceId;
+  const current = instances.get(id);
+  if (current && event.instanceId === current.instanceId) current.open = false;
+}
+
+/** 等 agentHost 的 release 回执，并认出被别的实例的结束事件提前唤醒的情况（见 releaseWatches） */
+async function releaseConfirmed(identity: SessionIdentity, instanceId: string): Promise<void> {
+  const id = identity.sessionId;
+  const watch: { instanceId: string; stale?: boolean } = { instanceId };
+  const watches = releaseWatches.get(id) ?? new Set();
+  watches.add(watch);
+  releaseWatches.set(id, watches);
+  let released: { ok: boolean; error?: string };
+  try {
+    released = await releaseParentSession(identity);
+  } finally {
+    watches.delete(watch);
+    if (!watches.size && releaseWatches.get(id) === watches) releaseWatches.delete(id);
+  }
+  if (!released.ok) throw new Error(released.error ?? 'release-failed');
+  // 实例登记保留，等排在后面的 release-parent 回真正的 parent-ended 再清；宿主按 release 失败处理
+  if (watch.stale) throw new Error('release-unconfirmed');
+}
+
 function createRuntime(botsRoot: string): BotRuntimePort {
   return {
     async updateEngine(conversationId, engine) {
@@ -321,7 +375,7 @@ function createRuntime(botsRoot: string): BotRuntimePort {
         (ref) => resolveModelSelection(ref.providerId, ref.modelId, keys, { allowVirtual: true }).ok
       );
       if (!model) return { ok: false, error: botModelIssue(spec.bot.engine, keys) };
-      return spawnSession(
+      const spawned = spawnSession(
         identity,
         {
           sessionId: spec.conversationId,
@@ -348,12 +402,18 @@ function createRuntime(botsRoot: string): BotRuntimePort {
             skillIds: spec.bot.skillIds,
             mcpServerIds: spec.bot.mcpServerIds,
             ...(spec.groupTasks ? { groupTasks: true } : {}),
+            ...(spec.groupTasks && spec.discussMode ? { discussMode: true } : {}),
             ...(spec.routines ? { routines: true } : {}),
             ...(spec.delegationTask ? { delegationTask: true } : {}),
             ...(spec.writeLock ? { writeLock: spec.writeLock } : {}),
           },
+          // 之后同会话的 prompt / steer / retry 由 agentHost 自动带上这个号
+          instanceId: spec.instanceId,
         }
       );
+      if (spawned.ok)
+        instances.set(identity.sessionId, { instanceId: spec.instanceId, open: true });
+      return spawned;
     },
     prompt(conversationId, text, images, deliveryId, resume) {
       const identity = rootIdentity(conversationId);
@@ -370,10 +430,11 @@ function createRuntime(botsRoot: string): BotRuntimePort {
     },
     async release(conversationId) {
       const identity = rootIdentity(conversationId);
-      if (identity && agentSessionIndex.isAlive(conversationId)) {
-        const released = await releaseParentSession(identity);
-        if (!released.ok) throw new Error(released.error ?? 'release-failed');
-      }
+      const instance = instances.get(conversationId);
+      if (!identity || !instance || (!instance.open && !agentSessionIndex.isAlive(conversationId)))
+        return;
+      await releaseConfirmed(identity, instance.instanceId);
+      if (instances.get(conversationId) === instance) instance.open = false;
     },
     abort(conversationId) {
       const identity = rootIdentity(conversationId);
@@ -504,6 +565,7 @@ export function getBotServices(): BotServices | null {
     probe: (bot) => probe(bot.engine),
     invalidateProbe: (bot) => probe.invalidate(bot.engine),
     language: () => (String(readSettingsState()?.language ?? 'zh').startsWith('zh') ? 'zh' : 'en'),
+    discussEnabled: botDiscussModeEnabled,
   });
   const delegationStore = new DelegationStore(
     path.join(userData, 'bot-chats', 'delegations.jsonl')
@@ -569,6 +631,7 @@ export function getBotServices(): BotServices | null {
         .filter((task) => task.status !== 'done' && task.status !== 'canceled'),
     }),
     responder: createSmartRouter(routingDeps),
+    discussEnabled: botDiscussModeEnabled,
   });
   host.onDiscard((scope) => {
     if (scope.chatId) groups.discard(scope.chatId);
@@ -716,6 +779,7 @@ export function getBotServices(): BotServices | null {
   });
   host.onTurnFinished((event) => inbox.turnFinished(event.conversationId));
   setBotWorkerEventObserver((event) => {
+    trackInstanceEnd(event);
     runner.observe(event);
     host.observe(event);
     inbox.observe(event);
@@ -803,6 +867,22 @@ export function syncBotModeServices(): void {
     setBotGroupSender(null);
     services = null;
   }
+}
+
+/**
+ * 讨论模式开关变化：群聊在锁内收掉 / 放开讨论，群成员会话按新说明重建（上下文保留）。
+ * 不能复用 syncBotModeServices：它在 Bot 模式关闭时会销毁整套服务。Bot 服务没在跑时无事可做，
+ * 之后建出来的服务与会话直接读当前开关。
+ */
+export function syncBotDiscussMode(): void {
+  const current = services;
+  if (!current) return;
+  void current.groups
+    .syncDiscussMode()
+    .catch((error) => console.warn('[bots] discuss mode sync failed', error));
+  void current.host
+    .refreshGroupInstructions()
+    .catch((error) => console.warn('[bots] instruction refresh failed', error));
 }
 
 function reservedNames(): string[] {

@@ -182,6 +182,8 @@ export interface SettingsState {
   botAssistantModel: DefaultModelRef | null;
   /** Bot 全局并发上限（私聊/群聊/委派/例行共用）；缺省 4，范围 1–16 */
   botMaxRunningTurns: number;
+  /** 实验功能：Bot 群聊讨论模式；缺省关，关闭时群聊路由与 main 一致；只在本机，不参与同步 */
+  botDiscussModeEnabled: boolean;
   /** 桌面录音用的麦克风设备 id；SYSTEM_MICROPHONE 跟随系统 */
   voiceInputDevice: string;
   /** 本机语音识别模型 */
@@ -390,6 +392,7 @@ export interface SettingsState {
   setBotRouteClassifier: (value: VirtualClassifierConfig | null) => void;
   setBotAssistantModel: (value: DefaultModelRef | null) => void;
   setBotMaxRunningTurns: (value: number) => void;
+  setBotDiscussModeEnabled: (value: boolean) => void;
   setVoiceInputDevice: (deviceId: string) => void;
   setVoiceModel: (model: SpeechModelId) => void;
   setVoiceCorrectionEnabled: (value: boolean) => void;

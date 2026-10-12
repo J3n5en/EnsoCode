@@ -460,6 +460,8 @@ interface ManagedSession {
   /** 已发出、待挂到下一条 assistant 消息上的脱敏报告 */
   pendingPrivacyMask?: MaskReport;
   unsubscribe: () => void;
+  /** 仅父会话：最近一次 spawn-parent 绑定的 Main 实例号，parent-ended 回显（Bot 宿主据此确定归属） */
+  instanceId?: string;
 }
 
 /** 会话 spawn 时选中的常驻 MCP。授权后把当时没连上的工具补进这个会话。 */
@@ -1254,6 +1256,7 @@ export class SessionSupervisor {
       identity: managed.identity,
       seq: managed.seq + 1,
       reason,
+      ...(managed.instanceId ? { instanceId: managed.instanceId } : {}),
     });
   }
 
@@ -1579,6 +1582,7 @@ export class SessionSupervisor {
             identity: command.identity,
             seq: 0,
             reason: message,
+            ...(command.instanceId ? { instanceId: command.instanceId } : {}),
           });
           return;
         }
@@ -1611,7 +1615,14 @@ export class SessionSupervisor {
             this.options.emit(
               'parent' in target
                 ? { type: 'child-rejected', identity: target, seq: 0, reason: message }
-                : { type: 'parent-rejected', identity: target, seq: 0, reason: message }
+                : {
+                    type: 'parent-rejected',
+                    identity: target,
+                    seq: 0,
+                    reason: message,
+                    // 回显这条命令自己带的实例号：Main 只把发给当前实例的命令被拒算作当前实例结束
+                    ...(command.instanceId ? { instanceId: command.instanceId } : {}),
+                  }
             );
           }
           return;
@@ -1677,7 +1688,9 @@ export class SessionSupervisor {
           command.pluginTools,
           command.pluginEvents,
           command.dcgPath,
-          command.autoRejectApprovals ?? false
+          command.autoRejectApprovals ?? false,
+          command.botDiscussMode,
+          command.instanceId
         );
         return;
       case 'spawn-child':
@@ -2278,7 +2291,9 @@ export class SessionSupervisor {
     pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
     pluginEvents?: PluginEventPlan,
     dcgPath?: string,
-    autoRejectApprovals = false
+    autoRejectApprovals = false,
+    botDiscussMode = false,
+    instanceId?: string
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2289,6 +2304,8 @@ export class SessionSupervisor {
       if (!isSameGeneration(existing.identity, identity) || existing.childIdentity) {
         throw new Error('Parent session identity is already reserved by another generation.');
       }
+      // Main 已把这次 spawn 记成新实例：改绑实例号，之后结束时回显的是 Main 当前认的号
+      existing.instanceId = instanceId;
       this.options.emit({
         type: 'parent-ready',
         identity,
@@ -3083,6 +3100,7 @@ export class SessionSupervisor {
         ? createDelegationTools(delegation, {
             groupTasks: botGroupTasks,
             delegationTask: botDelegationTask,
+            discussMode: botDiscussMode,
           })
         : []),
       ...(delegation && botGroupTasks
@@ -3218,6 +3236,7 @@ export class SessionSupervisor {
         );
       }
     );
+    if (instanceId) managedRef.instanceId = instanceId;
     managedRef.agentControl = agentControl;
     managedRef.workflowRuns = workflowRuns;
     if (rolePrompt && !resumeFile) managedRef.pendingRole = rolePrompt;

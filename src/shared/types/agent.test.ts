@@ -671,6 +671,52 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...base, rolePrompt: 1 })).toBeNull();
   });
 
+  it('spawn-parent 携 botDiscussMode：只接受布尔值，true 只能出现在 Bot 群聊成员会话', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    const group = { ...base, botMode: true, botGroupTasks: true };
+    expect(parseAgentCommand({ ...group, botDiscussMode: true })).toEqual({
+      ...group,
+      botDiscussMode: true,
+    });
+    expect(parseAgentCommand({ ...group, botDiscussMode: false })).toEqual({
+      ...group,
+      botDiscussMode: false,
+    });
+    expect(parseAgentCommand({ ...base, botDiscussMode: false })).toEqual({
+      ...base,
+      botDiscussMode: false,
+    });
+    for (const value of ['true', 1, null, {}])
+      expect(parseAgentCommand({ ...group, botDiscussMode: value })).toBeNull();
+    // 私聊 / 非 Bot 会话没有群聊讨论：带 true 视为坏命令
+    expect(parseAgentCommand({ ...base, botDiscussMode: true })).toBeNull();
+    expect(parseAgentCommand({ ...base, botMode: true, botDiscussMode: true })).toBeNull();
+    expect(parseAgentCommand({ ...base, botGroupTasks: true, botDiscussMode: true })).toBeNull();
+  });
+
+  it('阶段13：spawn-parent / prompt / steer / retry 可带实例号，只收 UUID，prompt/steer/retry 只对父会话', () => {
+    const instanceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const commands = [
+      { type: 'spawn-parent', identity: parent, cwd: '/repo', model },
+      { type: 'prompt', identity: parent, text: 'hi' },
+      { type: 'steer', identity: parent, text: 'hi' },
+      { type: 'retry', identity: parent },
+    ];
+    for (const command of commands) {
+      expect(parseAgentCommand(command)).toEqual(command);
+      expect(parseAgentCommand({ ...command, instanceId })).toEqual({ ...command, instanceId });
+      for (const bad of ['', 'not-a-uuid', 1, null, {}])
+        expect(parseAgentCommand({ ...command, instanceId: bad })).toBeNull();
+    }
+    for (const type of ['prompt', 'steer'])
+      expect(parseAgentCommand({ type, identity: child, text: 'hi', instanceId })).toBeNull();
+    expect(parseAgentCommand({ type: 'retry', identity: child, instanceId })).toBeNull();
+    expect(parseAgentCommand({ type: 'retry', identity: parent, instanceId, extra: 1 })).toBeNull();
+    // 不在归属范围内的命令不接受实例号
+    for (const type of ['abort', 'abort-retry', 'release-parent'])
+      expect(parseAgentCommand({ type, identity: parent, instanceId })).toBeNull();
+  });
+
   it('spawn-parent 携 trustedProjectCode:字符串数组通过,脏值拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     const trusted = { ...base, trustedProjectCode: ['.pi/extensions/a.ts', 'package:npm:x'] };
@@ -1930,6 +1976,20 @@ describe('标题总结命令与事件', () => {
 });
 
 describe('generation lifecycle/events', () => {
+  it('阶段13：parent-rejected / parent-ended 可回显实例号；多字段、少字段、类型不对都拒绝', () => {
+    const instanceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    for (const type of ['parent-rejected', 'parent-ended']) {
+      const event = { type, identity: parent, seq: 0, reason: 'gone' };
+      expect(parseAgentWorkerEvent(event)).toEqual(event);
+      expect(parseAgentWorkerEvent({ ...event, instanceId })).toEqual({ ...event, instanceId });
+      for (const bad of ['', 'not-a-uuid', 1, null])
+        expect(parseAgentWorkerEvent({ ...event, instanceId: bad })).toBeNull();
+      expect(parseAgentWorkerEvent({ ...event, instanceId, command: 'prompt' })).toBeNull();
+      const { reason: _reason, ...withoutReason } = event;
+      expect(parseAgentWorkerEvent({ ...withoutReason, instanceId })).toBeNull();
+    }
+  });
+
   it('parent/child ready 使用 exact profile proof，缺资源或伪字段拒绝', () => {
     expect(
       parseAgentWorkerEvent({

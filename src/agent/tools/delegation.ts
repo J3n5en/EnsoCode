@@ -61,7 +61,8 @@ export const CHECK_SCHEMA = {
 
 export function createDelegationTools(
   invoker: MemoryInvoker<DelegationOp>,
-  options: { groupTasks?: boolean; delegationTask?: boolean } = {}
+  /** discussMode：Bot 讨论模式（实验性）开启，只影响群聊（groupTasks）里的 delegate 文案 */
+  options: { groupTasks?: boolean; delegationTask?: boolean; discussMode?: boolean } = {}
 ): ToolDefinition[] {
   const define = (
     name: DelegationOp,
@@ -98,7 +99,9 @@ export function createDelegationTools(
       "Delegate a task to another member by name or id. Returns immediately; results arrive asynchronously. Context is truncated to 8000 characters. The delegation fails with a timeout after deadlineMinutes (capped by the member's own limit, 240 minutes by default). If the user stops or interrupts your current turn, delegations started in it are canceled unless keep is true." +
         " With check, the delegation passes only if one of the member's final tool outputs contains check.text; otherwise it ends as failed with 'acceptance check failed'." +
         (options.groupTasks
-          ? ' In a group chat, handle discussion openly in the group with @mentions; delegate only long-running execution tasks that need a separate session.' +
+          ? (options.discussMode === true
+              ? ' In a group chat, handle discussion openly in the group with @mentions; delegate only long-running execution tasks that need a separate session.'
+              : '') +
             ' Pass taskId (e.g. "#3") to hand a group board task to the member: the task becomes doing with them as assignee; when the delegation succeeds it goes to review (done directly only if the member created the task) for the task creator or a human to accept or reject with group_tasks; on cancel it returns to todo.' +
             ' If the run fails (error, timeout, interrupted, denied or check failed) the task becomes blocked (run failed) with the same assignee: delegate the same taskId to them again to retry, or to another member to hand it over.' +
             ' If the member reports they are blocked, the result has status="blocked" and says what they need; the task becomes blocked. Answer by delegating the same taskId to them again with the answer (they continue in the same session); if you are not sure of the answer, ask the human in the group instead of guessing. After 3 blocked reports in a row from the same member on a task, only a human can answer it (on the task card).' +

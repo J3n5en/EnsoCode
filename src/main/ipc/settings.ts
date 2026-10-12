@@ -161,6 +161,7 @@ export const SETTINGS_STATE_FIELDS = [
   'botModeEnabled',
   'scratchSessionsEnabled',
   'botMaxRunningTurns',
+  'botDiscussModeEnabled',
   'botRouteClassifier',
   'botAssistantModel',
   'protectedActionsInCode',
@@ -219,6 +220,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'botModeEnabled',
   'scratchSessionsEnabled',
   'botMaxRunningTurns',
+  'botDiscussModeEnabled',
   'botRouteClassifier',
   'botAssistantModel',
   'protectedActionsInCode',
@@ -440,6 +442,13 @@ function scheduleWrite(
       void import('./bots')
         .then(({ syncBotModeServices }) => syncBotModeServices())
         .catch(() => {});
+    }
+    // 讨论模式开关不能走 syncBotModeServices：后者在 Bot 模式关闭时会销毁整套服务
+    if (
+      (settingsStateOf(previous).botDiscussModeEnabled === true) !==
+      (settingsStateOf(data).botDiscussModeEnabled === true)
+    ) {
+      void import('./bots').then(({ syncBotDiscussMode }) => syncBotDiscussMode()).catch(() => {});
     }
 
     // 普通 store 写排除 sender；Gateway 写显式选择 all-renderers。

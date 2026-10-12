@@ -26,6 +26,8 @@ export function buildBotModeInstruction(input: {
   roster: readonly BotIdentity[];
   /** 挂看板任务的委派会话：说明 report_blocked */
   delegationTask?: boolean;
+  /** 讨论模式（实验性）开启：群聊加讨论接力说明；关闭时与 main 一致 */
+  discussMode?: boolean;
 }): string {
   const lines = [
     '# Bot mode',
@@ -45,7 +47,11 @@ export function buildBotModeInstruction(input: {
     lines.push(
       '- This is a group chat. Messages from others arrive as <group-message from="Name" role="Title"> blocks.',
       '- Mention a member with @Name only when you need them to respond.',
-      '- For discussion-type questions (opinions, options, reviews), prefer relaying openly in the group: reply yourself and @Name the next member if needed. Use delegate only for long-running execution tasks that need a separate session; during a group discussion, finish your part within your own turn instead of delegating.',
+      ...(input.discussMode === true
+        ? [
+            '- For discussion-type questions (opinions, options, reviews), prefer relaying openly in the group: reply yourself and @Name the next member if needed. Use delegate only for long-running execution tasks that need a separate session; during a group discussion, finish your part within your own turn instead of delegating.',
+          ]
+        : []),
       '- You may be picked to reply together with other members, one after another. Add only what is new; do not repeat what others already said.',
       '- If there is truly no need for you to speak (the question has already been answered, or it is outside your responsibility), reply with exactly [skip] and nothing will be posted.',
       '- When the human @mentions you directly, you should reply whenever possible instead of skipping.',

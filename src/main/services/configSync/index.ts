@@ -101,6 +101,10 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     reason: 'temporary chats are a device-local experiment',
   },
   botMaxRunningTurns: { mode: 'excluded', reason: 'device-local Bot concurrency limit' },
+  botDiscussModeEnabled: {
+    mode: 'excluded',
+    reason: 'experimental Bot discussion toggle; bot chats live on this device',
+  },
   botRouteClassifier: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   botAssistantModel: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   protectedActionsInCode: { mode: 'excluded', reason: 'device-local safety preference' },

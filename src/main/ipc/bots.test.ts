@@ -139,6 +139,12 @@ async function createBot(name: string): Promise<string> {
   return (result.bot as { id: string }).id;
 }
 
+/** 第 nth 次 spawnSession 下发的实例号（Bot 宿主生成，随 spawn-parent 交给 worker） */
+function instanceOf(nth: number): string | undefined {
+  return (mocks.spawnSession.mock.calls[nth]?.[5] as { instanceId?: string } | undefined)
+    ?.instanceId;
+}
+
 describe('bots IPC', () => {
   it('loads the configured capacity when services start and applies subsequent changes live', async () => {
     const { getBotServices, syncBotModeServices } = await import('./bots');
@@ -163,6 +169,437 @@ describe('bots IPC', () => {
     await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(2));
     expect(getBotServices()).toBe(services);
     expect(services.host.queueState()).toEqual([]);
+  });
+
+  it('讨论模式开关：Main 读本机设置传给群成员会话；切换只同步讨论与说明，不重建 Bot 服务', async () => {
+    const { getBotServices, syncBotDiscussMode } = await import('./bots');
+    const services = getBotServices()!;
+    const alice = await createBot('Alice');
+    const bob = await createBot('Bob');
+    const group = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'group',
+      title: 'team',
+      members: [alice, bob],
+      bossBotId: alice,
+      workspace: { kind: 'chat-home' },
+    });
+    const groupId = (group.chat as { id: string }).id;
+    type SpawnOptions = {
+      bot: { groupTasks?: boolean; discussMode?: boolean; instruction: { content: string } };
+    };
+    // 非布尔值按关闭
+    mocks.settings.botDiscussModeEnabled = 'true';
+    expect(await services.host.deliver(groupId, alice, 'hi')).toMatchObject({ ok: true });
+    const off = mocks.spawnSession.mock.calls[0][5] as SpawnOptions;
+    expect(off.bot.groupTasks).toBe(true);
+    expect(off.bot).not.toHaveProperty('discussMode');
+    expect(off.bot.instruction.content).not.toContain('openly in the group');
+    mocks.settings.botDiscussModeEnabled = true;
+    const sync = vi.spyOn(services.groups, 'syncDiscussMode');
+    const refresh = vi.spyOn(services.host, 'refreshGroupInstructions');
+    syncBotDiscussMode();
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(getBotServices()).toBe(services);
+    expect(await services.host.deliver(groupId, bob, 'hi')).toMatchObject({ ok: true });
+    const on = mocks.spawnSession.mock.calls[1][5] as SpawnOptions;
+    expect(on.bot).toMatchObject({ groupTasks: true, discussMode: true });
+    expect(on.bot.instruction.content).toContain('openly in the group');
+  });
+
+  it('审查：failed 状态但尚未 parent-ended 的旧实例，重建说明前仍须真正 release', async () => {
+    const { getBotServices, syncBotDiscussMode } = await import('./bots');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const alice = await createBot('Alice');
+    const bob = await createBot('Bob');
+    const group = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'group',
+      title: 'team',
+      members: [alice, bob],
+      bossBotId: alice,
+      workspace: { kind: 'chat-home' },
+    });
+    const groupId = (group.chat as { id: string }).id;
+    const first = await services.host.deliver(groupId, alice, 'first');
+    if (!first.ok) throw new Error(first.error);
+    const id = first.conversationId;
+    const registry = mocks.registry as SourceAuthorityRegistry;
+    registry.markReady(id, join(mocks.root, 'session.jsonl'), { providerId: 'p', modelId: 'm' });
+    const identity = mocks.identities.get(id)!;
+    services.host.observe({ type: 'turn-failed', identity, seq: 2, turnId: 't1', error: 'failed' });
+    // 真正 AgentSessionIndex.observe(status:failed) 将 alive 置 false，
+    // 但 supervisor 通用异常并不销毁 sessions 里的实例，也不保证发 parent-ended。
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const release = vi.spyOn(agent, 'releaseParentSession');
+    try {
+      mocks.settings.botDiscussModeEnabled = true;
+      syncBotDiscussMode();
+      await services.host.refreshGroupInstructions();
+      await services.host.deliver(groupId, alice, 'second');
+      expect(release).toHaveBeenCalled();
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
+  });
+
+  it('status:failed 但未见实例结束：中止会话仍真正 release；已见 parent-ended / worker-exited 后不再空发 release', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)?.[0];
+    if (!observe) throw new Error('missing observer');
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const sent = await services.host.deliver(chatId, alice, 'first');
+    if (!sent.ok) throw new Error(sent.error);
+    const id = sent.conversationId;
+    const identity = mocks.identities.get(id)!;
+    observe({ type: 'turn-failed', identity, seq: 2, turnId: 't1', error: 'x' });
+    // 会话索引因 status:failed 标为不活跃，supervisor 里的实例却还在
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const release = vi.spyOn(agent, 'releaseParentSession');
+    try {
+      await services.host.abortConversation(id);
+      expect(release).toHaveBeenCalledTimes(1);
+      // 闲置回收：实例真正结束，worker 里已没有它，再发 release-parent 只会空等超时
+      expect(await services.host.deliver(chatId, alice, 'second')).toMatchObject({ ok: true });
+      observe({
+        type: 'parent-ended',
+        identity,
+        seq: 3,
+        reason: 'evicted',
+        instanceId: instanceOf(1),
+      });
+      await services.host.abortConversation(id);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(await services.host.deliver(chatId, alice, 'third')).toMatchObject({ ok: true });
+      observe({ type: 'worker-exited' });
+      await services.host.abortConversation(id);
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
+  });
+
+  it('审查48：旧 spawn+prompt 的第二次拒绝不能抹掉新 spawn 的实例登记', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const sent = await services.host.deliver(chatId, alice, 'first');
+    if (!sent.ok) throw new Error(sent.error);
+    const id = sent.conversationId;
+    const identity = mocks.identities.get(id)!;
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const release = vi.spyOn(agent, 'releaseParentSession');
+    try {
+      expect(
+        await services.host.deliver(chatId, alice, 'second', { queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      observe({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'spawn preparation failed',
+        instanceId: instanceOf(0),
+      });
+      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      observe({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'Unknown session',
+        instanceId: instanceOf(0),
+      });
+      // 新 spawn 已下发；旧 prompt 的拒绝不证明这个新实例已经销毁。
+      await services.host.abortConversation(id);
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
+  });
+
+  it('#49：闲置回收时在途 prompt 的拒绝晚于新 spawn 到达，不能抹掉新实例登记', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const sent = await services.host.deliver(chatId, alice, 'first');
+    if (!sent.ok) throw new Error(sent.error);
+    const id = sent.conversationId;
+    const identity = mocks.identities.get(id)!;
+    observe({ type: 'status', identity, seq: 1, status: 'running' });
+    observe({ type: 'turn-completed', identity, seq: 2, turnId: 't1' });
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const release = vi.spyOn(agent, 'releaseParentSession');
+    try {
+      expect(await services.host.deliver(chatId, alice, 'again')).toMatchObject({ ok: true });
+      expect(
+        await services.host.deliver(chatId, alice, 'third', { queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      observe({
+        type: 'parent-ended',
+        identity,
+        seq: 3,
+        reason: 'evicted',
+        instanceId: instanceOf(0),
+      });
+      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      observe({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'unknown or stale session generation',
+        instanceId: instanceOf(0),
+      });
+      await services.host.abortConversation(id);
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
+  });
+
+  it('审查49：evicted 前 abort 的 idle 不得清掉在途 prompt 的拒绝归属', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
+    const waiters: (() => void)[] = [];
+    const emit = (event: Parameters<typeof observe>[0]) => {
+      if (event.type === 'parent-ended' || event.type === 'parent-rejected')
+        for (const wake of waiters.splice(0)) wake();
+      observe(event);
+    };
+    const release = vi
+      .spyOn(agent, 'releaseParentSession')
+      .mockImplementation(
+        () => new Promise((resolve) => waiters.push(() => resolve({ ok: true })))
+      );
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const finished: { deliveryId?: string; ok: boolean }[] = [];
+    services.host.onTurnFinished((event) => finished.push(event));
+    try {
+      const first = await services.host.deliver(chatId, alice, 'first', { deliveryId: 'first' });
+      if (!first.ok) throw new Error(first.error);
+      const id = first.conversationId;
+      const identity = mocks.identities.get(id)!;
+      emit({ type: 'status', identity, seq: 1, status: 'running' });
+      emit({ type: 'turn-completed', identity, seq: 2, turnId: 't1' });
+      // worker 已开始闲置回收，prompt 排在尚未完成的 releaseParent 后面。
+      await services.host.deliver(chatId, alice, 'second', { deliveryId: 'second' });
+      const stopping = services.host.abortConversation(id);
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      // 真 supervisor 的 abort 绕过 gate，在 evicted 之前发出 idle；不是 prompt 的确认。
+      emit({ type: 'status', identity, seq: 3, status: 'idle' });
+      emit({
+        type: 'parent-ended',
+        identity,
+        seq: 4,
+        reason: 'evicted',
+        instanceId: instanceOf(0),
+      });
+      await stopping;
+      expect(
+        await services.host.deliver(chatId, alice, 'third', { deliveryId: 'third' })
+      ).toMatchObject({ ok: true });
+      await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
+      // 旧 prompt 现在才执行，因旧会话已回收而拒绝；新 spawn 已发出但未回 ready。
+      emit({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'Unknown session',
+        instanceId: instanceOf(0),
+      });
+      expect(finished.filter((event) => event.deliveryId === 'third')).toEqual([]);
+      expect(services.host.runningCount()).toBe(1);
+    } finally {
+      release.mockRestore();
+    }
+  });
+
+  it('阶段12：旧实例的拒绝晚于新 spawn 到达并唤醒 release 等待者时，新实例的 release 不算成功；新实例真正结束后事件归属正确', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
+    // 照真实 agentHost：同会话任意一条 parent-ended / parent-rejected 都唤醒 release 等待者，
+    // 唤醒在前、同一条事件随后同步交给 Bot 观察者，release 的后续代码在两者之后才执行
+    const waiters: (() => void)[] = [];
+    const emit = (event: Parameters<typeof observe>[0]) => {
+      if (event.type === 'parent-ended' || event.type === 'parent-rejected')
+        for (const wake of waiters.splice(0)) wake();
+      observe(event);
+    };
+    const release = vi
+      .spyOn(agent, 'releaseParentSession')
+      .mockImplementation(
+        () => new Promise((resolve) => waiters.push(() => resolve({ ok: true })))
+      );
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const finished: { ok: boolean; error?: string }[] = [];
+    services.host.onTurnFinished((event) => finished.push(event));
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    try {
+      const sent = await services.host.deliver(chatId, alice, 'first');
+      if (!sent.ok) throw new Error(sent.error);
+      const id = sent.conversationId;
+      const identity = mocks.identities.get(id)!;
+      expect(
+        await services.host.deliver(chatId, alice, 'second', { queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      // 旧实例：spawn 失败回第一条拒绝，宿主随即派出新 spawn；旧 prompt 的拒绝还在路上
+      emit({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'spawn preparation failed',
+        instanceId: instanceOf(0),
+      });
+      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      const aborting = services.host.abortConversation(id);
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      emit({
+        type: 'parent-rejected',
+        identity,
+        seq: 0,
+        reason: 'Unknown session',
+        instanceId: instanceOf(0),
+      });
+      // 唤醒它的是旧实例的拒绝：新实例还在 worker 里，release 不能报成功
+      await expect(aborting).rejects.toThrow('release-unconfirmed');
+      // 新实例未确认结束前仍按停止中处理：新投递只排队，不另起实例
+      expect(
+        await services.host.deliver(chatId, alice, 'third', { queueIfBusy: true })
+      ).toMatchObject({ ok: true, queued: true });
+      expect(mocks.spawnSession).toHaveBeenCalledTimes(2);
+      // 排在后面的 release-parent 真正销毁新实例：这条结束事件归新实例，确认释放并放行排队投递
+      emit({ type: 'status', identity, seq: 1, status: 'running' });
+      emit({
+        type: 'parent-ended',
+        identity,
+        seq: 2,
+        reason: 'released',
+        instanceId: instanceOf(1),
+      });
+      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
+      const settled = finished.length;
+      emit({ type: 'status', identity, seq: 1, status: 'running' });
+      emit({ type: 'turn-completed', identity, seq: 2, turnId: 't3' });
+      await vi.waitFor(() => expect(finished.length).toBe(settled + 1));
+      expect(finished.at(-1)).toMatchObject({ ok: true });
+      // 第三个实例仍登记在案：中止要真正 release，由它自己的 parent-ended 正常确认
+      const stopping = services.host.abortConversation(id);
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+      emit({
+        type: 'parent-ended',
+        identity,
+        seq: 3,
+        reason: 'released',
+        instanceId: instanceOf(2),
+      });
+      await expect(stopping).resolves.toBeUndefined();
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
+  });
+
+  it('阶段13：插话被 worker 吸收（无回执）后实例被回收，新实例自己的 spawn 失败照常结束登记，中止不再空发 release', async () => {
+    const { getBotServices } = await import('./bots');
+    const { setBotWorkerEventObserver } = await import('./agent');
+    const agent = await import('../services/agentHost');
+    const { agentSessionIndex } = await import('./capabilities');
+    const services = getBotServices()!;
+    const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
+    const alice = await createBot('Alice');
+    const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+      kind: 'direct',
+      members: [alice],
+      workspace: { kind: 'member-home' },
+    });
+    const chatId = (created.chat as { id: string }).id;
+    const sent = await services.host.deliver(chatId, alice, 'first');
+    if (!sent.ok) throw new Error(sent.error);
+    const id = sent.conversationId;
+    const identity = mocks.identities.get(id)!;
+    observe({ type: 'status', identity, seq: 1, status: 'running' });
+    const steers = mocks.steerSession.mock.calls.length;
+    await services.host.deliver(chatId, alice, 'more');
+    expect(mocks.steerSession).toHaveBeenCalledTimes(steers + 1);
+    observe({
+      type: 'parent-ended',
+      identity,
+      seq: 2,
+      reason: 'evicted',
+      instanceId: instanceOf(0),
+    });
+    expect(await services.host.deliver(chatId, alice, 'next')).toMatchObject({ ok: true });
+    expect(mocks.spawnSession).toHaveBeenCalledTimes(2);
+    expect(instanceOf(1)).not.toBe(instanceOf(0));
+    observe({
+      type: 'parent-rejected',
+      identity,
+      seq: 0,
+      reason: 'spawn failed',
+      instanceId: instanceOf(1),
+    });
+    const alive = vi.spyOn(agentSessionIndex, 'isAlive').mockReturnValue(false);
+    const release = vi.spyOn(agent, 'releaseParentSession');
+    try {
+      await services.host.abortConversation(id);
+      expect(release).not.toHaveBeenCalled();
+    } finally {
+      alive.mockRestore();
+      release.mockRestore();
+    }
   });
 
   it('saving a member model synchronizes idle sessions and reasoning without respawning', async () => {

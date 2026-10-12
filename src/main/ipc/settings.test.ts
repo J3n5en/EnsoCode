@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
     handlers,
     sends,
     syncBotModeServices: vi.fn(),
+    syncBotDiscussMode: vi.fn(),
     windows: [] as Array<{
       isDestroyed: () => boolean;
       webContents: { id: number; isDestroyed: () => boolean; send: (channel: string) => void };
@@ -20,7 +21,10 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('./bots', () => ({ syncBotModeServices: mocks.syncBotModeServices }));
+vi.mock('./bots', () => ({
+  syncBotModeServices: mocks.syncBotModeServices,
+  syncBotDiscussMode: mocks.syncBotDiscussMode,
+}));
 
 // scheduleWrite 成功后会动态通知统一模型目录；mock 掉避免动态 import 链
 // （modelDirectory → 本模块 → oauthProviders）把无关模块拉进测试的注册表。
@@ -173,6 +177,27 @@ describe('settings广播策略', () => {
     reloaded.flushSettings();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mocks.syncBotModeServices).toHaveBeenCalledTimes(1);
+  });
+
+  it('讨论模式开关：本机字段、不参与同步，变化只通知 syncBotDiscussMode', async () => {
+    vi.resetModules();
+    const settings = await import('./settings');
+    expect(settings.SETTINGS_STATE_FIELDS).toContain('botDiscussModeEnabled');
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('botDiscussModeEnabled');
+    mocks.syncBotModeServices.mockClear();
+    mocks.syncBotDiscussMode.mockClear();
+    expect(settings.patchSettingsState('botDiscussModeEnabled', true)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(mocks.syncBotDiscussMode).toHaveBeenCalledTimes(1));
+    settings.patchSettingsState('botDiscussModeEnabled', true);
+    settings.patchSettingsState('theme', 'light');
+    settings.flushSettings();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.syncBotDiscussMode).toHaveBeenCalledTimes(1);
+    // 讨论开关不能走 syncBotModeServices：后者关闭时会销毁整套 Bot 服务
+    expect(mocks.syncBotModeServices).not.toHaveBeenCalled();
+    settings.patchSettingsState('botDiscussModeEnabled', false);
+    await vi.waitFor(() => expect(mocks.syncBotDiscussMode).toHaveBeenCalledTimes(2));
+    settings.flushSettings();
   });
 
   it('设置白名单同时保留 canonical editMode 与只读迁移用旧字段', async () => {

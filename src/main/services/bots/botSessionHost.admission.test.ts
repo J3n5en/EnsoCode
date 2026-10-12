@@ -28,6 +28,11 @@ const runtime = {
   removeSessionFiles: vi.fn(),
 };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** 会话最近一次 spawn 的实例号：结束事件要回显它才算该实例结束 */
+const instanceOf = (id: string) =>
+  (runtime.spawn.mock.calls as unknown as [{ conversationId: string; instanceId: string }][])
+    .filter(([spec]) => spec.conversationId === id)
+    .at(-1)?.[0].instanceId;
 const human = { kind: 'human' as const, readOnly: false };
 const roots = new Map<string, string>();
 beforeEach(() => {
@@ -595,6 +600,7 @@ it.each(['parent-ended', 'worker-exited'] as const)(
             reason: 'ended',
             seq: 2,
             identity: { sessionId: a, generation: 'g' },
+            instanceId: instanceOf(a),
           } as AgentWorkerEvent)
     );
     await flush();
@@ -810,7 +816,13 @@ it.each(['worker-exited', 'parent-ended'] as const)(
     host.observe(
       type === 'worker-exited'
         ? { type }
-        : { type, seq: 4, identity: { sessionId: a, generation: 'g' }, reason: 'ended' }
+        : {
+            type,
+            seq: 4,
+            identity: { sessionId: a, generation: 'g' },
+            reason: 'ended',
+            instanceId: instanceOf(a),
+          }
     );
     expect(finished.mock.calls.map(([event]) => event)).toContainEqual(
       expect.objectContaining({ deliveryId: 'pending', ok: false })

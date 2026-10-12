@@ -1280,6 +1280,16 @@ export type AgentCommand =
       botMode?: boolean;
       /** Bot 群聊成员会话：挂 group_tasks / group_history 工具（私聊 / 委派子会话不挂） */
       botGroupTasks?: boolean;
+      /**
+       * Bot 讨论模式（实验性）开启：群聊成员会话的 delegate 说明加讨论接力句。只能与 botMode + botGroupTasks
+       * 同时为 true；缺省 / false 时文案与 main 一致。worker 与 Main 同包发布，不存在跨版本组合。
+       */
+      botDiscussMode?: boolean;
+      /**
+       * Main 给这次 spawn 出的实例分配的号（UUID，目前只有 Bot 宿主传）。worker 存在会话上，parent-ended 回显它；
+       * 同代会话仍在而短路回 parent-ready 时改绑成这个号。与 generation 正交，不参与授权键。
+       */
+      instanceId?: string;
       /** Bot 私聊 / 群聊成员会话（非委派）：挂 routine_propose / send_image 工具 */
       botRoutines?: boolean;
       /** Bot 挂看板任务的委派会话：挂 report_blocked 工具 */
@@ -1352,6 +1362,11 @@ export type AgentCommand =
        * 打进同一应用包、启动时 fork，随应用退出，不存在跨版本组合。
        */
       resume?: true;
+      /**
+       * 仅父会话：这条命令发往的实例号（见 spawn-parent.instanceId）。会话不在而被拒时 parent-rejected 原样回显，
+       * Main 据此认出拒绝属于哪个实例。
+       */
+      instanceId?: string;
     }
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
   | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
@@ -1543,7 +1558,8 @@ export type AgentCommand =
     }
   | { type: 'abort-classify-choice'; requestId: string }
   | { type: 'abort-retry'; identity: SessionIdentity }
-  | { type: 'retry'; identity: SessionIdentity }
+  /** instanceId 同 prompt：会话不在而被拒时 parent-rejected 回显 */
+  | { type: 'retry'; identity: SessionIdentity; instanceId?: string }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
    *  用于 Move to worktree 等需要换 cwd 重新 spawn 的场景。 */
   | { type: 'release-parent'; identity: SessionIdentity }
@@ -1789,8 +1805,17 @@ export type ParentLifecycleEvent =
       identity: SessionIdentity;
       seq: number;
       reason: string;
+      /** 被拒命令自己带的实例号（spawn-parent / prompt / steer / retry）；命令没带则缺省 */
+      instanceId?: string;
     }
-  | { type: 'parent-ended'; identity: SessionIdentity; seq: number; reason: string };
+  | {
+      type: 'parent-ended';
+      identity: SessionIdentity;
+      seq: number;
+      reason: string;
+      /** 被结束实例最近一次 spawn-parent 绑定的实例号；没绑过则缺省 */
+      instanceId?: string;
+    };
 
 export type ChildLifecycleEvent =
   | {
@@ -3521,11 +3546,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'refusalRetryPrompt',
           'botMode',
           'botGroupTasks',
+          'botDiscussMode',
           'botRoutines',
           'botDelegationTask',
           'botWriteLock',
           'protectedActions',
           'planMode',
+          'instanceId',
         ]) ||
         !parseSessionIdentity(value.identity) ||
         typeof value.cwd !== 'string' ||
@@ -3587,6 +3614,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.refusalRetryPrompt !== undefined && !isNonEmptyString(value.refusalRetryPrompt)) ||
         (value.botMode !== undefined && typeof value.botMode !== 'boolean') ||
         (value.botGroupTasks !== undefined && typeof value.botGroupTasks !== 'boolean') ||
+        (value.botDiscussMode !== undefined && typeof value.botDiscussMode !== 'boolean') ||
+        (value.botDiscussMode === true &&
+          (value.botMode !== true || value.botGroupTasks !== true)) ||
         (value.botRoutines !== undefined && typeof value.botRoutines !== 'boolean') ||
         (value.botDelegationTask !== undefined && typeof value.botDelegationTask !== 'boolean') ||
         (value.botWriteLock !== undefined &&
@@ -3594,7 +3624,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             !isNonEmptyString(value.botWriteLock.label) ||
             !Array.isArray(value.botWriteLock.ancestors) ||
             !value.botWriteLock.ancestors.every(isNonEmptyString))) ||
-        (value.protectedActions !== undefined && typeof value.protectedActions !== 'boolean')
+        (value.protectedActions !== undefined && typeof value.protectedActions !== 'boolean') ||
+        (value.instanceId !== undefined && !isUuid(value.instanceId))
       ) {
         return null;
       }
@@ -3750,6 +3781,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         'deliveryId',
         'activeOnly',
         'resume',
+        'instanceId',
       ]) &&
         parseAnySessionIdentity(value.identity) &&
         typeof value.text === 'string' &&
@@ -3760,7 +3792,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.activeOnly === true &&
             isDeliveryId(value.deliveryId))) &&
         (value.resume === undefined || (value.type === 'prompt' && value.resume === true)) &&
-        (value.deliveryId === undefined || isDeliveryId(value.deliveryId))
+        (value.deliveryId === undefined || isDeliveryId(value.deliveryId)) &&
+        (value.instanceId === undefined ||
+          (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
         ? (value as unknown as AgentCommand)
         : null;
     }
@@ -4030,9 +4064,15 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
     }
     case 'abort':
     case 'abort-retry':
-    case 'retry':
     case 'release-parent':
       return hasExactKeys(value, ['type', 'identity']) && parseAnySessionIdentity(value.identity)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'retry':
+      return hasOnlyKeys(value, ['type', 'identity', 'instanceId']) &&
+        parseAnySessionIdentity(value.identity) &&
+        (value.instanceId === undefined ||
+          (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
         ? (value as unknown as AgentCommand)
         : null;
     case 'append-session-custom-entry':
@@ -4111,6 +4151,11 @@ function parseLifecycleEvent(value: Record<string, unknown>): AgentWorkerEvent |
       return parseModelRef(value.model) ? (value as unknown as AgentWorkerEvent) : null;
     case 'parent-rejected':
     case 'parent-ended':
+      return hasOnlyKeys(value, ['type', 'identity', 'seq', 'reason', 'instanceId']) &&
+        isNonEmptyString(value.reason) &&
+        (value.instanceId === undefined || isUuid(value.instanceId))
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'child-rejected':
     case 'child-ended':
       return isNonEmptyString(value.reason) ? (value as unknown as AgentWorkerEvent) : null;

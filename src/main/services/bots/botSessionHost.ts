@@ -70,13 +70,23 @@ export interface BotSpawnSpec {
   instructionText: string;
   /** 群聊成员会话：挂 group_tasks 工具 */
   groupTasks?: boolean;
+  /** 群聊成员会话且讨论模式（实验性）开启：delegate 工具说明加讨论接力句 */
+  discussMode?: boolean;
   /** 私聊 / 群聊成员会话（委派会话走 independentSpecs，不挂）：挂 routine_propose */
   routines?: boolean;
   /** 写成员：worker 内同工作区按文件占用、全局命令短独占；ancestors 为委派链祖先会话 */
   writeLock?: { label: string; ancestors: string[] };
   /** 挂看板任务的委派会话：挂 report_blocked */
   delegationTask?: boolean;
+  /**
+   * 这次 spawn 的实例号（UUID，每次 spawn 新生成）。随 spawn-parent 下发，之后同会话的 prompt / steer / retry
+   * 都带它；worker 在 parent-rejected / parent-ended 里回显，宿主据此确定结束事件属于哪个实例
+   */
+  instanceId: string;
 }
+
+/** spawn 规格里与具体实例无关的部分；实例号在每次 spawn 时现生成 */
+type BotSpawnTemplate = Omit<BotSpawnSpec, 'instanceId'>;
 
 export interface BotRuntimePort {
   updateEngine?(conversationId: string, engine?: BotEngine): Promise<ActionResult>;
@@ -137,6 +147,8 @@ export interface BotSessionHostDeps {
   now?: () => number;
   /** 界面语言：人类插话补充说明用，缺省中文 */
   language?: () => 'zh' | 'en';
+  /** 讨论模式（实验性）总开关，缺省关闭：决定群聊成员会话的 Bot 说明与 delegate 文案 */
+  discussEnabled?: () => boolean;
 }
 
 /** 委派会话的来源：工作区写锁沿委派链共用，等待提示落到发起委派的群 */
@@ -227,9 +239,20 @@ export class BotSessionHost {
   private readonly running = new Set<string>();
   /**
    * 由本宿主发起、尚未结束的轮次；sawRunning 防止 spawn 后的 idle 误释放；
-   * retry 标记这一格等的是 retry 命令开轮，只有它认 worker 的 retry-skipped 回执
+   * retry 标记这一格等的是 retry 命令开轮，只有它认 worker 的 retry-skipped 回执；
+   * instance 是这一轮的 prompt / retry 发往的 worker 实例（见 instances），发出前缺省
    */
-  private readonly slots = new Map<string, { sawRunning: boolean; retry?: true }>();
+  private readonly slots = new Map<
+    string,
+    { sawRunning: boolean; retry?: true; instance?: string }
+  >();
+  /**
+   * 会话当前的 worker 实例号（spawn 成功时登记 spec.instanceId）。只有回显这个号的 parent-ended /
+   * parent-rejected 才算当前实例结束：旧实例命令的拒绝回显旧号，缺号的不是本宿主的实例，都与当前实例无关。
+   * 实例结束（含 worker-exited）只结算已发到该实例上的轮次：还在准备（探测、预算、重建释放、spawn）的轮次
+   * 不属于任何旧实例，由准备它的任务自己发出或失败结算
+   */
+  private readonly instances = new Map<string, string>();
   private readonly stopping = new Map<string, string>();
   private readonly epochs = new Map<string, number>();
   private readonly tasks = new Map<string, string>();
@@ -245,8 +268,10 @@ export class BotSessionHost {
   private maxRunning: number;
   private readonly settleGraceMs: number;
   private readonly settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly independentSpecs = new Map<string, BotSpawnSpec>();
+  private readonly independentSpecs = new Map<string, BotSpawnTemplate>();
   private readonly liveProfiles = new Map<string, BotProfile>();
+  /** live 会话 spawn 时采用的讨论模式；与当前开关不一致的群成员会话要换说明 */
+  private readonly liveDiscuss = new Map<string, boolean>();
   private readonly activeDeliveries = new Map<string, string>();
   private readonly turnKeys = new Map<string, string>();
   private disposed = false;
@@ -448,6 +473,59 @@ export class BotSessionHost {
           })
         )
     );
+  }
+
+  /**
+   * 讨论模式开关变化：群聊成员会话按新说明重建，上下文保留。
+   * 空闲的只释放 worker（会话不结束，下次投递带 resumeFile 重启并换上新说明）；正在跑回合的等回合结束；
+   * 回合结束前已排队的投递在开新回合前重建。没有 sessionFile 的不重建（免得丢上下文）；私聊与委派子会话不受影响。
+   */
+  async refreshGroupInstructions(): Promise<void> {
+    await Promise.all(
+      [...this.live]
+        .filter((id) => this.instructionsStale(id))
+        .map((id) =>
+          this.withLock(id, () => this.rebuildIfIdle(id)).catch((error) =>
+            console.warn('[bots] instruction refresh deferred:', error)
+          )
+        )
+    );
+  }
+
+  private discussOn(): boolean {
+    return this.deps.discussEnabled?.() === true;
+  }
+
+  /** 起着 worker 的群聊成员会话（非委派、有 sessionFile），且 spawn 时的讨论模式与当前开关不一致 */
+  private instructionsStale(id: string): boolean {
+    if (this.disposed || !this.live.has(id) || this.independentSpecs.has(id)) return false;
+    const binding = this.binding(id);
+    if (!binding?.chatId || binding.delegationId) return false;
+    if (this.deps.chats.get(binding.chatId)?.kind !== 'group') return false;
+    if (!this.deps.authority.conversation(id)?.sessionFile) return false;
+    return (this.liveDiscuss.get(id) ?? false) !== this.discussOn();
+  }
+
+  private async rebuildIfIdle(id: string): Promise<void> {
+    if (!this.instructionsStale(id) || this.isBusy(id)) return;
+    const error = await this.releaseForInstructions(id);
+    if (error) console.warn('[bots] instruction refresh deferred:', error);
+  }
+
+  /** 只释放 worker 里的实例，会话保留；下次投递按新 spawnSpec 带 resumeFile 重启 */
+  private async releaseForInstructions(id: string): Promise<string | undefined> {
+    try {
+      await this.deps.runtime.release(id);
+    } catch (error) {
+      // 等待期间已确认旧实例结束（parent-ended / worker-exited 已把它移出 live）：释放的目的已达成，
+      // 只是 agentHost 的等待者没被唤醒（worker 退出不唤醒、要等超时）
+      if (this.live.has(id)) return error instanceof Error ? error.message : 'release-failed';
+    }
+    this.live.delete(id);
+    this.instances.delete(id);
+    this.liveProfiles.delete(id);
+    this.liveDiscuss.delete(id);
+    return undefined;
   }
 
   private async syncEngine(
@@ -732,9 +810,12 @@ export class BotSessionHost {
   }
 
   private async prepareBudget(botId: string): Promise<void> {
-    await this.deps.budget?.prepare(botId).catch((error) => {
+    // 同步抛错与 reject 同样按「检查失败、照常放行」处理：调用方此时可能已占着运行槽
+    try {
+      await this.deps.budget?.prepare(botId);
+    } catch (error) {
       console.warn('[bots] budget check failed', error);
-    });
+    }
   }
 
   /** 同步判定，计入该成员其他进行中回合的预留与本回合尚未入账的 inflight；开始回合的调用方须在同一同步段里占住 slot */
@@ -1092,16 +1173,24 @@ export class BotSessionHost {
   observe(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
     if (this.disposed) return;
     if (event.type === 'worker-exited') {
-      const interrupted = [...this.slots.keys()].filter((id) => !this.stopping.has(id));
+      // 只有已发到 worker 的轮次随 worker 一起中断；还在准备的轮次保留占位，由准备它的任务换新 worker 发出或失败结算
+      // （start 的任何出口——返回失败或抛错——都会把槽绑定到实例或删掉，见 start）
+      const preparing = [...this.slots]
+        .filter(([id, slot]) => slot.instance === undefined && !this.stopping.has(id))
+        .map(([id]) => id);
+      const interrupted = [...this.slots.keys()].filter(
+        (id) => !this.stopping.has(id) && !preparing.includes(id)
+      );
       for (const id of this.stopping.keys()) this.confirmRelease(id);
       for (const id of [...this.settleTimers.keys()]) this.cancelSettle(id);
       this.live.clear();
+      this.instances.clear();
       this.running.clear();
-      this.slots.clear();
+      for (const id of [...this.slots.keys()]) if (!preparing.includes(id)) this.slots.delete(id);
       this.lastAssistant.clear();
       this.waiting.clear();
       this.retrying.clear();
-      for (const id of [...this.lastOutput.keys()]) this.quiet(id);
+      for (const id of [...this.lastOutput.keys()]) if (!preparing.includes(id)) this.quiet(id);
       for (const id of interrupted) {
         this.finish(id, undefined, false, 'worker-exited', '', undefined, true);
         this.turnKeys.delete(id);
@@ -1114,6 +1203,12 @@ export class BotSessionHost {
     this.noteOutput(event);
     if ('parent' in event.identity) return;
     const id = event.identity.sessionId;
+    // 有当前实例时，结束事件只认回显它的号：旧实例命令的拒绝 / 结束既不结束当前实例，也不确认正在等的 release。
+    // 没有当前实例时这条事件结束不了任何实例（endInstance 不结算），只照旧清掉残留的运行标记并出队
+    if (event.type === 'parent-ended' || event.type === 'parent-rejected') {
+      const current = this.instances.get(id);
+      if (current !== undefined && event.instanceId !== current) return;
+    }
     if (this.stopping.has(id)) {
       if (event.type === 'parent-ended' || event.type === 'parent-rejected')
         this.confirmRelease(id);
@@ -1270,12 +1365,12 @@ export class BotSessionHost {
       case 'parent-ended':
       case 'parent-rejected': {
         this.failPendingSteers((item) => item.conversationId === id, event.reason);
-        const hadSlot = this.slots.has(id);
+        const owned = this.endInstance(id);
         this.live.delete(id);
         this.running.delete(id);
         this.retrying.delete(id);
         this.lastAssistant.delete(id);
-        if (hadSlot) {
+        if (owned) {
           this.finish(id, undefined, false, event.reason);
           this.release(id);
         } else this.pump();
@@ -1292,6 +1387,31 @@ export class BotSessionHost {
     const binding = this.deps.authority.conversation(conversationId)?.bot ?? null;
     if (binding) this.bindings.set(conversationId, binding);
     return binding;
+  }
+
+  /**
+   * worker 里会话的当前实例已结束（调用方已按实例号确认归属）：回答这一格是否是发到该实例上的轮次、要随它结算。
+   * 宿主自己 release（重建说明）时，worker 回传的 parent-ended 先于 release 返回到达，此时占槽的是
+   * 还没发出的新轮次，不属于结束的实例。worker 自己结束实例（闲置回收 evicted，以及 #44 的
+   * force-released）同样只结算已发出的轮次。实例号同时作废，之后的 spawn 换新号
+   */
+  private endInstance(conversationId: string): boolean {
+    const ended = this.instances.get(conversationId);
+    this.instances.delete(conversationId);
+    const sentTo = this.slots.get(conversationId)?.instance;
+    return ended !== undefined && sentTo === ended;
+  }
+
+  /**
+   * 这一轮即将发往会话当前的 worker 实例；没有当前实例（准备期间已结束）时返回 false，不能发：
+   * 发往已结束实例的命令被拒时回显的是旧号，不会再结算这一轮
+   */
+  private dispatchTo(conversationId: string): boolean {
+    const slot = this.slots.get(conversationId);
+    const instance = this.instances.get(conversationId);
+    if (!slot || instance === undefined) return false;
+    slot.instance = instance;
+    return true;
   }
 
   private awaitingTurnEnd(conversationId: string): boolean {
@@ -1481,9 +1601,36 @@ export class BotSessionHost {
       this.quiet(conversationId);
       return { ok: false, error };
     };
+    // 准备阶段（探测 / 重建 / spawn / 同步模型 / prompt / retry）抛错与返回失败同一出口：回合还没发出就删槽，
+    // 由调用方按失败结果结算一次并 pump；已经发出则槽归实例，由该实例的回合事件结算（worker-exited 保留未发出的槽，
+    // 前提就是这里一定收口）
+    const stage = { failure: 'start-failed', sent: false };
+    try {
+      return await this.prepareTurn(delivery, bot, independent, fail, stage);
+    } catch (error) {
+      if (stage.sent) {
+        console.warn('[bots] step after dispatch failed', error);
+        return { ok: true, conversationId };
+      }
+      console.warn('[bots] turn preparation failed', error);
+      return fail(error instanceof Error && error.message ? error.message : stage.failure);
+    }
+  }
+
+  /** start 的准备与发出；stage 记录当前步骤的默认错误码与回合是否已发到 worker */
+  private async prepareTurn(
+    delivery: Delivery,
+    initial: BotProfile,
+    independent: BotProfile | undefined,
+    fail: (error: string) => Fail,
+    stage: { failure: string; sent: boolean }
+  ): Promise<BotDeliverResult> {
+    const { conversationId } = delivery;
+    let bot = initial;
     let fallback: Extract<ModelProbeResult, { ok: true }>['fallback'];
     let selected: BotProfile | undefined = independent;
     if (this.deps.probe) {
+      stage.failure = '模型检测失败';
       const probed = await this.deps
         .probe(bot)
         .catch((): { ok: false; error: string } => ({ ok: false, error: '模型检测失败' }));
@@ -1500,12 +1647,20 @@ export class BotSessionHost {
       if (fallback || probed.model) selected = bot;
     }
     let notes: { text: string; seen?: string } = { text: delivery.text };
+    if (this.instructionsStale(conversationId)) {
+      stage.failure = 'release-failed';
+      const error = await this.releaseForInstructions(conversationId);
+      if (error) return fail(error);
+    }
     if (!this.live.has(conversationId)) {
+      stage.failure = 'spawn-failed';
       const spawned = await this.spawnLive(delivery, bot, selected);
       if (spawned) return fail(spawned);
     } else {
+      stage.failure = 'model-update-failed';
       const error = await this.syncEngine(conversationId, selected);
       if (error) return fail(error);
+      stage.failure = 'start-failed';
       notes = this.withNotesUpdate(delivery);
     }
     if (
@@ -1519,11 +1674,17 @@ export class BotSessionHost {
       // 不存在不发回执的旧 worker。worker 一直不回时由 worker-exited、parent-ended、委派超时
       // （abortConversation）、手动停止兜底，静默看门狗也照常提醒（#29）。
       this.slots.get(conversationId)!.retry = true;
+      if (!this.dispatchTo(conversationId)) return fail('session-unavailable');
+      stage.failure = 'retry-failed';
       const sent = this.deps.runtime.retry?.(conversationId);
       if (!sent?.ok) return fail(sent?.error ?? 'retry-failed');
-      this.modelNotice(delivery, bot, fallback);
+      stage.sent = true;
+      // 续跑没有 deliveryId、不改任务文本：发出后无必做记账，只剩附属的回退提示
+      this.afterDispatch(() => this.modelNotice(delivery, bot, fallback));
       return { ok: true, conversationId };
     }
+    if (!this.dispatchTo(conversationId)) return fail('session-unavailable');
+    stage.failure = 'prompt-failed';
     const sent = delivery.resume
       ? this.deps.runtime.prompt(
           conversationId,
@@ -1534,11 +1695,23 @@ export class BotSessionHost {
         )
       : this.deps.runtime.prompt(conversationId, notes.text, delivery.images, delivery.deliveryId);
     if (!sent.ok) return fail(sent.error ?? 'prompt-failed');
-    this.modelNotice(delivery, bot, fallback);
+    stage.sent = true;
+    // 发出后先做必做记账（续跑任务、笔记已读版本、去重登记与 sent 通知——排队投递靠 sent 推进群游标），
+    // 再做附属的回退提示；附属步骤失败只告警，不影响记账，也不改变「已发出」的结果
     this.retryTasks.set(conversationId, this.tasks.get(conversationId) ?? '');
     if (notes.seen !== undefined) this.notesSeen.set(conversationId, notes.seen);
     this.deliverySent(delivery);
+    this.afterDispatch(() => this.modelNotice(delivery, bot, fallback));
     return { ok: true, conversationId };
+  }
+
+  /** 回合已发出后的附属步骤：失败只告警，回合仍由实例结算 */
+  private afterDispatch(step: () => void): void {
+    try {
+      step();
+    } catch (error) {
+      console.warn('[bots] step after dispatch failed', error);
+    }
   }
 
   private modelNotice(
@@ -1611,13 +1784,18 @@ export class BotSessionHost {
         ...spec.spec,
         systemPrompt: `${spec.spec.systemPrompt}\n\n${snap.section}`,
       };
-    const spawned = await this.deps.runtime.spawn(spec.spec);
+    const instanceId = randomUUID();
+    const spawned = await this.deps.runtime.spawn({ ...spec.spec, instanceId });
     if (!spawned.ok) return spawned.error ?? 'spawn-failed';
+    // 先登记实例号：之后的结束事件（含下面 release 回放的 parent-ended）按它认归属
+    this.instances.set(conversationId, instanceId);
     if (this.disposed || this.deps.authority.conversation(conversationId)?.lifecycle === 'ended') {
       await this.deps.runtime.release(conversationId);
+      this.instances.delete(conversationId);
       return this.disposed ? 'disabled' : 'canceled';
     }
     this.liveProfiles.set(conversationId, spec.spec.bot);
+    this.liveDiscuss.set(conversationId, spec.spec.discussMode === true);
     this.live.add(conversationId);
     this.notesSeen.set(conversationId, snap?.version ?? '');
     return undefined;
@@ -1726,12 +1904,19 @@ export class BotSessionHost {
   private deliverySent(delivery: Delivery, steered?: true): void {
     if (!delivery.deliveryId) return;
     this.rememberDelivery(delivery.conversationId, delivery.deliveryId, 'sent');
-    for (const listener of this.sentListeners)
-      listener({
-        conversationId: delivery.conversationId,
-        deliveryId: delivery.deliveryId,
-        ...(steered ? { steered } : {}),
-      });
+    const event = {
+      conversationId: delivery.conversationId,
+      deliveryId: delivery.deliveryId,
+      ...(steered ? { steered } : {}),
+    };
+    // 每个监听器各自隔离：群游标等记账不能因前一个监听器抛错被跳过
+    for (const listener of this.sentListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn('[bots] delivery-sent listener failed', error);
+      }
+    }
   }
 
   private rememberDelivery(
@@ -1751,7 +1936,7 @@ export class BotSessionHost {
     for (const listener of this.startedListeners) listener({ conversationId, deliveryId });
   }
 
-  private spawnSpec(delivery: Delivery): { ok: true; spec: BotSpawnSpec } | Fail {
+  private spawnSpec(delivery: Delivery): { ok: true; spec: BotSpawnTemplate } | Fail {
     const independent = this.independentSpecs.get(delivery.conversationId);
     if (independent) return { ok: true, spec: independent };
     const chat = this.deps.chats.get(delivery.chatId);
@@ -1768,6 +1953,7 @@ export class BotSessionHost {
     const roster = chat.members
       .map((id) => this.deps.bots.get(id))
       .filter((member): member is BotProfile => member !== undefined);
+    const discussMode = chat.kind === 'group' && this.discussOn();
     return {
       ok: true,
       spec: {
@@ -1777,8 +1963,14 @@ export class BotSessionHost {
         ...(conversation.sessionFile ? { resumeFile: conversation.sessionFile } : {}),
         bot,
         systemPrompt: buildBotSystemPrompt(bot, this.deps.bots.readPersona(bot.id)),
-        instructionText: buildBotModeInstruction({ self: bot, kind: chat.kind, roster }),
+        instructionText: buildBotModeInstruction({
+          self: bot,
+          kind: chat.kind,
+          roster,
+          ...(discussMode ? { discussMode } : {}),
+        }),
         ...(chat.kind === 'group' ? { groupTasks: true } : {}),
+        ...(discussMode ? { discussMode: true } : {}),
         routines: true,
       },
     };
@@ -1795,6 +1987,11 @@ export class BotSessionHost {
       const botId = this.binding(conversationId)?.botId;
       if (botId) void this.refreshModel(botId);
     }
+    // 讨论模式在回合中切换过：回合结束后换说明（之后已排队的投递由 start 在开新回合前处理）
+    if (this.instructionsStale(conversationId))
+      void this.withLock(conversationId, () => this.rebuildIfIdle(conversationId)).catch((error) =>
+        console.warn('[bots] instruction refresh deferred:', error)
+      );
     // 宿主没占位的运行（worker 自发 / 晚于结算宽限才开始）结束时调用方已移出 running：同样可能放出同成员的排队投递
     this.pump();
   }
@@ -1885,17 +2082,30 @@ export class BotSessionHost {
       this.tasks.set(next.conversationId, next.text.length <= 2000 ? next.text : '');
       if (next.deliveryId) this.activeDeliveries.set(next.conversationId, next.deliveryId);
       void this.withLock(next.conversationId, async () => {
-        await this.prepareBudget(next.botId);
-        // 预算备好后才让出占位：期间别的投递抢不走并发位与工作区写锁
-        const canceled =
-          next.epoch !== (this.epochs.get(next.conversationId) ?? 0) ||
-          this.stopping.has(next.conversationId);
-        if (!this.stopping.has(next.conversationId)) this.slots.delete(next.conversationId);
-        const started: BotDeliverResult = canceled
-          ? { ok: false, error: 'canceled' }
-          : this.budgetExceeded(next.botId, next.chatId || null, next.conversationId)
-            ? { ok: false, error: BOT_BUDGET_ERROR }
-            : await this.start(next);
+        let started: BotDeliverResult;
+        try {
+          await this.prepareBudget(next.botId);
+          // 预算备好后才让出占位：期间别的投递抢不走并发位与工作区写锁
+          const canceled =
+            next.epoch !== (this.epochs.get(next.conversationId) ?? 0) ||
+            this.stopping.has(next.conversationId);
+          if (!this.stopping.has(next.conversationId)) this.slots.delete(next.conversationId);
+          started = canceled
+            ? { ok: false, error: 'canceled' }
+            : this.budgetExceeded(next.botId, next.chatId || null, next.conversationId)
+              ? { ok: false, error: BOT_BUDGET_ERROR }
+              : await this.start(next);
+        } catch (error) {
+          // start 自己收口；这里兜住它之前的步骤：未发出的占位让出，并和返回失败一样结算一次
+          console.warn('[bots] queued turn preparation failed', error);
+          if (this.slots.get(next.conversationId)?.instance !== undefined) return;
+          if (!this.stopping.has(next.conversationId)) this.slots.delete(next.conversationId);
+          this.quiet(next.conversationId);
+          started = {
+            ok: false,
+            error: error instanceof Error && error.message ? error.message : 'start-failed',
+          };
+        }
         if (!started.ok) {
           if (this.stopping.has(next.conversationId)) return;
           this.finish(
@@ -2172,6 +2382,8 @@ export class BotSessionHost {
     this.independentSpecs.clear();
     this.origins.clear();
     this.liveProfiles.clear();
+    this.liveDiscuss.clear();
+    this.instances.clear();
     this.listeners.clear();
     this.discardListeners.clear();
     this.sentListeners.clear();
@@ -2242,6 +2454,8 @@ export class BotSessionHost {
     this.bindings.delete(id);
     this.independentSpecs.delete(id);
     this.liveProfiles.delete(id);
+    this.liveDiscuss.delete(id);
+    this.instances.delete(id);
     this.deliveries.delete(id);
     this.origins.delete(id);
   }

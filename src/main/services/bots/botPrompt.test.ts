@@ -9,6 +9,9 @@ import {
 
 const alice = { id: 'a', name: 'Alice', title: 'Backend', scope: 'APIs and databases' };
 const bob = { id: 'b', name: 'Bob', title: '', scope: '' };
+/** HEAD b6a0b27f 里群聊讨论那一行，开关打开时必须原样保留 */
+const DISCUSS_LINE =
+  '- For discussion-type questions (opinions, options, reviews), prefer relaying openly in the group: reply yourself and @Name the next member if needed. Use delegate only for long-running execution tasks that need a separate session; during a group discussion, finish your part within your own turn instead of delegating.';
 
 describe('buildBotSystemPrompt', () => {
   it('把名字、头衔、职责放在人设正文之前', () => {
@@ -64,17 +67,50 @@ describe('buildBotModeInstruction', () => {
     expect(text).toMatch(/human @mentions you directly.*reply/i);
   });
 
-  it('群聊：讨论类问题优先在群里公开 @ 接力，委派只用于耗时长、需要单独会话的执行任务', () => {
+  it('群聊（讨论模式开）：讨论类问题优先在群里公开 @ 接力，委派只用于耗时长、需要单独会话的执行任务', () => {
     expect(buildBotModeInstruction({ self: alice, kind: 'direct', roster: [] })).toContain(
       'retry_delegation({id, note?})'
     );
-    const text = buildBotModeInstruction({ self: alice, kind: 'group', roster: [alice, bob] });
+    const text = buildBotModeInstruction({
+      self: alice,
+      kind: 'group',
+      roster: [alice, bob],
+      discussMode: true,
+    });
     expect(text).toMatch(/discussion.*openly in the group.*@Name/i);
     expect(text).toMatch(
       /delegate only for long-running execution tasks that need a separate session/i
     );
-    const direct = buildBotModeInstruction({ self: alice, kind: 'direct', roster: [] });
+    expect(text).toContain(DISCUSS_LINE);
+    const direct = buildBotModeInstruction({
+      self: alice,
+      kind: 'direct',
+      roster: [],
+      discussMode: true,
+    });
     expect(direct).not.toMatch(/openly in the group/i);
+  });
+
+  it('群聊（讨论模式关）：不含讨论接力说明，其余行与开启时逐行一致，retry_delegation 行保留', () => {
+    const on = buildBotModeInstruction({
+      self: alice,
+      kind: 'group',
+      roster: [alice, bob],
+      discussMode: true,
+    });
+    const off = buildBotModeInstruction({ self: alice, kind: 'group', roster: [alice, bob] });
+    expect(off).not.toMatch(/openly in the group/i);
+    expect(off).not.toMatch(/during a group discussion/i);
+    expect(off).toContain('retry_delegation({id, note?})');
+    expect(off.split('\n')).toEqual(on.split('\n').filter((line) => line !== DISCUSS_LINE));
+    expect(
+      buildBotModeInstruction({
+        self: alice,
+        kind: 'group',
+        roster: [alice, bob],
+        discussMode: false,
+      })
+    ).toBe(off);
   });
 });
 

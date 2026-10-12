@@ -238,6 +238,287 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     }));
   });
 
+  it('审查49：evicted 释放期间 abort 旁路先发 idle，排队 prompt 随后仍回拒绝', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-review49-order-'));
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: sessionDir,
+      sessionDir,
+    });
+    const release = Promise.withResolvers<void>();
+    try {
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+      });
+      await waitFor(events, 'parent-ready');
+      const current = mocks.sessions[0] as unknown as ReturnType<typeof session>;
+      current.abort.mockImplementationOnce(async () => {
+        await release.promise;
+        return undefined;
+      });
+      const internals = supervisor as unknown as {
+        sessions: Map<string, { lastActivityAt: number }>;
+        evictIdleSessions(): void;
+      };
+      internals.sessions.get(parent.sessionId)!.lastActivityAt = Date.now() - 31 * 60_000;
+      internals.evictIdleSessions();
+      await vi.waitFor(() => expect(current.abort).toHaveBeenCalledTimes(1));
+      events.length = 0;
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'in-flight' });
+      supervisor.handleCommand({ type: 'abort', identity: parent });
+      expect(events).toContainEqual(expect.objectContaining({ type: 'status', status: 'idle' }));
+      release.resolve();
+      await waitFor(events, 'parent-rejected');
+      expect(
+        events.filter((event) => ['status', 'parent-ended', 'parent-rejected'].includes(event.type))
+      ).toEqual([
+        expect.objectContaining({ type: 'status', status: 'idle' }),
+        expect.objectContaining({ type: 'parent-ended', reason: 'evicted' }),
+        expect.objectContaining({ type: 'parent-rejected', identity: parent }),
+      ]);
+    } finally {
+      release.resolve();
+      await supervisor.shutdown();
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it('审查48：spawn 与 prompt 已连续下发时，spawn 失败会回传两次同代 parent-rejected', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-review48-rejected-'));
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: sessionDir,
+      sessionDir,
+    });
+    mocks.createAgentSession.mockRejectedValueOnce(new Error('spawn preparation failed'));
+    try {
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+      });
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'first' });
+      await vi.waitFor(() =>
+        expect(events.filter((event) => event.type === 'parent-rejected')).toHaveLength(2)
+      );
+      expect(
+        events.filter((event) => event.type === 'parent-rejected').map((event) => event.identity)
+      ).toEqual([parent, parent]);
+    } finally {
+      await supervisor.shutdown();
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  describe('阶段13：结束事件回显实例号', () => {
+    const first = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const second = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const ends = (events: AgentWorkerEvent[]) =>
+      events
+        .filter((event) => event.type === 'parent-rejected' || event.type === 'parent-ended')
+        .map((event) => ({
+          type: event.type,
+          instanceId: (event as { instanceId?: string }).instanceId,
+        }));
+    let sessionDir: string;
+    let events: AgentWorkerEvent[];
+    let supervisor: SessionSupervisor;
+    beforeEach(() => {
+      events = [];
+      sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-stage13-'));
+      supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: sessionDir,
+        sessionDir,
+      });
+    });
+    const cleanup = async () => {
+      await supervisor.shutdown();
+      rmSync(sessionDir, { recursive: true, force: true });
+    };
+
+    it('spawn 失败加旧 prompt 双拒绝：两条都回显各自命令带的实例号', async () => {
+      mocks.createAgentSession.mockRejectedValueOnce(new Error('spawn preparation failed'));
+      try {
+        supervisor.handleCommand({
+          type: 'spawn-parent',
+          identity: parent,
+          cwd: '/workspace',
+          model,
+          instanceId: first,
+        });
+        supervisor.handleCommand({
+          type: 'prompt',
+          identity: parent,
+          text: 'first',
+          instanceId: first,
+        });
+        await vi.waitFor(() => expect(ends(events)).toHaveLength(2));
+        expect(ends(events)).toEqual([
+          { type: 'parent-rejected', instanceId: first },
+          { type: 'parent-rejected', instanceId: first },
+        ]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('新实例自己的 spawn 失败回显新号；旧实例的 parent-ended 回显旧号', async () => {
+      try {
+        supervisor.handleCommand({
+          type: 'spawn-parent',
+          identity: parent,
+          cwd: '/workspace',
+          model,
+          instanceId: first,
+        });
+        await waitFor(events, 'parent-ready');
+        supervisor.handleCommand({ type: 'release-parent', identity: parent });
+        await waitFor(events, 'parent-ended');
+        mocks.createAgentSession.mockRejectedValueOnce(new Error('spawn failed again'));
+        supervisor.handleCommand({
+          type: 'spawn-parent',
+          identity: parent,
+          cwd: '/workspace',
+          model,
+          instanceId: second,
+        });
+        await waitFor(events, 'parent-rejected');
+        expect(ends(events)).toEqual([
+          { type: 'parent-ended', instanceId: first },
+          { type: 'parent-rejected', instanceId: second },
+        ]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('evicted 期间 abort 旁路先发 idle：parent-ended 与排队 prompt 的拒绝都回显旧号', async () => {
+      const release = Promise.withResolvers<void>();
+      try {
+        supervisor.handleCommand({
+          type: 'spawn-parent',
+          identity: parent,
+          cwd: '/workspace',
+          model,
+          instanceId: first,
+        });
+        await waitFor(events, 'parent-ready');
+        const current = mocks.sessions[0] as unknown as ReturnType<typeof session>;
+        current.abort.mockImplementationOnce(async () => {
+          await release.promise;
+          return undefined;
+        });
+        const internals = supervisor as unknown as {
+          sessions: Map<string, { lastActivityAt: number }>;
+          evictIdleSessions(): void;
+        };
+        internals.sessions.get(parent.sessionId)!.lastActivityAt = Date.now() - 31 * 60_000;
+        internals.evictIdleSessions();
+        await vi.waitFor(() => expect(current.abort).toHaveBeenCalledTimes(1));
+        supervisor.handleCommand({
+          type: 'prompt',
+          identity: parent,
+          text: 'in-flight',
+          instanceId: first,
+        });
+        supervisor.handleCommand({ type: 'abort', identity: parent });
+        release.resolve();
+        await waitFor(events, 'parent-rejected');
+        expect(ends(events)).toEqual([
+          { type: 'parent-ended', instanceId: first },
+          { type: 'parent-rejected', instanceId: first },
+        ]);
+      } finally {
+        release.resolve();
+        await cleanup();
+      }
+    });
+
+    it('steer / retry 到不在的会话回显各自的号；不带号的桌面命令回的拒绝也不带号', async () => {
+      try {
+        supervisor.handleCommand({
+          type: 'steer',
+          identity: parent,
+          text: 'late',
+          instanceId: first,
+        });
+        supervisor.handleCommand({ type: 'retry', identity: parent, instanceId: second });
+        supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'desktop' });
+        await vi.waitFor(() => expect(ends(events)).toHaveLength(3));
+        expect(ends(events)).toEqual([
+          { type: 'parent-rejected', instanceId: first },
+          { type: 'parent-rejected', instanceId: second },
+          { type: 'parent-rejected', instanceId: undefined },
+        ]);
+        expect(events.at(-1)).not.toHaveProperty('instanceId');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('workspace 锁期间 defer 的 prompt 解锁后重入，拒绝仍回显原命令的号', async () => {
+      try {
+        supervisor.handleCommand({
+          type: 'lock-workspace',
+          requestId: 'lock-1',
+          conversationIds: [parent.sessionId],
+        });
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: 'workspace-lock-result', ok: true })
+        );
+        supervisor.handleCommand({
+          type: 'prompt',
+          identity: parent,
+          text: 'deferred',
+          instanceId: first,
+        });
+        await settle();
+        expect(ends(events)).toEqual([]);
+        supervisor.handleCommand({
+          type: 'unlock-workspace',
+          requestId: 'lock-1',
+          conversationIds: [parent.sessionId],
+        });
+        await waitFor(events, 'parent-rejected');
+        expect(ends(events)).toEqual([{ type: 'parent-rejected', instanceId: first }]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('同代会话仍在时重复 spawn 改绑新号：之后的 parent-ended 回显新号', async () => {
+      try {
+        for (const instanceId of [first, second]) {
+          supervisor.handleCommand({
+            type: 'spawn-parent',
+            identity: parent,
+            cwd: '/workspace',
+            model,
+            instanceId,
+          });
+          await settleUntil(
+            () => events.filter((event) => event.type === 'parent-ready').length > 0
+          );
+        }
+        await vi.waitFor(() =>
+          expect(events.filter((event) => event.type === 'parent-ready')).toHaveLength(2)
+        );
+        supervisor.handleCommand({ type: 'release-parent', identity: parent });
+        await waitFor(events, 'parent-ended');
+        expect(ends(events)).toEqual([{ type: 'parent-ended', instanceId: second }]);
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+
   it.each([
     ['replace', ['edit', 'write'], ['apply_patch']],
     ['apply_patch', ['apply_patch'], ['edit', 'write']],
@@ -2136,4 +2417,42 @@ describe('SessionSupervisor custom parent system prompt', () => {
     ).toEqual([]);
     await supervisor.shutdown();
   });
+
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ] as const)(
+    'Bot 群聊成员会话 botDiscussMode=%s：delegate 说明含讨论接力句 %s，其余工具不变',
+    async (botDiscussMode, expected) => {
+      const events: AgentWorkerEvent[] = [];
+      const supervisor = new SessionSupervisor({
+        emit: (event) => events.push(event),
+        agentDir: '/tmp/agent',
+        sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-discuss-')),
+      });
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        botMode: true,
+        botGroupTasks: true,
+        ...(botDiscussMode === undefined ? {} : { botDiscussMode }),
+      } as AgentCommand);
+      await waitFor(events, 'parent-ready');
+      const options = mocks.createAgentSession.mock.calls.at(-1)?.[0] as {
+        customTools: Array<{ name: string; description?: string }>;
+      };
+      const delegate = options.customTools.find((tool) => tool.name === 'delegate');
+      expect(delegate?.description).toContain('Pass taskId');
+      expect(delegate?.description?.includes('handle discussion openly in the group')).toBe(
+        expected
+      );
+      expect(options.customTools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(['check_delegation', 'retry_delegation', 'group_tasks'])
+      );
+      await supervisor.shutdown();
+    }
+  );
 });

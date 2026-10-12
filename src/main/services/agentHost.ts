@@ -406,6 +406,7 @@ export function startAgentWorker(): void {
       worker = null;
       workerReady = false;
       workerExited = true;
+      parentInstanceIds.clear();
     }
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');
@@ -733,6 +734,21 @@ function resolvePhysicalModelSelection(
 
 const parentToolProfiles = new Map<string, ChildProfileToolOptions>();
 const builtinToolScopes = new BuiltinToolScopes();
+/** 父会话最近一次 spawn-parent 带的实例号（见 spawnSession 的 options.instanceId）；worker 退出清空 */
+const parentInstanceIds = new Map<string, string>();
+
+/** 记下父会话这次 spawn-parent 带的实例号；不带号的 spawn 清掉旧号（worker 同样按最近一次 spawn 改绑） */
+export function rememberParentInstance(sessionId: string, instanceId: string | undefined): void {
+  if (instanceId) parentInstanceIds.set(sessionId, instanceId);
+  else parentInstanceIds.delete(sessionId);
+}
+
+/** 发往父会话的 prompt / steer / retry 附上该会话当前的实例号；子会话与没登记号的会话不附 */
+function instanceField(identity: SessionIdentity): { instanceId?: string } {
+  if ('parent' in identity) return {};
+  const instanceId = parentInstanceIds.get(identity.sessionId);
+  return instanceId ? { instanceId } : {};
+}
 
 export interface AgentTypeProfileContext {
   parentSessionId?: string;
@@ -909,6 +925,8 @@ export function spawnSession(
       mcpServerIds: string[];
       /** 群聊成员会话：worker 挂 group_tasks */
       groupTasks?: boolean;
+      /** 群聊成员会话且讨论模式（实验性）开启：delegate 说明加讨论接力句 */
+      discussMode?: boolean;
       /** 私聊 / 群聊成员会话（非委派）：worker 挂 routine_propose */
       routines?: boolean;
       /** 挂看板任务的委派会话：worker 挂 report_blocked */
@@ -916,6 +934,11 @@ export function spawnSession(
       /** 写成员同工作区写协调 */
       writeLock?: { label: string; ancestors: string[] };
     };
+    /**
+     * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
+     * retry 自动带上，worker 在 parent-rejected / parent-ended 里回显，调用方据此确定结束事件属于哪个实例
+     */
+    instanceId?: string;
   }
 ): { ok: boolean; error?: string } {
   if (request.resumeFile && !existsSync(request.resumeFile)) {
@@ -1096,10 +1119,12 @@ export function spawnSession(
     ...(promptKit.refusalRetryPrompt ? { refusalRetryPrompt: promptKit.refusalRetryPrompt } : {}),
     ...(options?.bot ? { botMode: true } : {}),
     ...(options?.bot?.groupTasks ? { botGroupTasks: true } : {}),
+    ...(options?.bot?.groupTasks && options.bot.discussMode ? { botDiscussMode: true } : {}),
     ...(options?.bot?.routines ? { botRoutines: true } : {}),
     ...(options?.bot?.delegationTask ? { botDelegationTask: true } : {}),
     ...(options?.bot?.writeLock ? { botWriteLock: options.bot.writeLock } : {}),
     ...(options?.bot || state?.protectedActionsInCode === true ? { protectedActions: true } : {}),
+    ...(options?.instanceId ? { instanceId: options.instanceId } : {}),
   });
   if (sent.ok) {
     builtinToolScopes.remember(
@@ -1108,6 +1133,7 @@ export function spawnSession(
       extraDisabledTools,
       presetApplied.disabledTools
     );
+    rememberParentInstance(identity.sessionId, options?.instanceId);
     rememberParentToolProfile(identity.sessionId, {
       editMode,
       shell: childProfileShell({
@@ -1555,6 +1581,7 @@ export function promptSession(
     ...(images?.length ? { images } : {}),
     ...(deliveryId ? { deliveryId } : {}),
     ...(resume ? { resume } : {}),
+    ...instanceField(identity),
   });
 }
 
@@ -1572,6 +1599,7 @@ export function steerSession(
     ...(images?.length ? { images } : {}),
     ...(deliveryId ? { deliveryId } : {}),
     ...(activeOnly ? { activeOnly } : {}),
+    ...instanceField(identity),
   });
 }
 
@@ -1819,7 +1847,7 @@ export function abortRetrySession(identity: SessionIdentity): { ok: boolean; err
 
 /** 终态失败后手动续跑：不新增 user 消息，从当前上下文 continue */
 export function retrySession(identity: SessionIdentity): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'retry', identity });
+  return sendAgentCommand({ type: 'retry', identity, ...instanceField(identity) });
 }
 
 export function respondApproval(
