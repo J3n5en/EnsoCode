@@ -313,6 +313,10 @@ export type BotChatStateResult =
       pendingHuman: boolean;
       /** 正在智能选人（分类中） */
       routing: boolean;
+      /** 讨论进行中（仅讨论模式开关打开时返回）：已用成员发言次数 / 安全上限 */
+      discuss?: { turns: number; max: number };
+      /** 群主正在收尾（仅讨论模式开关打开时返回） */
+      wrapUp?: true;
     }
   | BotIpcError;
 /** 私聊返回新会话；群聊返回分隔线 seq（当前段为空时不变） */

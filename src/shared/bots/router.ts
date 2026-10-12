@@ -1,4 +1,5 @@
 import type { BotChat, BotId, BotProfile, GroupEntry } from '../types/bot';
+import { type DiscussEndReason, discussCap, hasNewContent } from './discussWrapUp';
 import { namedMentions, parseMentions } from './mentions';
 
 export type RouterMember = Pick<BotProfile, 'id' | 'name'> & { archivedAt?: number };
@@ -22,6 +23,19 @@ export interface RouterState {
   reports?: SummaryReport[];
   /** 讨论模式（仅 smart 群）：成员说完且没 @ 人时，由判断模型决定下一位或结束 */
   discuss?: true;
+  /**
+   * 以下讨论计数只在 discuss 时存在（#33）；router.json 里只用于崩溃恢复，重启不重放讨论或收尾。
+   * discussTurns：讨论主链已开始的成员回合（含 [skip] 与失败，不含并行投递与收尾），对比安全上限。
+   */
+  discussTurns?: number;
+  /** 讨论主链的有效发言条数（非 [skip]、非失败），决定结束时是否收尾 */
+  discussReplies?: number;
+  /** 讨论主链最新一条有效发言的 seq */
+  discussLastSeq?: number;
+  /** 各成员上次发言（含 [skip] 与失败）时看到的最新有效发言 seq：之后没有新发言就不进候选 */
+  discussSeen?: Record<BotId, number>;
+  /** 讨论结束后群主正在收尾：回复里的 @ 只是提醒，不接力 */
+  wrapUp?: true;
 }
 
 export interface SummaryReport {
@@ -123,6 +137,66 @@ function advance(state: RouterState): RouterState {
     queue,
     current: next,
     turnsByBot: { ...state.turnsByBot, [next]: (state.turnsByBot[next] ?? 0) + 1 },
+    ...(state.discuss ? { discussTurns: (state.discussTurns ?? 0) + 1 } : {}),
+  };
+}
+
+/** 进入讨论：首位发言人（已开始）计一次，排队的首轮名单在开始时各计一次 */
+export function startDiscussion(state: RouterState): RouterState {
+  return {
+    ...state,
+    discuss: true,
+    discussTurns: state.current ? 1 : 0,
+    discussReplies: 0,
+  };
+}
+
+function withoutDiscussion(state: RouterState): RouterState {
+  const {
+    discuss: _discuss,
+    discussTurns: _turns,
+    discussReplies: _replies,
+    discussLastSeq: _lastSeq,
+    discussSeen: _seen,
+    ...rest
+  } = state;
+  return rest;
+}
+
+/**
+ * 讨论中途结束（委派 / 开关关闭）：去掉讨论标记与计数，丢掉还没发言的候选；
+ * 讨论里的发言次数不带进之后的普通接力（只记当前发言者这一次），maxTurnsPerBot 按全新额度算
+ */
+export function clearDiscussion(state: RouterState): RouterState {
+  return {
+    ...withoutDiscussion(state),
+    queue: [],
+    turnsByBot: state.current ? { [state.current]: 1 } : {},
+  };
+}
+
+/** 讨论结束后由群主收尾：不再是讨论，派单名单作废（收尾不追加汇总跳） */
+export function startWrapUp(state: RouterState, bossId: BotId): RouterState {
+  const { waiting: _waiting, reports: _reports, ...rest } = withoutDiscussion(state);
+  return {
+    ...rest,
+    queue: [],
+    current: bossId,
+    wrapUp: true,
+    turnsByBot: { ...state.turnsByBot, [bossId]: (state.turnsByBot[bossId] ?? 0) + 1 },
+  };
+}
+
+/**
+ * 收尾中途转回普通接力（开关关闭时群主已在收尾）：去掉收尾标记，与 clearDiscussion 同一口径——
+ * 讨论里的发言次数不带进之后的普通接力，只记当前发言者（群主）这一次，maxTurnsPerBot 按全新额度算
+ */
+export function clearWrapUp(state: RouterState): RouterState {
+  const { wrapUp: _wrapUp, ...rest } = state;
+  return {
+    ...rest,
+    queue: [],
+    turnsByBot: state.current ? { [state.current]: 1 } : {},
   };
 }
 
@@ -177,6 +251,9 @@ function nameOf(members: readonly RouterMember[], id: BotId): string {
  * 当前回复人说完：解析其回复里的 @ 接力，超出上限的拦下并提示。
  * delegated：本轮刚委派出去的成员，结果会经委派回传，正文 @ 他们不再接力。
  * 群主 @ 派出的成员都回复后（最后一条没 @ 群主），给群主追加一跳汇总提醒。
+ * 讨论中（discuss）：@ 接力不看 maxHops / maxTurnsPerBot，只受安全上限（已用 + 排队）限制，拦下不提示；
+ * 不记派单名单、不追加汇总跳；记录有效发言与各人看到的位置。
+ * 收尾中（wrapUp）：不解析 @、不计次数、不入队，说完本轮即结束。
  */
 export function onReply(
   state: RouterState,
@@ -188,6 +265,18 @@ export function onReply(
     return { state, next: state.current, skipped: false, notices: [], mentioned: false };
   }
   const skipped = isSkipReply(reply.text);
+  if (state.wrapUp) {
+    const { wrapUp: _wrapUp, waiting: _w, reports: _r, ...rest } = state;
+    return {
+      state: { ...rest, queue: [], current: null },
+      next: null,
+      skipped,
+      notices: [],
+      mentioned: false,
+    };
+  }
+  const discuss = state.discuss === true;
+  const cap = discuss ? discussCap(chat.routing) : 0;
   const queue = [...state.queue];
   const noticed = [...state.noticed];
   const notices: string[] = [];
@@ -202,6 +291,14 @@ export function onReply(
   const delegated = Array.isArray(reply.delegated) ? reply.delegated : [];
   for (const id of targets) {
     if (id === reply.botId || queue.includes(id) || delegated.includes(id)) continue;
+    if (discuss) {
+      // 已用 + 排队到安全上限时静默拦下，由 discussStep 统一按 cap 结束并提示
+      if ((state.discussTurns ?? 0) + queue.length < cap) {
+        queue.push(id);
+        relayed.push(id);
+      }
+      continue;
+    }
     const turns = turnsByBot[id] ?? 0;
     if (turns >= chat.routing.maxTurnsPerBot) {
       if (!noticed.includes(`turns:${id}`)) {
@@ -226,7 +323,7 @@ export function onReply(
   let reports = Array.isArray(state.reports) ? state.reports : [];
   let summary: ReplyResult['summary'];
   const boss = chat.bossBotId;
-  if (waiting.includes(reply.botId)) {
+  if (!discuss && waiting.includes(reply.botId)) {
     waiting = waiting.filter((id) => id !== reply.botId);
     const seq = skipped || typeof reply.seq !== 'number' ? {} : { seq: reply.seq };
     reports = [...reports, { botId: reply.botId, ...seq }];
@@ -257,10 +354,24 @@ export function onReply(
       }
     }
   }
-  if (reply.botId === boss) waiting = [...waiting, ...relayed];
+  if (!discuss && reply.botId === boss) waiting = [...waiting, ...relayed];
+  const progress: Partial<RouterState> = {};
+  if (discuss) {
+    const valid = !skipped && typeof reply.seq === 'number';
+    const lastSeq = valid
+      ? Math.max(state.discussLastSeq ?? 0, reply.seq as number)
+      : state.discussLastSeq;
+    progress.discussReplies = (state.discussReplies ?? 0) + (valid ? 1 : 0);
+    if (lastSeq !== undefined) progress.discussLastSeq = lastSeq;
+    progress.discussSeen = {
+      ...(state.discussSeen ?? {}),
+      [reply.botId]: lastSeq ?? state.rootEntrySeq,
+    };
+  }
   const { waiting: _w, reports: _r, ...rest } = state;
   const next = advance({
     ...rest,
+    ...progress,
     queue,
     hops,
     noticed,
@@ -280,25 +391,29 @@ export function onReply(
 export type DiscussStep =
   | { kind: 'none' }
   | { kind: 'judge'; candidates: BotId[] }
-  | { kind: 'end'; notice?: string };
+  | { kind: 'end'; reason: Extract<DiscussEndReason, 'cap' | 'idle'> };
 
-/** 讨论中可接话的成员：在群、未归档、未静音、本轮发言未满，且不是刚说完的那位 */
+/**
+ * 讨论中可接话的成员：在群、未归档、未静音、不是刚说完的那位，且自上次发言以来有新的有效发言
+ * （不看 maxTurnsPerBot，总量由安全上限兜底）
+ */
 function discussCandidates(
   state: RouterState,
   chat: RouterChat,
   members: readonly RouterMember[],
   lastBotId: BotId
-): { candidates: BotId[]; others: number } {
-  const others = activeMembers(chat, members, true).filter((m) => m.id !== lastBotId);
-  const candidates = others
-    .filter((m) => (state.turnsByBot[m.id] ?? 0) < chat.routing.maxTurnsPerBot)
+): BotId[] {
+  const latest = state.discussLastSeq ?? state.rootEntrySeq;
+  const seen = state.discussSeen ?? {};
+  return activeMembers(chat, members, true)
+    .filter((m) => m.id !== lastBotId && hasNewContent(seen[m.id], latest))
     .map((m) => m.id);
-  return { candidates, others: others.length };
 }
 
 /**
  * 讨论中一位成员说完、接力队列已空：回复里 @ 了人 / 本回合委派了 / 有待处理的人类消息时不判断；
- * 到 hops 上限或没人可选时直接结束（附一句提示），否则交给判断模型从 candidates 里选下一位或结束。
+ * 到安全上限（优先于 @：@ 被上限拦下也要结束）或没人可选时结束并给出原因，
+ * 否则交给判断模型从 candidates 里选下一位或结束。
  */
 export function discussStep(
   state: RouterState,
@@ -307,22 +422,15 @@ export function discussStep(
   input: { lastBotId: BotId; mentioned: boolean; delegated: boolean; pendingHuman: boolean }
 ): DiscussStep {
   if (!state.discuss || state.current !== null || state.queue.length > 0) return { kind: 'none' };
-  if (input.mentioned || input.delegated || input.pendingHuman) return { kind: 'none' };
-  if (state.hops >= chat.routing.maxHops)
-    return {
-      kind: 'end',
-      notice: `本轮讨论已达接力上限（${chat.routing.maxHops} 次），讨论结束。`,
-    };
-  const { candidates, others } = discussCandidates(state, chat, members, input.lastBotId);
+  if (input.delegated || input.pendingHuman) return { kind: 'none' };
+  if ((state.discussTurns ?? 0) >= discussCap(chat.routing)) return { kind: 'end', reason: 'cap' };
+  if (input.mentioned) return { kind: 'none' };
+  const candidates = discussCandidates(state, chat, members, input.lastBotId);
   if (candidates.length > 0) return { kind: 'judge', candidates };
-  return {
-    kind: 'end',
-    notice:
-      others > 0 ? '成员本轮发言次数都已达上限，讨论结束。' : '没有其他可接话的成员，讨论结束。',
-  };
+  return { kind: 'end', reason: 'idle' };
 }
 
-/** 应用判断结果：按当前群况重新校验选中的人，计一跳与一次发言；不合法返回 null（讨论结束） */
+/** 应用判断结果：按当前群况重新校验选中的人，计一次讨论发言（不计 hop）；到上限或不合法返回 null */
 export function discussPick(
   state: RouterState,
   chat: RouterChat,
@@ -330,13 +438,14 @@ export function discussPick(
   botId: BotId,
   lastBotId: BotId
 ): RouterState | null {
-  if (!state.discuss || state.current !== null || state.hops >= chat.routing.maxHops) return null;
-  if (!discussCandidates(state, chat, members, lastBotId).candidates.includes(botId)) return null;
+  if (!state.discuss || state.current !== null) return null;
+  if ((state.discussTurns ?? 0) >= discussCap(chat.routing)) return null;
+  if (!discussCandidates(state, chat, members, lastBotId).includes(botId)) return null;
   return {
     ...state,
     queue: [],
     current: botId,
-    hops: state.hops + 1,
+    discussTurns: (state.discussTurns ?? 0) + 1,
     turnsByBot: { ...state.turnsByBot, [botId]: (state.turnsByBot[botId] ?? 0) + 1 },
   };
 }
@@ -368,8 +477,10 @@ export function onHumanMessage(
     return { action: 'start', state: startRound(chat, members, humanEntry) };
   const parsed = parseMentions(humanEntry.text, inChatMembers(chat, members));
   if (!humanEntry.mentions?.length && !parsed.all && !parsed.ids.length)
-    // 讨论中不打断正在说话的成员：等他说完放弃剩下的讨论，按新消息重开（与 Grok 的 epoch 取消一致）
-    return state.discuss ? { action: 'restart-after-current' } : { action: 'route-parallel' };
+    // 讨论 / 收尾中不打断正在说话的成员：等他说完放弃剩下的讨论，按新消息重开（与 Grok 的 epoch 取消一致）
+    return state.discuss || state.wrapUp
+      ? { action: 'restart-after-current' }
+      : { action: 'route-parallel' };
   const targets = humanTargets(chat, members, humanEntry);
   const others = targets.filter((id) => id !== state.current);
   if (others.length) return { action: 'parallel', targets };

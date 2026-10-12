@@ -16,6 +16,7 @@ import {
   type ThinkingLevel,
 } from '@shared/types/agent';
 import {
+  BOT_DISCUSS_MAX_TURNS,
   BOT_ROUTING_MODES,
   BOT_THREAD_TITLE_MAX,
   type BotChat,
@@ -212,7 +213,8 @@ function parseWorkspaceInput(value: unknown): ChatWorkspaceInput | null {
 
 function parseRouting(value: unknown): Partial<BotChat['routing']> | null {
   const input = record(value);
-  if (!input || !onlyKeys(input, ['mode', 'maxHops', 'maxTurnsPerBot', 'muted'])) return null;
+  if (!input || !onlyKeys(input, ['mode', 'maxHops', 'maxTurnsPerBot', 'discussMaxTurns', 'muted']))
+    return null;
   const routing: Partial<BotChat['routing']> = {};
   if (input.mode !== undefined) {
     if (!BOT_ROUTING_MODES.includes(input.mode as BotRoutingMode)) return null;
@@ -222,6 +224,16 @@ function parseRouting(value: unknown): Partial<BotChat['routing']> | null {
     if (input[key] === undefined) continue;
     if (!seq(input[key])) return null;
     routing[key] = input[key];
+  }
+  if (input.discussMaxTurns !== undefined) {
+    const value = input.discussMaxTurns;
+    if (
+      !Number.isSafeInteger(value) ||
+      (value as number) < BOT_DISCUSS_MAX_TURNS.min ||
+      (value as number) > BOT_DISCUSS_MAX_TURNS.max
+    )
+      return null;
+    routing.discussMaxTurns = value as number;
   }
   if (input.muted !== undefined) {
     if (!Array.isArray(input.muted) || input.muted.length > MAX.ids || !input.muted.every(isBotId))

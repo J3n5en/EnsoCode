@@ -59,6 +59,11 @@ export interface BotChatRouting {
   mode: BotRoutingMode;
   maxHops: number;
   maxTurnsPerBot: number;
+  /**
+   * 讨论安全上限（讨论模式开关打开时生效）：讨论主链里成员发言（含 [skip] 与失败）达到这个次数时交群主收尾。
+   * 缺省按 BOT_DISCUSS_MAX_TURNS.default 算，旧数据不迁移；只存群内，不随团队导出。
+   */
+  discussMaxTurns?: number;
   /** 静音成员：只在被点名 @ 时发言（@所有人、智能选人、群主兜底都跳过）；群主不可静音 */
   muted?: BotId[];
 }
@@ -398,7 +403,10 @@ export type GroupEntry =
       text: string;
       conversationId: string;
       turnId: string;
-      /** 该轮回复人由智能选人选出（群主兜底不标）；带意图时为 smart:<intent>；summary 为派单后的群主汇总 */
+      /**
+       * 该轮回复人由智能选人选出（群主兜底不标）；带意图时为 smart:<intent>；summary 为派单后的群主汇总；
+       * wrap-up 为讨论结束后的群主收尾
+       */
       routedBy?: BotRoutedBy;
       /** 产出该回复的模型 id（虚拟模型为实际路由到的真实模型） */
       model?: string;
@@ -451,9 +459,12 @@ export const BOT_ROUTED_BY = [
   'smart:answer',
   'smart:discuss',
   'summary',
+  'wrap-up',
 ] as const;
 export type BotRoutedBy = (typeof BOT_ROUTED_BY)[number];
 const ROUTING_LIMITS = { maxHops: 20, maxTurnsPerBot: 10 } as const;
+/** 讨论安全上限的取值范围与缺省值 */
+export const BOT_DISCUSS_MAX_TURNS = { min: 5, max: 200, default: 50 } as const;
 
 export const BOT_NAME_MAX = 24;
 /** 群聊里 @ 全体的保留写法 */
@@ -654,6 +665,16 @@ export function parseBotChat(value: unknown): BotChat | undefined {
         ROUTING_LIMITS.maxTurnsPerBot,
         BOT_ROUTING_DEFAULTS.maxTurnsPerBot
       ),
+      ...(Number.isSafeInteger(routing.discussMaxTurns)
+        ? {
+            discussMaxTurns: intIn(
+              routing.discussMaxTurns,
+              BOT_DISCUSS_MAX_TURNS.min,
+              BOT_DISCUSS_MAX_TURNS.max,
+              BOT_DISCUSS_MAX_TURNS.default
+            ),
+          }
+        : {}),
       ...(muted.length > 0 ? { muted } : {}),
     },
     pinned: value.pinned === true,

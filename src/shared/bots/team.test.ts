@@ -280,4 +280,15 @@ describe('buildTeamFile', () => {
     expect(file.team.routing).toEqual({ mode: 'smart', maxHops: 5, maxTurnsPerBot: 3 });
     expect(parseTeamFile(JSON.stringify(file)).ok).toBe(true);
   });
+
+  it('讨论安全上限是群内设置，不随团队导出（旧版本 exactKeys 校验仍能导入）', () => {
+    const file = buildTeamFile(
+      { ...chat, routing: { ...chat.routing, discussMaxTurns: 80 } },
+      [bot(1, 'Lin'), bot(2, 'Max')],
+      {},
+      'now'
+    );
+    expect(file.team.routing).not.toHaveProperty('discussMaxTurns');
+    expect(parseTeamFile(JSON.stringify(file)).ok).toBe(true);
+  });
 });

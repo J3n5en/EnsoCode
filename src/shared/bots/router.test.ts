@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { BotChat, GroupEntry } from '../types/bot';
 import {
   buildSummaryNote,
+  clearDiscussion,
+  clearWrapUp,
   discussPick,
   discussStep,
   isSkipReply,
@@ -11,7 +13,9 @@ import {
   onReply,
   type RouterState,
   shouldRoute,
+  startDiscussion,
   startRound,
+  startWrapUp,
 } from './router';
 
 type Human = Extract<GroupEntry, { kind: 'human' }>;
@@ -593,6 +597,10 @@ describe('讨论模式', () => {
     turnsByBot: { boss: 1, fe: 1 },
     noticed: [],
     discuss: true,
+    discussTurns: 2,
+    discussReplies: 2,
+    discussLastSeq: 3,
+    discussSeen: { boss: 2, fe: 3 },
     ...patch,
   });
   const quiet = { lastBotId: 'fe', mentioned: false, delegated: false, pendingHuman: false };
@@ -603,14 +611,78 @@ describe('讨论模式', () => {
     expect(result.state).toMatchObject({ discuss: true, current: 'boss' });
   });
 
-  it('onReply 标出回复里是否 @ 了别人（含被上限拦下的）', () => {
-    const state = discussing({ current: 'fe', hops: 4 });
+  it('startDiscussion 计入首位发言人；之后每开始一个讨论回合计一次（含首轮排队的人）', () => {
+    const c = chat({}, 'smart');
+    const started = startDiscussion(startRound(c, members, human('@所有人 说说')));
+    expect(started).toMatchObject({
+      discuss: true,
+      current: 'boss',
+      queue: ['fe', 'be'],
+      discussTurns: 1,
+      discussReplies: 0,
+    });
+    const r1 = onReply(started, c, members, { botId: 'boss', text: 'a', seq: 2 });
+    expect(r1.state).toMatchObject({ current: 'fe', discussTurns: 2, hops: 0 });
+    expect(startDiscussion({ ...started, current: null, queue: [] }).discussTurns).toBe(0);
+  });
+
+  it('首轮名单超过安全上限时照常跑完，上限只拦后面新加的回合', () => {
+    const c = chat({ discussMaxTurns: 5 }, 'smart');
+    let state = discussing({ current: 'fe', queue: ['be', 'boss', 'be', 'boss'], discussTurns: 4 });
+    for (const botId of ['fe', 'be', 'boss', 'be'])
+      state = onReply(state, c, members, { botId, text: 'x' }).state;
+    expect(state).toMatchObject({ current: 'boss', queue: [], discussTurns: 8 });
+    const last = onReply(state, c, members, { botId: 'boss', text: '@前端 你再说说' });
+    expect(last.state).toMatchObject({ current: null, queue: [] });
+    expect(last.notices).toEqual([]);
+  });
+
+  it('onReply 标出回复里是否 @ 了别人（含被安全上限拦下的）', () => {
+    const state = discussing({ current: 'fe', discussTurns: 50 });
     const result = onReply(state, chat(), members, { botId: 'fe', text: '@Backend 你看呢' });
     expect(result.mentioned).toBe(true);
     expect(result.next).toBeNull();
+    expect(result.notices).toEqual([]);
     expect(
       onReply(discussing({ current: 'fe' }), chat(), members, { botId: 'fe', text: 'ok' })
     ).toMatchObject({ mentioned: false });
+  });
+
+  it('讨论中 @ 接力不受 maxHops / maxTurnsPerBot 限制，也不计 hop、不发上限提示', () => {
+    const c = chat({ maxHops: 1, maxTurnsPerBot: 1 });
+    const state = discussing({ current: 'fe', hops: 1, turnsByBot: { boss: 3, be: 3, fe: 3 } });
+    const result = onReply(state, c, members, { botId: 'fe', text: '@Backend @老板 你们看呢' });
+    expect(result.state).toMatchObject({ current: 'be', queue: ['boss'], hops: 1 });
+    expect(result.state.discussTurns).toBe(3);
+    expect(result.notices).toEqual([]);
+  });
+
+  it('讨论中 @ 接力到安全上限静默拦下（已用 + 排队），discussStep 报 cap 且优先于 mentioned', () => {
+    const c = chat({ discussMaxTurns: 5 });
+    const state = discussing({ current: 'fe', discussTurns: 4 });
+    const result = onReply(state, c, members, { botId: 'fe', text: '@Backend @老板 你们看呢' });
+    expect(result.state).toMatchObject({ current: 'be', queue: [], discussTurns: 5 });
+    expect(result.notices).toEqual([]);
+    const capped = onReply(result.state, c, members, { botId: 'be', text: '@老板 你来定' });
+    expect(capped.mentioned).toBe(true);
+    expect(capped.notices).toEqual([]);
+    expect(
+      discussStep(capped.state, c, members, { ...quiet, lastBotId: 'be', mentioned: true })
+    ).toEqual({ kind: 'end', reason: 'cap' });
+  });
+
+  it('讨论中群主 @ 派人不记 waiting、不追加汇总跳', () => {
+    const c = chat({ maxHops: 6 });
+    const r1 = onReply(discussing({ current: 'boss' }), c, members, {
+      botId: 'boss',
+      text: '@前端 @Backend 各给一个方案',
+      seq: 4,
+    });
+    expect(r1.state.waiting).toBeUndefined();
+    const r2 = onReply(r1.state, c, members, { botId: 'fe', text: 'A', seq: 5 });
+    const r3 = onReply(r2.state, c, members, { botId: 'be', text: 'B', seq: 6 });
+    expect(r3.summary).toBeUndefined();
+    expect(r3.state).toMatchObject({ current: null, queue: [] });
   });
 
   it('不在讨论、还有人排队、回复里有 @、本回合委派、有待处理人类消息时不判断', () => {
@@ -629,67 +701,121 @@ describe('讨论模式', () => {
       });
   });
 
-  it('可选名单排除刚说完的人、静音、归档与发言已满的成员', () => {
-    expect(discussStep(discussing(), chat(), members, quiet)).toEqual({
-      kind: 'judge',
-      candidates: ['boss', 'be'],
-    });
+  it('可选名单排除刚说完的人、静音、归档，以及上次发言后没有新内容的成员；不看 maxTurnsPerBot', () => {
+    // boss 发言次数已超 maxTurnsPerBot，但看到 seq 2 之后又有了 seq 3 的新发言
+    expect(
+      discussStep(discussing({ turnsByBot: { boss: 9, fe: 1 } }), chat(), members, quiet)
+    ).toEqual({ kind: 'judge', candidates: ['boss', 'be'] });
+    expect(
+      discussStep(discussing({ discussSeen: { boss: 3, fe: 3 } }), chat(), members, quiet)
+    ).toEqual({ kind: 'judge', candidates: ['be'] });
     expect(
       discussStep(
-        discussing({ turnsByBot: { boss: 2, fe: 1 } }),
+        discussing({ discussSeen: { boss: 3, fe: 3 } }),
         chat({ muted: ['be'] }),
         members,
         quiet
       )
-    ).toEqual({ kind: 'end', notice: '成员本轮发言次数都已达上限，讨论结束。' });
+    ).toEqual({ kind: 'end', reason: 'idle' });
   });
 
-  it('没有其他可接话的成员时结束并提示', () => {
+  it('没有可接话的成员时 reason=idle', () => {
     const solo = [{ id: 'fe', name: '前端' }];
-    expect(discussStep(discussing(), chat(), solo, quiet)).toEqual({
-      kind: 'end',
-      notice: '没有其他可接话的成员，讨论结束。',
-    });
+    expect(discussStep(discussing(), chat(), solo, quiet)).toEqual({ kind: 'end', reason: 'idle' });
   });
 
-  it('hops 已到上限时不调模型，直接结束并提示', () => {
-    expect(discussStep(discussing({ hops: 4 }), chat(), members, quiet)).toEqual({
-      kind: 'end',
-      notice: '本轮讨论已达接力上限（4 次），讨论结束。',
+  it('讨论不看 maxHops：hops 超过 maxHops 仍继续判断；到安全上限才结束（reason=cap）', () => {
+    expect(discussStep(discussing({ hops: 9 }), chat({ maxHops: 1 }), members, quiet)).toEqual({
+      kind: 'judge',
+      candidates: ['boss', 'be'],
     });
+    expect(discussStep(discussing({ discussTurns: 49 }), chat(), members, quiet)).toMatchObject({
+      kind: 'judge',
+    });
+    expect(discussStep(discussing({ discussTurns: 50 }), chat(), members, quiet)).toEqual({
+      kind: 'end',
+      reason: 'cap',
+    });
+    expect(
+      discussStep(discussing({ discussTurns: 5 }), chat({ discussMaxTurns: 5 }), members, quiet)
+    ).toEqual({ kind: 'end', reason: 'cap' });
   });
 
-  it('discussPick 计 hop 与发言次数；不合法就拒绝', () => {
+  it('discussPick 计讨论次数、不计 hop；到安全上限或不合法就拒绝', () => {
     const picked = discussPick(discussing(), chat(), members, 'be', 'fe');
     expect(picked).toMatchObject({
       current: 'be',
-      hops: 1,
+      hops: 0,
+      discussTurns: 3,
       turnsByBot: { boss: 1, fe: 1, be: 1 },
       discuss: true,
     });
     expect(discussPick(discussing(), chat(), members, 'fe', 'fe')).toBeNull();
     expect(discussPick(discussing(), chat(), members, 'old', 'fe')).toBeNull();
-    expect(discussPick(discussing({ hops: 4 }), chat(), members, 'be', 'fe')).toBeNull();
+    expect(discussPick(discussing({ discussTurns: 50 }), chat(), members, 'be', 'fe')).toBeNull();
     expect(
-      discussPick(discussing({ turnsByBot: { be: 2 } }), chat(), members, 'be', 'fe')
+      discussPick(discussing({ discussSeen: { boss: 3, be: 3 } }), chat(), members, 'be', 'fe')
     ).toBeNull();
+    // 不再看 maxHops / maxTurnsPerBot
+    expect(
+      discussPick(discussing({ hops: 9, turnsByBot: { be: 9 } }), chat(), members, 'be', 'fe')
+    ).toMatchObject({ current: 'be' });
   });
 
-  it('[skip] 不占发言次数，但判断选出的那一跳照样计 hop，最终会因 hops 结束', () => {
-    let state = discussing();
+  it('[skip] 与失败计入安全上限，不计入有效发言；有效发言记 seq 与各人看到的位置', () => {
+    const c = chat();
+    const skipped = onReply(discussing({ current: 'be', discussTurns: 3 }), c, members, {
+      botId: 'be',
+      text: '[skip]',
+    });
+    expect(skipped.state).toMatchObject({
+      discussTurns: 3,
+      discussReplies: 2,
+      discussLastSeq: 3,
+      discussSeen: { boss: 2, fe: 3, be: 3 },
+    });
+    const failed = onReply(discussing({ current: 'be', discussTurns: 3 }), c, members, {
+      botId: 'be',
+      text: '',
+    });
+    expect(failed.state).toMatchObject({ discussTurns: 3, discussReplies: 2 });
+    const spoke = onReply(discussing({ current: 'be', discussTurns: 3 }), c, members, {
+      botId: 'be',
+      text: '我补充一点',
+      seq: 9,
+    });
+    expect(spoke.state).toMatchObject({
+      discussTurns: 3,
+      discussReplies: 3,
+      discussLastSeq: 9,
+      discussSeen: { boss: 2, fe: 3, be: 9 },
+    });
+    // 刚 [skip] 的人在没有新发言之前不会再被选；有了新发言才回到名单
+    expect(discussStep(skipped.state, c, members, { ...quiet, lastBotId: 'be' })).toEqual({
+      kind: 'judge',
+      candidates: ['boss'],
+    });
+  });
+
+  it('一直 [skip]：每人只会被问到没有新内容为止，然后 reason=idle', () => {
+    let state = discussing({ discussSeen: { fe: 3 } });
     let last = 'fe';
     let judged = 0;
     for (let i = 0; i < 10; i++) {
       const step = discussStep(state, chat(), members, { ...quiet, lastBotId: last });
-      if (step.kind !== 'judge') break;
+      if (step.kind !== 'judge') {
+        expect(step).toEqual({ kind: 'end', reason: 'idle' });
+        break;
+      }
       judged++;
       const next = step.candidates[0]!;
       state = discussPick(state, chat(), members, next, last)!;
       state = onReply(state, chat(), members, { botId: next, text: '[skip]' }).state;
       last = next;
     }
-    expect(judged).toBe(4);
-    expect(state.hops).toBe(4);
+    expect(judged).toBe(2);
+    expect(state.discussTurns).toBe(4);
+    expect(state.hops).toBe(0);
   });
 
   it('讨论中有人在说话时，人类发来没 @ 的消息：等他说完再按新消息重开', () => {
@@ -710,5 +836,108 @@ describe('讨论模式', () => {
         human('换个话题')
       )
     ).toEqual({ action: 'route-parallel' });
+  });
+
+  describe('群主收尾', () => {
+    const wrapping = (): RouterState => startWrapUp(discussing({ waiting: ['fe'] }), 'boss');
+
+    it('startWrapUp：去掉讨论标记与计数、清掉派单名单，当前回复人为群主', () => {
+      const state = wrapping();
+      expect(state).toMatchObject({ wrapUp: true, current: 'boss', queue: [] });
+      for (const key of [
+        'discuss',
+        'discussTurns',
+        'discussReplies',
+        'discussLastSeq',
+        'discussSeen',
+        'waiting',
+        'reports',
+      ])
+        expect(state).not.toHaveProperty(key);
+    });
+
+    it('wrapUp 下 onReply 不解析 @、不计次数、不入队，说完即结束并去掉 wrapUp', () => {
+      const state = wrapping();
+      const result = onReply(state, chat({ maxHops: 9 }), members, {
+        botId: 'boss',
+        text: '结论：用 A。@前端 @Backend 请落实',
+        seq: 9,
+      });
+      expect(result).toMatchObject({ next: null, mentioned: false, notices: [], skipped: false });
+      expect(result.state).toMatchObject({ current: null, queue: [], hops: state.hops });
+      expect(result.state.turnsByBot).toEqual(state.turnsByBot);
+      expect(result.state).not.toHaveProperty('wrapUp');
+      expect(result.state).not.toHaveProperty('waiting');
+      expect(onReply(state, chat(), members, { botId: 'boss', text: '[skip]' })).toMatchObject({
+        skipped: true,
+        next: null,
+      });
+    });
+
+    it('wrapUp 下没 @ 的人类消息 → restart-after-current，只 @ 群主 → steer，@ 别人 → 并行', () => {
+      expect(onHumanMessage(wrapping(), chat(), members, human('还有个问题'))).toEqual({
+        action: 'restart-after-current',
+      });
+      expect(onHumanMessage(wrapping(), chat(), members, human('@老板 补一句'))).toEqual({
+        action: 'steer',
+      });
+      expect(onHumanMessage(wrapping(), chat(), members, human('@前端 你先做'))).toEqual({
+        action: 'parallel',
+        targets: ['fe'],
+      });
+    });
+
+    it('clearDiscussion：去掉讨论标记与计数，丢掉排队候选，发言次数清零（只记当前发言者这一次）', () => {
+      const cleared = clearDiscussion(
+        discussing({ current: 'be', queue: ['boss'], turnsByBot: { boss: 4, fe: 3, be: 2 } })
+      );
+      expect(cleared).toMatchObject({ current: 'be', queue: [], turnsByBot: { be: 1 } });
+      for (const key of [
+        'discuss',
+        'discussTurns',
+        'discussReplies',
+        'discussLastSeq',
+        'discussSeen',
+      ])
+        expect(cleared).not.toHaveProperty(key);
+      expect(clearDiscussion(discussing()).turnsByBot).toEqual({});
+      // 之后的普通接力按全新额度：maxTurnsPerBot 不受讨论里的发言次数影响
+      const relay = onReply(clearDiscussion(discussing({ current: 'be' })), chat(), members, {
+        botId: 'be',
+        text: '@老板 你来',
+      });
+      expect(relay.state).toMatchObject({ current: 'boss', hops: 1 });
+      expect(relay.notices).toEqual([]);
+    });
+
+    it('clearWrapUp：收尾中途关开关转普通接力，去掉 wrapUp，讨论发言次数清零（只记群主这一次）', () => {
+      const state = startWrapUp(
+        discussing({ turnsByBot: { boss: 1, fe: 1, be: 1 }, current: null }),
+        'boss'
+      );
+      expect(state.turnsByBot).toEqual({ boss: 2, fe: 1, be: 1 });
+      const snapshot = JSON.parse(JSON.stringify(state)) as RouterState;
+      const cleared = clearWrapUp(state);
+      expect(state).toEqual(snapshot);
+      expect(cleared).toMatchObject({ current: 'boss', queue: [], turnsByBot: { boss: 1 } });
+      expect(cleared).not.toHaveProperty('wrapUp');
+      expect(clearWrapUp({ ...state, current: null }).turnsByBot).toEqual({});
+      // 群主的回复按 main 规则接力，讨论里已发过言的成员按全新额度
+      const relay = onReply(cleared, chat({ maxTurnsPerBot: 1 }), members, {
+        botId: 'boss',
+        text: '@前端 请落实',
+      });
+      expect(relay.state).toMatchObject({ current: 'fe' });
+      expect(relay.notices).toEqual([]);
+    });
+
+    it('新增字段的状态可 JSON 往返且输入状态不被修改', () => {
+      for (const state of [discussing({ current: 'fe' }), wrapping()]) {
+        const snapshot = JSON.parse(JSON.stringify(state)) as RouterState;
+        expect(snapshot).toEqual(state);
+        onReply(state, chat(), members, { botId: state.current!, text: '@Backend ok', seq: 8 });
+        expect(state).toEqual(snapshot);
+      }
+    });
   });
 });

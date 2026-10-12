@@ -456,6 +456,10 @@ export interface PairBotChatState {
   hops: number;
   turnsByBot: Record<string, number>;
   pendingHuman: boolean;
+  /** 讨论进行中：已用成员发言次数 / 安全上限（可选，旧手机忽略） */
+  discuss?: { turns: number; max: number };
+  /** 群主正在收尾（可选，旧手机忽略） */
+  wrapUp?: boolean;
 }
 
 export interface PairBotActivityStep {

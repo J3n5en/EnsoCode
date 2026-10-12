@@ -68,6 +68,7 @@ const ROUTED_BY_LABELS: Record<BotRoutedBy, string> = {
   'smart:answer': 'Smart pick · answer',
   'smart:discuss': 'Smart pick · discuss',
   summary: 'Owner summary',
+  'wrap-up': 'Owner wrap-up',
 };
 
 interface GroupTimelineProps {

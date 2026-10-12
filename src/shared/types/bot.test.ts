@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BOT_DISCUSS_MAX_TURNS,
   BOT_ROUTING_DEFAULTS,
   BOT_THREAD_TITLE_MAX,
   checkBotName,
@@ -258,6 +259,18 @@ describe('parseBotChat', () => {
     expect(parseBotChat(group)?.routing).not.toHaveProperty('muted');
   });
 
+  it('routing.discussMaxTurns：缺省不写入（按 50 算），越界夹到 5–200，非整数丢弃', () => {
+    expect(BOT_DISCUSS_MAX_TURNS).toEqual({ min: 5, max: 200, default: 50 });
+    const parse = (discussMaxTurns: unknown) =>
+      parseBotChat({ ...group, routing: { ...group.routing, discussMaxTurns } })?.routing;
+    expect(parseBotChat(group)?.routing).not.toHaveProperty('discussMaxTurns');
+    expect(parse(30)?.discussMaxTurns).toBe(30);
+    expect(parse(1)?.discussMaxTurns).toBe(5);
+    expect(parse(999)?.discussMaxTurns).toBe(200);
+    for (const bad of ['30', 12.5, null, Number.NaN, {}])
+      expect(parse(bad)).not.toHaveProperty('discussMaxTurns');
+  });
+
   it('preserves valid distillation watermarks and drops malformed ones', () => {
     for (const distilledTo of ['entry-7', '', 42, null]) {
       const parsed = parseBotChat({
@@ -480,7 +493,7 @@ describe('parseGroupEntry', () => {
     };
     expect(parseGroupEntry({ ...base, routedBy: 'smart' })).toEqual({ ...base, routedBy: 'smart' });
     expect(parseGroupEntry({ ...base, routedBy: 'other' })).toEqual(base);
-    for (const routedBy of ['smart:build', 'smart:answer', 'smart:discuss', 'summary'])
+    for (const routedBy of ['smart:build', 'smart:answer', 'smart:discuss', 'summary', 'wrap-up'])
       expect(parseGroupEntry({ ...base, routedBy })).toEqual({ ...base, routedBy });
     expect(parseGroupEntry({ ...base, routedBy: 'smart:x' })).toEqual(base);
   });

@@ -532,6 +532,11 @@ describe('讨论判断 next()', () => {
       maxTokens: 128,
     });
     expect(judge.mock.calls[0][0].userText).toContain('NEXT: <name>');
+    // 讨论判断的 judge 请求带 #33 的新规则：END 只表示已有结论，兜圈子交给群主拍板
+    expect(judge.mock.calls[0][0].userText).toContain(
+      'Answer END only when the discussion has reached a conclusion or a clear next step'
+    );
+    expect(judge.mock.calls[0][0].userText).toContain('pick the group owner');
     expect(classify).not.toHaveBeenCalled();
   });
 

@@ -131,6 +131,14 @@ describe('llama-cpp-classify：完整概率表', () => {
     expect(pickDiscussNext(picked, input)).toEqual({ next: 'b' });
     expect(pickDiscussNext(await run([0.2, 0.2, 0.6]), input)).toEqual({ end: true });
     expect(pickDiscussNext(await run([0.35, 0.3, 0.35]), input)).toEqual({ end: true });
+    // 最高成员不到 0.4 且 end 更低：交给群主（Carol），群主不在候选里才结束
+    const unsure = await run([0.38, 0.3, 0.32]);
+    const owned: DiscussNextInput = {
+      ...input,
+      candidates: input.candidates.map((c) => (c.id === 'c' ? { ...c, owner: true } : c)),
+    };
+    expect(pickDiscussNext(unsure, owned)).toEqual({ next: 'c' });
+    expect(pickDiscussNext(unsure, input)).toEqual({ end: true });
   });
 });
 

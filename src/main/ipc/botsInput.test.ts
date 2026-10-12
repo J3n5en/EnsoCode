@@ -195,6 +195,15 @@ describe('chat inputs', () => {
     expect(parseChatUpdateInput({ chatId: A, routing: { muted: A } })).toBeNull();
     expect(parseChatUpdateInput({ chatId: A, routing: { muted: [1] } })).toBeNull();
   });
+
+  it('routing.discussMaxTurns 接受 5–200 的整数，越界、小数、字符串整条拒绝', () => {
+    for (const value of [5, 50, 200])
+      expect(
+        parseChatUpdateInput({ chatId: A, routing: { discussMaxTurns: value } })?.routing
+      ).toEqual({ discussMaxTurns: value });
+    for (const bad of [4, 201, 0, -1, 12.5, '50', null, Number.NaN])
+      expect(parseChatUpdateInput({ chatId: A, routing: { discussMaxTurns: bad } })).toBeNull();
+  });
 });
 
 describe('send / timeline / workspace / history inputs', () => {
