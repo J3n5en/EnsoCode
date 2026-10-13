@@ -18,6 +18,7 @@ import {
   type GroupEntry,
   type GroupEntryInput,
   isBotChatId,
+  NEW_GROUP_ROUTING_MODE,
   parseBotChat,
   parseGroupEntry,
 } from '../../../shared/types/bot';
@@ -180,7 +181,10 @@ export class BotChatStore {
     const chat = parseBotChat({
       ...draft,
       // 解析缺省为 boss（旧数据不变）；新建群缺省智能选人
-      routing: { ...(draft.kind === 'group' ? { mode: 'smart' } : {}), ...draft.routing },
+      routing: {
+        ...(draft.kind === 'group' ? { mode: NEW_GROUP_ROUTING_MODE } : {}),
+        ...draft.routing,
+      },
       // 新建群的主话题参与 AI 自动命名；旧数据没有此标记
       ...(draft.kind === 'group' ? { autoTitle: { seq: 0 } } : {}),
       id,

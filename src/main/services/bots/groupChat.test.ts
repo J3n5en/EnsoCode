@@ -2112,6 +2112,85 @@ describe('讨论模式', () => {
     expect(group.state(id)).toMatchObject({ current: a, hops: 0, discuss: { turns: 2, max: 50 } });
   });
 
+  it('判断选中的人在投递附录等待期间被静音：不投递给 TA，按当前名单重新判断', async () => {
+    let gate = false;
+    let ready!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const waiting = new Promise<string>((resolve) => {
+      resume = () => resolve('');
+    });
+    appendix = async (_chat, botId) => {
+      if (!gate || botId !== c) return '';
+      ready();
+      return waiting;
+    };
+    make();
+    select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    gate = true;
+    next.mockResolvedValueOnce({ next: c }).mockResolvedValueOnce({ next: a });
+    const finishing = finishTurn(b, '观点');
+    await entered;
+    chats.update(id, (chat) => ({ ...chat, routing: { ...chat.routing, muted: [c] } }));
+    resume();
+    await finishing;
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    await group.settled(id);
+    expect(to()).toEqual([b, a]);
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(next.mock.calls[1][0].candidates.map((m) => m.id)).toEqual([a]);
+    expect(systems()).toEqual([]);
+    expect(group.state(id)).toMatchObject({ current: a, hops: 0, discuss: { turns: 2, max: 50 } });
+  });
+
+  it('讨论中成功但空白的回复按 [skip]：不写正文、不算有效发言，不判断、不收尾', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await finishTurn(b, '');
+    await finishTurn(c, '   ');
+    await group.settled(id);
+    expect(to()).toEqual([b, c]);
+    expect(next).not.toHaveBeenCalled();
+    expect(entries().filter((e) => e.kind === 'bot')).toEqual([]);
+    expect(systems()).toEqual(['「Bob」「Carol」已跳过，本轮无人回复。']);
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+    expect(group.state(id)).not.toHaveProperty('wrapUp');
+    expect(settledBatch).not.toHaveBeenCalled();
+  });
+
+  it('讨论中一条有效发言后空白回复：不算第 2 条有效发言，不交群主收尾', async () => {
+    select.mockResolvedValueOnce({ ids: [b, c], intent: 'discuss' });
+    await group.send(id, '讨论');
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await finishTurn(b, 'B');
+    await finishTurn(c, '');
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(group.state(id)).toMatchObject({ routing: false }));
+    await group.settled(id);
+    expect(next.mock.calls[0][0].candidates.map((m) => m.id)).toEqual([a]);
+    expect(to()).toEqual([b, c]);
+    expect(entries().filter((e) => e.kind === 'bot')).toMatchObject([{ botId: b, text: 'B' }]);
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+    expect(group.state(id)).not.toHaveProperty('wrapUp');
+  });
+
+  it('群主收尾时成功但空白：不写收尾条目，提示未给出收尾', async () => {
+    await toWrapUp();
+    await finishTurn(a, '  ');
+    expect(entries().filter((e) => e.kind === 'bot')).toMatchObject([
+      { botId: b, text: 'B' },
+      { botId: c, text: 'C' },
+    ]);
+    expect(systems()).toEqual(['群主「Alice」未给出收尾。']);
+    expect(group.state(id)).toMatchObject({ current: null, routing: false });
+    expect(settledBatch).toHaveBeenCalledTimes(1);
+  });
+
   it('判断返回名单外的成员：按判断结果无法识别结束并提示', async () => {
     select.mockResolvedValueOnce({ ids: [b], intent: 'discuss' });
     await group.send(id, '讨论');

@@ -51,9 +51,14 @@ export type BotChatWorkspace =
   | { kind: 'chat-home'; projectId: string }
   | { kind: 'project'; projectId: string };
 
-/** 人类消息不 @ 任何人时：boss 群主回复；smart 由便宜模型/分类器选一位成员 */
-export const BOT_ROUTING_MODES = ['boss', 'smart'] as const;
+/**
+ * 人类消息不 @ 任何人时：boss 群主回复；smart 由便宜模型/分类器选一位成员；
+ * turns 成员自选（#22，仅讨论模式开关打开时生效，关闭时按 smart）：成员按顺序多轮发言，各自判断说不说
+ */
+export const BOT_ROUTING_MODES = ['boss', 'smart', 'turns'] as const;
 export type BotRoutingMode = (typeof BOT_ROUTING_MODES)[number];
+/** 新建群（含内置团队模板建群）的默认路由模式；验收成员自选后再决定是否改为 turns */
+export const NEW_GROUP_ROUTING_MODE: BotRoutingMode = 'smart';
 
 export interface BotChatRouting {
   mode: BotRoutingMode;

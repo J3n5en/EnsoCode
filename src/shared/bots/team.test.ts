@@ -57,6 +57,11 @@ describe('parseTeamSpec', () => {
     expect(team?.routing).toEqual({ mode: 'smart', maxHops: 6, maxTurnsPerBot: 2 });
   });
 
+  it('接受成员自选（turns）路由模式', () => {
+    const team = parseTeamSpec(spec({ routing: { mode: 'turns', maxHops: 6, maxTurnsPerBot: 2 } }));
+    expect(team?.routing.mode).toBe('turns');
+  });
+
   it('拒绝未知字段（顶层、成员、嵌套）', () => {
     expect(parseTeamSpec(spec({ projectId: 'x' }))).toBeNull();
     expect(

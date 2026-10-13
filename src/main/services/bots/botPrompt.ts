@@ -26,9 +26,13 @@ export function buildBotModeInstruction(input: {
   roster: readonly BotIdentity[];
   /** 挂看板任务的委派会话：说明 report_blocked */
   delegationTask?: boolean;
-  /** 讨论模式（实验性）开启：群聊加讨论接力说明；关闭时与 main 一致 */
+  /**
+   * 讨论模式（实验性）开启：群聊加讨论说明，@ 与依次发言改用和路由模式无关的说法
+   * （smart / boss / 成员自选的具体规则放在投递附注 <routing-note> 里）；关闭时与 main 逐字一致
+   */
   discussMode?: boolean;
 }): string {
+  const discuss = input.discussMode === true;
   const lines = [
     '# Bot mode',
     '',
@@ -46,13 +50,17 @@ export function buildBotModeInstruction(input: {
   if (input.kind === 'group') {
     lines.push(
       '- This is a group chat. Messages from others arrive as <group-message from="Name" role="Title"> blocks.',
-      '- Mention a member with @Name only when you need them to respond.',
-      ...(input.discussMode === true
+      discuss
+        ? '- Mention a member with @Name to bring them in. By default this asks them to respond; when a <routing-note> describes different rules for the current routing, follow the note.'
+        : '- Mention a member with @Name only when you need them to respond.',
+      ...(discuss
         ? [
-            '- For discussion-type questions (opinions, options, reviews), prefer relaying openly in the group: reply yourself and @Name the next member if needed. Use delegate only for long-running execution tasks that need a separate session; during a group discussion, finish your part within your own turn instead of delegating.',
+            '- For discussion-type questions (opinions, options, reviews), prefer discussing openly in the group: reply yourself, and @Name a member whose input is needed. Use delegate only for long-running execution tasks that need a separate session; during a group discussion, finish your part within your own turn instead of delegating.',
           ]
         : []),
-      '- You may be picked to reply together with other members, one after another. Add only what is new; do not repeat what others already said.',
+      discuss
+        ? "- You may reply together with other members, one after another; how speakers are chosen depends on the group's routing. Add only what is new; do not repeat what others already said."
+        : '- You may be picked to reply together with other members, one after another. Add only what is new; do not repeat what others already said.',
       '- If there is truly no need for you to speak (the question has already been answered, or it is outside your responsibility), reply with exactly [skip] and nothing will be posted.',
       '- When the human @mentions you directly, you should reply whenever possible instead of skipping.',
       '- The group has a shared task board, the group_tasks tool. Use it for multi-step work that needs tracking or several members: split it into a few tasks, claim a task before working on it, and complete it with a short result when done. To hand a task to someone, delegate with taskId (e.g. "#3"); a delegated task is updated automatically when the delegation ends, so do not complete it yourself. Do not create a task for every message or small question; check list before adding duplicates.',

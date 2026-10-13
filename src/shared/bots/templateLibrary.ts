@@ -1,5 +1,5 @@
 import { APPROVAL_MODES, type ApprovalMode } from '../types/agent';
-import { type BotProfile, checkBotName } from '../types/bot';
+import { type BotProfile, checkBotName, NEW_GROUP_ROUTING_MODE } from '../types/bot';
 import type { BotDraftInput } from '../types/botIpc';
 import { parseTeamSpec, TEAM_MEMBERS_MAX, type TeamRefList, type TeamSpec } from './team';
 
@@ -11,7 +11,11 @@ const MAX = { short: 200, summary: 500, scope: 2_000, persona: 20_000 } as const
 const BUILTIN_ID_RE = /^[a-z0-9-]{1,40}$/u;
 const CUSTOM_ID_RE = /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const COLOR_RE = /^#[0-9a-f]{6}$/iu;
-const ROUTING: TeamSpec['routing'] = { mode: 'smart', maxHops: 6, maxTurnsPerBot: 2 };
+const ROUTING: TeamSpec['routing'] = {
+  mode: NEW_GROUP_ROUTING_MODE,
+  maxHops: 6,
+  maxTurnsPerBot: 2,
+};
 
 export interface MemberTemplateData {
   name: string;

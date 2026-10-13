@@ -6,6 +6,7 @@ import {
   clearWrapUp,
   discussPick,
   discussStep,
+  isBlankReply,
   isSkipReply,
   mergePending,
   needsSmartRoute,
@@ -585,6 +586,18 @@ describe('isSkipReply', () => {
     expect(isSkipReply(' [Skip] ')).toBe(true);
     expect(isSkipReply('skip')).toBe(false);
     expect(isSkipReply(undefined as never)).toBe(false);
+  });
+});
+
+describe('isBlankReply', () => {
+  it('空白与不可见格式字符视为空白', () => {
+    for (const text of ['', ' \n\t', '\u200b', '\u200c\u200d', '\u2060', '\ufeff', ' \u200b\n'])
+      expect(isBlankReply(text)).toBe(true);
+  });
+
+  it('含可见字符即非空白（不误伤 ZWJ emoji 与夹带零宽的文字）', () => {
+    for (const text of ['👨\u200d👩\u200d👧', '好\u200b的', 'a', '[skip]'])
+      expect(isBlankReply(text)).toBe(false);
   });
 });
 

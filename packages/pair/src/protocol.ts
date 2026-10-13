@@ -458,6 +458,8 @@ export interface PairBotChatState {
   pendingHuman: boolean;
   /** 讨论进行中：已用成员发言次数 / 安全上限（可选，旧手机忽略） */
   discuss?: { turns: number; max: number };
+  /** 成员自选进行中：当前第几轮，从 1 开始（可选，旧手机忽略） */
+  turns?: { round: number };
   /** 群主正在收尾（可选，旧手机忽略） */
   wrapUp?: boolean;
 }

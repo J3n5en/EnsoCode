@@ -185,6 +185,12 @@ describe('chat inputs', () => {
     expect(parseChatUpdateInput({ chatId: A, routing: { mode: 1 } })).toBeNull();
   });
 
+  it('routing.mode 接受成员自选 turns', () => {
+    expect(parseChatUpdateInput({ chatId: A, routing: { mode: 'turns' } })?.routing).toEqual({
+      mode: 'turns',
+    });
+  });
+
   it('routing.muted 为成员 id 数组（去重）', () => {
     expect(parseChatUpdateInput({ chatId: A, routing: { muted: [A, A] } })?.routing).toEqual({
       muted: [A],

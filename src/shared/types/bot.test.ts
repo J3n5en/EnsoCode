@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   BOT_DISCUSS_MAX_TURNS,
   BOT_ROUTING_DEFAULTS,
+  BOT_ROUTING_MODES,
   BOT_THREAD_TITLE_MAX,
   checkBotName,
+  NEW_GROUP_ROUTING_MODE,
   parseBotBudget,
   parseBotChat,
   parseBotProfile,
@@ -180,6 +182,15 @@ describe('parseBotChat', () => {
 
   it('accepts a group chat', () => {
     expect(parseBotChat(group)).toEqual(group);
+  });
+
+  it('成员自选（turns）是合法路由模式；未知模式退回 boss；新建群默认仍为 smart', () => {
+    expect(BOT_ROUTING_MODES).toEqual(['boss', 'smart', 'turns']);
+    const turns = { ...group, routing: { ...group.routing, mode: 'turns' } };
+    expect(parseBotChat(turns)?.routing.mode).toBe('turns');
+    const unknown = { ...group, routing: { ...group.routing, mode: 'auto' } };
+    expect(parseBotChat(unknown)?.routing.mode).toBe(BOT_ROUTING_DEFAULTS.mode);
+    expect(NEW_GROUP_ROUTING_MODE).toBe('smart');
   });
 
   it('keeps settle / snooze times and the pin order only while pinned', () => {

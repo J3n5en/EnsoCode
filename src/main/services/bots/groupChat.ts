@@ -22,6 +22,7 @@ import {
   discussPick,
   discussStep,
   type HumanEntry,
+  isBlankReply,
   isSkipReply,
   mergePending,
   needsSmartRoute,
@@ -40,6 +41,18 @@ import {
   type SmartRouteIntent,
 } from '../../../shared/bots/smartRoute';
 import { buildGroupDelta, buildGroupStateBlock } from '../../../shared/bots/transcript';
+import {
+  clearTurns,
+  endTurns,
+  onTurnReply,
+  planTurnsEnd,
+  skipTurn,
+  startTurns,
+  type TurnStep,
+  turnsEligible,
+  turnsNote,
+  turnsWrapUp,
+} from '../../../shared/bots/turnRoute';
 import type {
   BotChat,
   BotId,
@@ -109,6 +122,12 @@ interface Round {
   wrapUp?: { botId: BotId; note?: string };
   /** 讨论中判断点到了群主：下一次给 TA 的投递附裁决提示 */
   ownerCall?: BotId;
+  /** 讨论中判断刚选中、还没投递的成员（及判断时的上一位发言者）：投递前复核失效时按当前名单重新判断 */
+  judged?: { botId: BotId; lastBotId: BotId };
+  /**
+   * 成员自选群里的例行任务 / 委派回传 / 重试：只有这一位成员说一回合，回复里的 @ 不接力（开关打开时才生效）
+   */
+  solo?: true;
 }
 interface AutonomousReply {
   botId: string;
@@ -168,6 +187,10 @@ const SMART_ROUTE_HISTORY_SCAN = 40;
 const DISCUSS_CLOSED_NOTICE = '讨论模式已关闭，本轮讨论结束';
 /** 收尾投递准备期间开关被关闭：不发给宿主，由 dispatch 丢弃收尾 */
 const WRAP_UP_CANCELLED = 'wrap-up-cancelled';
+/** 投递准备期间（拼增量 / 附录的 await）成员自选或判断选中的发言者已不能发言：不发给宿主，由 dispatch 跳过 */
+const SPEAKER_UNAVAILABLE = 'speaker-unavailable';
+/** 讨论 / 成员自选 / 收尾里成功但空白的回复按 [skip] 处理 */
+const BLANK_AS_SKIP = '[skip]';
 const empty = (): RouterState => ({
   rootEntrySeq: 0,
   current: null,
@@ -409,6 +432,13 @@ export class GroupChatService {
       ...(on && state.discuss
         ? { discuss: { turns: state.discussTurns ?? 0, max: discussCap(chat.routing) } }
         : {}),
+      // 成员自选：轮次 + 与讨论共用的安全上限进度，同样只在开关打开时返回
+      ...(on && state.turns
+        ? {
+            discuss: { turns: state.discussTurns ?? 0, max: discussCap(chat.routing) },
+            turns: { round: state.turns.round },
+          }
+        : {}),
       ...(on && state.wrapUp ? { wrapUp: true as const } : {}),
     };
   }
@@ -432,7 +462,8 @@ export class GroupChatService {
         this.lock(chatId, async () => {
           const round = this.rounds.get(chatId);
           if (this.disposed || !round || this.discussOn()) return;
-          if (!round.state.discuss && !round.deciding && !round.state.wrapUp) return;
+          if (!round.state.discuss && !round.deciding && !round.state.wrapUp && !round.state.turns)
+            return;
           if (this.closeDiscussion(chatId, round)) await this.dispatch(chatId);
           this.persist(chatId);
           this.settleBatch(chatId);
@@ -484,6 +515,14 @@ export class GroupChatService {
           round.options = options;
           await this.begin(chat, merged);
         }
+        this.persist(chatId);
+        return { ok: true };
+      }
+      if (this.turnsFor(chat, entry.seq)) {
+        // 成员自选：有人在说（含只 @ 当前发言者、收尾中、例行任务）时不插话，等他说完按合并后的消息重开
+        round.options = options;
+        if (round.state.current !== null) round.pending.push(entry);
+        else await this.begin(chat, entry);
         this.persist(chatId);
         return { ok: true };
       }
@@ -620,6 +659,14 @@ export class GroupChatService {
       !parallel && round.summary?.botId === event.botId && round.summary.note === undefined;
     if (summarized) delete round.summary;
     const wrapping = !parallel && round.wrapUp?.botId === event.botId;
+    // 开关打开时，成员自选 / 讨论 / 收尾里成功但空白的回复按 [skip]：不写时间线、不算有效发言；
+    // 开关关闭（含还没同步到这个群）与普通接力保持 main 行为
+    const blank =
+      event.ok &&
+      !parallel &&
+      isBlankReply(event.text) &&
+      this.discussOn() &&
+      Boolean(round.state.turns || round.state.discuss || round.state.wrapUp);
     if (!event.ok) {
       const name = this.deps.bots.get(event.botId)?.name ?? '已删除成员';
       this.system(
@@ -631,7 +678,7 @@ export class GroupChatService {
             : `${name} 回复失败：${event.error ?? '未知错误'}`,
         { botId: event.botId, conversationId: event.conversationId, mode: 'resume' }
       );
-    } else if (!isSkipReply(event.text) && event.turnId) {
+    } else if (!blank && !isSkipReply(event.text) && event.turnId) {
       const smart = !parallel && (round.smartPicked?.includes(event.botId) ?? false);
       seq = this.append(chat.id, {
         kind: 'bot',
@@ -655,7 +702,7 @@ export class GroupChatService {
         at: Date.now(),
       })?.seq;
     }
-    this.recordBatch(round, event);
+    this.recordBatch(round, event, blank);
     if (parallel && event.deliveryId) {
       // 讨论中并行发言者本回合发起了委派：讨论同样就此结束（丢掉剩余候选、取消进行中的判断）
       const cancelledJudge =
@@ -674,11 +721,12 @@ export class GroupChatService {
     else
       this.advance(
         chat,
-        event.ok ? event.text : '',
+        blank ? BLANK_AS_SKIP : event.ok ? event.text : '',
         event.turnKey
           ? this.deps.delegatedTargets?.(event.conversationId, event.turnKey)
           : undefined,
-        seq
+        seq,
+        !event.ok
       );
     const pending = mergePending(round.pending);
     if (pending) {
@@ -689,12 +737,12 @@ export class GroupChatService {
     this.settleBatch(chat.id);
   }
 
-  private recordBatch(round: Round, event: BotTurnFinished): void {
+  private recordBatch(round: Round, event: BotTurnFinished, blank = false): void {
     const batch = round.batch ?? { botIds: [], failed: [] };
     round.batch = batch;
     if (!event.ok) {
       if (!batch.failed.includes(event.botId)) batch.failed.push(event.botId);
-    } else if (!isSkipReply(event.text) && event.text.trim()) {
+    } else if (!blank && !isSkipReply(event.text) && event.text.trim()) {
       if (!batch.botIds.includes(event.botId)) batch.botIds.push(event.botId);
       batch.last = { botId: event.botId, text: event.text };
     }
@@ -735,8 +783,18 @@ export class GroupChatService {
     const members = this.members(chat);
     this.clearSmart(round);
     round.allSkipped = { botIds: [] };
+    if (this.turnsFor(chat, entry.seq)) {
+      const started = startTurns(chat, members, entry);
+      if ('notice' in started) {
+        round.state = empty();
+        delete round.allSkipped;
+        this.system(chat.id, started.notice);
+      } else round.state = started.state;
+      await this.dispatch(chat.id);
+      return;
+    }
     const responder = this.deps.responder;
-    if (responder && needsSmartRoute(chat, members, entry)) {
+    if (responder && needsSmartRoute(this.routingView(chat), members, entry)) {
       round.state = empty();
       this.selectResponders(chat, entry, responder);
       return;
@@ -792,7 +850,7 @@ export class GroupChatService {
     options: BotDeliverOptions
   ): Promise<void> {
     const responder = this.deps.responder;
-    if (responder && needsSmartRoute(chat, this.members(chat), entry)) {
+    if (responder && needsSmartRoute(this.routingView(chat), this.members(chat), entry)) {
       this.selectResponders(chat, entry, responder, options);
       return;
     }
@@ -951,6 +1009,23 @@ export class GroupChatService {
     return this.deps.discussEnabled?.() === true;
   }
 
+  /** 成员自选群且讨论模式开关打开（例行任务等单人回合据此不接力） */
+  private turnsGroup(chat: BotChat): boolean {
+    return this.discussOn() && chat.routing.mode === 'turns';
+  }
+
+  /** 这条人类消息按成员自选走：开关打开、turns 群，且消息晚于开关打开时的末条 seq */
+  private turnsFor(chat: BotChat, rootSeq: number): boolean {
+    return this.turnsGroup(chat) && rootSeq > (this.discussFrom.get(chat.id) ?? 0);
+  }
+
+  /** 成员自选不生效时（开关关闭 / 打开前的消息）turns 群按 smart 路由；存储的 mode 不改写 */
+  private routingView(chat: BotChat): BotChat {
+    return chat.routing.mode === 'turns'
+      ? { ...chat, routing: { ...chat.routing, mode: 'smart' } }
+      : chat;
+  }
+
   /**
    * 讨论模式只在开关打开、smart 群、有判断后端、且至少两位可发言成员时生效；
    * 开关打开之前发出的人类消息（rootSeq 不晚于打开时的末条 seq）不进入讨论
@@ -977,6 +1052,11 @@ export class GroupChatService {
    */
   private closeDiscussion(chatId: string, round: Round): boolean {
     if (this.discussOn()) return false;
+    if (round.state.turns) {
+      // 成员自选进行中：当前发言者说完就停，丢掉本轮剩下的人和后面的轮次，回复按 main 规则处理
+      round.state = round.state.current ? clearTurns(round.state) : endTurns(round.state);
+      this.system(chatId, DISCUSS_CLOSED_NOTICE);
+    }
     if (round.state.wrapUp) {
       if (round.wrapUp?.note !== undefined) this.dropWrapUp(chatId, round);
       else round.state = clearWrapUp(round.state);
@@ -1129,6 +1209,7 @@ export class GroupChatService {
             round.smartPicked = [...(round.smartPicked ?? []), decision.next];
             round.smartIntent = 'discuss';
             if (decision.next === chat.bossBotId) round.ownerCall = decision.next;
+            round.judged = { botId: decision.next, lastBotId };
           } else this.repickDiscussion(chat, lastBotId);
         } else this.finishDiscussion(chat, 'concluded', lastBotId);
       }
@@ -1165,6 +1246,8 @@ export class GroupChatService {
     delete round.summary;
     delete round.wrapUp;
     delete round.ownerCall;
+    delete round.solo;
+    delete round.judged;
   }
 
   /**
@@ -1183,12 +1266,31 @@ export class GroupChatService {
     return true;
   }
 
-  private advance(chat: BotChat, text: string, delegated?: readonly string[], seq?: number): void {
+  private advance(
+    chat: BotChat,
+    text: string,
+    delegated?: readonly string[],
+    seq?: number,
+    /** 回复失败、预算用完或投递失败（成员自选据此不再排 TA；main 规则不区分） */
+    failed = false
+  ): void {
     const round = this.round(chat.id);
     const members = this.members(chat);
     // 开关已关但还没同步到这个群：当前发言者就是最后一位，按关闭处理
     this.closeDiscussion(chat.id, round);
     const botId = round.state.current!;
+    if (round.state.turns) {
+      this.advanceTurns(chat, botId, text, delegated, seq, failed);
+      return;
+    }
+    if (round.solo) {
+      delete round.solo;
+      // 成员自选群的例行任务 / 委派回传：说完即止，回复里的 @ 只是提醒；开关已关则按 main 规则
+      if (this.discussOn()) {
+        round.state = empty();
+        return;
+      }
+    }
     // 群主收尾：回复里的 @ 只是提醒；开关在收尾中关闭时已去掉标记，回复按 main 规则处理
     const wrapping = round.state.wrapUp === true;
     // 讨论中本回合发起了委派：讨论就此结束，丢掉还没发言的讨论候选；回复里的 @ 仍按普通接力处理
@@ -1272,6 +1374,101 @@ export class GroupChatService {
     }
   }
 
+  /**
+   * 成员自选中一位成员说完：排下一位 / 开下一轮，或结束（一整轮没人发言、到安全上限、有人委派、有新的人类消息）。
+   * allSkipped 与 main 同口径维护：开关中途关闭后，当前发言者的 [skip] 按本批计数决定是否交群主兜底
+   */
+  private advanceTurns(
+    chat: BotChat,
+    botId: BotId,
+    text: string,
+    delegated: readonly string[] | undefined,
+    seq: number | undefined,
+    failed: boolean
+  ): void {
+    const round = this.round(chat.id);
+    const members = this.members(chat);
+    const skipped = isSkipReply(text);
+    if (skipped) round.allSkipped?.botIds.push(botId);
+    else delete round.allSkipped;
+    this.applyTurnStep(
+      chat,
+      onTurnReply(round.state, chat, members, {
+        botId,
+        ...(seq !== undefined && !skipped && !failed ? { seq } : {}),
+        ...(failed ? { failed: true } : {}),
+        ...(delegated?.length ? { delegated: true } : {}),
+        ...(round.pending.length > 0 ? { pendingHuman: true } : {}),
+      })
+    );
+  }
+
+  /** 应用成员自选的一步：继续就换下一位；结束时按原因停下、提示或交群主收尾 */
+  private applyTurnStep(chat: BotChat, step: TurnStep): void {
+    const round = this.round(chat.id);
+    if (!step.end) {
+      round.state = step.state;
+      return;
+    }
+    delete round.allSkipped;
+    // 有人委派 / 被新的人类消息打断：不收尾
+    if (step.end === 'stop') {
+      round.state = endTurns(step.state);
+      return;
+    }
+    const plan = planTurnsEnd(step.state, chat, this.members(chat), step.end, step.quiet);
+    if (plan.notice) this.system(chat.id, plan.notice);
+    if (plan.kind === 'wrap-up') {
+      round.state = turnsWrapUp(step.state, plan.botId);
+      round.wrapUp = { botId: plan.botId, note: plan.note };
+    } else round.state = endTurns(step.state);
+  }
+
+  /** 投递前复核：成员自选按轮到时的口径（点名的人静音照常）；判断选中的人按讨论候选口径（在群、未归档、未静音） */
+  private speakerReady(chatId: string, botId: BotId): boolean {
+    const chat = this.deps.chats.get(chatId);
+    if (!chat || chat.archivedAt !== undefined) return false;
+    const { state } = this.round(chatId);
+    const members = this.members(chat);
+    if (state.turns) return turnsEligible(state, chat, members, botId);
+    const bot = members.find((m) => m.id === botId);
+    return (
+      bot !== undefined &&
+      bot.archivedAt === undefined &&
+      chat.members.includes(botId) &&
+      !(chat.routing.muted ?? []).includes(botId)
+    );
+  }
+
+  /**
+   * 轮到的人在投递前已不能发言（静音 / 归档 / 移出群）：TA 还没收到投递，当作没轮到 TA——不提示、
+   * 不算 [skip] 或失败。成员自选接着排下一位；讨论中判断选中的人撤回这次计数，按当前名单重走 discussStep
+   * （与判断期间失效同一口径）。开关已关时按关闭处理：没投递出去的人不再发言
+   */
+  private skipSpeaker(chat: BotChat, botId: BotId, judged?: Round['judged']): void {
+    const round = this.round(chat.id);
+    if (round.summary?.botId === botId) delete round.summary;
+    if (!this.discussOn()) {
+      this.closeDiscussion(chat.id, round);
+      round.state = { ...round.state, current: null, queue: [] };
+      return;
+    }
+    if (round.state.turns) {
+      this.applyTurnStep(chat, skipTurn(round.state, chat, this.members(chat)));
+      return;
+    }
+    const { state } = round;
+    round.state = { ...state, current: null };
+    if (!judged || !state.discuss) return;
+    round.state = {
+      ...round.state,
+      discussTurns: Math.max(0, (state.discussTurns ?? 0) - 1),
+      turnsByBot: { ...state.turnsByBot, [botId]: Math.max(0, (state.turnsByBot[botId] ?? 0) - 1) },
+    };
+    round.smartPicked = round.smartPicked?.filter((id) => id !== botId);
+    this.repickDiscussion(chat, judged.lastBotId);
+  }
+
   private async dispatch(chatId: string): Promise<void> {
     const round = this.round(chatId);
     if (
@@ -1297,6 +1494,7 @@ export class GroupChatService {
         }
         if (job.title !== undefined) this.system(chatId, `例行任务：${job.title}`);
         this.clearSmart(round);
+        if (this.turnsGroup(chat)) round.solo = true;
         round.state = { ...empty(), current: job.botId, turnsByBot: { [job.botId]: 1 } };
         round.options = { ...job.options, queueIfBusy: true };
         round.deliveryId = round.options.deliveryId ?? randomUUID();
@@ -1318,6 +1516,7 @@ export class GroupChatService {
         }
         if (sent.ok) this.system(chatId, `${bot.name} 的投递已处理过，本次未发出`);
         else if (sent.error === BOT_BUDGET_ERROR) this.system(chatId, budgetNotice(bot.name));
+        delete round.solo;
         round.state = empty();
         return this.dispatch(chatId);
       }
@@ -1330,10 +1529,17 @@ export class GroupChatService {
         break;
       }
       const botId = round.state.current;
+      const judged = round.judged?.botId === botId ? round.judged : undefined;
+      delete round.judged;
       const bot = this.deps.bots.get(botId);
       if (!bot || bot.archivedAt !== undefined || !chat.members.includes(botId)) {
+        // 成员自选轮到时已不可用：静默跳过（不算失败），不提示「请先指定群主」
+        if (round.state.turns) {
+          this.skipSpeaker(chat, botId);
+          continue;
+        }
         unavailable = true;
-        this.advance(chat, '');
+        this.advance(chat, '', undefined, undefined, true);
         continue;
       }
       round.generation++;
@@ -1341,6 +1547,7 @@ export class GroupChatService {
       const summary = round.summary?.botId === botId ? round.summary.note : undefined;
       if (summary !== undefined) round.summary = { botId };
       const discussing = round.state.discuss && this.discussOn();
+      const turns = this.discussOn() ? round.state.turns : undefined;
       const wrapNote =
         round.state.wrapUp && round.wrapUp?.botId === botId ? round.wrapUp.note : undefined;
       const note =
@@ -1348,6 +1555,7 @@ export class GroupChatService {
           round.buildNote === botId ? SMART_ROUTE_BUILD_NOTE : summary,
           discussing ? DISCUSS_NOTE : undefined,
           discussing && round.ownerCall === botId ? DISCUSS_OWNER_NOTE : undefined,
+          turns ? turnsNote(turns.round, turns.named.includes(botId)) : undefined,
           wrapNote,
         ]
           .filter(Boolean)
@@ -1368,13 +1576,28 @@ export class GroupChatService {
         note,
         undefined,
         undefined,
-        // 收尾在拼增量的 await 期间开关可能被关掉：发给宿主前再确认一次
-        wrapNote !== undefined ? () => this.discussOn() : undefined
+        // 拼增量 / 附录的 await 期间开关可能被关掉、成员可能被静音 / 归档 / 移出：发给宿主前再确认一次。
+        // 只复核收尾、成员自选与判断选中的人；其余投递保持 main 行为
+        () => {
+          if (wrapNote !== undefined && !this.discussOn()) return WRAP_UP_CANCELLED;
+          if ((round.state.turns || judged) && !this.speakerReady(chatId, botId))
+            return SPEAKER_UNAVAILABLE;
+          return undefined;
+        }
       );
       round.options = relayOptions(round.options);
       if (!sent.ok && sent.error === WRAP_UP_CANCELLED) {
         this.dropWrapUp(chatId, round);
         break;
+      }
+      if (!sent.ok && sent.error === SPEAKER_UNAVAILABLE) {
+        const fresh = this.deps.chats.get(chatId);
+        if (!fresh || fresh.archivedAt !== undefined) {
+          round.state = empty();
+          break;
+        }
+        this.skipSpeaker(fresh, botId, judged);
+        continue;
       }
       if (wrapNote !== undefined && round.wrapUp?.botId === botId) round.wrapUp = { botId };
       if (sent.ok && !sent.duplicate) return;
@@ -1390,7 +1613,7 @@ export class GroupChatService {
               }`,
         sent.ok ? undefined : { botId, mode: 'deliver' }
       );
-      this.advance(chat, '');
+      this.advance(chat, '', undefined, undefined, !sent.ok);
     }
     if (unavailable) this.system(chatId, '请先指定群主');
     if (this.autonomous.get(chatId)?.length) await this.dispatch(chatId);
@@ -1431,8 +1654,8 @@ export class GroupChatService {
     note?: string,
     lead?: string,
     hideDelegationIds?: readonly string[],
-    /** 发给宿主前的最后确认；返回 false 时不投递、不动水位 */
-    proceed?: () => boolean
+    /** 发给宿主前的最后确认；返回错误码时不投递、不动水位，按该错误码返回失败 */
+    proceed?: () => string | undefined
   ) {
     const cursor = chat.sessions[botId]?.cursor ?? 0;
     // 排队尚未提交水位，但后续投递不能再次携带已排队的消息。
@@ -1456,7 +1679,8 @@ export class GroupChatService {
     const appendix = this.deps.refsAppendix
       ? await this.deps.refsAppendix(chat, botId, entries).catch(() => '')
       : '';
-    if (proceed && !proceed()) return { ok: false as const, error: WRAP_UP_CANCELLED };
+    const cancelled = proceed?.();
+    if (cancelled !== undefined) return { ok: false as const, error: cancelled };
     const text = [
       // lead 必须在最前：委派结果靠开头的 <delegation-result id> 判断是否已投递
       lead,

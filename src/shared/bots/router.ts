@@ -36,6 +36,31 @@ export interface RouterState {
   discussSeen?: Record<BotId, number>;
   /** 讨论结束后群主正在收尾：回复里的 @ 只是提醒，不接力 */
   wrapUp?: true;
+  /**
+   * 成员自选（turns，#22）进行中：成员按顺序多轮发言，每人自己判断说不说。
+   * 与 discuss 互斥；安全上限、有效发言与「有新内容才发言」复用上面的 discussTurns / discussReplies /
+   * discussLastSeq / discussSeen。router.json 里只用于崩溃恢复，重启不续跑
+   */
+  turns?: TurnsProgress;
+}
+
+export interface TurnsProgress {
+  /** 当前第几轮，从 1 开始 */
+  round: number;
+  /** 参与者的基础顺序：群主第一，其余按群成员顺序；第 r 轮按 (r-1) 轮换 */
+  order: BotId[];
+  /** 人类点名 @ 的成员（@所有人 不展开）：静音成员只有被点名才参与 */
+  named: BotId[];
+  /** 本轮有效发言条数 */
+  spoke: number;
+  /** 本轮失败（回复失败、预算用完、投递失败）的人数 */
+  failed: number;
+  /** 本条消息内失败过的成员：后面的轮次不再排 */
+  out?: BotId[];
+  /** 本轮有人发起了委派：本轮说完就结束，不开下一轮、不收尾 */
+  last?: true;
+  /** 最近一条有效发言的成员 */
+  lastBy?: BotId;
 }
 
 export interface SummaryReport {
@@ -118,7 +143,7 @@ function parseActive(chat: RouterChat, members: readonly RouterMember[], text: s
 }
 
 /** entry.mentions 为权威（Main 写入时计算）；为空时回退解析正文 */
-function humanTargets(
+export function humanTargets(
   chat: RouterChat,
   members: readonly RouterMember[],
   entry: HumanEntry
@@ -242,6 +267,10 @@ export function needsSmartRoute(
 
 export const isSkipReply = (text: string): boolean =>
   typeof text === 'string' && text.trim().toLowerCase() === '[skip]';
+
+/** 去掉空白与不可见格式字符（零宽空格/连接符、词连接符、BOM）后为空；只用于判定，不改正文 */
+export const isBlankReply = (text: string): boolean =>
+  typeof text !== 'string' || /^(?:\s|\u200b|\u200c|\u200d|\u2060|\ufeff)*$/.test(text);
 
 function nameOf(members: readonly RouterMember[], id: BotId): string {
   return members.find((m) => m?.id === id)?.name ?? id;

@@ -315,6 +315,8 @@ export type BotChatStateResult =
       routing: boolean;
       /** 讨论进行中（仅讨论模式开关打开时返回）：已用成员发言次数 / 安全上限 */
       discuss?: { turns: number; max: number };
+      /** 成员自选进行中（仅讨论模式开关打开时返回）：当前第几轮（从 1 开始）；进度同样见 discuss */
+      turns?: { round: number };
       /** 群主正在收尾（仅讨论模式开关打开时返回） */
       wrapUp?: true;
     }
