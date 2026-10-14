@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   showItemInFolder: vi.fn(),
   openPath: vi.fn(),
   busy: vi.fn(() => false),
+  readSettings: vi.fn((): Record<string, unknown> | null => null),
   search: vi.fn(async () => ({ ok: true as const, mode: 'names' as const, hits: [] })),
 }));
 vi.mock('node:path', async (importOriginal) => {
@@ -35,6 +36,19 @@ vi.mock('electron', () => ({
   ipcMain: { handle: (key: string, fn: never) => mocks.handlers.set(key, fn) },
 }));
 vi.mock('./worktree', () => ({ sessionWorktreeBusy: mocks.busy }));
+vi.mock('./settings', async () => {
+  const { normalizeFileOpenRules } = await import('@shared/fileOpening');
+  return {
+    readFileOpenRules: () => {
+      const settings = mocks.readSettings();
+      const store = settings?.['enso-settings'] as
+        | { state?: { fileOpenRules?: unknown } }
+        | undefined;
+      return normalizeFileOpenRules(store?.state?.fileOpenRules);
+    },
+    readSshTimeoutSeconds: () => 30,
+  };
+});
 vi.mock('./agent', () => ({
   getSourceAuthorityRegistry: () => ({
     conversation: () => mocks.conversation,
@@ -61,6 +75,7 @@ beforeEach(() => {
   mocks.conversation = { projectId: 'project', lifecycle: 'active' };
   mocks.exec.mockReset();
   mocks.busy.mockReturnValue(false);
+  mocks.readSettings.mockReset().mockReturnValue(null);
   mocks.writeText.mockReset();
   mocks.showItemInFolder.mockReset();
   mocks.openPath.mockReset().mockResolvedValue('');
@@ -74,6 +89,83 @@ const invoke = (channel: string, request = {}) =>
     {},
     { conversationId: 'conversation', projectId: 'project', rel: 'file', ...request }
   );
+it.each([
+  ['readme.md', 'markdown'],
+  ['source.ts', 'text'],
+  ['picture.png', 'image'],
+])('按默认类型返回内部查看器 %s', async (rel, viewer) => {
+  writeFileSync(path.join(root, rel), 'fixture');
+  expect(await invoke('files:open', { rel })).toEqual({
+    ok: true,
+    target: 'internal',
+    viewer,
+    rel,
+  });
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+it('新打开通道只采信 Main 设置，不采信 renderer 的动作和应用路径', async () => {
+  writeFileSync(path.join(root, 'readme.md'), 'fixture');
+  mocks.readSettings.mockReturnValue({
+    'enso-settings': { state: { fileOpenRules: [{ extension: 'md', target: 'reveal' }] } },
+  });
+  expect(
+    await invoke('files:open', {
+      rel: 'readme.md',
+      target: 'application',
+      applicationPath: '/malicious/editor',
+    })
+  ).toEqual({ ok: true, target: 'handled' });
+  expect(mocks.showItemInFolder).toHaveBeenCalledWith(path.join(root, 'readme.md'));
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+it.each(['../outside.md', '/absolute.md', 'C:\\absolute.md', 'nested\\bad.md', 'bad\0.md'])(
+  '新打开通道拒绝恶意路径 %s',
+  async (rel) => {
+    expect(await invoke('files:open', { rel })).toEqual({ ok: false, error: 'invalid-path' });
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+    expect(mocks.openPath).not.toHaveBeenCalled();
+  }
+);
+it('新打开通道拒绝缺失目标与越界软链接', async () => {
+  expect(await invoke('files:open', { rel: 'missing.md' })).toEqual({
+    ok: false,
+    error: 'unavailable',
+  });
+  symlinkSync(os.tmpdir(), path.join(root, 'escape'), 'junction');
+  expect(await invoke('files:open', { rel: 'escape/outside.md' })).toEqual({
+    ok: false,
+    error: 'invalid-path',
+  });
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+it('新打开通道拒绝错误身份、迁移中工作区和非字符串 rel', async () => {
+  writeFileSync(path.join(root, 'file'), 'fixture');
+  mocks.conversation.projectId = 'other';
+  expect(await invoke('files:open')).toEqual({ ok: false, error: 'unavailable' });
+  mocks.conversation.projectId = 'project';
+  mocks.busy.mockReturnValue(true);
+  expect(await invoke('files:open')).toEqual({ ok: false, error: 'unavailable' });
+  mocks.busy.mockReturnValue(false);
+  expect(await invoke('files:open', { rel: 12 })).toEqual({ ok: false, error: 'unavailable' });
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+it('新打开通道 SSH 明确不支持且不执行本机打开', async () => {
+  mocks.project.kind = 'ssh';
+  expect(await invoke('files:open', { rel: 'readme.md' })).toEqual({
+    ok: false,
+    error: 'unsupported',
+  });
+  expect(mocks.exec).not.toHaveBeenCalled();
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+it('新打开通道报告目录定位错误', async () => {
+  mkdirSync(path.join(root, 'dir'));
+  mocks.openPath.mockResolvedValue('Explorer failed');
+  expect(await invoke('files:open', { rel: 'dir' })).toEqual({
+    ok: false,
+    error: 'Explorer failed',
+  });
+});
 it.each([
   IPC_CHANNELS.FILES_WRITE,
   IPC_CHANNELS.FILES_CREATE,

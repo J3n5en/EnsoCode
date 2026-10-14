@@ -25,6 +25,13 @@ const bundle = (state: Partial<ConfigSyncBundle['state']>): ConfigSyncBundle => 
 });
 
 describe('config sync portable preference contract', () => {
+  it('本机文件打开规则及应用路径不进入配置同步字段', () => {
+    expect(CONFIG_SYNC_FIELD_POLICY.fileOpenRules).toEqual({
+      mode: 'excluded',
+      reason: expect.stringContaining('device-local'),
+    });
+    expect(SYNC_FIELDS).not.toContain('fileOpenRules');
+  });
   it('将安全的通用偏好列为 portable，并明确保留本机背景资源与设备策略', () => {
     const portable = [
       'theme',

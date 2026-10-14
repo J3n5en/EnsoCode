@@ -10,6 +10,7 @@ import type {
   FilesFetchRemoteImageResult,
   FilesListResult,
   FilesMutateResult,
+  FilesOpenResult,
   FilesReadImageResult,
   FilesReadRelResult,
   FilesWatchEvent,
@@ -41,9 +42,10 @@ import {
 import { writeFileToClipboard } from '../services/filesWorkspaceClipboard';
 import { fetchRemoteImageDataUrl, REMOTE_IMAGE_MAX_BYTES } from '../services/remoteImageFetch';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
+import { openLocalWorkspaceFile } from '../services/workspaceFileOpening';
 import { searchWorkspaceFiles } from '../services/workspaceFileSearch';
 import { getSourceAuthorityRegistry } from './agent';
-import { readSshTimeoutSeconds } from './settings';
+import { readFileOpenRules, readSshTimeoutSeconds } from './settings';
 import { sessionWorktreeBusy } from './worktree';
 
 const watches = new RefCountWatchers();
@@ -57,7 +59,7 @@ function isNonEmptyString(value: unknown): value is string {
 function parseRequest(
   request: unknown
 ): { conversationId: string; projectId: string; rel: string } | null {
-  if (!request || typeof request !== 'object') return null;
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
   const conversationId = (request as { conversationId?: unknown }).conversationId;
   const projectId = (request as { projectId?: unknown }).projectId;
   const rel = (request as { rel?: unknown }).rel;
@@ -211,6 +213,17 @@ export function registerFilesWorkspaceHandlers(): void {
       }
     });
   };
+  handle(IPC_CHANNELS.FILES_OPEN, async (_event, request: unknown): Promise<FilesOpenResult> => {
+    const parsed = parseRequest(request);
+    if (!parsed || typeof (request as Record<string, unknown>).rel !== 'string')
+      return { ok: false, error: 'unavailable' };
+    if (getSourceAuthorityRegistry()?.project(parsed.projectId)?.kind === 'ssh')
+      return { ok: false, error: 'unsupported' };
+    if (sessionWorktreeBusy(parsed.conversationId)) return { ok: false, error: 'unavailable' };
+    const cwd = resolveLocalCwd(parsed.conversationId, parsed.projectId);
+    if (!cwd) return { ok: false, error: 'unavailable' };
+    return openLocalWorkspaceFile(cwd, parsed.rel, readFileOpenRules());
+  });
   handle(
     IPC_CHANNELS.FILES_LIST_DIR,
     async (_event, request: unknown): Promise<FilesListResult> => {

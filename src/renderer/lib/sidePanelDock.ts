@@ -13,7 +13,7 @@ import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 
 const docks = new Map<string, DockviewApi>();
 const filesTabClosers = new Map<string, () => boolean>();
-type FileTarget = [rel: string, line?: number];
+type FileTarget = [rel: string, line?: number, viewer?: 'text' | 'markdown'];
 const filesOpeners = new Map<string, (...target: FileTarget) => void>();
 /** Files 视图未挂载时挂起的待开文件，视图注册 opener 时补开 */
 const pendingFileOpens = new Map<string, FileTarget>();
@@ -47,6 +47,11 @@ export function registerFilesTabCloser(conversationId: string, close: () => bool
   };
 }
 
+/**
+ * 注册按会话归属的 Files 打开入口；冷挂载时保留行号与查看器意图并只消费一次。
+ *
+ * Register the conversation-owned Files opener; retain line and viewer intent across cold mounts and consume it once.
+ */
 export function registerFilesOpener(
   conversationId: string,
   open: (...target: FileTarget) => void
@@ -168,14 +173,23 @@ function revealFilesPanel(
   });
 }
 
-/** 在会话所属 dock 的 Files 面板打开文件（btw 落到父会话 dock） */
-export function openSidePanelFile(conversationId: string, rel: string, line?: number): void {
+/**
+ * 在会话所属 dock 打开文件，btw 沿既有父路由；Markdown 查看器选择预览，行号入口使用源码。
+ *
+ * Open files in their conversation-owned dock, preserving the existing btw parent route; Markdown requests preview and line references use source.
+ */
+export function openSidePanelFile(
+  conversationId: string,
+  rel: string,
+  line?: number,
+  viewer?: 'text' | 'markdown'
+): void {
   const sessions = useSessionsStore.getState();
   const dockId = resolveSidePanelDockConversationId(sessions.conversations, conversationId);
   const projectId = sessions.conversations[dockId]?.projectId;
   if (!projectId) return;
   useSidePanelStore.getState().ensureOpen(dockId);
-  const target: FileTarget = line ? [rel, line] : [rel];
+  const target: FileTarget = viewer ? [rel, line, viewer] : line ? [rel, line] : [rel];
   const open = filesOpeners.get(dockId);
   if (open) open(...target);
   else pendingFileOpens.set(dockId, target);

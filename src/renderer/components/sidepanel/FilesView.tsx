@@ -189,9 +189,12 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   );
 
   const openFile = useCallback(
-    async (rel: string) => {
+    async (rel: string, viewMode?: 'source' | 'preview') => {
       const existing = openDocsRef.current.find((doc) => doc.rel === rel);
       if (existing) {
+        if (viewMode) {
+          setOpenDocs((docs) => docs.map((doc) => (doc.rel === rel ? { ...doc, viewMode } : doc)));
+        }
         setActiveRel(rel);
         return;
       }
@@ -227,6 +230,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
           version: 0,
           dirty: false,
           conflict: false,
+          viewMode,
         },
       ]);
       setActiveRel(rel);
@@ -285,21 +289,6 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
       return true;
     });
   }, [conversationId, requestCloseFile]);
-
-  useEffect(
-    () =>
-      registerFilesOpener(conversationId, (rel, line) => {
-        pendingLineRef.current = line ? { rel, line } : null;
-        const attached = attachedEditorRef.current;
-        if (line && attached?.rel === rel && activeRelRef.current === rel) {
-          pendingLineRef.current = null;
-          attached.editor.focus({ lineNumber: line });
-          return;
-        }
-        void openFile(rel);
-      }),
-    [conversationId, openFile]
-  );
 
   useEffect(() => {
     return () => {
@@ -470,7 +459,11 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   );
 
   const openPreview = useCallback(
-    async (rel: string) => {
+    async (rel: string, allowSourceToggle = false) => {
+      if (allowSourceToggle) {
+        await openFile(rel, 'preview');
+        return;
+      }
       const key = toPreviewKey(rel);
       const existing = openDocsRef.current.find((doc) => doc.rel === key);
       if (existing) {
@@ -498,7 +491,29 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
       ]);
       setActiveRel(key);
     },
-    [failToast, readFile]
+    [failToast, readFile, openFile]
+  );
+
+  useEffect(
+    () =>
+      registerFilesOpener(conversationId, (rel, line, viewer) => {
+        pendingLineRef.current = line ? { rel, line } : null;
+        const attached = attachedEditorRef.current;
+        const doc = openDocsRef.current.find((item) => item.rel === rel);
+        if (
+          line &&
+          attached?.rel === rel &&
+          activeRelRef.current === rel &&
+          doc?.viewMode !== 'preview'
+        ) {
+          pendingLineRef.current = null;
+          attached.editor.focus({ lineNumber: line });
+          return;
+        }
+        if (viewer === 'markdown' && !line) void openPreview(rel, true);
+        else void openFile(rel, 'source');
+      }),
+    [conversationId, openFile, openPreview]
   );
 
   const resolvePreviewImage = useCallback(

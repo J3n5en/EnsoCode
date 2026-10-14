@@ -4,6 +4,7 @@ import type {
   DefaultModelRef,
   OauthCredentialBlock,
 } from '@shared/defaultModel';
+import type { FileOpenRule } from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import type { ProxyMode } from '@shared/proxy';
 import type { StatusLineSegmentId } from '@shared/statusLine';
@@ -84,6 +85,13 @@ export interface SettingsState {
   /** 界面强调色；写入 `html[data-accent]`，缺省 violet */
   accentColor: import('@shared/accentColor').AccentColor;
   language: Locale;
+
+  /**
+   * 按扩展名保存本地文件打开方式；空数组使用系统默认策略。
+   *
+   * Store local file-opening targets by extension; an empty array uses the default policy.
+   */
+  fileOpenRules: FileOpenRule[];
 
   // Terminal appearance
   terminalTheme: string;
@@ -326,6 +334,7 @@ export interface SettingsState {
   setTerminalFontWeightBold: (weight: FontWeight) => void;
   setTerminalShell: (value: TerminalShell) => void;
   setWorktreeRoot: (path: string) => void;
+  setFileOpenRules: (rules: unknown) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;

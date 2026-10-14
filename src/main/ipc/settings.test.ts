@@ -57,6 +57,69 @@ afterAll(async () => {
 });
 
 describe('settings广播策略', () => {
+  it('文件打开规则允许持久化规范化值，但禁止同步到其他设备', async () => {
+    const settings = await import('./settings');
+    expect(settings.SETTINGS_STATE_FIELDS).toContain('fileOpenRules');
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('fileOpenRules');
+    const rules = [{ extension: '*.MD', target: 'reveal' }];
+    expect(settings.patchSettingsState('fileOpenRules', rules)).toMatchObject({
+      ok: true,
+      value: [{ extension: '.md', target: 'reveal' }],
+    });
+    expect(
+      settings.patchSettingsState('fileOpenRules', [{ extension: '../md', target: 'system' }])
+    ).toMatchObject({ ok: false });
+    expect(settings.readSettings()?.['enso-settings']).toMatchObject({
+      state: { fileOpenRules: [{ extension: '.md', target: 'reveal' }] },
+    });
+    const fingerprint = settings.settingsFingerprint(settings.readSettings());
+    settings.patchSettingsState('fileOpenRules', [
+      {
+        extension: 'PDF',
+        target: 'application',
+        applicationPath: path.join(userData, 'Reader.exe'),
+      },
+    ]);
+    expect(settings.settingsFingerprint(settings.readSettings())).toBe(fingerprint);
+    settings.flushSettings();
+    expect(
+      JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))['enso-settings'].state
+        .fileOpenRules
+    ).toEqual(settings.readFileOpenRules());
+  });
+
+  it('renderer 持久化入口同样拒绝脏规则，不覆盖上一份本机规则', async () => {
+    const settings = await import('./settings');
+    settings.registerSettingsHandlers();
+    const event = { sender: mocks.windows[0].webContents };
+    const writeKey = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
+    const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE);
+    expect(
+      await writeKey?.(event, 'enso-settings', {
+        state: {
+          fileOpenRules: [
+            { extension: 'md', target: 'application', applicationPath: '/bin/editor --run' },
+          ],
+        },
+      })
+    ).toBe(false);
+    expect(
+      await write?.(event, {
+        'enso-settings': {
+          state: { fileOpenRules: [{ extension: 'md', target: 'system', command: 'bad' }] },
+        },
+      })
+    ).toBe(false);
+    expect(
+      await writeKey?.(event, 'enso-settings', {
+        state: { fileOpenRules: [{ extension: 'TXT', target: 'internal' }] },
+      })
+    ).toBe(true);
+    expect(settings.readSettings()?.['enso-settings']).toMatchObject({
+      state: { fileOpenRules: [{ extension: '.txt', target: 'internal' }] },
+    });
+  });
+
   it('persists local Bot capacity across reload and notifies the scheduler on changes only', async () => {
     const settings = await import('./settings');
     expect(settings.SETTINGS_STATE_FIELDS).toContain('botMaxRunningTurns');

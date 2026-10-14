@@ -65,6 +65,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   terminalFontWeightBold: { mode: 'portable' },
   terminalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   worktreeRoot: { mode: 'excluded', reason: 'device-local worktree storage path' },
+  fileOpenRules: { mode: 'excluded', reason: 'device-local file opening applications and paths' },
   favoriteTerminalThemes: { mode: 'portable' },
   statusLineSegments: { mode: 'portable' },
   loadLocalSkills: { mode: 'portable' },

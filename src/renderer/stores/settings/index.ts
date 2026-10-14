@@ -8,6 +8,7 @@ import {
   oauthCredentialBlock,
   sanitizeDefaultModel,
 } from '@shared/defaultModel';
+import { type FileOpenRule, normalizeFileOpenRules } from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
 import {
@@ -135,6 +136,7 @@ const initialState = {
   theme: 'system' as Theme,
   accentColor: DEFAULT_ACCENT_COLOR,
   language: getDefaultLocale(),
+  fileOpenRules: [] as FileOpenRule[],
   terminalTheme: 'Dracula',
   terminalFontSize: 14,
   terminalFontFamily: 'ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace',
@@ -301,6 +303,7 @@ export const useSettingsStore = create<SettingsState>()(
       setTerminalShell: (terminalShell) =>
         set({ terminalShell: parseTerminalShell(terminalShell) }),
       setWorktreeRoot: (worktreeRoot) => set({ worktreeRoot: worktreeRoot.trim() }),
+      setFileOpenRules: (rules) => set({ fileOpenRules: normalizeFileOpenRules(rules) }),
 
       toggleFavoriteTerminalTheme: (theme) =>
         set((state) => ({
@@ -1061,11 +1064,19 @@ export const useSettingsStore = create<SettingsState>()(
       version: SETTINGS_VERSION,
       migrate: (persisted, version) => migrateSettings(persisted, version) as SettingsState,
       merge: (persisted, current) => mergeSettingsState(persisted, current),
+      partialize: (state) => ({
+        ...state,
+        fileOpenRules: normalizeFileOpenRules(state.fileOpenRules),
+      }),
       onRehydrateStorage: () => (state, error) => {
         // merge 已完成：此后（含下面的补写）才允许落盘；读失败保持关闸
         if (!error) openPersistWriteGate('enso-settings');
         const s = state ?? useSettingsStore.getState();
         applySettings(s);
+        const fileOpenRules = normalizeFileOpenRules(s.fileOpenRules);
+        if (JSON.stringify(fileOpenRules) !== JSON.stringify(s.fileOpenRules)) {
+          useSettingsStore.setState({ fileOpenRules });
+        }
         // 持久化数据可能被外部污染；非法值会让设置弹层渲染 undefined 图标而白屏
         const windowsLocalShell = parseWindowsLocalShell(s.windowsLocalShell);
         if (windowsLocalShell !== s.windowsLocalShell) {

@@ -275,6 +275,7 @@ export const IPC_CHANNELS = {
   FILES_COPY_PATH: 'files:copy-path',
   FILES_COPY_FILE: 'files:copy-file',
   FILES_REVEAL: 'files:reveal',
+  FILES_OPEN: 'files:open',
   FILES_SEARCH_WORKSPACE: 'files:search-workspace',
 
   GIT_DIFF_HEAD: 'git:diff-head',

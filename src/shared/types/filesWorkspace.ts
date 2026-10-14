@@ -9,6 +9,17 @@ export type FilesReadRelResult = { ok: true; content: string } | { ok: false; er
 
 export type FilesReadImageResult = { ok: true; dataUrl: string } | { ok: false; error: string };
 
+export interface FilesOpenRequest {
+  conversationId: string;
+  projectId: string;
+  rel: string;
+}
+
+export type FilesOpenResult =
+  | { ok: true; target: 'internal'; viewer: 'text' | 'markdown' | 'image'; rel: string }
+  | { ok: true; target: 'handled' }
+  | { ok: false; error: string };
+
 export type FilesFetchRemoteImageResult =
   | { ok: true; dataUrl: string }
   | { ok: false; error: string };

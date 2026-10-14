@@ -118,4 +118,13 @@ describe('openSidePanelFile', () => {
       ['files', { conversationId: 'late', projectId: 'p2' }],
     ]);
   });
+
+  it('Markdown 预览意图在冷挂载与 btw 父路由中保留；行号仍保持源码', () => {
+    openSidePanelFile('btw', 'README.md', undefined, 'markdown');
+    const open = vi.fn();
+    registerFilesOpener('parent', open);
+    expect(open).toHaveBeenLastCalledWith('README.md', undefined, 'markdown');
+    openSidePanelFile('btw', 'README.md', 9);
+    expect(open).toHaveBeenLastCalledWith('README.md', 9);
+  });
 });

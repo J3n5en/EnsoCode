@@ -1,5 +1,6 @@
 import { type AccentColor, resolveAccentColor } from '@shared/accentColor';
 import { resolveCompactStrategy } from '@shared/compactStrategy';
+import { normalizeFileOpenRules } from '@shared/fileOpening';
 import { extractModelOverrides, referencedModelIds } from '@shared/modelDirectory';
 import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import { type EditMode, type ModelEntry, resolveEditMode } from '@shared/types';
@@ -46,7 +47,11 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
       ? { webSearchChain: parseWebSearchChain(source.webSearchChain) }
       : {};
   void bashInterceptEnabled;
-  return { ...current, ...rest, ...voice, ...search, editMode, accentColor } as T;
+  const fileOpening =
+    'fileOpenRules' in source || 'fileOpenRules' in current
+      ? { fileOpenRules: normalizeFileOpenRules(source.fileOpenRules) }
+      : {};
+  return { ...current, ...rest, ...voice, ...search, ...fileOpening, editMode, accentColor } as T;
 }
 
 /**

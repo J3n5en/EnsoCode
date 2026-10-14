@@ -22,6 +22,7 @@ import {
   AUTO_DELETE_ARCHIVED_DAYS,
 } from '@/stores/settings/autoArchiveIdleDays';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
+import { FileOpeningSettings } from './FileOpeningSettings';
 import { SmartCompactPicker } from './SmartCompactPicker';
 
 const TERMINAL_SHELL_LABELS: Record<Exclude<TerminalShell, 'auto'>, string> = {
@@ -65,6 +66,7 @@ export function GeneralSettings() {
       <NotificationSection />
       <AutoArchiveSection />
       <SidePanelSection />
+      <FileOpeningSettings />
       <SmartCompactPicker />
       <WindowsLocalShellSection />
       <TerminalShellSection />

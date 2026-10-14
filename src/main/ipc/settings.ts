@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { type FileOpenRule, normalizeFileOpenRules, parseFileOpenRules } from '@shared/fileOpening';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
 import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
 import { app, BrowserWindow, ipcMain } from 'electron';
@@ -65,6 +66,7 @@ export const SETTINGS_STATE_FIELDS = [
   'proxyMode',
   'customProxyUrl',
   'openChangesOnFileEdit',
+  'fileOpenRules',
   'compactReadOnlyTools',
   'expandLiveEdits',
   'expandLiveReasoning',
@@ -156,6 +158,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'windowsLocalShell',
   'terminalShell',
   'worktreeRoot',
+  'fileOpenRules',
   'autoUpdate',
   'autoRestartWhenIdle',
   'proxyMode',
@@ -357,6 +360,13 @@ function scheduleWrite(
   broadcast: SettingsBroadcast = 'exclude-sender'
 ): boolean {
   try {
+    const store = objectRecord(data['enso-settings']);
+    const state = objectRecord(store?.state);
+    if (state && 'fileOpenRules' in state) {
+      const rules = parseFileOpenRules(state.fileOpenRules);
+      if (!rules) return false;
+      data = { ...data, 'enso-settings': { ...store, state: { ...state, fileOpenRules: rules } } };
+    }
     const previous = readSettings();
     const destructive = destructiveFields(previous, data);
     if (destructive.length > 0) {
@@ -583,6 +593,10 @@ export function patchSettingsState(
     targetValue = resolveEditMode(undefined, value);
   } else if (targetField === 'editMode' && !isEditMode(value)) {
     return { ok: false, error: 'Invalid edit mode' };
+  } else if (targetField === 'fileOpenRules') {
+    const rules = parseFileOpenRules(value);
+    if (!rules) return { ok: false, error: 'Invalid file open rules' };
+    targetValue = rules;
   }
   const current = readSettings() ?? {};
   const persisted =
@@ -632,6 +646,16 @@ export function readTrayPreventDisplaySleep(): boolean {
 
 export function readSshTimeoutSeconds(): number {
   return normalizeSshTimeoutSeconds(settingsStateOf(readSettings()).sshTimeoutSeconds);
+}
+
+/**
+ * 从 Main 持久化设置读取本机打开规则，坏配置只回退默认行为，绝不采信请求中的动作或应用路径。
+ *
+ * Read device-local opening rules from Main's persisted settings; invalid configuration only falls
+ * back to defaults, never to actions or application paths supplied by a request.
+ */
+export function readFileOpenRules(): FileOpenRule[] {
+  return normalizeFileOpenRules(settingsStateOf(readSettings()).fileOpenRules);
 }
 
 export function writeTrayPreventDisplaySleep(enabled: boolean): boolean {
@@ -777,7 +801,8 @@ export function registerSettingsHandlers(): void {
   });
 
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE_KEY, async (event, name: string, value: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE_KEY, async (event, name: unknown, value: unknown) => {
+    if (typeof name !== 'string') return false;
     const current = readSettings() ?? {};
     const next = { ...current };
     if (value === undefined) delete next[name];
@@ -786,7 +811,8 @@ export function registerSettingsHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE, async (event, data: unknown) => {
-    return scheduleWrite(data as Record<string, unknown>, event.sender);
+    const record = objectRecord(data);
+    return record ? scheduleWrite(record, event.sender) : false;
   });
 
   app.on('before-quit', () => {

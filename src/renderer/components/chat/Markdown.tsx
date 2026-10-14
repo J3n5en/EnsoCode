@@ -1,8 +1,19 @@
+import { previewImageMime } from '@shared/markdownPreviewImage';
+import { FolderOpen } from 'lucide-react';
 import type { Root } from 'mdast';
-import { createContext, type MouseEvent, type ReactNode, useContext, useMemo } from 'react';
+import {
+  createContext,
+  type MouseEvent,
+  type ReactNode,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
 import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
+import { revealLabel } from '@/components/sidepanel/fileTreeMenu';
+import { WorkspaceImagePreview } from '@/components/sidepanel/WorkspaceImagePreview';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { openSidePanelFile } from '@/lib/sidePanelDock';
@@ -107,67 +118,149 @@ function revealErrorDescription(error: string, t: (key: string) => string): stri
       return t('This link is not available on the local computer.');
     case 'unavailable':
       return t('The linked file or folder is unavailable.');
+    case 'unsupported-viewer':
+      return t('This file format cannot be previewed inside EnsoCode.');
+    case 'too-large':
+      return t('The image is too large to preview.');
     default:
       return error;
   }
 }
 
+/**
+ * 行号只适用于带扩展名的本地文件，避免将 javascript:123 等协议误识别成路径。
+ *
+ * Line references apply only to local files with extensions, never protocols such as javascript:123.
+ */
+function classifyFileReference(href: string) {
+  const classification = classifyMarkdownLink(href);
+  if (classification.kind === 'external') return { classification, line: undefined };
+  const reference = splitFileLineRef(classification.kind === 'local' ? classification.path : href);
+  if (reference.line && /\.[\w]+$/.test(reference.path)) {
+    return { classification: classifyMarkdownLink(reference.path), line: reference.line };
+  }
+  return { classification, line: undefined };
+}
+
 function MarkdownAnchor({ children, href }: { children?: ReactNode; href?: string }) {
   const { t } = useI18n();
   const linkContext = useContext(MarkdownLinkContext);
-  const classification =
-    typeof href === 'string' ? classifyMarkdownLink(href) : ({ kind: 'blocked' } as const);
+  const [imagePreview, setImagePreview] = useState<{ rel: string; dataUrl: string } | null>(null);
+  const { classification, line } = classifyFileReference(href ?? '');
   const local = classification.kind === 'local' && linkContext !== null;
 
-  const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (classification.kind === 'blocked') {
-      event.preventDefault();
-      return;
-    }
-    if (!local || !linkContext || classification.kind !== 'local') return;
-    event.preventDefault();
-    const rel = toWorkspaceRelativePath(classification.path, linkContext.cwd);
-    if (rel == null) {
-      addToast({
-        type: 'error',
-        title: t('Could not open local file link'),
-        description: t('The link is outside the current workspace.'),
-      });
-      return;
-    }
-    void window.electronAPI.workspaceFiles
-      .reveal({
-        conversationId: linkContext.conversationId,
-        projectId: linkContext.projectId,
-        rel,
-      })
-      .then((result) => {
-        if (!result.ok) {
-          addToast({
-            type: 'error',
-            title: t('Could not open local file link'),
-            description: revealErrorDescription(result.error, t),
-          });
-        }
-      })
-      .catch((error: unknown) => {
-        addToast({
-          type: 'error',
-          title: t('Could not open local file link'),
-          description: error instanceof Error ? error.message : String(error),
-        });
-      });
+  const fail = (error: string) => {
+    addToast({
+      type: 'error',
+      title: t('Could not open local file link'),
+      description: revealErrorDescription(error, t),
+    });
   };
 
-  return (
+  const openLocal = async (reveal: boolean) => {
+    if (!linkContext || classification.kind !== 'local') return;
+    const rel = toWorkspaceRelativePath(classification.path, linkContext.cwd);
+    if (rel == null) {
+      fail('invalid-path');
+      return;
+    }
+    if (!reveal && line) {
+      openSidePanelFile(linkContext.conversationId, rel, line);
+      return;
+    }
+    const req = {
+      conversationId: linkContext.conversationId,
+      projectId: linkContext.projectId,
+      rel,
+    };
+    try {
+      if (reveal) {
+        const result = await window.electronAPI.workspaceFiles.reveal(req);
+        if (!result.ok) fail(result.error);
+        return;
+      }
+      const result = await window.electronAPI.workspaceFiles.open(req);
+      if (!result.ok) {
+        fail(result.error);
+        return;
+      }
+      if (result.target === 'handled') return;
+      if (result.viewer === 'image') {
+        const mime = previewImageMime(result.rel);
+        if (!mime) {
+          fail('unsupported-viewer');
+          return;
+        }
+        const image = await window.electronAPI.workspaceFiles.readImage({
+          ...req,
+          rel: result.rel,
+        });
+        if (!image.ok) {
+          fail(image.error);
+          return;
+        }
+        const prefix = `data:${mime};base64,`;
+        if (
+          !image.dataUrl.startsWith(prefix) ||
+          !/^[A-Za-z0-9+/=]+$/.test(image.dataUrl.slice(prefix.length))
+        ) {
+          fail('unsupported-viewer');
+          return;
+        }
+        setImagePreview({ rel: result.rel, dataUrl: image.dataUrl });
+      } else if (result.viewer === 'markdown') {
+        openSidePanelFile(linkContext.conversationId, result.rel, undefined, 'markdown');
+      } else {
+        openSidePanelFile(linkContext.conversationId, result.rel);
+      }
+    } catch (error: unknown) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (classification.kind === 'external') return;
+    event.preventDefault();
+    if (local) void openLocal(false);
+  };
+
+  const anchor = (
     <a
-      href={href || undefined}
-      className="text-brand underline decoration-brand/40 underline-offset-2 transition-colors hover:decoration-brand"
-      {...(local ? {} : { target: '_blank', rel: 'noreferrer' })}
+      href={classification.kind === 'external' ? href || undefined : undefined}
+      className={cn(
+        'text-brand underline decoration-brand/40 underline-offset-2 transition-colors hover:decoration-brand',
+        local && 'cursor-pointer break-all'
+      )}
+      role={local ? 'link' : undefined}
+      tabIndex={local ? 0 : undefined}
+      {...(classification.kind === 'external' ? { target: '_blank', rel: 'noreferrer' } : {})}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (local && event.key === 'Enter') {
+          event.preventDefault();
+          void openLocal(false);
+        }
+      }}
     >
       {children}
     </a>
+  );
+  if (!local) return anchor;
+
+  return (
+    <span className="inline">
+      {anchor}
+      <button
+        type="button"
+        className="ml-1 inline-flex rounded p-0.5 align-middle text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label={t(revealLabel())}
+        title={t(revealLabel())}
+        onClick={() => void openLocal(true)}
+      >
+        <FolderOpen className="h-3.5 w-3.5" />
+      </button>
+      <WorkspaceImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />
+    </span>
   );
 }
 
@@ -179,7 +272,7 @@ function MarkdownAnchor({ children, href }: { children?: ReactNode; href?: strin
 export function markdownUrlTransform(value: string, key?: string, allowLocal = true): string {
   const transformed = defaultUrlTransform(value);
   if (transformed || key !== 'href') return transformed;
-  return allowLocal && classifyMarkdownLink(value).kind === 'local' ? value : '';
+  return allowLocal && classifyFileReference(value).classification.kind === 'local' ? value : '';
 }
 
 /** 模块级稳定引用：react-markdown 按组件类型协调子树，内联对象每帧都会拆掉 CodeBlock */
