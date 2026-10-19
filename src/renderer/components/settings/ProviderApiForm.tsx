@@ -118,6 +118,9 @@ export function ProviderApiForm({
   const visibleIds = visibleModels.map((model) => model.id);
   const selection = useVisibleSelection(visibleIds);
   const enabledCount = models.filter(isEnabled).length;
+  const availableTestModel = models.some((model) => model.id === testModel)
+    ? testModel
+    : (models.find(isEnabled)?.id ?? models[0]?.id ?? '');
 
   const setSelectedEnabled = (enabled: boolean) => {
     const ids = new Set(selection.selectedIds);
@@ -182,7 +185,7 @@ export function ProviderApiForm({
   const handleTest = async () => {
     setBusy('test');
     setStatus(null);
-    const target = testModel || models.find(isEnabled)?.id;
+    const target = availableTestModel || undefined;
     const result = await window.electronAPI.providers.test(apiConfig, target);
     setBusy(null);
     const text = result.ok ? t('Connected ({{ms}}ms)', { ms: result.latencyMs }) : result.message;
@@ -415,7 +418,7 @@ export function ProviderApiForm({
                 value: model.id,
                 label: model.label ?? model.id,
               }))}
-              value={testModel}
+              value={availableTestModel}
               onValueChange={(value) => setTestModel(value ?? '')}
             >
               <SelectTrigger className="h-8 w-36">

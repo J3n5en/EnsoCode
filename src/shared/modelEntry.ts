@@ -42,9 +42,14 @@ export function commitPendingModel(models: readonly ModelEntry[], pending: strin
 }
 
 /**
- * 拉取结果并入已有模型列表（Fetch Models 按钮的唯一合并逻辑）：
- * - 新模型追加到末尾，默认启用，携带拉到的 contextWindow/maxTokens；
- * - 已有模型只回填缺失字段，绝不覆盖已有值（已有值 = 用户覆盖，优先级更高）。
+ * 用成功拉取的完整清单同步模型：移除上游缺席的条目（包括手动添加的模型），
+ * 空清单会清空本地列表。同 ID 去重；仍存在的模型保留原顺序与用户设置，
+ * 只回填缺失元数据；新模型追加到末尾并默认启用。调用方不能传入失败结果。
+ *
+ * Synchronize against a successfully fetched complete list, removing absent entries
+ * (including manually added models) and clearing the local list when it is empty.
+ * Deduplicate fetched IDs, preserve retained order and user settings, backfill only
+ * missing metadata, and append enabled new models. Callers must exclude failed results.
  */
 export function mergeFetchedModels(
   current: readonly ModelEntry[],
@@ -52,16 +57,16 @@ export function mergeFetchedModels(
 ): ModelEntry[] {
   const byId = new Map(fetched.map((model) => [model.id, model]));
   const known = new Set(current.map((model) => model.id));
-  const updated = current.map((model) => {
+  const updated = current.flatMap((model) => {
     const hit = byId.get(model.id);
-    if (!hit) return model;
+    if (!hit) return [];
     const next: ModelEntry = { ...model };
     if (next.contextWindow === undefined && hit.contextWindow !== undefined)
       next.contextWindow = hit.contextWindow;
     if (next.maxTokens === undefined && hit.maxTokens !== undefined) next.maxTokens = hit.maxTokens;
-    return next;
+    return [next];
   });
-  const fresh = fetched
+  const fresh = [...byId.values()]
     .filter((model) => !known.has(model.id))
     .map(
       (model): ModelEntry => ({

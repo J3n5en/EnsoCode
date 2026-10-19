@@ -186,6 +186,47 @@ describe('withVersionSegment', () => {
 });
 
 describe('isValidModelListPayload', () => {
+  it('有后续页的响应不能用于全量同步，最后一页和无分页标记的清单仍有效', () => {
+    const data = [{ id: 'kept' }];
+    expect(isValidModelListPayload('anthropic-messages', { data, has_more: true })).toBe(false);
+    expect(isValidModelListPayload('openai-completions', { data, has_more: true })).toBe(false);
+    expect(isValidModelListPayload('anthropic-messages', { data, has_more: false })).toBe(true);
+    const models = [{ name: 'models/gemini' }];
+    expect(isValidModelListPayload('google-generative-ai', { models, nextPageToken: 'next' })).toBe(
+      false
+    );
+    expect(isValidModelListPayload('google-generative-ai', { models, nextPageToken: '' })).toBe(
+      true
+    );
+  });
+
+  it.each<ModelApiKind>(['openai-completions', 'openai-responses', 'anthropic-messages'])(
+    '%s 拒绝缺失或无效 ID，不能把损坏条目当成模型已下架',
+    (api) => {
+      for (const item of [null, {}, [], { id: 123 }, { id: '' }, { id: '  ' }]) {
+        expect(isValidModelListPayload(api, { data: [item] })).toBe(false);
+        expect(isValidModelListPayload(api, { data: [{ id: 'kept' }, item] })).toBe(false);
+      }
+    }
+  );
+
+  it('Google / Ollama 按实际解析的 ID 校验每个条目，合法空数组仍可同步', () => {
+    expect(
+      isValidModelListPayload('google-generative-ai', { models: [{ name: 'models/gemini' }] })
+    ).toBe(true);
+    expect(isValidModelListPayload('google-generative-ai', { models: [{ name: 'models/' }] })).toBe(
+      false
+    );
+    expect(isValidModelListPayload('google-generative-ai', { models: [null] })).toBe(false);
+    expect(
+      isValidModelListPayload('ollama', { models: [{ model: 'llama' }, { name: 'qwen' }] })
+    ).toBe(true);
+    expect(isValidModelListPayload('ollama', { models: [{ model: 123, name: 'qwen' }] })).toBe(
+      false
+    );
+    expect(isValidModelListPayload('ollama', { models: [{ name: ' ' }] })).toBe(false);
+  });
+
   it('Anthropic / OpenAI 要求根对象包含 data 数组', () => {
     expect(isValidModelListPayload('anthropic-messages', { data: [] })).toBe(true);
     expect(isValidModelListPayload('openai-completions', { data: [{ id: 'm1' }] })).toBe(true);
@@ -339,6 +380,38 @@ describe('toMessage', () => {
 });
 
 describe('远端错误边界', () => {
+  it.each([
+    { api: 'openai-completions', payload: { data: [null, {}, { id: 123 }] } },
+    { api: 'anthropic-messages', payload: { data: [{ id: 'kept' }, {}] } },
+    { api: 'google-generative-ai', payload: { models: [{ name: 'models/' }] } },
+    { api: 'ollama', payload: { models: [{ name: ' ' }] } },
+    { api: 'anthropic-messages', payload: { data: [{ id: 'kept' }], has_more: true } },
+    { api: 'openai-completions', payload: { data: [{ id: 'kept' }], has_more: true } },
+    {
+      api: 'google-generative-ai',
+      payload: { models: [{ name: 'models/gemini' }], nextPageToken: 'next' },
+    },
+  ] satisfies { api: ModelApiKind; payload: unknown }[])(
+    '$api 的损坏或不完整清单返回失败，不生成可用于删除本地模型的成功快照',
+    async ({ api, payload }) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(payload)))
+      );
+      try {
+        const result = await listModels({
+          api,
+          apiKey: 'fixture-key',
+          baseUrl: 'https://example.test/v1',
+        });
+        expect(result.ok).toBe(false);
+        expect(result.models).toEqual([]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   it('list/test 都只返回状态，不读取或回显恶意响应 body', async () => {
     const secret = 'sk-provider-real-secret';
     const text = vi.fn(async () => `malicious body ${secret}`);
