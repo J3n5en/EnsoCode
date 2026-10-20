@@ -72,6 +72,7 @@ import type {
   FilesFetchRemoteImageResult,
   FilesListResult,
   FilesMutateResult,
+  FilesOpenContextRequest,
   FilesOpenRequest,
   FilesOpenResult,
   FilesReadImageResult,
@@ -608,6 +609,8 @@ const electronAPI = {
   },
 
   workspaceFiles: {
+    openContext: (request: FilesOpenContextRequest): Promise<FilesMutateResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, request),
     open: (request: FilesOpenRequest): Promise<FilesOpenResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_OPEN, request),
     listDir: (request: {

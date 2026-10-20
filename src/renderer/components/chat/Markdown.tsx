@@ -4,6 +4,7 @@ import type { Root } from 'mdast';
 import {
   createContext,
   type MouseEvent,
+  type ReactElement,
   type ReactNode,
   useContext,
   useMemo,
@@ -14,10 +15,17 @@ import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
 import { revealLabel } from '@/components/sidepanel/fileTreeMenu';
 import { WorkspaceImagePreview } from '@/components/sidepanel/WorkspaceImagePreview';
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuPopup,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/stores/settings';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { highlightNode } from './highlightQuery';
@@ -122,9 +130,76 @@ function revealErrorDescription(error: string, t: (key: string) => string): stri
       return t('This file format cannot be previewed inside EnsoCode.');
     case 'too-large':
       return t('The image is too large to preview.');
+    case 'invalid-application':
+      return t('The selected application path is invalid.');
+    case 'application-unavailable':
+      return t('VS Code is unavailable. Install it or select another application.');
     default:
       return error;
   }
+}
+
+async function openFileLinkContext(
+  context: MarkdownLinkContextValue,
+  file: string,
+  itemId: string,
+  t: (key: string) => string
+): Promise<void> {
+  try {
+    const rel = toWorkspaceRelativePath(file, context.cwd);
+    if (rel === null) throw new Error('invalid-path');
+    const result = await window.electronAPI.workspaceFiles.openContext({
+      conversationId: context.conversationId,
+      projectId: context.projectId,
+      rel,
+      itemId,
+    });
+    if (!result.ok) throw new Error(result.error);
+  } catch (error: unknown) {
+    addToast({
+      type: 'error',
+      title: t('Could not open local file link'),
+      description: revealErrorDescription(error instanceof Error ? error.message : String(error), t),
+    });
+  }
+}
+
+function FileLinkContextMenu({
+  context,
+  file,
+  children,
+}: {
+  context: MarkdownLinkContextValue;
+  file: string;
+  children: ReactElement;
+}) {
+  const { t } = useI18n();
+  const configured = useSettingsStore((state) => state.contextMenuOpen);
+  const items = configured.filter((item) => item.enabled);
+  if (items.length === 0) return children;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={children} onContextMenu={(event) => event.stopPropagation()} />
+      <ContextMenuPopup className="min-w-48">
+        {items.map((item) => {
+          const name =
+            item.target === 'application'
+              ? (item.applicationPath.split(/[/\\]/).at(-1) ?? item.applicationPath)
+                  .replace(/\.(?:exe|app)$/i, '')
+              : 'VS Code';
+          return (
+            <ContextMenuItem
+              key={item.id}
+              closeOnClick
+              onClick={() => void openFileLinkContext(context, file, item.id, t)}
+            >
+              {item.target === 'reveal' ? t(revealLabel()) : t('Open in {{app}}', { app: name })}
+            </ContextMenuItem>
+          );
+        })}
+      </ContextMenuPopup>
+    </ContextMenu>
+  );
 }
 
 /**
@@ -242,7 +317,7 @@ function MarkdownAnchor({
     if (local) void openLocal(false);
   };
 
-  const anchor = (
+  const anchorElement = (
     <a
       href={classification.kind === 'external' ? href || undefined : undefined}
       className={cn(
@@ -263,7 +338,12 @@ function MarkdownAnchor({
       {codeText ?? children}
     </a>
   );
-  if (!local) return anchor;
+  if (!local || classification.kind !== 'local' || !linkContext) return anchorElement;
+  const anchor = (
+    <FileLinkContextMenu context={linkContext} file={classification.path}>
+      {anchorElement}
+    </FileLinkContextMenu>
+  );
 
   if (codeText !== null) {
     return (
@@ -372,7 +452,7 @@ export const markdownComponents: Components = {
         }
         openSidePanelFile(linkContext.conversationId, rel, line);
       };
-      return (
+      const chip = (
         <button
           type="button"
           onClick={onClick}
@@ -381,6 +461,13 @@ export const markdownComponents: Components = {
         >
           <span className="truncate">{value}</span>
         </button>
+      );
+      return linkContext ? (
+        <FileLinkContextMenu context={linkContext} file={path}>
+          {chip}
+        </FileLinkContextMenu>
+      ) : (
+        chip
       );
     }
     return (

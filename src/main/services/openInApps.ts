@@ -261,11 +261,16 @@ async function detect(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): Promis
   });
 }
 
-function launch(platform: NodeJS.Platform, detected: DetectedApp, dir: string): Promise<void> {
+function launch(
+  platform: NodeJS.Platform,
+  detected: DetectedApp,
+  dir: string,
+  cwd: string
+): Promise<void> {
   if (platform === 'darwin') return run('open', ['-a', detected.target, dir]).then(() => undefined);
   return new Promise((resolve, reject) => {
     const child = spawn(detected.target, buildLaunchArgs(detected.definition.args, dir), {
-      cwd: dir,
+      cwd,
       detached: true,
       stdio: 'ignore',
     });
@@ -312,13 +317,13 @@ export function createOpenInApps({
         return [];
       }
     },
-    async open(appId: string, dir: string): Promise<{ ok: boolean; error?: string }> {
+    async open(appId: string, dir: string, cwd = dir): Promise<{ ok: boolean; error?: string }> {
       const target = (await detected().catch(() => [])).find(
         (entry) => entry.definition.id === appId
       );
       if (!target) return { ok: false, error: 'unavailable' };
       try {
-        await launch(platform, target, dir);
+        await launch(platform, target, dir, cwd);
         return { ok: true };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'unavailable' };

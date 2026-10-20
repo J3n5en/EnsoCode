@@ -81,6 +81,7 @@ export const SETTINGS_DATA_COVERAGE = {
   customProxyUrl: surfaces('general.custom-proxy-url'),
   openChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
   fileOpenRules: excluded('Device-local user file opening preferences; not an Enso capability.'),
+  contextMenuOpen: excluded('Device-local preference for right-clicking chat file links.'),
   compactReadOnlyTools: excluded('Renderer timeline density preference; not an Enso capability.'),
   expandLiveEdits: excluded('Renderer timeline expansion preference; not an Enso capability.'),
   expandLiveReasoning: excluded(
@@ -222,6 +223,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setCustomProxyUrl: surfaces('general.custom-proxy-url'),
   setOpenChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
   setFileOpenRules: excluded('Device-local user file opening preferences; not an Enso capability.'),
+  setContextMenuOpen: excluded('Device-local preference for right-clicking chat file links.'),
   setCompactReadOnlyTools: excluded(
     'Renderer timeline density preference; not an Enso capability.'
   ),
@@ -616,6 +618,7 @@ export const IPC_PRODUCT_COVERAGE = {
   FILES_COPY_FILE: excluded('Side panel Files copy local file to OS clipboard.'),
   FILES_REVEAL: excluded('Side panel Files reveal in system file manager.'),
   FILES_OPEN: excluded('User-clicked workspace file opening; not an autonomous model capability.'),
+  FILES_OPEN_CONTEXT: excluded('User right-clicks a chat file link; not a model capability.'),
   FILES_SEARCH_WORKSPACE: excluded(
     'Side panel Files name/content search scoped to conversation cwd.'
   ),

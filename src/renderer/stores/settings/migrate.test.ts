@@ -2,6 +2,23 @@ import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine
 import { describe, expect, it } from 'vitest';
 import { mergeSettingsState, migrateSettings, SETTINGS_VERSION } from './migrate';
 
+describe('文件链接右键打开设置水合', () => {
+  const current = {
+    editMode: 'apply_patch' as const,
+    accentColor: 'indigo' as const,
+    contextMenuOpen: [{ id: 'reveal', target: 'reveal' as const, enabled: true }],
+  };
+  it('兼容旧设置和脏配置，并保留多窗口同步来的已保存目标', () => {
+    expect(mergeSettingsState({}, current).contextMenuOpen).toEqual([]);
+    expect(
+      mergeSettingsState({ contextMenuOpen: { target: 'bad' } }, current).contextMenuOpen
+    ).toEqual([]);
+    expect(mergeSettingsState({ contextMenuOpen: [] }, current).contextMenuOpen).toEqual([]);
+    const config = [{ id: 'vscode', target: 'vscode', enabled: false }];
+    expect(mergeSettingsState({ contextMenuOpen: config }, current).contextMenuOpen).toEqual(config);
+  });
+});
+
 describe('web search chain hydration', () => {
   const current = {
     editMode: 'apply_patch' as const,

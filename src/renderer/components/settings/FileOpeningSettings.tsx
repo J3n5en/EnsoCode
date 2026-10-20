@@ -19,6 +19,7 @@ import {
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
+import { ContextMenuOpeningSettings } from './ContextMenuOpeningSettings';
 
 type Target = FileOpenRule['target'];
 const TARGETS: Target[] = ['internal', 'reveal', 'system', 'application'];
@@ -192,6 +193,7 @@ export function FileOpeningSettings() {
           {t('Executable and installer files are always revealed in the file manager.')}
         </p>
       </div>
+      <ContextMenuOpeningSettings />
       {rules.map((rule) => (
         <div
           key={rule.extension}

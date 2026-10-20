@@ -57,6 +57,34 @@ afterAll(async () => {
 });
 
 describe('settings广播策略', () => {
+  it('右键打开配置落盘但不跨设备同步，非法应用配置不能覆盖已保存值', async () => {
+    const settings = await import('./settings');
+    settings.patchSettingsState('contextMenuOpen', []);
+    const fingerprint = settings.settingsFingerprint(settings.readSettings());
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('contextMenuOpen');
+    const config = [{ id: 'vscode', target: 'vscode', enabled: true }];
+    expect(settings.patchSettingsState('contextMenuOpen', config)).toMatchObject({
+      ok: true,
+    });
+    expect(
+      settings.patchSettingsState('contextMenuOpen', [
+        {
+          id: 'custom',
+          enabled: true,
+          target: 'application',
+          applicationPath: 'editor.exe --run',
+        },
+      ])
+    ).toMatchObject({ ok: false });
+    expect(settings.readContextMenuOpen()).toEqual(config);
+    expect(settings.settingsFingerprint(settings.readSettings())).toBe(fingerprint);
+    settings.flushSettings();
+    expect(
+      JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))['enso-settings'].state
+        .contextMenuOpen
+    ).toEqual(config);
+  });
+
   it('文件打开规则允许持久化规范化值，但禁止同步到其他设备', async () => {
     const settings = await import('./settings');
     expect(settings.SETTINGS_STATE_FIELDS).toContain('fileOpenRules');

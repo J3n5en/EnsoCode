@@ -10,7 +10,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { type FileOpenRule, normalizeFileOpenRules, parseFileOpenRules } from '@shared/fileOpening';
+import {
+  type ContextMenuOpen,
+  type FileOpenRule,
+  normalizeContextMenuOpen,
+  normalizeFileOpenRules,
+  parseContextMenuOpen,
+  parseFileOpenRules,
+} from '@shared/fileOpening';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
 import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
 import { app, BrowserWindow, ipcMain } from 'electron';
@@ -67,6 +74,7 @@ export const SETTINGS_STATE_FIELDS = [
   'customProxyUrl',
   'openChangesOnFileEdit',
   'fileOpenRules',
+  'contextMenuOpen',
   'compactReadOnlyTools',
   'expandLiveEdits',
   'expandLiveReasoning',
@@ -160,6 +168,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'terminalShell',
   'worktreeRoot',
   'fileOpenRules',
+  'contextMenuOpen',
   'autoUpdate',
   'autoRestartWhenIdle',
   'proxyMode',
@@ -363,10 +372,19 @@ function scheduleWrite(
   try {
     const store = objectRecord(data['enso-settings']);
     const state = objectRecord(store?.state);
-    if (state && 'fileOpenRules' in state) {
-      const rules = parseFileOpenRules(state.fileOpenRules);
-      if (!rules) return false;
-      data = { ...data, 'enso-settings': { ...store, state: { ...state, fileOpenRules: rules } } };
+    if (state) {
+      let normalized = state;
+      if ('fileOpenRules' in state) {
+        const rules = parseFileOpenRules(state.fileOpenRules);
+        if (!rules) return false;
+        normalized = { ...normalized, fileOpenRules: rules };
+      }
+      if ('contextMenuOpen' in state) {
+        const config = parseContextMenuOpen(state.contextMenuOpen);
+        if (!config) return false;
+        normalized = { ...normalized, contextMenuOpen: config };
+      }
+      data = { ...data, 'enso-settings': { ...store, state: normalized } };
     }
     const previous = readSettings();
     const destructive = destructiveFields(previous, data);
@@ -602,6 +620,10 @@ export function patchSettingsState(
     const rules = parseFileOpenRules(value);
     if (!rules) return { ok: false, error: 'Invalid file open rules' };
     targetValue = rules;
+  } else if (targetField === 'contextMenuOpen') {
+    const config = parseContextMenuOpen(value);
+    if (!config) return { ok: false, error: 'Invalid context menu opening' };
+    targetValue = config;
   }
   const current = readSettings() ?? {};
   const persisted =
@@ -661,6 +683,10 @@ export function readSshTimeoutSeconds(): number {
  */
 export function readFileOpenRules(): FileOpenRule[] {
   return normalizeFileOpenRules(settingsStateOf(readSettings()).fileOpenRules);
+}
+
+export function readContextMenuOpen(): ContextMenuOpen {
+  return normalizeContextMenuOpen(settingsStateOf(readSettings()).contextMenuOpen);
 }
 
 export function writeTrayPreventDisplaySleep(enabled: boolean): boolean {

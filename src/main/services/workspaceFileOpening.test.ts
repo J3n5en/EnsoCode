@@ -17,6 +17,7 @@ import {
   canOpenWorkspaceFileExternally,
   launchWorkspaceFileApplication,
   openLocalWorkspaceFile,
+  openLocalWorkspaceFileContext,
   openWorkspacePdfWindow,
   type WorkspaceFileOpeningDependencies,
 } from './workspaceFileOpening';
@@ -89,6 +90,66 @@ const file = (rel: string) => {
   writeFileSync(abs, rel.endsWith('.pdf') ? '%PDF-1.7\nfixture' : 'fixture');
   return abs;
 };
+
+describe('文件链接右键打开', () => {
+  it('默认只定位文件，VS Code 可打开源码且工作目录使用父目录', async () => {
+    const abs = file('source.ts');
+    const context = { ...dependencies, openVSCode: vi.fn(async () => ({ ok: true })) };
+    expect(
+      await openLocalWorkspaceFileContext(root, 'source.ts', { target: 'reveal' }, context)
+    ).toEqual({ ok: true });
+    expect(context.showItemInFolder).toHaveBeenCalledWith(abs);
+    expect(context.openVSCode).not.toHaveBeenCalled();
+    expect(
+      await openLocalWorkspaceFileContext(root, 'source.ts', { target: 'vscode' }, context)
+    ).toEqual({ ok: true });
+    expect(context.openVSCode).toHaveBeenCalledWith(abs, root);
+    expect(context.openPath).not.toHaveBeenCalled();
+  });
+
+  it.each(['中文 报告.txt', 'source.ts'])(
+    '指定应用需验证真实可执行路径，独立传递文件参数 %s',
+    async (rel) => {
+      const abs = file(rel);
+      const applicationPath = file('Editor.exe');
+      const context = { ...dependencies, openVSCode: vi.fn(async () => ({ ok: true })) };
+      expect(
+        await openLocalWorkspaceFileContext(
+          root,
+          rel,
+          { target: 'application', applicationPath },
+          context
+        )
+      ).toEqual({ ok: true });
+      expect(context.launchApplication).toHaveBeenCalledWith(applicationPath, abs);
+      expect(
+        await openLocalWorkspaceFileContext(
+          root,
+          rel,
+          { target: 'application', applicationPath: path.join(root, 'missing.exe') },
+          context
+        )
+      ).toEqual({ ok: false, error: 'invalid-application' });
+      expect(context.launchApplication).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('拒绝越界目标，可执行文件和伪装链接仍仅定位', async () => {
+    const exe = file('payload.exe');
+    const alias = file('alias.txt');
+    mocks.realPaths.set(alias, exe);
+    const context = { ...dependencies, openVSCode: vi.fn(async () => ({ ok: true })) };
+    expect(
+      await openLocalWorkspaceFileContext(root, '../outside.txt', { target: 'vscode' }, context)
+    ).toEqual({ ok: false, error: 'invalid-path' });
+    expect(
+      await openLocalWorkspaceFileContext(root, 'alias.txt', { target: 'vscode' }, context)
+    ).toEqual({ ok: true });
+    expect(context.showItemInFolder).toHaveBeenCalledWith(exe);
+    expect(context.openVSCode).not.toHaveBeenCalled();
+    expect(context.launchApplication).not.toHaveBeenCalled();
+  });
+});
 
 describe('本地工作区文件按类型打开', () => {
   it('PDF 仅由安全内部预览处理', async () => {

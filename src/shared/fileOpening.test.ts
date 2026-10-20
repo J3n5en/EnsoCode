@@ -1,10 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import {
   fileOpenViewer,
+  normalizeContextMenuOpen,
   normalizeFileOpenRules,
+  parseContextMenuOpen,
   parseFileOpenRules,
   resolveFileOpenTarget,
 } from './fileOpening';
+
+describe('文件链接右键打开配置', () => {
+  it('保留多项启用状态和顺序，支持多个指定应用及全部关闭', () => {
+    const config = [
+      { id: 'vscode', target: 'vscode', enabled: true },
+      { id: 'reveal', target: 'reveal', enabled: false },
+      { id: 'editor-1', target: 'application', enabled: true, applicationPath: 'C:/Apps/Editor.exe' },
+      { id: 'editor-2', target: 'application', enabled: false, applicationPath: '/bin/editor' },
+    ];
+    expect(parseContextMenuOpen(config)).toEqual(config);
+    expect(normalizeContextMenuOpen([])).toEqual([]);
+    expect(normalizeContextMenuOpen(undefined)).toEqual([]);
+  });
+
+  it.each([
+    null,
+    {},
+    [{ id: 'reveal', target: 'system', enabled: true }],
+    [{ id: 'custom', target: 'application', enabled: true }],
+    [{ id: 'custom', target: 'application', enabled: true, applicationPath: 'editor.exe' }],
+    [{ id: 'vscode', target: 'vscode', enabled: true, applicationPath: '/bin/editor' }],
+    [{ id: 'reveal', target: 'reveal', enabled: true, command: 'bad' }],
+    [{ id: 'vscode', target: 'vscode', enabled: 'yes' }],
+    [
+      { id: 'vscode', target: 'vscode', enabled: true },
+      { id: 'vscode', target: 'vscode', enabled: false },
+    ],
+    [
+      { id: 'a', target: 'application', enabled: true, applicationPath: 'C:/Apps/Editor.exe' },
+      { id: 'b', target: 'application', enabled: true, applicationPath: 'c:\\apps\\editor.EXE' },
+    ],
+  ])('拒绝脏配置并安全回落 %#', (value) => {
+    expect(parseContextMenuOpen(value)).toBeNull();
+    expect(normalizeContextMenuOpen(value)).toEqual(normalizeContextMenuOpen(undefined));
+  });
+});
 
 describe('文件打开规则', () => {
   it('扩展名支持省略点与通配前缀，统一小写并保留应用路径', () => {

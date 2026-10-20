@@ -58,6 +58,17 @@ export const zhTranslations: Record<string, string> = {
   General: '通用',
   'General application settings': '应用通用设置',
   'File opening': '文件打开',
+  'Context menu opening': '右键打开方式',
+  'File manager': '文件管理器',
+  'VS Code': 'VS Code',
+  'Change application': '更换应用',
+  'Configure list': '配置列表',
+  'Add application': '添加应用',
+  'Open in {{app}}': '在 {{app}} 中打开',
+  'No opening methods enabled': '未启用打开方式',
+  'You can configure up to 32 opening methods.': '最多可配置 32 项打开方式。',
+  'Select the opening methods shown in file link context menus. You can add multiple applications.':
+    '勾选文件链接右键菜单中显示的打开方式，可添加多个应用。',
   'Configure how local workspace file links open by extension.':
     '按扩展名配置本地工作区文件链接的打开方式。',
   'By default, supported files open inside EnsoCode; other files are revealed in the file manager.':
@@ -71,6 +82,8 @@ export const zhTranslations: Record<string, string> = {
   'Selected application': '指定应用',
   'Choose application': '选择应用',
   'The selected application path is invalid.': '所选应用路径无效。',
+  'VS Code is unavailable. Install it or select another application.':
+    '未找到 VS Code，请安装或选择其他应用。',
   'Enter a valid file extension, for example .md.': '请输入有效的文件扩展名，例如 .md。',
   'This extension does not support internal preview.': '此扩展名不支持内部预览。',
   'Choose an application before saving this rule.': '保存此规则前请选择应用。',

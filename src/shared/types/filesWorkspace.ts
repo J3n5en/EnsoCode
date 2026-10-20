@@ -15,6 +15,10 @@ export interface FilesOpenRequest {
   rel: string;
 }
 
+export interface FilesOpenContextRequest extends FilesOpenRequest {
+  itemId: string;
+}
+
 export type FilesOpenResult =
   | { ok: true; target: 'internal'; viewer: 'text' | 'markdown' | 'image'; rel: string }
   | { ok: true; target: 'handled' }

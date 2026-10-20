@@ -4,7 +4,7 @@ import type {
   DefaultModelRef,
   OauthCredentialBlock,
 } from '@shared/defaultModel';
-import type { FileOpenRule } from '@shared/fileOpening';
+import type { ContextMenuOpen, FileOpenRule } from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import type { ProxyMode } from '@shared/proxy';
 import type { StatusLineSegmentId } from '@shared/statusLine';
@@ -92,6 +92,7 @@ export interface SettingsState {
    * Store local file-opening targets by extension; an empty array uses the default policy.
    */
   fileOpenRules: FileOpenRule[];
+  contextMenuOpen: ContextMenuOpen;
 
   // Terminal appearance
   terminalTheme: string;
@@ -337,6 +338,7 @@ export interface SettingsState {
   setTerminalShell: (value: TerminalShell) => void;
   setWorktreeRoot: (path: string) => void;
   setFileOpenRules: (rules: unknown) => void;
+  setContextMenuOpen: (value: unknown) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;

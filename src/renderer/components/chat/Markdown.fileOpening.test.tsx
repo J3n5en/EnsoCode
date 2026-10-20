@@ -1,21 +1,56 @@
+import type { ContextMenuOpen } from '@shared/fileOpening';
 import { parseHTML } from 'linkedom';
-import { act, type ReactNode } from 'react';
+import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Markdown, MarkdownLinkContext } from './Markdown';
 
 const harness = vi.hoisted(() => ({
   open: vi.fn(),
+  openContext: vi.fn(),
   reveal: vi.fn(),
   readImage: vi.fn(),
   openSidePanelFile: vi.fn(),
   toast: vi.fn(),
+  contextMenuOpen: [] as ContextMenuOpen,
 }));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/sidePanelDock', () => ({ openSidePanelFile: harness.openSidePanelFile }));
 vi.mock('@/components/ui/toast', () => ({ addToast: harness.toast }));
 vi.mock('./CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('./MermaidRenderer', () => ({ MermaidRenderer: () => null }));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: (selector: (state: { contextMenuOpen: ContextMenuOpen }) => unknown) =>
+    selector({ contextMenuOpen: harness.contextMenuOpen }),
+}));
+vi.mock('@/components/ui/context-menu', async () => {
+  const { cloneElement, createContext, useContext, useState } = await import('react');
+  const State = createContext({ open: false, show: () => {} });
+  return {
+    ContextMenu: ({ children }: { children: ReactNode }) => {
+      const [open, setOpen] = useState(false);
+      return (
+        <State.Provider value={{ open, show: () => setOpen(true) }}>{children}</State.Provider>
+      );
+    },
+    ContextMenuTrigger: ({ render }: { render: ReactElement }) => {
+      const { show } = useContext(State);
+      return cloneElement(render as ReactElement<{ onContextMenu: (event: Event) => void }>, {
+        onContextMenu: (event: Event) => {
+          event.preventDefault();
+          show();
+        },
+      });
+    },
+    ContextMenuPopup: ({ children }: { children: ReactNode }) =>
+      useContext(State).open ? <span role="menu">{children}</span> : null,
+    ContextMenuItem: ({ children, onClick }: { children: ReactNode; onClick: () => void }) => (
+      <button type="button" role="menuitem" onClick={onClick}>
+        {children}
+      </button>
+    ),
+  };
+});
 vi.mock('@/components/ui/dialog', () => {
   const Wrap = ({ children }: { children?: ReactNode }) => <span>{children}</span>;
   return {
@@ -44,12 +79,12 @@ async function render(text: string, authorized = true) {
   );
 }
 
-async function click(selector: string) {
+async function click(selector: string, type = 'click') {
   const element = container.querySelector(selector);
   expect(element).not.toBeNull();
   let prevented = false;
   await act(async () => {
-    const event = new window.Event('click', { bubbles: true, cancelable: true });
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
     element?.dispatchEvent(event);
     prevented = event.defaultPrevented;
   });
@@ -64,7 +99,12 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   Object.assign(dom.window, {
     electronAPI: {
-      workspaceFiles: { open: harness.open, reveal: harness.reveal, readImage: harness.readImage },
+      workspaceFiles: {
+        open: harness.open,
+        openContext: harness.openContext,
+        reveal: harness.reveal,
+        readImage: harness.readImage,
+      },
     },
   });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
@@ -72,6 +112,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   harness.open.mockResolvedValue({ ok: true, target: 'internal', viewer: 'text', rel: 'src/a.ts' });
   harness.reveal.mockResolvedValue({ ok: true });
+  harness.openContext.mockResolvedValue({ ok: true });
+  harness.contextMenuOpen = [
+    { id: 'reveal', target: 'reveal', enabled: true },
+    { id: 'vscode', target: 'vscode', enabled: true },
+  ];
   harness.readImage.mockResolvedValue({ ok: true, dataUrl: 'data:image/png;base64,AAAA' });
 });
 
@@ -81,6 +126,57 @@ afterEach(async () => {
 });
 
 describe('聊天文件链接的打开方式', () => {
+  it.each([
+    ['[source](src/a.ts:12)', 'a'],
+    ['`src/a.ts:12`', 'button'],
+  ])('右键文件链接先展示列表，点击后只发送条目标识：%s', async (text, selector) => {
+    await render(text);
+    expect(await click(selector, 'contextmenu')).toBe(true);
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
+    expect(harness.openContext).not.toHaveBeenCalled();
+    await click('[role="menuitem"]:last-child');
+    expect(harness.openContext).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/a.ts',
+      itemId: 'vscode',
+    });
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.reveal).not.toHaveBeenCalled();
+    expect(harness.openSidePanelFile).not.toHaveBeenCalled();
+  });
+
+  it('菜单只显示启用项，允许多应用并仅传所选应用的标识', async () => {
+    harness.contextMenuOpen = [
+      { id: 'reveal', target: 'reveal', enabled: false },
+      { id: 'vscode', target: 'vscode', enabled: true },
+      { id: 'custom', target: 'application', enabled: true, applicationPath: 'C:/Apps/Editor.exe' },
+      { id: 'off', target: 'application', enabled: false, applicationPath: 'C:/Apps/Other.exe' },
+    ];
+    await render('[source](src/a.ts)');
+    await click('a', 'contextmenu');
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
+    await click('[role="menuitem"]:last-child');
+    expect(harness.openContext).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/a.ts',
+      itemId: 'custom',
+    });
+  });
+
+  it('右键不接管外链或无权限链接，越界链接拒绝调用 IPC', async () => {
+    await render('[web](https://example.com)');
+    expect(await click('a', 'contextmenu')).toBe(false);
+    await render('[local](src/a.ts)', false);
+    expect(await click('a', 'contextmenu')).toBe(false);
+    await render('[escape](../secret.txt)');
+    await click('a', 'contextmenu');
+    await click('[role="menuitem"]');
+    expect(harness.openContext).not.toHaveBeenCalled();
+    expect(harness.toast).toHaveBeenCalled();
+  });
+
   it('正文文本调用 open，以原会话 owner 打开内部 Files 而不是 reveal', async () => {
     await render('[source](src/a.ts)');
     expect(await click('a')).toBe(true);

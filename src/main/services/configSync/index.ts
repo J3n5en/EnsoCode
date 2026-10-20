@@ -66,6 +66,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   terminalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   worktreeRoot: { mode: 'excluded', reason: 'device-local worktree storage path' },
   fileOpenRules: { mode: 'excluded', reason: 'device-local file opening applications and paths' },
+  contextMenuOpen: { mode: 'excluded', reason: 'device-local file link opening application' },
   favoriteTerminalThemes: { mode: 'portable' },
   statusLineSegments: { mode: 'portable' },
   loadLocalSkills: { mode: 'portable' },

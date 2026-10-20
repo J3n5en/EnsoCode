@@ -42,10 +42,13 @@ import {
 import { writeFileToClipboard } from '../services/filesWorkspaceClipboard';
 import { fetchRemoteImageDataUrl, REMOTE_IMAGE_MAX_BYTES } from '../services/remoteImageFetch';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
-import { openLocalWorkspaceFile } from '../services/workspaceFileOpening';
+import {
+  openLocalWorkspaceFile,
+  openLocalWorkspaceFileContext,
+} from '../services/workspaceFileOpening';
 import { searchWorkspaceFiles } from '../services/workspaceFileSearch';
 import { getSourceAuthorityRegistry } from './agent';
-import { readFileOpenRules, readSshTimeoutSeconds } from './settings';
+import { readContextMenuOpen, readFileOpenRules, readSshTimeoutSeconds } from './settings';
 import { sessionWorktreeBusy } from './worktree';
 
 const watches = new RefCountWatchers();
@@ -224,6 +227,25 @@ export function registerFilesWorkspaceHandlers(): void {
     if (!cwd) return { ok: false, error: 'unavailable' };
     return openLocalWorkspaceFile(cwd, parsed.rel, readFileOpenRules());
   });
+  handle(
+    IPC_CHANNELS.FILES_OPEN_CONTEXT,
+    async (_event, request: unknown): Promise<FilesMutateResult> => {
+      const parsed = parseRequest(request);
+      const itemId =
+        request && typeof request === 'object' && 'itemId' in request ? request.itemId : null;
+      if (!parsed || typeof itemId !== 'string') return { ok: false, error: 'unavailable' };
+      if (getSourceAuthorityRegistry()?.project(parsed.projectId)?.kind === 'ssh')
+        return { ok: false, error: 'unsupported' };
+      if (sessionWorktreeBusy(parsed.conversationId)) return { ok: false, error: 'unavailable' };
+      const cwd = resolveLocalCwd(parsed.conversationId, parsed.projectId);
+      if (!cwd) return { ok: false, error: 'unavailable' };
+      const item = readContextMenuOpen().find(
+        (candidate) => candidate.id === itemId && candidate.enabled
+      );
+      if (!item) return { ok: false, error: 'unavailable' };
+      return openLocalWorkspaceFileContext(cwd, parsed.rel, item);
+    }
+  );
   handle(
     IPC_CHANNELS.FILES_LIST_DIR,
     async (_event, request: unknown): Promise<FilesListResult> => {

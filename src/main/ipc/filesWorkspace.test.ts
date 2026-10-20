@@ -38,8 +38,15 @@ vi.mock('electron', () => ({
 }));
 vi.mock('./worktree', () => ({ sessionWorktreeBusy: mocks.busy }));
 vi.mock('./settings', async () => {
-  const { normalizeFileOpenRules } = await import('@shared/fileOpening');
+  const { normalizeContextMenuOpen, normalizeFileOpenRules } = await import('@shared/fileOpening');
   return {
+    readContextMenuOpen: () => {
+      const settings = mocks.readSettings();
+      const store = settings?.['enso-settings'] as
+        | { state?: { contextMenuOpen?: unknown } }
+        | undefined;
+      return normalizeContextMenuOpen(store?.state?.contextMenuOpen);
+    },
     readFileOpenRules: () => {
       const settings = mocks.readSettings();
       const store = settings?.['enso-settings'] as
@@ -88,8 +95,55 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 const invoke = (channel: string, request = {}) =>
   mocks.handlers.get(channel)?.(
     {},
-    { conversationId: 'conversation', projectId: 'project', rel: 'file', ...request }
+    { conversationId: 'conversation', projectId: 'project', rel: 'file', itemId: 'reveal', ...request }
   );
+it('文件链接右键只采信 Main 配置，身份、远程与边界校验先于本机打开', async () => {
+  const abs = path.join(root, 'readme.md');
+  writeFileSync(abs, 'fixture');
+  expect(await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, { rel: 'readme.md' })).toEqual({
+    ok: false,
+    error: 'unavailable',
+  });
+  const configured = {
+    'enso-settings': {
+      state: { contextMenuOpen: [{ id: 'reveal', target: 'reveal', enabled: true }] },
+    },
+  };
+  mocks.readSettings.mockReturnValue(configured);
+  expect(
+    await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, {
+      rel: 'readme.md',
+      target: 'application',
+      applicationPath: '/bad/editor',
+    })
+  ).toEqual({ ok: true });
+  expect(mocks.showItemInFolder).toHaveBeenCalledWith(abs);
+  mocks.showItemInFolder.mockClear();
+  expect(
+    await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, { rel: 'readme.md', itemId: 'unknown' })
+  ).toEqual({ ok: false, error: 'unavailable' });
+  mocks.readSettings.mockReturnValue({
+    'enso-settings': {
+      state: { contextMenuOpen: [{ id: 'reveal', target: 'reveal', enabled: false }] },
+    },
+  });
+  expect(await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, { rel: 'readme.md' })).toEqual({
+    ok: false,
+    error: 'unavailable',
+  });
+  mocks.readSettings.mockReturnValue(configured);
+  expect(await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT, { rel: '../escape.md' })).toEqual({
+    ok: false,
+    error: 'invalid-path',
+  });
+  mocks.project.kind = 'ssh';
+  expect(await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT)).toEqual({ ok: false, error: 'unsupported' });
+  mocks.project.kind = 'local';
+  mocks.conversation.projectId = 'other';
+  expect(await invoke(IPC_CHANNELS.FILES_OPEN_CONTEXT)).toEqual({ ok: false, error: 'unavailable' });
+  expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
 it.each([
   ['readme.md', 'markdown'],
   ['source.ts', 'text'],

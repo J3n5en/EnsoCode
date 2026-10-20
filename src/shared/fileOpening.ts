@@ -4,6 +4,56 @@ export interface FileOpenRule {
   applicationPath?: string;
 }
 
+export type ContextMenuOpenTarget =
+  | { target: 'reveal' }
+  | { target: 'vscode' }
+  | { target: 'application'; applicationPath: string };
+
+export type ContextMenuOpenItem = ContextMenuOpenTarget & { id: string; enabled: boolean };
+export type ContextMenuOpen = ContextMenuOpenItem[];
+
+export function contextMenuApplicationIdentity(applicationPath: string): string {
+  const normalized = applicationPath.replace(/\\/g, '/');
+  return /^[a-z]:\/|^\/\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+export function parseContextMenuOpen(value: unknown): ContextMenuOpen | null {
+  if (!Array.isArray(value) || value.length > 32) return null;
+  const items: ContextMenuOpen = [];
+  const ids = new Set<string>();
+  const applications = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const config = item as Record<string, unknown>;
+    if (
+      Object.keys(config).some((key) => !['id', 'target', 'enabled', 'applicationPath'].includes(key))
+    )
+      return null;
+    const { id, enabled, target } = config;
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id) || ids.has(id)) return null;
+    if (typeof enabled !== 'boolean') return null;
+    if (target === 'application') {
+      if (id === 'reveal' || id === 'vscode' || !isFileOpenApplicationPath(config.applicationPath))
+        return null;
+      const applicationPath = config.applicationPath;
+      const identity = contextMenuApplicationIdentity(applicationPath);
+      if (applications.has(identity)) return null;
+      applications.add(identity);
+      items.push({ id, enabled, target, applicationPath });
+    } else {
+      if ((target !== 'reveal' && target !== 'vscode') || id !== target || 'applicationPath' in config)
+        return null;
+      items.push({ id, enabled, target });
+    }
+    ids.add(id);
+  }
+  return items;
+}
+
+export function normalizeContextMenuOpen(value: unknown): ContextMenuOpen {
+  return parseContextMenuOpen(value) ?? [];
+}
+
 const TEXT_EXTENSIONS = new Set(
   'txt text log csv tsv json jsonl yaml yml toml xml html htm ini conf config env properties ts tsx js jsx mjs cjs mts cts py pyi rb go rs java kt kts swift c h cpp hpp cc cxx cs fs fsx php sh bash zsh fish ps1 psm1 psd1 bat cmd sql css scss sass less vue svelte lua dart diff patch r pl pm ex exs erl hrl clj cljs edn scala gradle groovy tex rst adoc asm s cmake make graphql gql proto ipynb'.split(
     ' '

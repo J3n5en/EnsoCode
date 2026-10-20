@@ -9,7 +9,11 @@ import {
   oauthCredentialBlock,
   sanitizeDefaultModel,
 } from '@shared/defaultModel';
-import { type FileOpenRule, normalizeFileOpenRules } from '@shared/fileOpening';
+import {
+  type FileOpenRule,
+  normalizeContextMenuOpen,
+  normalizeFileOpenRules,
+} from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
 import {
@@ -138,6 +142,7 @@ const initialState = {
   accentColor: DEFAULT_ACCENT_COLOR,
   language: getDefaultLocale(),
   fileOpenRules: [] as FileOpenRule[],
+  contextMenuOpen: normalizeContextMenuOpen(undefined),
   terminalTheme: 'Dracula',
   terminalFontSize: 14,
   terminalFontFamily: 'ui-monospace, SF Mono, Menlo, Monaco, Consolas, monospace',
@@ -306,6 +311,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ terminalShell: parseTerminalShell(terminalShell) }),
       setWorktreeRoot: (worktreeRoot) => set({ worktreeRoot: worktreeRoot.trim() }),
       setFileOpenRules: (rules) => set({ fileOpenRules: normalizeFileOpenRules(rules) }),
+      setContextMenuOpen: (value) => set({ contextMenuOpen: normalizeContextMenuOpen(value) }),
 
       toggleFavoriteTerminalTheme: (theme) =>
         set((state) => ({
@@ -1070,6 +1076,7 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: (state) => ({
         ...state,
         fileOpenRules: normalizeFileOpenRules(state.fileOpenRules),
+        contextMenuOpen: normalizeContextMenuOpen(state.contextMenuOpen),
       }),
       onRehydrateStorage: () => (state, error) => {
         // merge 已完成：此后（含下面的补写）才允许落盘；读失败保持关闸

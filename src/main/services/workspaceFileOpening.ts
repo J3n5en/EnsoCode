@@ -4,6 +4,7 @@ import { closeSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  type ContextMenuOpenTarget,
   type FileOpenRule,
   fileOpenExtension,
   fileOpenViewer,
@@ -11,9 +12,10 @@ import {
   isFileOpenApplicationPath,
   resolveFileOpenTarget,
 } from '@shared/fileOpening';
-import type { FilesOpenResult } from '@shared/types/filesWorkspace';
+import type { FilesMutateResult, FilesOpenResult } from '@shared/types/filesWorkspace';
 import { BrowserWindow, shell } from 'electron';
 import { resolveLocalUnderCwd } from './filesWorkspace';
+import { openInApps } from './openInApps';
 
 const PDF_VIEWER_URL = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html';
 const PDF_STREAM_URL =
@@ -162,6 +164,59 @@ function defaultDependencies(): WorkspaceFileOpeningDependencies {
     previewPdf: openWorkspacePdfWindow,
     launchApplication: launchWorkspaceFileApplication,
   };
+}
+
+type ContextOpeningDependencies = Pick<
+  WorkspaceFileOpeningDependencies,
+  'platform' | 'openPath' | 'showItemInFolder' | 'launchApplication'
+> & {
+  openVSCode: (file: string, cwd: string) => Promise<{ ok: boolean; error?: string }>;
+};
+
+export async function openLocalWorkspaceFileContext(
+  cwd: string,
+  rel: string,
+  config: ContextMenuOpenTarget,
+  dependencies: ContextOpeningDependencies = {
+    ...defaultDependencies(),
+    openVSCode: (file, directory) => openInApps.open('vscode', file, directory),
+  }
+): Promise<FilesMutateResult> {
+  if (/[\p{Cc}:]/u.test(rel)) return { ok: false, error: 'invalid-path' };
+  const abs = resolveLocalUnderCwd(cwd, rel);
+  if (!abs) return { ok: false, error: 'invalid-path' };
+  try {
+    const real = realpathSync(abs);
+    const stat = statSync(real);
+    if (!stat.isFile() && !stat.isDirectory()) return { ok: false, error: 'unavailable' };
+    const realRel = real.split(path.sep).join('/');
+    const blocked = [rel, realRel].some(
+      (file) => isExternalFileOpenBlocked(file) && !fileOpenViewer(file)
+    );
+    if (config.target === 'reveal' || blocked) {
+      if (stat.isDirectory() && !blocked) {
+        const error = await dependencies.openPath(real);
+        return error ? { ok: false, error } : { ok: true };
+      }
+      dependencies.showItemInFolder(real);
+      return { ok: true };
+    }
+    if (config.target === 'vscode') {
+      const result = await dependencies.openVSCode(
+        real,
+        stat.isDirectory() ? real : path.dirname(real)
+      );
+      if (result.ok) return { ok: true };
+      const error = result.error ?? 'unavailable';
+      return { ok: false, error: error === 'unavailable' ? 'application-unavailable' : error };
+    }
+    const application = resolveApplication(config.applicationPath, dependencies.platform);
+    if (!application) return { ok: false, error: 'invalid-application' };
+    await dependencies.launchApplication(application, real);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'unavailable' };
+  }
 }
 
 /**
