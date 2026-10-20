@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
+import type { GitRequest } from '@shared/types/git';
 import type {
   SessionWorktree,
   WorkspaceBranches,
@@ -31,6 +32,7 @@ import {
   WorkspaceBranchError,
   workspaceIdentityPath,
 } from '../services/gitBranches';
+import { GitOperationError } from '../services/gitVersionControl';
 import { getSharedWorktreeRegistry, type WorktreeRegistry } from '../services/worktree/registry';
 import {
   createSessionWorktree,
@@ -224,6 +226,84 @@ function workspaceRoots(cwd: string): string[] {
       return context && physicalPath(context.path) === physicalPath(cwd);
     })
     .map((conversation) => conversation.conversationId);
+}
+
+export async function withSessionGitWorkspace<T>(
+  request: GitRequest,
+  mutate: boolean,
+  action: (cwd: string, assertCurrent: () => void) => Promise<T>
+): Promise<T> {
+  const rootId = agentSessionIndex.workspaceRoot(request.conversationId);
+  const context = workspaceContext(rootId);
+  const assertCurrent = () => {
+    const conversation = getSourceAuthorityRegistry()?.conversation(request.conversationId);
+    const current = workspaceContext(rootId);
+    if (
+      !context ||
+      !current ||
+      !conversation ||
+      conversation.lifecycle === 'ended' ||
+      conversation.projectId !== request.projectId ||
+      current.conversation.projectId !== request.projectId ||
+      current.path !== context.path ||
+      current.repoPath !== context.repoPath ||
+      current.conversation.version !== context.conversation.version ||
+      agentSessionIndex.workspaceRoot(request.conversationId) !== rootId
+    ) {
+      throw new GitOperationError('unavailable', '会话工作区不可用或授权已变更。');
+    }
+  };
+  assertCurrent();
+  if (!context) throw new GitOperationError('unavailable', '本地工作区不可用。');
+  const roots = workspaceRoots(context.path);
+  if (roots.some(sessionWorktreeBusy)) {
+    throw new GitOperationError('workspace-busy', '工作区操作正在进行，请稍后重试。');
+  }
+  if (mutate && roots.some((id) => agentSessionIndex.workspaceTreeRunning(id))) {
+    throw new GitOperationError(
+      'workspace-running',
+      '使用该工作区的会话正在运行，请先停止后再修改 Git。'
+    );
+  }
+  if (!mutate) {
+    const result = await action(context.path, assertCurrent);
+    assertCurrent();
+    if (roots.some(sessionWorktreeBusy)) {
+      throw new GitOperationError('workspace-busy', '工作区操作正在进行，请稍后重试。');
+    }
+    return result;
+  }
+  const release = lockWorktree(context.path);
+  const requestId = randomUUID();
+  let frozen = false;
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    const result = await freezeWorkspace(requestId, roots);
+    frozen = result.ok || result.needsThaw === true;
+    if (!result.ok) {
+      throw new GitOperationError('workspace-running', result.error ?? '无法冻结工作区。');
+    }
+    assertCurrent();
+    outcome = { ok: true, value: await action(context.path, assertCurrent) };
+  } catch (error) {
+    outcome = { ok: false, error };
+  } finally {
+    if (frozen) {
+      const resume = () => thawWorkspace(requestId, roots).catch(() => ({ ok: false }));
+      let result = await resume();
+      if (!result.ok) result = await resume();
+      frozen = !result.ok;
+    }
+    if (!frozen) release();
+  }
+  if (frozen) {
+    throw new GitOperationError(
+      'workspace-blocked',
+      'Git 操作结束但工作区未能解锁，请重启 EnsoCode 后刷新 Git 状态。'
+    );
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
 }
 
 function occupiedConversation(repoPath: string, cwd: string | undefined): string | undefined {

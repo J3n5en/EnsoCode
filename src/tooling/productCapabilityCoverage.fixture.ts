@@ -576,6 +576,20 @@ export const IPC_PRODUCT_COVERAGE = {
   FILES_SEARCH: surfaces('conversations.file-mention.attach'),
   FILES_READ: excluded('Internal bounded file reader used by reviewed UI flows.'),
   GIT_DIFF_HEAD: excluded('Internal git working-tree reader for the Changes panel.'),
+  GIT_STATUS: excluded('Desktop Changes panel Git status; no Enso capability.'),
+  GIT_FILE_DIFF: excluded(
+    'Desktop Changes panel staged/unstaged file preview; no Enso capability.'
+  ),
+  GIT_HISTORY: excluded('Desktop Changes panel commit history pagination; no Enso capability.'),
+  GIT_COMMIT_FILES: excluded('Desktop Changes panel historical file list; no Enso capability.'),
+  GIT_COMMIT_DIFF: excluded('Desktop Changes panel historical file preview; no Enso capability.'),
+  GIT_STAGE: excluded('Desktop Changes panel explicit file staging; no Enso capability.'),
+  GIT_UNSTAGE: excluded('Desktop Changes panel explicit file unstaging; no Enso capability.'),
+  GIT_DISCARD: excluded('Desktop Changes panel confirmed unstaged discard; no Enso capability.'),
+  GIT_COMMIT: excluded('Desktop Changes panel user-authored staged commit; no Enso capability.'),
+  GIT_FETCH: excluded('Desktop Changes panel remote fetch; no Enso capability.'),
+  GIT_PULL: excluded('Desktop Changes panel fast-forward-only pull; no Enso capability.'),
+  GIT_PUSH: excluded('Desktop Changes panel non-forced upstream push; no Enso capability.'),
   CHANGES_SNAPSHOTS_READ: excluded(
     'Internal per-conversation snapshot store for the Changes panel.'
   ),

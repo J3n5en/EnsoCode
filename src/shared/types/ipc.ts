@@ -281,6 +281,18 @@ export const IPC_CHANNELS = {
   FILES_SEARCH_WORKSPACE: 'files:search-workspace',
 
   GIT_DIFF_HEAD: 'git:diff-head',
+  GIT_STATUS: 'git:status',
+  GIT_FILE_DIFF: 'git:file-diff',
+  GIT_HISTORY: 'git:history',
+  GIT_COMMIT_FILES: 'git:commit-files',
+  GIT_COMMIT_DIFF: 'git:commit-diff',
+  GIT_STAGE: 'git:stage',
+  GIT_UNSTAGE: 'git:unstage',
+  GIT_DISCARD: 'git:discard',
+  GIT_COMMIT: 'git:commit',
+  GIT_FETCH: 'git:fetch',
+  GIT_PULL: 'git:pull',
+  GIT_PUSH: 'git:push',
 
   // Changes 面板「Session」模式的编辑前快照（主进程按会话落盘）
   CHANGES_SNAPSHOTS_READ: 'changes:snapshots-read',

@@ -6,6 +6,7 @@ export * from './builtinTools';
 export type * from './configSync';
 export * from './editMode';
 export * from './filesWorkspace';
+export type * from './git';
 export * from './gitDiff';
 export * from './ipc';
 export * from './llm';

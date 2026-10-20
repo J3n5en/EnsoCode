@@ -81,7 +81,20 @@ import type {
   FilesWatchEvent,
   FilesWatchResult,
   FilesWriteResult,
+  GitCommitDiffRequest,
+  GitCommitFilesResult,
+  GitCommitRequest,
+  GitCreateCommitRequest,
   GitDiffResult,
+  GitDiscardRequest,
+  GitFileDiffRequest,
+  GitFileDiffResult,
+  GitHistoryRequest,
+  GitHistoryResult,
+  GitOperationResult,
+  GitPathsRequest,
+  GitRequest,
+  GitStatusResult,
   InstalledPluginInfo,
   ListModelsResult,
   LocalAssetScanResult,
@@ -595,6 +608,30 @@ const electronAPI = {
   git: {
     diffHead: (request: { conversationId: string; projectId: string }): Promise<GitDiffResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_DIFF_HEAD, request),
+    status: (request: GitRequest): Promise<GitStatusResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_STATUS, request),
+    fileDiff: (request: GitFileDiffRequest): Promise<GitFileDiffResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_FILE_DIFF, request),
+    history: (request: GitHistoryRequest): Promise<GitHistoryResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_HISTORY, request),
+    commitFiles: (request: GitCommitRequest): Promise<GitCommitFilesResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT_FILES, request),
+    commitDiff: (request: GitCommitDiffRequest): Promise<GitFileDiffResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT_DIFF, request),
+    stage: (request: GitPathsRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_STAGE, request),
+    unstage: (request: GitPathsRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_UNSTAGE, request),
+    discard: (request: GitDiscardRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_DISCARD, request),
+    commit: (request: GitCreateCommitRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_COMMIT, request),
+    fetch: (request: GitRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_FETCH, request),
+    pull: (request: GitRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_PULL, request),
+    push: (request: GitRequest): Promise<GitOperationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_PUSH, request),
   },
 
   changes: {

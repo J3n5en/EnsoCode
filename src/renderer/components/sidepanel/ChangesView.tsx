@@ -25,6 +25,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { buildTimeline, completedEditWriteFingerprint } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { GitChangesView } from './GitChangesView';
 
 const CODE_VIEW_OPTIONS = {
   theme: CODE_THEME,
@@ -101,7 +102,6 @@ export function ChangesView({
     Boolean(s.conversations[conversationId]?.workspaceMigrating)
   );
   const project = useSettingsStore((s) => s.projects.find((item) => item.id === projectId));
-  const ssh = project?.kind === 'ssh';
   const root = useSessionsStore(
     (s) => s.conversations[conversationId]?.worktree?.path ?? project?.path
   );
@@ -141,11 +141,6 @@ export function ChangesView({
 
   const [ready, setReady] = useState(false);
   const [currentByPath, setCurrentByPath] = useState<Record<string, string | null>>({});
-  const [gitError, setGitError] = useState<'not-repo' | 'unavailable' | null>(null);
-  const [gitLoading, setGitLoading] = useState(false);
-  const [gitFiles, setGitFiles] = useState<{ path: string; oldText: string; newText: string }[]>(
-    []
-  );
 
   useEffect(() => {
     let alive = true;
@@ -200,52 +195,8 @@ export function ChangesView({
     saveSnapshots(conversationId, next);
   }, [allResult.snapshots, conversationId, mode, saveSnapshots, snapshots]);
 
-  useEffect(() => {
-    void workspaceRevision;
-    if (mode !== 'git') return;
-    if (workspaceMigrating) {
-      setGitLoading(true);
-      return;
-    }
-    if (ssh) {
-      setGitError('unavailable');
-      setGitFiles([]);
-      return;
-    }
-    let alive = true;
-    setGitLoading(true);
-    void window.electronAPI.git
-      .diffHead({ conversationId, projectId })
-      .then((result) => {
-        if (!alive) return;
-        setGitLoading(false);
-        if (!result.ok) {
-          setGitError(result.error);
-          setGitFiles([]);
-          return;
-        }
-        setGitError(null);
-        setGitFiles(
-          result.files.map((file) => ({
-            path: file.path,
-            oldText: file.oldText,
-            newText: file.newText,
-          }))
-        );
-      })
-      .catch(() => {
-        if (!alive) return;
-        setGitLoading(false);
-        setGitError('unavailable');
-        setGitFiles([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [conversationId, mode, projectId, ssh, workspaceMigrating, workspaceRevision]);
-
-  const files = mode === 'git' ? gitFiles : allResult.files;
-  const incompletePaths = mode === 'git' ? [] : (allResult.incompletePaths ?? []);
+  const files = allResult.files;
+  const incompletePaths = allResult.incompletePaths ?? [];
   // 折叠态按 item id 记；折叠的文件 CodeView 只渲 header，不解析不高亮
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const toggleCollapsed = useCallback((id: string) => {
@@ -271,15 +222,7 @@ export function ChangesView({
     [toggleCollapsed]
   );
 
-  const loading = !ready || (mode === 'git' ? gitLoading : !snapshots);
-  const emptyText = (() => {
-    if (mode === 'git') {
-      if (gitError === 'not-repo') return t('Not a git repository.');
-      if (gitError === 'unavailable') return t('Git diff is not available for this workspace.');
-      return t('No changes relative to HEAD.');
-    }
-    return t('No file changes in this conversation yet.');
-  })();
+  const loading = !ready || !snapshots;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -293,7 +236,7 @@ export function ChangesView({
             {t('Git')}
           </ModeTab>
         </div>
-        {items.length > 0 && (
+        {mode === 'all' && items.length > 0 && (
           <button
             type="button"
             onClick={toggleAll}
@@ -309,9 +252,18 @@ export function ChangesView({
         )}
       </div>
       <div className="min-h-0 flex-1">
-        {loading || (files.length === 0 && incompletePaths.length === 0) ? (
+        {mode === 'git' ? (
+          <GitChangesView
+            key={`${conversationId}:${root}:${workspaceRevision}`}
+            conversationId={conversationId}
+            projectId={projectId}
+            disabled={workspaceMigrating}
+            unavailable={project?.kind === 'ssh'}
+            editWriteKey={editWriteKey}
+          />
+        ) : loading || (files.length === 0 && incompletePaths.length === 0) ? (
           <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
-            {loading ? t('Loading...') : emptyText}
+            {loading ? t('Loading...') : t('No file changes in this conversation yet.')}
           </div>
         ) : (
           <div className="flex h-full min-h-0 flex-col">

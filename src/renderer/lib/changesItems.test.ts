@@ -4,6 +4,28 @@ import { buildChangeItems, type ChangeItemMemo } from './changesItems';
 const file = (path: string, oldText: string, newText: string) => ({ path, oldText, newText });
 
 describe('buildChangeItems', () => {
+  it('Git 预览忽略 CRLF 与 LF 差别，只统计实际修改的行', () => {
+    const items = buildChangeItems(
+      [file('a.txt', 'first\nold\nlast\n', 'first\r\nnew\r\nlast\r\n')],
+      new Set(),
+      new Map(),
+      { ignoreLineEndings: true }
+    );
+    expect(items[0].fileDiff.hunks.reduce((count, hunk) => count + hunk.additionLines, 0)).toBe(1);
+    expect(items[0].fileDiff.hunks.reduce((count, hunk) => count + hunk.deletionLines, 0)).toBe(1);
+  });
+
+  it('换行处理选项切换后刷新缓存，默认仍保留换行差异', () => {
+    const files = [file('a.txt', 'first\nlast\n', 'first\r\nlast\r\n')];
+    const memo: ChangeItemMemo = new Map();
+    const original = buildChangeItems(files, new Set(), memo);
+    expect(original[0].fileDiff.hunks).not.toHaveLength(0);
+    const normalized = buildChangeItems(files, new Set(), memo, { ignoreLineEndings: true });
+    expect(normalized[0].fileDiff.hunks).toHaveLength(0);
+    expect(normalized[0].version).toBe((original[0].version ?? 0) + 1);
+    expect(normalized[0].fileDiff.cacheKey).not.toBe(original[0].fileDiff.cacheKey);
+  });
+
   it('首次构建：version 从 0 起，collapsed 取自集合', () => {
     const memo: ChangeItemMemo = new Map();
     const items = buildChangeItems([file('a.ts', 'x', 'y')], new Set(['diff:a.ts']), memo);
