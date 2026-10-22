@@ -11,6 +11,7 @@ import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import { tabTitleFromTerminal } from '@/lib/terminalTitle';
 import '@xterm/xterm/css/xterm.css';
+import '@/styles/terminal-fonts.css';
 
 export interface TerminalOptions {
   theme?: ITheme;
@@ -54,7 +55,7 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
 
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: options.fontFamily,
+    fontFamily: `"Enso Nerd Symbols", ${options.fontFamily}`,
     fontSize: options.fontSize,
     theme: options.theme,
     // 背景图模式下 wrapper 半透明，xterm 自身不得再刷不透明底色
@@ -126,7 +127,7 @@ export function updateTerminalAppearance(
 ): void {
   for (const { term } of registry.values()) {
     term.options.theme = theme;
-    term.options.fontFamily = fontFamily;
+    term.options.fontFamily = `"Enso Nerd Symbols", ${fontFamily}`;
     term.options.fontSize = fontSize;
   }
 }

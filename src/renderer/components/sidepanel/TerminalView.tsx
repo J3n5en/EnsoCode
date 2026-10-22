@@ -92,7 +92,13 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
       observer = new ResizeObserver(doFit);
       observer.observe(wrapper);
     };
-    tryAttach();
+    // 首次测量前加载图标，避免 xterm 缓存缺字时的错误宽度。
+    //
+    // Load icons before the first measurement so xterm does not cache missing-glyph widths.
+    void document.fonts.load('14px "Enso Nerd Symbols"', '\uE0B0').then(tryAttach, (error) => {
+      console.warn('Failed to load terminal icon font', error);
+      tryAttach();
+    });
 
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {

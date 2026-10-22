@@ -1,0 +1,14 @@
+/*
+ * 图标字体只接管私用区，放在用户字体之前也不会改变普通文字的字形与字宽。
+ *
+ * Restrict the bundled icon font to private-use code points so it can precede
+ * the user font without changing ordinary text glyphs or character widths.
+ */
+@font-face {
+  font-family: "Enso Nerd Symbols";
+  src: url("../assets/fonts/EnsoNerdSymbolsMono-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+}
