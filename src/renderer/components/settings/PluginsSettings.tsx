@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { NewSessionBadge } from './NewSessionBadge';
 
 function componentCounts(
   components: PluginComponentSummary,
@@ -160,6 +161,7 @@ export function PluginsSettings() {
         <div>
           <h3 className="font-medium text-lg">
             {t('Plugins')}
+            <NewSessionBadge />
             {enabledCount > 0 && (
               <span className="ml-2 font-normal text-muted-foreground text-xs">
                 {t('{{count}} enabled', { count: enabledCount })}

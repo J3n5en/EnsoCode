@@ -28,6 +28,7 @@ import { chatgptPoolSources, createChatgptPoolProvider, providerDisplayName } fr
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
 import { LocalImportDialog } from './LocalImportDialog';
+import { NewSessionBadge } from './NewSessionBadge';
 import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
@@ -127,7 +128,14 @@ export function ProvidersSettings() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4" data-settings-row="providers.root">
         <div>
-          <h3 className="text-lg font-medium">{t('Model Providers')}</h3>
+          <h3 className="text-lg font-medium">
+            {t('Model Providers')}
+            <NewSessionBadge
+              note={t(
+                'Newly enabled models can be picked right away. After changing a key or address, an open session uses it once you switch its model or start a new session.'
+              )}
+            />
+          </h3>
           <p className="text-sm text-muted-foreground">
             {t('Manage model API providers for this app')}
           </p>

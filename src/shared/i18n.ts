@@ -499,6 +499,20 @@ export const zhTranslations: Record<string, string> = {
   'Not authorized': '未授权',
   'Authorized, pending connection': '已授权，待连接',
   'Authorized. Takes effect in new conversations.': '已授权，新会话生效。',
+  'New sessions only': '新会话生效',
+  'Open sessions keep the previous setting; it applies once you start a new session.':
+    '已打开的会话保持原设置，新建会话后生效。',
+  'Settings without this tag take effect immediately.': '没有此标签的设置修改后立即生效。',
+  'Turning a tool on applies to new sessions. Turning off Memory or Computer also blocks it in open sessions.':
+    '开启工具只对新会话生效；关闭记忆或电脑操控会同时在已打开的会话中拦截。',
+  'The / menu updates right away, but open sessions keep the skills they loaded. Start a new session to load the change.':
+    '输入框的 / 菜单会立即更新，但已打开的会话仍使用原来加载的技能，新建会话后才会加载改动。',
+  'Open sessions use edited definitions the next time they start a subagent, but added or turned-off types only change in new sessions.':
+    '已打开的会话下次派子代理时会用修改后的定义，但新增或停用的类型只在新会话中变化。',
+  'The file panel and terminal use the change right away. Agents in open sessions keep the previous connection settings.':
+    '文件面板和终端立即使用新配置；已打开会话里的代理仍使用原来的连接配置。',
+  'Newly enabled models can be picked right away. After changing a key or address, an open session uses it once you switch its model or start a new session.':
+    '新启用的模型可以立即选用；修改 API Key 或地址后，已打开的会话需切换一次模型或新建会话才会使用。',
   'Always loaded': '常驻',
   'On demand': '按需',
   'Load mode': '加载方式',

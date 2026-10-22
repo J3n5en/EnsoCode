@@ -32,6 +32,7 @@ import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { NewSessionBadge } from './NewSessionBadge';
 import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
 
 export function AgentTypesSettings() {
@@ -43,7 +44,14 @@ export function AgentTypesSettings() {
   return (
     <div className="space-y-6">
       <div data-settings-row="agents.root">
-        <h3 className="font-medium text-lg">{t('Agent types')}</h3>
+        <h3 className="font-medium text-lg">
+          {t('Agent types')}
+          <NewSessionBadge
+            note={t(
+              'Open sessions use edited definitions the next time they start a subagent, but added or turned-off types only change in new sessions.'
+            )}
+          />
+        </h3>
         <p className="text-muted-foreground text-sm">
           {t(
             'Custom subagent presets: system prompt, model and toolset. The agent picks one via the agent_type parameter.'

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
+import { NewSessionBadge } from './NewSessionBadge';
 import {
   enabledOccupancyTotal,
   OccupancyEnabledTotal,
@@ -71,6 +72,11 @@ export function SkillsSettings() {
         <div>
           <h3 className="font-medium text-lg">
             {t('Skills')}
+            <NewSessionBadge
+              note={t(
+                'The / menu updates right away, but open sessions keep the skills they loaded. Start a new session to load the change.'
+              )}
+            />
             {skills.length > 0 && (
               <span className="ml-2 font-normal text-muted-foreground text-xs">
                 {t('{{enabled}}/{{total}} enabled', {

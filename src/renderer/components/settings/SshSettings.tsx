@@ -23,6 +23,7 @@ import {
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
+import { NewSessionBadge } from './NewSessionBadge';
 
 const SSH_TIMEOUT_OPTIONS = [10, 15, 30, 60, 120, 300];
 
@@ -146,7 +147,14 @@ export function SshSettings() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4" data-settings-row="ssh.root">
         <div>
-          <h2 className="text-lg font-medium">{t('SSH')}</h2>
+          <h2 className="text-lg font-medium">
+            {t('SSH')}
+            <NewSessionBadge
+              note={t(
+                'The file panel and terminal use the change right away. Agents in open sessions keep the previous connection settings.'
+              )}
+            />
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {t('Saved hosts for remote projects. Passwords stay in the system keychain.')}
           </p>

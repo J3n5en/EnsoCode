@@ -16,6 +16,7 @@ import {
 import { useI18n } from '@/i18n';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { NewSessionBadge } from './NewSessionBadge';
 
 const MODE_LABEL: Record<SmartCompactMode, string> = {
   auto: 'Auto (by usage)',
@@ -56,7 +57,10 @@ export function SmartCompactPicker() {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h4 className="font-medium text-sm">{t('Context compaction strategy')}</h4>
+          <h4 className="font-medium text-sm">
+            {t('Context compaction strategy')}
+            <NewSessionBadge />
+          </h4>
           <p className="mt-0.5 text-muted-foreground text-xs">
             {t(
               'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model applies to open conversations on the next compaction.'

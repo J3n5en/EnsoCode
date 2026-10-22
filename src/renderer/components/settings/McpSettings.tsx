@@ -22,6 +22,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter, useVisibleSelection } from './ListFilterBar';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
 import { McpEditDialog } from './McpEditDialog';
+import { NewSessionBadge } from './NewSessionBadge';
 import {
   enabledOccupancyTotal,
   OccupancyEnabledTotal,
@@ -115,6 +116,7 @@ export function McpSettings() {
         <div>
           <h3 className="font-medium text-lg">
             {t('MCP Servers')}
+            <NewSessionBadge />
             {mcpServers.length > 0 && (
               <span className="ml-2 font-normal text-muted-foreground text-xs">
                 {t('{{enabled}}/{{total}} enabled', {

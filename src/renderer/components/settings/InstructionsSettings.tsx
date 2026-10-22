@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { InstructionEditDialog } from './InstructionEditDialog';
 import { LocalAssetImportDialog } from './LocalAssetImportDialog';
+import { NewSessionBadge } from './NewSessionBadge';
 import {
   enabledOccupancyTotal,
   OccupancyEnabledTotal,
@@ -42,6 +43,7 @@ export function InstructionsSettings() {
           <h3 className="font-medium text-lg">
             {t('Instruction Files')}
             <OccupancyEnabledTotal tokens={enabledTokens} />
+            <NewSessionBadge />
           </h3>
           <p className="text-muted-foreground text-sm">
             {t('Global CLAUDE.md / AGENTS.md style files from local AI tools')}

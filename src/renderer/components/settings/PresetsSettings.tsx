@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter } from './ListFilterBar';
+import { NewSessionBadge } from './NewSessionBadge';
 
 export function PresetsSettings() {
   const { t } = useI18n();
@@ -32,7 +33,10 @@ export function PresetsSettings() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4" data-settings-row="presets.root">
         <div>
-          <h3 className="font-medium text-lg">{t('Presets')}</h3>
+          <h3 className="font-medium text-lg">
+            {t('Presets')}
+            <NewSessionBadge />
+          </h3>
           <p className="text-muted-foreground text-sm">
             {t(
               'Role descriptions, skills, MCP servers and instruction files, chosen per conversation'

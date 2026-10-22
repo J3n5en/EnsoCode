@@ -24,6 +24,7 @@ import {
 } from '@/stores/settings/autoArchiveIdleDays';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
 import { FileOpeningSettings } from './FileOpeningSettings';
+import { NewSessionBadge } from './NewSessionBadge';
 import { SmartCompactPicker } from './SmartCompactPicker';
 
 const TERMINAL_SHELL_LABELS: Record<Exclude<TerminalShell, 'auto'>, string> = {
@@ -475,7 +476,10 @@ function WindowsLocalShellSection() {
       data-settings-row="general.windowsLocalShell"
     >
       <div className="min-w-0">
-        <p className="text-sm">{t('Windows local command shell')}</p>
+        <p className="text-sm">
+          {t('Windows local command shell')}
+          <NewSessionBadge />
+        </p>
         <p className="text-xs text-muted-foreground">
           {t(
             'Only the Windows local agent command tool. SSH and other platforms stay on bash. Takes effect on the next session.'
