@@ -308,8 +308,8 @@ export const zhTranslations: Record<string, string> = {
   'Automatically unfold the thinking block while the model is still reasoning. It collapses again when reasoning ends.':
     '模型思考时自动展开推理内容；思考结束后仍自动收起',
   'Context compaction strategy': '上下文压缩策略',
-  'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model applies to open conversations on the next compaction.':
-    '标准使用默认压缩。智能压缩在压缩时用 Enso 验证式摘要。Codex 原生压缩在 Codex 模型上额外保存官方 Codex checkpoint，其他模型按智能压缩处理。持续记忆在后台持续记录观察，压缩时保留更多上下文；失败都回退默认压缩。切换策略从下一个会话生效。摘要模型对已打开的对话在下一次压缩时用最新设置。',
+  'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.':
+    '标准使用默认压缩。智能压缩在压缩时用 Enso 验证式摘要。Codex 原生压缩在 Codex 模型上额外保存官方 Codex checkpoint，其他模型按智能压缩处理。持续记忆在后台持续记录观察，压缩时保留更多上下文；失败都回退默认压缩。切换策略从下一个会话生效。摘要模型和压缩档位对已打开的对话在下一次压缩时用最新设置。',
   Standard: '标准',
   'Smart compaction': '智能压缩',
   'Codex native compaction': 'Codex 原生压缩',
@@ -507,8 +507,6 @@ export const zhTranslations: Record<string, string> = {
     '开启工具只对新会话生效；关闭记忆或电脑操控会同时在已打开的会话中拦截。',
   'The / menu updates right away, but open sessions keep the skills they loaded. Start a new session to load the change.':
     '输入框的 / 菜单会立即更新，但已打开的会话仍使用原来加载的技能，新建会话后才会加载改动。',
-  'Open sessions use edited definitions the next time they start a subagent, but added or turned-off types only change in new sessions.':
-    '已打开的会话下次派子代理时会用修改后的定义，但新增或停用的类型只在新会话中变化。',
   'The file panel and terminal use the change right away. Agents in open sessions keep the previous connection settings.':
     '文件面板和终端立即使用新配置；已打开会话里的代理仍使用原来的连接配置。',
   'Newly enabled models can be picked right away. After changing a key or address, an open session uses it once you switch its model or start a new session.':

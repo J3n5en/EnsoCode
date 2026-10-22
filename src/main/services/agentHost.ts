@@ -107,7 +107,6 @@ import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentTyp
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { resolveGlobalInstruction } from './instructionStore';
-import { magpieProviderFilePath, readMagpieProviderFile } from './magpieProvider';
 import { refreshMcpOAuthAccess } from './mcpOAuthRefresh';
 import { getMcpOAuthStore } from './mcpOAuthStore';
 import { getMcpToolCatalog } from './mcpToolCatalog';
@@ -1988,10 +1987,7 @@ function providersFromSettings(): ModelProvider[] {
     : [];
   // OAuth 条目的 models 只是稀疏覆盖；存在性、enabled 与凭证校验都看目录物化后的清单。
   const materialized = materializeProviders(raw, getModelDirectorySnapshot());
-  // magpie 插件的供应商不在 settings.json 里。同 id 的条目让位给文件。
-  const magpie = readMagpieProviderFile(magpieProviderFilePath());
-  if (!magpie) return materialized;
-  return [...materialized.filter((provider) => provider.id !== magpie.id), magpie];
+  return materialized;
 }
 
 export function modelRefForSpawnConfig(config: SpawnModelConfig): ModelRef {

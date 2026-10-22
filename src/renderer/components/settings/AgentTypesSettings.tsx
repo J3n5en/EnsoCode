@@ -46,11 +46,7 @@ export function AgentTypesSettings() {
       <div data-settings-row="agents.root">
         <h3 className="font-medium text-lg">
           {t('Agent types')}
-          <NewSessionBadge
-            note={t(
-              'Open sessions use edited definitions the next time they start a subagent, but added or turned-off types only change in new sessions.'
-            )}
-          />
+          <NewSessionBadge />
         </h3>
         <p className="text-muted-foreground text-sm">
           {t(
