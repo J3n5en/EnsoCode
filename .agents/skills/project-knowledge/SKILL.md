@@ -23,6 +23,7 @@ description: >
 | provider、skill、MCP、指令扫描 | `docs/engineering-reference/main/services.md`、`testing.md` |
 | React、Zustand、持久化 | `docs/engineering-reference/renderer/state.md`、`renderer/components.md` |
 | UI、弹窗、窗口、样式 | `docs/engineering-reference/renderer/components.md`、`dialogs.md`、`styling.md`、`main/windows.md` |
+| Windows 本地安装包 | `docs/engineering-reference/guides/EnsoCode_Windows本地打包_操作指南.md`；使用既有入口，不重复环境探索 |
 | 纯逻辑、协议、解析器、路径校验 | `docs/engineering-reference/testing.md` |
 | 怀疑已有类似实现 | `docs/engineering-reference/guides/code-reuse-thinking-guide.md` |
 

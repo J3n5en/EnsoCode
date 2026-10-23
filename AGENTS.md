@@ -9,6 +9,7 @@
 - 优先复用现有实现模式；详细规范见 [`docs/engineering-guidelines.md`](docs/engineering-guidelines.md)。
 - 非平凡改动、排障或发现可复用经验时，使用 [`project-knowledge`](.agents/skills/project-knowledge/SKILL.md) 检索和沉淀项目知识。
 - 真实排查过的高代价陷阱见 [`docs/engineering-reference/big-question/`](docs/engineering-reference/big-question/)。
+- Windows 本地打包先读 [打包操作指南](docs/engineering-reference/guides/EnsoCode_Windows本地打包_操作指南.md)，直接使用固定入口 `node scripts/build-win-local.mjs`；复用适用于当前源码的验证证据，仅在实际失败时按指南排查，不重复探索已解决的环境问题。
 
 ## 测试先行
 

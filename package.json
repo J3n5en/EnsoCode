@@ -18,6 +18,7 @@
     "build:mac": "pnpm build && electron-builder --mac",
     "build:mac:dir": "pnpm build && electron-builder --mac --arm64 --dir -c.mac.notarize=false",
     "build:win": "pnpm build && electron-builder --win",
+    "build:win:local": "node scripts/build-win-local.mjs",
     "build:linux": "pnpm build && electron-builder --linux",
     "generate:themes": "npx tsx scripts/generate-themes.ts",
     "rtk:prepare": "node scripts/prepare-rtk.mjs",
@@ -27,7 +28,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test": "node --test scripts/rtk.test.mjs && vitest run",
+    "test": "node --test scripts/rtk.test.mjs scripts/build-win-local.test.mjs && vitest run",
     "test:watch": "vitest",
     "format": "biome format --write .",
     "postinstall": "node node_modules/electron/install.js && node scripts/fix-node-pty-helper.mjs"

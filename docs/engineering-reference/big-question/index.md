@@ -27,6 +27,7 @@
 | [hashline-stale-recovery.md](hashline-stale-recovery.md) | 文件远处变动使旧 TAG 失效；恢复必须证明上下文唯一且不改变行号坐标系 |
 | [session-before-compact-return-and-eviction-range.md](session-before-compact-return-and-eviction-range.md) | 持续记忆压缩：overflow 轮直接失败 / 走了原生摘要；memory#2 起静默丢旧史、split-turn 前缀无覆盖 |
 | [electron-builder-platform-files.md](electron-builder-platform-files.md) | 安装包 asar 里出现 src/packages，体积比应用代码大出一两百 MB |
+| [Windows 本地打包操作指南](../guides/EnsoCode_Windows本地打包_操作指南.md) | pnpm 入口缺失、PATHEXT 缺失导致依赖列表为空、后台命令空退出；固定入口与产物验收 |
 | [main-cjs-shim-regex.md](main-cjs-shim-regex.md) | 构建报 i18n 某条译文 Unterminated string literal，后面紧跟 CommonJS Shims |
 | [history-paging-stuck-at-top.md](history-paging-stuck-at-top.md) | 长会话上滑翻一两页就停，顶部钉着「上下文已压缩」；或每翻一页跳回底部 |
 | [coworker-adopt-phantom-run.md](coworker-adopt-phantom-run.md) | subagent 雇的 coworker 回复完了 Run 仍一直「进行中」，send 带 wait:true 永远不返回；单测全绿 |
