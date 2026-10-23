@@ -226,6 +226,35 @@ describe('聊天文件链接的打开方式', () => {
     expect(harness.open).not.toHaveBeenCalled();
   });
 
+  it('AI 生成的 Windows 安装包表格链接与定位按钮使用相同的工作区相对路径', async () => {
+    harness.open.mockResolvedValueOnce({ ok: true, target: 'handled' });
+    await render(
+      '| 安装包 | 大小 |\n| --- | --- |\n| [国内版：馆长](/C:/workspace/dist/%E9%A6%86%E9%95%BF-1.0.11.exe) | 273.35 MiB |'
+    );
+    await click('td a');
+    expect(harness.open).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'dist/馆长-1.0.11.exe',
+    });
+    await click('button[aria-label="Reveal in File Explorer"]');
+    expect(harness.reveal).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'dist/馆长-1.0.11.exe',
+    });
+    expect(harness.openSidePanelFile).not.toHaveBeenCalled();
+    expect(harness.toast).not.toHaveBeenCalled();
+  });
+
+  it('带前导斜杠的 Windows 文档链接保留源码跳行', async () => {
+    await render('[source](/C:/workspace/src/a.ts:12)');
+    await click('a');
+    expect(harness.openSidePanelFile).toHaveBeenCalledWith('child', 'src/a.ts', 12);
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.toast).not.toHaveBeenCalled();
+  });
+
   it('图片通过有权限的 readImage 显示 dataUrl，不导航到磁盘 URL', async () => {
     harness.open.mockResolvedValueOnce({
       ok: true,

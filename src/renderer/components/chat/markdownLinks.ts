@@ -130,8 +130,12 @@ export function toWorkspaceRelativePath(raw: string, cwd?: string): string | nul
   const root = canonicalAbsolutePath(cwd);
   if (!root) return null;
 
-  const target = canonicalAbsolutePath(raw);
-  if (!target) return normalizeRelativePath(raw);
+  // Windows 链接可能带 URL 风格的前导斜杠；仅按 Windows 工作区解释，保留 Unix 路径语义。
+  //
+  // Windows links may include a URL-style leading slash; interpret it only for Windows workspaces to preserve Unix path semantics.
+  const targetPath = root.windows && /^\/[a-z]:[\\/]/i.test(raw) ? raw.slice(1) : raw;
+  const target = canonicalAbsolutePath(targetPath);
+  if (!target) return targetPath === raw ? normalizeRelativePath(raw) : null;
   if (target.windows !== root.windows) return null;
 
   const comparisonRoot = root.value.toLowerCase();
