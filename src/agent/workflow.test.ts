@@ -489,6 +489,21 @@ describe('workflow tool', () => {
       { name: 'Max/claude-opus-5', config: {} as never },
       { name: 'OpenAI/gpt-6', config: {} as never },
     ];
+
+    it('model 参数说明带上选型描述，空白描述不产生空条目', () => {
+      const noted = createWorkflowTool({
+        invoke: vi.fn(),
+        emit: vi.fn(),
+        models: [
+          { name: 'Max/claude-opus-5', config: {} as never, description: '只读调研' },
+          { name: 'OpenAI/gpt-6', config: {} as never, description: '  ' },
+        ],
+      });
+      const schema = noted.parameters as { properties: { model: { description: string } } };
+      expect(schema.properties.model.description).toContain('Max/claude-opus-5: 只读调研');
+      expect(schema.properties.model.description).not.toContain('OpenAI/gpt-6:');
+      expect((noted.promptGuidelines ?? []).join('\n')).toContain('Max/claude-opus-5: 只读调研');
+    });
     const agentTypes = [
       { name: 'reviewer', allowModelOverride: true },
       { name: 'worker', allowModelOverride: true },

@@ -13,6 +13,7 @@ import type {
   WorkflowRunSnapshot,
 } from '@shared/types/workflow';
 import { JSException, type JSValueHandle, QuickJS } from 'quickjs-wasi';
+import { describeSubagentModels } from './subagent';
 import { resolveWorkflowPresetArgs, type WorkflowPreset } from './workflowPresets';
 
 const require = createRequire(import.meta.url);
@@ -42,7 +43,7 @@ export interface WorkflowToolDeps {
   /** 会话建立时的可用预设快照，写进工具说明供模型挑选 */
   presets?: readonly WorkflowPresetSummary[];
   /** 与 subagent 工具同源：可选模型，以及哪些类型要求主 agent 选模型 */
-  models?: readonly Pick<SubagentModelOption, 'name'>[];
+  models?: readonly SubagentModelOption[];
   agentTypes?: readonly Pick<AgentTypeSpawnConfig, 'name' | 'allowModelOverride'>[];
   randomUuid?: () => string;
 }
@@ -534,6 +535,7 @@ const USER_STOP_TEXT = 'was stopped by the user — do not restart it';
 
 export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
   const modelNames = (deps.models ?? []).map((option) => option.name);
+  const modelNotes = describeSubagentModels(deps.models ?? []);
   const pickTypes = (deps.agentTypes ?? [])
     .filter((type) => type.allowModelOverride === true)
     .map((type) => type.name);
@@ -586,7 +588,7 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
       'agent() options are only label, phase, model, agentType, and schema. Anything else fails the run.',
       ...(modelNames.length > 0
         ? [
-            `model must be copied exactly from the model enum: ${modelNames.join(', ')}. Top-level model applies to every agent() without its own model whose agent type requires one${
+            `model must be copied exactly from the model enum: ${modelNames.join(', ')}.${modelNotes ? ` ${modelNotes}.` : ''} Top-level model applies to every agent() without its own model whose agent type requires one${
               pickTypes.length > 0
                 ? ` (${pickTypes.join(', ')}; agent() without agentType uses worker). Pass it when running presets that use these types`
                 : ''
@@ -634,8 +636,9 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
               model: {
                 type: 'string',
                 enum: modelNames,
-                description:
-                  'Model for every agent() without its own model whose agent type requires one. Exact id from the enum.',
+                description: `Model for every agent() without its own model whose agent type requires one. Exact id from the enum.${
+                  modelNotes ? ` ${modelNotes}.` : ''
+                }`,
               },
             }
           : {}),
