@@ -53,8 +53,19 @@ function waitReceiptOf(value: unknown): AgentWaitReceipt | undefined {
   return typeof report?.timedOut === 'boolean' ? (report as AgentWaitReceipt) : undefined;
 }
 
+/** 把用户为子代理模型填写的选型描述拼成 "name: description"，空白描述跳过 */
+export function describeSubagentModels(
+  models: readonly Pick<SubagentModelOption, 'name' | 'description'>[]
+): string {
+  return models
+    .filter((model) => model.description?.trim())
+    .map((model) => `${model.name}: ${model.description?.trim()}`)
+    .join('; ');
+}
+
 export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefinition {
   const modelNames = deps.models.map((model) => model.name);
+  const modelNotes = describeSubagentModels(deps.models);
   const typeNames = deps.agentTypes.map((agentType) => agentType.name);
   const normalize = (params: Record<string, unknown>): AgentControlToolRequest | null => {
     const operation = params.operation;
@@ -185,7 +196,9 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       'Unknown gate ids fail the run and nothing is executed.',
       ...(modelNames.length > 0
         ? [
-            `model must be copied exactly from the model enum: ${modelNames.join(', ')}. Short names are rejected.`,
+            `model must be copied exactly from the model enum: ${modelNames.join(', ')}. Short names are rejected.${
+              modelNotes ? ` ${modelNotes}.` : ''
+            }`,
           ]
         : []),
     ],
@@ -221,8 +234,9 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
               model: {
                 type: 'string',
                 enum: modelNames,
-                description:
-                  'Exact model id from the model enum. Short names and guessed ids are rejected.',
+                description: `Exact model id from the model enum. Short names and guessed ids are rejected.${
+                  modelNotes ? ` ${modelNotes}.` : ''
+                }`,
               },
             }
           : {}),

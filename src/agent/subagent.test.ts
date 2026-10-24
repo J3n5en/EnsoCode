@@ -167,3 +167,30 @@ describe('CoworkerIdleReminder', () => {
     expect(texts[0]).not.toMatch(/agentId a[12]/);
   });
 });
+
+describe('子代理模型选型描述', () => {
+  const models = [
+    { name: 'Max/claude-opus-5', config: model, description: '只读调研、大量读代码用这个' },
+    { name: 'OpenAI/gpt-6', config: model, description: '   ' },
+    { name: 'xAI/grok-4', config: model, description: '代码评审、架构设计用这个' },
+    { name: 'Plain/no-note', config: model },
+  ];
+
+  it('model 参数说明和 promptGuidelines 带上有描述的模型，跳过空白描述', () => {
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models, invoke: vi.fn() });
+    const expected =
+      'Max/claude-opus-5: 只读调研、大量读代码用这个; xAI/grok-4: 代码评审、架构设计用这个';
+    const schema = tool.parameters as {
+      properties: { model: { description: string; enum: string[] } };
+    };
+    expect(schema.properties.model.enum).toEqual(models.map((entry) => entry.name));
+    expect(schema.properties.model.description).toContain(expected);
+    expect(schema.properties.model.description).not.toContain('Plain/no-note');
+    expect(schema.properties.model.description).not.toContain('OpenAI/gpt-6:');
+    const guidelines = (tool.promptGuidelines ?? []).join('\n');
+    expect(guidelines).toContain(expected);
+    const notes = guidelines.split('Short names are rejected. ')[1] ?? '';
+    expect(notes).not.toContain('Plain/no-note');
+    expect(notes).not.toContain('OpenAI/gpt-6');
+  });
+});
