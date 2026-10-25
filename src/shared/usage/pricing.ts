@@ -15,14 +15,24 @@ export type PricingTable = Record<string, ModelPricing>;
 const THINKING_SUFFIX = new RegExp(`-(${THINKING_LEVELS.join('|')})$`);
 
 /**
- * 精确 id 优先；查不到时剥掉结尾的思考档位后缀再查一次。
- * 真实场景：部分账号 provider 把档位拼进 model id（grok-4.6-fast-max），catalog 只有基础 id。
+ * 完整 ID 及其去思考档位后缀的价格优先；缺价时逐段剥除中转命名空间，每段仍先精确匹配。
+ * 仅在查价时回退，保留原始模型 ID，并优先使用更长路径的专用价格（含零价）。
+ *
+ * Prefer the full ID and its thinking-suffix fallback, then strip relay namespaces one segment at a time.
+ * Only pricing lookup falls back; preserve the recorded model ID and prefer prices for longer paths, including zero rates.
  */
 export function resolvePricing(model: string, table: PricingTable): ModelPricing | null {
-  const exact = table[model];
-  if (exact) return exact;
-  const base = model.replace(THINKING_SUFFIX, '');
-  return base !== model ? (table[base] ?? null) : null;
+  let candidate = model;
+  while (candidate) {
+    const exact = Object.hasOwn(table, candidate) ? table[candidate] : null;
+    if (exact) return exact;
+    const base = candidate.replace(THINKING_SUFFIX, '');
+    if (base !== candidate && Object.hasOwn(table, base) && table[base]) return table[base];
+    const separator = candidate.indexOf('/');
+    if (separator < 0) break;
+    candidate = candidate.slice(separator + 1);
+  }
+  return null;
 }
 
 function pickRate(value: unknown): number | null {

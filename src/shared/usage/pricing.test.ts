@@ -74,6 +74,92 @@ describe('costOf — 思考档位后缀兜底', () => {
   });
 });
 
+describe('costOf — 中转命名空间前缀', () => {
+  const tokens = {
+    input: 1_000_000,
+    output: 2_000_000,
+    cacheRead: 3_000_000,
+    cacheWrite: 4_000_000,
+  };
+  const gptRates = { input: 2, output: 5, cacheRead: 1, cacheWrite: 3 };
+  const deepseekRates = { input: 1, output: 4, cacheRead: 0.5, cacheWrite: 2 };
+
+  it('完整 ID 精确命中时保留全零单价', () => {
+    const table: PricingTable = {
+      'relay/gpt-6.1-sol-high': { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      'relay/gpt-6.1-sol': gptRates,
+      'gpt-6.1-sol': deepseekRates,
+    };
+    expect(costOf({ model: 'relay/gpt-6.1-sol-high', ...tokens }, table)).toBe(0);
+  });
+
+  it.each(['constructor', '__proto__', 'toString', 'constructor-high'])(
+    '命名空间回退不把继承属性 %s 当作价格',
+    (model) => {
+      expect(costOf({ model: `relay/${model}`, ...tokens }, {})).toBeNull();
+    }
+  );
+
+  it('忽略继承的价格条目，但保留同名自有条目的优先级', () => {
+    const table: PricingTable = { 'gpt-6.1-sol': gptRates };
+    Object.setPrototypeOf(table, { 'relay/gpt-6.1-sol': deepseekRates });
+    expect(costOf({ model: 'relay/gpt-6.1-sol', ...tokens }, table)).toBeCloseTo(27);
+    table['relay/gpt-6.1-sol'] = deepseekRates;
+    expect(costOf({ model: 'relay/gpt-6.1-sol', ...tokens }, table)).toBeCloseTo(18.5);
+  });
+
+  it('codex/gpt-6.1-sol 回落到去前缀后的模型 ID', () => {
+    expect(
+      costOf({ model: 'codex/gpt-6.1-sol', ...tokens }, { 'gpt-6.1-sol': gptRates })
+    ).toBeCloseTo(27);
+  });
+
+  it('workbuddy-ai/deepseek-v4.1-flash 回落到去前缀后的模型 ID', () => {
+    expect(
+      costOf(
+        { model: 'workbuddy-ai/deepseek-v4.1-flash', ...tokens },
+        {
+          'deepseek-v4.1-flash': deepseekRates,
+        }
+      )
+    ).toBeCloseTo(18.5);
+  });
+
+  it('剥思考档位时优先匹配带命名空间的基础 ID', () => {
+    const table: PricingTable = {
+      'relay/gpt-6.1-sol': gptRates,
+      'gpt-6.1-sol-high': deepseekRates,
+    };
+    expect(costOf({ model: 'relay/gpt-6.1-sol-high', ...tokens }, table)).toBeCloseTo(27);
+  });
+
+  it('逐段剥除多层命名空间后匹配模型 ID', () => {
+    expect(
+      costOf({ model: 'relay/openai/gpt-6.1-sol', ...tokens }, { 'gpt-6.1-sol': gptRates })
+    ).toBeCloseTo(27);
+    expect(
+      costOf({ model: 'relay/openai/gpt-6.1-sol-high', ...tokens }, { 'gpt-6.1-sol': gptRates })
+    ).toBeCloseTo(27);
+  });
+
+  it('模型 ID 自带斜杠时优先保留更长的剩余路径', () => {
+    const table: PricingTable = {
+      'meta-llama/model': gptRates,
+      model: deepseekRates,
+    };
+    expect(costOf({ model: 'relay/meta-llama/model', ...tokens }, table)).toBeCloseTo(27);
+  });
+
+  it('前缀回落不改写点号或连字符，也不剥未识别后缀', () => {
+    expect(
+      costOf({ model: 'codex/gpt-6.1-sol', ...tokens }, { 'gpt-6-1-sol': deepseekRates })
+    ).toBeNull();
+    expect(
+      costOf({ model: 'codex/gpt-6.1-sol-turbo', ...tokens }, { 'gpt-6.1-sol': gptRates })
+    ).toBeNull();
+  });
+});
+
 describe('parseUsageModelPricing', () => {
   const ok = { input: 0.4, output: 3, cacheRead: 0.05, cacheWrite: 0 };
 

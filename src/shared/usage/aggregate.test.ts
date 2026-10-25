@@ -236,6 +236,71 @@ describe('aggregateUsage — cost', () => {
   });
 });
 
+describe('aggregateUsage — 中转命名空间前缀单价', () => {
+  it('恢复历史前缀模型的费用和单价，保留原始模型分组并汇总各区间费用', () => {
+    const gptRates = { input: 2, output: 5, cacheRead: 1, cacheWrite: 3 };
+    const deepseekRates = { input: 1, output: 4, cacheRead: 0.5, cacheWrite: 2 };
+    const pricing = {
+      'gpt-6.1-sol': gptRates,
+      'deepseek-v4.1-flash': deepseekRates,
+    };
+    const records = [
+      record({
+        ts: dayStart(0),
+        id: 'proxy-gpt-current',
+        model: 'codex/gpt-6.1-sol',
+        input: 1_000_000,
+        output: 2_000_000,
+        cacheRead: 3_000_000,
+        cacheWrite: 4_000_000,
+      }),
+      record({ ts: dayStart(0), id: 'raw-gpt-current', model: 'gpt-6.1-sol', input: 1_000_000 }),
+      record({
+        ts: dayStart(0),
+        id: 'proxy-deepseek-current',
+        model: 'workbuddy-ai/deepseek-v4.1-flash',
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 1_000_000,
+        cacheWrite: 1_000_000,
+      }),
+      record({
+        ts: dayStart(1),
+        id: 'proxy-deepseek-previous',
+        model: 'workbuddy-ai/deepseek-v4.1-flash',
+        input: 2_000_000,
+        output: 1_000_000,
+        cacheRead: 2_000_000,
+        cacheWrite: 1_000_000,
+      }),
+    ];
+
+    const summary = aggregateUsage(records, [], pricing, { days: 1, now: NOW });
+
+    expect(summary.totals.cost).toBeCloseTo(36.5);
+    expect(summary.daily[0].cost).toBeCloseTo(36.5);
+    expect(summary.previous.cost).toBeCloseTo(9);
+    expect(summary.unpricedModels).not.toContain('codex/gpt-6.1-sol');
+    expect(summary.unpricedModels).not.toContain('workbuddy-ai/deepseek-v4.1-flash');
+    expect(summary.byModel.map((row) => row.model).sort()).toEqual([
+      'codex/gpt-6.1-sol',
+      'gpt-6.1-sol',
+      'workbuddy-ai/deepseek-v4.1-flash',
+    ]);
+    expect(summary.byModel.find((row) => row.model === 'codex/gpt-6.1-sol')).toMatchObject({
+      cost: 27,
+      pricing: gptRates,
+    });
+    expect(summary.byModel.find((row) => row.model === 'gpt-6.1-sol')).toMatchObject({
+      cost: 2,
+      pricing: gptRates,
+    });
+    expect(
+      summary.byModel.find((row) => row.model === 'workbuddy-ai/deepseek-v4.1-flash')
+    ).toMatchObject({ cost: 7.5, pricing: deepseekRates });
+  });
+});
+
 describe('aggregateUsage — unpricedModels', () => {
   it('列出周期内出现过但无定价的模型，去重且只统计区间内的', () => {
     const records = [
