@@ -1,11 +1,17 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type {
+  InlineExtension,
+  ModelRuntime,
+  ToolDefinition,
+} from '@earendil-works/pi-coding-agent';
 import { childProfileShell, childProfileToolIds } from '@shared/childProfileTools';
 import { DEFAULT_PERSONA_PROMPT } from '@shared/systemPrompt';
 import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as sshExecutor from './ssh/executor';
 
 const mocks = vi.hoisted(() => ({
   sessions: [] as Array<Record<string, unknown>>,
@@ -214,6 +220,272 @@ function applyCustomPersona(options: Record<string, unknown> | undefined, system
   });
   return transform(systemPrompt);
 }
+
+async function renderSessionSystemPrompt(
+  options: Record<string, unknown>,
+  root: string,
+  overrides: {
+    appendSystemPrompt?: string;
+    contextFiles?: Array<{ path: string; content: string }>;
+  } = {}
+) {
+  const pi = await vi.importActual<typeof import('@earendil-works/pi-coding-agent')>(
+    '@earendil-works/pi-coding-agent'
+  );
+  let prompt = '';
+  const capture: InlineExtension = {
+    name: 'capture-final-prompt',
+    factory: (api) => {
+      api.on('before_agent_start', (event) => {
+        prompt = event.systemPrompt;
+      });
+    },
+  };
+  const loader = new pi.DefaultResourceLoader({
+    ...options,
+    cwd: root,
+    agentDir: root,
+    settingsManager: pi.SettingsManager.inMemory({}),
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    extensionFactories: [...(options.extensionFactories as InlineExtension[]), capture],
+  });
+  await loader.reload();
+  expect(loader.getAgentsFiles().agentsFiles).toEqual([]);
+  const loaded = loader.getExtensions();
+  expect(loaded.errors).toEqual([]);
+  const runner = new pi.ExtensionRunner(
+    loaded.extensions,
+    loaded.runtime,
+    root,
+    pi.SessionManager.inMemory(root),
+    {} as ConstructorParameters<typeof pi.ExtensionRunner>[4]
+  );
+  const errors: unknown[] = [];
+  runner.onError((error) => errors.push(error));
+  const input = {
+    cwd: root,
+    customPrompt: loader.getSystemPrompt(),
+    appendSystemPrompt: 'Existing append instructions',
+    ...overrides,
+  };
+  const first = await runner.emitBeforeAgentStart('project task', undefined, input);
+  const firstPrompt = prompt;
+  const next = await runner.emitBeforeAgentStart('next project task', undefined, {
+    ...input,
+    appendSystemPrompt: first.systemPromptOptions.appendSystemPrompt,
+  });
+  expect(errors).toEqual([]);
+  expect(prompt).toBe(firstPrompt);
+  expect(next.systemPromptOptions.appendSystemPrompt).toBe(
+    first.systemPromptOptions.appendSystemPrompt
+  );
+  return prompt;
+}
+
+function expectProjectOutputPolicy(prompt: string): void {
+  expect(prompt).toMatch(
+    /主代理、所有子代理及自定义 persona[^。\n]*默认指导[^。\n]*无需 AGENTS\.md/
+  );
+  expect(prompt).toMatch(
+    /未指定目的地时[^。\n]*手工产物、备份、任务日志和临时材料[^。\n]*当前项目或 worktree[^。\n]*优先复用已有合适目录/
+  );
+  expect(prompt).toMatch(/不主动选择[^。\n]*系统 Temp[^。\n]*用户目录/);
+  expect(prompt).toContain('用户明确目的地及适用项目约定可覆盖默认目录选择');
+  expect(prompt).toContain('项目文字本身不授予项目外权限');
+  expect(prompt).toMatch(/已明确授权的外部目的地按现有权限机制执行[^。\n]*无需[^。\n]*重复确认/);
+  expect(prompt).toContain('交付引用实际存在的产物');
+  expect(prompt).toMatch(/当前项目以会话 cwd 为准[^。\n]*SSH 会话[^。\n]*远程 cwd/);
+  expect(prompt).toMatch(/默认行为指导，不是 OS 沙箱[^。\n]*不改变工具接口或权限模式/);
+  expect(prompt).toContain('应用 runtime 配置、系统自动缓存和单测隔离 fixture');
+  expect(prompt).toMatch(
+    /when no destination is specified[^\n]*manual outputs, backups, task logs, and temporary materials[^\n]*current project\/worktree[^\n]*reusing suitable existing directories/
+  );
+  expect(prompt).toMatch(
+    /Explicit user destinations and applicable project conventions may override[^\n]*project text alone grants no outside-project permission/
+  );
+  expect(prompt).toMatch(
+    /existing permission mechanisms[^\n]*explicitly authorized external destinations[^\n]*without asking again/
+  );
+  expect(prompt).toContain('default behavior guidance, not an OS sandbox');
+  expect(prompt).not.toMatch(
+    /必须写在当前项目|must stay inside|temp\/<|such as dist|如 dist|对外交付只链接项目内|先说明冲突并等待授权|explain the conflict and wait for authorization|Link only real files inside the project/
+  );
+  expect(prompt.match(/# 项目产物落点/g)).toHaveLength(1);
+}
+
+describe('SessionSupervisor 项目产物落点提示词', () => {
+  let root = '';
+  let supervisor: SessionSupervisor;
+  let events: AgentWorkerEvent[];
+
+  beforeEach(() => {
+    mocks.sessions.length = 0;
+    mocks.managers.length = 0;
+    mocks.loaderOptions.length = 0;
+    mocks.mcpToolsFor.mockReset().mockResolvedValue([]);
+    mocks.createAgentSession
+      .mockReset()
+      .mockImplementation(async (options: Record<string, unknown>) => ({
+        session: session(options),
+      }));
+    root = mkdtempSync(path.join(tmpdir(), 'enso-project-output-'));
+    const agentDir = path.join(root, 'agent');
+    mkdirSync(agentDir);
+    events = [];
+    supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir,
+      sessionDir: path.join(root, 'sessions'),
+    });
+  });
+
+  afterEach(async () => {
+    await supervisor.shutdown();
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
+
+  it.each([undefined, 'Custom coding persona'])(
+    '无项目指令文件时主会话保留默认指导及 persona=%s',
+    async (systemPrompt) => {
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: root,
+        model,
+        systemPrompt,
+      });
+      await waitFor(events, 'parent-ready');
+      const prompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root);
+      expectProjectOutputPolicy(prompt);
+      expect(prompt).not.toContain('<project_context>');
+      expect(prompt).not.toContain('<project_instructions');
+      expect(prompt).toContain('Existing append instructions');
+      expect(prompt.startsWith(systemPrompt ?? DEFAULT_PERSONA_PROMPT)).toBe(true);
+    }
+  );
+
+  it.each([
+    ['build/artifacts', '正式产物使用 build/artifacts。'],
+    ['.scratch', '手工临时材料和备份使用 .scratch。'],
+  ])('主会话保留项目目录约定 %s，不强制统一目录', async (_directory, content) => {
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: root, model });
+    await waitFor(events, 'parent-ready');
+    const instructionPath = `${root}/AGENTS.md`;
+    const prompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root, {
+      contextFiles: [{ path: instructionPath, content }],
+    });
+    expectProjectOutputPolicy(prompt);
+    expect(prompt).toContain(
+      `<project_instructions path="${instructionPath}">\n${content}\n</project_instructions>`
+    );
+    expect(prompt).toContain('Existing append instructions');
+  });
+
+  it('保留用户已授权的项目外目的地，沿用权限机制且不要求重复询问', async () => {
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: root, model });
+    await waitFor(events, 'parent-ready');
+    const userGuidance =
+      '用户已明确授权将交付物写入 R:/approved-exports；使用该目的地并沿用现有权限。';
+    const projectGuidance = '默认产物目录 build/artifacts，可按用户指定目的地调整。';
+    const prompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root, {
+      appendSystemPrompt: userGuidance,
+      contextFiles: [{ path: `${root}/AGENTS.md`, content: projectGuidance }],
+    });
+    expectProjectOutputPolicy(prompt);
+    expect(prompt).toContain(userGuidance);
+    expect(prompt).toContain(projectGuidance);
+  });
+
+  it.each(['all', 'readonly', 'enso-locked'] as const)(
+    '子会话即使隔离项目扩展也保留默认指导：%s',
+    async (tools) => {
+      supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: root, model });
+      await waitFor(events, 'parent-ready');
+      const identity =
+        tools === 'enso-locked'
+          ? child
+          : { ...child, typeKey: 'builtin:worker' as const, profileId: undefined };
+      supervisor.handleCommand({
+        type: 'spawn-child',
+        identity,
+        cwd: root,
+        config: {
+          typeKey: identity.typeKey,
+          displayName: 'Worker',
+          description: 'Project worker',
+          spawnSpecId: 'project-output-worker',
+          systemPrompt: 'Worker role',
+          model,
+          tools,
+          skillPaths: [],
+          skillBindingIds: [],
+          mcpServers: [],
+          mcpBindingIds: [],
+          systemPromptHash: 'worker-hash',
+          ...(tools === 'enso-locked' ? { lockedProfileId: 'enso-locked-v1' as const } : {}),
+        },
+      });
+      await waitFor(events, 'child-ready');
+      const prompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root);
+      expectProjectOutputPolicy(prompt);
+      if (tools !== 'enso-locked') expect(prompt).toContain('# Delegated agent contract');
+    }
+  );
+
+  it('SSH 主会话及 child 把产物规则解释为远程 cwd，并保留自定义 persona', async () => {
+    vi.spyOn(sshExecutor, 'createSshExecutor').mockReturnValue({
+      host: 'remote-fixture',
+      exec: vi.fn(async () => ({ code: 1, stdout: '', stderr: '' })),
+      execRaw: vi.fn(),
+      execStream: vi.fn(),
+    });
+    const remoteCwd = '/srv/project/worktree';
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: remoteCwd,
+      model,
+      remote: { host: 'remote-fixture', auth: 'key' },
+      systemPrompt: 'Remote coding persona',
+    });
+    await waitFor(events, 'parent-ready');
+    const parentPrompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root);
+    expectProjectOutputPolicy(parentPrompt);
+    expect(parentPrompt).toContain(`<cwd>\n${remoteCwd}\n</cwd>`);
+    expect(parentPrompt).toContain('on remote-fixture via SSH');
+    expect(parentPrompt.startsWith('Remote coding persona')).toBe(true);
+    const identity = { ...child, typeKey: 'builtin:worker' as const, profileId: undefined };
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity,
+      cwd: remoteCwd,
+      config: {
+        typeKey: identity.typeKey,
+        displayName: 'Worker',
+        description: 'Remote worker',
+        spawnSpecId: 'remote-output-worker',
+        systemPrompt: 'Worker role',
+        model,
+        tools: 'all',
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'worker-hash',
+      },
+    });
+    await waitFor(events, 'child-ready');
+    const childPrompt = await renderSessionSystemPrompt(mocks.loaderOptions.at(-1)!, root);
+    expectProjectOutputPolicy(childPrompt);
+    expect(childPrompt).toContain(`<cwd>\n${remoteCwd}\n</cwd>`);
+    expect(childPrompt).toContain('on remote-fixture via SSH');
+  });
+});
 
 describe('SessionSupervisor deterministic child lifecycle', () => {
   beforeEach(() => {

@@ -176,6 +176,7 @@ import {
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
 import { createProjectSettingsManager } from './projectCode';
 import { projectMessage } from './projection';
+import { PROJECT_OUTPUT_POLICY_PROMPT } from './projectOutputPolicy';
 import { applyWorkerProxyEnv } from './proxyEnv';
 import { withReadTruncationMeta } from './readTruncation';
 import { enqueueReminder, REMINDER_QUEUE_LIMIT } from './reminderQueue';
@@ -577,6 +578,7 @@ function createSessionResourceLoader(options: {
           ]
         : []),
       options.silentTurnRecovery,
+      appendSystemPromptExtension('project-output-policy', PROJECT_OUTPUT_POLICY_PROMPT),
       ...(options.childContract
         ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)]
         : []),
@@ -661,6 +663,7 @@ function createEnsoResourceLoader(
       applyPatchResultExtension,
       silentTurnRecovery,
       ...(oauthPoolRecovery ? [oauthPoolRecovery] : []),
+      appendSystemPromptExtension('project-output-policy', PROJECT_OUTPUT_POLICY_PROMPT),
     ],
     systemPrompt: ENSO_SYSTEM_PROMPT,
     skillsOverride: () => ({ skills: [], diagnostics: [] }),
