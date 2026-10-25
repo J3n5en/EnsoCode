@@ -1205,10 +1205,14 @@ export function Sidebar({
                                     <MessageSquarePlus className="h-3.5 w-3.5" />
                                   </button>
                                   <ProjectOverflowMenu actions={projectActions} />
-                                  {/* 置顶标记放最右：左侧透明操作位仍占宽，放在它们前面会悬在行中间 */}
+                                  {/*
+                                    置顶标记在最右侧保留占位，避免菜单遮罩使项目行失去悬停时挤动触发器，导致松开鼠标即关闭菜单。
+
+                                    Keep the rightmost pin marker's space so losing row hover to the menu backdrop cannot shift the trigger and close the menu on mouseup.
+                                  */}
                                   {projectPinned && (
                                     <span
-                                      className="flex shrink-0 items-center justify-center rounded p-1 group-hover:hidden"
+                                      className="flex shrink-0 items-center justify-center rounded p-1 group-hover:opacity-0"
                                       aria-hidden
                                     >
                                       <Pin className="h-3.5 w-3.5 text-muted-foreground/70" />
