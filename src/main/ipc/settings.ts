@@ -97,6 +97,7 @@ export const SETTINGS_STATE_FIELDS = [
   'autoArchiveIdleDays',
   'autoArchiveMergedWorktrees',
   'autoDeleteArchivedDays',
+  'activeRetentionMinutes',
   'backgroundImageEnabled',
   'backgroundSourceType',
   'backgroundImagePath',

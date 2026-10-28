@@ -16,6 +16,7 @@ export interface SidebarDirectoryEntry {
   messages: { timestamp?: number }[];
   forkedFromConversationId?: string;
   unread?: boolean;
+  activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
   pendingCapabilityAsks?: readonly unknown[];
@@ -42,6 +43,7 @@ type Source = {
   messages: { timestamp?: number }[];
   forkedFromConversationId?: string;
   unread?: boolean;
+  activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
   pendingCapabilityAsks?: readonly unknown[];
@@ -76,6 +78,7 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     messages: [],
     forkedFromConversationId: conversation.forkedFromConversationId,
     unread: conversation.unread,
+    activeRenewedAt: conversation.activeRenewedAt,
     pendingAsks: conversation.pendingAsks,
     pendingApprovals: conversation.pendingApprovals,
     pendingCapabilityAsks: conversation.pendingCapabilityAsks,

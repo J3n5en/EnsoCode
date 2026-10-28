@@ -109,6 +109,7 @@ export const SETTINGS_DATA_COVERAGE = {
     'Renderer sidebar archive preference; not an Enso capability.'
   ),
   autoDeleteArchivedDays: excluded('Renderer sidebar archive preference; not an Enso capability.'),
+  activeRetentionMinutes: excluded('Renderer sidebar Active preference; not an Enso capability.'),
   providers: surfaces('providers.list'),
   defaultModel: surfaces('providers.default-model'),
   defaultModelFollowLast: surfaces('providers.default-model'),
@@ -260,6 +261,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setAutoDeleteArchivedDays: excluded(
     'Renderer sidebar archive preference; not an Enso capability.'
+  ),
+  setActiveRetentionMinutes: excluded(
+    'Renderer sidebar Active preference; not an Enso capability.'
   ),
   setStatusLineSegments: surfaces('appearance.status-line-segments'),
   toggleStatusLineSegment: surfaces('appearance.status-line-segments'),

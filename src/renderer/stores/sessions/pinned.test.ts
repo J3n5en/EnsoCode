@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as pinned from './pinned';
 import {
   activeConversationIds,
+  activeRetentionRemainingMs,
   archivedConversationGroups,
   archivedConversationIds,
   pinnedConversationIds,
@@ -598,6 +599,80 @@ describe('activeConversationIds', () => {
         ghost: { ...conversations.ghost, pinned: true },
       })
     ).toEqual(['e', 'c', 'b']);
+  });
+
+  describe('留存窗口', () => {
+    const now = 1000;
+    const retention = { now, ms: 100 };
+    const kept = {
+      readRecent: { ...conv('p1', 1, 950), status: 'idle' },
+      readOld: { ...conv('p1', 2, 800), status: 'idle' },
+      unreadOld: { ...conv('p1', 3, 800), status: 'idle', unread: true },
+      readFailRecent: { ...conv('p1', 4, 960), status: 'failed' },
+      runningOld: { ...conv('p1', 5, 0), status: 'running' },
+      waitingOld: { ...conv('p1', 6, 0), status: 'idle', pendingAsks: [{ requestId: 'q' }] },
+      emptyNew: { ...conv('p1', 990), status: 'idle' },
+      persistedRecent: { ...conv('p1', 7), status: 'idle', lastActiveAt: 970 },
+      archivedRecent: { ...conv('p1', 8, 990), status: 'idle', archived: true },
+    };
+    const keptOrder = Object.keys(kept);
+
+    it('窗口内已读会话保留;超窗回到原规则(已读退出、未读保留);运行与待处理不受窗口影响', () => {
+      expect(activeConversationIds(keptOrder, kept, [], retention)).toEqual([
+        'persistedRecent',
+        'readFailRecent',
+        'readRecent',
+        'unreadOld',
+        'runningOld',
+        'waitingOld',
+      ]);
+    });
+
+    it('没有任何活动时间的空会话不进栏', () => {
+      expect(activeConversationIds(keptOrder, kept, [], retention)).not.toContain('emptyNew');
+    });
+
+    it('窗口内点开续期:按续期时刻重新计时', () => {
+      const renewed = {
+        renewed: { ...conv('p1', 1, 0), status: 'idle', activeRenewedAt: 950 },
+        stale: { ...conv('p1', 2, 0), status: 'idle', activeRenewedAt: 850 },
+      };
+      expect(activeConversationIds(['renewed', 'stale'], renewed, [], retention)).toEqual([
+        'renewed',
+      ]);
+    });
+
+    it('留存为 0 时保持原有规则', () => {
+      expect(activeConversationIds(liveOrder, live, [], { now, ms: 0 })).toEqual(
+        activeConversationIds(liveOrder, live)
+      );
+    });
+
+    it('剩余时间只给靠留存留下的会话,按最后消息与续期中较晚者计算', () => {
+      const renewed = { ...conv('p1', 9, 900), status: 'idle', activeRenewedAt: 980 };
+      const all = { ...kept, renewed };
+      expect(activeRetentionRemainingMs('readRecent', all, retention)).toBe(50);
+      expect(activeRetentionRemainingMs('persistedRecent', all, retention)).toBe(70);
+      expect(activeRetentionRemainingMs('renewed', all, retention)).toBe(80);
+    });
+
+    it('不会因超时移出的会话与已超时的会话没有剩余时间', () => {
+      const unreadRecent = { ...conv('p1', 9, 990), status: 'idle', unread: true };
+      const failedUnread = { ...conv('p1', 10, 990), status: 'failed', unread: true };
+      const all = { ...kept, unreadRecent, failedUnread };
+      for (const id of [
+        'runningOld',
+        'waitingOld',
+        'unreadRecent',
+        'failedUnread',
+        'readOld',
+        'emptyNew',
+        'missing',
+      ]) {
+        expect(activeRetentionRemainingMs(id, all, retention), id).toBeUndefined();
+      }
+      expect(activeRetentionRemainingMs('readRecent', all, { now, ms: 0 })).toBeUndefined();
+    });
   });
 });
 

@@ -105,7 +105,12 @@ import {
 } from './messageCache';
 import { migrateSessions, SESSIONS_VERSION } from './migrate';
 import { cachedPartializeSessions } from './persistSnapshot';
-import { staleArchivedConversationIdsToDelete, staleUnarchivedConversationIds } from './pinned';
+import {
+  activeConversationIds,
+  SIDEBAR_TICK_MS,
+  staleArchivedConversationIdsToDelete,
+  staleUnarchivedConversationIds,
+} from './pinned';
 import { remapConversationProjectIds } from './projectAuthorityRemap';
 import {
   applyAgentEvent,
@@ -301,6 +306,8 @@ export interface Conversation extends SessionProjection {
   activeTabId?: string;
   /** 完成未读:后台完成且用户未查看(侧栏绿点);选中时清除。持久化 */
   unread?: boolean;
+  /** 仍在侧栏「活跃中」时被点开的时刻,留存窗口据此续期。持久化 */
+  activeRenewedAt?: number;
   /** 排队待发消息(running 时用户消息先入队) */
   queuedMessages?: QueuedMessage[];
   /** 会话目标(设定后空闲自动续跑) */
@@ -2561,11 +2568,21 @@ export const useSessionsStore = create<SessionsState>()(
           const pendingAgentPrefill = get().pendingAgentPrefill;
           const local = get().conversations[id];
           const epoch = ++conversationSelectionEpoch;
+          const now = Date.now();
+          const retentionMs = useSettingsStore.getState().activeRetentionMinutes * 60_000;
+          // 侧栏按至多旧一个刷新间隔的时钟判定,放宽同样余量,避免「看得见却点不续期」
+          const renewActive =
+            retentionMs > 0 &&
+            activeConversationIds([id], get().conversations, [], {
+              now,
+              ms: retentionMs + SIDEBAR_TICK_MS,
+            }).length > 0;
           set((state) => ({
             activeId: id,
             pendingAgentPrefill: undefined,
             conversations: patch(state, id, {
               unread: false,
+              ...(renewActive ? { activeRenewedAt: now } : {}),
               ...(pendingAgentPrefill
                 ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
                 : {}),

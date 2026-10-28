@@ -118,11 +118,13 @@ import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   activeConversationIds,
+  activeRetentionRemainingMs,
   archivedConversationGroups,
   pinnedConversationIds,
   projectConversationIds,
   RECENT_PROJECT_WINDOW_DAYS,
   recentProjects,
+  SIDEBAR_TICK_MS,
   staleArchivedConversationIds,
 } from '@/stores/sessions/pinned';
 import {
@@ -185,6 +187,7 @@ export function Sidebar({
   const reorderProjectGroups = useSettingsStore((state) => state.reorderProjectGroups);
   const setProjectGroupId = useSettingsStore((state) => state.setProjectGroupId);
   const keybindings = useSettingsStore((state) => state.keybindings);
+  const activeRetentionMinutes = useSettingsStore((state) => state.activeRetentionMinutes);
   const searchBinding = effectiveKeybindings(keybindings)['search-workspace'];
   const searchShortcut = searchBinding ? formatBinding(searchBinding) : '';
   const addProject = useSettingsStore((state) => state.addProject);
@@ -502,7 +505,28 @@ export function Sidebar({
   const [listQuery, setListQuery] = useState('');
   const [modHeld, setModHeld] = useState(false);
 
-  const activeIds = activeConversationIds(order, conversations, archivedProjectIds);
+  // 相对时间每分钟自刷（“3 分钟前”不随时间僵住；活跃中留存窗口也随之过期）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), SIDEBAR_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const activeRetention = { now: nowTick, ms: activeRetentionMinutes * 60_000 };
+  const activeIds = activeConversationIds(
+    order,
+    conversations,
+    archivedProjectIds,
+    activeRetention
+  );
+  const activeHoverTitle = (id: string) => {
+    const projectName = hoverProjectName(projects, conversations[id].projectId);
+    const remaining = activeRetentionRemainingMs(id, conversations, activeRetention);
+    if (remaining === undefined) return projectName;
+    const hint = t('Stays in Active for about {{count}} more min', {
+      count: Math.ceil(remaining / 60_000),
+    });
+    return projectName ? `${projectName}\n${hint}` : hint;
+  };
   const pinnedIds = pinnedConversationIds(order, conversations, pinnedOrderIds, archivedProjectIds);
   const archivedGroups = archivedConversationGroups(
     order,
@@ -601,12 +625,6 @@ export function Sidebar({
     setArchiveOpen(true);
   };
 
-  // 相对时间每分钟自刷（“3 分钟前”不随时间僵住）
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNowTick(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
   useEffect(() => {
     if (resolvedGroupId === selectedGroupId) return;
     setSelectedGroupId(ALL_GROUP_ID);
@@ -942,7 +960,7 @@ export function Sidebar({
                       switchHint={switchHintFor(id, 'active')}
                       locale={locale}
                       nowTick={nowTick}
-                      hoverTitle={hoverProjectName(projects, conversations[id].projectId)}
+                      hoverTitle={activeHoverTitle(id)}
                       worktreeStatus={conversations[id].worktree ? worktreeStatuses[id] : undefined}
                       isolated={Boolean(conversations[id].worktree)}
                       onSelect={selectConversation}

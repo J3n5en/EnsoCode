@@ -18,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { GENERATION_STALL_TIMEOUT_MINUTES } from '@/stores/sessions/stallTimeout';
 import { useSettingsStore } from '@/stores/settings';
+import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
 import {
   AUTO_ARCHIVE_IDLE_DAYS,
   AUTO_DELETE_ARCHIVED_DAYS,
@@ -128,6 +129,10 @@ function SidePanelSection() {
       : value === UNLIMITED_AUTO_RETRY
         ? t('Unlimited')
         : t('{{count}} times', { count: value });
+  const activeRetentionMinutes = useSettingsStore((s) => s.activeRetentionMinutes);
+  const setActiveRetentionMinutes = useSettingsStore((s) => s.setActiveRetentionMinutes);
+  const retentionLabel = (value: number) =>
+    value === 0 ? t('Off') : t('{{count}} min', { count: value });
   return (
     <div className="space-y-2">
       <SwitchRow
@@ -253,6 +258,37 @@ function SidePanelSection() {
             {autoRetryOptions.map((value) => (
               <SelectItem key={value} value={String(value)}>
                 {autoRetryLabel(value)}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+      <div
+        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+        data-settings-row="general.activeRetentionMinutes"
+      >
+        <div className="min-w-0">
+          <p className="text-sm">{t('Keep in Active after last message')}</p>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.'
+            )}
+          </p>
+        </div>
+        <Select
+          items={Object.fromEntries(
+            ACTIVE_RETENTION_MINUTES.map((value) => [String(value), retentionLabel(value)])
+          )}
+          value={String(activeRetentionMinutes)}
+          onValueChange={(value) => setActiveRetentionMinutes(Number(value))}
+        >
+          <SelectTrigger className="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {ACTIVE_RETENTION_MINUTES.map((value) => (
+              <SelectItem key={value} value={String(value)}>
+                {retentionLabel(value)}
               </SelectItem>
             ))}
           </SelectPopup>

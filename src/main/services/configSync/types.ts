@@ -151,6 +151,7 @@ export interface ConfigSyncState {
   autoArchiveIdleDays?: number;
   autoArchiveMergedWorktrees?: boolean;
   autoDeleteArchivedDays?: number;
+  activeRetentionMinutes?: number;
   backgroundRandomInterval?: number;
   backgroundOpacity?: number;
   backgroundBlur?: number;

@@ -27,6 +27,8 @@ interface SidebarConversation {
   status?: string;
   spawning?: boolean;
   unread?: boolean;
+  /** 仍在「活跃中」时被点开的时刻:留存窗口从它与最后一条消息中较晚者起算 */
+  activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
   pendingCapabilityAsks?: readonly unknown[];
@@ -42,6 +44,9 @@ function sidebarRoot(id: string, conversations: Conversations): SidebarConversat
   const conversation = conversations[id];
   return conversation && !conversation.parentId ? conversation : undefined;
 }
+
+/** 侧栏时钟刷新间隔:相对时间与「活跃中」留存都按它过期,点开判定需留出同样余量 */
+export const SIDEBAR_TICK_MS = 60_000;
 
 /** 会话的最后活跃时刻:最后一条消息时间 → 持久化 lastActiveAt(messages 被剥离时) → createdAt */
 export function lastActiveAt(conversation: SidebarConversation): number {
@@ -138,38 +143,81 @@ export function projectConversationIds(
   );
 }
 
+function sidebarTone(
+  conversation: SidebarConversation,
+  conversations: Conversations
+): ConversationDotTone {
+  return conversationDotTone({
+    status: conversation.status ?? 'idle',
+    spawning: conversation.spawning,
+    unread: conversation.unread,
+    pendingAskCount: conversation.pendingAsks?.length ?? 0,
+    hasRunningChild: conversationHasRunningChild(
+      { ...conversation, status: conversation.status ?? 'idle' },
+      conversations as Record<string, { status: string; spawning?: boolean } | undefined>
+    ),
+  });
+}
+
+/** 不受留存窗口影响、始终留在「活跃中」:运行、待确认、未读、未读失败 */
+function staysActive(tone: ConversationDotTone, conversation: SidebarConversation): boolean {
+  if (tone === 'failed') return conversation.unread === true;
+  return tone === 'running' || tone === 'waiting' || tone === 'unread';
+}
+
+/** 留存窗口起点:最后一条消息与续期时刻中较晚者;都没有则不参与留存 */
+function retentionAnchor(conversation: SidebarConversation): number | undefined {
+  const messageAt = conversation.messages.at(-1)?.timestamp ?? conversation.lastActiveAt;
+  return conversation.activeRenewedAt === undefined
+    ? messageAt
+    : Math.max(messageAt ?? 0, conversation.activeRenewedAt);
+}
+
 /**
  * 全部置顶会话 id(跨项目)。manualIds 是用户拖拽过的手动顺序:
  * 命中的按其顺序排前,未收录的新置顶按活跃时间追加末尾,失效 id 忽略。
  * 归档的与 order 之外的会话(coworker)不参与。
  */
-/** 蓝/绿/红活跃态:运行、待确认、未读失败、未读。失败查看过即退出(红点仍在项目组里) */
+/**
+ * 蓝/绿/红活跃态:运行、待确认、未读失败、未读。失败查看过即退出(红点仍在项目组里)。
+ * retention.ms>0 时,最后一条消息或续期时刻落在窗口内的会话不论已读都保留;超窗回到上述规则。
+ */
 export function activeConversationIds(
   order: readonly string[],
   conversations: Conversations,
-  archivedProjectIds: readonly string[] = []
+  archivedProjectIds: readonly string[] = [],
+  retention?: { now: number; ms: number }
 ): string[] {
   const archivedProjects = new Set(archivedProjectIds);
+  const cutoff = retention && retention.ms > 0 ? retention.now - retention.ms : undefined;
   return sortByActivity(
     order.filter((id) => {
       const conversation = sidebarRoot(id, conversations);
       if (!conversation || conversation.archived === true) return false;
       if (archivedProjects.has(conversation.projectId)) return false;
-      const tone = conversationDotTone({
-        status: conversation.status ?? 'idle',
-        spawning: conversation.spawning,
-        unread: conversation.unread,
-        pendingAskCount: conversation.pendingAsks?.length ?? 0,
-        hasRunningChild: conversationHasRunningChild(
-          { ...conversation, status: conversation.status ?? 'idle' },
-          conversations as Record<string, { status: string; spawning?: boolean } | undefined>
-        ),
-      });
-      if (tone === 'failed') return conversation.unread === true;
-      return tone === 'running' || tone === 'waiting' || tone === 'unread';
+      if (staysActive(sidebarTone(conversation, conversations), conversation)) return true;
+      const anchor = retentionAnchor(conversation);
+      return cutoff !== undefined && anchor !== undefined && anchor >= cutoff;
     }),
     conversations
   );
+}
+
+/** 仅靠留存窗口留在「活跃中」的会话还剩多少毫秒;不会因超时移出或已超时的返回 undefined */
+export function activeRetentionRemainingMs(
+  id: string,
+  conversations: Conversations,
+  retention: { now: number; ms: number }
+): number | undefined {
+  if (!(retention.ms > 0)) return undefined;
+  const conversation = sidebarRoot(id, conversations);
+  if (!conversation || staysActive(sidebarTone(conversation, conversations), conversation)) {
+    return undefined;
+  }
+  const anchor = retentionAnchor(conversation);
+  if (anchor === undefined) return undefined;
+  const remaining = anchor + retention.ms - retention.now;
+  return remaining > 0 ? remaining : undefined;
 }
 
 export function pinnedConversationIds(

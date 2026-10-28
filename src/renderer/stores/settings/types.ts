@@ -229,6 +229,8 @@ export interface SettingsState {
   autoArchiveMergedWorktrees: boolean;
   /** 归档超过此天数自动删除；0 = 永不；缺省 0 */
   autoDeleteArchivedDays: number;
+  /** 侧栏「活跃中」按最后一条消息留存的分钟数；0 = 关（看过即退出）；缺省 0 */
+  activeRetentionMinutes: number;
 
   // 背景图（主窗口生效；渲染见 BackgroundLayer + useBackgroundImage）
   /** 背景图总开关；缺省 false */
@@ -396,6 +398,7 @@ export interface SettingsState {
   setAutoArchiveIdleDays: (days: number) => void;
   setAutoArchiveMergedWorktrees: (value: boolean) => void;
   setAutoDeleteArchivedDays: (days: number) => void;
+  setActiveRetentionMinutes: (minutes: number) => void;
 
   // Background image actions（数值 setter 内部 clamp，非法值落回缺省）
   setBackgroundImageEnabled: (value: boolean) => void;

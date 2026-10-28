@@ -411,6 +411,10 @@ export const zhTranslations: Record<string, string> = {
     '超过此时长没有 token 或工具结果就中止并重试。思考输出也算有输出。',
   Never: '永不',
   '{{count}} min': '{{count}} 分钟',
+  'Keep in Active after last message': '活跃中留存时长',
+  'Stays in Active for about {{count}} more min': '活跃中还会保留约 {{count}} 分钟',
+  'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.':
+    '从最后一条消息或在「活跃中」时最后一次点开算起，此时长内即使已查看也保留，超时后移出；未查看的仍保留到你点开。',
   'Auto-retry on transient errors': '瞬态错误自动重试',
   'Retry with backoff (up to 60s apart) after 429, 5xx or network errors. Quota and billing errors are never retried. Unlimited keeps retrying until you cancel.':
     '遇到 429、5xx 或网络错误时退避重试（间隔最长 60 秒）。额度与计费错误不重试。选「无限」会一直重试，直到手动取消。',

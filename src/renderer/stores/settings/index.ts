@@ -70,6 +70,10 @@ import {
   useOauthCredentialStore,
 } from '@/stores/oauthCredentials';
 import {
+  DEFAULT_ACTIVE_RETENTION_MINUTES,
+  normalizeActiveRetentionMinutes,
+} from './activeRetention';
+import {
   DEFAULT_AUTO_ARCHIVE_IDLE_DAYS,
   DEFAULT_AUTO_DELETE_ARCHIVED_DAYS,
   normalizeAutoArchiveIdleDays,
@@ -207,6 +211,7 @@ const initialState = {
   autoArchiveIdleDays: DEFAULT_AUTO_ARCHIVE_IDLE_DAYS,
   autoArchiveMergedWorktrees: false,
   autoDeleteArchivedDays: DEFAULT_AUTO_DELETE_ARCHIVED_DAYS,
+  activeRetentionMinutes: DEFAULT_ACTIVE_RETENTION_MINUTES,
   backgroundImageEnabled: false,
   backgroundSourceType: 'file' as BackgroundSourceType,
   backgroundImagePath: '',
@@ -402,6 +407,8 @@ export const useSettingsStore = create<SettingsState>()(
         set({ autoArchiveMergedWorktrees }),
       setAutoDeleteArchivedDays: (days) =>
         set({ autoDeleteArchivedDays: normalizeAutoDeleteArchivedDays(days) }),
+      setActiveRetentionMinutes: (minutes) =>
+        set({ activeRetentionMinutes: normalizeActiveRetentionMinutes(minutes) }),
 
       setBackgroundImageEnabled: (backgroundImageEnabled) => set({ backgroundImageEnabled }),
       setBackgroundSourceType: (backgroundSourceType) => set({ backgroundSourceType }),
@@ -1158,6 +1165,10 @@ export const useSettingsStore = create<SettingsState>()(
         const autoDeleteArchivedDays = normalizeAutoDeleteArchivedDays(s.autoDeleteArchivedDays);
         if (autoDeleteArchivedDays !== s.autoDeleteArchivedDays) {
           useSettingsStore.setState({ autoDeleteArchivedDays });
+        }
+        const activeRetentionMinutes = normalizeActiveRetentionMinutes(s.activeRetentionMinutes);
+        if (activeRetentionMinutes !== s.activeRetentionMinutes) {
+          useSettingsStore.setState({ activeRetentionMinutes });
         }
         if (s.autoArchiveMergedWorktrees !== true && s.autoArchiveMergedWorktrees !== false) {
           useSettingsStore.setState({ autoArchiveMergedWorktrees: false });

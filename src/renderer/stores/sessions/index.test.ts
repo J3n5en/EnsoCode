@@ -3614,6 +3614,101 @@ describe('parent history tail hydrate', () => {
     expect((message.content[0] as { text: string }).text).toBe('后半');
   });
 
+  it('活跃中留存:仍在活跃中时点开重新计时,已移出的点开不回来', () => {
+    vi.useFakeTimers();
+    const minute = 60_000;
+    vi.setSystemTime(100 * minute);
+    settingsModule.useSettingsStore.setState({ activeRetentionMinutes: 30 });
+    const template = sessionsModule.useSessionsStore.getState().conversations.parent;
+    const at = (id: string, timestamp: number, unread?: boolean) => ({
+      ...template,
+      id,
+      started: false,
+      sessionFile: undefined,
+      status: 'idle' as const,
+      activeTabId: undefined,
+      parentId: undefined,
+      unread,
+      messages: [{ role: 'assistant' as const, content: [], timestamp }],
+    });
+    sessionsModule.useSessionsStore.setState({
+      conversations: {
+        recent: at('recent', 90 * minute),
+        unreadOld: at('unreadOld', 10 * minute, true),
+        expired: at('expired', 10 * minute),
+      },
+      order: ['recent', 'unreadOld', 'expired'],
+      activeId: null,
+    });
+    const store = sessionsModule.useSessionsStore.getState();
+    store.selectConversation('recent');
+    store.selectConversation('unreadOld');
+    store.selectConversation('expired');
+    const conversations = sessionsModule.useSessionsStore.getState().conversations;
+    expect(conversations.recent.activeRenewedAt).toBe(100 * minute);
+    expect(conversations.unreadOld.activeRenewedAt).toBe(100 * minute);
+    expect(conversations.expired.activeRenewedAt).toBeUndefined();
+    settingsModule.useSettingsStore.setState({ activeRetentionMinutes: 0 });
+  });
+
+  it('活跃中留存:侧栏刷新间隔内刚超时、仍显示着的会话点开也续期', () => {
+    vi.useFakeTimers();
+    const minute = 60_000;
+    vi.setSystemTime(100 * minute);
+    settingsModule.useSettingsStore.setState({ activeRetentionMinutes: 30 });
+    const template = sessionsModule.useSessionsStore.getState().conversations.parent;
+    sessionsModule.useSessionsStore.setState({
+      conversations: {
+        edge: {
+          ...template,
+          id: 'edge',
+          started: false,
+          sessionFile: undefined,
+          status: 'idle',
+          activeTabId: undefined,
+          parentId: undefined,
+          unread: false,
+          messages: [{ role: 'assistant', content: [], timestamp: 70 * minute - 30_000 }],
+        },
+      },
+      order: ['edge'],
+      activeId: null,
+    });
+    sessionsModule.useSessionsStore.getState().selectConversation('edge');
+    expect(sessionsModule.useSessionsStore.getState().conversations.edge.activeRenewedAt).toBe(
+      100 * minute
+    );
+    settingsModule.useSettingsStore.setState({ activeRetentionMinutes: 0 });
+  });
+
+  it('活跃中留存关闭时点开不记录续期', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    settingsModule.useSettingsStore.setState({ activeRetentionMinutes: 0 });
+    const template = sessionsModule.useSessionsStore.getState().conversations.parent;
+    sessionsModule.useSessionsStore.setState({
+      conversations: {
+        done: {
+          ...template,
+          id: 'done',
+          started: false,
+          sessionFile: undefined,
+          status: 'idle',
+          activeTabId: undefined,
+          parentId: undefined,
+          unread: true,
+          messages: [],
+        },
+      },
+      order: ['done'],
+      activeId: null,
+    });
+    sessionsModule.useSessionsStore.getState().selectConversation('done');
+    expect(
+      sessionsModule.useSessionsStore.getState().conversations.done.activeRenewedAt
+    ).toBeUndefined();
+  });
+
   it('连续切 coworker 时，已过 TTL 的正文马上清掉，不等下一次满 TTL', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);

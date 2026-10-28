@@ -133,6 +133,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   autoArchiveIdleDays: { mode: 'portable' },
   autoArchiveMergedWorktrees: { mode: 'portable' },
   autoDeleteArchivedDays: { mode: 'portable' },
+  activeRetentionMinutes: { mode: 'portable' },
   backgroundImageEnabled: {
     mode: 'excluded',
     reason: 'background appearance activation could enable unavailable or private resources',
