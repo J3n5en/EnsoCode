@@ -464,6 +464,24 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
+  it('拖入的 Windows 绝对路径（含中文目录）渲染成文件卡片', () => {
+    const pdf = 'C:\\Users\\me\\Desktop\\224fde15-dedd.pdf';
+    expect(splitInlineFileTokens(`@${pdf} 这是什么？`)).toEqual([
+      { type: 'file', path: pdf },
+      { type: 'text', text: ' 这是什么？' },
+    ]);
+    expect(splitInlineFileTokens('看 @D:\\资料\\报告.docx 和 @/home/me/a.png')).toEqual([
+      { type: 'text', text: '看 ' },
+      { type: 'file', path: 'D:\\资料\\报告.docx' },
+      { type: 'text', text: ' 和 ' },
+      { type: 'file', path: '/home/me/a.png' },
+    ]);
+    // 盘符只认行首单字母，不误伤 @a:b.c 这类文本
+    expect(splitInlineFileTokens('ping @host:8080.x ok')).toEqual([
+      { type: 'text', text: 'ping @host:8080.x ok' },
+    ]);
+  });
+
   it('round-trips editor segments through wire text: files and chats keep inline positions', () => {
     const segments = [
       { type: 'text' as const, text: 'compare ' },

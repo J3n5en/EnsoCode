@@ -204,8 +204,10 @@ export function splitInlineMentions(text: string): MentionSegment[] {
 }
 
 /** 内联文件 token：带扩展名才算（@src/main.ts、@.DS_Store、@.gitignore），
- * 目录以尾 / 识别（@src/、@src/components/）。避免误伤 @types/node 这类 npm scope（无点） */
-const INLINE_FILE_TOKEN = /^(?:[\w./-]*\.[\w-]{1,16}(?:#L\d+(?:-L\d+)?)?|[\w./-]+\/)$/;
+ * 目录以尾 / 识别（@src/、@src/components/）。避免误伤 @types/node 这类 npm scope（无点）。
+ * 兼容拖入的 Windows 绝对路径（盘符 + \ 分隔、含中文名） */
+const INLINE_FILE_TOKEN =
+  /^(?:[A-Za-z]:[\\/])?(?:[\p{L}\p{N}_./\\-]*\.[\w-]{1,16}(?:#L\d+(?:-L\d+)?)?|[\p{L}\p{N}_./\\-]+[\\/])$/u;
 const FILE_LINE_REF = /#L\d+(?:-L\d+)?$/;
 
 export function stripFileLineRef(path: string): string {
