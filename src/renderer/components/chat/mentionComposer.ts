@@ -136,12 +136,16 @@ export type MentionSegment =
   | { type: 'chat'; label: string; sessionFile: string }
   | { type: 'ui-element'; id: string; label: string; path: string; text: string; imageId: string };
 
-/** 编辑器段 → wire text：文件原位 @path，会话/选区原位内联引用块 */
+/** 编辑器段 → wire text：文件原位 @path（含空白时 @"path"），会话/选区原位内联引用块 */
 export function serializeSegments(segments: readonly MentionSegment[]): string {
   return segments
     .map((segment) => {
       if (segment.type === 'text') return segment.text;
-      if (segment.type === 'file') return `@${segment.path}`;
+      if (segment.type === 'file') {
+        return /\s/.test(segment.path) && !segment.path.includes('"')
+          ? `@"${segment.path}"`
+          : `@${segment.path}`;
+      }
       if (segment.type === 'chat') return chatRefLine(segment.label, segment.sessionFile);
       return formatUiElementRefLine(segment);
     })
@@ -208,6 +212,8 @@ export function splitInlineMentions(text: string): MentionSegment[] {
  * 兼容拖入的 Windows 绝对路径（盘符 + \ 分隔、含中文名） */
 const INLINE_FILE_TOKEN =
   /^(?:[A-Za-z]:[\\/])?(?:[\p{L}\p{N}_./\\-]*\.[\w-]{1,16}(?:#L\d+(?:-L\d+)?)?|[\p{L}\p{N}_./\\-]+[\\/])$/u;
+/** @"..." 引号形态（含空格的路径）：引号内同样要求带扩展名或尾分隔符 */
+const QUOTED_FILE_TOKEN = /^"([^"\n]*(?:\.[\w-]{1,16}(?:#L\d+(?:-L\d+)?)?|[\\/]))"/;
 const FILE_LINE_REF = /#L\d+(?:-L\d+)?$/;
 
 export function stripFileLineRef(path: string): string {
@@ -242,6 +248,18 @@ function splitHeuristicFileTokens(text: string): InlineSegment[] {
       break;
     }
     const previous = at > 0 ? text[at - 1] : ' ';
+    const quoted =
+      previous === ' ' || previous === '\n' ? QUOTED_FILE_TOKEN.exec(text.slice(at + 1)) : null;
+    if (quoted) {
+      plain += text.slice(index, at);
+      if (plain) {
+        segments.push({ type: 'text', text: plain });
+        plain = '';
+      }
+      segments.push({ type: 'file', path: quoted[1] });
+      index = at + 1 + quoted[0].length;
+      continue;
+    }
     const raw = /^\S*/.exec(text.slice(at + 1))?.[0] ?? '';
     const token = raw.replace(/[),.;!?]+$/, '');
     if ((previous === ' ' || previous === '\n') && token && INLINE_FILE_TOKEN.test(token)) {
