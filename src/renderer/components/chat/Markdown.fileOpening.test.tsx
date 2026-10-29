@@ -13,6 +13,7 @@ const harness = vi.hoisted(() => ({
   openSidePanelFile: vi.fn(),
   toast: vi.fn(),
   contextMenuOpen: [] as ContextMenuOpen,
+  projects: [] as { id: string; kind: string }[],
 }));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/sidePanelDock', () => ({ openSidePanelFile: harness.openSidePanelFile }));
@@ -20,8 +21,12 @@ vi.mock('@/components/ui/toast', () => ({ addToast: harness.toast }));
 vi.mock('./CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('./MermaidRenderer', () => ({ MermaidRenderer: () => null }));
 vi.mock('@/stores/settings', () => ({
-  useSettingsStore: (selector: (state: { contextMenuOpen: ContextMenuOpen }) => unknown) =>
-    selector({ contextMenuOpen: harness.contextMenuOpen }),
+  useSettingsStore: (
+    selector: (state: {
+      contextMenuOpen: ContextMenuOpen;
+      projects: { id: string; kind: string }[];
+    }) => unknown
+  ) => selector({ contextMenuOpen: harness.contextMenuOpen, projects: harness.projects }),
 }));
 vi.mock('@/components/ui/context-menu', async () => {
   const { cloneElement, createContext, useContext, useState } = await import('react');
@@ -117,6 +122,7 @@ beforeEach(() => {
     { id: 'reveal', target: 'reveal', enabled: true },
     { id: 'vscode', target: 'vscode', enabled: true },
   ];
+  harness.projects = [];
   harness.readImage.mockResolvedValue({ ok: true, dataUrl: 'data:image/png;base64,AAAA' });
 });
 
@@ -400,6 +406,14 @@ describe('气泡文件卡片的打开方式', () => {
     await renderChip('src/a.ts');
     await click('[data-chip]', 'contextmenu');
     expect(menuLabels()).toEqual(['Copy Path', 'Reveal in File Explorer', 'Open in {{app}}']);
+  });
+
+  it('SSH 项目不补「在文件夹中显示」（Main 不支持远程定位）', async () => {
+    harness.contextMenuOpen = [];
+    harness.projects = [{ id: 'project', kind: 'ssh' }];
+    await renderChip('src/a.ts');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Copy Path']);
   });
 
   it('工作区外不可点击打开，右键只复制路径且不触达 IPC', async () => {

@@ -19,6 +19,7 @@ import {
   resolvePopupKeyAction,
   serializeSegments,
   splitInlineFileTokens,
+  fileMentionBasename,
   splitInlineMentions,
   splitMentionRefs,
 } from './mentionComposer';
@@ -465,6 +466,8 @@ describe('typed multi-entity mentions', () => {
   });
 
   it('拖入的 Windows 绝对路径（含中文目录）渲染成文件卡片', () => {
+    expect(fileMentionBasename('C:\\Users\\me\\Desktop\\a.pdf')).toBe('a.pdf');
+    expect(fileMentionBasename('src/components/')).toBe('components');
     const pdf = 'C:\\Users\\me\\Desktop\\224fde15-dedd.pdf';
     expect(splitInlineFileTokens(`@${pdf} 这是什么？`)).toEqual([
       { type: 'file', path: pdf },

@@ -109,7 +109,7 @@ import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
 import { mentionChipClass } from './MentionChip';
 import { parseMemoryCapture, parseMemorySearchHits } from './memorySearchHits';
-import { splitInlineMentions, splitMentionRefs } from './mentionComposer';
+import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
 import { ReadFileView } from './ReadFileView';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
@@ -431,7 +431,7 @@ function InlineMentionText({
           <LocalFileTrigger key={index} path={segment.path}>
             <InlineMentionCard
               kind="file"
-              label={segment.path.split(/[\\/]/).at(-1) || segment.path}
+              label={fileMentionBasename(segment.path)}
               title={segment.path}
             />
           </LocalFileTrigger>
@@ -476,7 +476,7 @@ function MentionRefChips({
     <span className="mt-1.5 flex flex-wrap gap-1.5">
       {files.map((path) => (
         <LocalFileTrigger key={`f:${path}`} path={path}>
-          <InlineMentionCard kind="file" label={path.split('/').at(-1) || path} title={path} />
+          <InlineMentionCard kind="file" label={fileMentionBasename(path)} title={path} />
         </LocalFileTrigger>
       ))}
       {chats.map((chat) => (

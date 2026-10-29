@@ -329,6 +329,9 @@ export function LocalFileTrigger({ path, children }: { path: string; children: R
   const { classification } = classifyFileReference(path);
   const file = classification.kind === 'local' ? classification.path : null;
   const { linkContext, openLocal, preview } = useLocalFileOpen(file);
+  const ssh = useSettingsStore((state) =>
+    state.projects.some((item) => item.id === linkContext?.projectId && item.kind === 'ssh')
+  );
   const inWorkspace =
     linkContext !== null &&
     file !== null &&
@@ -346,7 +349,7 @@ export function LocalFileTrigger({ path, children }: { path: string; children: R
   };
   const extra = (
     <>
-      {inWorkspace && !revealConfigured && (
+      {inWorkspace && !revealConfigured && !ssh && (
         <ContextMenuItem closeOnClick onClick={() => void openLocal(true)}>
           {t(revealLabel())}
         </ContextMenuItem>
