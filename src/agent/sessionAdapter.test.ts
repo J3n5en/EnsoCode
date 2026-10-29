@@ -476,8 +476,20 @@ describe('Pi session adapter integration', () => {
 
     expect(editLatestAssistantForRetry(current.session)).toBe(true);
     expect(current.session.agent.state.messages.at(-1)?.role).toBe('user');
+    const settled = vi.fn();
+    current.session.subscribe((event) => {
+      if (event.type === 'agent_settled') settled();
+    });
     await continueSessionActivity(current.session);
 
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(current.session.isIdle).toBe(true);
+    expect(
+      current.manager
+        .getBranch()
+        .filter((entry) => entry.type === 'message' && entry.message.role === 'user')
+        .map((entry) => entry.type === 'message' && textOf(entry.message))
+    ).toEqual(['Please retry this request.']);
     expect(current.requests).toHaveLength(1);
     expect(contextText(current.requests[0]!)).toContain('Please retry this request.');
     expect(contextText(current.requests[0]!)).not.toContain('old provider error response');

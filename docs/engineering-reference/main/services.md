@@ -136,8 +136,9 @@ Pi 0.87.1 的 `_rewriteFile()` 不设置 `flushed`；不显式同步时，首条
 会以 `wx` 创建已有文件并抛出 `EEXIST`。回归还须覆盖物化后追加首条 assistant、
 重开 JSONL 后消息仍存在。只有重写成功后才能设置该标记。
 
-第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.0.0
-私有 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
+第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.4.0
+私有 `_startRun`，通过每次调用独立的代理令 `_prepareRun` 返回空数组。Pi 1.2 起
+移除了旧 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
 `agent.continue()` 绕过自动重试、`agent_before_settle` 与 `agent_settled`，手工补发
 settled 无法恢复 OAuth 池的结算前接替。空数组启动完整活动但不追加用户任务，原任务
 及已完成工具结果不重放。显式用户 retry 才复位池的 per-activity `attempted`，自动接替不复位；
@@ -145,8 +146,10 @@ settled 无法恢复 OAuth 池的结算前接替。空数组启动完整活动�
 入口要求 `session.isIdle`，压缩、branch summary 或其它活动中不允许续跑；保留原
 `agent.continue()` 的上下文边界：空、仅 system 或 assistant 尾部都拒绝，不发起请求。
 
-**升级 pi 必须复检第二处**：优先查找公开无消息继续 API；确认 `_runAgentPrompt([])`
-仍接受空数组、不产生用户消息，且保留完整 post-run / before-settle / settled 生命周期。
+**升级 pi 必须复检第二处**：优先查找公开无消息继续 API；确认 `_startRun`
+仍通过 `_prepareRun` 获取初始消息、允许空数组且不在其它位置读取启动参数；代理不能
+替换共享 session 方法。确认不产生用户消息或重新触发用户提示 hook，且保留完整
+post-run / before-settle / settled 生命周期。
 当前 SDK 的 before-settle 位于低层 loop 结束后，`ctx.signal` 可能为空；取消由
 `session.abort()` 的活动标志和 before-settle 取消守卫阻止延迟选号后的续跑，不能自行
 补发结算或假定低层 `agent.signal` 覆盖整个活动。回归见 `oauthAccountPool.test.ts`
@@ -154,7 +157,7 @@ settled 无法恢复 OAuth 池的结算前接替。空数组启动完整活动�
 选号等待时取消与唯一结算）、`sessionAdapter.test.ts` 和 `supervisor.silentTurn.test.ts`。
 
 第三处：`sessionAdapter.steerActiveSession()` 针对 Bot 插话，以每次调用独立的代理拦截
-pi 1.0.0 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
+pi 1.4.0 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
 steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., streamingBehavior:'steer')`
 在 `started` 回调抛错：那时已经可能做过压缩并清空 nextTurn 消息。
 已入队但到 `agent_settled` 仍未消费的消息（如 abort）按对象引用从

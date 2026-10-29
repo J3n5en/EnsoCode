@@ -1,6 +1,15 @@
-/** pi 的 compaction.reserveTokens：上下文 > 窗口 − 该值时触发压缩，摘要输出上限取其 80% */
+/**
+ * pi 的 compaction.reserveTokens：上下文 > 窗口 − 该值时触发压缩；摘要输出使用模型输出上限。
+ *
+ * Pi compaction.reserveTokens triggers compaction above the context window minus this value;
+ * summary generation uses the model output limit.
+ */
 export const COMPACT_RESERVE_TOKENS_DEFAULT = 16384;
-/** 太小会让摘要输出上限过低而失败 */
+/**
+ * 设置页保留至少 4096 tokens 的上下文余量。
+ *
+ * The settings UI reserves at least 4096 tokens of context headroom.
+ */
 export const COMPACT_RESERVE_TOKENS_MIN = 4096;
 /** 全局值无法按模型校验；超过小窗口模型的窗口会每次请求前都压缩，故取保守上限 */
 export const COMPACT_RESERVE_TOKENS_MAX = 65536;

@@ -128,7 +128,10 @@ export function workspaceBranchContextExtension(
         const session = getSession();
         if (session?.pendingBranch === undefined) return;
         const requestId = session.pendingBranchRequestId;
-        const note = takeBranchContextNote(session, event.prompt);
+        const note = takeBranchContextNote(
+          session,
+          event.messageType === 'user' ? event.prompt : ''
+        );
         if (requestId !== undefined) onConsumed?.(requestId);
         if (!note) return;
         return { message: { customType: 'enso-branch-context', content: note, display: false } };

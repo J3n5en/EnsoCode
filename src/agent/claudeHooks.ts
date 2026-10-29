@@ -344,7 +344,7 @@ export function createClaudeHooksExtension(options: {
           stopContinuations = 0;
           if (!started) await runStart(ctx);
           const parts = pending.splice(0);
-          if (runsPrompt) {
+          if (runsPrompt && event.messageType === 'user') {
             const outs = await dispatch(
               'UserPromptSubmit',
               ctx,

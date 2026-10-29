@@ -257,15 +257,14 @@ describe('SessionSupervisor terminal turn handling', () => {
     });
     parentSession.messages.push({ role: 'user', content: [{ type: 'text', text: 'hi' }] });
     const finish = Promise.withResolvers<void>();
-    const run = vi.fn(async (messages: unknown[]) => {
-      expect(messages).toEqual([]);
+    const run = vi.fn(async () => {
       parentSession.emit({ type: 'agent_start' });
       parentSession.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'ok' }] });
       parentSession.emit({ type: 'agent_end', willRetry: false });
       await finish.promise;
       parentSession.emit({ type: 'agent_settled' });
     });
-    Object.assign(parentSession, { _runAgentPrompt: run });
+    Object.assign(parentSession, { _startRun: run, _prepareRun: vi.fn() });
 
     supervisor.handleCommand({ type: 'retry', identity: parent });
     await settle();
@@ -306,7 +305,8 @@ describe('SessionSupervisor terminal turn handling', () => {
     });
     parentSession.messages.push({ role: 'user', content: [{ type: 'text', text: 'hi' }] });
     Object.assign(parentSession, {
-      _runAgentPrompt: vi.fn(async () => {
+      _prepareRun: vi.fn(),
+      _startRun: vi.fn(async () => {
         parentSession.emit({ type: 'agent_start' });
         parentSession.messages.push({
           role: 'assistant',

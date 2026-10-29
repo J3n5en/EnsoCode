@@ -201,7 +201,7 @@ describe('Responses 请求出口的摘要 routing key', () => {
     vi.unstubAllEnvs();
   });
 
-  it('native 摘要保持 none 缓存策略和 13107 预算，仍能通过网关拿到摘要', async () => {
+  it('native 摘要保持 none 缓存策略并使用模型输出上限，仍能通过网关拿到摘要', async () => {
     // 真实场景：Pi native compaction 创建了 fresh sessionId，但 none 会让 serializer 删掉 key。
     const sdkOptions: SimpleStreamOptions[] = [];
     const streamFn: StreamFn = (summaryModel, context, options) => {
@@ -225,15 +225,15 @@ describe('Responses 请求出口的摘要 routing key', () => {
     expect(sdkOptions).toHaveLength(1);
     expect(sdkOptions[0]).toMatchObject({
       cacheRetention: 'none',
-      maxTokens: 13_107,
       sessionId: expect.any(String),
     });
+    expect(sdkOptions[0]).not.toHaveProperty('maxTokens');
     expect(requests).toHaveLength(1);
     expect(requests[0].body).toMatchObject({
       model: MODEL_ID,
       stream: true,
       store: false,
-      max_output_tokens: 13_107,
+      max_output_tokens: model.maxTokens,
     });
     expect(requests[0].body).not.toHaveProperty('tools');
     expect(requests[0].body).not.toHaveProperty('prompt_cache_retention');

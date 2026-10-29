@@ -10,8 +10,12 @@ import { transcriptMessages } from './transcript';
 
 export const OAUTH_POOL_TERMINAL_ERROR_ENTRY = 'enso.oauth-pool-terminal-error';
 
-/** Pi 1.0：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
+/** Pi 1.4：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
  * 每次调用独立代理，不替换共享 session 方法；私有队列形状由真实 SDK 契约测试锁定。
+ *
+ * Pi 1.4: Check the active run only at this steer call’s synchronous enqueue point,
+ * avoiding prompt compaction/nextTurn effects. A per-call proxy leaves shared session
+ * methods intact; real SDK contract tests cover the private queue shape.
  */
 export async function steerActiveSession(
   session: AgentSession,
@@ -176,14 +180,16 @@ export function editLatestAssistantForRetry(session: AgentSession): boolean {
 }
 
 /**
- * 无新增消息的活动续跑：pi 1.0.0 没有公开的 session.continue，裸 agent.continue 会绕过
- * 自动重试、agent_before_settle 和 agent_settled。空消息数组不会重放任务或工具结果，
- * 由 SDK 管理取消与唯一结算。升级时复检私有入口及空数组语义，见 main/services.md。
+ * 无新增消息的活动续跑：pi 1.4.0 没有公开的 session.continue，裸 agent.continue 会绕过
+ * 自动重试、agent_before_settle 和 agent_settled。通过每次调用独立的代理，让 _startRun
+ * 的 _prepareRun 返回空数组，不重放任务或工具结果，也不重新触发用户提示 hook。
+ * SDK 管理取消与唯一结算。升级时复检这两个私有入口，见 main/services.md。
  *
- * Continue an activity without new messages. Pi 1.0.0 exposes no session.continue;
- * bare agent.continue bypasses retry, agent_before_settle and agent_settled. An empty
- * array does not replay tasks/tools; the SDK owns cancellation and single settlement.
- * Recheck the private entry and empty-array semantics on upgrades; see main/services.md.
+ * Continue an activity without new messages. Pi 1.4.0 exposes no session.continue;
+ * bare agent.continue bypasses retry, agent_before_settle and agent_settled. A per-call
+ * proxy makes _prepareRun return no new messages to _startRun, without replaying tasks,
+ * tools or user-prompt hooks. The SDK owns cancellation and single settlement. Recheck
+ * both private entries on upgrades; see main/services.md.
  */
 export async function continueSessionActivity(session: AgentSession): Promise<void> {
   if (!session.isIdle) throw new Error('Cannot continue a busy session.');
@@ -193,11 +199,20 @@ export async function continueSessionActivity(session: AgentSession): Promise<vo
     throw new Error('No messages to continue from');
   }
   if (last.role === 'assistant') throw new Error('Cannot continue from message role: assistant');
-  const adapter = session as unknown as { _runAgentPrompt(messages: []): Promise<void> };
-  if (typeof adapter._runAgentPrompt !== 'function') {
+  const adapter = session as unknown as {
+    _startRun(trigger: undefined): Promise<void>;
+    _prepareRun: unknown;
+  };
+  if (typeof adapter._startRun !== 'function' || typeof adapter._prepareRun !== 'function') {
     throw new Error('Pi SDK no longer supports message-free activity continuation.');
   }
-  await adapter._runAgentPrompt([]);
+  const continuation = new Proxy(adapter, {
+    get(target, key, receiver) {
+      if (key === '_prepareRun') return async () => [];
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  await continuation._startRun(undefined);
 }
 
 /** context_edit 只作用于模型上下文，渲染层记录仍展示原始消息 */

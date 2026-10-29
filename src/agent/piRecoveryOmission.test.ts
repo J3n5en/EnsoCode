@@ -44,8 +44,9 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-// pi 0.87.1 prompt() 前的 _checkCompaction 不传 toolResults，length 截断的 assistant 被 context_edit
-// 移除后，它的 toolResult 成孤儿，OpenAI 兼容接口此后每轮 400。patches/ 里的补丁修复这一点。
+// Pi 1.4.0 已原生修复 length 截断回复恢复后的孤立 toolResult；此测试保护升级后的配对省略行为。
+//
+// Pi 1.4.0 natively fixes orphaned tool results after length recovery; keep this regression for paired omission.
 it('prompt 前恢复 length 截断回复时，连同其 toolResult 一起移出上下文', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'enso-recovery-omission-'));
   roots.push(root);

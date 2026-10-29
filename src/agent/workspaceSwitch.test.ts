@@ -34,7 +34,9 @@ describe('WorkspaceSwitchGate', () => {
       pendingBranchRequestId: 'req-1',
     };
     const consumed = vi.fn();
-    let handler: ((event: { prompt: string; systemPrompt: string }) => unknown) | undefined;
+    let handler:
+      | ((event: { messageType: 'user'; prompt: string; systemPrompt: string }) => unknown)
+      | undefined;
     const extension = workspaceBranchContextExtension(() => current, consumed) as {
       factory: (pi: unknown) => void;
     };
@@ -43,7 +45,11 @@ describe('WorkspaceSwitchGate', () => {
         handler = fn;
       },
     });
-    const first = await handler?.({ prompt: 'real input', systemPrompt: 'base' });
+    const first = await handler?.({
+      messageType: 'user',
+      prompt: 'real input',
+      systemPrompt: 'base',
+    });
     expect(first).toEqual({
       message: {
         customType: 'enso-branch-context',
@@ -52,12 +58,50 @@ describe('WorkspaceSwitchGate', () => {
       },
     });
     expect(consumed).toHaveBeenCalledWith('req-1');
-    expect(await handler?.({ prompt: 'next', systemPrompt: 'base' })).toBeUndefined();
+    expect(
+      await handler?.({ messageType: 'user', prompt: 'next', systemPrompt: 'base' })
+    ).toBeUndefined();
 
     current.pendingBranch = 'feature/new';
     const note = workspaceBranchChangedNote('feature/new');
-    expect(await handler?.({ prompt: `${note}\n\ninput`, systemPrompt: 'base' })).toBeUndefined();
+    expect(
+      await handler?.({ messageType: 'user', prompt: `${note}\n\ninput`, systemPrompt: 'base' })
+    ).toBeUndefined();
     expect(current.pendingBranch).toBeUndefined();
+  });
+
+  it('custom 启动没有 prompt 时仍注入一次分支提示并确认消费', async () => {
+    const current: { pendingBranch?: string; pendingBranchRequestId?: string } = {
+      pendingBranch: 'feature/new',
+      pendingBranchRequestId: 'req-custom',
+    };
+    const consumed = vi.fn();
+    let handler: ((event: Record<string, unknown>) => unknown) | undefined;
+    const extension = workspaceBranchContextExtension(() => current, consumed) as {
+      factory: (pi: unknown) => void;
+    };
+    extension.factory({
+      on: (_event: string, fn: typeof handler) => {
+        handler = fn;
+      },
+    });
+    const event = {
+      messageType: 'custom',
+      message: { customType: 'extension-task', content: 'continue task', display: false },
+      systemPrompt: 'base',
+    };
+    await expect(Promise.resolve().then(() => handler?.(event))).resolves.toEqual({
+      message: {
+        customType: 'enso-branch-context',
+        content: workspaceBranchChangedNote('feature/new'),
+        display: false,
+      },
+    });
+    expect(current.pendingBranch).toBeUndefined();
+    expect(current.pendingBranchRequestId).toBeUndefined();
+    expect(consumed).toHaveBeenCalledExactlyOnceWith('req-custom');
+    expect(await handler?.(event)).toBeUndefined();
+    expect(consumed).toHaveBeenCalledTimes(1);
   });
 
   it('consumes but does not duplicate the same branch background already attached to real input', () => {
