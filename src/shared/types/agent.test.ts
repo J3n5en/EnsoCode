@@ -1312,6 +1312,14 @@ describe('一次性文本补全命令', () => {
     expect(parseAgentCommand(command)).toEqual(command);
     const { apiKey: _apiKey, ...noKey } = command.classifier;
     expect(parseAgentCommand({ ...command, classifier: noKey })).not.toBeNull();
+    const gateway = { ...command.classifier, baseUrl: 'https://gw.example.test/v1' };
+    expect(parseAgentCommand({ ...command, classifier: gateway })).toEqual({
+      ...command,
+      classifier: gateway,
+    });
+    expect(
+      parseAgentCommand({ ...command, classifier: { ...command.classifier, baseUrl: '' } })
+    ).toBeNull();
     for (const bad of [
       { ...command, requestId: '' },
       { ...command, classifier: { provider: '', modelId: 'cls' } },

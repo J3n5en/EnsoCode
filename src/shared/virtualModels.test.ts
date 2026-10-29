@@ -3,6 +3,7 @@ import { modelUsability, resolveChatModel, sanitizeDefaultModel } from './defaul
 import type { ModelProvider } from './types';
 import {
   canBeVirtualMember,
+  classifierBaseUrlFor,
   classifierProviderFor,
   directMemberRef,
   findVirtualModel,
@@ -212,5 +213,31 @@ describe('classifierProviderFor', () => {
     expect(classifierProviderFor({ baseUrl: 'https://opencode.ai/zen/v1' })).toBe('opencode');
     expect(classifierProviderFor({ baseUrl: 'https://evil-openrouter.ai.test' })).toBeUndefined();
     expect(classifierProviderFor({ baseUrl: 'not a url' })).toBeUndefined();
+  });
+});
+
+describe('自定义地址的 System One 分类器', () => {
+  const gateway = { api: 'typesafe-system-one' as const, baseUrl: 'https://gw.example.test/v1/' };
+
+  it('显式声明 System One 协议的条目不受域名白名单限制，按自身地址调用', () => {
+    expect(classifierProviderFor(gateway)).toBe('typesafe');
+    expect(classifierBaseUrlFor(gateway)).toBe('https://gw.example.test/v1');
+  });
+
+  it('官方地址与未填地址沿用 pi 内置地址，其它协议的中转地址仍不认', () => {
+    expect(
+      classifierBaseUrlFor({ api: 'typesafe-system-one', baseUrl: 'https://api.typesafe.ai/v1/' })
+    ).toBeUndefined();
+    expect(classifierProviderFor({ api: 'typesafe-system-one', baseUrl: '' })).toBe('typesafe');
+    expect(classifierBaseUrlFor({ api: 'typesafe-system-one', baseUrl: '' })).toBeUndefined();
+    expect(
+      classifierProviderFor({ api: 'openai-completions', baseUrl: 'https://gw.example.test/v1' })
+    ).toBeUndefined();
+    expect(
+      classifierProviderFor({ api: 'typesafe-system-one', baseUrl: 'not a url' })
+    ).toBeUndefined();
+    expect(
+      classifierProviderFor({ api: 'typesafe-system-one', baseUrl: 'file:///etc/passwd' })
+    ).toBeUndefined();
   });
 });

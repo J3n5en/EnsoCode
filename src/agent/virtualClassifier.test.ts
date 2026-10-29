@@ -9,6 +9,7 @@ import {
   latestUserText,
   nextTier,
   parseJudgeReply,
+  resolveClassifierModel,
 } from './virtualClassifier';
 import type { VirtualMembers } from './virtualModels';
 
@@ -140,5 +141,31 @@ describe('pi 分类器', () => {
       preferred: members.primary,
     });
     expect(seen).toEqual([{ provider: 'openrouter#2', apiKey: undefined }]);
+  });
+});
+
+describe('resolveClassifierModel', () => {
+  const runtime = {
+    getModelsOfType: () => [
+      {
+        id: 'jev',
+        provider: 'typesafe',
+        type: 'classifier',
+        baseUrl: 'https://api.typesafe.ai/v1',
+      },
+    ],
+  } as unknown as ModelRuntime;
+
+  it('带自定义地址时改打该地址，否则保留 catalog 地址', () => {
+    expect(
+      resolveClassifierModel(runtime, {
+        provider: 'typesafe',
+        modelId: 'jev',
+        baseUrl: 'https://gw.example.test/v1',
+      })
+    ).toMatchObject({ provider: 'typesafe', baseUrl: 'https://gw.example.test/v1' });
+    expect(resolveClassifierModel(runtime, { provider: 'typesafe', modelId: 'jev' })).toMatchObject(
+      { baseUrl: 'https://api.typesafe.ai/v1' }
+    );
   });
 });

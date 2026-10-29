@@ -165,8 +165,34 @@ const CLASSIFIER_PROVIDER_IDS = new Set(Object.values(CLASSIFIER_PROVIDER_HOSTS)
 
 /**
  * 设置里的 provider 条目能否当 pi 分类器的凭证来源，能则返回 pi provider id。
- * 订阅账号返回账号 key（多账号克隆同样按 key 取凭证）；API key 条目按 baseUrl 域名识别。
+ * 订阅账号返回账号 key（多账号克隆同样按 key 取凭证）；显式 System One 协议的条目不限域名；
+ * 其余 API key 条目按 baseUrl 域名识别。
  */
+function systemOneBaseUrl(baseUrl: string): URL | undefined {
+  try {
+    const url = new URL(baseUrl.trim() || DEFAULT_BASE_URLS['typesafe-system-one']);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 显式声明 System One 协议、地址不是官方域名的条目（兼容网关），分类请求改打它自己的地址；
+ * 官方或未填地址返回 undefined，沿用 pi 内置地址。
+ */
+export function classifierBaseUrlFor(
+  provider: Pick<ModelProvider, 'baseUrl'> & Partial<Pick<ModelProvider, 'api' | 'oauthAccountKey'>>
+): string | undefined {
+  if (provider.oauthAccountKey || provider.api !== 'typesafe-system-one') return undefined;
+  if (!provider.baseUrl.trim()) return undefined;
+  const url = systemOneBaseUrl(provider.baseUrl);
+  if (!url) return undefined;
+  const host = url.hostname.toLowerCase();
+  if (host === 'api.typesafe.ai' || host.endsWith('.api.typesafe.ai')) return undefined;
+  return provider.baseUrl.trim().replace(/\/+$/, '');
+}
+
 export function classifierProviderFor(
   provider: Pick<ModelProvider, 'oauthAccountKey' | 'baseUrl' | 'catalogId'> &
     Partial<Pick<ModelProvider, 'api'>>
@@ -176,12 +202,14 @@ export function classifierProviderFor(
       ? provider.oauthAccountKey
       : undefined;
   }
+  if (provider.api === 'typesafe-system-one') {
+    return systemOneBaseUrl(provider.baseUrl)
+      ? CLASSIFIER_PROVIDER_HOSTS['api.typesafe.ai']
+      : undefined;
+  }
   // 只认 baseUrl 域名：目录 id 相同但 baseUrl 改成中转站时，不能把 key 发到官方域名
   try {
-    const baseUrl =
-      provider.baseUrl.trim() ||
-      (provider.api === 'typesafe-system-one' ? DEFAULT_BASE_URLS['typesafe-system-one'] : '');
-    const host = new URL(baseUrl).hostname.toLowerCase();
+    const host = new URL(provider.baseUrl.trim()).hostname.toLowerCase();
     for (const [domain, id] of Object.entries(CLASSIFIER_PROVIDER_HOSTS)) {
       if (host === domain || host.endsWith(`.${domain}`)) return id;
     }

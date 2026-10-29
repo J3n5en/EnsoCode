@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { modelUsability, resolveChatModel, sanitizeDefaultModel } from './defaultModel';
 import { STATIC_PROVIDER_DEFINITIONS } from './providerCatalog';
 import type { ModelProvider } from './types';
-import { canBeVirtualMember, classifierProviderFor, VIRTUAL_PROVIDER_ID } from './virtualModels';
+import {
+  canBeVirtualMember,
+  classifierBaseUrlFor,
+  classifierProviderFor,
+  VIRTUAL_PROVIDER_ID,
+} from './virtualModels';
 
 const typesafe: ModelProvider = {
   id: 'typesafe-fixture',
@@ -42,12 +47,13 @@ describe('TypeSafe classifier-only boundary', () => {
     );
   });
 
-  it('uses the protocol default for an empty address, but not for an explicit relay', () => {
+  it('uses the protocol default for an empty address and the relay itself for an explicit relay', () => {
     const provider: ModelProvider = { ...typesafe, api: 'typesafe-system-one', baseUrl: '  ' };
     expect(classifierProviderFor(provider)).toBe('typesafe');
-    expect(
-      classifierProviderFor({ ...provider, baseUrl: 'https://relay.example/v1' })
-    ).toBeUndefined();
+    expect(classifierBaseUrlFor(provider)).toBeUndefined();
+    const relay = { ...provider, baseUrl: 'https://relay.example/v1' };
+    expect(classifierProviderFor(relay)).toBe('typesafe');
+    expect(classifierBaseUrlFor(relay)).toBe('https://relay.example/v1');
   });
 
   it('rejects chat, default/session/project/group overrides and virtual members', () => {

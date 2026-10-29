@@ -89,6 +89,7 @@ import type { AgentDispatchTask } from '@shared/types/mentions';
 import { parseDisabledWorkflowPresets } from '@shared/types/workflow';
 import {
   canBeVirtualMember,
+  classifierBaseUrlFor,
   classifierProviderFor,
   directMemberRef,
   findVirtualModel,
@@ -635,6 +636,7 @@ export function resolveVirtualClassifier(
   if (!provider?.enabled) return undefined;
   const piProvider = classifierProviderFor(provider);
   if (!piProvider) return undefined;
+  const baseUrl = classifierBaseUrlFor(provider);
   if (provider.oauthAccountKey) {
     if (!authenticatedAccountKeys.has(provider.oauthAccountKey)) return undefined;
   } else if (!provider.apiKey) {
@@ -647,6 +649,7 @@ export function resolveVirtualClassifier(
       provider: piProvider,
       modelId: classifier.model.modelId,
       ...(provider.oauthAccountKey ? {} : { apiKey: provider.apiKey }),
+      ...(baseUrl ? { baseUrl } : {}),
     },
   };
 }

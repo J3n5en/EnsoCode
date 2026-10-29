@@ -122,7 +122,11 @@ export function resolveClassifierModel(
     .find((candidate) => candidate.id === config.modelId);
   if (!found) throw new Error(`classifier not found: ${config.provider}/${config.modelId}`);
   // 多账号克隆 provider 列出的模型仍带基础 provider id，凭证必须按克隆账号解析
-  return { ...found, provider: config.provider } as ClassifierModel<never>;
+  return {
+    ...found,
+    provider: config.provider,
+    ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+  } as ClassifierModel<never>;
 }
 
 function piClassify(runtime: ModelRuntime, config: VirtualClassifierCredentials): Classify {
