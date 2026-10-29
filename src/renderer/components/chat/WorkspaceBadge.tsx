@@ -35,7 +35,8 @@ export function WorkspaceBadge({
 }) {
   const { t } = useI18n();
   const [apps, setApps] = useState<OpenInApp[]>([]);
-  const local = project.kind !== 'ssh';
+  // 远端客户端：打开 / 用应用打开都发生在宿主机上，只留复制路径
+  const local = project.kind !== 'ssh' && !window.electronAPI.remote;
   const scratch = project.kind === 'scratch';
   const label = scratch ? t('Temporary chats') : project.name;
   const refreshApps = useCallback(() => {
