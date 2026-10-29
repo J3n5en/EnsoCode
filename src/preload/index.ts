@@ -1123,6 +1123,15 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROXY_APPLY, settings),
   },
 
+  compaction: {
+    getReserveTokens: (): Promise<number | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.COMPACTION_RESERVE_TOKENS_GET),
+    setReserveTokens: (
+      value: number | null
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.COMPACTION_RESERVE_TOKENS_SET, value),
+  },
+
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),

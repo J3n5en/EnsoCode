@@ -187,6 +187,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
       'Standard uses default compact. Smart compaction uses Enso verified summary at compact time. Codex native compaction additionally stores an official Codex checkpoint on Codex models and uses smart compaction otherwise. Continuous memory records observations in the background so compact keeps more context; all fall back to default compact on failure. Switching strategy takes effect on the next session. The summary model and compaction mode apply to open conversations on the next compaction.',
   },
   {
+    id: 'general.compactReserveTokens',
+    category: 'general',
+    title: 'Compaction reserve tokens',
+    description:
+      'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.',
+  },
+  {
     id: 'general.generationStallTimeout',
     category: 'general',
     title: 'Stop if no output',

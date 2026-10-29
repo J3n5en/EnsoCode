@@ -422,6 +422,13 @@ export const zhTranslations: Record<string, string> = {
     '超过此时长没有 token 或工具结果就中止并重试。思考输出也算有输出。',
   Never: '永不',
   '{{count}} min': '{{count}} 分钟',
+  'Compaction reserve tokens': '压缩预留 token',
+  'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.':
+    '上下文超过「模型窗口 − 此值」时触发压缩，值越大压缩越早。小窗口模型请勿设得过大，接近窗口会导致每次请求前都先压缩。留空使用默认值。',
+  'Enter a whole number between {{min}} and {{max}}, or leave it empty.':
+    '请输入 {{min}} 到 {{max}} 之间的整数，或留空。',
+  'Could not save. Check that pi-agent/settings.json is valid JSON.':
+    '保存失败，请检查 pi-agent/settings.json 是否为合法 JSON。',
   'Keep in Active after last message': '活跃中留存时长',
   'Stays in Active for about {{count}} more min': '活跃中还会保留约 {{count}} 分钟',
   'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.':

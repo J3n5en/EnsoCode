@@ -7,6 +7,7 @@ import { registerBotTemplateHandlers } from './botTemplates';
 import { registerBtwHandlers } from './btw';
 import { registerCapabilityHandlers } from './capabilities';
 import { registerChangesHandlers } from './changes';
+import { registerCompactionHandlers } from './compaction';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
 import { registerGitHandlers } from './git';
@@ -37,6 +38,7 @@ export function registerIpcHandlers(): void {
   registerCapabilityHandlers();
   registerAgentHandlers();
   registerProxyHandlers();
+  registerCompactionHandlers();
   registerProjectHandlers();
   registerSshConnectionHandlers();
   registerFileHandlers();

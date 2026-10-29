@@ -627,6 +627,8 @@ export const IPC_PRODUCT_COVERAGE = {
     'Device idle-restart update policy; not an Enso capability.'
   ),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
+  COMPACTION_RESERVE_TOKENS_GET: excluded('Context compaction is a desktop session preference.'),
+  COMPACTION_RESERVE_TOKENS_SET: excluded('Context compaction is a desktop session preference.'),
   UPDATER_STATUS: surfaces('updates.status'),
   UPDATER_GET_STATE: surfaces('updates.status'),
   UPDATER_RESTART: excluded(

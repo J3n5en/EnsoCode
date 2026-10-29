@@ -205,6 +205,7 @@ describe('buildSettingsCatalog', () => {
     'general.pinUnfinishedTodos',
     'general.notifyMainAgentOnly',
     'general.smartCompactEnabled',
+    'general.compactReserveTokens',
     'general.generationStallTimeout',
     'general.autoRetryLimit',
     'general.proxy',
