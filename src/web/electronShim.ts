@@ -234,6 +234,7 @@ const local: Record<string, (...args: unknown[]) => unknown> = {
   },
   [IPC_CHANNELS.FILES_COPY_FILE]: unsupported,
   [IPC_CHANNELS.FILES_REVEAL]: unsupported,
+  [IPC_CHANNELS.FILES_REVEAL_EXTERNAL]: unsupported,
   [IPC_CHANNELS.FILES_OPEN]: unsupported,
   [IPC_CHANNELS.FILES_OPEN_CONTEXT]: unsupported,
   [IPC_CHANNELS.PROJECTS_REVEAL]: unsupported,
