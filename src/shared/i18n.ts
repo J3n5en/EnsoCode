@@ -2150,6 +2150,9 @@ export const zhTranslations: Record<string, string> = {
   'Click to switch: view-only devices cannot send, approve or stop.':
     '点击切换：只读设备不能发送、审批或停止。',
   Copied: '已复制',
+  'Copy image': '复制图片',
+  'Image copied': '图片已复制',
+  'Could not copy image': '复制图片失败',
   'Copy failed': '复制失败',
   'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.':
     '浏览并操控另一台 EnsoCode 桌面上的会话。agent、密钥与历史都留在对方机器上。',
