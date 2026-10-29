@@ -1,3 +1,4 @@
+import { parseApprovalReviewRecord } from '@shared/approvalReviewRecord';
 import { parseMaskReport } from '@shared/privacyMask/report';
 import { parseRtkToolStats } from '@shared/rtk';
 import {
@@ -197,6 +198,10 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     isBackgroundTaskId(value.details.backgroundTaskId)
   ) {
     projected.backgroundTaskId = value.details.backgroundTaskId;
+  }
+  if (value.role === 'toolResult' && isRecord(value.details)) {
+    const approvalReview = parseApprovalReviewRecord(value.details.approvalReview);
+    if (approvalReview) projected.approvalReview = approvalReview;
   }
   if (value.role === 'toolResult' && value.toolName === 'todo') {
     const todos = projectTodos(value.details);

@@ -121,6 +121,7 @@ export const SETTINGS_DATA_COVERAGE = {
   memoryLanguage: excluded('Memory output language preference; not an Enso capability.'),
   memoryChatModel: excluded('Memory local/remote chat model preference; not an Enso capability.'),
   approvalReviewer: excluded('Assistant approval reviewer model; desktop settings only.'),
+  approvalAutoManage: excluded('Assistant approval auto-manage opt-in; desktop settings only.'),
   lastApprovalMode: excluded('Last used approval mode is a desktop session preference.'),
   skills: surfaces('skills.list'),
   plugins: excluded('Desktop-only Claude Code plugin import; plugin code runs on this device.'),
@@ -284,6 +285,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Memory local/remote chat model preference; not an Enso capability.'
   ),
   setApprovalReviewer: excluded('Assistant approval reviewer model; desktop settings only.'),
+  setApprovalAutoManage: excluded('Assistant approval auto-manage opt-in; desktop settings only.'),
   setLastApprovalMode: excluded('Last used approval mode is a desktop session preference.'),
   revalidateDefaultModel: surfaces('providers.default-model'),
   addProviders: surfaces('providers.add', 'providers.import-local'),

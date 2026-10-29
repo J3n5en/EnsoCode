@@ -1875,7 +1875,7 @@ function asModelRef(value: unknown): DefaultModelRef | null {
 
 export type ApprovalReviewerSource =
   | { model: SpawnModelConfig }
-  | { classifier: VirtualClassifierCredentials };
+  | { classifier: VirtualClassifierCredentials; managed?: true };
 
 /** 代审来源：分类器专用供应商（如 Jev）走分类器，其余按聊天模型解析 */
 export function resolveApprovalReviewer(
@@ -1886,8 +1886,9 @@ export function resolveApprovalReviewer(
   const provider = providersFromSettings().find((item) => item.id === ref.providerId);
   if (provider && isClassifierOnlyProvider(provider)) {
     const classifier = classifierCredentialsFor(provider, ref.modelId, authenticatedAccountKeys);
+    const managed = readSettingsState()?.approvalAutoManage === true;
     return classifier
-      ? { ok: true, source: { classifier } }
+      ? { ok: true, source: { classifier, ...(managed ? { managed: true as const } : {}) } }
       : { ok: false, error: 'The assistant approval classifier is unavailable.' };
   }
   const resolved = resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
@@ -1900,7 +1901,10 @@ function approvalReviewerSpawnFields(source: ApprovalReviewerSource | null | und
   if (!source) return {};
   return 'model' in source
     ? { approvalReviewer: source.model }
-    : { approvalReviewerClassifier: source.classifier };
+    : {
+        approvalReviewerClassifier: source.classifier,
+        ...(source.managed ? { approvalReviewerManaged: true as const } : {}),
+      };
 }
 
 export function pushApprovalReviewer(authenticatedAccountKeys?: ReadonlySet<string>): void {
@@ -1913,7 +1917,7 @@ export function pushApprovalReviewer(authenticatedAccountKeys?: ReadonlySet<stri
     ...(source
       ? 'model' in source
         ? { model: source.model }
-        : { classifier: source.classifier }
+        : { classifier: source.classifier, ...(source.managed ? { managed: true as const } : {}) }
       : {}),
   } satisfies AgentCommand);
 }

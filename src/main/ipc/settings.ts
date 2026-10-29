@@ -125,6 +125,7 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryChatModel',
   'memoryLanguage',
   'approvalReviewer',
+  'approvalAutoManage',
   'lastApprovalMode',
   'defaultReasoningEnabled',
   'defaultThinkingLevel',
@@ -175,6 +176,7 @@ export type SettingsStateField = (typeof SETTINGS_STATE_FIELDS)[number];
 /** Device-local keys that config-sync must never fingerprint or write back. */
 const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'hashlineEditEnabled',
+  'approvalAutoManage',
   'privacyMasking',
   'virtualModels',
   'windowsLocalShell',

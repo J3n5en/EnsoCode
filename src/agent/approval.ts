@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { ApprovalReviewFallback, ApprovalReviewRecord } from '@shared/approvalReviewRecord';
 import { APPROVAL_TIMEOUT_ERROR } from '@shared/humanRequestTimeout';
 import type {
   ApprovalDecision,
@@ -7,6 +8,7 @@ import type {
   ApprovalRequestInfo,
   ProtectedActionCategory,
 } from '@shared/types/agent';
+import { rememberApprovalReview } from './approvalReviewRecords';
 import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
@@ -17,10 +19,17 @@ interface PendingApproval {
   settle(result: ApprovalResult): void;
 }
 
+export type ApprovalReviewResult =
+  | { decision: 'auto_allow' | 'block'; rationale?: string; record?: ApprovalReviewRecord }
+  /** 托管拒绝：只拒这一条，message 作为工具错误交回模型 */
+  | { decision: 'deny'; message: string; record?: ApprovalReviewRecord }
+  /** fallback：托管判定无效，退回人工并在卡片上说明 */
+  | { decision: 'ask_user'; rationale?: string; fallback?: ApprovalReviewFallback };
+
 export type ApprovalReviewFn = (
   info: ApprovalRequestInfo,
   signal: AbortSignal | undefined
-) => Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }>;
+) => Promise<ApprovalReviewResult>;
 
 export interface ApprovalGateOptions {
   review?: ApprovalReviewFn;
@@ -95,19 +104,20 @@ export class ApprovalGate {
       ...(toolCallId ? { toolCallId } : {}),
       ...(protectedCategory ? { protected: protectedCategory } : {}),
     };
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let settled = false;
-      const settle = (result: ApprovalResult) => {
+      const settle = (result: ApprovalResult, denial?: Error) => {
         if (settled) return;
         settled = true;
         this.pending.delete(requestId);
         signal?.removeEventListener('abort', onAbort);
         this.onResolve(requestId);
-        resolve(result);
+        if (denial) reject(denial);
+        else resolve(result);
       };
       const onAbort = () => settle('cancel');
-      const askHuman = () => {
-        info = { ...info, phase: undefined };
+      const askHuman = (fallback?: ApprovalReviewFallback) => {
+        info = { ...info, phase: undefined, ...(fallback ? { reviewFallback: fallback } : {}) };
         const timeoutMs = this.options?.humanTimeoutMs;
         if (timeoutMs) info = { ...info, expiresAt: Date.now() + timeoutMs };
         this.pending.set(requestId, { info, settle });
@@ -133,6 +143,9 @@ export class ApprovalGate {
         .then(() => review(info, signal))
         .then((result) => {
           if (settled) return;
+          if (result.decision !== 'ask_user' && result.record && toolCallId) {
+            rememberApprovalReview(toolCallId, result.record);
+          }
           if (result.decision === 'auto_allow') {
             settle('allow');
             return;
@@ -141,7 +154,11 @@ export class ApprovalGate {
             settle('block');
             return;
           }
-          askHuman();
+          if (result.decision === 'deny') {
+            settle('block', new Error(result.message));
+            return;
+          }
+          askHuman(result.decision === 'ask_user' ? result.fallback : undefined);
         })
         .catch(() => {
           if (!settled) askHuman();

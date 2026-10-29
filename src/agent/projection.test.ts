@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { PROJECTED_FILE_CHANGE_LIMIT, PROJECTED_TEXT_LIMIT, projectMessage } from './projection';
 
 describe('projectMessage', () => {
+  it('托管判定记录从任意工具结果 details 白名单投影', () => {
+    const approvalReview = { verdict: 'deny', model: 'jev', allow: 0.67, ask: 0.1, block: 0.23 };
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'read',
+        content: [],
+        isError: true,
+        details: { approvalReview: { ...approvalReview, extra: 1 } },
+      })
+    ).toMatchObject({ approvalReview });
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'read',
+        content: [],
+        details: { approvalReview: { ...approvalReview, verdict: 'maybe' } },
+      })
+    ).not.toHaveProperty('approvalReview');
+  });
+
   it('命令统计从 details 白名单投影，历史恢复可见且内部状态不泄露', () => {
     const rtk = {
       status: 'compressed',

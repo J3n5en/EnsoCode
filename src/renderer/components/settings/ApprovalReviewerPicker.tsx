@@ -2,6 +2,7 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { useMemo } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
   useUsableClassifierProviders,
@@ -14,6 +15,8 @@ export function ApprovalReviewerPicker() {
   const { t } = useI18n();
   const model = useSettingsStore((state) => state.approvalReviewer);
   const setModel = useSettingsStore((state) => state.setApprovalReviewer);
+  const autoManage = useSettingsStore((state) => state.approvalAutoManage);
+  const setAutoManage = useSettingsStore((state) => state.setApprovalAutoManage);
   const chatProviders = useUsableProviders();
   const classifierProviders = useUsableClassifierProviders();
   const candidates = useMemo(
@@ -54,11 +57,25 @@ export function ApprovalReviewerPicker() {
         </div>
       )}
       {selectedProvider && isClassifierOnlyProvider(selectedProvider) && (
-        <p className="text-muted-foreground text-xs">
-          {t(
-            'Decision models only allow or block when highly confident. Everything else asks you.'
-          )}
-        </p>
+        <>
+          <p className="text-muted-foreground text-xs">
+            {autoManage
+              ? t(
+                  'Auto-managed: runs only when the decision model is highly confident it is safe. Everything else is denied and the agent tries another way. Protected actions still ask you.'
+                )
+              : t(
+                  'Decision models only allow or block when highly confident. Everything else asks you.'
+                )}
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm">{t('Auto-manage approvals')}</span>
+            <Switch
+              aria-label={t('Auto-manage approvals')}
+              checked={autoManage}
+              onCheckedChange={setAutoManage}
+            />
+          </div>
+        </>
       )}
       {model && (!selectedProvider || !selectedModel) && (
         <p className="text-muted-foreground text-xs">{t('Selected model is unavailable')}</p>

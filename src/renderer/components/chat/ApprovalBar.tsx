@@ -1,3 +1,4 @@
+import type { ApprovalReviewFallback } from '@shared/approvalReviewRecord';
 import { isNestedToolCallId } from '@shared/toolCallId';
 import type { ApprovalDecision, ApprovalKind, ApprovalRequestInfo } from '@shared/types/agent';
 import { FileEdit, FilePlus, Plug, ShieldAlert, TerminalSquare } from 'lucide-react';
@@ -54,6 +55,12 @@ function SummaryView({ kind, summary }: { kind: ApprovalKind; summary: string })
     </pre>
   );
 }
+const REVIEW_FALLBACK_LABELS: Record<ApprovalReviewFallback, string> = {
+  timeout: 'Auto-managed review timed out. Please decide.',
+  error: 'Auto-managed review failed. Please decide.',
+  invalid: 'Auto-managed review returned no valid decision. Please decide.',
+};
+
 /** composer 上方的审批条（ref-chat-a 形态）：只渲染队首，>1 显示 1/N；summary 全文可滚动 */
 export function ApprovalBar({
   approvals,
@@ -107,6 +114,11 @@ export function ApprovalBar({
           )}
         </span>
       </div>
+      {active.reviewFallback && (
+        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+          {t(REVIEW_FALLBACK_LABELS[active.reviewFallback])}
+        </p>
+      )}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">

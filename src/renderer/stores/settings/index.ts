@@ -236,6 +236,7 @@ const initialState = {
   memoryChatModel: 'remote',
   memoryLanguage: 'en',
   approvalReviewer: null as import('@shared/defaultModel').DefaultModelRef | null,
+  approvalAutoManage: false,
   lastApprovalMode: null as import('@shared/types/agent').ApprovalMode | null,
   defaultReasoningEnabled: true,
   defaultThinkingLevel: 'medium' as import('@shared/types/agent').ThinkingLevel,
@@ -491,6 +492,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryChatModel: (memoryChatModel) => set({ memoryChatModel }),
       setMemoryLanguage: (memoryLanguage) => set({ memoryLanguage }),
       setApprovalReviewer: (approvalReviewer) => set({ approvalReviewer }),
+      setApprovalAutoManage: (approvalAutoManage) => set({ approvalAutoManage }),
       setLastApprovalMode: (lastApprovalMode) => set({ lastApprovalMode }),
 
       revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {

@@ -427,6 +427,22 @@ export const zhTranslations: Record<string, string> = {
   'Decision models only allow or block when highly confident. Everything else asks you.':
     '决策模型只在把握很高时才自动放行或拦截，其余都交给你审批。',
   'The assistant approval classifier is unavailable.': '助手代审的决策模型不可用。',
+  'Auto-manage approvals': '全自动托管',
+  'Auto-managed: runs only when the decision model is highly confident it is safe. Everything else is denied and the agent tries another way. Protected actions still ask you.':
+    '托管中：只有决策模型高度确信安全的操作才会执行，其余直接拒绝，由 AI 换一种做法继续。受保护操作仍会问你。',
+  'Auto-managed · allowed': '托管 · 已放行',
+  'Auto-managed · denied': '托管 · 已拒绝',
+  'Read-only': '只读',
+  'Regenerable output': '可再生成',
+  'Reversible workspace change': '工作区内可回退的改动',
+  'Possible data loss': '可能丢失数据',
+  'Changes system state': '改动系统状态',
+  'Sends data externally': '向外发送数据',
+  'Unclear target or intent': '目标或意图不明',
+  'Auto-managed review timed out. Please decide.': '托管判定超时，请你来决定。',
+  'Auto-managed review failed. Please decide.': '托管判定出错，请你来决定。',
+  'Auto-managed review returned no valid decision. Please decide.':
+    '托管判定结果无效，请你来决定。',
   'Compaction runs when context exceeds the model window minus this value. Larger values compact earlier. Do not set it close to the window of small-context models, or every request compacts first. Leave empty for the default.':
     '上下文超过「模型窗口 − 此值」时触发压缩，值越大压缩越早。小窗口模型请勿设得过大，接近窗口会导致每次请求前都先压缩。留空使用默认值。',
   'Enter a whole number between {{min}} and {{max}}, or leave it empty.':
@@ -1733,7 +1749,6 @@ export const zhTranslations: Record<string, string> = {
   'Built-in': '内置',
   'Follows the conversation model, full toolset': '跟随会话模型,全部工具',
   'Follows the conversation model': '跟随会话模型',
-  'Read-only': '只读',
   'Overrides built-in': '覆盖内置',
   'Edit agent type': '编辑类型',
   'Name (slug)': '名称(slug)',

@@ -806,6 +806,36 @@ describe('resolveApprovalReviewer', () => {
     });
   });
 
+  it('托管开关只对分类器代审生效', () => {
+    settingsMock.value = {
+      'enso-settings': {
+        state: {
+          providers: [jev, chat],
+          approvalReviewer: { providerId: 'jev', modelId: 'jev-latest' },
+          approvalAutoManage: true,
+        },
+      },
+    };
+    expect(resolveApprovalReviewer(new Set())).toMatchObject({
+      ok: true,
+      source: { classifier: { modelId: 'jev-latest' }, managed: true },
+    });
+    settingsMock.value = {
+      'enso-settings': {
+        state: {
+          providers: [jev, chat],
+          approvalReviewer: { providerId: 'chat', modelId: 'chat-model' },
+          approvalAutoManage: true,
+        },
+      },
+    };
+    const chatSource = resolveApprovalReviewer(new Set());
+    expect(chatSource.ok && chatSource.source).not.toHaveProperty('managed');
+    withReviewer([jev], { providerId: 'jev', modelId: 'jev-latest' });
+    const off = resolveApprovalReviewer(new Set());
+    expect(off.ok && off.source).not.toHaveProperty('managed');
+  });
+
   it('分类器缺 key 或停用时明确失败，不回退聊天模型', () => {
     for (const provider of [
       { ...jev, apiKey: '' },

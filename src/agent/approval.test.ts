@@ -1,6 +1,7 @@
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
 import { ApprovalGate, summarizeApproval, withApproval, withProtectedFloor } from './approval';
+import { takeApprovalReview } from './approvalReviewRecords';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
 // options.review?: (info: ApprovalRequestInfo, signal: AbortSignal | undefined) =>
@@ -648,5 +649,87 @@ describe('ApprovalGate 等人超时', () => {
     void plain.ask('bash', 'command', 'ls', undefined);
     expect(infos[2].expiresAt).toBeUndefined();
     expect(plain.humanTimeoutMs).toBeUndefined();
+  });
+});
+
+describe('ApprovalGate 托管判定（#152）', () => {
+  const record = { verdict: 'deny' as const, model: 'jev', allow: 0.67, ask: 0.1, block: 0.23 };
+
+  it('托管拒绝：不弹真人卡，ask() 以交回模型的理由失败，记录挂到该工具调用', async () => {
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      {
+        review: async () => ({ decision: 'deny', message: 'Denied: try another way.', record }),
+      }
+    );
+    await expect(gate.ask('read', 'command', 'Read .env', undefined, 'call-deny')).rejects.toThrow(
+      'Denied: try another way.'
+    );
+    expect(infos.map((info) => info.phase)).toEqual(['reviewing']);
+    expect(gate.snapshot()).toEqual([]);
+    expect(takeApprovalReview('call-deny')).toEqual(record);
+    expect(takeApprovalReview('call-deny')).toBeUndefined();
+  });
+
+  it('托管放行也记录判定', async () => {
+    const allow = { ...record, verdict: 'allow' as const, allow: 0.95, ask: 0.05, block: 0 };
+    const gate = new ApprovalGate(
+      'assistant',
+      () => {},
+      () => {},
+      {
+        review: async () => ({ decision: 'auto_allow', record: allow }),
+      }
+    );
+    expect(await gate.ask('bash', 'command', 'ls', undefined, 'call-allow')).toBe('allow');
+    expect(takeApprovalReview('call-allow')).toEqual(allow);
+  });
+
+  it('受保护动作开托管后仍强制问人，不调用判定模型', async () => {
+    const review = vi.fn(async () => ({ decision: 'deny' as const, message: 'x', record }));
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      { review }
+    );
+    const pending = gate.ask(
+      'read',
+      'command',
+      'read .env',
+      undefined,
+      'call-p',
+      undefined,
+      'secret'
+    );
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(review).not.toHaveBeenCalled();
+    expect(infos[0].phase).toBeUndefined();
+    gate.respond(infos[0].requestId, 'deny');
+    expect(await pending).toBe('deny');
+  });
+
+  it('判定失败（超时 / 报错 / 缺字段）退回人工，卡片带失败原因', async () => {
+    for (const fallback of ['timeout', 'error', 'invalid'] as const) {
+      const infos: ApprovalRequestInfo[] = [];
+      const gate = new ApprovalGate(
+        'assistant',
+        (info) => infos.push(info),
+        () => {},
+        {
+          review: async () => ({ decision: 'ask_user', fallback }),
+        }
+      );
+      const pending = gate.ask('bash', 'command', 'ls', undefined, `call-${fallback}`);
+      await vi.waitFor(() => expect(infos).toHaveLength(2));
+      expect(infos[1]).toMatchObject({ reviewFallback: fallback });
+      expect(infos[1].phase).toBeUndefined();
+      gate.respond(infos[1].requestId, 'allow');
+      expect(await pending).toBe('allow');
+    }
   });
 });

@@ -168,6 +168,10 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   memoryChatModel: { mode: 'portable' },
   memoryLanguage: { mode: 'portable' },
   approvalReviewer: { mode: 'portable' },
+  approvalAutoManage: {
+    mode: 'excluded',
+    reason: 'device-local opt-in to skip human approval prompts',
+  },
   lastApprovalMode: { mode: 'excluded', reason: 'last session choice' },
   defaultReasoningEnabled: { mode: 'portable' },
   defaultThinkingLevel: { mode: 'portable' },

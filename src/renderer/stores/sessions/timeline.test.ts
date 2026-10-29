@@ -919,6 +919,36 @@ describe('buildTimeline', () => {
     expect(timeline[1]).toMatchObject({ kind: 'tool', rtk });
   });
 
+  it('托管拒绝的判定记录带到对应工具行，工具行为失败', () => {
+    const approvalReview = {
+      verdict: 'deny' as const,
+      model: 'jev-latest',
+      allow: 0.67,
+      ask: 0.1,
+      block: 0.23,
+      reason: 'unclear_target' as const,
+    };
+    const timeline = buildTimeline(
+      [
+        user('看下数据库'),
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: { path: '.env' } }],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 't1',
+          toolName: 'read',
+          isError: true,
+          content: [{ type: 'text', text: 'Auto-managed approval denied this tool call.' }],
+          approvalReview,
+        },
+      ],
+      false
+    );
+    expect(timeline[1]).toMatchObject({ kind: 'tool', state: 'error', approvalReview });
+  });
+
   it('运行中的命令行带调用 id 供转后台；转后台的结果带任务 id', () => {
     const call = (id: string, name: string): TimelineMessage => ({
       role: 'assistant',
