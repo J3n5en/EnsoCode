@@ -105,7 +105,7 @@ import { useChatHost } from './chatHost';
 import { EditDiff } from './EditDiff';
 import { EnsoMark } from './EnsoMark';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
-import { Markdown } from './Markdown';
+import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
 import { mentionChipClass } from './MentionChip';
 import { parseMemoryCapture, parseMemorySearchHits } from './memorySearchHits';
@@ -427,13 +427,14 @@ function InlineMentionText({
     <span className="whitespace-pre-wrap">
       {segments.map((segment, index) =>
         segment.type === 'file' ? (
-          <InlineMentionCard
-            // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
-            key={index}
-            kind="file"
-            label={segment.path.split(/[\\/]/).at(-1) || segment.path}
-            title={segment.path}
-          />
+          // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
+          <LocalFileTrigger key={index} path={segment.path}>
+            <InlineMentionCard
+              kind="file"
+              label={segment.path.split(/[\\/]/).at(-1) || segment.path}
+              title={segment.path}
+            />
+          </LocalFileTrigger>
         ) : segment.type === 'chat' ? (
           <InlineMentionCard
             // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
@@ -474,12 +475,9 @@ function MentionRefChips({
   return (
     <span className="mt-1.5 flex flex-wrap gap-1.5">
       {files.map((path) => (
-        <InlineMentionCard
-          key={`f:${path}`}
-          kind="file"
-          label={path.split('/').at(-1) || path}
-          title={path}
-        />
+        <LocalFileTrigger key={`f:${path}`} path={path}>
+          <InlineMentionCard kind="file" label={path.split('/').at(-1) || path} title={path} />
+        </LocalFileTrigger>
       ))}
       {chats.map((chat) => (
         <InlineMentionCard

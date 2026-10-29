@@ -2,8 +2,8 @@ import type { ContextMenuOpen } from '@shared/fileOpening';
 import { parseHTML } from 'linkedom';
 import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Markdown, MarkdownLinkContext } from './Markdown';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { LocalFileTrigger, Markdown, MarkdownLinkContext } from './Markdown';
 
 const harness = vi.hoisted(() => ({
   open: vi.fn(),
@@ -355,5 +355,66 @@ describe('聊天文件链接的打开方式', () => {
       'data:image/svg+xml;base64,AAAA'
     );
     expect(container.querySelector('iframe, object, embed')).toBeNull();
+  });
+});
+
+describe('气泡文件卡片的打开方式', () => {
+  async function renderChip(path: string) {
+    await act(async () =>
+      root.render(
+        <MarkdownLinkContext.Provider value={context}>
+          <LocalFileTrigger path={path}>
+            <span data-chip="">{path}</span>
+          </LocalFileTrigger>
+        </MarkdownLinkContext.Provider>
+      )
+    );
+  }
+  const menuLabels = () =>
+    [...container.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent);
+
+  it('工作区内（含 Windows 绝对路径）左键按相对路径打开', async () => {
+    await renderChip('C:\\workspace\\src\\a.ts');
+    await click('[data-chip]');
+    expect(harness.open).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/a.ts',
+    });
+  });
+
+  it('设置未启用定位时右键补「在文件夹中显示」，只发相对路径给 reveal', async () => {
+    harness.contextMenuOpen = [];
+    await renderChip('src/a.ts');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Reveal in File Explorer', 'Copy Path']);
+    await click('[role="menuitem"]:first-child');
+    expect(harness.reveal).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      rel: 'src/a.ts',
+    });
+  });
+
+  it('设置已启用定位时不重复，固定项排在设置项之前', async () => {
+    await renderChip('src/a.ts');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Copy Path', 'Reveal in File Explorer', 'Open in {{app}}']);
+  });
+
+  it('工作区外不可点击打开，右键只复制路径且不触达 IPC', async () => {
+    const writeText = navigator.clipboard.writeText as Mock;
+    writeText.mockResolvedValue(undefined);
+    const outside = 'C:\\Users\\me\\Desktop\\x.pdf';
+    await renderChip(outside);
+    await click('[data-chip]');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Copy Path']);
+    await click('[role="menuitem"]');
+    expect(writeText).toHaveBeenCalledWith(outside);
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.reveal).not.toHaveBeenCalled();
+    expect(harness.openContext).not.toHaveBeenCalled();
+    expect(harness.toast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }));
   });
 });

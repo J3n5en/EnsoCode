@@ -170,20 +170,25 @@ async function openFileLinkContext(
 function FileLinkContextMenu({
   context,
   file,
+  extra,
   children,
 }: {
-  context: MarkdownLinkContextValue;
+  /** null = 工作区外，只显示 extra，不提供按设置打开 */
+  context: MarkdownLinkContextValue | null;
   file: string;
+  /** 固定菜单项，排在设置项之前 */
+  extra?: ReactNode;
   children: ReactElement;
 }) {
   const { t } = useI18n();
   const configured = useSettingsStore((state) => state.contextMenuOpen);
-  const items = configured.filter((item) => item.enabled);
-  if (items.length === 0) return children;
+  const items = context ? configured.filter((item) => item.enabled) : [];
+  if (items.length === 0 && !extra) return children;
   return (
     <ContextMenu>
       <ContextMenuTrigger render={children} onContextMenu={(event) => event.stopPropagation()} />
       <ContextMenuPopup className="min-w-48">
+        {extra}
         {items.map((item) => {
           const name =
             item.target === 'application'
@@ -196,7 +201,7 @@ function FileLinkContextMenu({
             <ContextMenuItem
               key={item.id}
               closeOnClick
-              onClick={() => void openFileLinkContext(context, file, item.id, t)}
+              onClick={() => context && void openFileLinkContext(context, file, item.id, t)}
             >
               {item.target === 'reveal' ? t(revealLabel()) : t('Open in {{app}}', { app: name })}
             </ContextMenuItem>
@@ -231,21 +236,11 @@ function soleInlineCodeText(node: unknown): string | null {
   return text?.type === 'text' && typeof text.value === 'string' ? text.value : null;
 }
 
-function MarkdownAnchor({
-  children,
-  href,
-  node,
-}: {
-  children?: ReactNode;
-  href?: string;
-  node?: unknown;
-}) {
+/** 本地文件打开/定位：Markdown 链接与气泡文件卡片共用；path 为 null 表示非本地链接 */
+function useLocalFileOpen(path: string | null, line?: number) {
   const { t } = useI18n();
   const linkContext = useContext(MarkdownLinkContext);
   const [imagePreview, setImagePreview] = useState<{ rel: string; dataUrl: string } | null>(null);
-  const { classification, line } = classifyFileReference(href ?? '');
-  const local = classification.kind === 'local' && linkContext !== null;
-  const codeText = local ? soleInlineCodeText(node) : null;
 
   const fail = (error: string) => {
     addToast({
@@ -256,8 +251,8 @@ function MarkdownAnchor({
   };
 
   const openLocal = async (reveal: boolean) => {
-    if (!linkContext || classification.kind !== 'local') return;
-    const rel = toWorkspaceRelativePath(classification.path, linkContext.cwd);
+    if (!linkContext || path === null) return;
+    const rel = toWorkspaceRelativePath(path, linkContext.cwd);
     if (rel == null) {
       fail('invalid-path');
       return;
@@ -316,6 +311,99 @@ function MarkdownAnchor({
     }
   };
 
+  const preview = (
+    <WorkspaceImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />
+  );
+  return { linkContext, openLocal, preview };
+}
+
+/**
+ * 气泡里的 @文件 卡片：工作区内点击打开，右键固定提供「在文件夹中显示 / 复制路径」并追加设置项；
+ * 工作区外不做越界授权，右键只提供复制路径（纯文本，不触达 Main）。
+ */
+export function LocalFileTrigger({ path, children }: { path: string; children: ReactElement }) {
+  const { t } = useI18n();
+  const revealConfigured = useSettingsStore((state) =>
+    state.contextMenuOpen.some((item) => item.enabled && item.target === 'reveal')
+  );
+  const { classification } = classifyFileReference(path);
+  const file = classification.kind === 'local' ? classification.path : null;
+  const { linkContext, openLocal, preview } = useLocalFileOpen(file);
+  const inWorkspace =
+    linkContext !== null &&
+    file !== null &&
+    toWorkspaceRelativePath(file, linkContext.cwd) !== null;
+  const copyPath = () => {
+    navigator.clipboard.writeText(file ?? path).then(
+      () => addToast({ type: 'success', title: t('Copied') }),
+      (error: unknown) =>
+        addToast({
+          type: 'error',
+          title: t('Copy failed'),
+          description: error instanceof Error ? error.message : String(error),
+        })
+    );
+  };
+  const extra = (
+    <>
+      {inWorkspace && !revealConfigured && (
+        <ContextMenuItem closeOnClick onClick={() => void openLocal(true)}>
+          {t(revealLabel())}
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem closeOnClick onClick={copyPath}>
+        {t('Copy Path')}
+      </ContextMenuItem>
+    </>
+  );
+  if (!inWorkspace) {
+    return (
+      <FileLinkContextMenu context={null} file={file ?? path} extra={extra}>
+        <span>{children}</span>
+      </FileLinkContextMenu>
+    );
+  }
+  return (
+    <>
+      <FileLinkContextMenu context={linkContext} file={file ?? path} extra={extra}>
+        <span
+          role="link"
+          tabIndex={0}
+          className="cursor-pointer"
+          onClick={() => void openLocal(false)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void openLocal(false);
+            }
+          }}
+        >
+          {children}
+        </span>
+      </FileLinkContextMenu>
+      {preview}
+    </>
+  );
+}
+
+function MarkdownAnchor({
+  children,
+  href,
+  node,
+}: {
+  children?: ReactNode;
+  href?: string;
+  node?: unknown;
+}) {
+  const { t } = useI18n();
+  const { classification, line } = classifyFileReference(href ?? '');
+  const { linkContext, openLocal, preview } = useLocalFileOpen(
+    classification.kind === 'local' ? classification.path : null,
+    line
+  );
+  const local = classification.kind === 'local' && linkContext !== null;
+  const codeText = local ? soleInlineCodeText(node) : null;
+
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (classification.kind === 'external') return;
     event.preventDefault();
@@ -363,7 +451,7 @@ function MarkdownAnchor({
         >
           <FolderOpen className="h-3 w-3" />
         </button>
-        <WorkspaceImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />
+        {preview}
       </span>
     );
   }
@@ -380,7 +468,7 @@ function MarkdownAnchor({
       >
         <FolderOpen className="h-3.5 w-3.5" />
       </button>
-      <WorkspaceImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />
+      {preview}
     </span>
   );
 }
