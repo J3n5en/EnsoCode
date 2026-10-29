@@ -855,6 +855,32 @@ describe('parent/child commands', () => {
     }
     // 辅助用途（代审、压缩摘要）只收真实模型
     expect(parseAgentCommand({ type: 'set-approval-reviewer', model: virtualModel })).toBeNull();
+    // 代审可改用分类器；与 model 互斥，凭证字段严格校验
+    const classifier = { provider: 'typesafe', modelId: 'jev-latest', apiKey: 'k' };
+    expect(parseAgentCommand({ type: 'set-approval-reviewer', classifier })).toEqual({
+      type: 'set-approval-reviewer',
+      classifier,
+    });
+    expect(parseAgentCommand({ type: 'set-approval-reviewer', model, classifier })).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'set-approval-reviewer', classifier: { ...classifier, x: 1 } })
+    ).toBeNull();
+    expect(parseAgentCommand({ ...base, model, approvalReviewerClassifier: classifier })).toEqual({
+      ...base,
+      model,
+      approvalReviewerClassifier: classifier,
+    });
+    expect(
+      parseAgentCommand({
+        ...base,
+        model,
+        approvalReviewer: model,
+        approvalReviewerClassifier: classifier,
+      })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ ...base, model, approvalReviewerClassifier: { provider: '' } })
+    ).toBeNull();
     expect(
       parseAgentCommand({ ...base, model, smartCompactSummaryModel: virtualModel })
     ).toBeNull();

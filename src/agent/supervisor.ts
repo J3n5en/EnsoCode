@@ -82,6 +82,7 @@ import type {
   SpawnModelConfig,
   SubagentModelOption,
   ThinkingLevel,
+  VirtualClassifierCredentials,
 } from '@shared/types/agent';
 import { parseAgentSessionCustomEntry, STALE_SESSION_ERROR } from '@shared/types/agent';
 import { type EditMode, resolveEditMode } from '@shared/types/editMode';
@@ -101,9 +102,11 @@ import { applyPatchResultExtension } from './applyPatchResultExtension';
 import { ApprovalGate, withApproval, withProtectedFloor } from './approval';
 import {
   APPROVAL_REVIEW_TIMEOUT_MS,
+  buildApprovalClassifierRequest,
   buildApprovalReviewSystemPrompt,
   buildApprovalReviewUserPrompt,
   computeApprovalActionHash,
+  decideFromApprovalClassifier,
   normalizeReviewDecision,
   recentReviewMessages,
 } from './approvalReview';
@@ -900,7 +903,11 @@ export class SessionSupervisor {
   /** 不可回收的会话（桌面正在查看 / 手机订阅），由 Main 全量下发 */
   private pinned: ReadonlySet<string> = new Set();
   private readonly evictionTimer: ReturnType<typeof setInterval>;
-  private approvalReviewer: SpawnModelConfig | undefined;
+  /** 代审来源：聊天模型走 JSON 契约，分类器（System One）走三选一概率 */
+  private approvalReviewer:
+    | { model: SpawnModelConfig }
+    | { classifier: VirtualClassifierCredentials }
+    | undefined;
   /** 所有已打开会话的压缩摘要路线；设置变更时原地改 */
   private readonly compactRoute: EnsoCompactOptions = {};
   private maxActiveCoworkers = DEFAULT_MAX_ACTIVE_COWORKERS;
@@ -1268,7 +1275,7 @@ export class SessionSupervisor {
       return;
     }
     if (command.type === 'set-approval-reviewer') {
-      this.approvalReviewer = command.model;
+      this.approvalReviewer = approvalReviewerSource(command.model, command.classifier);
       return;
     }
     if (command.type === 'set-compact-route') {
@@ -1439,7 +1446,7 @@ export class SessionSupervisor {
           command.skillPaths,
           command.mcpServers,
           command.approvalMode,
-          command.approvalReviewer,
+          approvalReviewerSource(command.approvalReviewer, command.approvalReviewerClassifier),
           command.agentTypes,
           command.disabledTools,
           command.instruction,
@@ -1692,7 +1699,7 @@ export class SessionSupervisor {
         return;
       }
       case 'set-approval-reviewer':
-        this.approvalReviewer = command.model;
+        this.approvalReviewer = approvalReviewerSource(command.model, command.classifier);
         return;
       case 'ask-respond':
         this.must(command.identity).asks.respond(command.requestId, command.answer);
@@ -1961,7 +1968,7 @@ export class SessionSupervisor {
     skillPaths: string[] = [],
     mcpServers: McpServerSpawnConfig[] = [],
     approvalMode: ApprovalMode = 'full',
-    approvalReviewer?: SpawnModelConfig,
+    approvalReviewer?: { model: SpawnModelConfig } | { classifier: VirtualClassifierCredentials },
     agentTypes: AgentTypeSpawnConfig[] = [],
     disabledTools: string[] = [],
     instruction?: { path: string; content: string },
@@ -4682,10 +4689,12 @@ export class SessionSupervisor {
     info: import('@shared/types/agent').ApprovalRequestInfo,
     signal: AbortSignal | undefined
   ): Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }> {
-    const reviewer = this.approvalReviewer;
-    if (!reviewer) {
+    const source = this.approvalReviewer;
+    if (!source) {
       return { decision: 'ask_user', rationale: 'No approval reviewer model is configured.' };
     }
+    if ('classifier' in source) return this.classifyApproval(source.classifier, info, signal);
+    const reviewer = source.model;
     const actionHash = computeApprovalActionHash({
       version: 1,
       kind: 'enso_tool_permission_review',
@@ -4741,6 +4750,41 @@ export class SessionSupervisor {
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener('abort', onParentAbort);
+    }
+  }
+
+  /** 分类器代审：只问三选一；超时、出错、缺概率都交人工。结果由 gate 按 requestId 闭包绑定 */
+  private async classifyApproval(
+    credentials: VirtualClassifierCredentials,
+    info: import('@shared/types/agent').ApprovalRequestInfo,
+    signal: AbortSignal | undefined
+  ): Promise<{ decision: 'auto_allow' | 'ask_user' | 'block'; rationale?: string }> {
+    const timeout = AbortSignal.timeout(APPROVAL_REVIEW_TIMEOUT_MS);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    try {
+      const runtime = await this.getRuntime();
+      const model = resolveClassifierModel(runtime, credentials);
+      const recentMessages = recentReviewMessages(
+        [...this.sessions.values()].find((session) =>
+          session.gate.snapshot().some((item) => item.requestId === info.requestId)
+        )?.messages ?? []
+      );
+      const result = await runtime.classify(
+        model,
+        buildApprovalClassifierRequest({
+          tool: info.tool,
+          kind: info.kind,
+          summary: info.summary,
+          recentMessages,
+        }),
+        { signal: combined, ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}) }
+      );
+      if (result.stopReason !== 'stop') {
+        return { decision: 'ask_user', rationale: 'Auto-review failed.' };
+      }
+      return decideFromApprovalClassifier(result.answers.decision);
+    } catch {
+      return { decision: 'ask_user', rationale: 'Auto-review failed.' };
     }
   }
 
@@ -5350,4 +5394,12 @@ function collectSlashCommands(session: AgentSession): SlashCommand[] {
     // 资源加载失败不阻塞会话，命令列表为空即可
   }
   return commands;
+}
+
+function approvalReviewerSource(
+  model: SpawnModelConfig | undefined,
+  classifier: VirtualClassifierCredentials | undefined
+): { model: SpawnModelConfig } | { classifier: VirtualClassifierCredentials } | undefined {
+  if (model) return { model };
+  return classifier ? { classifier } : undefined;
 }

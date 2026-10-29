@@ -178,6 +178,31 @@ export function isUsableModel(
   return modelUsability(selection, providers, credentials, virtualModels) === 'usable';
 }
 
+/** 分类器专用供应商（如 Jev）作代审来源：需启用、有 apiKey、模型在清单内且未禁用 */
+export function isUsableApprovalClassifier(
+  selection: DefaultModelRef | null,
+  providers: readonly ModelProvider[]
+): boolean {
+  if (!selection) return false;
+  const provider = providers.find((entry) => entry.id === selection.providerId);
+  if (!provider?.enabled || !isClassifierOnlyProvider(provider)) return false;
+  if (!provider.apiKey || provider.oauthAccountKey) return false;
+  const model = provider.models.find((entry) => entry.id === selection.modelId);
+  return Boolean(model && model.enabled !== false);
+}
+
+/** 代审模型可用：聊天模型或分类器专用供应商的分类器 */
+export function isUsableApprovalReviewer(
+  reviewer: DefaultModelRef | null,
+  providers: readonly ModelProvider[],
+  credentials: ModelCredentialContext
+): boolean {
+  return (
+    isUsableModel(reviewer, providers, credentials) ||
+    isUsableApprovalClassifier(reviewer, providers)
+  );
+}
+
 /** 新会话缺省审批档：优先上次档；assistant 仅在代审模型可用时保留，否则 full。 */
 export function defaultApprovalMode(
   reviewer: DefaultModelRef | null,
@@ -185,7 +210,7 @@ export function defaultApprovalMode(
   credentials: ModelCredentialContext,
   lastMode?: ApprovalMode | null
 ): ApprovalMode {
-  const reviewerUsable = isUsableModel(reviewer, providers, credentials);
+  const reviewerUsable = isUsableApprovalReviewer(reviewer, providers, credentials);
   if (lastMode === 'assistant') return reviewerUsable ? 'assistant' : 'full';
   if (lastMode === 'supervised' || lastMode === 'auto-edits' || lastMode === 'full') {
     return lastMode;

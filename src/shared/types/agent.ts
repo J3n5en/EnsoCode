@@ -1136,6 +1136,8 @@ export type AgentCommand =
       approvalMode?: ApprovalMode;
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
+      /** 代审改用分类器（System One）；与 approvalReviewer 互斥 */
+      approvalReviewerClassifier?: VirtualClassifierCredentials;
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
@@ -1255,7 +1257,12 @@ export type AgentCommand =
       action: PlanRespondAction;
       feedback?: string;
     }
-  | { type: 'set-approval-reviewer'; model?: SpawnModelConfig }
+  | {
+      type: 'set-approval-reviewer';
+      model?: SpawnModelConfig;
+      /** 与 model 互斥 */
+      classifier?: VirtualClassifierCredentials;
+    }
   /** 已打开会话的压缩摘要模型。缺省 model 表示改跟会话模型 */
   | { type: 'set-compact-route'; model?: SpawnModelConfig; mode?: SmartCompactMode }
   | { type: 'set-max-active-coworkers'; limit: number }
@@ -3034,6 +3041,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'instruction',
           'approvalMode',
           'approvalReviewer',
+          'approvalReviewerClassifier',
           'agentTypes',
           'subagentModels',
           'disabledTools',
@@ -3094,6 +3102,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
           parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.approvalReviewerClassifier !== undefined &&
+          (value.approvalReviewer !== undefined ||
+            !parseClassifierCredentials(value.approvalReviewerClassifier))) ||
         (value.rolePrompt !== undefined && !isNonEmptyString(value.rolePrompt)) ||
         (value.systemPrompt !== undefined && !isNonEmptyString(value.systemPrompt)) ||
         (value.systemPromptAppend !== undefined && !isNonEmptyString(value.systemPromptAppend)) ||
@@ -3340,8 +3351,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-approval-reviewer':
-      return hasOnlyKeys(value, ['type', 'model']) &&
-        (value.model === undefined || parseSpawnModelConfig(value.model))
+      return hasOnlyKeys(value, ['type', 'model', 'classifier']) &&
+        (value.model === undefined || parseSpawnModelConfig(value.model)) &&
+        (value.classifier === undefined ||
+          (value.model === undefined && parseClassifierCredentials(value.classifier)))
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-compact-route':

@@ -1,15 +1,25 @@
+import { isClassifierOnlyProvider } from '@shared/providerCatalog';
+import { useMemo } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
-import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
+import {
+  useUsableClassifierProviders,
+  useUsableProviders,
+} from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 
-/** 助手代审模型：未选则该档不可用，不回退会话模型。 */
+/** 助手代审模型：未选则该档不可用，不回退会话模型。分类器专用供应商（如 Jev）也可选，走分类器代审。 */
 export function ApprovalReviewerPicker() {
   const { t } = useI18n();
   const model = useSettingsStore((state) => state.approvalReviewer);
   const setModel = useSettingsStore((state) => state.setApprovalReviewer);
-  const candidates = useUsableProviders();
+  const chatProviders = useUsableProviders();
+  const classifierProviders = useUsableClassifierProviders();
+  const candidates = useMemo(
+    () => [...chatProviders, ...classifierProviders.filter(isClassifierOnlyProvider)],
+    [chatProviders, classifierProviders]
+  );
   const selectedProvider = model
     ? candidates.find((entry) => entry.id === model.providerId)
     : undefined;
@@ -42,6 +52,13 @@ export function ApprovalReviewerPicker() {
             onThinkingChange={() => {}}
           />
         </div>
+      )}
+      {selectedProvider && isClassifierOnlyProvider(selectedProvider) && (
+        <p className="text-muted-foreground text-xs">
+          {t(
+            'Decision models only allow or block when highly confident. Everything else asks you.'
+          )}
+        </p>
       )}
       {model && (!selectedProvider || !selectedModel) && (
         <p className="text-muted-foreground text-xs">{t('Selected model is unavailable')}</p>

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APPROVAL_CLASSIFIER_THRESHOLD,
+  buildApprovalClassifierRequest,
   computeApprovalActionHash,
+  decideFromApprovalClassifier,
   extractJsonObjectText,
   normalizeReviewDecision,
   recentReviewMessages,
@@ -186,5 +189,76 @@ describe('recentReviewMessages', () => {
     expect(recent.some((message) => message.role === 'system')).toBe(false);
     expect(recent[0]).toEqual({ role: 'assistant', content: 'm1' });
     expect(recent.at(-1)).toEqual({ role: 'assistant', content: 'a\n\nb' });
+  });
+});
+
+describe('decideFromApprovalClassifier', () => {
+  const choice = (probabilities: Record<string, unknown>) => ({
+    type: 'choice',
+    choice: 'allow',
+    probabilities,
+    confidence: 1,
+  });
+
+  it('allow / block 概率达到阈值才放行或拦截', () => {
+    expect(
+      decideFromApprovalClassifier(choice({ allow: 0.95, ask: 0.04, block: 0.01 }))
+    ).toMatchObject({ decision: 'auto_allow' });
+    expect(
+      decideFromApprovalClassifier(choice({ allow: APPROVAL_CLASSIFIER_THRESHOLD, block: 0 }))
+    ).toMatchObject({ decision: 'auto_allow' });
+    expect(
+      decideFromApprovalClassifier(choice({ allow: 0.01, ask: 0.02, block: 0.97 }))
+    ).toMatchObject({ decision: 'block' });
+  });
+
+  it('未达阈值、ask 占优一律交人工', () => {
+    for (const probabilities of [
+      { allow: 0.89, ask: 0.1, block: 0.01 },
+      { allow: 0.05, ask: 0.9, block: 0.05 },
+      { allow: 0.5, ask: 0, block: 0.5 },
+    ]) {
+      expect(decideFromApprovalClassifier(choice(probabilities))).toMatchObject({
+        decision: 'ask_user',
+      });
+    }
+  });
+
+  it('缺概率、非数值、非 choice 答案交人工', () => {
+    for (const answer of [
+      undefined,
+      null,
+      { type: 'boolean', value: true },
+      { type: 'choice', choice: 'allow' },
+      choice({ allow: '0.99' }),
+      choice({ allow: Number.NaN }),
+      choice({ allow: 1.5 }),
+      choice({ block: Number.POSITIVE_INFINITY }),
+    ]) {
+      expect(decideFromApprovalClassifier(answer)).toMatchObject({ decision: 'ask_user' });
+    }
+  });
+
+  it('理由带上三档概率，便于排查', () => {
+    expect(
+      decideFromApprovalClassifier(choice({ allow: 0.95, ask: 0.04, block: 0.01 })).rationale
+    ).toContain('allow 0.95');
+  });
+});
+
+describe('buildApprovalClassifierRequest', () => {
+  it('只问三选一，截断过长的摘要与上下文', () => {
+    const request = buildApprovalClassifierRequest({
+      tool: 'bash',
+      kind: 'command',
+      summary: 'x'.repeat(5000),
+      recentMessages: [{ role: 'user', content: 'y'.repeat(5000) }],
+    });
+    const question = request.questions.decision;
+    expect(question.type).toBe('choice');
+    expect(Object.keys(question.criteria).sort()).toEqual(['allow', 'ask', 'block']);
+    expect(request.state.tool).toBe('bash');
+    expect(String(request.state.action).length).toBeLessThan(2100);
+    expect(JSON.stringify(request.state.recentMessages).length).toBeLessThan(2200);
   });
 });

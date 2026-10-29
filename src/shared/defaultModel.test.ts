@@ -317,6 +317,25 @@ describe('defaultApprovalMode', () => {
     expect(defaultApprovalMode(reviewer, providers, ready(), 'full')).toBe('full');
   });
 
+  it('分类器专用供应商（Jev）可作代审：需启用、有 apiKey、模型在清单内', () => {
+    const jev = provider('jev', ['jev-latest'], {
+      api: 'typesafe-system-one',
+      baseUrl: 'https://api.typesafe.ai/v1/',
+    });
+    const reviewer = { providerId: 'jev', modelId: 'jev-latest' };
+    expect(defaultApprovalMode(reviewer, [jev], ready())).toBe('assistant');
+    expect(defaultApprovalMode(reviewer, [{ ...jev, apiKey: '' }], ready())).toBe('full');
+    expect(defaultApprovalMode(reviewer, [{ ...jev, enabled: false }], ready())).toBe('full');
+    expect(defaultApprovalMode({ ...reviewer, modelId: 'gone' }, [jev], ready())).toBe('full');
+    expect(
+      defaultApprovalMode(
+        reviewer,
+        [{ ...jev, models: [{ id: 'jev-latest', enabled: false }] }],
+        ready()
+      )
+    ).toBe('full');
+  });
+
   it('上次是 assistant 但代审模型不可用时回落 full', () => {
     const providers = [provider('p', ['m'])];
     expect(defaultApprovalMode(null, providers, ready(), 'assistant')).toBe('full');

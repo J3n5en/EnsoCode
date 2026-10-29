@@ -34,6 +34,7 @@ import { materializeProviders } from '@shared/modelDirectory';
 import { eligibleOauthPoolAccountKeys, isOauthAccountPool } from '@shared/oauthAccountPool';
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { parsePrivacyMaskSettings } from '@shared/privacyMask/settings';
+import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
@@ -632,7 +633,21 @@ export function resolveVirtualClassifier(
       ? { source: 'judge', timeoutMs: classifier.timeoutMs, model: resolved.selection.config }
       : undefined;
   }
-  const provider = providersFromSettings().find((item) => item.id === classifier.model.providerId);
+  const credentials = classifierCredentialsFor(
+    providersFromSettings().find((item) => item.id === classifier.model.providerId),
+    classifier.model.modelId,
+    authenticatedAccountKeys
+  );
+  return credentials
+    ? { source: 'pi-classifier', timeoutMs: classifier.timeoutMs, classifier: credentials }
+    : undefined;
+}
+
+function classifierCredentialsFor(
+  provider: ModelProvider | undefined,
+  modelId: string,
+  authenticatedAccountKeys: ReadonlySet<string>
+): VirtualClassifierCredentials | undefined {
   if (!provider?.enabled) return undefined;
   const piProvider = classifierProviderFor(provider);
   if (!piProvider) return undefined;
@@ -643,14 +658,10 @@ export function resolveVirtualClassifier(
     return undefined;
   }
   return {
-    source: 'pi-classifier',
-    timeoutMs: classifier.timeoutMs,
-    classifier: {
-      provider: piProvider,
-      modelId: classifier.model.modelId,
-      ...(provider.oauthAccountKey ? {} : { apiKey: provider.apiKey }),
-      ...(baseUrl ? { baseUrl } : {}),
-    },
+    provider: piProvider,
+    modelId,
+    ...(provider.oauthAccountKey ? {} : { apiKey: provider.apiKey }),
+    ...(baseUrl ? { baseUrl } : {}),
   };
 }
 
@@ -879,10 +890,10 @@ export function spawnSession(
   if (!reviewer.ok) {
     if (request.approvalMode === 'assistant') return { ok: false, error: reviewer.error };
   }
-  if (request.approvalMode === 'assistant' && (!reviewer.ok || !reviewer.selection)) {
+  if (request.approvalMode === 'assistant' && (!reviewer.ok || !reviewer.source)) {
     return { ok: false, error: 'Select an assistant approval model in Settings first.' };
   }
-  const approvalReviewerConfig = reviewer.ok ? reviewer.selection?.config : undefined;
+  const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
   const preset: Preset | undefined = bot
     ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
@@ -977,7 +988,7 @@ export function spawnSession(
     ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
     ...(request.planMode !== undefined ? { planMode: request.planMode } : {}),
-    ...(approvalReviewerConfig ? { approvalReviewer: approvalReviewerConfig } : {}),
+    ...approvalReviewerSpawnFields(approvalReviewerSource),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
     ...(subagentModels.length > 0 ? { subagentModels } : {}),
     ...(disabledTools.length > 0 ? { disabledTools } : {}),
@@ -1579,7 +1590,7 @@ export function setSessionApprovalMode(
   if (mode === 'assistant') {
     const reviewer = resolveApprovalReviewer(authenticatedAccountKeys);
     if (!reviewer.ok) return reviewer;
-    if (!reviewer.selection) {
+    if (!reviewer.source) {
       return { ok: false, error: 'Select an assistant approval model in Settings first.' };
     }
     pushApprovalReviewer(authenticatedAccountKeys);
@@ -1862,22 +1873,48 @@ function asModelRef(value: unknown): DefaultModelRef | null {
     : null;
 }
 
+export type ApprovalReviewerSource =
+  | { model: SpawnModelConfig }
+  | { classifier: VirtualClassifierCredentials };
+
+/** 代审来源：分类器专用供应商（如 Jev）走分类器，其余按聊天模型解析 */
 export function resolveApprovalReviewer(
   authenticatedAccountKeys: ReadonlySet<string>
-): ModelSelectionResult | { ok: true; selection: null } {
+): { ok: false; error: string } | { ok: true; source: ApprovalReviewerSource | null } {
   const ref = asModelRef(readSettingsState()?.approvalReviewer);
-  if (!ref) return { ok: true, selection: null };
-  return resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
+  if (!ref) return { ok: true, source: null };
+  const provider = providersFromSettings().find((item) => item.id === ref.providerId);
+  if (provider && isClassifierOnlyProvider(provider)) {
+    const classifier = classifierCredentialsFor(provider, ref.modelId, authenticatedAccountKeys);
+    return classifier
+      ? { ok: true, source: { classifier } }
+      : { ok: false, error: 'The assistant approval classifier is unavailable.' };
+  }
+  const resolved = resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
+  return resolved.ok
+    ? { ok: true, source: { model: resolved.selection.config } }
+    : { ok: false, error: resolved.error };
+}
+
+function approvalReviewerSpawnFields(source: ApprovalReviewerSource | null | undefined) {
+  if (!source) return {};
+  return 'model' in source
+    ? { approvalReviewer: source.model }
+    : { approvalReviewerClassifier: source.classifier };
 }
 
 export function pushApprovalReviewer(authenticatedAccountKeys?: ReadonlySet<string>): void {
   if (!worker || !workerReady) return;
   const keys = authenticatedAccountKeys ?? new Set<string>();
   const resolved = resolveApprovalReviewer(keys);
-  const model = resolved.ok ? resolved.selection?.config : undefined;
+  const source = resolved.ok ? resolved.source : null;
   worker.postMessage({
     type: 'set-approval-reviewer',
-    ...(model ? { model } : {}),
+    ...(source
+      ? 'model' in source
+        ? { model: source.model }
+        : { classifier: source.classifier }
+      : {}),
   } satisfies AgentCommand);
 }
 
