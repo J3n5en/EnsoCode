@@ -659,6 +659,9 @@ export const IPC_PRODUCT_COVERAGE = {
   FILES_COPY_PATH: excluded('Side panel Files copy path text to clipboard.'),
   FILES_COPY_FILE: excluded('Side panel Files copy local file to OS clipboard.'),
   FILES_REVEAL: excluded('Side panel Files reveal in system file manager.'),
+  FILES_REVEAL_EXTERNAL: excluded(
+    'Chat link reveal of out-of-workspace files in the local file manager.'
+  ),
   FILES_OPEN: excluded('User-clicked workspace file opening; not an autonomous model capability.'),
   FILES_OPEN_CONTEXT: excluded('User right-clicks a chat file link; not a model capability.'),
   FILES_SEARCH_WORKSPACE: excluded(

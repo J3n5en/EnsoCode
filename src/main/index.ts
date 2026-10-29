@@ -7,6 +7,7 @@ import {
 } from './desktop/localImageScheme';
 import { installDesktopLocalUi } from './desktop/localUi';
 import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
+import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { consumeTrayReenterAfterUpdate, readSettings } from './ipc/settings';
@@ -137,7 +138,11 @@ if (!gotTheLock) {
         notifyChat: (chatId, build) => notifyBotChat(chatId, build),
       },
       notify: { maybeNotify, maybeNotifyBot, setViewedSession },
-      file: { openPdf: openBotPdfWindow, openWorkspacePdf: openDesktopPdfWindow },
+      file: {
+        openPdf: openBotPdfWindow,
+        openWorkspacePdf: openDesktopPdfWindow,
+        confirmRevealExternal,
+      },
       app: {
         updaterAvailable: () => !(process.platform === 'linux' && !process.env.APPIMAGE),
         checkForUpdates: async () => {

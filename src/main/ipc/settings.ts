@@ -19,6 +19,7 @@ import {
   parseContextMenuOpen,
   parseFileOpenRules,
 } from '@shared/fileOpening';
+import { type Locale, normalizeLocale } from '@shared/i18n';
 import { collectPresetPromptIds } from '@shared/presetPrompts';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
 import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
@@ -708,6 +709,11 @@ export function readSshTimeoutSeconds(): number {
  */
 export function readFileOpenRules(): FileOpenRule[] {
   return normalizeFileOpenRules(settingsStateOf(readSettings()).fileOpenRules);
+}
+
+export function readLocale(): Locale {
+  const language = settingsStateOf(readSettings()).language;
+  return normalizeLocale(typeof language === 'string' ? language : undefined);
 }
 
 export function readContextMenuOpen(): ContextMenuOpen {

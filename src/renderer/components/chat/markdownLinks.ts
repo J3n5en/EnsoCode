@@ -145,3 +145,15 @@ export function toWorkspaceRelativePath(raw: string, cwd?: string): string | nul
   if (!comparisonTarget.startsWith(prefix.toLowerCase())) return null;
   return normalizeRelativePath(target.value.slice(prefix.length));
 }
+
+/**
+ * 工作区外的本地绝对路径，只用于请求 Main 定位；工作区内、相对路径或缺工作区返回 null。
+ *
+ * Absolute local path outside the workspace, used only to ask Main to reveal it.
+ */
+export function toExternalAbsolutePath(raw: string, cwd?: string): string | null {
+  const root = cwd ? canonicalAbsolutePath(cwd) : null;
+  if (!root || toWorkspaceRelativePath(raw, cwd) !== null) return null;
+  const targetPath = root.windows && /^\/[a-z]:[\\/]/i.test(raw) ? raw.slice(1) : raw;
+  return canonicalAbsolutePath(targetPath) ? targetPath : null;
+}

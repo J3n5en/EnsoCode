@@ -25,7 +25,11 @@ import {
 } from './workspaceFileOpening';
 
 installDesktopHooks({
-  file: { openPdf() {}, openWorkspacePdf: openDesktopPdfWindow },
+  file: {
+    openPdf() {},
+    openWorkspacePdf: openDesktopPdfWindow,
+    confirmRevealExternal: async () => false,
+  },
 });
 
 const mocks = vi.hoisted(() => ({

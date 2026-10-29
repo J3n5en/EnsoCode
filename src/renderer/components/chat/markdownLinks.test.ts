@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMarkdownLink, splitFileLineRef, toWorkspaceRelativePath } from './markdownLinks';
+import {
+  classifyMarkdownLink,
+  splitFileLineRef,
+  toExternalAbsolutePath,
+  toWorkspaceRelativePath,
+} from './markdownLinks';
 
 describe('splitFileLineRef', () => {
   it('拆出路径与起始行号', () => {
@@ -112,5 +117,22 @@ describe('toWorkspaceRelativePath', () => {
     expect(toWorkspaceRelativePath('./docs/README.md')).toBe('docs/README.md');
     expect(toWorkspaceRelativePath('../outside.txt')).toBeNull();
     expect(toWorkspaceRelativePath('H:/outside.txt')).toBeNull();
+  });
+});
+
+describe('toExternalAbsolutePath', () => {
+  it('只返回工作区外的绝对路径', () => {
+    expect(toExternalAbsolutePath('/tmp/out/report.md', '/repo')).toBe('/tmp/out/report.md');
+    expect(toExternalAbsolutePath('C:\\Users\\me\\x.pdf', 'C:/workspace')).toBe(
+      'C:\\Users\\me\\x.pdf'
+    );
+    expect(toExternalAbsolutePath('/C:/Temp/x.txt', 'C:/workspace')).toBe('C:/Temp/x.txt');
+  });
+
+  it('工作区内、相对越界或缺工作区返回 null', () => {
+    expect(toExternalAbsolutePath('/repo/src/a.ts', '/repo')).toBeNull();
+    expect(toExternalAbsolutePath('src/a.ts', '/repo')).toBeNull();
+    expect(toExternalAbsolutePath('../secret.txt', '/repo')).toBeNull();
+    expect(toExternalAbsolutePath('/tmp/x', undefined)).toBeNull();
   });
 });

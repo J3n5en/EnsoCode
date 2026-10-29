@@ -291,6 +291,7 @@ export const IPC_CHANNELS = {
   FILES_COPY_PATH: 'files:copy-path',
   FILES_COPY_FILE: 'files:copy-file',
   FILES_REVEAL: 'files:reveal',
+  FILES_REVEAL_EXTERNAL: 'files:reveal-external',
   FILES_OPEN: 'files:open',
   FILES_OPEN_CONTEXT: 'files:open-context',
   FILES_SEARCH_WORKSPACE: 'files:search-workspace',

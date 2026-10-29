@@ -9,6 +9,7 @@ const harness = vi.hoisted(() => ({
   open: vi.fn(),
   openContext: vi.fn(),
   reveal: vi.fn(),
+  revealExternal: vi.fn(),
   readImage: vi.fn(),
   openSidePanelFile: vi.fn(),
   toast: vi.fn(),
@@ -108,6 +109,7 @@ beforeEach(() => {
         open: harness.open,
         openContext: harness.openContext,
         reveal: harness.reveal,
+        revealExternal: harness.revealExternal,
         readImage: harness.readImage,
       },
     },
@@ -117,6 +119,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   harness.open.mockResolvedValue({ ok: true, target: 'internal', viewer: 'text', rel: 'src/a.ts' });
   harness.reveal.mockResolvedValue({ ok: true });
+  harness.revealExternal.mockResolvedValue({ ok: true });
   harness.openContext.mockResolvedValue({ ok: true });
   harness.contextMenuOpen = [
     { id: 'reveal', target: 'reveal', enabled: true },
@@ -416,19 +419,73 @@ describe('气泡文件卡片的打开方式', () => {
     expect(menuLabels()).toEqual(['Copy Path']);
   });
 
-  it('工作区外不可点击打开，右键只复制路径且不触达 IPC', async () => {
+  it('工作区外不可点击打开，右键只提供定位与复制路径', async () => {
     const writeText = navigator.clipboard.writeText as Mock;
     writeText.mockResolvedValue(undefined);
     const outside = 'C:\\Users\\me\\Desktop\\x.pdf';
     await renderChip(outside);
     await click('[data-chip]');
+    expect(harness.revealExternal).not.toHaveBeenCalled();
     await click('[data-chip]', 'contextmenu');
-    expect(menuLabels()).toEqual(['Copy Path']);
-    await click('[role="menuitem"]');
+    expect(menuLabels()).toEqual(['Reveal in File Explorer', 'Copy Path']);
+    await click('[role="menuitem"]:last-child');
     expect(writeText).toHaveBeenCalledWith(outside);
+    await click('[role="menuitem"]:first-child');
+    expect(harness.revealExternal).toHaveBeenCalledWith({
+      conversationId: 'child',
+      projectId: 'project',
+      path: outside,
+    });
     expect(harness.open).not.toHaveBeenCalled();
     expect(harness.reveal).not.toHaveBeenCalled();
     expect(harness.openContext).not.toHaveBeenCalled();
-    expect(harness.toast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }));
+  });
+
+  it('工作区外相对越界或 SSH 项目仍只复制路径', async () => {
+    await renderChip('../secret.txt');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Copy Path']);
+    harness.projects = [{ id: 'project', kind: 'ssh' }];
+    await renderChip('C:\\Users\\me\\x.pdf');
+    await click('[data-chip]', 'contextmenu');
+    expect(menuLabels()).toEqual(['Copy Path']);
+  });
+});
+
+describe('工作区外的聊天链接只定位（#157）', () => {
+  const outside = 'C:/Users/me/AppData/Local/Temp/report.md';
+
+  it('点击链接与定位按钮都只请求 Main 定位，传原路径不传 rel', async () => {
+    await render(`[report](${outside})`);
+    await click('a');
+    await click('button');
+    const request = { conversationId: 'child', projectId: 'project', path: outside };
+    expect(harness.revealExternal).toHaveBeenNthCalledWith(1, request);
+    expect(harness.revealExternal).toHaveBeenNthCalledWith(2, request);
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.reveal).not.toHaveBeenCalled();
+  });
+
+  it('右键菜单不提供按设置打开的应用，只有定位', async () => {
+    await render(`[report](${outside})`);
+    await click('a', 'contextmenu');
+    expect(
+      [...container.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)
+    ).toEqual(['Reveal in File Explorer']);
+    await click('[role="menuitem"]');
+    expect(harness.revealExternal).toHaveBeenCalledTimes(1);
+    expect(harness.openContext).not.toHaveBeenCalled();
+  });
+
+  it('用户取消确认不报错；不存在等失败沿用越界提示', async () => {
+    harness.revealExternal.mockResolvedValueOnce({ ok: false, error: 'cancelled' });
+    await render(`[report](${outside})`);
+    await click('a');
+    expect(harness.toast).not.toHaveBeenCalled();
+    harness.revealExternal.mockResolvedValueOnce({ ok: false, error: 'invalid-path' });
+    await click('a');
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: 'The link is outside the current workspace.' })
+    );
   });
 });

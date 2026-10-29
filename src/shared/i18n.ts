@@ -740,6 +740,8 @@ export const zhTranslations: Record<string, string> = {
   Terminals: '终端',
   'Open Containing Folder': '打开所在文件夹',
   'Reveal in File Explorer': '在资源管理器中显示',
+  'This file is outside the workspace and was not written by this conversation. Show it anyway?':
+    '该文件在工作区外，且不是本会话写入的。仍要在文件管理器中显示吗？',
   'A file or folder with that name already exists.': '已存在同名文件或文件夹。',
   'Invalid name.': '名称无效。',
   'Could not complete the file action.': '无法完成该文件操作。',

@@ -30,7 +30,12 @@ import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { highlightNode } from './highlightQuery';
 import { MermaidRenderer } from './MermaidRenderer';
-import { classifyMarkdownLink, splitFileLineRef, toWorkspaceRelativePath } from './markdownLinks';
+import {
+  classifyMarkdownLink,
+  splitFileLineRef,
+  toExternalAbsolutePath,
+  toWorkspaceRelativePath,
+} from './markdownLinks';
 
 /**
  * 解析代码围栏的 info 串。除了纯语言名（```ts），agent 常输出
@@ -250,11 +255,30 @@ function useLocalFileOpen(path: string | null, line?: number) {
     });
   };
 
+  const external =
+    linkContext && path !== null ? toExternalAbsolutePath(path, linkContext.cwd) : null;
+
+  /** 工作区外只定位不打开；用户在 Main 确认框里取消不提示 */
+  const revealExternal = async (file: string) => {
+    if (!linkContext) return;
+    try {
+      const result = await window.electronAPI.workspaceFiles.revealExternal({
+        conversationId: linkContext.conversationId,
+        projectId: linkContext.projectId,
+        path: file,
+      });
+      if (!result.ok && result.error !== 'cancelled') fail(result.error);
+    } catch (error: unknown) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const openLocal = async (reveal: boolean) => {
     if (!linkContext || path === null) return;
     const rel = toWorkspaceRelativePath(path, linkContext.cwd);
     if (rel == null) {
-      fail('invalid-path');
+      if (external) await revealExternal(external);
+      else fail('invalid-path');
       return;
     }
     if (!reveal && line) {
@@ -314,7 +338,7 @@ function useLocalFileOpen(path: string | null, line?: number) {
   const preview = (
     <WorkspaceImagePreview image={imagePreview} onClose={() => setImagePreview(null)} />
   );
-  return { linkContext, openLocal, preview };
+  return { linkContext, external, openLocal, preview };
 }
 
 /**
@@ -328,7 +352,7 @@ export function LocalFileTrigger({ path, children }: { path: string; children: R
   );
   const { classification } = classifyFileReference(path);
   const file = classification.kind === 'local' ? classification.path : null;
-  const { linkContext, openLocal, preview } = useLocalFileOpen(file);
+  const { linkContext, external, openLocal, preview } = useLocalFileOpen(file);
   const ssh = useSettingsStore((state) =>
     state.projects.some((item) => item.id === linkContext?.projectId && item.kind === 'ssh')
   );
@@ -349,7 +373,7 @@ export function LocalFileTrigger({ path, children }: { path: string; children: R
   };
   const extra = (
     <>
-      {inWorkspace && !revealConfigured && !ssh && (
+      {((inWorkspace && !revealConfigured) || (!inWorkspace && external)) && !ssh && (
         <ContextMenuItem closeOnClick onClick={() => void openLocal(true)}>
           {t(revealLabel())}
         </ContextMenuItem>
@@ -400,7 +424,7 @@ function MarkdownAnchor({
 }) {
   const { t } = useI18n();
   const { classification, line } = classifyFileReference(href ?? '');
-  const { linkContext, openLocal, preview } = useLocalFileOpen(
+  const { linkContext, external, openLocal, preview } = useLocalFileOpen(
     classification.kind === 'local' ? classification.path : null,
     line
   );
@@ -435,7 +459,20 @@ function MarkdownAnchor({
     </a>
   );
   if (!local || classification.kind !== 'local' || !linkContext) return anchorElement;
-  const anchor = (
+  // 工作区外：菜单不提供按设置打开的应用，只保留定位
+  const anchor = external ? (
+    <FileLinkContextMenu
+      context={null}
+      file={classification.path}
+      extra={
+        <ContextMenuItem closeOnClick onClick={() => void openLocal(true)}>
+          {t(revealLabel())}
+        </ContextMenuItem>
+      }
+    >
+      {anchorElement}
+    </FileLinkContextMenu>
+  ) : (
     <FileLinkContextMenu context={linkContext} file={classification.path}>
       {anchorElement}
     </FileLinkContextMenu>

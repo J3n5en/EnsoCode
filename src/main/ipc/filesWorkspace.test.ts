@@ -12,7 +12,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, request: unknown) => Promise<unknown>>(),
@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   busy: vi.fn(() => false),
   readSettings: vi.fn((): Record<string, unknown> | null => null),
   search: vi.fn(async () => ({ ok: true as const, mode: 'names' as const, hits: [] })),
+  confirmReveal: vi.fn(async () => false),
+  sessionMessages: vi.fn(async (): Promise<unknown[]> => []),
 }));
 vi.mock('node:path', async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof import('node:path') }>();
@@ -55,6 +57,7 @@ vi.mock('./settings', async () => {
       return normalizeFileOpenRules(store?.state?.fileOpenRules);
     },
     readSshTimeoutSeconds: () => 30,
+    readLocale: () => 'en',
   };
 });
 vi.mock('./agent', () => ({
@@ -70,6 +73,16 @@ vi.mock('../services/sshConnectionStore', () => ({
   getSshConnectionStore: () => ({ getSecret: () => undefined }),
 }));
 vi.mock('../../agent/ssh/executor', () => ({ createSshExecutor: () => ({ exec: mocks.exec }) }));
+vi.mock('../services/desktopHooks', () => ({
+  fileDesktop: () => ({
+    openPdf: () => {},
+    openWorkspacePdf: async () => {},
+    confirmRevealExternal: mocks.confirmReveal,
+  }),
+}));
+vi.mock('../services/bots/sessionMessages', () => ({
+  readBotSessionMessages: mocks.sessionMessages,
+}));
 vi.mock('../services/workspaceFileSearch', () => ({
   searchWorkspaceFiles: mocks.search,
 }));
@@ -87,6 +100,8 @@ beforeEach(() => {
   mocks.writeText.mockReset();
   mocks.showItemInFolder.mockReset();
   mocks.openPath.mockReset().mockResolvedValue('');
+  mocks.confirmReveal.mockReset().mockResolvedValue(false);
+  mocks.sessionMessages.mockReset().mockResolvedValue([]);
   mocks.search.mockReset();
   mocks.search.mockResolvedValue({ ok: true, mode: 'names', hits: [] });
   registerFilesWorkspaceHandlers();
@@ -506,4 +521,73 @@ it('本地搜索 cwd 来自会话而不是请求路径', async () => {
       mode: 'names',
     })
   );
+});
+
+describe('工作区外文件只定位（#157）', () => {
+  let outsideDir = '';
+  beforeEach(() => {
+    outsideDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'files-outside-')));
+  });
+  afterEach(() => rmSync(outsideDir, { recursive: true, force: true }));
+  const revealExternal = (file: unknown) =>
+    mocks.handlers.get(IPC_CHANNELS.FILES_REVEAL_EXTERNAL)?.(
+      { sender: { id: 7 } },
+      { conversationId: 'conversation', projectId: 'project', path: file }
+    );
+
+  it('本会话写入工具写过的文件直接定位，不弹确认、不打开', async () => {
+    const file = path.join(outsideDir, 'report.md');
+    writeFileSync(file, 'x');
+    mocks.sessionMessages.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'w', name: 'write', arguments: { path: file } }],
+      },
+      { role: 'toolResult', toolName: 'write', toolCallId: 'w', content: [] },
+    ]);
+    expect(await revealExternal(file)).toEqual({ ok: true });
+    expect(mocks.showItemInFolder).toHaveBeenCalledWith(file);
+    expect(mocks.confirmReveal).not.toHaveBeenCalled();
+    expect(mocks.openPath).not.toHaveBeenCalled();
+  });
+
+  it('未被本会话写过：Main 先弹确认框显示真实路径，取消则不定位', async () => {
+    const file = path.join(outsideDir, 'unknown.md');
+    writeFileSync(file, 'x');
+    expect(await revealExternal(file)).toEqual({ ok: false, error: 'cancelled' });
+    expect(mocks.confirmReveal).toHaveBeenCalledWith(7, file, expect.any(String));
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+    mocks.confirmReveal.mockResolvedValue(true);
+    expect(await revealExternal(file)).toEqual({ ok: true });
+    expect(mocks.showItemInFolder).toHaveBeenCalledWith(file);
+    expect(mocks.openPath).not.toHaveBeenCalled();
+  });
+
+  it('会话记录读取失败按未写过处理', async () => {
+    const file = path.join(outsideDir, 'x.md');
+    writeFileSync(file, 'x');
+    mocks.sessionMessages.mockRejectedValue(new Error('broken'));
+    expect(await revealExternal(file)).toEqual({ ok: false, error: 'cancelled' });
+    expect(mocks.confirmReveal).toHaveBeenCalled();
+  });
+
+  it('不存在、目录、相对路径：invalid-path，不弹确认、不定位', async () => {
+    for (const input of [path.join(outsideDir, 'missing.md'), outsideDir, 'x.md', 1]) {
+      expect(await revealExternal(input)).toEqual({ ok: false, error: 'invalid-path' });
+    }
+    expect(mocks.confirmReveal).not.toHaveBeenCalled();
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+    expect(mocks.openPath).not.toHaveBeenCalled();
+  });
+
+  it('身份不符或 SSH 项目不定位本机路径', async () => {
+    const file = path.join(outsideDir, 'x.md');
+    writeFileSync(file, 'x');
+    mocks.conversation = { projectId: 'other', lifecycle: 'active' };
+    expect(await revealExternal(file)).toEqual({ ok: false, error: 'unavailable' });
+    mocks.conversation = { projectId: 'project', lifecycle: 'active' };
+    mocks.project = { ...mocks.project, kind: 'ssh' };
+    expect(await revealExternal(file)).toEqual({ ok: false, error: 'unsupported' });
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+  });
 });

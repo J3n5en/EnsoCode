@@ -21,7 +21,10 @@ import type {
 import { IPC_CHANNELS } from '@shared/types';
 import { parseWorkspaceFileSearchRequest } from '@shared/workspaceFileSearch';
 import { createSshExecutor } from '../../agent/ssh/executor';
+import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import { resolveLocalCwdForBrowser } from '../services/browserFileRoot';
+import { fileDesktop } from '../services/desktopHooks';
+import { resolveExternalRevealTarget, sessionWrittenFiles } from '../services/externalFileReveal';
 import {
   assertEntryName,
   createLocalDir,
@@ -48,7 +51,12 @@ import {
 } from '../services/workspaceFileOpening';
 import { searchWorkspaceFiles } from '../services/workspaceFileSearch';
 import { getSourceAuthorityRegistry } from './agent';
-import { readContextMenuOpen, readFileOpenRules, readSshTimeoutSeconds } from './settings';
+import {
+  readContextMenuOpen,
+  readFileOpenRules,
+  readLocale,
+  readSshTimeoutSeconds,
+} from './settings';
 import { sessionWorktreeBusy } from './worktree';
 
 const watches = new RefCountWatchers();
@@ -644,6 +652,42 @@ export function registerFilesWorkspaceHandlers(): void {
       } catch {
         return { ok: false, error: 'unavailable' };
       }
+    }
+  );
+
+  // 工作区外文件只定位不打开：本会话写入工具写过的直接定位，否则 Main 先弹确认框（#157）
+  handle(
+    IPC_CHANNELS.FILES_REVEAL_EXTERNAL,
+    async (event, request: unknown): Promise<FilesMutateResult> => {
+      const parsed = parseRequest(request);
+      if (!parsed) return { ok: false, error: 'unavailable' };
+      if (getSourceAuthorityRegistry()?.project(parsed.projectId)?.kind === 'ssh')
+        return { ok: false, error: 'unsupported' };
+      const cwd = resolveLocalCwd(parsed.conversationId, parsed.projectId);
+      if (!cwd) return { ok: false, error: 'unavailable' };
+      const target = resolveExternalRevealTarget((request as { path?: unknown }).path);
+      if (!target.ok) return target;
+      let written = false;
+      try {
+        const sessionFile = getSourceAuthorityRegistry()?.conversation(
+          parsed.conversationId
+        )?.sessionFile;
+        const messages = await readBotSessionMessages(
+          path.join(app.getPath('userData'), 'agent', 'sessions'),
+          sessionFile
+        );
+        written = sessionWrittenFiles(messages, cwd).has(target.real);
+      } catch {
+        // 拿不到可靠记录：按未写过处理，走确认
+      }
+      if (!written) {
+        if (
+          !(await fileDesktop().confirmRevealExternal(event.sender.id, target.real, readLocale()))
+        )
+          return { ok: false, error: 'cancelled' };
+      }
+      shell.showItemInFolder(target.real);
+      return { ok: true };
     }
   );
 

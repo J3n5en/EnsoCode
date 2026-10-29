@@ -763,6 +763,13 @@ const electronAPI = {
       projectId: string;
       rel?: string;
     }): Promise<FilesMutateResult> => ipcRenderer.invoke(IPC_CHANNELS.FILES_REVEAL, request),
+    /** 工作区外文件只定位：Main 按真实路径与本会话写入记录校验，未写过的先弹确认 */
+    revealExternal: (request: {
+      conversationId: string;
+      projectId: string;
+      path: string;
+    }): Promise<FilesMutateResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_REVEAL_EXTERNAL, request),
     search: (request: FilesSearchRequest): Promise<FilesSearchResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH_WORKSPACE, request),
   },

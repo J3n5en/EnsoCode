@@ -35,6 +35,8 @@ export interface NotifyDesktop {
 export interface FileDesktop {
   openPdf(file: string, title: string): void;
   openWorkspacePdf(file: string): Promise<void>;
+  /** 工作区外文件定位前的原生确认框（显示完整真实路径）；无桌面宿主一律不确认 */
+  confirmRevealExternal(senderId: number, file: string, locale: 'zh' | 'en'): Promise<boolean>;
 }
 
 export interface AppDesktop {
@@ -80,6 +82,9 @@ const fileDesktopNoop: FileDesktop = {
   openPdf() {},
   async openWorkspacePdf() {
     throw new Error('unsupported-viewer');
+  },
+  async confirmRevealExternal() {
+    return false;
   },
 };
 
