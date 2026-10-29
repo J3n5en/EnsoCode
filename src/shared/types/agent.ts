@@ -1,7 +1,9 @@
 import {
   APPROVAL_REVIEW_FALLBACKS,
+  type ApprovalAllowThreshold,
   type ApprovalReviewFallback,
   type ApprovalReviewRecord,
+  isApprovalAllowThreshold,
   parseApprovalReviewRecord,
 } from '../approvalReviewRecord';
 import { parseAutoRetryLimit } from '../autoRetry';
@@ -1148,6 +1150,8 @@ export type AgentCommand =
       approvalReviewerClassifier?: VirtualClassifierCredentials;
       /** 分类器代审托管；只随 approvalReviewerClassifier 下发 */
       approvalReviewerManaged?: true;
+      /** 分类器代审放行阈值（0.85 / 0.95）；缺省 0.9，只随 approvalReviewerClassifier 下发 */
+      approvalReviewerAllowThreshold?: ApprovalAllowThreshold;
       agentTypes?: AgentTypeSpawnConfig[];
       subagentModels?: SubagentModelOption[];
       disabledTools?: string[];
@@ -1274,6 +1278,8 @@ export type AgentCommand =
       classifier?: VirtualClassifierCredentials;
       /** 托管：只随 classifier 下发 */
       managed?: true;
+      /** 放行阈值；缺省 0.9，只随 classifier 下发 */
+      allowThreshold?: ApprovalAllowThreshold;
     }
   /** 已打开会话的压缩摘要模型。缺省 model 表示改跟会话模型 */
   | { type: 'set-compact-route'; model?: SpawnModelConfig; mode?: SmartCompactMode }
@@ -3059,6 +3065,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'approvalReviewer',
           'approvalReviewerClassifier',
           'approvalReviewerManaged',
+          'approvalReviewerAllowThreshold',
           'agentTypes',
           'subagentModels',
           'disabledTools',
@@ -3119,6 +3126,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
           parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.approvalReviewerAllowThreshold !== undefined &&
+          (!isApprovalAllowThreshold(value.approvalReviewerAllowThreshold) ||
+            value.approvalReviewerClassifier === undefined)) ||
         (value.approvalReviewerManaged !== undefined &&
           (value.approvalReviewerManaged !== true ||
             value.approvalReviewerClassifier === undefined)) ||
@@ -3371,7 +3381,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-approval-reviewer':
-      return hasOnlyKeys(value, ['type', 'model', 'classifier', 'managed']) &&
+      return hasOnlyKeys(value, ['type', 'model', 'classifier', 'managed', 'allowThreshold']) &&
+        (value.allowThreshold === undefined ||
+          (isApprovalAllowThreshold(value.allowThreshold) && value.classifier !== undefined)) &&
         (value.model === undefined || parseSpawnModelConfig(value.model)) &&
         (value.classifier === undefined ||
           (value.model === undefined && parseClassifierCredentials(value.classifier))) &&

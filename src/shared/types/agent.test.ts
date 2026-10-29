@@ -900,6 +900,42 @@ describe('parent/child commands', () => {
     expect(
       parseAgentCommand({ ...base, model, approvalReviewer: model, approvalReviewerManaged: true })
     ).toBeNull();
+    // 放行阈值只随分类器下发，只认三档
+    expect(
+      parseAgentCommand({
+        ...base,
+        model,
+        approvalReviewerClassifier: classifier,
+        approvalReviewerAllowThreshold: 0.85,
+      })
+    ).toMatchObject({ approvalReviewerAllowThreshold: 0.85 });
+    for (const bad of [0.5, '0.85']) {
+      expect(
+        parseAgentCommand({
+          ...base,
+          model,
+          approvalReviewerClassifier: classifier,
+          approvalReviewerAllowThreshold: bad,
+        })
+      ).toBeNull();
+    }
+    expect(
+      parseAgentCommand({
+        ...base,
+        model,
+        approvalReviewer: model,
+        approvalReviewerAllowThreshold: 0.95,
+      })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'set-approval-reviewer', classifier, allowThreshold: 0.95 })
+    ).toEqual({ type: 'set-approval-reviewer', classifier, allowThreshold: 0.95 });
+    expect(
+      parseAgentCommand({ type: 'set-approval-reviewer', classifier, allowThreshold: 0.7 })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'set-approval-reviewer', model, allowThreshold: 0.95 })
+    ).toBeNull();
     expect(
       parseAgentCommand({ ...base, model, smartCompactSummaryModel: virtualModel })
     ).toBeNull();

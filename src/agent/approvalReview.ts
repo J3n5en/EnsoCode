@@ -5,6 +5,7 @@ import {
   type ApprovalReviewRecord,
   isApprovalReviewReason,
   isProbability,
+  parseApprovalAllowThreshold,
 } from '@shared/approvalReviewRecord';
 import type { ProjectedMessage } from '@shared/types/agent';
 
@@ -175,7 +176,7 @@ export function buildApprovalReviewUserPrompt(params: {
   ].join('\n\n');
 }
 
-/** 分类器代审：allow / block 概率都须达到该值，其余一律交人工（保守占位，待真实分布再调） */
+/** 分类器代审：block 概率须达到该值才拦截；allow 默认同值，可选档位见 APPROVAL_ALLOW_THRESHOLDS */
 export const APPROVAL_CLASSIFIER_THRESHOLD = 0.9;
 
 const APPROVAL_CLASSIFIER_CRITERIA = {
@@ -275,7 +276,10 @@ const formatProbabilities = (p: { allow: number; ask: number; block: number }) =
   `allow ${p.allow.toFixed(2)}, ask ${p.ask.toFixed(2)}, block ${p.block.toFixed(2)}`;
 
 /** 分类器答案 → 代审结论：缺概率或任何异常都交人工，不按 choice 字段直接放行 */
-export function decideFromApprovalClassifier(answer: unknown): {
+export function decideFromApprovalClassifier(
+  answer: unknown,
+  allowThreshold?: unknown
+): {
   decision: ApprovalReviewDecision;
   rationale: string;
 } {
@@ -286,7 +290,9 @@ export function decideFromApprovalClassifier(answer: unknown): {
   if (!p) return { decision: 'ask_user', rationale: 'Classifier returned invalid probabilities.' };
   const rationale = `Classifier: ${formatProbabilities(p)}.`;
   if (p.block >= APPROVAL_CLASSIFIER_THRESHOLD) return { decision: 'block', rationale };
-  if (p.allow >= APPROVAL_CLASSIFIER_THRESHOLD) return { decision: 'auto_allow', rationale };
+  if (p.allow >= parseApprovalAllowThreshold(allowThreshold)) {
+    return { decision: 'auto_allow', rationale };
+  }
   return { decision: 'ask_user', rationale };
 }
 
@@ -299,7 +305,12 @@ export type ManagedApprovalDecision =
  * 托管：allow ≥ 阈值才放行，其余（ask、block、概率不够）只拒绝这一条并把英文理由交回模型；
  * 缺判定或数值非法 → 判定无效、退回人工。理由不参与判定。
  */
-export function decideManagedApproval(answers: unknown, model: string): ManagedApprovalDecision {
+export function decideManagedApproval(
+  answers: unknown,
+  model: string,
+  allowThreshold?: unknown
+): ManagedApprovalDecision {
+  const threshold = parseApprovalAllowThreshold(allowThreshold);
   const record =
     typeof answers === 'object' && answers !== null ? (answers as Record<string, unknown>) : {};
   const p = readProbabilities(record.decision);
@@ -316,12 +327,12 @@ export function decideManagedApproval(answers: unknown, model: string): ManagedA
       ? reasonAnswer.choice
       : undefined;
   const base = { model, ...p, ...(reason ? { reason } : {}) };
-  if (p.allow >= APPROVAL_CLASSIFIER_THRESHOLD) {
+  if (p.allow >= threshold) {
     return { decision: 'auto_allow', record: { verdict: 'allow', ...base } };
   }
   const message = [
     'Auto-managed approval denied this tool call; the tool was not run.',
-    `Classifier ${model}: ${formatProbabilities(p)} (auto-run requires allow >= ${APPROVAL_CLASSIFIER_THRESHOLD}).`,
+    `Classifier ${model}: ${formatProbabilities(p)} (auto-run requires allow >= ${threshold}).`,
     ...(reason ? [`Impact: ${APPROVAL_REASON_TEXT[reason]}.`] : []),
     'Do not retry the same action. Take a different approach, or tell the user why this action is needed.',
   ].join(' ');

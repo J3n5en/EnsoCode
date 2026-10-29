@@ -836,6 +836,32 @@ describe('resolveApprovalReviewer', () => {
     expect(off.ok && off.source).not.toHaveProperty('managed');
   });
 
+  it('放行阈值只对分类器代审下发，非 0.9 档才带；非法值按 0.9', () => {
+    const withThreshold = (reviewer: { providerId: string; modelId: string }, value: unknown) => {
+      settingsMock.value = {
+        'enso-settings': {
+          state: {
+            providers: [jev, chat],
+            approvalReviewer: reviewer,
+            approvalAllowThreshold: value,
+          },
+        },
+      };
+      return resolveApprovalReviewer(new Set());
+    };
+    const jevRef = { providerId: 'jev', modelId: 'jev-latest' };
+    expect(withThreshold(jevRef, 0.85)).toMatchObject({
+      ok: true,
+      source: { allowThreshold: 0.85 },
+    });
+    for (const value of [0.9, 0.5, '0.85', undefined]) {
+      const result = withThreshold(jevRef, value);
+      expect(result.ok && result.source).not.toHaveProperty('allowThreshold');
+    }
+    const chatSource = withThreshold({ providerId: 'chat', modelId: 'chat-model' }, 0.95);
+    expect(chatSource.ok && chatSource.source).not.toHaveProperty('allowThreshold');
+  });
+
   it('分类器缺 key 或停用时明确失败，不回退聊天模型', () => {
     for (const provider of [
       { ...jev, apiKey: '' },

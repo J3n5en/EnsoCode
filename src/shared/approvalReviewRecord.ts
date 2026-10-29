@@ -1,3 +1,17 @@
+/** 分类器代审放行阈值只给三档；拦截阈值固定 0.9 不开放 */
+export const APPROVAL_ALLOW_THRESHOLDS = [0.85, 0.9, 0.95] as const;
+export type ApprovalAllowThreshold = (typeof APPROVAL_ALLOW_THRESHOLDS)[number];
+export const DEFAULT_APPROVAL_ALLOW_THRESHOLD: ApprovalAllowThreshold = 0.9;
+
+export function isApprovalAllowThreshold(value: unknown): value is ApprovalAllowThreshold {
+  return (APPROVAL_ALLOW_THRESHOLDS as readonly unknown[]).includes(value);
+}
+
+/** 配置里读到三档以外的值一律按 0.9 */
+export function parseApprovalAllowThreshold(value: unknown): ApprovalAllowThreshold {
+  return isApprovalAllowThreshold(value) ? value : DEFAULT_APPROVAL_ALLOW_THRESHOLD;
+}
+
 /** 托管代审理由的固定分类：只用于展示与交回模型，不参与判定 */
 export const APPROVAL_REVIEW_REASONS = [
   'read_only',

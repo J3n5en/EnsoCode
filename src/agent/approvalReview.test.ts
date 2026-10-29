@@ -265,6 +265,33 @@ describe('buildApprovalClassifierRequest', () => {
   });
 });
 
+describe('放行阈值可选档位', () => {
+  const choice = (allow: number) => ({
+    type: 'choice',
+    choice: 'allow',
+    probabilities: { allow, ask: 1 - allow, block: 0 },
+    confidence: 1,
+  });
+  const managed = (allow: number) => ({ decision: choice(allow) });
+
+  it('0.85 档：0.86 放行，0.84 非托管问人、托管拒绝', () => {
+    expect(decideFromApprovalClassifier(choice(0.86), 0.85).decision).toBe('auto_allow');
+    expect(decideFromApprovalClassifier(choice(0.84), 0.85).decision).toBe('ask_user');
+    expect(decideManagedApproval(managed(0.86), 'jev', 0.85).decision).toBe('auto_allow');
+    const denied = decideManagedApproval(managed(0.84), 'jev', 0.85);
+    expect(denied.decision).toBe('deny');
+    expect(denied.decision === 'deny' && denied.message).toContain('allow >= 0.85');
+  });
+
+  it('非法阈值按 0.9；拦截阈值固定 0.9 不随放行档位变化', () => {
+    expect(decideFromApprovalClassifier(choice(0.86), 0.5).decision).toBe('ask_user');
+    expect(decideManagedApproval(managed(0.86), 'jev', 0.5).decision).toBe('deny');
+    expect(decideFromApprovalClassifier(choice(0.92), 0.95).decision).toBe('ask_user');
+    const block = { ...choice(0), probabilities: { allow: 0.05, ask: 0.07, block: 0.88 } };
+    expect(decideFromApprovalClassifier(block, 0.85).decision).toBe('ask_user');
+  });
+});
+
 describe('decideManagedApproval（托管）', () => {
   const answers = (probabilities: Record<string, unknown>, reason?: string) => ({
     decision: { type: 'choice', choice: 'allow', probabilities, confidence: 1 },

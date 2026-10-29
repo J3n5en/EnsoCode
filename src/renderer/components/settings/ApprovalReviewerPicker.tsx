@@ -1,7 +1,18 @@
+import {
+  APPROVAL_ALLOW_THRESHOLDS,
+  parseApprovalAllowThreshold,
+} from '@shared/approvalReviewRecord';
 import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { useMemo } from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import {
@@ -17,6 +28,15 @@ export function ApprovalReviewerPicker() {
   const setModel = useSettingsStore((state) => state.setApprovalReviewer);
   const autoManage = useSettingsStore((state) => state.approvalAutoManage);
   const setAutoManage = useSettingsStore((state) => state.setApprovalAutoManage);
+  const allowThreshold = parseApprovalAllowThreshold(
+    useSettingsStore((state) => state.approvalAllowThreshold)
+  );
+  const setAllowThreshold = useSettingsStore((state) => state.setApprovalAllowThreshold);
+  const thresholdItems: Record<string, string> = {
+    '0.85': t('0.85 (looser)'),
+    '0.9': t('0.9 (default)'),
+    '0.95': t('0.95 (stricter)'),
+  };
   const chatProviders = useUsableProviders();
   const classifierProviders = useUsableClassifierProviders();
   const candidates = useMemo(
@@ -75,6 +95,30 @@ export function ApprovalReviewerPicker() {
               onCheckedChange={setAutoManage}
             />
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm">{t('Auto-allow threshold')}</span>
+            <Select
+              items={thresholdItems}
+              value={String(allowThreshold)}
+              onValueChange={(value) => setAllowThreshold(Number(value))}
+            >
+              <SelectTrigger className="w-36" aria-label={t('Auto-allow threshold')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {APPROVAL_ALLOW_THRESHOLDS.map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {thresholdItems[String(value)]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'Only runs automatically when the allow probability reaches this value. Operations near the threshold may be allowed one time and not the next.'
+            )}
+          </p>
         </>
       )}
       {model && (!selectedProvider || !selectedModel) && (

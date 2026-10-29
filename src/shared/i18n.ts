@@ -428,6 +428,12 @@ export const zhTranslations: Record<string, string> = {
     '决策模型只在把握很高时才自动放行或拦截，其余都交给你审批。',
   'The assistant approval classifier is unavailable.': '助手代审的决策模型不可用。',
   'Auto-manage approvals': '全自动托管',
+  'Auto-allow threshold': '自动放行阈值',
+  '0.85 (looser)': '0.85（偏松）',
+  '0.9 (default)': '0.9（默认）',
+  '0.95 (stricter)': '0.95（偏严）',
+  'Only runs automatically when the allow probability reaches this value. Operations near the threshold may be allowed one time and not the next.':
+    '放行概率达到该值才自动执行。概率在阈值附近的操作，可能这次放行、下次不放行。',
   'Auto-managed: runs only when the decision model is highly confident it is safe. Everything else is denied and the agent tries another way. Protected actions still ask you.':
     '托管中：只有决策模型高度确信安全的操作才会执行，其余直接拒绝，由 AI 换一种做法继续。受保护操作仍会问你。',
   'Auto-managed · allowed': '托管 · 已放行',

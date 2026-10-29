@@ -2,6 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
+import {
+  type ApprovalAllowThreshold,
+  DEFAULT_APPROVAL_ALLOW_THRESHOLD,
+  parseApprovalAllowThreshold,
+} from '@shared/approvalReviewRecord';
 import { normalizeAutoRetryLimit } from '@shared/autoRetry';
 import {
   type AgentTypeKey,
@@ -1875,7 +1880,11 @@ function asModelRef(value: unknown): DefaultModelRef | null {
 
 export type ApprovalReviewerSource =
   | { model: SpawnModelConfig }
-  | { classifier: VirtualClassifierCredentials; managed?: true };
+  | {
+      classifier: VirtualClassifierCredentials;
+      managed?: true;
+      allowThreshold?: ApprovalAllowThreshold;
+    };
 
 /** 代审来源：分类器专用供应商（如 Jev）走分类器，其余按聊天模型解析 */
 export function resolveApprovalReviewer(
@@ -1886,9 +1895,18 @@ export function resolveApprovalReviewer(
   const provider = providersFromSettings().find((item) => item.id === ref.providerId);
   if (provider && isClassifierOnlyProvider(provider)) {
     const classifier = classifierCredentialsFor(provider, ref.modelId, authenticatedAccountKeys);
-    const managed = readSettingsState()?.approvalAutoManage === true;
+    const state = readSettingsState();
+    const managed = state?.approvalAutoManage === true;
+    const allowThreshold = parseApprovalAllowThreshold(state?.approvalAllowThreshold);
     return classifier
-      ? { ok: true, source: { classifier, ...(managed ? { managed: true as const } : {}) } }
+      ? {
+          ok: true,
+          source: {
+            classifier,
+            ...(managed ? { managed: true as const } : {}),
+            ...(allowThreshold === DEFAULT_APPROVAL_ALLOW_THRESHOLD ? {} : { allowThreshold }),
+          },
+        }
       : { ok: false, error: 'The assistant approval classifier is unavailable.' };
   }
   const resolved = resolveModelSelection(ref.providerId, ref.modelId, authenticatedAccountKeys);
@@ -1904,6 +1922,9 @@ function approvalReviewerSpawnFields(source: ApprovalReviewerSource | null | und
     : {
         approvalReviewerClassifier: source.classifier,
         ...(source.managed ? { approvalReviewerManaged: true as const } : {}),
+        ...(source.allowThreshold === undefined
+          ? {}
+          : { approvalReviewerAllowThreshold: source.allowThreshold }),
       };
 }
 
@@ -1917,7 +1938,13 @@ export function pushApprovalReviewer(authenticatedAccountKeys?: ReadonlySet<stri
     ...(source
       ? 'model' in source
         ? { model: source.model }
-        : { classifier: source.classifier, ...(source.managed ? { managed: true as const } : {}) }
+        : {
+            classifier: source.classifier,
+            ...(source.managed ? { managed: true as const } : {}),
+            ...(source.allowThreshold === undefined
+              ? {}
+              : { allowThreshold: source.allowThreshold }),
+          }
       : {}),
   } satisfies AgentCommand);
 }

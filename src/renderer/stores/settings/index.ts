@@ -1,4 +1,5 @@
 import { type AccentColor, DEFAULT_ACCENT_COLOR, resolveAccentColor } from '@shared/accentColor';
+import { parseApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { DEFAULT_AUTO_RETRY_LIMIT, normalizeAutoRetryLimit } from '@shared/autoRetry';
 import {
   DEFAULT_BOT_MAX_RUNNING_TURNS,
@@ -237,6 +238,7 @@ const initialState = {
   memoryLanguage: 'en',
   approvalReviewer: null as import('@shared/defaultModel').DefaultModelRef | null,
   approvalAutoManage: false,
+  approvalAllowThreshold: 0.9,
   lastApprovalMode: null as import('@shared/types/agent').ApprovalMode | null,
   defaultReasoningEnabled: true,
   defaultThinkingLevel: 'medium' as import('@shared/types/agent').ThinkingLevel,
@@ -493,6 +495,8 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryLanguage: (memoryLanguage) => set({ memoryLanguage }),
       setApprovalReviewer: (approvalReviewer) => set({ approvalReviewer }),
       setApprovalAutoManage: (approvalAutoManage) => set({ approvalAutoManage }),
+      setApprovalAllowThreshold: (threshold) =>
+        set({ approvalAllowThreshold: parseApprovalAllowThreshold(threshold) }),
       setLastApprovalMode: (lastApprovalMode) => set({ lastApprovalMode }),
 
       revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => {

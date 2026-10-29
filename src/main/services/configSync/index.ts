@@ -172,6 +172,10 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     mode: 'excluded',
     reason: 'device-local opt-in to skip human approval prompts',
   },
+  approvalAllowThreshold: {
+    mode: 'excluded',
+    reason: 'device-local assistant approval risk preference',
+  },
   lastApprovalMode: { mode: 'excluded', reason: 'last session choice' },
   defaultReasoningEnabled: { mode: 'portable' },
   defaultThinkingLevel: { mode: 'portable' },

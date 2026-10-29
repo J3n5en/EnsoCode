@@ -20,6 +20,7 @@ import {
   SessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
 import {
   type ChildSessionIdentity,
@@ -1284,7 +1285,8 @@ export class SessionSupervisor {
       this.approvalReviewer = approvalReviewerSource(
         command.model,
         command.classifier,
-        command.managed
+        command.managed,
+        command.allowThreshold
       );
       return;
     }
@@ -1459,7 +1461,8 @@ export class SessionSupervisor {
           approvalReviewerSource(
             command.approvalReviewer,
             command.approvalReviewerClassifier,
-            command.approvalReviewerManaged
+            command.approvalReviewerManaged,
+            command.approvalReviewerAllowThreshold
           ),
           command.agentTypes,
           command.disabledTools,
@@ -1716,7 +1719,8 @@ export class SessionSupervisor {
         this.approvalReviewer = approvalReviewerSource(
           command.model,
           command.classifier,
-          command.managed
+          command.managed,
+          command.allowThreshold
         );
         return;
       case 'ask-respond':
@@ -4712,7 +4716,7 @@ export class SessionSupervisor {
       return { decision: 'ask_user', rationale: 'No approval reviewer model is configured.' };
     }
     if ('classifier' in source) {
-      return this.classifyApproval(source.classifier, source.managed === true, info, signal);
+      return this.classifyApproval(source, info, signal);
     }
     const reviewer = source.model;
     const actionHash = computeApprovalActionHash({
@@ -4778,11 +4782,12 @@ export class SessionSupervisor {
    * 托管：allow 达阈值放行，其余只拒这一条并交回模型；判定无效时退回人工并标明原因。
    */
   private async classifyApproval(
-    credentials: VirtualClassifierCredentials,
-    managed: boolean,
+    source: Extract<ApprovalReviewerSource, { classifier: unknown }>,
     info: import('@shared/types/agent').ApprovalRequestInfo,
     signal: AbortSignal | undefined
   ): Promise<ApprovalReviewResult> {
+    const { classifier: credentials, allowThreshold } = source;
+    const managed = source.managed === true;
     const timeout = AbortSignal.timeout(APPROVAL_REVIEW_TIMEOUT_MS);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     try {
@@ -4809,8 +4814,8 @@ export class SessionSupervisor {
         };
       }
       return managed
-        ? decideManagedApproval(result.answers, credentials.modelId)
-        : decideFromApprovalClassifier(result.answers.decision);
+        ? decideManagedApproval(result.answers, credentials.modelId, allowThreshold)
+        : decideFromApprovalClassifier(result.answers.decision, allowThreshold);
     } catch {
       return {
         decision: 'ask_user',
@@ -5430,13 +5435,23 @@ function collectSlashCommands(session: AgentSession): SlashCommand[] {
 
 type ApprovalReviewerSource =
   | { model: SpawnModelConfig }
-  | { classifier: VirtualClassifierCredentials; managed?: boolean };
+  | {
+      classifier: VirtualClassifierCredentials;
+      managed?: boolean;
+      allowThreshold?: ApprovalAllowThreshold;
+    };
 
 function approvalReviewerSource(
   model: SpawnModelConfig | undefined,
   classifier: VirtualClassifierCredentials | undefined,
-  managed: boolean | undefined
+  managed: boolean | undefined,
+  allowThreshold: ApprovalAllowThreshold | undefined
 ): ApprovalReviewerSource | undefined {
   if (model) return { model };
-  return classifier ? { classifier, ...(managed ? { managed: true } : {}) } : undefined;
+  if (!classifier) return undefined;
+  return {
+    classifier,
+    ...(managed ? { managed: true } : {}),
+    ...(allowThreshold === undefined ? {} : { allowThreshold }),
+  };
 }
