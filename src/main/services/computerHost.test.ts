@@ -44,7 +44,11 @@ vi.mock('./computer/macPrivacySettings', () => ({
   openMacPrivacySettings: vi.fn(async () => {}),
 }));
 
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { desktopCapturer, systemPreferences } from 'electron';
+import { AppAuthorizer } from './computer/appAuthorization';
 import { FakeDesktopBackend } from './computer/fakeBackend';
 import { openMacPrivacySettings } from './computer/macPrivacySettings';
 import { ComputerOccupancy } from './computer/occupancy';
@@ -157,6 +161,10 @@ describe('ComputerHost', () => {
     await host.invoke('s1', 'run', {
       code: 'const w = await desktop.window("w1"); await w.press("Enter")',
     });
+    expect(events).toEqual([]);
+    await host.invoke('s1', 'run', {
+      code: 'const w = await desktop.window("w1"); await w.press("Enter", { delivery: "foreground" })',
+    });
     expect(events).toEqual(['show', 'hide']);
   });
 
@@ -206,26 +214,122 @@ describe('ComputerHost', () => {
     await expect(second).resolves.toMatchObject({ returnValue: 2 });
   });
 
-  it('桌面同一时刻只给一个 session，另一个排队等租约', async () => {
-    const host = new ComputerHost(() => new FakeDesktopBackend());
+  const twoApps = () => {
+    const backend = new FakeDesktopBackend();
+    backend.windowsList = [
+      { ...backend.windowsList[0] },
+      { id: 'w2', app: 'Notes', title: 'n', pid: 2, x: 0, y: 0, width: 200, height: 100 },
+    ];
+    return backend;
+  };
+  const clickThenWait = (id: string, label: string, ms: number) =>
+    `const w = await desktop.window("${id}"); await w.screenshot(); await w.click(1, 1); await wait(${ms}); return "${label}"`;
+
+  it('同一 app 串行：后来的 session 等前一个 run 结束才拿到该 app', async () => {
+    const host = new ComputerHost(twoApps);
     const order: string[] = [];
     const a = host
-      .invoke('a', 'run', { code: 'await wait(80); return "a"' })
+      .invoke('a', 'run', { code: clickThenWait('w1', 'a', 80) })
       .then((r) => order.push(String(r.returnValue)));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const b = host
-      .invoke('b', 'run', { code: 'return "b"' })
+      .invoke('b', 'run', { code: clickThenWait('w1', 'b', 0) })
       .then((r) => order.push(String(r.returnValue)));
     await Promise.all([a, b]);
     expect(order).toEqual(['a', 'b']);
   });
 
-  it('等租约超时给出明确错误，排队中可被中止', async () => {
-    const host = new ComputerHost(() => new FakeDesktopBackend(), undefined, { leaseWaitMs: 30 });
-    const a = host.invoke('a', 'run', { code: 'await wait(300); return 1' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await expect(host.invoke('b', 'run', { code: 'return 2' })).rejects.toThrow(/another session/i);
+  it('不同 app 并行；不碰任何 app 的 run 不排队', async () => {
+    const host = new ComputerHost(twoApps);
+    const order: string[] = [];
+    const a = host
+      .invoke('a', 'run', { code: clickThenWait('w1', 'a', 120) })
+      .then((r) => order.push(String(r.returnValue)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const b = host
+      .invoke('b', 'run', { code: clickThenWait('w2', 'b', 0) })
+      .then((r) => order.push(String(r.returnValue)));
+    const c = host
+      .invoke('c', 'run', { code: 'return "c"' })
+      .then((r) => order.push(String(r.returnValue)));
+    await Promise.all([a, b, c]);
+    expect(order.indexOf('b')).toBeLessThan(order.indexOf('a'));
+    expect(order.indexOf('c')).toBeLessThan(order.indexOf('a'));
+  });
+
+  it('前台接管全局互斥：不同 app 的前台输入也串行', async () => {
+    const host = new ComputerHost(twoApps);
+    const order: string[] = [];
+    const fg = (id: string, label: string, ms: number) =>
+      `const w = await desktop.window("${id}"); await w.press("a", { delivery: "foreground" }); await wait(${ms}); return "${label}"`;
+    const a = host
+      .invoke('a', 'run', { code: fg('w1', 'a', 80) })
+      .then((r) => order.push(String(r.returnValue)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const b = host
+      .invoke('b', 'run', { code: fg('w2', 'b', 0) })
+      .then((r) => order.push(String(r.returnValue)));
+    await Promise.all([a, b]);
+    expect(order).toEqual(['a', 'b']);
+  });
+
+  it('等租约超时给出明确错误并带上 app 名', async () => {
+    const host = new ComputerHost(twoApps, undefined, { leaseWaitMs: 30 });
+    const a = host.invoke('a', 'run', { code: clickThenWait('w1', 'a', 300) });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(host.invoke('b', 'run', { code: clickThenWait('w1', 'b', 0) })).rejects.toThrow(
+      /another session is using Safari/i
+    );
     await a;
+  });
+
+  it('app 授权被拒：动作不投递，错误回给模型', async () => {
+    const backend = new FakeDesktopBackend();
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');
+    const prompts: string[] = [];
+    const host = new ComputerHost(() => backend, undefined, {
+      authorizer: new AppAuthorizer({
+        file,
+        prompt: async (app) => {
+          prompts.push(app.bundleId);
+          return 'deny';
+        },
+      }),
+    });
+    await expect(
+      host.invoke('s1', 'run', {
+        code: 'const w = await desktop.window("w1"); await w.screenshot(); await w.click(1, 1)',
+      })
+    ).rejects.toThrow(/not allowed computer control of Safari/);
+    expect(backend.clicks).toHaveLength(0);
+    expect(prompts).toEqual(['test.safari']);
+    // 截图与 AX 读取不需要授权
+    await expect(
+      host.invoke('s1', 'run', {
+        code: 'const w = await desktop.window("w1"); await w.screenshot(); return 1',
+      })
+    ).resolves.toMatchObject({ returnValue: 1 });
+  });
+
+  it('始终允许后名单可列出与撤销', async () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');
+    const host = new ComputerHost(() => new FakeDesktopBackend(), undefined, {
+      authorizer: new AppAuthorizer({ file, prompt: async () => 'always' }),
+    });
+    await host.invoke('s1', 'run', {
+      code: 'const w = await desktop.window("w1"); await w.screenshot(); await w.click(1, 1)',
+    });
+    expect(host.allowedApps().map((app) => app.bundleId)).toEqual(['test.safari']);
+    expect(host.revokeApp('test.safari')).toBe(true);
+    expect(host.allowedApps()).toEqual([]);
+  });
+
+  it('closeAll 收尾后端的合成焦点', async () => {
+    const backend = new FakeDesktopBackend();
+    const host = new ComputerHost(() => backend);
+    await host.invoke('s1', 'run', { code: 'return 1' });
+    host.closeAll();
+    expect(backend.releasedAll).toBeGreaterThan(0);
   });
 
   it('closeAll 中止所有 run 并释放 VM', async () => {

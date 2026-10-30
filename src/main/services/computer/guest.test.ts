@@ -55,7 +55,7 @@ describe('runComputerGuest', () => {
       target: 'w1',
       x: 20,
       y: 10,
-      delivery: 'foreground',
+      delivery: 'background',
     });
     expect(result.returnValue).toMatchObject({ clickSpace: 'w1', x: 10, y: 5 });
   });
@@ -228,7 +228,7 @@ describe('runComputerGuest', () => {
         ok: true,
         x: 10,
         y: 5,
-        delivery: 'foreground',
+        delivery: 'background',
         pixelsChanged: expect.any(Boolean),
       }),
       typed: expect.objectContaining({ ok: true, chars: 2 }),
@@ -584,16 +584,25 @@ describe('runComputerGuest 生命周期', () => {
     expect(result.text).toMatch(/truncated/);
   });
 
-  it('run 结束（含超时）都会调 backend.endRun 恢复临时系统状态', async () => {
+  it('用过前台输入的 run 结束（含超时）都会调 backend.endRun；纯后台 run 不去恢复别人的前台状态', async () => {
     const backend = new FakeDesktopBackend();
     let ended = 0;
     backend.endRun = async () => {
       ended += 1;
     };
     await run('return 1', { backend });
+    await run(`const w = await desktop.window('w1'); await w.type('x')`, { backend });
+    expect(ended).toBe(0);
+    await run(
+      `const w = await desktop.window('w1'); await w.type('x', { delivery: 'foreground' })`,
+      {
+        backend,
+      }
+    );
+    expect(ended).toBe(1);
     await expect(
       runComputerGuest({
-        code: 'for (;;) await wait(20);',
+        code: `const w = await desktop.window('w1'); await w.press('a', { delivery: 'foreground' }); for (;;) await wait(20);`,
         readOnly: false,
         timeoutMs: 60,
         backend,
@@ -637,8 +646,26 @@ describe('投递方式与桌面接管', () => {
     return [click.delivery, typed.delivery, pressed.delivery];
   `;
 
-  it('默认前台接管；显式 background 不接管', async () => {
+  it('支持后台投递时缺省走后台，不接管桌面；显式 foreground 才接管', async () => {
     const backend = new FakeDesktopBackend();
+    const occupancy = tracker();
+    const result = await runWith(script, backend, occupancy);
+    expect(result.returnValue).toEqual(['background', 'background', 'background']);
+    expect(occupancy.calls).toEqual([]);
+    expect(backend.raised).toEqual([]);
+    const loud = tracker();
+    await runWith(
+      `const w = await desktop.window('w1'); await w.screenshot(); return (await w.click(1, 1, { delivery: 'foreground' })).delivery`,
+      backend,
+      loud
+    );
+    expect(backend.clicks.at(-1)?.delivery).toBe('foreground');
+    expect(loud.calls).toEqual(['begin', 'end']);
+  });
+
+  it('平台不支持后台投递时缺省前台接管；显式 background 不接管', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.backgroundInput = false;
     const occupancy = tracker();
     const result = await runWith(script, backend, occupancy);
     expect(result.returnValue).toEqual(['foreground', 'foreground', 'foreground']);
@@ -653,8 +680,82 @@ describe('投递方式与桌面接管', () => {
     expect(quiet.calls).toEqual([]);
   });
 
+  it('动作前先经宿主授权/加锁：窗口动作带 target 与投递方式，AX 写操作带 ref', async () => {
+    const backend = new FakeDesktopBackend();
+    const requests: unknown[] = [];
+    await runComputerGuest({
+      code: `const w = await desktop.window('w1'); await w.screenshot(); await w.click(1, 1); await w.type('x', { delivery: 'foreground' }); const [el] = await w.find({ title: 'Save' }); await el.setValue('v'); await el.press();`,
+      readOnly: false,
+      timeoutMs: 10_000,
+      backend,
+      session: createComputerGuestSession(),
+      settleMs: 0,
+      access: async (request) => {
+        requests.push(request);
+      },
+    });
+    expect(requests).toEqual([
+      { target: 'w1', delivery: 'background' },
+      { target: 'w1', delivery: 'foreground' },
+      { ref: expect.stringMatching(/^e\d+$/), delivery: 'background' },
+      { ref: expect.stringMatching(/^e\d+$/), delivery: 'background' },
+    ]);
+  });
+
+  it('等授权/等租约的时间不计入 run 预算', async () => {
+    const backend = new FakeDesktopBackend();
+    const result = await runComputerGuest({
+      code: `const w = await desktop.window('w1'); await w.type('x'); return 'done'`,
+      readOnly: false,
+      timeoutMs: 80,
+      backend,
+      session: createComputerGuestSession(),
+      settleMs: 0,
+      access: () => new Promise((resolve) => setTimeout(resolve, 200)),
+    });
+    expect(result.returnValue).toBe('done');
+  });
+
+  it('授权被拒时动作不投递', async () => {
+    const backend = new FakeDesktopBackend();
+    await expect(
+      runComputerGuest({
+        code: `const w = await desktop.window('w1'); await w.type('secret')`,
+        readOnly: false,
+        timeoutMs: 10_000,
+        backend,
+        session: createComputerGuestSession(),
+        settleMs: 0,
+        access: async () => {
+          throw new Error('The user has not allowed computer control of Safari');
+        },
+      })
+    ).rejects.toThrow(/not allowed/);
+    expect(backend.inputs).toEqual([]);
+  });
+
+  it('后台指针动作给出可视反馈，前台与键盘不给', async () => {
+    const backend = new FakeDesktopBackend();
+    const pointers: string[] = [];
+    await runComputerGuest({
+      code: `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 5); await w.scroll(10, 5, 0, 3); await w.type('x'); await w.click(10, 5, { delivery: 'foreground' });`,
+      readOnly: false,
+      timeoutMs: 10_000,
+      backend,
+      session: createComputerGuestSession(),
+      settleMs: 0,
+      feedback: {
+        pointer: (input) => {
+          pointers.push(`${input.action}@${input.screenX},${input.screenY}`);
+        },
+      },
+    });
+    expect(pointers).toEqual(['click@20,10', 'scroll@20,10']);
+  });
+
   it('前台输入前先把目标窗口提到最前；已在最前则不动', async () => {
     const backend = new FakeDesktopBackend();
+    backend.backgroundInput = false;
     backend.windowsList[0] = { ...backend.windowsList[0], focused: false };
     await runWith(
       `const w = await desktop.window('w1'); await w.press('cmd+a'); await w.type('x')`,
@@ -666,6 +767,7 @@ describe('投递方式与桌面接管', () => {
 
   it('目标窗口提不到最前时不发送输入，免得打进用户正在用的 App', async () => {
     const backend = new FakeDesktopBackend();
+    backend.backgroundInput = false;
     backend.windowsList[0] = { ...backend.windowsList[0], focused: false };
     backend.raiseFails = true;
     await expect(

@@ -10,6 +10,26 @@ import {
 import { StaleRefError } from './errors';
 
 describe('AxRegistry', () => {
+  it('同一 target 下同一句柄跨代复用同一 ref，并随新一代续命', () => {
+    const registry = new AxRegistry<string>();
+    const g1 = registry.beginSnapshot('w1');
+    const a1 = registry.register('w1', g1, 'A');
+    const g2 = registry.beginSnapshot('w1');
+    expect(registry.register('w1', g2, 'A')).toBe(a1);
+    const g3 = registry.beginSnapshot('w1');
+    expect(registry.register('w1', g3, 'A')).toBe(a1);
+    registry.beginSnapshot('w1');
+    // 第 3 代仍在两代窗口内，ref 不过期
+    expect(registry.resolve(a1)).toBe('A');
+  });
+
+  it('不同 target 的同一句柄各自登记', () => {
+    const registry = new AxRegistry<string>();
+    const a = registry.register('w1', registry.beginSnapshot('w1'), 'A');
+    const b = registry.register('desktop', registry.beginSnapshot('desktop'), 'A');
+    expect(a).not.toBe(b);
+  });
+
   it('新 snapshot 作废更早一代，当前与上一世代仍可解析', () => {
     const registry = new AxRegistry<string>();
     const g1 = registry.beginSnapshot('w1');

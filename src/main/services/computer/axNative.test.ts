@@ -13,6 +13,41 @@ function table(epoch = 'e1') {
 }
 
 describe('AxHandleTable', () => {
+  it('提供元素身份时，同 scope 相等元素跨代复用句柄且不重复 retain', () => {
+    const retained: string[] = [];
+    const released: string[] = [];
+    const handles = new AxHandleTable<string>('k1', {
+      retain: (value) => retained.push(value),
+      release: (value) => released.push(value),
+      hash: (value) => value.toLowerCase().charCodeAt(0),
+      equals: (a, b) => a.toLowerCase() === b.toLowerCase(),
+    });
+    const first = handles.add('A', handles.begin('pid:1'));
+    const second = handles.add('a', handles.begin('pid:1'));
+    expect(second).toBe(first);
+    expect(retained).toEqual(['A']);
+    handles.begin('pid:1');
+    // 第 2 代续命：第 3 代时仍在两代窗口内
+    expect(released).toEqual([]);
+    handles.begin('pid:1');
+    expect(released).toEqual(['A']);
+    expect(handles.size).toBe(0);
+  });
+
+  it('不同 scope 不复用；没有身份函数时保持每次新句柄', () => {
+    const { handles } = table();
+    const a = handles.add('A', handles.begin('pid:1'));
+    expect(handles.add('A', handles.begin('pid:1'))).not.toBe(a);
+    const withIdentity = new AxHandleTable<string>('k2', {
+      retain: () => {},
+      release: () => {},
+      hash: () => 1,
+      equals: (x, y) => x === y,
+    });
+    const p1 = withIdentity.add('A', withIdentity.begin('pid:1'));
+    expect(withIdentity.add('A', withIdentity.begin('desktop'))).not.toBe(p1);
+  });
+
   it('句柄带纪元并持有独立引用', () => {
     const { handles, retained } = table('k9');
     const scope = handles.begin('pid:1');

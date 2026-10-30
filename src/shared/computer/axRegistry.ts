@@ -43,6 +43,8 @@ export class AxRegistry<T> {
   private epoch: string | undefined;
   private readonly generations = new Map<string, number>();
   private readonly entries = new Map<number, Registered<T>>();
+  /** target → 句柄 → ref 序号：同一句柄（worker 已按元素身份去重）跨代保持同一 ref */
+  private readonly byHandle = new Map<string, Map<T, number>>();
 
   constructor(private readonly epochOf?: (handle: T) => string | undefined) {}
 
@@ -51,10 +53,16 @@ export class AxRegistry<T> {
     this.generations.set(target, generation);
     for (const [id, entry] of this.entries) {
       if (entry.targetKey === target && entry.generation + 1 < generation) {
-        this.entries.delete(id);
+        this.drop(id, entry);
       }
     }
     return generation;
+  }
+
+  private drop(id: number, entry: Registered<T>): void {
+    this.entries.delete(id);
+    const handles = this.byHandle.get(entry.targetKey);
+    if (handles?.get(entry.handle) === id) handles.delete(entry.handle);
   }
 
   register(target: string, generation: number, handle: T): string {
@@ -62,11 +70,23 @@ export class AxRegistry<T> {
     if (epoch !== undefined && epoch !== this.epoch) {
       this.epoch = epoch;
       for (const [id, entry] of this.entries) {
-        if (entry.epoch !== epoch) this.entries.delete(id);
+        if (entry.epoch !== epoch) this.drop(id, entry);
       }
+    }
+    const known = this.byHandle.get(target)?.get(handle);
+    const existing = known === undefined ? undefined : this.entries.get(known);
+    if (known !== undefined && existing && existing.epoch === epoch) {
+      existing.generation = Math.max(existing.generation, generation);
+      return `e${known}`;
     }
     const id = this.nextRef++;
     this.entries.set(id, { handle, targetKey: target, generation, epoch });
+    let handles = this.byHandle.get(target);
+    if (!handles) {
+      handles = new Map();
+      this.byHandle.set(target, handles);
+    }
+    handles.set(handle, id);
     return `e${id}`;
   }
 
@@ -88,6 +108,7 @@ export class AxRegistry<T> {
     this.epoch = undefined;
     this.generations.clear();
     this.entries.clear();
+    this.byHandle.clear();
   }
 
   private lookup(reference: string): Registered<T> {
@@ -95,7 +116,7 @@ export class AxRegistry<T> {
     const entry = id === null ? undefined : this.entries.get(id);
     if (!entry || id === null) throw new StaleRefError(reference);
     if (this.epochOf && entry.epoch !== this.epoch) {
-      this.entries.delete(id);
+      this.drop(id, entry);
       throw new StaleRefError(reference);
     }
     return entry;

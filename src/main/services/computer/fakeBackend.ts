@@ -1,7 +1,7 @@
 import { AxRegistry } from '@shared/computer/axRegistry';
 import type { AxTreeNode } from '@shared/computer/axTree';
 import type { ComputerCapabilities, ComputerWindowInfo } from '@shared/computer/types';
-import type { CaptureBytes, DesktopBackend, PointerOptions } from './backend';
+import type { CaptureBytes, DesktopBackend, PointerOptions, TargetApp } from './backend';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -13,7 +13,14 @@ export class FakeDesktopBackend implements DesktopBackend {
   readonly launches: string[] = [];
   readonly panes: string[] = [];
   clipboard = '';
+  /** 能力上报的后台投递；false 时 guest 缺省走前台接管 */
+  backgroundInput = true;
+  /** 每个 run 内各动作开始/结束的时间线，用于断言并行与串行 */
+  readonly timeline: string[] = [];
+  /** 动作耗时（毫秒），用于制造并发窗口 */
+  inputDelayMs = 0;
   endRun?: () => Promise<void>;
+  releasedAll = 0;
   private readonly registry = new AxRegistry<AxTreeNode>();
   windowsList: ComputerWindowInfo[] = [
     {
@@ -35,7 +42,7 @@ export class FakeDesktopBackend implements DesktopBackend {
       capture: true,
       input: true,
       ax: true,
-      backgroundInput: true,
+      backgroundInput: this.backgroundInput,
       clipboard: true,
       capturePermission: 'granted',
       inputPermission: 'granted',
@@ -69,7 +76,30 @@ export class FakeDesktopBackend implements DesktopBackend {
   raiseFails = false;
 
   async click(target: string, screenX: number, screenY: number, opts?: PointerOptions) {
+    this.timeline.push(`click:${target}:start`);
+    if (this.inputDelayMs > 0)
+      await new Promise((resolve) => setTimeout(resolve, this.inputDelayMs));
     this.clicks.push({ target, x: screenX, y: screenY, delivery: opts?.delivery });
+    this.timeline.push(`click:${target}:end`);
+  }
+
+  releaseAll(): void {
+    this.releasedAll += 1;
+  }
+
+  async appForTarget(target: string): Promise<TargetApp | null> {
+    const window = this.windowsList.find((item) => item.id === target);
+    if (!window?.pid) return null;
+    return {
+      pid: window.pid,
+      name: window.app,
+      bundleId: `test.${window.app.toLowerCase()}`,
+      path: `/Applications/${window.app}.app`,
+    };
+  }
+
+  async appForRef(ref: string): Promise<TargetApp | null> {
+    return this.appForTarget(this.registry.targetOf(ref));
   }
 
   async move(_target: string, _x: number, _y: number, opts?: PointerOptions) {

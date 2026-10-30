@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import type { AxTreeNode } from '@shared/computer/axTree';
-import type { ComputerWindowInfo } from '@shared/computer/types';
+import type { ComputerAppIdentity, ComputerWindowInfo } from '@shared/computer/types';
 import { AX_WORKER_TIMEOUT_MS } from './axWalkBudget';
 import type { AxWorkerRequest } from './axWorkerClient';
 import { createAxWorkerClient, spawnAxWorker } from './axWorkerClient';
@@ -10,6 +11,7 @@ import { decodeCfNumberAsFloat64, kCFNumberFloat64Type } from './cfNumber';
 import {
   macClickCount,
   macKeyForAsciiChar,
+  macModifierFlag,
   macModifierFlags,
   macMouseButton,
   pickEnglishLayoutIndex,
@@ -19,25 +21,57 @@ import { withMacWindowFocus } from './macWindowFocus';
 import {
   SKY_CLICK_UNAVAILABLE,
   type SkyClickEventStep,
+  type SkyMouseButton,
   skyClickCgEventType,
-  skyClickEventRecipe,
   skyLightActivationRecord,
+  skyMouseButtonNumber,
 } from './skyClick';
 import { isListedCgWindowLayer } from './windowSource';
+
+/** 后台窗口事件的落点：屏幕坐标与窗口内坐标（含标题栏）同时给出 */
+export interface SkyPoint {
+  screenX: number;
+  screenY: number;
+  windowX: number;
+  windowY: number;
+}
 
 export interface MacosNative {
   windows(): Promise<ComputerWindowInfo[]>;
   click(x: number, y: number, opts?: PointerOptions & { pid?: number }): Promise<void>;
-  skyClick(input: {
-    screenX: number;
-    screenY: number;
-    windowX: number;
-    windowY: number;
-    windowId: number;
+  /** SkyLight 私有通道是否可用（激活包与窗口事件都依赖它） */
+  skyAvailable(): boolean;
+  /** 系统真前台进程 */
+  frontPid(): number | undefined;
+  /** 合成激活：目标相信自己激活、该窗口为 key；不改变系统真前台 */
+  activateWindow(pid: number, windowId: number): void;
+  deactivateWindow(pid: number, windowId: number): void;
+  /** 把系统真前台交给 pid，只带它的最前窗口 */
+  setFrontProcess(pid: number): boolean;
+  /** pid 所属 app 的规范身份（realpath 后的 .app 与 bundle id） */
+  appIdentity(pid: number): ComputerAppIdentity | null;
+  /** 当前输入源是否为输入法（拼音等会截获合成按键），而非纯键盘布局 */
+  inputMethodActive(): boolean;
+  /** 按配方投递一串带窗口身份的鼠标事件到 pid；中途失败会补发抬起 */
+  skyPointer(input: {
     pid: number;
-    alreadyFront?: boolean;
-    count?: number;
+    windowId: number;
+    button: SkyMouseButton;
+    flags: number;
+    points: SkyPoint[];
+    steps: SkyClickEventStep[];
   }): Promise<void>;
+  skyScroll(input: {
+    pid: number;
+    windowId: number;
+    point: SkyPoint;
+    dx: number;
+    dy: number;
+    flags: number;
+  }): Promise<void>;
+  /** 键盘事件直投 pid（不经 HID，不切换系统输入法） */
+  pidKeyChord(pid: number, keys: string[]): Promise<void>;
+  pidTypeText(pid: number, text: string, opts?: { englishLayout?: boolean }): Promise<void>;
   move(x: number, y: number): Promise<void>;
   drag(points: Array<{ x: number; y: number }>): Promise<void>;
   scroll(x: number, y: number, dx: number, dy: number): Promise<void>;
@@ -60,6 +94,9 @@ export interface MacosNative {
   axPerform(handle: string, action: string): Promise<void>;
   axSetValue(handle: string, value: string): Promise<void>;
   axFocus(handle: string): Promise<void>;
+  axPid(handle: string): Promise<number | undefined>;
+  axEnable(pid: number, bundleId: string | undefined): Promise<{ changed: string[] }>;
+  axRestoreEnable(pid: number, attrs: string[]): Promise<void>;
 }
 
 let cached: Promise<MacosNative | null> | undefined;
@@ -93,6 +130,14 @@ async function load(): Promise<MacosNative | null> {
   const carbon = koffi.load('/System/Library/Frameworks/Carbon.framework/Carbon');
   const GetFrontProcess = carbon.func('GetFrontProcess', 'int32', ['void *']);
   const GetProcessPID = carbon.func('GetProcessPID', 'int32', ['void *', 'void *']);
+  const GetProcessForPID = carbon.func('GetProcessForPID', 'int32', ['int32', 'void *']);
+  const SetFrontProcessWithOptions = carbon.func('SetFrontProcessWithOptions', 'int32', [
+    'void *',
+    'uint32',
+  ]);
+  const kSetFrontProcessFrontWindowOnly = 1;
+  const libSystem = koffi.load('/usr/lib/libSystem.B.dylib');
+  const procPidPath = libSystem.func('proc_pidpath', 'int', ['int', 'void *', 'uint32']);
 
   const CGPoint = koffi.struct('CGPoint', { x: 'double', y: 'double' });
   const CGEventCreateMouseEvent = cg.func('CGEventCreateMouseEvent', 'void *', [
@@ -103,6 +148,7 @@ async function load(): Promise<MacosNative | null> {
   ]);
   const CGEventPost = cg.func('CGEventPost', 'void', ['uint32', 'void *']);
   const CGEventPostToPid = cg.func('CGEventPostToPid', 'void', ['int32', 'void *']);
+  const CGEventSetLocation = cg.func('CGEventSetLocation', 'void', ['void *', CGPoint]);
   const CGEventSetIntegerValueField = cg.func('CGEventSetIntegerValueField', 'void', [
     'void *',
     'uint32',
@@ -133,12 +179,17 @@ async function load(): Promise<MacosNative | null> {
     carbon.symbol('kTISPropertyInputSourceID'),
     'void *'
   );
+  const kTISPropertyInputSourceType = koffi.decode(
+    carbon.symbol('kTISPropertyInputSourceType'),
+    'void *'
+  );
   const CGEventCreateKeyboardEvent = cg.func('CGEventCreateKeyboardEvent', 'void *', [
     'void *',
     'uint16',
     'bool',
   ]);
   const CGEventSetFlags = cg.func('CGEventSetFlags', 'void', ['void *', 'uint64']);
+  const CGEventSetType = cg.func('CGEventSetType', 'void', ['void *', 'uint32']);
   const CGEventKeyboardSetUnicodeString = cg.func('CGEventKeyboardSetUnicodeString', 'void', [
     'void *',
     'ulong',
@@ -191,6 +242,13 @@ async function load(): Promise<MacosNative | null> {
   const CFStringGetTypeID = cf.func('CFStringGetTypeID', 'ulong', []);
   const CFNumberGetTypeID = cf.func('CFNumberGetTypeID', 'ulong', []);
   const CFDictionaryGetTypeID = cf.func('CFDictionaryGetTypeID', 'ulong', []);
+  const CFURLCreateFromFileSystemRepresentation = cf.func(
+    'CFURLCreateFromFileSystemRepresentation',
+    'void *',
+    ['void *', 'void *', 'long', 'bool']
+  );
+  const CFBundleCreate = cf.func('CFBundleCreate', 'void *', ['void *', 'void *']);
+  const CFBundleGetIdentifier = cf.func('CFBundleGetIdentifier', 'void *', ['void *']);
   const AXUIElementCreateApplication = ax.func('AXUIElementCreateApplication', 'void *', ['int']);
   const axRefOut = koffi.out(koffi.pointer('void', 2));
   const AXUIElementCopyAttributeValue = ax.func('AXUIElementCopyAttributeValue', 'int', [
@@ -449,7 +507,6 @@ async function load(): Promise<MacosNative | null> {
     setIntegerField: (event: unknown, field: number, value: number) => void;
     setWindowLocation: (event: unknown, x: number, y: number) => void;
     postEventRecord: (psn: unknown, record: unknown) => number;
-    getProcessForPID: (pid: number, psn: unknown) => number;
   } | null = null;
   let slPostToPid: ((pid: number, event: unknown) => void) | undefined;
   try {
@@ -468,10 +525,6 @@ async function load(): Promise<MacosNative | null> {
       postEventRecord: sl.func('SLPSPostEventRecordTo', 'int32', ['void *', 'void *']) as (
         psn: unknown,
         record: unknown
-      ) => number,
-      getProcessForPID: carbon.func('GetProcessForPID', 'int32', ['int32', 'void *']) as (
-        pid: number,
-        psn: unknown
       ) => number,
     };
     try {
@@ -496,6 +549,158 @@ async function load(): Promise<MacosNative | null> {
       }
     }
     CGEventPostToPid(pid, event);
+  };
+
+  const psnFor = (pid: number): Buffer => {
+    const psn = Buffer.alloc(8);
+    const status = Number(GetProcessForPID(pid, psn));
+    if (status !== 0) throw new Error(`${SKY_CLICK_UNAVAILABLE}: PSN ${status}`);
+    return psn;
+  };
+  const frontPid = (): number | undefined => {
+    const psn = Buffer.alloc(8);
+    const pidBuffer = Buffer.alloc(4);
+    if (Number(GetFrontProcess(psn)) !== 0 || Number(GetProcessPID(psn, pidBuffer)) !== 0) return;
+    const pid = pidBuffer.readInt32LE();
+    return pid > 0 ? pid : undefined;
+  };
+  const postActivation = (pid: number, windowId: number, focused: boolean) => {
+    if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
+    const record = Buffer.from(skyLightActivationRecord(windowId, focused));
+    const status = Number(sky.postEventRecord(psnFor(pid), record));
+    if (status !== 0) throw new Error(`${SKY_CLICK_UNAVAILABLE}: focus ${status}`);
+  };
+  /** 窗口事件公共字段：40 目标 pid，51/91/92 窗口号，58 点击分组，7 事件来源 */
+  const tagSkyEvent = (
+    event: unknown,
+    input: { pid: number; windowId: number; windowX: number; windowY: number; groupId: number }
+  ) => {
+    if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
+    sky.setIntegerField(event, 7, 3);
+    sky.setIntegerField(event, 40, input.pid);
+    sky.setIntegerField(event, 51, input.windowId);
+    sky.setIntegerField(event, 58, input.groupId);
+    sky.setIntegerField(event, 91, input.windowId);
+    sky.setIntegerField(event, 92, input.windowId);
+    sky.setWindowLocation(event, input.windowX, input.windowY);
+  };
+  const readCfString = (ref: unknown): string => readString(ref);
+  const appIdentity = (pid: number): ComputerAppIdentity | null => {
+    const buf = Buffer.alloc(4096);
+    const length = Number(procPidPath(pid, buf, buf.length));
+    if (length <= 0) return null;
+    const executable = buf.toString('utf8', 0, length);
+    const inner = /^(.*?\.app)\/Contents\/MacOS\/[^/]+$/u.exec(executable);
+    const outer = /^(.*?\.app)(?:\/|$)/u.exec(executable);
+    const bundlePath = inner?.[1] ?? outer?.[1];
+    if (!bundlePath) return null;
+    let canonical: string;
+    try {
+      canonical = realpathSync(bundlePath);
+    } catch {
+      return null;
+    }
+    const pathBuf = Buffer.from(canonical, 'utf8');
+    const url = CFURLCreateFromFileSystemRepresentation(null, pathBuf, pathBuf.length, true);
+    let bundleId = '';
+    if (url) {
+      try {
+        const bundle = CFBundleCreate(null, url);
+        if (bundle) {
+          try {
+            bundleId = readCfString(CFBundleGetIdentifier(bundle));
+          } finally {
+            CFRelease(bundle);
+          }
+        }
+      } finally {
+        CFRelease(url);
+      }
+    }
+    const name =
+      canonical
+        .split('/')
+        .pop()
+        ?.replace(/\.app$/iu, '') ?? canonical;
+    return { bundleId, name, path: canonical };
+  };
+  const inputMethodActive = (): boolean => {
+    const now = TISCopyCurrentKeyboardInputSource();
+    if (!now) return false;
+    try {
+      return (
+        readString(TISGetInputSourceProperty(now, kTISPropertyInputSourceType)) !==
+        'TISTypeKeyboardLayout'
+      );
+    } finally {
+      CFRelease(now);
+    }
+  };
+  /** 后台输入的输入法处理：只在本次输入期间切到英文布局，输入被消费后立即切回 */
+  const withScopedEnglishLayout = async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (layoutRestore) return fn();
+    const current = TISCopyCurrentKeyboardInputSource();
+    const english = copyEnglishLayout();
+    let original: unknown = null;
+    try {
+      const target = english ? inputSourceId(english) : '';
+      if (
+        target &&
+        target !== inputSourceId(current) &&
+        Number(TISSelectInputSource(english)) === 0
+      ) {
+        original = current ? CFRetain(current) : null;
+        for (let i = 0; i < 20 && currentSourceId() !== target; i++) await sleep(25);
+        await sleep(80);
+      }
+    } finally {
+      if (english) CFRelease(english);
+      if (current) CFRelease(current);
+    }
+    try {
+      return await fn();
+    } finally {
+      if (original) {
+        await sleep(150);
+        try {
+          TISSelectInputSource(original);
+        } finally {
+          CFRelease(original);
+        }
+      }
+    }
+  };
+  const kCGEventFlagsChanged = 12;
+  const postPidFlags = (pid: number, code: number, flags: number) => {
+    const event = CGEventCreateKeyboardEvent(null, code, true);
+    if (!event) throw new Error('CGEventCreateKeyboardEvent failed');
+    try {
+      CGEventSetType(event, kCGEventFlagsChanged);
+      CGEventSetFlags(event, flags);
+      postToPidOnce(pid, event);
+    } finally {
+      CFRelease(event);
+    }
+  };
+  const postPidKey = (
+    pid: number,
+    code: number,
+    down: boolean,
+    flags: number,
+    unicode?: string
+  ) => {
+    const event = CGEventCreateKeyboardEvent(null, code, down);
+    if (!event) throw new Error('CGEventCreateKeyboardEvent failed');
+    try {
+      CGEventSetFlags(event, flags);
+      if (unicode) {
+        const units = Buffer.from(unicode, 'utf16le');
+        CGEventKeyboardSetUnicodeString(event, units.length / 2, units);
+      }
+      postToPidOnce(pid, event);
+    } finally {
+      CFRelease(event);
+    }
   };
 
   const raiseWindow = (pid: number, windowId: number, title: string) => {
@@ -594,44 +799,55 @@ async function load(): Promise<MacosNative | null> {
         postMouse(button.up, x, y, pid, extra);
       }
     },
-    async skyClick(input) {
-      if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
-      const skyApi = sky;
-      const count = input.count ?? 1;
-      const recipe = skyClickEventRecipe(count);
-      const psn = Buffer.alloc(8);
-      if (!input.alreadyFront) {
-        const status = Number(skyApi.getProcessForPID(input.pid, psn));
-        if (status !== 0) throw new Error(`${SKY_CLICK_UNAVAILABLE}: PSN ${status}`);
-        const activate = Buffer.from(skyLightActivationRecord(input.windowId, true));
-        const activateStatus = Number(skyApi.postEventRecord(psn, activate));
-        if (activateStatus !== 0)
-          throw new Error(`${SKY_CLICK_UNAVAILABLE}: focus ${activateStatus}`);
-        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+    skyAvailable: () => sky !== null,
+    frontPid,
+    activateWindow(pid, windowId) {
+      postActivation(pid, windowId, true);
+    },
+    deactivateWindow(pid, windowId) {
+      postActivation(pid, windowId, false);
+    },
+    setFrontProcess(pid) {
+      try {
+        return (
+          Number(SetFrontProcessWithOptions(psnFor(pid), kSetFrontProcessFrontWindowOnly)) === 0
+        );
+      } catch {
+        return false;
       }
-      const clickGroupId = Date.now() % 1_000_000_000;
+    },
+    appIdentity,
+    inputMethodActive,
+    async skyPointer(input) {
+      if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
+      const button = skyMouseButtonNumber(input.button);
+      const groupId = Date.now() % 1_000_000_000;
       const postStep = (step: SkyClickEventStep) => {
         const target = step.pointKind === 'target';
-        const screen = target ? { x: input.screenX, y: input.screenY } : { x: -1, y: -1 };
-        const windowPoint = target ? { x: input.windowX, y: input.windowY } : { x: -1, y: -1 };
+        const point = input.points[step.pointIndex ?? 0];
+        if (target && !point) throw new Error('sky pointer step has no point');
+        const screen = target ? { x: point.screenX, y: point.screenY } : { x: -1, y: -1 };
+        // primer 永远是左键 (-1,-1)，不落在任何控件上
+        const primer = !target;
         const event = CGEventCreateMouseEvent(
           null,
-          skyClickCgEventType(step.kind),
+          skyClickCgEventType(step.kind, primer ? 'left' : input.button),
           screen,
-          kCGMouseButtonLeft
+          primer ? kCGMouseButtonLeft : button
         );
         if (!event) throw new Error('CGEventCreateMouseEvent failed');
         try {
-          skyApi.setIntegerField(event, 0, step.phase);
-          skyApi.setIntegerField(event, 1, step.clickState);
-          skyApi.setIntegerField(event, 3, 0);
-          skyApi.setIntegerField(event, 7, 3);
-          skyApi.setIntegerField(event, 40, input.pid);
-          skyApi.setIntegerField(event, 51, input.windowId);
-          skyApi.setIntegerField(event, 58, clickGroupId);
-          skyApi.setIntegerField(event, 91, input.windowId);
-          skyApi.setIntegerField(event, 92, input.windowId);
-          skyApi.setWindowLocation(event, windowPoint.x, windowPoint.y);
+          sky?.setIntegerField(event, 0, step.phase);
+          sky?.setIntegerField(event, 1, step.clickState);
+          sky?.setIntegerField(event, 3, primer ? kCGMouseButtonLeft : button);
+          if (!primer && input.flags) CGEventSetFlags(event, input.flags);
+          tagSkyEvent(event, {
+            pid: input.pid,
+            windowId: input.windowId,
+            windowX: target ? point.windowX : -1,
+            windowY: target ? point.windowY : -1,
+            groupId,
+          });
           postToPidOnce(input.pid, event);
         } finally {
           CFRelease(event);
@@ -639,29 +855,102 @@ async function load(): Promise<MacosNative | null> {
       };
       let openDown: SkyClickEventStep | undefined;
       try {
-        for (const step of recipe) {
+        for (const step of input.steps) {
           postStep(step);
-          if (step.kind === 'down') openDown = step;
-          else if (step.kind === 'up') openDown = undefined;
-          if (step.delayAfterMs > 0) {
-            await new Promise<void>((resolve) => setTimeout(resolve, step.delayAfterMs));
+          if (step.pointKind === 'target') {
+            if (step.kind === 'down') openDown = step;
+            else if (step.kind === 'up') openDown = undefined;
+            else if (step.kind === 'dragged' && openDown)
+              openDown = { ...openDown, pointIndex: step.pointIndex };
           }
+          if (step.delayAfterMs > 0) await sleep(step.delayAfterMs);
         }
       } finally {
         if (openDown) {
           try {
             postStep({ ...openDown, kind: 'up', delayAfterMs: 0 });
           } catch {
-            // 尽力补发 mouseUp
+            // 尽力补发抬起，避免目标卡在按下状态
           }
         }
-        if (!input.alreadyFront) {
-          await new Promise<void>((resolve) => setTimeout(resolve, 100));
-          const deactivate = Buffer.from(skyLightActivationRecord(input.windowId, false));
-          skyApi.postEventRecord(psn, deactivate);
-          await new Promise<void>((resolve) => setTimeout(resolve, 40));
-        }
       }
+    },
+    async skyScroll(input) {
+      if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
+      const groupId = Date.now() % 1_000_000_000;
+      const { point } = input;
+      const moved = CGEventCreateMouseEvent(
+        null,
+        kCGEventMouseMoved,
+        { x: point.screenX, y: point.screenY },
+        kCGMouseButtonLeft
+      );
+      if (!moved) throw new Error('CGEventCreateMouseEvent failed');
+      try {
+        tagSkyEvent(moved, { ...input, windowX: point.windowX, windowY: point.windowY, groupId });
+        postToPidOnce(input.pid, moved);
+      } finally {
+        CFRelease(moved);
+      }
+      await sleep(10);
+      const event = createScrollEvent(Math.round(input.dy), Math.round(input.dx));
+      if (!event) throw new Error('CGEventCreateScrollWheelEvent failed');
+      try {
+        CGEventSetLocation(event, { x: point.screenX, y: point.screenY });
+        if (input.flags) CGEventSetFlags(event, input.flags);
+        tagSkyEvent(event, { ...input, windowX: point.windowX, windowY: point.windowY, groupId });
+        postToPidOnce(input.pid, event);
+      } finally {
+        CFRelease(event);
+      }
+    },
+    async pidKeyChord(pid, keys) {
+      const chord = splitMacChord(keys);
+      if (chord.modifiers.length + chord.keys.length === 0) throw new Error('unmapped key chord');
+      // 直投进程时修饰键必须是 FlagsChanged 事件：作为 keyDown 投递，AppKit 会一直认为它按着
+      const held: number[] = [];
+      let flags = 0;
+      try {
+        for (const code of chord.modifiers) {
+          flags |= macModifierFlag(code);
+          postPidFlags(pid, code, flags);
+          held.push(code);
+          await sleep(4);
+        }
+        for (const code of chord.keys) {
+          postPidKey(pid, code, true, chord.flags);
+          await sleep(4);
+          postPidKey(pid, code, false, chord.flags);
+          await sleep(4);
+        }
+      } finally {
+        for (const code of held.reverse()) {
+          flags &= ~macModifierFlag(code);
+          try {
+            postPidFlags(pid, code, flags);
+          } catch {
+            // 尽力释放修饰键
+          }
+        }
+        await sleep(20);
+      }
+    },
+    async pidTypeText(pid, text, opts) {
+      if (!text) return;
+      const send = async () => {
+        for (const char of text) {
+          const mapped = macKeyForAsciiChar(char);
+          // 键码给出物理键（e.code），Unicode 串给出字符：不依赖当前布局
+          const control = char === '\n' || char === '\r' || char === '\t';
+          const code = mapped?.code ?? 0;
+          const flags = mapped?.flags ?? 0;
+          postPidKey(pid, code, true, flags, control ? undefined : char);
+          postPidKey(pid, code, false, flags, control ? undefined : char);
+          await sleep(3);
+        }
+      };
+      if (opts?.englishLayout) await withScopedEnglishLayout(send);
+      else await send();
     },
     async move(x, y) {
       postMouse(kCGEventMouseMoved, x, y);
@@ -788,6 +1077,22 @@ async function load(): Promise<MacosNative | null> {
     },
     async axFocus(handle) {
       await axCall({ op: 'focus', handle });
+    },
+    async axPid(handle) {
+      const pid = await axCall({ op: 'pid', handle });
+      return typeof pid === 'number' && pid > 0 ? pid : undefined;
+    },
+    async axEnable(pid, bundleId) {
+      const result = (await axCall({ op: 'enable', pid, ...(bundleId ? { bundleId } : {}) })) as {
+        changed?: unknown;
+      } | null;
+      const changed = Array.isArray(result?.changed)
+        ? result.changed.filter((item): item is string => typeof item === 'string')
+        : [];
+      return { changed };
+    },
+    async axRestoreEnable(pid, attrs) {
+      await axCall({ op: 'restoreEnable', pid, attrs });
     },
   };
 }
