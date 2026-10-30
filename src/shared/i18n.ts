@@ -1530,7 +1530,7 @@ export const zhTranslations: Record<string, string> = {
   'No memories match these filters.': '没有符合当前筛选条件的记忆。',
   'Type a query to search by meaning.': '输入关键词后按语义检索。',
   Crystal: '结晶',
-  '{{count}} hits': '命中 {{count}} 次',
+  'Retrieved {{count}} times': '被检索 {{count}} 次',
   Previous: '上一页',
   'Needs review': '待审阅',
   'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.':

@@ -119,6 +119,14 @@ describe('memory admin — 语义搜索模式', () => {
     expect(exact.items.map((i) => i.id)).toEqual([literal.id]);
   });
 
+  it('列表项带被检索次数（appearances），不用从不写入的 access_count（#169）', async () => {
+    const m = await add('Redis 缓存策略');
+    db.prepare('UPDATE memories SET appearances = 7 WHERE id = ?').run(m.id);
+    const [item] = listMemoriesForAdmin(db, { limit: 10, offset: 0 }).items;
+    expect(item).toMatchObject({ id: m.id, appearances: 7 });
+    expect(item).not.toHaveProperty('accessCount');
+  });
+
   it('空查询不跑检索；unitType 在结果上后过滤', async () => {
     await add('Postgres 主库决策');
     expect(

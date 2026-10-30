@@ -56,7 +56,7 @@ function toListItem(memory: Memory): MemoryListItem {
     lifecycleState: memory.lifecycleState,
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
-    accessCount: memory.accessCount,
+    appearances: memory.appearances,
   };
 }
 

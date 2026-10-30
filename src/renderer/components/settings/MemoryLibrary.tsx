@@ -119,7 +119,7 @@ export function MemoryRows({
             </span>
             <span className="block text-muted-foreground text-xs">
               {formatDate(item.updatedAt)} · {item.spaceLabel} ·{' '}
-              {t('{{count}} hits', { count: String(item.accessCount) })}
+              {t('Retrieved {{count}} times', { count: String(item.appearances) })}
             </span>
           </button>
         </li>

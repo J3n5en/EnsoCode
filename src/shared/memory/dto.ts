@@ -19,7 +19,8 @@ export interface MemoryListItem {
   lifecycleState: MemoryLifecycleState;
   createdAt: string;
   updatedAt: string;
-  accessCount: number;
+  /** 被检索返回的次数；不代表被真正用上 */
+  appearances: number;
 }
 
 export interface EvolvesEdgeDto {

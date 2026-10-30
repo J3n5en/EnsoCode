@@ -70,7 +70,7 @@ function item(overrides: Partial<MemoryListItem> = {}): MemoryListItem {
     lifecycleState: 'active',
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
-    accessCount: 3,
+    appearances: 3,
     ...overrides,
   };
 }
@@ -449,7 +449,8 @@ describe('MemoryRows', () => {
     expect(html).toContain('★');
     expect(html).toContain('Archived');
     expect(html).toContain('Retrieval fuses three channels');
-    expect(html).toContain('3 hits');
+    expect(html).toContain('Retrieved 3 times');
+    expect(html).not.toContain('hits');
     expect(html).toContain('decision');
   });
 

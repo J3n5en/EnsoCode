@@ -366,6 +366,8 @@ export async function searchMemories(
   fused.forEach(([id, rrfScore], i) => {
     const memory = byId.get(id);
     if (!memory) return;
+    // last_accessed_at 只在创建时写入、access_count 从不写：衰减实际按创建时间算，访问频率一项恒为 0（#169）。
+    // 不把「被检索返回」记成访问：会形成越排越前的正反馈，自动召回也会把次数刷虚
     const decay = computeDecayScore({
       lastAccessedAt: memory.lastAccessedAt,
       accessCount: memory.accessCount,
