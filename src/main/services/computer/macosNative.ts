@@ -24,6 +24,7 @@ import {
   type SkyMouseButton,
   skyClickCgEventType,
   skyLightActivationRecord,
+  skyLightKeyWindowRecords,
   skyMouseButtonNumber,
 } from './skyClick';
 import { isListedCgWindowLayer } from './windowSource';
@@ -85,7 +86,7 @@ export interface MacosNative {
     target: string,
     query: { role?: string; title?: string; value?: string; description?: string; limit?: number }
   ): Promise<AxTreeNode[]>;
-  axElementAt(x: number, y: number): Promise<AxTreeNode | null>;
+  axElementAt(x: number, y: number, pid?: number): Promise<AxTreeNode | null>;
   axFocused(): Promise<AxTreeNode | null>;
   axNode(handle: string): Promise<AxTreeNode>;
   axAttributes(handle: string): Promise<Array<[string, string]>>;
@@ -564,11 +565,16 @@ async function load(): Promise<MacosNative | null> {
     const pid = pidBuffer.readInt32LE();
     return pid > 0 ? pid : undefined;
   };
-  const postActivation = (pid: number, windowId: number, focused: boolean) => {
+  const postRecord = (psn: Buffer, record: Uint8Array) => {
     if (!sky) throw new Error(SKY_CLICK_UNAVAILABLE);
-    const record = Buffer.from(skyLightActivationRecord(windowId, focused));
-    const status = Number(sky.postEventRecord(psnFor(pid), record));
+    const status = Number(sky.postEventRecord(psn, Buffer.from(record)));
     if (status !== 0) throw new Error(`${SKY_CLICK_UNAVAILABLE}: focus ${status}`);
+  };
+  const postActivation = (pid: number, windowId: number, focused: boolean) => {
+    const psn = psnFor(pid);
+    postRecord(psn, skyLightActivationRecord(windowId, focused));
+    // 激活后把目标窗口设为 key：否则键盘落在该 app 原来的 key 窗口（可能是别的文档）
+    if (focused) for (const record of skyLightKeyWindowRecords(windowId)) postRecord(psn, record);
   };
   /** 窗口事件公共字段：40 目标 pid，51/91/92 窗口号，58 点击分组，7 事件来源 */
   const tagSkyEvent = (
@@ -1051,8 +1057,13 @@ async function load(): Promise<MacosNative | null> {
         ...(query.description ? { description: query.description } : {}),
       })) as AxTreeNode[];
     },
-    async axElementAt(x, y) {
-      return (await axCall({ op: 'elementAt', x, y })) as AxTreeNode | null;
+    async axElementAt(x, y, pid) {
+      return (await axCall({
+        op: 'elementAt',
+        x,
+        y,
+        ...(pid ? { pid } : {}),
+      })) as AxTreeNode | null;
     },
     async axFocused() {
       return (await axCall({ op: 'focused' })) as AxTreeNode | null;

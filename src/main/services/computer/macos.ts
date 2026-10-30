@@ -343,7 +343,8 @@ export class MacosDesktopBackend implements DesktopBackend {
     const count = macClickCount(opts?.count);
     const flags = macModifierFlags(opts?.modifiers);
     if (route === 'skyClick') {
-      const element = await this.rawElementAt(native, screenX, screenY);
+      await this.ensureAx(native, pid).catch(() => undefined);
+      const element = await this.rawElementAt(native, screenX, screenY, pid);
       const path = chooseClickPath({
         targetPid: pid,
         element,
@@ -382,10 +383,12 @@ export class MacosDesktopBackend implements DesktopBackend {
   private async rawElementAt(
     native: MacosNative,
     screenX: number,
-    screenY: number
+    screenY: number,
+    pid: number
   ): Promise<AxTreeNode | null> {
     try {
-      return await native.axElementAt(screenX, screenY);
+      // 按 app 命中：后台目标常被别的窗口盖住，系统级命中会落到遮挡它的 app
+      return await native.axElementAt(screenX, screenY, pid);
     } catch {
       return null;
     }

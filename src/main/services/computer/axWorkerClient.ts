@@ -17,7 +17,7 @@ export type AxWorkerRequest =
       description?: string;
       limit: number;
     }
-  | { op: 'elementAt'; x: number; y: number }
+  | { op: 'elementAt'; x: number; y: number; pid?: number }
   | { op: 'focused' }
   | { op: 'node'; handle: string }
   | { op: 'attributes'; handle: string }

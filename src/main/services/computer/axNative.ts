@@ -595,25 +595,36 @@ async function load(): Promise<AxJobBridge> {
         }
       });
     },
-    async elementAt(x, y) {
-      return withSystemWide((sys) => {
+    async elementAt(x, y, pid) {
+      const hit = (root: unknown) => {
         const out = [null];
-        const status = Number(AXUIElementCopyElementAtPosition(sys, x, y, out));
+        const status = Number(AXUIElementCopyElementAtPosition(root, x, y, out));
         const element = out[0];
         if (!element) return null;
         try {
           if (status !== 0 || !isLikelyCfPointer(element)) return null;
-          const pid = elementPid(element);
+          const owner = elementPid(element);
           const actions = readActionNames(element);
           return {
             ...describeNew(element, handles.begin(AX_DESKTOP_SCOPE)),
-            ...(pid ? { pid } : {}),
+            ...(owner ? { pid: owner } : {}),
             ...(actions.length > 0 ? { actions } : {}),
           };
         } finally {
           CFRelease(element);
         }
-      });
+      };
+      if (typeof pid === 'number' && pid > 0) {
+        const app = AXUIElementCreateApplication(pid);
+        if (!app) return null;
+        try {
+          AXUIElementSetMessagingTimeout(app, AX_MESSAGING_TIMEOUT_SEC);
+          return hit(app);
+        } finally {
+          CFRelease(app);
+        }
+      }
+      return withSystemWide(hit);
     },
     async focused() {
       return withSystemWide((sys) => {

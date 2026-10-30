@@ -161,6 +161,26 @@ export function skyLightActivationRecord(windowId: number, focused: boolean): Ui
   return record;
 }
 
+/**
+ * 让目标 app 把该窗口设为 key/main 而不提升层级（类型 0x01、0x02 两条，顺序固定）。
+ * 只发激活包时，AppKit 会把键盘交给它原来的 key 窗口，同 app 多窗口时会打进别的文档。
+ */
+export function skyLightKeyWindowRecords(windowId: number): [Uint8Array, Uint8Array] {
+  const make = (type: number) => {
+    const record = new Uint8Array(0xf8);
+    record[0x04] = 0xf8;
+    record[0x08] = type;
+    record[0x3a] = 0x10;
+    record.fill(0xff, 0x20, 0x30);
+    record[0x3c] = windowId & 0xff;
+    record[0x3d] = (windowId >> 8) & 0xff;
+    record[0x3e] = (windowId >> 16) & 0xff;
+    record[0x3f] = (windowId >> 24) & 0xff;
+    return record;
+  };
+  return [make(0x01), make(0x02)];
+}
+
 export function skyClickLocalPoint(
   screen: { x: number; y: number },
   bounds: { x: number; y: number; width: number; height: number }

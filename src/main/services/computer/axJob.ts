@@ -7,7 +7,8 @@ export type AxJobBridge = {
     pid: number,
     query: { role?: string; title?: string; value?: string; description?: string; limit?: number }
   ): Promise<AxTreeNode[]>;
-  elementAt(x: number, y: number): Promise<AxTreeNode | null>;
+  /** pid 给定时只在该 app 内命中（不受遮挡它的其它窗口影响） */
+  elementAt(x: number, y: number, pid?: number): Promise<AxTreeNode | null>;
   focused(): Promise<AxTreeNode | null>;
   node(handle: string): Promise<AxTreeNode>;
   attributes(handle: string): Promise<Array<[string, string]>>;
@@ -32,7 +33,7 @@ export async function dispatchAxJob(ax: AxJobBridge, request: AxWorkerRequest): 
     case 'query':
       return ax.query(request.pid, request);
     case 'elementAt':
-      return ax.elementAt(request.x, request.y);
+      return ax.elementAt(request.x, request.y, request.pid);
     case 'focused':
       return ax.focused();
     case 'node':

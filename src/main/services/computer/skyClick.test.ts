@@ -7,6 +7,7 @@ import {
   skyDragPath,
   skyDragRecipe,
   skyLightActivationRecord,
+  skyLightKeyWindowRecords,
   skyPointerClickRecipe,
 } from './skyClick';
 
@@ -128,6 +129,20 @@ describe('skyDragRecipe', () => {
 
   it('至少两个点', () => {
     expect(() => skyDragRecipe(1)).toThrow();
+  });
+});
+
+describe('skyLightKeyWindowRecords', () => {
+  it('两条 0xF8 记录（0x01 再 0x02），带窗口号、0x3a=0x10 与 0x20–0x2f 全 0xff', () => {
+    const records = skyLightKeyWindowRecords(0x01020304);
+    expect(records.map((record) => record[0x08])).toEqual([0x01, 0x02]);
+    for (const record of records) {
+      expect(record).toHaveLength(0xf8);
+      expect(record[0x04]).toBe(0xf8);
+      expect(record[0x3a]).toBe(0x10);
+      expect([...record.slice(0x20, 0x30)].every((byte) => byte === 0xff)).toBe(true);
+      expect([...record.slice(0x3c, 0x40)]).toEqual([0x04, 0x03, 0x02, 0x01]);
+    }
   });
 });
 
