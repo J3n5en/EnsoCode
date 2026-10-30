@@ -102,6 +102,7 @@ No EnsoCode account. Model traffic goes to the provider you configured.
 - **Phone companion**: Scan a QR code. Review history, approve, answer questions, steer. Relay sees ciphertext only.
 - **Desktop remote node**: Pair two EnsoCode machines and operate sessions that live on the other desk.
 - **SSH projects**: Run against a remote tree over SSH without mirroring the repo locally.
+- **Self-hosted server**: Run the host on your own Linux or macOS box. Queued messages and goals keep running after every client is closed; pair a phone or browser to use it. See [Headless server](#headless-server).
 
 <p align="center">
   <img src="docs/readme/phone.png" alt="QR pairing for the phone companion" width="920" />
@@ -139,6 +140,7 @@ Local-first does not mean “never touches the network.”
 | EnsoCode telemetry | None |
 | Model requests | Direct to the provider or endpoint you configure |
 | Phone / remote node | Optional. Default relay forwards **ciphertext only**; same LAN can connect directly |
+| Self-hosted server | Optional. Conversations and settings stay on that machine (default `~/.enso-server`) |
 
 There is no EnsoCode account and no Enso-hosted model proxy. If you use a remote model, that provider receives the context for the request under its own policy. The phone companion is optional; skip pairing and nothing leaves the desktop except model calls you make.
 
@@ -153,6 +155,24 @@ There is no EnsoCode account and no Enso-hosted model proxy. If you use a remote
 | macOS | `.dmg` (Apple Silicon / Intel) |
 | Windows | `EnsoCode-Setup-<version>.exe` |
 | Linux | `.AppImage` / `.deb` |
+
+### Headless server
+
+[`@ensocode/server`](https://www.npmjs.com/package/@ensocode/server) is the EnsoCode host without a UI. It runs the agents itself; it is not the phone relay, which only forwards ciphertext. Requires Node.js 22+.
+
+```bash
+npm i -g @ensocode/server
+enso-server config   # optional: choose how clients connect
+enso-server start
+enso-server pair     # in another terminal: scan the QR code or open the link
+```
+
+`enso-server service install` registers a systemd service (starts on boot, restarts on crash). Full command list: [scripts/server-package/README.md](scripts/server-package/README.md).
+
+- On a fresh install, projects and the model catalog appear once the full (browser) desk connects and pushes them. After that the phone works on its own; after a restart the host uses the last pushed snapshot.
+- No desktop control, built-in browser, tray, or system notifications on the server.
+- The browser desk needs https or localhost.
+- Data stays on that machine (default `~/.enso-server`). No EnsoCode account.
 
 ---
 

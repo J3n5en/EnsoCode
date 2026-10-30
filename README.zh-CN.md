@@ -102,6 +102,7 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 - **手机伴侣**：扫码即连。翻历史、审批、回答提问、插话。中继只见密文。
 - **桌面 Remote Node**：两台 EnsoCode 配对，在轻薄本上操作另一台机器上的会话。
 - **SSH 项目**：经 SSH 直接打远端目录，不必把仓库镜像到本地。
+- **自建服务端**：宿主跑在你自己的 Linux 或 macOS 上。客户端都关掉后，排队消息和 goal 继续跑；手机或浏览器配对后使用。见[无界面服务端](#无界面服务端)。
 
 <p align="center">
   <img src="docs/readme/phone.png" alt="扫码配对手机伴侣" width="920" />
@@ -139,6 +140,7 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 | EnsoCode 遥测 | 无 |
 | 模型请求 | 直达你配置的供应商或 Endpoint |
 | 手机 / 远程节点 | 可选。默认中继只转发**密文**；同一局域网可直连 |
+| 自建服务端 | 可选。会话和设置留在那台机器（默认 `~/.enso-server`） |
 
 不需要 EnsoCode 账号，也没有 Enso 托管的模型中转。若使用远程模型，请求上下文会发给该供应商，按其隐私政策处理。手机伴侣是可选项：不配对，除你发起的模型调用外，没有数据离开桌面。
 
@@ -153,6 +155,24 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 | macOS | `.dmg`（Apple Silicon / Intel） |
 | Windows | `EnsoCode-Setup-<version>.exe` |
 | Linux | `.AppImage` / `.deb` |
+
+### 无界面服务端
+
+[`@ensocode/server`](https://www.npmjs.com/package/@ensocode/server) 是没有界面的 EnsoCode 宿主，agent 在它上面跑；它不是手机中继，中继只转发密文。需要 Node.js 22+。
+
+```bash
+npm i -g @ensocode/server
+enso-server config   # 可选：选择客户端连接方式
+enso-server start
+enso-server pair     # 另开终端：扫码或打开链接完成配对
+```
+
+`enso-server service install` 注册 systemd 服务（开机自启、崩溃拉起）。完整命令见 [scripts/server-package/README.md](scripts/server-package/README.md)。
+
+- 新装后，项目和模型目录要等完整版（浏览器 desk）连上并推送一次才会出现。之后手机可以单独用；宿主重启后沿用上次推送的快照。
+- 服务器上没有桌面控制、内嵌浏览器、托盘、系统通知。
+- 浏览器完整版需要 https 或 localhost。
+- 数据在这台机器上（默认 `~/.enso-server`），没有 EnsoCode 账号。
 
 ---
 
