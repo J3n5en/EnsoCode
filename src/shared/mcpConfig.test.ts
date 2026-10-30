@@ -1,7 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { parseMcpImportJson } from './mcpConfig';
+import { formatMcpHeaderLines, parseMcpHeaderLines, parseMcpImportJson } from './mcpConfig';
+
+describe('MCP 请求头文本（#177）', () => {
+  it('按第一个冒号拆，值里的冒号保留；无名或无冒号的行忽略', () => {
+    expect(
+      parseMcpHeaderLines('Authorization: Bearer a:b=\n  X-Team :  core \nbroken\n: nameless\n')
+    ).toEqual({ Authorization: 'Bearer a:b=', 'X-Team': 'core' });
+    expect(parseMcpHeaderLines(' \n')).toBeUndefined();
+  });
+
+  it('格式化后能原样解析回来', () => {
+    const headers = { Authorization: 'Bearer t', 'X-Team': 'core' };
+    expect(parseMcpHeaderLines(formatMcpHeaderLines(headers))).toEqual(headers);
+    expect(formatMcpHeaderLines(undefined)).toBe('');
+  });
+});
 
 describe('parseMcpImportJson', () => {
+  it('URL 服务器保留 headers（只收字符串值），command 服务器忽略（#177）', () => {
+    expect(
+      parseMcpImportJson(
+        JSON.stringify({
+          type: 'http',
+          url: 'https://example.com/mcp',
+          headers: { Authorization: 'Bearer t', Bad: 1 },
+        })
+      )
+    ).toMatchObject({
+      ok: true,
+      servers: [{ transport: 'http', headers: { Authorization: 'Bearer t' } }],
+    });
+    const stdio = parseMcpImportJson(JSON.stringify({ command: 'x', headers: { A: 'b' } }));
+    expect(stdio.ok && stdio.servers[0]).not.toHaveProperty('headers');
+    const bare = parseMcpImportJson(JSON.stringify({ url: 'https://x', headers: {} }));
+    expect(bare.ok && bare.servers[0]).not.toHaveProperty('headers');
+  });
+
   it('解析 Cursor / Claude Desktop 的 mcpServers 对象', () => {
     const result = parseMcpImportJson(
       JSON.stringify({

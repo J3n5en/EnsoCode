@@ -158,6 +158,7 @@ describe('config sync codec', () => {
             name: 'M',
             transport: 'http' as const,
             env: { TOKEN: 'secret' },
+            headers: { Authorization: 'Bearer secret' },
             args: ['--token=secret'],
             url: 'https://user:pass@example.test/a?token=secret#frag',
             source: 'local',
@@ -170,6 +171,7 @@ describe('config sync codec', () => {
     expect(JSON.stringify(redacted)).not.toContain('secret');
     expect(source.state.providers[0]).toHaveProperty('apiKey', 'secret');
     expect(source.state.mcpServers[0]).toHaveProperty('env.TOKEN', 'secret');
+    expect(redacted.state.mcpServers[0]?.omittedFields).toContain('headers');
   });
 
   it('包含敏感信息时加密整个包并支持正确密码解密', async () => {

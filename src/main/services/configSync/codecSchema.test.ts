@@ -100,6 +100,28 @@ describe('config sync codec schema and crypto boundaries', () => {
     expect(() => validateBundle(invalid)).toThrow(/description/);
   });
 
+  it('MCP 请求头随包往返，非字符串值拒绝（#177）', () => {
+    const mcp = (headers: unknown) => ({
+      id: 'mcp-1',
+      name: 'Remote',
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      headers,
+      source: 'manual',
+      enabled: true,
+    });
+    const input = minimalBundle();
+    (input.state as unknown as Record<string, unknown>).mcpServers = [
+      mcp({ Authorization: 'Bearer t' }),
+    ];
+    expect(validateBundle(input).state.mcpServers[0]).toMatchObject({
+      headers: { Authorization: 'Bearer t' },
+    });
+    const invalid = minimalBundle();
+    (invalid.state as unknown as Record<string, unknown>).mcpServers = [mcp({ A: 1 })];
+    expect(() => validateBundle(invalid)).toThrow(/headers/);
+  });
+
   it('MCP OAuth 客户端名与元数据地址随包往返，坏 URL 拒绝', () => {
     const mcp = (oauthMetadataUrl: string) => ({
       id: 'mcp-1',

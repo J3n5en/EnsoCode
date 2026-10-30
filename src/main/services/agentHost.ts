@@ -33,6 +33,7 @@ import {
   modelUsability,
 } from '@shared/defaultModel';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
+import { mcpHeaders } from '@shared/mcpConfig';
 import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import { materializeProviders } from '@shared/modelDirectory';
@@ -1851,7 +1852,11 @@ function mcpServerById(serverId: string): McpServerSpawnConfig[] {
 }
 
 function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
-  const oauth = server.transport === 'stdio' ? undefined : getMcpOAuthStore().access(server.id);
+  const headers = server.transport === 'stdio' ? undefined : mcpHeaders(server.headers);
+  // 自配 Authorization 优先：worker 那边也不会再注入 OAuth token
+  const ownAuth = Object.keys(headers ?? {}).some((name) => name.toLowerCase() === 'authorization');
+  const oauth =
+    server.transport === 'stdio' || ownAuth ? undefined : getMcpOAuthStore().access(server.id);
   return {
     ...(server.id ? { id: server.id } : {}),
     name: server.name,
@@ -1861,6 +1866,7 @@ function toMcpSpawnConfig(server: McpServerEntry): McpServerSpawnConfig {
     ...(server.args?.length ? { args: server.args } : {}),
     ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
     ...(server.url ? { url: server.url } : {}),
+    ...(headers ? { headers } : {}),
     ...(oauth ? { oauth } : {}),
     ...mcpTimeoutsForSpawn(server),
   };

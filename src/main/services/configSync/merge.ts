@@ -332,6 +332,7 @@ function mcpEntry(plan: PlannedEntry): JsonRecord {
   };
   mergeSensitiveField(next, plan.source, plan.existing, 'args', omitted);
   mergeSensitiveField(next, plan.source, plan.existing, 'env', omitted);
+  mergeSensitiveField(next, plan.source, plan.existing, 'headers', omitted);
   if (plan.existing) next.url = preserveUrlParts(next.url, plan.existing.url, omitted, 'url');
   delete next.omittedFields;
   if (plan.existing && importedEnvConflicts(plan.source, plan.existing, omitted)) {

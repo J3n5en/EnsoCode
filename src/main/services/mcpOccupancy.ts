@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { mcpHeaders } from '@shared/mcpConfig';
 import type { OccupancyTool } from '@shared/occupancy';
 import type { McpServerEntry } from '@shared/types';
 import { assignMcpToolNames } from '../../agent/mcpNames';
@@ -26,6 +27,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+function requestInit(server: McpServerEntry) {
+  const headers = mcpHeaders(server.headers);
+  return headers ? { requestInit: { headers } } : undefined;
+}
+
 function transport(server: McpServerEntry) {
   switch (server.transport) {
     case 'stdio': {
@@ -38,11 +44,11 @@ function transport(server: McpServerEntry) {
     }
     case 'http': {
       if (!server.url) throw new Error('http server missing url');
-      return new StreamableHTTPClientTransport(new URL(server.url));
+      return new StreamableHTTPClientTransport(new URL(server.url), requestInit(server));
     }
     case 'sse': {
       if (!server.url) throw new Error('sse server missing url');
-      return new SSEClientTransport(new URL(server.url));
+      return new SSEClientTransport(new URL(server.url), requestInit(server));
     }
     default:
       throw new Error(`unknown transport: ${server.transport}`);
@@ -54,7 +60,14 @@ type ProbedTool = { name: string; description?: string; inputSchema: unknown };
 const cache = new Map<string, ProbedTool[]>();
 
 function cacheKey(server: McpServerEntry): string {
-  return JSON.stringify([server.transport, server.command, server.args, server.env, server.url]);
+  return JSON.stringify([
+    server.transport,
+    server.command,
+    server.args,
+    server.env,
+    server.url,
+    ...(server.headers ? [server.headers] : []),
+  ]);
 }
 
 export async function listMcpOccupancyTools(server: McpServerEntry): Promise<OccupancyTool[]> {

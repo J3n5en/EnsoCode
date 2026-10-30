@@ -36,6 +36,8 @@ export interface McpServerEntry {
   env?: Record<string, string>;
   /** http/sse 用 */
   url?: string;
+  /** http/sse 请求头，如 Authorization: Bearer <token> */
+  headers?: Record<string, string>;
   /** OAuth 动态注册时的 client_name：只接受已知客户端的服务器用；缺省 Enso Code */
   oauthClientName?: string;
   /** 授权服务器元数据地址：服务器声明的授权服务器不对或没有声明时，代替自动发现 */

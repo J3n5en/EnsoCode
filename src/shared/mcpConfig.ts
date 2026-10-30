@@ -7,6 +7,7 @@ export interface DiscoveredMcpServer {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
 }
 
 export type ParseMcpImportResult =
@@ -26,6 +27,29 @@ const asStringRecord = (value: unknown): Record<string, string> => {
   }
   return result;
 };
+
+/** http/sse 请求头：只收非空名字的字符串值，空表视为没有 */
+export function mcpHeaders(value: unknown): Record<string, string> | undefined {
+  const headers = asStringRecord(value);
+  delete headers[''];
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/** 设置页文本框：每行 `Name: value`，按第一个冒号拆（请求头名不含冒号） */
+export function parseMcpHeaderLines(text: string): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const colon = line.indexOf(':');
+    const name = colon > 0 ? line.slice(0, colon).trim() : '';
+    if (name) headers[name] = line.slice(colon + 1).trim();
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+export const formatMcpHeaderLines = (headers?: Record<string, string>): string =>
+  Object.entries(headers ?? {})
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('\n');
 
 function toTransport(raw: unknown, url: string): McpTransport {
   const value = asText(raw).toLowerCase();
@@ -47,6 +71,7 @@ export function parseServerMap(servers: unknown): DiscoveredMcpServer[] {
     const command = asText(config.command);
     if (!command && !url) continue;
 
+    const headers = command ? undefined : mcpHeaders(config.headers);
     result.push({
       name,
       transport: toTransport(config.type ?? config.transport, url),
@@ -54,6 +79,7 @@ export function parseServerMap(servers: unknown): DiscoveredMcpServer[] {
       args: command ? asStringArray(config.args) : undefined,
       env: command ? asStringRecord(config.env) : undefined,
       url: url || undefined,
+      ...(headers ? { headers } : {}),
     });
   }
 

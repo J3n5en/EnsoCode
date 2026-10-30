@@ -179,6 +179,31 @@ describe('agentHost session MCP config', () => {
     expect(toSessionMcpConfig(entry('   '), catalog)).not.toHaveProperty('description');
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('http/sse 下发自定义请求头，丢弃非字符串值；stdio 不下发（#177）', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-session-mcp-'));
+    const catalog = new McpToolCatalogStore(path.join(dir, 'catalog.json'));
+    const remote = {
+      id: 'r1',
+      name: 'fofa',
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      headers: { Authorization: 'Bearer t', 'X-Bad': 1, '': 'x' },
+      source: 'manual',
+      enabled: true,
+    } as unknown as McpServerEntry;
+    expect(toSessionMcpConfig(remote, catalog)).toMatchObject({
+      headers: { Authorization: 'Bearer t' },
+    });
+    expect(toSessionMcpConfig({ ...remote, transport: 'sse' }, catalog)).toMatchObject({
+      headers: { Authorization: 'Bearer t' },
+    });
+    expect(toSessionMcpConfig({ ...remote, headers: {} }, catalog)).not.toHaveProperty('headers');
+    expect(
+      toSessionMcpConfig({ ...remote, transport: 'stdio', command: 'x', url: undefined }, catalog)
+    ).not.toHaveProperty('headers');
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe('agentHost agent type tool filtering', () => {

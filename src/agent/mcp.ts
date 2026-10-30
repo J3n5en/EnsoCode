@@ -182,6 +182,7 @@ const connectionKey = (server: McpServerSpawnConfig): string =>
     server.args,
     server.env,
     server.url,
+    ...(server.headers ? [server.headers] : []),
   ]);
 
 /** token 指纹：token 明文不入内存索引，只用 hash 前缀判断「Main 是否换了下发的 token」 */

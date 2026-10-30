@@ -341,6 +341,27 @@ describe('config sync merge identity and reference mapping', () => {
       env: { TOKEN: 'keep' },
       omittedFields: undefined,
     };
+    const remote: ConfigSyncMcpServer = {
+      id: 'remote',
+      name: 'Remote',
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      source: 'import',
+      enabled: true,
+      omittedFields: ['headers'],
+    };
+    const keptHeaders = planImport(
+      current({
+        mcpServers: [
+          { ...remote, headers: { Authorization: 'Bearer keep' }, omittedFields: undefined },
+        ],
+      }),
+      bundle({ mcpServers: [remote] }),
+      'merge'
+    );
+    expect(keptHeaders.state.mcpServers).toContainEqual(
+      expect.objectContaining({ id: 'remote', headers: { Authorization: 'Bearer keep' } })
+    );
     const updated = planImport(
       current({ mcpServers: [existing] }),
       bundle({ mcpServers: [imported] }),

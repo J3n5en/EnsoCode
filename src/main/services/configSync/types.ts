@@ -30,6 +30,7 @@ export type ConfigSyncProviderOmission = (typeof CONFIG_SYNC_PROVIDER_OMISSIONS)
 export const CONFIG_SYNC_MCP_OMISSIONS = [
   'args',
   'env',
+  'headers',
   'urlCredentials',
   'urlQuery',
   'urlFragment',

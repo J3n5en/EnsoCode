@@ -1,4 +1,9 @@
-import { type DiscoveredMcpServer, parseMcpImportJson } from '@shared/mcpConfig';
+import {
+  type DiscoveredMcpServer,
+  formatMcpHeaderLines,
+  parseMcpHeaderLines,
+  parseMcpImportJson,
+} from '@shared/mcpConfig';
 import {
   DEFAULT_MCP_CALL_TIMEOUT_MS,
   DEFAULT_MCP_CONNECT_TIMEOUT_MS,
@@ -75,6 +80,7 @@ const specFromDiscovered = (entry: DiscoveredMcpServer): Record<string, unknown>
   if (entry.args && entry.args.length > 0) spec.args = entry.args;
   if (entry.env && Object.keys(entry.env).length > 0) spec.env = entry.env;
   if (entry.url) spec.url = entry.url;
+  if (entry.headers && Object.keys(entry.headers).length > 0) spec.headers = entry.headers;
   return spec;
 };
 
@@ -94,6 +100,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
   const [argsText, setArgsText] = React.useState('');
   const [envText, setEnvText] = React.useState('');
   const [url, setUrl] = React.useState('');
+  const [headersText, setHeadersText] = React.useState('');
   const [connectTimeout, setConnectTimeout] = React.useState('');
   const [callTimeout, setCallTimeout] = React.useState('');
   const [jsonText, setJsonText] = React.useState('');
@@ -115,6 +122,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
     setArgsText((entry.args ?? []).join('\n'));
     setEnvText(formatEnv(entry.env && Object.keys(entry.env).length > 0 ? entry.env : undefined));
     setUrl(entry.url ?? '');
+    setHeadersText(formatMcpHeaderLines(entry.headers));
   };
 
   const formToJson = (): string => {
@@ -127,6 +135,8 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
       if (env) spec.env = env;
     } else {
       spec.url = url.trim();
+      const headers = parseMcpHeaderLines(headersText);
+      if (headers) spec.headers = headers;
     }
     return JSON.stringify(spec, null, 2);
   };
@@ -143,12 +153,15 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
           args,
           env,
           url: undefined,
+          headers: undefined,
           ...serverOptions(),
         }
       : {
           name: nextName,
           transport: entry.transport,
           url: (entry.url ?? '').trim(),
+          headers:
+            entry.headers && Object.keys(entry.headers).length > 0 ? entry.headers : undefined,
           command: undefined,
           args: undefined,
           env: undefined,
@@ -169,6 +182,7 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
     setArgsText((base?.args ?? []).join('\n'));
     setEnvText(formatEnv(base?.env));
     setUrl(base?.url ?? '');
+    setHeadersText(formatMcpHeaderLines(base?.headers));
     setConnectTimeout(base?.connectTimeoutSec?.toString() ?? '');
     setCallTimeout(base?.callTimeoutSec?.toString() ?? '');
     setJsonText('');
@@ -287,12 +301,14 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
             args: parseLines(argsText),
             env: parseEnv(envText),
             url: undefined,
+            headers: undefined,
             ...serverOptions(),
           }
         : {
             name: name.trim(),
             transport,
             url: url.trim(),
+            headers: parseMcpHeaderLines(headersText),
             command: undefined,
             args: undefined,
             env: undefined,
@@ -419,6 +435,16 @@ export function McpEditDialog({ server, onClose }: McpEditDialogProps) {
                       value={url}
                       onChange={(e) => setUrl(e.target.value)}
                       placeholder="https://..."
+                      className="font-mono text-xs"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t('Headers (Name: value, one per line)')}</FieldLabel>
+                    <Textarea
+                      value={headersText}
+                      onChange={(e) => setHeadersText(e.target.value)}
+                      rows={2}
+                      placeholder="Authorization: Bearer <token>"
                       className="font-mono text-xs"
                     />
                   </Field>

@@ -148,6 +148,7 @@ const MCP_KEYS = [
   'args',
   'env',
   'url',
+  'headers',
   'oauthClientName',
   'oauthMetadataUrl',
   'connectTimeoutSec',
@@ -574,6 +575,13 @@ function validateMcp(raw: unknown): RecordValue {
     )
       throw new Error('Invalid MCP env');
   }
+  if (entry.headers !== undefined) {
+    if (
+      !isRecord(entry.headers) ||
+      Object.entries(entry.headers).some(([key, value]) => !key || typeof value !== 'string')
+    )
+      throw new Error('Invalid MCP headers');
+  }
   for (const key of ['connectTimeoutSec', 'callTimeoutSec']) {
     if (
       entry[key] !== undefined &&
@@ -740,6 +748,7 @@ function assertPlainBundle(bundle: ConfigSyncBundle): void {
       (entry) =>
         entry.args !== undefined ||
         entry.env !== undefined ||
+        entry.headers !== undefined ||
         (entry.url !== undefined && redactEndpoint(entry.url).omissions.length > 0)
     )
   ) {
@@ -1155,6 +1164,10 @@ export function redactBundle(bundle: ConfigSyncBundle): ConfigSyncBundle {
     if (next.env !== undefined) {
       delete next.env;
       omitted.add('env');
+    }
+    if (next.headers !== undefined) {
+      delete next.headers;
+      omitted.add('headers');
     }
     if (next.url !== undefined) {
       const original = next.url;

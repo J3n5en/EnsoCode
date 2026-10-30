@@ -897,6 +897,7 @@ export const zhTranslations: Record<string, string> = {
   Command: '命令',
   'Arguments (one per line)': '参数（每行一条）',
   'Environment variables (KEY=VALUE, one per line)': '环境变量（KEY=VALUE，每行一条）',
+  'Headers (Name: value, one per line)': '请求头（Name: value，每行一条）',
   URL: 'URL',
   'Connection timeout (seconds)': '连接超时（秒）',
   'Tool call timeout (seconds)': '工具调用超时（秒）',
