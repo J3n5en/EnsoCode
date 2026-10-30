@@ -167,7 +167,7 @@ enso-server start
 enso-server pair     # in another terminal: scan the QR code or open the link
 ```
 
-`enso-server service install` registers a systemd service (starts on boot, restarts on crash). Full command list: [scripts/server-package/README.md](scripts/server-package/README.md).
+`enso-server service install` registers a systemd service (Linux only: starts on boot, restarts on crash). Full command list: [scripts/server-package/README.md](scripts/server-package/README.md).
 
 - On a fresh install, projects and the model catalog appear once the full (browser) desk connects and pushes them. After that the phone works on its own; after a restart the host uses the last pushed snapshot.
 - No desktop control, built-in browser, tray, or system notifications on the server.

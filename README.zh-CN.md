@@ -167,7 +167,7 @@ enso-server start
 enso-server pair     # 另开终端：扫码或打开链接完成配对
 ```
 
-`enso-server service install` 注册 systemd 服务（开机自启、崩溃拉起）。完整命令见 [scripts/server-package/README.md](scripts/server-package/README.md)。
+`enso-server service install` 注册 systemd 服务（仅 Linux：开机自启、崩溃拉起）。完整命令见 [scripts/server-package/README.md](scripts/server-package/README.md)。
 
 - 新装后，项目和模型目录要等完整版（浏览器 desk）连上并推送一次才会出现。之后手机可以单独用；宿主重启后沿用上次推送的快照。
 - 服务器上没有桌面控制、内嵌浏览器、托盘、系统通知。
