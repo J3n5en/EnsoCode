@@ -36,6 +36,7 @@
 | [koffi-view-electron-sandbox.md](koffi-view-electron-sandbox.md) | Windows `ax()`/`getState` 报 AX_WORKER_EXITED；单测和 Node 探针全绿，只在 Electron 里崩 |
 | [macos-window-focus.md](macos-window-focus.md) | 系统设置已在前台，computer 仍报窗口无法置于前台；浮窗被误判为输入焦点 |
 | [macos-ax-identity.md](macos-ax-identity.md) | AX 树中有亮度滑块但 find 返回空，setValue 无可见效果、actions 为空 |
+| [macos-background-input.md](macos-background-input.md) | 后台 cmd+a 后输入丢字/app 被隐藏；Electron 收不到后台按键；后台拖拽不动；目标偶发抢走前台 |
 | [model-directory-single-source.md](model-directory-single-source.md) | 新版本静态表里的模型进不了老账号的 picker（清单冻结在登录时刻）；vitest 里莫名 `unknown oauth provider` |
 | [mcp-oauth-worker-refresh.md](mcp-oauth-worker-refresh.md) | 远程 MCP 授权过一阵就变「需要授权」，token 正常、有效期长的 MCP 不受影响 |
 
