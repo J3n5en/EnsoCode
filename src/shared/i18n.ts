@@ -1688,6 +1688,11 @@ export const zhTranslations: Record<string, string> = {
     '电脑操控需要屏幕录制才能截窗，需要辅助功能才能读无障碍树或点击。请把这两项授权给 EnsoCode，然后重启应用。',
   'Grant Computer permissions': '授权电脑操控权限',
   'Show permission guide': '打开权限引导',
+  'Apps the AI may control': 'AI 可操作的应用',
+  'The first time the AI clicks or types in an app, EnsoCode asks you. Apps you always allow are listed here; it can then read everything in their windows.':
+    'AI 第一次在某个应用里点击或输入时，EnsoCode 会先询问你。你选择「始终允许」的应用会列在这里，AI 之后可以读取这些应用窗口里的全部内容。',
+  'No apps are always allowed yet.': '还没有始终允许的应用。',
+  Revoke: '撤销',
   'The agent can screenshot windows and control the mouse and keyboard. Grant Screen Recording and Accessibility to EnsoCode, then restart.':
     'Agent 可以截取窗口并控制键鼠。请把屏幕录制和辅助功能授权给 EnsoCode，然后重启。',
   'Computer is ready. Open sessions can use it from their next step.':

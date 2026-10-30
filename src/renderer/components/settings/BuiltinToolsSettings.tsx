@@ -53,6 +53,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { ComputerAllowedApps } from './ComputerAllowedApps';
 import { NewSessionBadge } from './NewSessionBadge';
 import {
   enabledOccupancyTotal,
@@ -426,6 +427,7 @@ export function BuiltinToolsSettings() {
                         </>
                       )}
                     </div>
+                    {capabilities?.platform === 'darwin' && <ComputerAllowedApps />}
                   </>
                 )}
               </div>

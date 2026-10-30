@@ -362,6 +362,9 @@ export const IPC_CHANNELS = {
   // Auto updater
   COMPUTER_CAPABILITIES: 'computer:capabilities',
   COMPUTER_OPEN_PERMISSIONS: 'computer:open-permissions',
+  // computer 按 app 授权名单（只读列出 / 撤销）
+  COMPUTER_ALLOWED_APPS: 'computer:allowed-apps',
+  COMPUTER_REVOKE_APP: 'computer:revoke-app',
   UPDATER_CHECK: 'updater:check',
   UPDATER_DOWNLOAD_UPDATE: 'updater:downloadUpdate',
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',

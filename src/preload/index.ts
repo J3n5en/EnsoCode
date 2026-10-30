@@ -1594,6 +1594,11 @@ const electronAPI = {
     > => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_CAPABILITIES),
     openPermissions: (kind: 'screen' | 'accessibility'): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_OPEN_PERMISSIONS, kind),
+    allowedApps: (): Promise<ComputerAllowedApp[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_ALLOWED_APPS),
+    /** key 为 bundle id（无 bundle id 的 app 用其路径） */
+    revokeApp: (key: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_REVOKE_APP, key),
   },
 
   workspaceSearch: {
@@ -1679,7 +1684,7 @@ export type ElectronAPI = typeof electronAPI;
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 
-import type { ComputerCapabilities } from '@shared/computer/types';
+import type { ComputerAllowedApp, ComputerCapabilities } from '@shared/computer/types';
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
