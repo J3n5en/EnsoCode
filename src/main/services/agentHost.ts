@@ -1302,28 +1302,38 @@ export function completeText(input: {
   reasoning?: ThinkingLevel | 'off';
   /** 连通性探测：模型已响应但正文为空（被预算截断 / 只输出思考）也算完成 */
   probe?: boolean;
+  signal?: AbortSignal;
 }): Promise<string> {
   if (!worker || !workerReady) return Promise.reject(new Error('Agent worker is not running.'));
+  if (input.signal?.aborted) return Promise.reject(new Error('aborted'));
   const requestId = input.requestId?.trim() || randomUUID();
-  const { requestId: _requestId, stream, reasoning, probe, ...rest } = input;
+  const { requestId: _requestId, stream, reasoning, probe, signal, ...rest } = input;
   return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      fn();
+    };
     // 每个候选各自 timeoutMs，整体再留一点余量做兑底
     const timer = setTimeout(
       () => {
         pendingCompletions.delete(requestId);
-        reject(new Error('completion timed out'));
+        finish(() => reject(new Error('completion timed out')));
       },
       rest.timeoutMs * rest.candidates.length + 5_000
     );
+    const onAbort = () => {
+      if (!pendingCompletions.delete(requestId)) return;
+      finish(() => reject(new Error('aborted')));
+      sendAgentCommand({ type: 'abort-complete-text', requestId });
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     pendingCompletions.set(requestId, {
-      resolve: (text) => {
-        clearTimeout(timer);
-        resolve(text);
-      },
-      reject: (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
+      resolve: (text) => finish(() => resolve(text)),
+      reject: (error) => finish(() => reject(error)),
     });
     const posted = sendAgentCommand({
       type: 'complete-text',

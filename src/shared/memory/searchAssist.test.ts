@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   blendRerankScore,
   mapLlmIntent,
   parseRerankScores,
   parseSearchAnalysis,
   SearchLlmGate,
+  searchLlmTimeoutMs,
   termCoverage,
-  withTimeout,
 } from './searchAssist';
 
 describe('mapLlmIntent', () => {
@@ -70,17 +70,7 @@ describe('termCoverage / blendRerankScore', () => {
   });
 });
 
-describe('withTimeout / SearchLlmGate', () => {
-  afterEach(() => vi.useRealTimers());
-
-  it('returns null on timeout or rejection', async () => {
-    vi.useFakeTimers();
-    const hung = withTimeout(new Promise<string>(() => {}), 1500);
-    vi.advanceTimersByTime(1500);
-    await expect(hung).resolves.toBeNull();
-    await expect(withTimeout(Promise.reject(new Error('boom')), 1500)).resolves.toBeNull();
-  });
-
+describe('SearchLlmGate', () => {
   it('skips the whole assist window after a trip', () => {
     let now = 0;
     const gate = new SearchLlmGate(30_000, () => now);
@@ -91,5 +81,12 @@ describe('withTimeout / SearchLlmGate', () => {
     expect(gate.available()).toBe(false);
     now = 30_000;
     expect(gate.available()).toBe(true);
+  });
+});
+
+describe('searchLlmTimeoutMs', () => {
+  it('keeps local calls at 1500ms and gives remote calls 8000ms', () => {
+    expect(searchLlmTimeoutMs('local')).toBe(1500);
+    expect(searchLlmTimeoutMs('remote')).toBe(8000);
   });
 });

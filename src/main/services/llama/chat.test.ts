@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { __resetLocalChatForTest, createLocalComplete, memoryCompleteFromSettings } from './chat';
+import { chatModelDir, resolveChatModelSpec } from './chatModels';
 import type { LocalInferenceDiag } from './inferenceDiag';
 import type { LlamaModelLike } from './runtime';
 
@@ -173,6 +177,35 @@ describe('createLocalComplete', () => {
     });
     await expect(complete('s', 'u')).rejects.toThrow(/aborted|timed out/i);
   });
+
+  it('aborts the prompt when the caller signal aborts', async () => {
+    let promptSignal: AbortSignal | undefined;
+    const complete = createLocalComplete('/m/a.gguf', {
+      timeoutMs: 200,
+      acquireModelImpl: async () => fakeModel(),
+      createSession: async () => ({
+        prompt: (_user, opts) =>
+          new Promise<string>((_resolve, reject) => {
+            promptSignal = opts?.signal;
+            opts?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+        dispose: () => {},
+      }),
+    });
+    const caller = new AbortController();
+    const pending = complete('s', 'u', { signal: caller.signal }).then(
+      () => 'resolved',
+      (error: Error) => error.message
+    );
+    await vi.waitFor(() => expect(promptSignal).toBeDefined());
+    caller.abort();
+    const result = await Promise.race([
+      pending,
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 50)),
+    ]);
+    expect(result).toMatch(/aborted/);
+    expect(promptSignal?.aborted).toBe(true);
+  });
 });
 
 describe('memoryCompleteFromSettings', () => {
@@ -200,5 +233,36 @@ describe('memoryCompleteFromSettings', () => {
     );
     expect(complete).toBeNull();
     expect(remote).not.toHaveBeenCalled();
+  });
+
+  it('stamps an 8000ms search budget on remote completes and 1500ms on local ones', async () => {
+    const remote = vi.fn(async () => async () => 'remote-text');
+    const fromRemote = await memoryCompleteFromSettings(
+      { memoryChatModel: 'remote' },
+      { modelsRoot: '/missing', remoteComplete: remote }
+    );
+    expect(fromRemote?.searchTimeoutMs).toBe(8000);
+
+    const root = mkdtempSync(path.join(tmpdir(), 'enso-chat-model-'));
+    try {
+      const spec = resolveChatModelSpec('local:qwen3-0.6b-chat');
+      if (!spec) throw new Error('missing chat spec');
+      const dir = chatModelDir(root, spec);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, '.ready'), '');
+      writeFileSync(path.join(dir, spec.files[0]?.name ?? 'model.gguf'), '');
+      const fromLocal = await memoryCompleteFromSettings(
+        { memoryChatModel: 'local:qwen3-0.6b-chat' },
+        {
+          modelsRoot: root,
+          remoteComplete: remote,
+          createLocal: () => async () => 'local-text',
+        }
+      );
+      expect(fromLocal?.searchTimeoutMs).toBe(1500);
+      expect(remote).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { CRYSTAL_MIN_SOURCES } from '@shared/memory/constants';
+import { searchAssistReport } from '@shared/memory/searchAssist';
 import {
   parseMemoryCaptureRequest,
   parseMemoryCrystallizeRequest,
@@ -103,6 +104,7 @@ export async function executeMemoryOp(
         score: Number(hit.score.toFixed(4)),
         isLatest: hit.memory.isLatest,
       })),
+      ...searchAssistReport(request.mode, assist),
     };
   }
   if (op === 'capture') {

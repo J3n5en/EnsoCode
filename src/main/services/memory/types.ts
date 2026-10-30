@@ -1,6 +1,6 @@
 import type { UnitTypeSource } from '@shared/memory/classify';
 import type { EvolvesRelation, UnitType } from '@shared/memory/constants';
-import type { SearchAnalysis } from '@shared/memory/searchAssist';
+import type { SearchAnalysis, SearchAssistReport } from '@shared/memory/searchAssist';
 import type { TemporalPrecision } from '@shared/memory/temporal';
 import { isBotChatId, isBotId } from '@shared/types/bot';
 
@@ -167,6 +167,7 @@ export interface MemorySearchHit {
 export interface SearchAssist {
   analyze(query: string): Promise<SearchAnalysis | null>;
   rerank(query: string, items: { title: string; content: string }[]): Promise<number[] | null>;
+  outcome?: () => SearchAssistReport;
 }
 
 export interface SearchOptions {

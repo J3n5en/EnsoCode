@@ -475,3 +475,48 @@ describe('executeMemoryOp：写入安全', () => {
     ]);
   });
 });
+
+describe('executeMemoryOp search assist', () => {
+  it('fast 不调用 completion，assist 为 off', async () => {
+    await createMemory(db, { content: '偏好用 pnpm', spaceId: 'global' });
+    let calls = 0;
+    const result = (await executeMemoryOp(
+      db,
+      'search',
+      { query: 'pnpm', limit: 5, spaceId: 'global' },
+      {
+        projectId: null,
+        complete: () => {
+          calls += 1;
+          return async () => '{"intent":"factual_query","confidence":1}';
+        },
+      }
+    )) as { assist?: string; assistReason?: string };
+    expect(calls).toBe(0);
+    expect(result.assist).toBe('off');
+    expect(result.assistReason).toBeUndefined();
+  });
+
+  it('deep 没有 completion 时 assist 为 off；解析成功为 llm；解析失败为 fallback', async () => {
+    await createMemory(db, { content: '偏好用 pnpm', spaceId: 'global' });
+    const search = (complete?: () => Promise<string>) =>
+      executeMemoryOp(
+        db,
+        'search',
+        { query: 'pnpm', limit: 5, spaceId: 'global', mode: 'deep' },
+        { projectId: null, ...(complete ? { complete: async () => complete } : {}) }
+      ) as Promise<{ assist?: string; assistReason?: string; results?: unknown }>;
+
+    const off = await search();
+    expect(off.assist).toBe('off');
+    expect(off.assistReason).toBeUndefined();
+
+    const llm = await search(async () => '{"intent":"factual_query","confidence":1}');
+    expect(llm.assist).toBe('llm');
+    expect(llm.assistReason).toBeUndefined();
+
+    const fallback = await search(async () => 'not json');
+    expect(fallback.assist).toBe('fallback');
+    expect(fallback.assistReason).toBe('unparseable');
+  });
+});

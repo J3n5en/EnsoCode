@@ -99,7 +99,7 @@ describe('memoryHost 懒建', () => {
     closeMemoryDb();
     await expect(
       invokeMemory('search', { query: 'x', limit: 5, spaceId: 'global' }, null)
-    ).resolves.toEqual({ results: [] });
+    ).resolves.toEqual({ results: [], assist: 'off' });
   });
 });
 

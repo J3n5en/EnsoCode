@@ -1,3 +1,4 @@
+import { searchLlmTimeoutMs } from '@shared/memory/searchAssist';
 import type { Complete } from '../memory/distill';
 import {
   chatModelIdFromSettings,
@@ -261,8 +262,13 @@ export function createLocalComplete(
           ac.abort(timedOut);
           reject(timedOut);
         }, timeoutMs);
+        const external = completeOptions?.signal;
+        const onExternalAbort = () => ac.abort(external?.reason);
+        external?.addEventListener('abort', onExternalAbort);
+        if (external?.aborted) ac.abort(external.reason);
         let session: ChatSessionLike | null = null;
         try {
+          ac.signal.throwIfAborted();
           if (cachedContext && cachedContext.path !== modelPath) await disposeChatContext();
           const modelStartedAt = performance.now();
           const model = await acquire('chat', modelPath);
@@ -298,6 +304,7 @@ export function createLocalComplete(
           reject(error);
         } finally {
           clearTimeout(timer);
+          external?.removeEventListener('abort', onExternalAbort);
           try {
             session?.dispose();
           } catch {}
@@ -317,9 +324,18 @@ export async function memoryCompleteFromSettings(
   }
 ): Promise<Complete | null> {
   const id = chatModelIdFromSettings(state);
-  if (id === REMOTE_CHAT_MODEL_ID) return opts.remoteComplete();
+  if (id === REMOTE_CHAT_MODEL_ID) {
+    const complete = await opts.remoteComplete();
+    if (!complete) return null;
+    complete.searchTimeoutMs = searchLlmTimeoutMs('remote');
+    return complete;
+  }
   const gguf = localChatModelPathIfReady(opts.modelsRoot, id);
   if (!gguf) return null;
   const spec = resolveChatModelSpec(id);
-  return (opts.createLocal ?? createLocalComplete)(gguf, { contextSize: spec?.contextSize });
+  const complete = (opts.createLocal ?? createLocalComplete)(gguf, {
+    contextSize: spec?.contextSize,
+  });
+  complete.searchTimeoutMs = searchLlmTimeoutMs('local');
+  return complete;
 }

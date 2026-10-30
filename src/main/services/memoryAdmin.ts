@@ -12,6 +12,7 @@ import type {
   MemoryStats,
   ReembedJobDto,
 } from '@shared/memory/dto';
+import { searchAssistReport } from '@shared/memory/searchAssist';
 import type Database from 'better-sqlite3';
 import { listCrystalSources } from './memory/crystal';
 import { openMemoryDb, vecTableExists } from './memory/db';
@@ -128,23 +129,30 @@ export async function searchMemoriesForAdmin(
   assist?: SearchAssist | null
 ): Promise<MemoryListResult> {
   const text = query.query?.trim() ?? '';
-  if (!text) return { items: [], total: 0, approximate: true, vectorsUsed: false };
+  if (!text) return { items: [], total: 0, approximate: true, vectorsUsed: false, assist: 'off' };
   const spaceIds =
     query.spaceId !== undefined && query.spaceId !== null ? [query.spaceId] : listSpaceIds(db);
+  const deep = query.mode === 'deep';
   const hits = await searchMemories(db, {
     q: text,
     spaceIds,
     limit: query.limit,
     embedder,
     mmr: true,
-    mode: query.mode === 'deep' ? 'deep' : 'fast',
-    assist: query.mode === 'deep' ? assist : undefined,
+    mode: deep ? 'deep' : 'fast',
+    assist: deep ? assist : undefined,
   });
   // unitType 在语义通道里没有下推，只能在结果上后过滤
   const items = hits
     .map((hit) => toListItem(hit.memory))
     .filter((item) => query.unitType === undefined || item.unitType === query.unitType);
-  return { items, total: items.length, approximate: true, vectorsUsed: embedder !== null };
+  return {
+    items,
+    total: items.length,
+    approximate: true,
+    vectorsUsed: embedder !== null,
+    ...searchAssistReport(deep ? 'deep' : 'fast', deep ? assist : null),
+  };
 }
 
 function listSpaceIds(db: Database.Database): string[] {

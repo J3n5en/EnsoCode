@@ -1,4 +1,5 @@
 import { isUnitType, type UnitType } from './constants';
+import type { SearchAssistReason, SearchAssistState } from './searchAssist';
 import type { TemporalPrecision } from './temporal';
 
 export type MemoryLifecycleState = 'active' | 'archived' | 'deleted';
@@ -76,6 +77,9 @@ export interface MemoryListResult {
   approximate?: boolean;
   /** fast/deep 模式实际是否用上了向量（模型未就绪时自动降级为 FTS + 实体） */
   vectorsUsed?: boolean;
+  /** off=fast 或无模型；llm=deep 至少一步成功；fallback=超时、报错、不可解析或退避 */
+  assist?: SearchAssistState;
+  assistReason?: SearchAssistReason;
 }
 
 export interface DistillJobDto {

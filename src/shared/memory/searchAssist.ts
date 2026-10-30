@@ -2,8 +2,67 @@ import type { SearchIntent } from './searchIntent';
 import type { TemporalIntent } from './temporalIntent';
 
 export const SEARCH_LLM_TIMEOUT_MS = 1500;
+export const SEARCH_LLM_REMOTE_TIMEOUT_MS = 8_000;
 export const SEARCH_LLM_RERANK_MAX = 8;
 export const SEARCH_LLM_BACKOFF_MS = 30_000;
+
+export type SearchLlmBackend = 'local' | 'remote';
+export type SearchAssistState = 'llm' | 'fallback' | 'off';
+export type SearchAssistReason = 'timeout' | 'error' | 'unparseable' | 'backoff';
+export type SearchAssistReport =
+  | { assist: 'llm' | 'off' }
+  | { assist: 'fallback'; assistReason: SearchAssistReason };
+
+export function searchLlmTimeoutMs(backend: SearchLlmBackend): number {
+  return backend === 'remote' ? SEARCH_LLM_REMOTE_TIMEOUT_MS : SEARCH_LLM_TIMEOUT_MS;
+}
+
+/** deep 检索结束时读 assist.outcome；fast 或没有 completion 时为 off */
+export function searchAssistReport(
+  mode: 'fast' | 'deep' | undefined,
+  assist: { outcome?: () => SearchAssistReport } | null | undefined
+): SearchAssistReport {
+  if (mode !== 'deep' || !assist?.outcome) return { assist: 'off' };
+  const report = assist.outcome();
+  if (report.assist === 'llm') return { assist: 'llm' };
+  if (report.assist === 'fallback' && report.assistReason) return report;
+  return { assist: 'off' };
+}
+
+export async function completeWithin<T>(
+  start: (signal: AbortSignal) => Promise<T>,
+  ms: number
+): Promise<{ ok: true; value: T } | { ok: false; reason: 'timeout' | 'error' }> {
+  const ac = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let started: Promise<{ ok: true; value: T } | { ok: false; reason: 'timeout' | 'error' }>;
+  try {
+    started = Promise.resolve(start(ac.signal)).then(
+      (value) => ({ ok: true as const, value }),
+      () => {
+        const reason: 'timeout' | 'error' = timedOut ? 'timeout' : 'error';
+        return { ok: false as const, reason };
+      }
+    );
+  } catch {
+    return { ok: false, reason: 'error' };
+  }
+  try {
+    return await Promise.race([
+      started,
+      new Promise<{ ok: false; reason: 'timeout' }>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          ac.abort();
+          resolve({ ok: false, reason: 'timeout' });
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 const LLM_INTENTS = [
   'concept_lookup',
@@ -122,23 +181,6 @@ export function termCoverage(query: string, text: string): number {
 export function blendRerankScore(llm: number, origNorm: number, coverage: number): number {
   const grounded = Math.min(llm / 10, coverage);
   return grounded * 0.55 + origNorm * 0.25 + coverage * 0.2;
-}
-
-export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise.then(
-        (value) => value,
-        () => null
-      ),
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 export class SearchLlmGate {
