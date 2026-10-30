@@ -9,6 +9,7 @@
 - TextEdit 开着两个文档时，后台 `type()` 指定 t2 窗口，字却打进了 t1。
 - 后台点击按钮总是走合成点击，`via` 从不是 `axPress`。
 - 开发版（未签名 Electron）里 SkyLight 激活报 `focus 1002`，或 `ax()` 报 tcc-denied。
+- 正式版里输入都走后台了，被操作的 app 仍然每次调用都弹到前台（如系统设置）。
 
 ## 根因
 
@@ -26,6 +27,8 @@
   从终端 `pnpm dev` 起的开发版归属会随终端变化；用 `open -n -a .../Electron.app` 起时它自己是权限主体，
   但其 utility 子进程（AX worker）不继承授权，`ax()` 仍是 tcc-denied。正式签名的 EnsoCode 不受影响。
   另见过一次已授权的开发版整个实例持续 1002、重启即恢复，根因未定位。
+- `desktop.app(name, { pane })` 用 `open` 打开应用 / 设置面板；`open` 不带 `-g` 会激活目标。
+  模型习惯每次调用都先 `desktop.app("系统设置", { pane })`，于是每次都抢前台。
 
 ## 修法
 
@@ -39,12 +42,14 @@
 - 激活后补发 0x01/0x02 两条 key-window 记录（窗口号在 0x3c，0x3a=0x10，0x20–0x2f 为 0xff），只改 key 不提升层级。
 - 点击判 AXPress 前先打开目标 AX 树，并用 `AXUIElementCreateApplication(pid)` 做 app 内命中；命中不到可按控件时合成点击。
 - 激活被拒时报 `BackgroundUnavailable`（提示可能是辅助功能授权），不自动改走前台。
+- `launchApp` 一律 `open -g`（面板 URL 同样生效，未运行的 app 也只在后台启动）；工具说明要求窗口已开时直接复用、不为查看而 `raise()`。
 
 ## 回归防线
 
 - `focusSession.test.ts`：激活顺序、幂等、换窗口先反激活、窃取还回、用户主动切换报 `user-active`、窃取上限、空闲收尾。
 - `skyClick.test.ts`：右键/中键无 primer、拖拽配方与路径插值。
 - `macKey.test.ts`：修饰键键码到标志位。
+- `appLaunch.test.ts`：`backgroundOpenArgs` 带 `-g`。
 - `skyClick.test.ts` 覆盖 key-window 记录字节布局。
 - 真机（macOS 27.0.1）用 Electron 测试窗口验证：后台单击/右键菜单/菜单键盘选择/滚动/拖拽/`cmd+a` 后输入中英文混合文本均到达，
   全程 `GetFrontProcess` 仍是用户原来的前台 app。

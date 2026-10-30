@@ -26,6 +26,11 @@ export function resolveOpenArgs(name: string, opts?: { pane?: string }): string[
   return ['-a', name.trim()];
 }
 
+/** 打开应用/面板但不激活：用户的前台与焦点不变，后续操作走后台投递 */
+export function backgroundOpenArgs(name: string, opts?: { pane?: string }): string[] {
+  return ['-g', ...resolveOpenArgs(name, opts)];
+}
+
 export function appLaunchAliases(): Record<string, readonly string[]> {
   const map: Record<string, string[]> = {};
   for (const group of GROUPS) {

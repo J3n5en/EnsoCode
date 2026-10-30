@@ -95,7 +95,7 @@ const NOT_FRONT_MESSAGE = (target: string) =>
   `window '${target}' could not be brought to the front; input was not sent so it cannot land in another app. Ask the user to bring it forward.`;
 
 const HIDDEN_WINDOW_NOTE =
-  'window is covered by other windows; Chrome/Electron-based apps stop repainting while covered, so this image may be stale — verify with ax()/el.value, or raise() it if you must see it';
+  'window is covered by other windows; Chrome/Electron-based apps stop repainting while covered, so this image may be stale — verify with ax()/el.value instead of raising it';
 
 /** 显式 delivery 优先；缺省按平台能力：支持后台投递时走后台，否则前台接管 */
 function pointerOpts(raw: unknown, fallback: Delivery = 'foreground'): PointerOptions {

@@ -14,7 +14,7 @@ import type {
   ComputerWindowInfo,
 } from '@shared/computer/types';
 import { clipboard, desktopCapturer, type NativeImage, screen, systemPreferences } from 'electron';
-import { resolveOpenArgs } from './appLaunch';
+import { backgroundOpenArgs } from './appLaunch';
 import { AxEnablementRegistry } from './axEnablement';
 import { withAxErrors } from './axErrors';
 import { axPressFallbackMessage, isAxPressUnsupported } from './axJob';
@@ -716,7 +716,7 @@ export class MacosDesktopBackend implements DesktopBackend {
   }
 
   async launchApp(name: string, opts?: { pane?: string }): Promise<void> {
-    await execFileAsync('/usr/bin/open', resolveOpenArgs(name, opts), {
+    await execFileAsync('/usr/bin/open', backgroundOpenArgs(name, opts), {
       timeout: 15_000,
     });
   }

@@ -145,6 +145,7 @@ const DARWIN_GUIDELINES = [
   'Background input targets a window: use win.click/type/press/scroll/drag, not desktop.click/type/press (those need { delivery: "foreground" }).',
   'If background input fails because the user is using the target app, wait() and retry later or ask; do not switch to foreground to force it.',
   'Clicking a button/checkbox/menu item at (x,y) presses it through accessibility when possible; the result reports via:"axPress" or "synthetic".',
+  "desktop.app() opens apps and Settings panes behind the user's front app. Once a window is open, reacquire it with desktop.window()/app() without pane instead of reopening; never raise() just to look — screenshots and AX work on covered windows.",
 ];
 
 const WINDOWS_GUIDELINES = [
