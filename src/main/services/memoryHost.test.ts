@@ -143,10 +143,15 @@ describe('memoryHost embedding 接线', () => {
     const memory = await capture('redis');
     const search = (q: string) =>
       invokeMemory('search', { query: q, limit: 5, spaceId: 'global' }, null) as Promise<{
-        results: { id: string }[];
+        results: { id: string; relevance?: number }[];
       }>;
-    expect((await search('cache')).results.map((r) => r.id)).toEqual([memory.id]);
-    expect((await search('kafka')).results).toEqual([]);
+    expect((await search('cache')).results.map((r) => [r.id, r.relevance])).toEqual([
+      [memory.id, 1],
+    ]);
+    // 向量通道不按余弦截断：正交的行仍会返回，但原始相关度如实为 0
+    expect((await search('kafka')).results.map((r) => [r.id, r.relevance])).toEqual([
+      [memory.id, 0],
+    ]);
 
     // none：新写入无向量，查询也不走向量（cache 不再命中 redis），FTS 照常
     configureMemoryEmbedding({ modelId: 'none' });

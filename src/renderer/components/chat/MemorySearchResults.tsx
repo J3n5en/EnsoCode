@@ -77,9 +77,12 @@ function MemoryHitRow({ hit, defaultOpen }: { hit: MemorySearchHit; defaultOpen:
               {t(hit.space === 'global' ? 'Global' : 'Project')}
             </Badge>
           )}
-          {hit.score !== null && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
-              {hit.score.toFixed(2)}
+          {hit.relevance !== null && (
+            <span
+              className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums"
+              title={t('Semantic similarity')}
+            >
+              {hit.relevance.toFixed(2)}
             </span>
           )}
         </span>

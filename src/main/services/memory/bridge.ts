@@ -94,13 +94,15 @@ export async function executeMemoryOp(
       recordedDateTo: request.recordedDateTo ?? null,
     });
     return {
-      results: hits.map((hit) => ({
+      // 顺序即排名；relevance 是向量余弦，未走向量通道时省略，不填占位值（#168）
+      results: hits.map((hit, index) => ({
         id: hit.memory.id,
         title: hit.memory.title,
         content: hit.memory.content,
         unitType: hit.memory.unitType,
         spaceId: hit.memory.spaceId,
-        score: Number(hit.score.toFixed(4)),
+        rank: index + 1,
+        ...(hit.relevance === null ? {} : { relevance: Number(hit.relevance.toFixed(4)) }),
         isLatest: hit.memory.isLatest,
       })),
     };

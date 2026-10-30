@@ -175,9 +175,11 @@ describe('executeMemoryOp', () => {
       { projectId: PROJECT }
     )) as { results: Record<string, unknown>[] };
     expect(r.results).toHaveLength(2);
+    // 没配 embedding：没有原始相关度，只给排名，不暴露归一化后的混分（#168）
+    expect(r.results.map((hit) => hit.rank)).toEqual([1, 2]);
     for (const hit of r.results) {
       expect(Object.keys(hit).sort()).toEqual(
-        ['content', 'id', 'isLatest', 'score', 'spaceId', 'title', 'unitType'].sort()
+        ['content', 'id', 'isLatest', 'rank', 'spaceId', 'title', 'unitType'].sort()
       );
     }
     const global = (await executeMemoryOp(

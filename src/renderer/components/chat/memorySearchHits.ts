@@ -4,7 +4,8 @@ export interface MemorySearchHit {
   content: string;
   unitType: string | null;
   space: 'global' | 'project' | null;
-  score: number | null;
+  /** 原始相关度（向量余弦）；没有时为 null */
+  relevance: number | null;
 }
 
 /** memory_capture：写入的那条，或未写入时挡住它的相似记忆 */
@@ -25,7 +26,10 @@ function parseRecord(output: string | null): Record<string, unknown> | null {
   }
 }
 
-function parseHits(list: unknown, scoreKey: 'score' | 'similarity'): MemorySearchHit[] | null {
+function parseHits(
+  list: unknown,
+  relevanceKey: 'relevance' | 'similarity'
+): MemorySearchHit[] | null {
   if (!Array.isArray(list)) return null;
   const hits: MemorySearchHit[] = [];
   for (const raw of list) {
@@ -38,7 +42,7 @@ function parseHits(list: unknown, scoreKey: 'score' | 'similarity'): MemorySearc
     ) {
       return null;
     }
-    const { spaceId, [scoreKey]: score } = raw;
+    const { spaceId, [relevanceKey]: relevance } = raw;
     hits.push({
       id: raw.id,
       title: raw.title,
@@ -50,7 +54,7 @@ function parseHits(list: unknown, scoreKey: 'score' | 'similarity'): MemorySearc
           : typeof spaceId === 'string' && spaceId.startsWith('proj:')
             ? 'project'
             : null,
-      score: typeof score === 'number' && Number.isFinite(score) ? score : null,
+      relevance: typeof relevance === 'number' && Number.isFinite(relevance) ? relevance : null,
     });
   }
   return hits;
@@ -59,7 +63,7 @@ function parseHits(list: unknown, scoreKey: 'score' | 'similarity'): MemorySearc
 /** memory_search 输出（Main bridge 投影的 JSON）→ 命中列表；形状不符返回 null，由调用方回退原文 */
 export function parseMemorySearchHits(output: string | null): MemorySearchHit[] | null {
   const parsed = parseRecord(output);
-  return parsed ? parseHits(parsed.results, 'score') : null;
+  return parsed ? parseHits(parsed.results, 'relevance') : null;
 }
 
 /** memory_capture 输出 → 展示模型；写入回执不带正文，正文取自调用参数 */
@@ -73,6 +77,6 @@ export function parseMemoryCapture(
     return candidates ? { written: false, candidates } : null;
   }
   if (parsed?.status !== 'inserted' || !isRecord(parsed.memory) || !content) return null;
-  const memory = parseHits([{ ...parsed.memory, content }], 'score')?.[0];
+  const memory = parseHits([{ ...parsed.memory, content }], 'relevance')?.[0];
   return memory ? { written: true, deduplicated: parsed.deduplicated === true, memory } : null;
 }

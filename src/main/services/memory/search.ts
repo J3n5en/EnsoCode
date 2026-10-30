@@ -218,7 +218,8 @@ async function vectorChannel(
   q: string,
   spaceIds: string[],
   scope: Scope,
-  pool: number
+  pool: number,
+  relevance: Map<string, number>
 ): Promise<string[]> {
   // 扩展未加载或该维度还没有任何向量：通道为空，RRF 退化为纯 FTS
   if (!hasVec(db)) return [];
@@ -228,7 +229,7 @@ async function vectorChannel(
   // 维度可能到这里才首次已知（onnx / remote）
   const dim = embedder.dim ?? query.length;
   if (query.length !== dim || !vecTableExists(db, dim)) return [];
-  // KNN 下推到 sqlite-vec：cosine distance = 1 - cos，只保留 cos > 0（与旧版点积过滤一致）；
+  // KNN 下推到 sqlite-vec：cosine distance = 1 - cos。不按余弦截断：绝对值随 embedding 模型变化，固定阈值换模型就失效（#168）；
   // model / space_id 作为 partition key 在 vec 表内过滤（实测 0.1.9 partition key 支持 IN），
   // 外层 space 的海量行不会挤占本 space 的 k 名额（3a 评审 Major 4）
   const spacePlaceholders = spaceIds.map(() => '?').join(',');
@@ -238,7 +239,7 @@ async function vectorChannel(
        FROM (SELECT rowid, distance FROM ${vecTableName(dim)}
              WHERE embedding MATCH ? AND k = ? AND model = ? AND space_id IN (${spacePlaceholders})) v
        JOIN memories m ON m.rowid = v.rowid
-       WHERE ${scope.sql} AND m.embedding_model = ? AND v.distance < 1
+       WHERE ${scope.sql} AND m.embedding_model = ?
        ORDER BY v.distance ASC, m.id ASC LIMIT ?`
     )
     .all(
@@ -250,6 +251,7 @@ async function vectorChannel(
       embedder.model,
       pool
     ) as { id: string; distance: number }[];
+  for (const r of rows) relevance.set(r.id, 1 - r.distance);
   return rows.map((r) => r.id);
 }
 
@@ -323,6 +325,8 @@ export async function searchMemories(
   const pool = Math.max(rerankPoolSize(limit), 20);
   const scope = scopeClause(opts.spaceIds, temporal);
 
+  // 原始相关度：向量余弦，跨查询可比；没走向量通道的命中留空
+  const relevance = new Map<string, number>();
   const [ftsIds, vecIds, entityIds, communityIds, analysis] = await Promise.all([
     Promise.resolve()
       .then(() => ftsChannel(db, q, scope, pool))
@@ -330,7 +334,9 @@ export async function searchMemories(
     // 生产不传 embedder（memoryHost.ts）时向量通道为空，RRF 退化为纯 FTS 排名；
     // 单通道失败/缺失的兜底见 search.test.ts「falls back to …」两例
     opts.embedder
-      ? vectorChannel(db, opts.embedder, q, opts.spaceIds, scope, pool).catch(() => [] as string[])
+      ? vectorChannel(db, opts.embedder, q, opts.spaceIds, scope, pool, relevance).catch(
+          () => [] as string[]
+        )
       : Promise.resolve([] as string[]),
     Promise.resolve()
       .then(() => entityChannel(db, q, scope, pool))
@@ -375,7 +381,7 @@ export async function searchMemories(
     const boost = temporalIntent ? computeTemporalBoost(memory.eventStart, temporalIntent) : 0;
     // crystal 是多源合成的结论，同分时应压过任一单源记忆：乘法 boost
     const score = finalScore(semantic[i], decay, boost) * (memory.isCrystal ? CRYSTAL_BOOST : 1);
-    hits.push({ memory, rrf: rrfScore, decay, score });
+    hits.push({ memory, rrf: rrfScore, decay, score, relevance: relevance.get(id) ?? null });
   });
   hits.sort(hitOrder);
   if (opts.mode === 'deep' && opts.assist && hits.length > 1) {

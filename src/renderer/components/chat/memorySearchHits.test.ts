@@ -7,7 +7,8 @@ const hit = (over: Record<string, unknown> = {}) => ({
   content: '随应用分发，默认开启',
   unitType: 'decision',
   spaceId: 'proj:3e8d',
-  score: 0.955,
+  rank: 1,
+  relevance: 0.62,
   isLatest: true,
   ...over,
 });
@@ -15,7 +16,16 @@ const hit = (over: Record<string, unknown> = {}) => ({
 describe('parseMemorySearchHits', () => {
   it('把 Main bridge 投影的 JSON 解析为命中列表，并区分全局/项目空间', () => {
     const output = JSON.stringify({
-      results: [hit(), hit({ id: 'm2', spaceId: 'global', unitType: 'preference', score: 1.2 })],
+      results: [
+        hit(),
+        hit({
+          id: 'm2',
+          spaceId: 'global',
+          unitType: 'preference',
+          relevance: undefined,
+          score: 0.955,
+        }),
+      ],
     });
     expect(parseMemorySearchHits(output)).toEqual([
       {
@@ -24,7 +34,7 @@ describe('parseMemorySearchHits', () => {
         content: '随应用分发，默认开启',
         unitType: 'decision',
         space: 'project',
-        score: 0.955,
+        relevance: 0.62,
       },
       {
         id: 'm2',
@@ -32,7 +42,7 @@ describe('parseMemorySearchHits', () => {
         content: '随应用分发，默认开启',
         unitType: 'preference',
         space: 'global',
-        score: 1.2,
+        relevance: null,
       },
     ]);
   });
@@ -45,7 +55,7 @@ describe('parseMemorySearchHits', () => {
     expect(
       parseMemorySearchHits(
         JSON.stringify({
-          results: [hit({ unitType: undefined, spaceId: 'team:x', score: 'high' })],
+          results: [hit({ unitType: undefined, spaceId: 'team:x', relevance: 'high' })],
         })
       )
     ).toEqual([
@@ -55,7 +65,7 @@ describe('parseMemorySearchHits', () => {
         content: '随应用分发，默认开启',
         unitType: null,
         space: null,
-        score: null,
+        relevance: null,
       },
     ]);
   });
@@ -100,7 +110,7 @@ describe('parseMemoryCapture', () => {
         content: '捎带提醒会被一起藏掉',
         unitType: 'learning',
         space: 'project',
-        score: null,
+        relevance: null,
       },
     });
     expect(parseMemoryCapture(inserted({ deduplicated: true }), 'x')).toMatchObject({
@@ -109,13 +119,19 @@ describe('parseMemoryCapture', () => {
     });
   });
 
-  it('发现相似记忆时未写入：列出候选，以相似度作分数', () => {
+  it('发现相似记忆时未写入：列出候选，以相似度作相关度', () => {
     const output = JSON.stringify({
       status: 'candidates_found',
       written: false,
       message: 'Nothing was written: similar memories already exist.',
       candidates: [
-        hit({ id: 'c1', spaceId: undefined, score: undefined, similarity: 0.9312, bm25Top1: true }),
+        hit({
+          id: 'c1',
+          spaceId: undefined,
+          relevance: undefined,
+          similarity: 0.9312,
+          bm25Top1: true,
+        }),
       ],
     });
     expect(parseMemoryCapture(output, '新正文')).toEqual({
@@ -127,7 +143,7 @@ describe('parseMemoryCapture', () => {
           content: '随应用分发，默认开启',
           unitType: 'decision',
           space: null,
-          score: 0.9312,
+          relevance: 0.9312,
         },
       ],
     });

@@ -258,17 +258,42 @@ describe('searchMemories — hybrid', () => {
       ...emb,
       embed: async () => Float32Array.from([0, 1]),
     });
-    // 只有 FTS 能召回：正文含 cache，但向量与查询正交
-    const ftsOnly = await add('cache invalidation strategy', 'global', {
-      ...emb,
-      embed: async () => Float32Array.from([1, 0]),
-    });
+    // 只有 FTS 能召回：正文含 cache，没有向量（向量通道不再按余弦截断，正交向量也会进候选）
+    const ftsOnly = await add('cache invalidation strategy');
     // 两路都命中
     const both = await add('Redis cache eviction policy', 'global', emb);
     const hits = await searchMemories(db, { q: 'cache', spaceIds: ['global'], embedder: emb });
     expect(hits[0].memory.id).toBe(both.id);
     expect(ids(hits)).toEqual(expect.arrayContaining([vecOnly.id, ftsOnly.id]));
     expect(hits).toHaveLength(3);
+  });
+
+  it('原始相关度是向量余弦；只靠全文命中的留空；余弦为负的候选不再被丢弃（#168）', async () => {
+    const emb: Embedder = {
+      model: 'kw',
+      dim: 2,
+      embed: async (text, kind) => {
+        if (kind === 'query') return Float32Array.from([1, 0]);
+        if (text.includes('opposite')) return Float32Array.from([-1, 0]);
+        if (text.includes('diagonal')) return Float32Array.from([Math.SQRT1_2, Math.SQRT1_2]);
+        return Float32Array.from([1, 0]);
+      },
+    };
+    const aligned = await add('cache aligned', 'global', emb);
+    const diagonal = await add('cache diagonal', 'global', emb);
+    const opposite = await add('opposite note', 'global', emb);
+    const ftsOnly = await add('cache without vector');
+    const hits = await searchMemories(db, {
+      q: 'cache',
+      spaceIds: ['global'],
+      embedder: emb,
+      mmr: false,
+    });
+    const relevance = new Map(hits.map((h) => [h.memory.id, h.relevance]));
+    expect(relevance.get(aligned.id)).toBeCloseTo(1, 6);
+    expect(relevance.get(diagonal.id)).toBeCloseTo(Math.SQRT1_2, 6);
+    expect(relevance.get(opposite.id)).toBeCloseTo(-1, 6);
+    expect(relevance.get(ftsOnly.id)).toBeNull();
   });
 
   it('ignores vectors from a different embedding model', async () => {
@@ -417,7 +442,7 @@ describe('searchMemories — MMR 去冗余', () => {
     const r2 = await add('note redis cache replica', 'global', emb);
     const r3 = await add('note redis cluster cache', 'global', emb);
     const k = await add('note kafka broker topic', 'global', emb);
-    const filler = await add('note misc misc misc misc misc misc misc misc', 'global', emb);
+    const filler = await add('note misc misc misc misc misc misc misc misc');
     return { redis: [r1.id, r2.id, r3.id], kafka: k.id, filler: filler.id };
   }
 
