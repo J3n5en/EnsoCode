@@ -203,6 +203,8 @@ Main 在动作前校验并回传**冻结的规范 app 路径**，guest 侧只能
 3. per-app 授权默认 **首次询问**：系统弹窗「允许 / 拒绝」+「始终允许」勾选；
    名单落在 `userData/computer/allowed-apps.json`（只存 bundle id、显示名、规范路径、时间），设置页可撤销。
    只门控输入与 AX 写操作；截图与 AX 读取不弹窗（读取已受 TCC 与只读审批约束）。
+   desktop 级前台输入按落点最上层窗口（无落点时按系统前台）解析实际收到输入的 app，同样授权加锁，解析不出就拒绝；
+   有 pid 却认不出 app 时 fail-closed，不在 `.app` 里的窗口程序以可执行文件路径作身份。
 4. 做了虚拟指针：每个目标进程一个，带色与「AI · 应用名」标签，`setContentProtection` 排除在截图外。
 5. 第 8、9 条随本次一起修：`backgroundInput` 只在 SkyLight 通道可用时为真；`delivery:'foreground'` 一律走 HID。
 
@@ -225,6 +227,8 @@ Main 在动作前校验并回传**冻结的规范 app 路径**，guest 侧只能
 - 应用内（隔离 userData + fake provider 驱动 computer 工具）：授权弹窗三种结果、后台点击与输入、TextEdit 定向输入、
   设置页撤销、虚拟指针窗口出现。
 - 未做：两个厂商真实模型的自主调用验证（隔离环境只有 fake provider）；开发版 AX worker 拿不到 TCC 授权，
-  AXPress 收敛在应用内未能走通，仅在原生层验证了 app 内命中能拿到 `AXButton`/`AXPress`。
+  AXPress 收敛在应用内未能走通，仅在原生层验证了 app 内命中能稳定拿到 `AXButton`（含命中按钮内文字时上溯）。
+- 未定位：开发版有一次整个实例的 SkyLight 激活都返回 1002（辅助功能已授权、同机 node 进程同时调用返回 0），
+  重启实例后恢复。现在会报 `BackgroundUnavailable` 并提示授权，不会静默改走前台。
 
 踩坑记录见 `docs/engineering-reference/big-question/macos-background-input.md`。
