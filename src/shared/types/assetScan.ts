@@ -12,6 +12,7 @@ export const ASSET_SOURCE_IDS = [
   'opencode',
   'cc-switch',
   'ensoai',
+  'agents',
 ] as const;
 export type AssetSourceId = (typeof ASSET_SOURCE_IDS)[number];
 

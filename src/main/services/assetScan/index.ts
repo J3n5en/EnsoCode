@@ -31,6 +31,7 @@ const SOURCE_NAMES: Record<AssetSourceId, string> = {
   opencode: 'opencode',
   'cc-switch': 'CC Switch',
   ensoai: 'EnsoAI',
+  agents: 'Agents (~/.agents)',
 };
 
 interface SourceSpec {
@@ -117,6 +118,13 @@ function sourceSpec(sourceId: AssetSourceId): SourceSpec {
         probe: settingsFile,
         readMcp: () => readEnsoAiMcp(settingsFile),
         readInstructions: () => readEnsoAiPrompts(settingsFile),
+      };
+    }
+    case 'agents': {
+      const skillsRoot = home('.agents', 'skills');
+      return {
+        probe: skillsRoot,
+        readSkills: () => readSkillsRoot(skillsRoot, SOURCE_NAMES.agents),
       };
     }
   }
