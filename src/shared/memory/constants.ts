@@ -88,7 +88,7 @@ export const KG_MAX_DESCRIPTION_CHARS = 300;
 export const KG_MAX_LABEL_CHARS = 40;
 // 与 DISTILL_MAX_ATTEMPTS 同理：暂时性失败重试上限
 export const KG_MAX_ATTEMPTS = 3;
-export const KG_EXTRACT_MAX_TOKENS = 1536;
+export const KG_EXTRACT_MAX_TOKENS = 4096;
 // Level 2：分析最多 15 个实体，保留 confidence≥0.7，最多 10 个名字；上下文 >2000 字取头 1000 + 尾 800
 export const KG_L2_MAX_ANALYZE = 15;
 export const KG_L2_MIN_CONFIDENCE = 0.7;

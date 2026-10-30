@@ -109,6 +109,8 @@ export interface KgJobDto {
   attempts: number;
   total: number;
   done: number;
+  /** 1 = 抽取失败终态；成功为 0 */
+  failed: number;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -131,6 +133,8 @@ export interface MemoryJobsSnapshot {
   distill: DistillJobDto[];
   kg: KgJobDto[];
   reembed: ReembedJobDto | null;
+  /** kind=kg 的失败终态条数，不受任务列表 limit 截断 */
+  kgFailed: number;
 }
 
 export interface MemoryStats {

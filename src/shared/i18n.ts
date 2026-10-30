@@ -1454,6 +1454,7 @@ export const zhTranslations: Record<string, string> = {
   'Distilling…': '提炼中…',
   'Background tasks': '后台任务',
   'Clear finished tasks': '清空历史任务',
+  'Retry failed extractions ({{count}})': '重试失败项（{{count}}）',
   'Removes completed and cancelled jobs. Running tasks are kept. Sessions will show as not distilled again, since that flag is derived from job history — re-distilling is deduplicated, so it will not create duplicate memories.':
     '清除已完成和已作废的任务，进行中的保留。清除后会话会重新显示为「未提炼」——该标记是由任务历史推导的；重新提炼有去重，不会产生重复记忆。',
   'Removes completed and cancelled jobs. Running tasks are kept.':

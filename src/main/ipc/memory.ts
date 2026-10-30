@@ -70,11 +70,13 @@ import {
   getMemoryDistillJobs,
   getMemoryEmbedder,
   getMemoryEmbeddingError,
+  getMemoryKgFailedCount,
   getMemoryKgJobs,
   getMemoryReembedProgress,
   memoryDatabase,
   memoryLanguage,
   refreshMemoryEmbedding,
+  retryFailedMemoryKg,
   setMemoryChangeListener,
 } from '../services/memoryHost';
 import {
@@ -97,7 +99,7 @@ const EMPTY_STATS: MemoryStats = {
   embedded: 0,
   databaseBytes: 0,
 };
-const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null };
+const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgFailed: 0 };
 const EMPTY_GRAPH: MemoryGraphDto = { nodes: [], edges: [], totalEntities: 0 };
 
 function isTrustedWindow(webContentsId: number): boolean {
@@ -272,6 +274,13 @@ export function registerMemoryHandlers(): void {
     });
   });
 
+  ipcMain.handle(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED, (event, raw: unknown) => {
+    if (!isTrustedWindow(event.sender.id) || raw !== undefined) return 0;
+    const reset = retryFailedMemoryKg();
+    if (reset > 0) memoryChanged();
+    return reset;
+  });
+
   ipcMain.handle(IPC_CHANNELS.MEMORY_JOBS, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_JOBS;
     const snapshot = toMemoryJobsSnapshot(
@@ -307,6 +316,7 @@ export function registerMemoryHandlers(): void {
       reembed: snapshot.reembed
         ? { ...snapshot.reembed, target: label(snapshot.reembed.target) }
         : null,
+      kgFailed: getMemoryKgFailedCount(),
     };
   });
 

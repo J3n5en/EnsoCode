@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   toMemoryJobsSnapshot: vi.fn(() => ({ distill: [], kg: [], reembed: null })),
   getMemoryDistillJobs: vi.fn(() => []),
   getMemoryKgJobs: vi.fn(() => []),
+  getMemoryKgFailedCount: vi.fn(() => 2),
   getMemoryReembedProgress: vi.fn(() => null),
   distillSessionNow: vi.fn(async () => true),
   getMemoryCompletion: vi.fn(
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     async (): Promise<{ ok: boolean; error?: string }> => ({ ok: false, error: 'x' })
   ),
   editMemory: vi.fn((): unknown => null),
+  retryFailedMemoryKg: vi.fn(() => 0),
   registry: null as { projection: () => unknown } | null,
   settings: null as Record<string, unknown> | null,
   send: vi.fn(),
@@ -73,6 +75,7 @@ vi.mock('../services/memoryAdmin', () => ({
 vi.mock('../services/memoryHost', () => ({
   getMemoryDistillJobs: mocks.getMemoryDistillJobs,
   getMemoryKgJobs: mocks.getMemoryKgJobs,
+  getMemoryKgFailedCount: mocks.getMemoryKgFailedCount,
   getMemoryReembedProgress: mocks.getMemoryReembedProgress,
   distillSessionNow: mocks.distillSessionNow,
   getMemoryCompletion: mocks.getMemoryCompletion,
@@ -84,6 +87,7 @@ vi.mock('../services/memoryHost', () => ({
   setMemoryChangeListener: vi.fn(),
   approvePendingMemoryWrite: mocks.approvePendingMemoryWrite,
   editMemory: mocks.editMemory,
+  retryFailedMemoryKg: mocks.retryFailedMemoryKg,
 }));
 vi.mock('../services/memory/pending', () => ({
   listPendingWrites: mocks.listPendingWrites,
@@ -321,7 +325,30 @@ describe('memory IPC', () => {
     expect(mocks.getMemoryReembedProgress).toHaveBeenCalled();
     expect(mocks.toMemoryJobsSnapshot).toHaveBeenCalled();
     expect(mocks.openExistingMemoryDb).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ distill: [], kg: [], reembed: null });
+    expect(mocks.getMemoryKgFailedCount).toHaveBeenCalled();
+    expect(result).toMatchObject({ distill: [], kg: [], reembed: null, kgFailed: 2 });
+  });
+
+  it('rejects untrusted or unexpected kg retry payloads', async () => {
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)({ sender: { id: 99 } })).toBe(0);
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)(event, { force: true })).toBe(0);
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)(event, null)).toBe(0);
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)(event, 0)).toBe(0);
+    expect(mocks.retryFailedMemoryKg).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('retries failed kg jobs when the window is trusted and there is no payload', async () => {
+    mocks.retryFailedMemoryKg.mockReturnValueOnce(3);
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)(event)).toBe(3);
+    expect(mocks.retryFailedMemoryKg).toHaveBeenCalledTimes(1);
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+  });
+
+  it('does not broadcast when no kg jobs were reset', async () => {
+    mocks.retryFailedMemoryKg.mockReturnValueOnce(0);
+    expect(await handler(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED)(event)).toBe(0);
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('rejects untrusted job history clears without opening the database', async () => {

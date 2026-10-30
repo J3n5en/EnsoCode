@@ -77,6 +77,7 @@ export const IPC_CHANNELS = {
   MEMORY_STATS: 'memory:stats',
   MEMORY_JOBS: 'memory:jobs',
   MEMORY_JOBS_CLEAR: 'memory:jobs-clear',
+  MEMORY_KG_RETRY_FAILED: 'memory:kg-retry-failed',
   MEMORY_EVOLVES_PENDING: 'memory:evolves-pending',
   MEMORY_EVOLVES_REVIEW: 'memory:evolves-review',
   MEMORY_PENDING_WRITES: 'memory:pending-writes',

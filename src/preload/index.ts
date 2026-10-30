@@ -394,6 +394,8 @@ const electronAPI = {
     stats: (): Promise<MemoryStats> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_STATS),
     jobs: (): Promise<MemoryJobsSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_JOBS),
     clearJobs: (): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_JOBS_CLEAR),
+    retryFailedKgJobs: (): Promise<number> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED),
     evolvesPending: (): Promise<EvolvesEdgeDto[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_EVOLVES_PENDING),
     evolvesReview: (id: string, state: 'accepted' | 'rejected'): Promise<MemoryMutationResult> =>

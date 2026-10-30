@@ -17,7 +17,7 @@ import { listCrystalSources } from './memory/crystal';
 import { openMemoryDb, vecTableExists } from './memory/db';
 import { type DistillJob, listDistillJobs } from './memory/distill';
 import { buildFtsMatchQuery } from './memory/fts';
-import { type KgJob, listEntityNames, listKgJobs } from './memory/kg';
+import { countFailedKgJobs, type KgJob, listEntityNames, listKgJobs } from './memory/kg';
 import { getReembedJob, type ReembedJob } from './memory/reembed';
 import { searchMemories } from './memory/search';
 import {
@@ -329,14 +329,18 @@ export function toMemoryJobsSnapshot(
     distill: distill.map(toDistillDto),
     kg: kg.map(toKgDto),
     reembed: reembed ? toReembedDto(reembed) : null,
+    kgFailed: 0,
   };
 }
 
 export function getMemoryJobsSnapshot(db: Database.Database, limit = 50): MemoryJobsSnapshot {
-  return toMemoryJobsSnapshot(listDistillJobs(db, limit), listKgJobs(db, limit), getReembedJob(db));
+  return {
+    ...toMemoryJobsSnapshot(listDistillJobs(db, limit), listKgJobs(db, limit), getReembedJob(db)),
+    kgFailed: countFailedKgJobs(db),
+  };
 }
 
-/** 只删终态行。pending/running 必须留着：worker 按 id 写回，删了会丢进度、状态永久错乱。失败是 done+error，没有独立 failed 状态。 */
+/** 只删终态行。pending/running 必须留着：worker 按 id 写回，删了会丢进度、状态永久错乱。失败仍是 done（kg 另记 failed=1），没有独立 failed 状态。 */
 export function clearFinishedMemoryJobs(db: Database.Database): number {
   return db.prepare("DELETE FROM memory_jobs WHERE status IN ('done','cancelled')").run().changes;
 }

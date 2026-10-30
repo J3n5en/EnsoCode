@@ -33,6 +33,7 @@ function kg(over: Partial<KgJobDto> = {}): KgJobDto {
     error: null,
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
+    failed: 0,
     ...over,
   };
 }
@@ -41,6 +42,7 @@ const snapshot = (over: Partial<MemoryJobsSnapshot> = {}): MemoryJobsSnapshot =>
   distill: [],
   kg: [],
   reembed: null,
+  kgFailed: 0,
   ...over,
 });
 
@@ -55,6 +57,25 @@ describe('toJobRows', () => {
     expect(rows.find((r) => r.kind === 'distill')?.target).toBe('Fix retry loop');
     expect(rows.find((r) => r.kind === 'distill')?.detail).toBe('2 stored');
     expect(rows.find((r) => r.kind === 'kg')?.detail).toBe('4 entities · 3 links');
+  });
+
+  it('shows the error of a failed entity extraction', () => {
+    const rows = toJobRows(
+      snapshot({
+        kg: [
+          kg({
+            status: 'done',
+            failed: 1,
+            error: 'kg extraction failed: model output is not parseable JSON',
+          }),
+        ],
+      })
+    );
+    expect(rows[0]).toMatchObject({
+      kind: 'kg',
+      state: 'failed',
+      detail: 'kg extraction failed: model output is not parseable JSON',
+    });
   });
 
   it('falls back to a short id when the title is gone', () => {

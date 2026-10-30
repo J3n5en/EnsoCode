@@ -208,13 +208,17 @@ export function normalizeExtraction(x: {
 
 /** Level 1：schema 在 system、正文在 user；模型输出不可解析即抛，由任务层按暂时性失败处理 */
 export const extractLevel1: KgExtractor = async (text, complete) => {
-  const parsed = parseKgResponse(
-    await complete(KG_EXTRACT_SYSTEM, kgExtractLevel1Prompt(text), {
-      maxTokens: KG_EXTRACT_MAX_TOKENS,
-    })
-  );
-  if (!parsed) throw new Error('model output is not parseable JSON');
-  return parsed;
+  const call = (nudge: boolean) =>
+    complete(
+      KG_EXTRACT_SYSTEM,
+      nudge ? `${kgExtractLevel1Prompt(text)}\n\nOutput JSON only` : kgExtractLevel1Prompt(text),
+      { maxTokens: KG_EXTRACT_MAX_TOKENS }
+    );
+  const parsed = parseKgResponse(await call(false));
+  if (parsed) return parsed;
+  const retried = parseKgResponse(await call(true));
+  if (!retried) throw new Error('model output is not parseable JSON');
+  return retried;
 };
 
 // ---------------------------------------------------------------------------
@@ -362,6 +366,8 @@ export interface KgJob {
   total: number;
   /** 写入的关系数 */
   done: number;
+  /** 1 = 用尽重试或写入失败；成功与尚未终态的 pending 为 0 */
+  failed: number;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -374,6 +380,7 @@ interface JobRow {
   cursor: number;
   total: number;
   done: number;
+  failed: number;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -387,6 +394,7 @@ const toJob = (r: JobRow): KgJob => ({
   attempts: r.cursor,
   total: r.total,
   done: r.done,
+  failed: r.failed,
   error: r.error,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -450,6 +458,39 @@ export function listKgJobs(db: Database.Database, limit = 50): KgJob[] {
   ).map(toJob);
 }
 
+const FAILED_KG_SQL = `kind = ? AND status = 'done' AND (failed != 0 OR (error IS NOT NULL AND error != ''))`;
+
+export function countFailedKgJobs(db: Database.Database): number {
+  return (
+    db.prepare(`SELECT count(*) AS n FROM memory_jobs WHERE ${FAILED_KG_SQL}`).get(KIND) as {
+      n: number;
+    }
+  ).n;
+}
+
+export function retryFailedKgJobs(db: Database.Database): KgJob[] {
+  const now = new Date().toISOString();
+  const ids = db
+    .prepare(`SELECT id FROM memory_jobs WHERE ${FAILED_KG_SQL} ORDER BY id ASC`)
+    .all(KIND) as { id: number }[];
+  if (ids.length === 0) return [];
+  const update = db.prepare(
+    `UPDATE memory_jobs SET status = 'pending', cursor = 0, failed = 0, error = NULL, updated_at = ?
+     WHERE id = ?`
+  );
+  const read = db.prepare('SELECT * FROM memory_jobs WHERE id = ?');
+  return db
+    .transaction(() => {
+      const jobs: KgJob[] = [];
+      for (const { id } of ids) {
+        update.run(now, id);
+        jobs.push(toJob(read.get(id) as JobRow));
+      }
+      return jobs;
+    })
+    .immediate();
+}
+
 /** 最新活动记忆若还没有当前指纹的任务，就建 pending。开库 / 打开开关时补抽用。 */
 export function ensurePendingKgJobs(db: Database.Database): number {
   const ids = db
@@ -469,7 +510,7 @@ export interface RunKgOptions {
 
 /**
  * 跑一个抽取任务：重读记忆核对指纹（内容已变 / 已删除 → cancelled）→ 密钥打码 → LLM → 归一 → applyExtraction。
- * LLM 阶段失败是暂时性的：attempts+1 保留 pending 记 error，超过 KG_MAX_ATTEMPTS 标 done。绝不抛出。
+ * LLM 阶段失败是暂时性的：attempts+1 保留 pending 记 error，超过 KG_MAX_ATTEMPTS 标 done 且 failed=1。绝不抛出。
  */
 export async function runKgJob(
   db: Database.Database,
@@ -477,7 +518,7 @@ export async function runKgJob(
   opts: RunKgOptions
 ): Promise<KgJob> {
   const set = db.prepare(
-    `UPDATE memory_jobs SET status = ?, cursor = ?, total = ?, done = ?, error = ?, updated_at = ? WHERE id = ?`
+    `UPDATE memory_jobs SET status = ?, cursor = ?, total = ?, done = ?, failed = ?, error = ?, updated_at = ? WHERE id = ?`
   );
   const reread = () =>
     toJob(db.prepare('SELECT * FROM memory_jobs WHERE id = ?').get(job.id) as JobRow);
@@ -485,9 +526,19 @@ export async function runKgJob(
     status: KgStatus,
     attempts: number,
     counts: { total: number; done: number },
-    error: string | null
+    error: string | null,
+    failed: number
   ) => {
-    set.run(status, attempts, counts.total, counts.done, error, new Date().toISOString(), job.id);
+    set.run(
+      status,
+      attempts,
+      counts.total,
+      counts.done,
+      failed,
+      error,
+      new Date().toISOString(),
+      job.id
+    );
     return reread();
   };
   const zero = { total: 0, done: 0 };
@@ -502,11 +553,12 @@ export async function runKgJob(
       'cancelled',
       job.attempts,
       zero,
-      'memory changed or deleted since the job was created'
+      'memory changed or deleted since the job was created',
+      job.failed ?? 0
     );
   }
   const attempts = job.attempts + 1;
-  finish('running', attempts, zero, null);
+  finish('running', attempts, zero, null, 0);
 
   let extraction: KgExtraction;
   try {
@@ -514,7 +566,8 @@ export async function runKgJob(
     extraction = await (opts.extract ?? extractLevel1)(text, opts.complete);
   } catch (error) {
     const message = `kg extraction failed: ${error instanceof Error ? error.message : String(error)}`;
-    return finish(attempts >= KG_MAX_ATTEMPTS ? 'done' : 'pending', attempts, zero, message);
+    const terminal = attempts >= KG_MAX_ATTEMPTS;
+    return finish(terminal ? 'done' : 'pending', attempts, zero, message, terminal ? 1 : 0);
   }
   // 打码后模型仍可能把 `[REDACTED]` 当实体，或凭记忆吐出密钥形态的字串；正名 / 别名带打码标记或自身命中密钥模式的一律丢
   const tainted = (s: string) => s.includes('[REDACTED]') || redactSecrets(s) !== s;
@@ -524,13 +577,14 @@ export async function runKgJob(
   extraction = normalizeExtraction(extraction);
   try {
     const counts = applyExtraction(db, memory, extraction, opts.now);
-    return finish('done', attempts, { total: counts.entities, done: counts.relations }, null);
+    return finish('done', attempts, { total: counts.entities, done: counts.relations }, null, 0);
   } catch (error) {
     return finish(
       'done',
       attempts,
       zero,
-      `kg write failed: ${error instanceof Error ? error.message : String(error)}`
+      `kg write failed: ${error instanceof Error ? error.message : String(error)}`,
+      1
     );
   }
 }

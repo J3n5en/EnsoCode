@@ -34,11 +34,13 @@ import {
 import type { RemoteEmbeddingOptions } from './memory/embedding/remote';
 import type { EmbeddingModelSpec, EmbeddingProvider } from './memory/embedding/types';
 import {
+  countFailedKgJobs,
   ensureKgJob,
   ensurePendingKgJobs,
   type KgJob,
   listKgJobs,
   listResumableKgJobs,
+  retryFailedKgJobs,
   runKgJob,
 } from './memory/kg';
 import { approvePendingWrite } from './memory/pending';
@@ -509,6 +511,22 @@ function resumeMemoryKg(): void {
 /** 设置页出口；库未打开不为此建库 */
 export function getMemoryKgJobs(limit?: number): KgJob[] {
   return db ? listKgJobs(db, limit) : [];
+}
+
+export function getMemoryKgFailedCount(): number {
+  return db ? countFailedKgJobs(db) : 0;
+}
+
+/** 把 kg 失败终态放回 pending，并在开关开着时立刻续跑。返回重置条数 */
+export function retryFailedMemoryKg(): number {
+  if (!db) return 0;
+  const jobs = retryFailedKgJobs(db);
+  if (jobs.length > 0 && kgConfig.enabled) {
+    void enqueueLlmJob(async () => {
+      for (const job of jobs) await runOneKg(job);
+    });
+  }
+  return jobs.length;
 }
 
 /** 等后台 KG 抽取收尾（测试 / 退出前用） */

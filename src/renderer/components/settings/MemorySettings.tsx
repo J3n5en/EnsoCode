@@ -60,7 +60,7 @@ const JOB_KIND_LABELS: Record<JobKind, string> = {
   reembed: 'job:vectors',
 };
 
-const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null };
+const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgFailed: 0 };
 
 // 模型清单来自 Main 的注册表（registry.ts），不在渲染层重写一份：
 // 手写副本一旦 id 对不上，选中后会静默回落默认模型，用户完全看不出来
@@ -1024,6 +1024,19 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-medium text-sm">{t('Background tasks')}</h3>
           <div className="flex shrink-0 items-center gap-1">
+            {jobs.kgFailed > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void window.electronAPI.memory
+                    .retryFailedKgJobs()
+                    .then(() => loadRef.current?.());
+                }}
+              >
+                {t('Retry failed extractions ({{count}})', { count: String(jobs.kgFailed) })}
+              </Button>
+            )}
             {jobRows.some((row) => row.state !== 'running') && (
               <Button
                 size="sm"

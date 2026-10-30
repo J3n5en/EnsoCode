@@ -1,13 +1,19 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { KG_MAX_ATTEMPTS, KG_MAX_ENTITIES, KG_MAX_RELATIONS } from '@shared/memory/constants';
+import {
+  KG_EXTRACT_MAX_TOKENS,
+  KG_MAX_ATTEMPTS,
+  KG_MAX_ENTITIES,
+  KG_MAX_RELATIONS,
+} from '@shared/memory/constants';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { contentHash } from './contentHash';
 import { cleanupOrphanMentions, openMemoryDb } from './db';
 import {
   applyExtraction,
+  countFailedKgJobs,
   ensureKgJob,
   ensurePendingKgJobs,
   extractLevel1,
@@ -19,6 +25,7 @@ import {
   listResumableKgJobs,
   normalizeExtraction,
   parseKgResponse,
+  retryFailedKgJobs,
   runKgJob,
 } from './kg';
 import { createMemory, updateMemory } from './store';
@@ -381,6 +388,98 @@ describe('kg 任务：幂等、续跑、失败不影响记忆', () => {
     expect(done.status).toBe('done');
     expect(listResumableKgJobs(db)).toEqual([]);
   });
+
+  it('同一任务连续失败 3 次（每次从 listResumableKgJobs 重读，模拟重启）后进入失败终态且不再 resumable', async () => {
+    const m = await create('Kubernetes is our orchestrator.');
+    const created = ensureKgJob(db, m.id);
+    expect(created).not.toBeNull();
+    let id = created?.id ?? 0;
+    const fail = async () => {
+      throw new Error('provider down');
+    };
+    for (let i = 0; i < KG_MAX_ATTEMPTS; i++) {
+      const current = listResumableKgJobs(db).find((j) => j.id === id);
+      expect(current?.attempts).toBe(i);
+      const next = await runKgJob(db, current as NonNullable<typeof current>, { complete: fail });
+      expect(next.attempts).toBe(i + 1);
+      id = next.id;
+      if (i + 1 < KG_MAX_ATTEMPTS) expect(next.status).toBe('pending');
+    }
+    const finished = listKgJobs(db).find((j) => j.id === id);
+    expect(finished).toMatchObject({ status: 'done', failed: 1, attempts: KG_MAX_ATTEMPTS });
+    expect(finished?.error).toContain('provider down');
+    expect(listResumableKgJobs(db).some((j) => j.id === id)).toBe(false);
+    expect(countFailedKgJobs(db)).toBe(1);
+  });
+
+  it('用尽重试的失败 failed=1 与成功 done 可区分；重试只把失败项放回 pending 并能再跑', async () => {
+    const bad = await create('Unparseable source text.');
+    const good = await create('Sarah uses Kubernetes with Docker.');
+    const legacy = await create('Legacy failed extraction.');
+    let failed = ensureKgJob(db, bad.id) as NonNullable<ReturnType<typeof ensureKgJob>>;
+    for (let i = 0; i < KG_MAX_ATTEMPTS; i++) {
+      const current = listResumableKgJobs(db).find((j) => j.id === failed.id);
+      failed = await runKgJob(db, current as NonNullable<typeof current>, {
+        complete: completeWith('garbage'),
+      });
+    }
+    const success = await runKgJob(
+      db,
+      ensureKgJob(db, good.id) as NonNullable<ReturnType<typeof ensureKgJob>>,
+      { complete: completeWith(sample) }
+    );
+    expect(failed).toMatchObject({ status: 'done', failed: 1 });
+    expect(failed.error).toContain('not parseable');
+    expect(success).toMatchObject({ status: 'done', failed: 0, error: null });
+
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO memory_jobs (kind, target, status, cursor, total, done, failed, error, created_at, updated_at)
+       VALUES ('kg', ?, 'done', 3, 0, 0, 0, 'kg extraction failed: model output is not parseable JSON', ?, ?)`
+    ).run(kgFingerprint(legacy.id, legacy.content), now, now);
+    db.prepare(
+      `INSERT INTO memory_jobs (kind, target, status, cursor, total, done, failed, error, created_at, updated_at)
+       VALUES ('distill', 'session-1', 'done', 3, 0, 0, 1, 'distill failed', ?, ?)`
+    ).run(now, now);
+    const pending = ensureKgJob(db, (await create('Still queued.')).id);
+    expect(pending?.attempts).toBe(0);
+
+    const reset = retryFailedKgJobs(db);
+    expect(reset.map((j) => j.memoryId).sort()).toEqual([bad.id, legacy.id].sort());
+    expect(
+      reset.every(
+        (j) => j.status === 'pending' && j.attempts === 0 && j.failed === 0 && j.error === null
+      )
+    ).toBe(true);
+    expect(
+      listResumableKgJobs(db)
+        .map((j) => j.memoryId)
+        .sort()
+    ).toEqual([bad.id, legacy.id, pending?.memoryId].sort());
+    expect(listKgJobs(db).find((j) => j.id === success.id)).toMatchObject({
+      status: 'done',
+      failed: 0,
+      error: null,
+    });
+    expect(
+      db.prepare("SELECT status, error FROM memory_jobs WHERE kind = 'distill'").get()
+    ).toEqual({
+      status: 'done',
+      error: 'distill failed',
+    });
+
+    const rerun = await runKgJob(
+      db,
+      listResumableKgJobs(db).find((j) => j.memoryId === bad.id) as NonNullable<
+        ReturnType<typeof ensureKgJob>
+      >,
+      { complete: completeWith(sample) }
+    );
+    expect(rerun).toMatchObject({ status: 'done', failed: 0, error: null, attempts: 1 });
+    expect(listResumableKgJobs(db).some((j) => j.id === rerun.id)).toBe(false);
+    expect(countFailedKgJobs(db)).toBe(0);
+  });
+
   it('extractLevel1 用 system schema，正文在 user，并限制 maxTokens', async () => {
     let system: string | null = null;
     let maxTokens: number | undefined;
@@ -394,5 +493,36 @@ describe('kg 任务：幂等、续跑、失败不影响记忆', () => {
     expect(system).toContain('"entities"');
     expect(maxTokens).toBeGreaterThanOrEqual(1024);
     expect(x.entities).toHaveLength(3);
+  });
+
+  it('解析失败时同一 attempt 内再用 Output JSON only 补一次；complete 抛错不补', async () => {
+    expect(KG_EXTRACT_MAX_TOKENS).toBeGreaterThanOrEqual(4096);
+    const prompts: string[] = [];
+    const x = await extractLevel1('Sarah uses Docker.', async (_s, user, opts) => {
+      prompts.push(user);
+      expect(opts?.maxTokens).toBe(KG_EXTRACT_MAX_TOKENS);
+      return prompts.length === 1 ? 'not json' : sample;
+    });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Output JSON only');
+    expect(x.entities.length).toBeGreaterThan(0);
+
+    let calls = 0;
+    await expect(
+      extractLevel1('x', async () => {
+        calls += 1;
+        return 'nope';
+      })
+    ).rejects.toThrow(/not parseable/);
+    expect(calls).toBe(2);
+
+    calls = 0;
+    await expect(
+      extractLevel1('x', async () => {
+        calls += 1;
+        throw new Error('provider down');
+      })
+    ).rejects.toThrow(/provider down/);
+    expect(calls).toBe(1);
   });
 });

@@ -20,7 +20,7 @@ import {
 const harness = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   stats: null as MemoryStats | null,
-  jobs: { distill: [], kg: [], reembed: null } as MemoryJobsSnapshot,
+  jobs: { distill: [], kg: [], reembed: null, kgFailed: 0 } as MemoryJobsSnapshot,
   models: [] as EmbeddingModelDto[],
   download: vi.fn(() => Promise.resolve(true)),
   pickerProps: null as Record<string, unknown> | null,
@@ -90,7 +90,7 @@ function setState(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   setState();
   harness.stats = null;
-  harness.jobs = { distill: [], kg: [], reembed: null };
+  harness.jobs = { distill: [], kg: [], reembed: null, kgFailed: 0 };
   harness.models = [model()];
   harness.download.mockClear();
   harness.pickerProps = null;
