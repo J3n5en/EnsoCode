@@ -1690,6 +1690,9 @@ export const zhTranslations: Record<string, string> = {
   'Grant Computer permissions': '授权电脑操控权限',
   'Show permission guide': '打开权限引导',
   'Apps the AI may control': 'AI 可操作的应用',
+  'Show the app being operated': '显示正在操作的应用',
+  'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.':
+    'AI 在后台操作某个应用时，用一个小浮窗实时显示这个应用的画面，可随时关掉。',
   'The first time the AI clicks or types in an app, EnsoCode asks you. Apps you always allow are listed here; it can then read everything in their windows.':
     'AI 第一次在某个应用里点击或输入时，EnsoCode 会先询问你。你选择「始终允许」的应用会列在这里，AI 之后可以读取这些应用窗口里的全部内容。',
   'No apps are always allowed yet.': '还没有始终允许的应用。',

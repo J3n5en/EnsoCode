@@ -283,6 +283,26 @@ describe('ComputerHost', () => {
     await a;
   });
 
+  it('后台操作某个窗口时通知预览（画中画）跟随该窗口，run 结束通知收起；前台接管不触发', async () => {
+    const events: string[] = [];
+    const host = new ComputerHost(twoApps, undefined, {
+      feedback: {
+        pointer: () => {},
+        activity: (input) => events.push(`show ${input.windowId} ${input.app} ${input.pid}`),
+        runEnd: () => events.push('end'),
+      },
+    });
+    await host.invoke('s1', 'run', {
+      code: 'const w = await desktop.window("w2"); await w.type("x"); await w.press("return")',
+    });
+    expect(events).toEqual(['show w2 Notes 2', 'show w2 Notes 2', 'end']);
+    events.length = 0;
+    await host.invoke('s1', 'run', {
+      code: 'const w = await desktop.window("w2"); await w.type("x", { delivery: "foreground" })',
+    });
+    expect(events).toEqual(['end']);
+  });
+
   it('app 授权被拒：动作不投递，错误回给模型', async () => {
     const backend = new FakeDesktopBackend();
     const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');

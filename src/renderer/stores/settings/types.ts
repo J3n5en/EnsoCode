@@ -130,6 +130,8 @@ export interface SettingsState {
 
   /** RTK 命令压缩；缺省开，新建或冷恢复会话生效。 */
   rtkEnabled: boolean;
+  /** 后台操作电脑时显示被操作窗口的画中画（macOS） */
+  computerPreview: boolean;
 
   /** Code 会话也启用受保护动作底线（Bot 会话恒开）；缺省关，新建或冷恢复会话生效。 */
   protectedActionsInCode: boolean;
@@ -356,6 +358,7 @@ export interface SettingsState {
   setWindowsLocalShell: (value: WindowsLocalShell) => void;
   setExploreFoldEnabled: (value: boolean) => void;
   setRtkEnabled: (value: boolean) => void;
+  setComputerPreview: (value: boolean) => void;
   setProtectedActionsInCode: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;
   setMemoryEmbeddingAutoDownload: (value: boolean) => void;

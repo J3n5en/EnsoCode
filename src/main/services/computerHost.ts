@@ -9,8 +9,10 @@ import type {
   ComputerRunResult,
 } from '@shared/computer/types';
 import type { ComputerOp } from '@shared/types/agent';
+import { readSettings } from '../ipc/settings';
 import { promptComputerAppAccess } from './computer/appApprovalPrompt';
 import { AppAuthorizer } from './computer/appAuthorization';
+import { createAppPreview } from './computer/appPreview';
 import type { DesktopBackend } from './computer/backend';
 import {
   type ComputerGuestSession,
@@ -55,7 +57,18 @@ export interface ComputerFeedback {
     screenY: number;
     action: string;
   }): void;
-  /** 收起并释放所有指针窗口 */
+  /** 后台操作某个窗口：预览（画中画）跟随它 */
+  activity?(input: {
+    owner: string;
+    windowId: string;
+    pid: number;
+    app: string;
+    path: string;
+    size: () => Promise<{ width: number; height: number } | undefined>;
+  }): void;
+  /** run 结束（预览据此延时收起） */
+  runEnd?(owner: string): void;
+  /** 收起并释放所有反馈窗口 */
   dispose?(): void;
 }
 
@@ -182,6 +195,20 @@ export class ComputerHost {
           labels[key] = `window ${request.target}`;
         }
         await this.leases.acquire(owner, keys, controller.signal, labels);
+        const windowId = request.ref ? backend.targetForRef?.(request.ref) : request.target;
+        if (request.delivery === 'background' && app && windowId && windowId !== 'desktop') {
+          this.feedback?.activity?.({
+            owner,
+            windowId,
+            pid: app.pid,
+            app: app.name,
+            path: app.path,
+            size: async () => {
+              const window = (await backend.windows()).find((item) => item.id === windowId);
+              return window ? { width: window.width, height: window.height } : undefined;
+            },
+          });
+        }
       };
       const feedback = this.feedback;
       try {
@@ -222,6 +249,7 @@ export class ComputerHost {
       } finally {
         if (occupancyGen !== undefined) this.occupancy?.stop(occupancyGen);
         this.leases.releaseOwner(owner);
+        this.feedback?.runEnd?.(owner);
       }
     } finally {
       signal?.removeEventListener('abort', onAbort);
@@ -288,6 +316,32 @@ export const computerHost = new ComputerHost(
       file: () => path.join(app.getPath('userData'), 'computer', 'allowed-apps.json'),
       prompt: promptComputerAppAccess,
     }),
-    feedback: createVirtualCursor(),
+    feedback: composeFeedback(
+      createVirtualCursor(),
+      createAppPreview({ enabled: readComputerPreviewEnabled })
+    ),
   }
 );
+
+/** 缺省开启：后台操作时显示被操作窗口的画中画 */
+function readComputerPreviewEnabled(): boolean {
+  const state = (
+    readSettings()?.['enso-settings'] as { state?: { computerPreview?: boolean } } | undefined
+  )?.state;
+  return state?.computerPreview !== false;
+}
+
+function composeFeedback(
+  cursor: Pick<ComputerFeedback, 'pointer' | 'dispose'>,
+  preview: Pick<ComputerFeedback, 'activity' | 'runEnd' | 'dispose'>
+): ComputerFeedback {
+  return {
+    pointer: (input) => cursor.pointer(input),
+    activity: (input) => void preview.activity?.(input),
+    runEnd: (owner) => preview.runEnd?.(owner),
+    dispose: () => {
+      cursor.dispose?.();
+      preview.dispose?.();
+    },
+  };
+}

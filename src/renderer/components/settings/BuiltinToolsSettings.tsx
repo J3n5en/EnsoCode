@@ -236,6 +236,8 @@ export function BuiltinToolsSettings() {
   const exploreFoldEnabled = useSettingsStore((state) => state.exploreFoldEnabled);
   const setExploreFoldEnabled = useSettingsStore((state) => state.setExploreFoldEnabled);
   const rtkEnabled = useSettingsStore((state) => state.rtkEnabled);
+  const computerPreview = useSettingsStore((state) => state.computerPreview);
+  const setComputerPreview = useSettingsStore((state) => state.setComputerPreview);
   const setRtkEnabled = useSettingsStore((state) => state.setRtkEnabled);
   const protectedActionsInCode = useSettingsStore((state) => state.protectedActionsInCode);
   const setProtectedActionsInCode = useSettingsStore((state) => state.setProtectedActionsInCode);
@@ -427,7 +429,24 @@ export function BuiltinToolsSettings() {
                         </>
                       )}
                     </div>
-                    {capabilities?.platform === 'darwin' && <ComputerAllowedApps />}
+                    {capabilities?.platform === 'darwin' && (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-sm">
+                              {t('Show the app being operated')}
+                            </div>
+                            <p className="text-muted-foreground text-xs">
+                              {t(
+                                'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
+                              )}
+                            </p>
+                          </div>
+                          <Switch checked={computerPreview} onCheckedChange={setComputerPreview} />
+                        </div>
+                        <ComputerAllowedApps />
+                      </>
+                    )}
                   </>
                 )}
               </div>

@@ -533,6 +533,10 @@ export class MacosDesktopBackend implements DesktopBackend {
     return this.identify(native, window.pid, window.app);
   }
 
+  targetForRef(ref: string): string {
+    return this.registry.targetOf(ref);
+  }
+
   async appForRef(ref: string): Promise<TargetApp | null> {
     const native = await this.nativeOrNull();
     if (!native) return null;

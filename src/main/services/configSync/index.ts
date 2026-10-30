@@ -74,6 +74,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   windowsLocalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   exploreFoldEnabled: { mode: 'portable' },
   rtkEnabled: { mode: 'portable' },
+  computerPreview: { mode: 'excluded', reason: 'macOS-only desktop display preference' },
   editMode: { mode: 'portable' },
   hashlineEditEnabled: { mode: 'excluded', reason: 'legacy read-only edit mode migration' },
   compactStrategy: { mode: 'portable' },

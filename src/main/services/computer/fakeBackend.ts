@@ -109,6 +109,10 @@ export class FakeDesktopBackend implements DesktopBackend {
     };
   }
 
+  targetForRef(ref: string): string {
+    return this.registry.targetOf(ref);
+  }
+
   async appForRef(ref: string): Promise<TargetApp | null> {
     return this.appForTarget(this.registry.targetOf(ref));
   }
