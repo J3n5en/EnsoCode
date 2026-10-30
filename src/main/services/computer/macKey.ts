@@ -124,6 +124,11 @@ const MODIFIER_FLAG = new Map<number, number>([
   [59, MAC_EVENT_FLAG.control],
 ]);
 
+/** 修饰键键码对应的事件标志位；非修饰键为 0 */
+export function macModifierFlag(code: number): number {
+  return MODIFIER_FLAG.get(code) ?? 0;
+}
+
 export function macEventFlags(keys: string[]): number {
   let flags = 0;
   for (const key of keys) {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAC_EVENT_FLAG,
   macClickCount,
   macEventFlags,
   macKeyForAsciiChar,
+  macModifierFlag,
   macModifierFlags,
   macMouseButton,
   pickEnglishLayoutIndex,
@@ -79,6 +81,16 @@ describe('resolveMacKey', () => {
     for (const key of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
       expect(resolveMacKey(key)).toEqual({ code: undefined, modifier: false });
     }
+  });
+});
+
+describe('macModifierFlag', () => {
+  it('修饰键键码映射到标志位，普通键为 0', () => {
+    expect(macModifierFlag(55)).toBe(MAC_EVENT_FLAG.command);
+    expect(macModifierFlag(56)).toBe(MAC_EVENT_FLAG.shift);
+    expect(macModifierFlag(58)).toBe(MAC_EVENT_FLAG.alternate);
+    expect(macModifierFlag(59)).toBe(MAC_EVENT_FLAG.control);
+    expect(macModifierFlag(0)).toBe(0);
   });
 });
 

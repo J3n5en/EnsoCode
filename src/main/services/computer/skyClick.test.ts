@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  skyClickCgEventType,
   skyClickEventRecipe,
   skyClickLocalPoint,
   skyClickWindowMatchesTarget,
+  skyDragPath,
+  skyDragRecipe,
   skyLightActivationRecord,
+  skyPointerClickRecipe,
 } from './skyClick';
 
 describe('skyClickEventRecipe', () => {
@@ -22,6 +26,108 @@ describe('skyClickEventRecipe', () => {
     expect(
       skyClickEventRecipe(2).filter((step) => step.pointKind === 'target' && step.kind !== 'moved')
     ).toHaveLength(4);
+  });
+});
+
+describe('skyPointerClickRecipe', () => {
+  it('左键与 skyClickEventRecipe 一致（带 primer）', () => {
+    expect(skyPointerClickRecipe({ button: 'left', count: 1 })).toEqual(skyClickEventRecipe(1));
+  });
+
+  it('左键三击：primer 之后三组 down/up，clickState 递增', () => {
+    const target = skyPointerClickRecipe({ button: 'left', count: 3 }).filter(
+      (step) => step.pointKind === 'target' && step.kind !== 'moved'
+    );
+    expect(target.map((step) => `${step.kind}${step.clickState}`)).toEqual([
+      'down1',
+      'up1',
+      'down2',
+      'up2',
+      'down3',
+      'up3',
+    ]);
+  });
+
+  it('右键/中键不发左键 primer，避免在目标里多出一次左键', () => {
+    for (const button of ['right', 'middle'] as const) {
+      const steps = skyPointerClickRecipe({ button, count: 1 });
+      expect(steps.some((step) => step.pointKind === 'primer')).toBe(false);
+      expect(steps.map((step) => step.kind)).toEqual(['moved', 'down', 'up']);
+    }
+  });
+
+  it('按按钮解析 CG 事件类型', () => {
+    expect(skyClickCgEventType('down', 'right')).toBe(3);
+    expect(skyClickCgEventType('up', 'right')).toBe(4);
+    expect(skyClickCgEventType('dragged', 'left')).toBe(6);
+    expect(skyClickCgEventType('down', 'middle')).toBe(25);
+    expect(skyClickCgEventType('moved')).toBe(5);
+  });
+
+  it('拒绝非法次数', () => {
+    expect(() => skyPointerClickRecipe({ button: 'left', count: 0 })).toThrow();
+    expect(() => skyPointerClickRecipe({ button: 'left', count: 4 })).toThrow();
+  });
+});
+
+describe('skyDragPath', () => {
+  it('长线段按步长插值，首尾保持原点', () => {
+    const path = skyDragPath(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      25
+    );
+    expect(path).toEqual([
+      { x: 0, y: 0 },
+      { x: 25, y: 0 },
+      { x: 50, y: 0 },
+      { x: 75, y: 0 },
+      { x: 100, y: 0 },
+    ]);
+  });
+
+  it('单点与重复点不插值', () => {
+    expect(skyDragPath([{ x: 3, y: 4 }], 10)).toEqual([{ x: 3, y: 4 }]);
+    expect(
+      skyDragPath(
+        [
+          { x: 3, y: 4 },
+          { x: 3, y: 4 },
+        ],
+        10
+      )
+    ).toEqual([
+      { x: 3, y: 4 },
+      { x: 3, y: 4 },
+    ]);
+  });
+});
+
+describe('skyDragRecipe', () => {
+  it('move → primer → down(首点) → dragged(中间与末点) → up(末点)', () => {
+    const steps = skyDragRecipe(3);
+    expect(steps.map((step) => `${step.kind}:${step.pointKind}:${step.pointIndex ?? '-'}`)).toEqual(
+      [
+        'moved:target:0',
+        'down:primer:-',
+        'up:primer:-',
+        'down:target:0',
+        'dragged:target:1',
+        'dragged:target:2',
+        'up:target:2',
+      ]
+    );
+    expect(
+      steps
+        .filter((step) => step.kind !== 'moved' && step.pointKind === 'target')
+        .every((step) => step.clickState === 1)
+    ).toBe(true);
+  });
+
+  it('至少两个点', () => {
+    expect(() => skyDragRecipe(1)).toThrow();
   });
 });
 

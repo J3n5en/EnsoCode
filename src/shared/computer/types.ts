@@ -51,3 +51,15 @@ export interface ComputerRunResult {
   screenshots: ComputerScreenshot[];
   capabilities: ComputerCapabilities;
 }
+
+/** 被控 app 的规范身份：Main 从 pid 推导，不接受 guest/renderer 传入的路径 */
+export interface ComputerAppIdentity {
+  bundleId: string;
+  name: string;
+  path: string;
+}
+
+export interface ComputerAllowedApp extends ComputerAppIdentity {
+  grantedAt: number;
+  lastUsedAt?: number;
+}

@@ -1,5 +1,6 @@
-export type SkyClickEventKind = 'moved' | 'down' | 'up';
+export type SkyClickEventKind = 'moved' | 'down' | 'up' | 'dragged';
 export type SkyClickPointKind = 'target' | 'primer';
+export type SkyMouseButton = 'left' | 'right' | 'middle';
 
 export type SkyClickEventStep = {
   kind: SkyClickEventKind;
@@ -7,23 +8,68 @@ export type SkyClickEventStep = {
   clickState: number;
   phase: number;
   delayAfterMs: number;
+  /** 拖拽路径里的点序号；点击只有一个目标点，省略即 0 */
+  pointIndex?: number;
 };
 
-const CG_EVENT_TYPE = { moved: 5, down: 1, up: 2 } as const;
+const CG_BUTTON_EVENT_TYPE: Record<SkyMouseButton, { down: number; up: number; dragged: number }> =
+  {
+    left: { down: 1, up: 2, dragged: 6 },
+    right: { down: 3, up: 4, dragged: 7 },
+    middle: { down: 25, up: 26, dragged: 27 },
+  };
+const CG_MOUSE_MOVED = 5;
+export const CG_SCROLL_WHEEL = 22;
 
-export function skyClickCgEventType(kind: SkyClickEventKind): number {
-  return CG_EVENT_TYPE[kind];
+export function skyClickCgEventType(
+  kind: SkyClickEventKind,
+  button: SkyMouseButton = 'left'
+): number {
+  if (kind === 'moved') return CG_MOUSE_MOVED;
+  return CG_BUTTON_EVENT_TYPE[button][kind];
 }
+
+export function skyMouseButton(button: string | undefined): SkyMouseButton {
+  const value = (button ?? 'left').trim().toLowerCase();
+  if (value === 'left' || value === 'right' || value === 'middle') return value;
+  throw new Error(`unsupported mouse button: ${button}`);
+}
+
+export function skyMouseButtonNumber(button: SkyMouseButton): number {
+  return button === 'left' ? 0 : button === 'right' ? 1 : 2;
+}
+
+const MOVE_STEP: SkyClickEventStep = {
+  kind: 'moved',
+  pointKind: 'target',
+  clickState: 0,
+  phase: 2,
+  delayAfterMs: 15,
+};
+/** (-1,-1) 处的左键 down/up：让后台窗口接受随后的 click-through，不落在任何控件上 */
+const PRIMER_STEPS: SkyClickEventStep[] = [
+  { kind: 'down', pointKind: 'primer', clickState: 1, phase: 1, delayAfterMs: 1 },
+  { kind: 'up', pointKind: 'primer', clickState: 1, phase: 2, delayAfterMs: 100 },
+];
 
 export function skyClickEventRecipe(clickCount: number): SkyClickEventStep[] {
   if (clickCount !== 1 && clickCount !== 2) {
     throw new Error('sky_click supports click_count 1 or 2');
   }
-  const steps: SkyClickEventStep[] = [
-    { kind: 'moved', pointKind: 'target', clickState: 0, phase: 2, delayAfterMs: 15 },
-    { kind: 'down', pointKind: 'primer', clickState: 1, phase: 1, delayAfterMs: 1 },
-    { kind: 'up', pointKind: 'primer', clickState: 1, phase: 2, delayAfterMs: 100 },
-  ];
+  return skyPointerClickRecipe({ button: 'left', count: clickCount });
+}
+
+/** 任意按钮、1–3 击。只有左键需要 primer；右键/中键加 primer 会在目标里多出一次左键。 */
+export function skyPointerClickRecipe(input: {
+  button: SkyMouseButton;
+  count: number;
+}): SkyClickEventStep[] {
+  const clickCount = input.count;
+  if (!Number.isInteger(clickCount) || clickCount < 1 || clickCount > 3) {
+    throw new Error(`unsupported click count: ${clickCount}`);
+  }
+  const steps: SkyClickEventStep[] = [{ ...MOVE_STEP }];
+  if (input.button === 'left') steps.push(...PRIMER_STEPS.map((step) => ({ ...step })));
   for (let pair = 1; pair <= clickCount; pair += 1) {
     steps.push({
       kind: 'down',
@@ -40,6 +86,66 @@ export function skyClickEventRecipe(clickCount: number): SkyClickEventStep[] {
       delayAfterMs: pair < clickCount ? 80 : 0,
     });
   }
+  return steps;
+}
+
+/** 线段按 maxStep 插值：应用只在 dragged 事件之间做命中/跟随，跳太远会丢掉拖拽目标。 */
+export function skyDragPath(
+  points: Array<{ x: number; y: number }>,
+  maxStep = 12
+): Array<{ x: number; y: number }> {
+  if (points.length === 0) return [];
+  const out = [{ ...points[0] }];
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1];
+    const to = points[i];
+    const distance = Math.hypot(to.x - from.x, to.y - from.y);
+    const segments = Math.max(1, Math.ceil(distance / Math.max(1, maxStep)));
+    for (let s = 1; s <= segments; s++) {
+      out.push({
+        x: from.x + ((to.x - from.x) * s) / segments,
+        y: from.y + ((to.y - from.y) * s) / segments,
+      });
+    }
+  }
+  return out;
+}
+
+/** 左键拖拽：移到起点 → primer → 起点按下 → 逐点 dragged → 终点抬起。 */
+export function skyDragRecipe(pointCount: number): SkyClickEventStep[] {
+  if (!Number.isInteger(pointCount) || pointCount < 2) {
+    throw new Error('drag needs at least two points');
+  }
+  const steps: SkyClickEventStep[] = [
+    { ...MOVE_STEP, pointIndex: 0 },
+    ...PRIMER_STEPS.map((step) => ({ ...step })),
+    {
+      kind: 'down',
+      pointKind: 'target',
+      clickState: 1,
+      phase: 3,
+      delayAfterMs: 30,
+      pointIndex: 0,
+    },
+  ];
+  for (let i = 1; i < pointCount; i++) {
+    steps.push({
+      kind: 'dragged',
+      pointKind: 'target',
+      clickState: 1,
+      phase: 3,
+      delayAfterMs: 12,
+      pointIndex: i,
+    });
+  }
+  steps.push({
+    kind: 'up',
+    pointKind: 'target',
+    clickState: 1,
+    phase: 3,
+    delayAfterMs: 0,
+    pointIndex: pointCount - 1,
+  });
   return steps;
 }
 
