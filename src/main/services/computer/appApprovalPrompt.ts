@@ -1,6 +1,5 @@
 import type { ComputerAppIdentity } from '@shared/computer/types';
 import { app, dialog } from 'electron';
-import { focusMainWindow, getMainWindow } from '../../windows/MainWindow';
 import type { AppPromptAnswer } from './appAuthorization';
 
 /**
@@ -30,6 +29,8 @@ export async function promptComputerAppAccess(
     checkboxChecked: false,
     signal,
   };
+  // 按需加载：主窗口模块牵连更新器等，computer 宿主加载时不该带上它们
+  const { focusMainWindow, getMainWindow } = await import('../../windows/MainWindow');
   const current = getMainWindow();
   const parent =
     current && !current.isDestroyed() && current.isVisible() && !current.isMinimized()

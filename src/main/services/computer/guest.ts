@@ -123,6 +123,8 @@ function applyFocus<T extends { id: string; focused?: boolean }>(
 }
 
 export const DEFAULT_SETTLE_MS = 120;
+/** 低于 worker 侧 COMPUTER_INVOKE_GRACE_MS（30s），留出收尾时间 */
+const DEFAULT_ACCESS_GRACE_MS = 25_000;
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -333,7 +335,15 @@ export async function runComputerGuest(input: {
    * 动作前的授权与加锁：target 为窗口、ref 为 AX 元素；前台还要独占真实键鼠。
    * 由宿主实现（按 app 授权、per-app 租约），未提供时不限制。
    */
-  access?: (request: { target?: string; ref?: string; delivery: Delivery }) => Promise<void>;
+  access?: (request: {
+    target?: string;
+    ref?: string;
+    delivery: Delivery;
+    /** desktop 级指针动作的屏幕落点，用于判断实际收到输入的 app */
+    point?: { x: number; y: number };
+  }) => Promise<void>;
+  /** 等授权/等锁可不计入预算的累计上限；须小于 worker 侧超出预算的余量 */
+  accessGraceMs?: number;
   /** 后台指针动作的可视反馈（虚拟指针），不影响投递 */
   feedback?: {
     pointer(input: { target: string; screenX: number; screenY: number; action: string }): void;
@@ -353,26 +363,41 @@ export async function runComputerGuest(input: {
   // 墙钟预算：含截图、等待与输入耗时；外部 abort 同样收口到这里
   const run = new AbortController();
   const signal = run.signal;
-  // 等用户授权与等别的 session 释放 app 不计入预算（原先等租约也在 run 开始之前）
-  const budget = { remaining: input.timeoutMs, startedAt: Date.now(), paused: 0 };
+  // 等用户授权与等别的 session 释放 app 不计入预算（原先等租约也在 run 开始之前），
+  // 但累计有上限：worker 侧只比预算多等 30s，超出部分照常计时
+  const budget = {
+    remaining: input.timeoutMs,
+    startedAt: Date.now(),
+    paused: 0,
+    pausedAt: 0,
+    grace: input.accessGraceMs ?? DEFAULT_ACCESS_GRACE_MS,
+  };
   let deadline: ReturnType<typeof setTimeout> | undefined;
+  const fireTimeout = () => {
+    const error = new Error(
+      `Computer run exceeded its ${Math.round(input.timeoutMs / 1000)}s time budget`
+    );
+    error.name = 'ComputerTimeoutError';
+    run.abort(error);
+  };
   const armDeadline = () => {
     budget.startedAt = Date.now();
-    deadline = setTimeout(() => {
-      const error = new Error(
-        `Computer run exceeded its ${Math.round(input.timeoutMs / 1000)}s time budget`
-      );
-      error.name = 'ComputerTimeoutError';
-      run.abort(error);
-    }, budget.remaining);
+    deadline = setTimeout(fireTimeout, budget.remaining);
   };
   const pauseBudget = () => {
     if (budget.paused++ > 0) return;
     clearTimeout(deadline);
-    budget.remaining = Math.max(0, budget.remaining - (Date.now() - budget.startedAt));
+    budget.pausedAt = Date.now();
+    budget.remaining = Math.max(0, budget.remaining - (budget.pausedAt - budget.startedAt));
+    deadline = setTimeout(fireTimeout, budget.remaining + budget.grace);
   };
   const resumeBudget = () => {
     if (--budget.paused > 0 || signal.aborted) return;
+    clearTimeout(deadline);
+    const waited = Date.now() - budget.pausedAt;
+    const credited = Math.min(waited, budget.grace);
+    budget.grace -= credited;
+    budget.remaining = Math.max(0, budget.remaining - (waited - credited));
     armDeadline();
   };
   armDeadline();
@@ -416,7 +441,12 @@ export async function runComputerGuest(input: {
   const settle = async () => {
     if (settleMs > 0) await abortableDelay(settleMs, signal, sleep);
   };
-  const withAccess = async (request: { target?: string; ref?: string; delivery: Delivery }) => {
+  const withAccess = async (request: {
+    target?: string;
+    ref?: string;
+    delivery: Delivery;
+    point?: { x: number; y: number };
+  }) => {
     if (!input.access) return;
     pauseBudget();
     try {
@@ -442,10 +472,15 @@ export async function runComputerGuest(input: {
     raw: unknown,
     fn: (opts: PointerOptions) => Promise<T>,
     target?: string,
-    keys?: readonly string[]
+    keys?: readonly string[],
+    point?: { x: number; y: number }
   ): Promise<{ delivery: Delivery; outcome: T | undefined }> => {
     const opts = pointerOpts(raw, defaultDelivery);
-    await withAccess({ target, delivery: opts.delivery ?? 'foreground' });
+    await withAccess({
+      target,
+      delivery: opts.delivery ?? 'foreground',
+      ...(point ? { point } : {}),
+    });
     if (opts.delivery === 'background') {
       return { delivery: 'background', outcome: await fn(opts) };
     }
@@ -676,7 +711,9 @@ export async function runComputerGuest(input: {
               method === 'move'
                 ? input.backend.move(target, mapped.screenX, mapped.screenY, opts)
                 : input.backend.click(target, mapped.screenX, mapped.screenY, opts),
-            target
+            target,
+            undefined,
+            { x: mapped.screenX, y: mapped.screenY }
           );
           if (delivery === 'background')
             showPointer(target, mapped.screenX, mapped.screenY, method);
@@ -733,7 +770,9 @@ export async function runComputerGuest(input: {
                 mapped.map((point) => ({ x: point.screenX, y: point.screenY })),
                 opts
               ),
-            target
+            target,
+            undefined,
+            mapped[0] ? { x: mapped[0].screenX, y: mapped[0].screenY } : undefined
           );
           const last = mapped.at(-1);
           if (delivery === 'background' && last) {
@@ -762,7 +801,9 @@ export async function runComputerGuest(input: {
                 delta.dy,
                 opts
               ),
-            target
+            target,
+            undefined,
+            { x: mapped.screenX, y: mapped.screenY }
           );
           if (delivery === 'background')
             showPointer(target, mapped.screenX, mapped.screenY, 'scroll');

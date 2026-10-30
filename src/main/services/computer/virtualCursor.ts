@@ -6,6 +6,10 @@ const HEIGHT = 44;
 const TIP_X = 4;
 const TIP_Y = 4;
 const VISIBLE_MS = 1400;
+/** 隐藏后空闲多久销毁窗口（每个窗口带一个 renderer 进程） */
+const DESTROY_AFTER_MS = 20_000;
+/** 同时保留的指针窗口上限，超出时销毁最久未用的 */
+const MAX_WINDOWS = 4;
 const COLOR = '#147ce5';
 
 function cursorHtml(): string {
@@ -64,17 +68,43 @@ function createWindow(): BrowserWindow {
  * 外观与系统指针区分开（带色与标签），不会被误认为真实鼠标。
  */
 export function createVirtualCursor() {
-  const windows = new Map<string, { win: BrowserWindow; timer?: ReturnType<typeof setTimeout> }>();
+  type Entry = {
+    win: BrowserWindow;
+    timer?: ReturnType<typeof setTimeout>;
+    destroyTimer?: ReturnType<typeof setTimeout>;
+    usedAt: number;
+  };
+  const windows = new Map<string, Entry>();
   const zh = () => app.getLocale().toLowerCase().startsWith('zh');
+  const drop = (key: string) => {
+    const entry = windows.get(key);
+    if (!entry) return;
+    windows.delete(key);
+    if (entry.timer) clearTimeout(entry.timer);
+    if (entry.destroyTimer) clearTimeout(entry.destroyTimer);
+    if (!entry.win.isDestroyed()) entry.win.destroy();
+  };
   return {
     pointer(input: { pid?: number; app?: string; screenX: number; screenY: number }) {
       if (!app.isReady()) return;
       const key = String(input.pid ?? 'desktop');
       let entry = windows.get(key);
-      if (!entry || entry.win.isDestroyed()) {
-        entry = { win: createWindow() };
+      if (entry?.win.isDestroyed()) {
+        drop(key);
+        entry = undefined;
+      }
+      if (!entry) {
+        while (windows.size >= MAX_WINDOWS) {
+          const oldest = [...windows].sort((a, b) => a[1].usedAt - b[1].usedAt)[0];
+          if (!oldest) break;
+          drop(oldest[0]);
+        }
+        entry = { win: createWindow(), usedAt: Date.now() };
         windows.set(key, entry);
       }
+      entry.usedAt = Date.now();
+      if (entry.destroyTimer) clearTimeout(entry.destroyTimer);
+      const current = entry;
       const { win } = entry;
       win.setBounds({
         x: Math.round(input.screenX - TIP_X),
@@ -91,14 +121,13 @@ export function createVirtualCursor() {
       if (entry.timer) clearTimeout(entry.timer);
       entry.timer = setTimeout(() => {
         if (!win.isDestroyed()) win.hide();
+        current.destroyTimer = setTimeout(() => {
+          if (windows.get(key) === current) drop(key);
+        }, DESTROY_AFTER_MS);
       }, VISIBLE_MS + 400);
     },
     dispose() {
-      for (const { win, timer } of windows.values()) {
-        if (timer) clearTimeout(timer);
-        if (!win.isDestroyed()) win.destroy();
-      }
-      windows.clear();
+      for (const key of [...windows.keys()]) drop(key);
     },
   };
 }

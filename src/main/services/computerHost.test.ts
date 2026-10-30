@@ -311,6 +311,56 @@ describe('ComputerHost', () => {
     ).resolves.toMatchObject({ returnValue: 1 });
   });
 
+  it('desktop 级前台输入同样要授权实际收到输入的 app，并锁住它', async () => {
+    const backend = new FakeDesktopBackend();
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');
+    const prompts: string[] = [];
+    const host = new ComputerHost(() => backend, undefined, {
+      authorizer: new AppAuthorizer({
+        file,
+        prompt: async (app) => {
+          prompts.push(app.bundleId);
+          return 'deny';
+        },
+      }),
+    });
+    await expect(
+      host.invoke('s1', 'run', {
+        code: 'await desktop.press("cmd+v", { delivery: "foreground" })',
+      })
+    ).rejects.toThrow(/not allowed computer control of Safari/);
+    expect(prompts).toEqual(['test.safari']);
+    expect(backend.inputs).toEqual([]);
+  });
+
+  it('desktop 级前台输入无法判断目标 app 时拒绝，而不是放行', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.desktopInputApp = null;
+    const host = new ComputerHost(() => backend);
+    await expect(
+      host.invoke('s1', 'run', {
+        code: 'await desktop.type("x", { delivery: "foreground" })',
+      })
+    ).rejects.toThrow(/which app/);
+    expect(backend.inputs).toEqual([]);
+  });
+
+  it('拿不到 app 身份的窗口与 AX 写操作仍按窗口/全局加锁', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.appIdentities = false;
+    const host = new ComputerHost(() => backend, undefined, { leaseWaitMs: 30 });
+    const a = host.invoke('a', 'run', {
+      code: 'const w = await desktop.window("w1"); await w.screenshot(); await w.click(1, 1); await wait(200)',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await expect(
+      host.invoke('b', 'run', {
+        code: 'const w = await desktop.window("w1"); await w.screenshot(); await w.click(1, 1)',
+      })
+    ).rejects.toThrow(/another session/i);
+    await a;
+  });
+
   it('始终允许后名单可列出与撤销', async () => {
     const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');
     const host = new ComputerHost(() => new FakeDesktopBackend(), undefined, {

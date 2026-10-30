@@ -695,7 +695,7 @@ describe('投递方式与桌面接管', () => {
       },
     });
     expect(requests).toEqual([
-      { target: 'w1', delivery: 'background' },
+      { target: 'w1', delivery: 'background', point: { x: 2, y: 2 } },
       { target: 'w1', delivery: 'foreground' },
       { ref: expect.stringMatching(/^e\d+$/), delivery: 'background' },
       { ref: expect.stringMatching(/^e\d+$/), delivery: 'background' },
@@ -714,6 +714,21 @@ describe('投递方式与桌面接管', () => {
       access: () => new Promise((resolve) => setTimeout(resolve, 200)),
     });
     expect(result.returnValue).toBe('done');
+  });
+
+  it('不计入预算的等待有上限：超出部分照常计时（worker 侧只多给 30s 余量）', async () => {
+    await expect(
+      runComputerGuest({
+        code: `const w = await desktop.window('w1'); await w.type('x'); return 'done'`,
+        readOnly: false,
+        timeoutMs: 80,
+        backend: new FakeDesktopBackend(),
+        session: createComputerGuestSession(),
+        settleMs: 0,
+        accessGraceMs: 20,
+        access: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      })
+    ).rejects.toThrow(/time budget/);
   });
 
   it('授权被拒时动作不投递', async () => {

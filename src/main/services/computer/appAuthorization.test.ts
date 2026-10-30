@@ -38,13 +38,19 @@ describe('normalizeAppIdentity', () => {
     expect(normalizeAppIdentity(textEdit)).toEqual(textEdit);
   });
 
-  it('拒绝相对路径、.. 片段、非 .app 路径和脏 bundle id', () => {
+  it('拒绝相对路径、.. 片段、非规范路径和脏 bundle id', () => {
     expect(normalizeAppIdentity({ ...textEdit, path: 'Applications/TextEdit.app' })).toBeNull();
     expect(normalizeAppIdentity({ ...textEdit, path: '/Applications/../tmp/x.app' })).toBeNull();
-    expect(normalizeAppIdentity({ ...textEdit, path: '/usr/bin/python3' })).toBeNull();
+    expect(normalizeAppIdentity({ ...textEdit, path: '/Applications//TextEdit.app' })).toBeNull();
     expect(normalizeAppIdentity({ ...textEdit, bundleId: 'bad id;rm' })).toBeNull();
     expect(normalizeAppIdentity(null)).toBeNull();
     expect(normalizeAppIdentity('TextEdit')).toBeNull();
+  });
+
+  it('不在 .app 里的窗口程序以可执行文件路径作身份（不能因此跳过授权）', () => {
+    const tool = { bundleId: '', name: 'python3', path: '/opt/homebrew/bin/python3' };
+    expect(normalizeAppIdentity(tool)).toEqual(tool);
+    expect(appIdentityKey(tool)).toBe('/opt/homebrew/bin/python3');
   });
 
   it('没有 bundle id 时允许空串，以路径作身份', () => {
@@ -182,6 +188,16 @@ describe('AppAuthorizer', () => {
     const pending = auth.authorize('s1', textEdit, controller.signal);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: 'app-prompt-dismissed' });
+  });
+
+  it('始终允许但名单写盘失败：本次 session 仍放行，不让动作失败', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-apps-'));
+    const blocker = path.join(dir, 'not-a-dir');
+    writeFileSync(blocker, 'x');
+    const { auth, prompts } = authorizer(path.join(blocker, 'apps.json'), ['always']);
+    await expect(auth.authorize('s1', textEdit)).resolves.toBeUndefined();
+    await expect(auth.authorize('s1', textEdit)).resolves.toBeUndefined();
+    expect(prompts).toEqual(['TextEdit']);
   });
 
   it('提示框异常按拒绝处理', async () => {

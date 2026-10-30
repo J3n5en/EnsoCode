@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseClickPath, resolveClickRoute } from './clickRoute';
+import { chooseClickPath, pickWindowForElement, resolveClickRoute } from './clickRoute';
 
 describe('resolveClickRoute', () => {
   it('后台：有 pid 和 windowId 时走 sky 窗口事件', () => {
@@ -58,6 +58,22 @@ describe('chooseClickPath', () => {
     expect(chooseClickPath({ targetPid: 42, element: null })).toBe('synthetic');
   });
 
+  it('元素在同一 app 的另一个窗口里（被自家面板遮住）：合成点击，不按错窗口的控件', () => {
+    expect(
+      chooseClickPath({
+        targetPid: 42,
+        targetWindowId: 9,
+        element: { ...button, windowId: 10 },
+      })
+    ).toBe('synthetic');
+    expect(
+      chooseClickPath({ targetPid: 42, targetWindowId: 9, element: { ...button, windowId: 9 } })
+    ).toBe('axPress');
+    expect(chooseClickPath({ targetPid: 42, targetWindowId: 9, element: button })).toBe(
+      'synthetic'
+    );
+  });
+
   it('文本输入框需要光标位置，不用 AXPress 代替', () => {
     expect(
       chooseClickPath({
@@ -65,5 +81,42 @@ describe('chooseClickPath', () => {
         element: { role: 'AXTextField', actions: ['AXPress', 'AXConfirm'], pid: 42 },
       })
     ).toBe('synthetic');
+  });
+});
+
+describe('pickWindowForElement', () => {
+  const windows = [
+    { id: '1', pid: 7, x: 0, y: 0, width: 100, height: 100 },
+    { id: '2', pid: 42, x: 0, y: 0, width: 300, height: 300 },
+    { id: '3', pid: 42, x: 400, y: 0, width: 300, height: 300 },
+  ];
+
+  it('元素带窗口号时用它', () => {
+    expect(
+      pickWindowForElement(windows, {
+        pid: 42,
+        windowId: 3,
+        center: { x: 10, y: 10 },
+        fallback: '2',
+      })
+    ).toBe('3');
+  });
+
+  it('否则取同进程里包含控件中心的窗口', () => {
+    expect(
+      pickWindowForElement(windows, { pid: 42, center: { x: 450, y: 20 }, fallback: 'desktop' })
+    ).toBe('3');
+  });
+
+  it('都定位不到时用 ref 登记的窗口；desktop 作用域退到同进程第一个窗口', () => {
+    expect(
+      pickWindowForElement(windows, { pid: 42, center: { x: 900, y: 900 }, fallback: '2' })
+    ).toBe('2');
+    expect(
+      pickWindowForElement(windows, { pid: 42, center: { x: 900, y: 900 }, fallback: 'desktop' })
+    ).toBe('2');
+    expect(pickWindowForElement(windows, { center: { x: 900, y: 900 }, fallback: 'desktop' })).toBe(
+      'desktop'
+    );
   });
 });

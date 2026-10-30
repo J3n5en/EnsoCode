@@ -16,7 +16,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** 规范 app 身份：绝对 `.app` 路径、无 `..` 片段；bundle id 可为空（以路径作身份）。 */
+/**
+ * 规范 app 身份：绝对且已规范化的路径（`.app` 包，或不在包里的窗口程序的可执行文件），
+ * 无 `..` 片段；bundle id 可为空（以路径作身份）。
+ */
 export function normalizeAppIdentity(raw: unknown): ComputerAppIdentity | null {
   if (!isRecord(raw)) return null;
   const { bundleId, name, path: appPath } = raw;
@@ -25,8 +28,7 @@ export function normalizeAppIdentity(raw: unknown): ComputerAppIdentity | null {
   }
   if (bundleId !== '' && !BUNDLE_ID.test(bundleId)) return null;
   if (!path.isAbsolute(appPath) || appPath.split('/').includes('..')) return null;
-  if (path.normalize(appPath) !== appPath.replace(/\/+$/u, '')) return null;
-  if (!/\.app$/iu.test(appPath)) return null;
+  if (path.normalize(appPath) !== appPath || appPath.length > 4096) return null;
   const trimmed = name.trim();
   if (!trimmed || trimmed.length > 200) return null;
   return { bundleId, name: trimmed, path: appPath };
@@ -173,8 +175,8 @@ export class AppAuthorizer {
       denials.add(grantKey);
       throw deniedError(app);
     }
-    if (answer === 'always') {
-      if (!this.allowed(app)) {
+    if (answer === 'always' && !this.allowed(app)) {
+      try {
         const now = this.now();
         const apps = this.list().filter(
           (entry) => !(appIdentityKey(entry) === key && entry.path === app.path)
@@ -188,7 +190,11 @@ export class AppAuthorizer {
           lastUsedAt: now,
         });
         writeAllowedApps(this.file(), apps);
+        return;
+      } catch {
+        // 名单写不进去时退回本次 session 授权：用户已经同意了，不该让动作失败
       }
+    } else if (answer === 'always') {
       return;
     }
     const grants = this.sessionGrants.get(sessionId) ?? new Set<string>();

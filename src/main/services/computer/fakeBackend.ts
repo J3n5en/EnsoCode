@@ -21,6 +21,10 @@ export class FakeDesktopBackend implements DesktopBackend {
   inputDelayMs = 0;
   endRun?: () => Promise<void>;
   releasedAll = 0;
+  /** false 时模拟拿不到 app 身份的后端（如 Windows） */
+  appIdentities = true;
+  /** desktop 级前台输入会落到的 app；null 表示无法判断 */
+  desktopInputApp: TargetApp | null | undefined;
   private readonly registry = new AxRegistry<AxTreeNode>();
   windowsList: ComputerWindowInfo[] = [
     {
@@ -87,7 +91,14 @@ export class FakeDesktopBackend implements DesktopBackend {
     this.releasedAll += 1;
   }
 
+  async appForDesktopInput(): Promise<TargetApp | null> {
+    if (this.desktopInputApp !== undefined) return this.desktopInputApp;
+    const focused = this.windowsList.find((item) => item.focused) ?? this.windowsList[0];
+    return focused ? this.appForTarget(focused.id) : null;
+  }
+
   async appForTarget(target: string): Promise<TargetApp | null> {
+    if (!this.appIdentities) return null;
     const window = this.windowsList.find((item) => item.id === target);
     if (!window?.pid) return null;
     return {

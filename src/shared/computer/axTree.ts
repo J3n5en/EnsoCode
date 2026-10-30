@@ -11,6 +11,8 @@ export interface AxTreeNode {
   bounds?: { x: number; y: number; width: number; height: number };
   /** 元素所属进程（macOS elementAt/node 返回），用于判断落点是否在目标 app 内 */
   pid?: number;
+  /** 元素所在窗口号（macOS elementAt/node 返回） */
+  windowId?: number;
 }
 
 const AX_EMPTY_WRAPPER_ROLES = new Set(['AXGroup', 'AXUnknown', 'AXGenericElement']);

@@ -19,6 +19,7 @@ import {
   axWalkDecision,
 } from './axWalkBudget';
 import type { AxWorkerRequest } from './axWorkerClient';
+import { PRESS_ANCESTOR_DEPTH, PRESS_LABEL_ROLES, PRESSABLE_ROLES } from './clickRoute';
 
 export interface AxHandleScope {
   scope: string;
@@ -387,6 +388,28 @@ async function load(): Promise<AxJobBridge> {
     ...describeLite(element, ref),
     bounds: readAxBounds(element),
   });
+  let AXUIElementGetWindow: ((element: unknown, out: Buffer) => unknown) | undefined;
+  try {
+    AXUIElementGetWindow = ax.func('_AXUIElementGetWindow', 'int', ['void *', 'void *']);
+  } catch {
+    AXUIElementGetWindow = undefined;
+  }
+  /** 元素所在窗口号：窗口本身直接取，其它元素经 AXWindow 属性 */
+  const elementWindowId = (element: unknown): number | undefined => {
+    if (!AXUIElementGetWindow) return undefined;
+    const read = (target: unknown) => {
+      const out = Buffer.alloc(4);
+      return Number(AXUIElementGetWindow?.(target, out)) === 0 ? out.readUInt32LE(0) : undefined;
+    };
+    if (readAxString(element, 'AXRole') === 'AXWindow') return read(element);
+    const { value } = copyAttr(element, 'AXWindow');
+    if (!value) return undefined;
+    try {
+      return read(value);
+    } finally {
+      CFRelease(value);
+    }
+  };
   const elementPid = (element: unknown): number | undefined => {
     const out = Buffer.alloc(4);
     if (Number(AXUIElementGetPid(element, out)) !== 0) return undefined;
@@ -596,18 +619,50 @@ async function load(): Promise<AxJobBridge> {
       });
     },
     async elementAt(x, y, pid) {
+      // 按 app 的命中是后端内部探测，用独立作用域，不推进 desktop 作用域的代（否则会作废模型手里的 ref）
+      const scope = typeof pid === 'number' && pid > 0 ? `probe:${pid}` : AX_DESKTOP_SCOPE;
+      /** 按 app 探测时：命中按钮/链接里的文字或图标，换成它所属的可按控件（返回 +1 引用） */
+      const pressableAncestor = (element: unknown): unknown => {
+        let current: unknown = element;
+        CFRetain(current);
+        for (let depth = 0; depth < PRESS_ANCESTOR_DEPTH; depth++) {
+          if (!PRESS_LABEL_ROLES.has(readAxString(current, 'AXRole'))) return current;
+          const { value: parent } = copyAttr(current, 'AXParent');
+          if (!parent) return current;
+          if (
+            PRESSABLE_ROLES.has(readAxString(parent, 'AXRole')) &&
+            readActionNames(parent).includes('AXPress')
+          ) {
+            CFRelease(current);
+            return parent;
+          }
+          CFRelease(current);
+          current = parent;
+        }
+        CFRelease(current);
+        CFRetain(element);
+        return element;
+      };
       const hit = (root: unknown) => {
         const out = [null];
         const status = Number(AXUIElementCopyElementAtPosition(root, x, y, out));
-        const element = out[0];
-        if (!element) return null;
+        const raw = out[0];
+        if (!raw) return null;
+        if (status !== 0 || !isLikelyCfPointer(raw)) {
+          CFRelease(raw);
+          return null;
+        }
+        // pressableAncestor 返回自己持有的 +1 引用，原始命中在此归还
+        const element = scope === AX_DESKTOP_SCOPE ? raw : pressableAncestor(raw);
+        if (scope !== AX_DESKTOP_SCOPE) CFRelease(raw);
         try {
-          if (status !== 0 || !isLikelyCfPointer(element)) return null;
           const owner = elementPid(element);
+          const windowId = elementWindowId(element);
           const actions = readActionNames(element);
           return {
-            ...describeNew(element, handles.begin(AX_DESKTOP_SCOPE)),
+            ...describeNew(element, handles.begin(scope)),
             ...(owner ? { pid: owner } : {}),
+            ...(windowId ? { windowId } : {}),
             ...(actions.length > 0 ? { actions } : {}),
           };
         } finally {
@@ -641,10 +696,12 @@ async function load(): Promise<AxJobBridge> {
       const element = handles.get(handle);
       const actions = readActionNames(element);
       const pid = elementPid(element);
+      const windowId = elementWindowId(element);
       return {
         ...describe(element, handle),
         ...(actions.length > 0 ? { actions } : {}),
         ...(pid ? { pid } : {}),
+        ...(windowId ? { windowId } : {}),
       };
     },
     async attributes(handle) {

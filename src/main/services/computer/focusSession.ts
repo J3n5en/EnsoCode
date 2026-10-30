@@ -50,6 +50,8 @@ export class FocusSession {
   private userFront: number | undefined;
   private steals = 0;
   private closed = false;
+  /** 进行中的动作数；大于 0 时不按空闲收尾 */
+  busy = 0;
   private readonly options: Required<FocusSessionOptions>;
 
   constructor(
@@ -77,7 +79,9 @@ export class FocusSession {
     if (this.closed) throw new Error('focus session closed');
     const front = this.deps.frontPid();
     if (front === this.pid) {
-      // 目标就是真前台：无需合成激活；用户正在用它时不能往里打字
+      // 目标就是真前台：合成激活态与“用户原前台”都已作废，不能再按窃取处理
+      this.believed = false;
+      this.userFront = undefined;
       if (this.userActive()) throw userActiveError();
       this.window = windowId;
       return;
@@ -126,14 +130,17 @@ export class FocusSession {
           }, this.options.pollMs)
         : undefined;
     let result: T;
+    this.busy += 1;
     try {
       result = await fn();
     } catch (error) {
+      this.busy -= 1;
       if (timer) clearInterval(timer);
       // 动作本身失败时只做还回，不改写它的错误
       this.detectSteal();
       throw error;
     }
+    this.busy -= 1;
     if (timer) clearInterval(timer);
     const error = pending ?? this.detectSteal();
     if (error) throw error;
@@ -143,7 +150,8 @@ export class FocusSession {
   teardown(): void {
     if (this.closed) return;
     this.closed = true;
-    if (this.believed && this.window !== undefined) {
+    // 目标已是真前台时它的激活是真的，反激活会让它丢掉用户的输入
+    if (this.believed && this.window !== undefined && this.deps.frontPid() !== this.pid) {
       this.believed = false;
       this.deps.deactivate(this.pid, this.window);
     }
@@ -180,7 +188,10 @@ export class FocusRegistry {
   touch(pid: number): void {
     const previous = this.timers.get(pid);
     if (previous) clearTimeout(previous);
-    const timer = setTimeout(() => this.release(pid), this.idleMs);
+    const timer = setTimeout(() => {
+      if ((this.sessions.get(pid)?.busy ?? 0) > 0) this.touch(pid);
+      else this.release(pid);
+    }, this.idleMs);
     timer.unref?.();
     this.timers.set(pid, timer);
   }
@@ -201,11 +212,4 @@ export class FocusRegistry {
   releaseAll(): void {
     for (const pid of [...this.sessions.keys()]) this.release(pid);
   }
-}
-
-/** 焦点会话给出的、需要原样告诉模型的错误（用户正在用目标 / 目标反复抢前台） */
-export function isUserFacingFocusError(error: unknown): boolean {
-  return (
-    error instanceof ComputerError && (error.code === 'user-active' || error.code === 'focus-steal')
-  );
 }

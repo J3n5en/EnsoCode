@@ -76,6 +76,28 @@ describe('FocusSession.enforce', () => {
   });
 });
 
+describe('FocusSession：目标成了真前台', () => {
+  it('用户自己切到目标后，后续动作不再把前台“还”给旧 app', async () => {
+    const { deps, calls, state } = fakeDeps();
+    const session = new FocusSession(42, deps);
+    await session.enforce(9);
+    // 用户切到目标 app，之后停手超过 1s
+    state.front = 42;
+    await session.guard(9, async () => {});
+    expect(calls).not.toContain('front 100');
+    expect(session.state().believedActive).toBe(false);
+  });
+
+  it('收尾时目标已是真前台：不发反激活，免得它以为自己失去激活', async () => {
+    const { deps, calls, state } = fakeDeps();
+    const session = new FocusSession(42, deps);
+    await session.enforce(9);
+    state.front = 42;
+    session.teardown();
+    expect(calls).toEqual(['activate 42:9']);
+  });
+});
+
 describe('FocusSession.guard（焦点窃取防护）', () => {
   it('动作期间目标抢成真前台、用户没动：还给用户原前台并在下次重新激活', async () => {
     const { deps, calls, state } = fakeDeps();
@@ -166,6 +188,32 @@ describe('FocusRegistry', () => {
       expect(calls).toEqual(['activate 42:9']);
       await vi.advanceTimersByTimeAsync(2);
       expect(calls).toEqual(['activate 42:9', 'deactivate 42:9']);
+      expect(registry.has(42)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('动作进行中不按空闲收尾，结束后重新计时', async () => {
+    vi.useFakeTimers();
+    try {
+      const { deps, calls } = fakeDeps();
+      const registry = new FocusRegistry(deps, { idleMs: 1000, pollMs: 0 });
+      let finish: () => void = () => {};
+      const running = registry.session(42).guard(
+        9,
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      );
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(registry.has(42)).toBe(true);
+      expect(calls).toEqual(['activate 42:9']);
+      finish();
+      await running;
+      registry.touch(42);
+      await vi.advanceTimersByTimeAsync(1001);
       expect(registry.has(42)).toBe(false);
     } finally {
       vi.useRealTimers();

@@ -8,6 +8,7 @@ import { createAxWorkerClient, spawnAxWorker } from './axWorkerClient';
 import axWorkerPath from './axWorkerThread?modulePath';
 import type { PointerOptions } from './backend';
 import { decodeCfNumberAsFloat64, kCFNumberFloat64Type } from './cfNumber';
+import { EnglishLayoutLease } from './layoutLease';
 import {
   macClickCount,
   macKeyForAsciiChar,
@@ -452,39 +453,27 @@ async function load(): Promise<MacosNative | null> {
    * 输入法吞进组字缓冲并乱序上屏。所以整次 run 内首次输入时切到英文布局并确认生效，
    * run 结束（输入已被消费）后再恢复。
    */
-  let layoutRestore: { original: unknown } | null = null;
   /** endInput 递增：等输入法切换期间 run 已被中止时，挂起的输入不再发送 */
   let inputEpoch = 0;
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-  const currentSourceId = (): string => {
-    const now = TISCopyCurrentKeyboardInputSource();
-    try {
-      return inputSourceId(now);
-    } finally {
-      if (now) CFRelease(now);
-    }
-  };
+  // 输入源是全局的：前台 run 与并行的后台输入共用一份切换声明，最后一个使用者结束才恢复
+  const layoutLease = new EnglishLayoutLease<unknown>(
+    {
+      current: () => TISCopyCurrentKeyboardInputSource() || null,
+      english: () => copyEnglishLayout() || null,
+      id: (source) => inputSourceId(source),
+      select: (source) => Number(TISSelectInputSource(source)) === 0,
+      release: (source) => CFRelease(source),
+      sleep,
+    },
+    300
+  );
+  /** 前台 run 持有声明直到 endInput（键盘事件按处理时的输入源解释，不能每次输入后立刻切回） */
+  let foregroundLayoutHeld = false;
   const ensureEnglishLayout = async (): Promise<void> => {
-    if (layoutRestore) return;
-    const current = TISCopyCurrentKeyboardInputSource();
-    const english = copyEnglishLayout();
-    try {
-      const target = english ? inputSourceId(english) : '';
-      if (!target || target === inputSourceId(current)) {
-        layoutRestore = { original: null };
-        return;
-      }
-      if (Number(TISSelectInputSource(english)) !== 0) {
-        layoutRestore = { original: null };
-        return;
-      }
-      layoutRestore = { original: current ? CFRetain(current) : null };
-      for (let i = 0; i < 20 && currentSourceId() !== target; i++) await sleep(25);
-      await sleep(300);
-    } finally {
-      if (english) CFRelease(english);
-      if (current) CFRelease(current);
-    }
+    if (foregroundLayoutHeld) return;
+    foregroundLayoutHeld = true;
+    await layoutLease.acquire();
   };
   const withEnglishLayout = async <T>(fn: () => T | Promise<T>): Promise<T> => {
     const epoch = inputEpoch;
@@ -598,13 +587,16 @@ async function load(): Promise<MacosNative | null> {
     const executable = buf.toString('utf8', 0, length);
     const inner = /^(.*?\.app)\/Contents\/MacOS\/[^/]+$/u.exec(executable);
     const outer = /^(.*?\.app)(?:\/|$)/u.exec(executable);
-    const bundlePath = inner?.[1] ?? outer?.[1];
-    if (!bundlePath) return null;
+    // 不在 .app 里的窗口程序（脚本解释器等）以可执行文件作身份，不能因此跳过授权
+    const bundlePath = inner?.[1] ?? outer?.[1] ?? executable;
     let canonical: string;
     try {
       canonical = realpathSync(bundlePath);
     } catch {
       return null;
+    }
+    if (!/\.app$/iu.test(canonical)) {
+      return { bundleId: '', name: canonical.split('/').pop() ?? canonical, path: canonical };
     }
     const pathBuf = Buffer.from(canonical, 'utf8');
     const url = CFURLCreateFromFileSystemRepresentation(null, pathBuf, pathBuf.length, true);
@@ -642,38 +634,13 @@ async function load(): Promise<MacosNative | null> {
       CFRelease(now);
     }
   };
-  /** 后台输入的输入法处理：只在本次输入期间切到英文布局，输入被消费后立即切回 */
+  /** 后台输入的输入法处理：只在本次输入期间持有英文布局声明 */
   const withScopedEnglishLayout = async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (layoutRestore) return fn();
-    const current = TISCopyCurrentKeyboardInputSource();
-    const english = copyEnglishLayout();
-    let original: unknown = null;
-    try {
-      const target = english ? inputSourceId(english) : '';
-      if (
-        target &&
-        target !== inputSourceId(current) &&
-        Number(TISSelectInputSource(english)) === 0
-      ) {
-        original = current ? CFRetain(current) : null;
-        for (let i = 0; i < 20 && currentSourceId() !== target; i++) await sleep(25);
-        await sleep(80);
-      }
-    } finally {
-      if (english) CFRelease(english);
-      if (current) CFRelease(current);
-    }
+    await layoutLease.acquire();
     try {
       return await fn();
     } finally {
-      if (original) {
-        await sleep(150);
-        try {
-          TISSelectInputSource(original);
-        } finally {
-          CFRelease(original);
-        }
-      }
+      await layoutLease.release();
     }
   };
   const kCGEventFlagsChanged = 12;
@@ -1014,15 +981,9 @@ async function load(): Promise<MacosNative | null> {
     },
     async endInput() {
       inputEpoch += 1;
-      const restore = layoutRestore;
-      layoutRestore = null;
-      if (!restore?.original) return;
-      await sleep(200);
-      try {
-        TISSelectInputSource(restore.original);
-      } finally {
-        CFRelease(restore.original);
-      }
+      if (!foregroundLayoutHeld) return;
+      foregroundLayoutHeld = false;
+      await layoutLease.release();
     },
     async raise(windowId) {
       const { pid, windowId: cgWindowId, title } = await windowPid(windowId);

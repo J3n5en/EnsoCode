@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
+import { ComputerError } from '@shared/computer/errors';
 import { normalizeComputerParams } from '@shared/computer/params';
 import type {
   ComputerAllowedApp,
@@ -27,6 +28,7 @@ import { createVirtualCursor } from './computer/virtualCursor';
 const DEFAULT_LEASE_WAIT_MS = 20_000;
 /** 真实键鼠只有一套：前台接管独占这把锁 */
 const FOREGROUND_LEASE = 'fg';
+const AX_WRITE_LEASE = 'ax-write';
 const YIELD_MESSAGE =
   'The user took over the desktop (Esc or physical input). Stop and ask the user before using computer again.';
 
@@ -53,6 +55,8 @@ export interface ComputerFeedback {
     screenY: number;
     action: string;
   }): void;
+  /** 收起并释放所有指针窗口 */
+  dispose?(): void;
 }
 
 /**
@@ -142,12 +146,24 @@ export class ComputerHost {
         target?: string;
         ref?: string;
         delivery: 'background' | 'foreground';
+        point?: { x: number; y: number };
       }) => {
-        const app = request.ref
+        const desktop = !request.ref && (!request.target || request.target === 'desktop');
+        let app = request.ref
           ? await backend.appForRef?.(request.ref)
-          : request.target
+          : !desktop && request.target
             ? await backend.appForTarget?.(request.target)
             : null;
+        // 真实键鼠落在 desktop 上时，授权与加锁对象是实际收到输入的 app，判断不了就拒绝
+        if (desktop && request.delivery === 'foreground' && backend.appForDesktopInput) {
+          app = await backend.appForDesktopInput({ point: request.point });
+          if (!app) {
+            throw new ComputerError(
+              'app-unknown',
+              'Cannot tell which app would receive this desktop input; target a window with desktop.window(...) instead.'
+            );
+          }
+        }
         const keys: string[] = [];
         const labels: Record<string, string> = { [FOREGROUND_LEASE]: 'the mouse and keyboard' };
         if (request.delivery === 'foreground') keys.push(FOREGROUND_LEASE);
@@ -156,6 +172,14 @@ export class ComputerHost {
           const key = `app:${app.pid}`;
           keys.push(key);
           labels[key] = app.name;
+        } else if (request.ref) {
+          // 后端给不出 app 身份（如 Windows）：AX 写操作退回全局串行
+          keys.push(AX_WRITE_LEASE);
+          labels[AX_WRITE_LEASE] = 'accessibility actions';
+        } else if (!desktop && request.target) {
+          const key = `win:${request.target}`;
+          keys.push(key);
+          labels[key] = `window ${request.target}`;
         }
         await this.leases.acquire(owner, keys, controller.signal, labels);
       };
@@ -244,6 +268,7 @@ export class ComputerHost {
 
   /** worker 退出 / 应用退出：停下所有桌面操作，收尾合成焦点与 AX 打开声明 */
   closeAll(): void {
+    this.feedback?.dispose?.();
     const tails = [...this.sessions.values()].map((state) => state.tail);
     for (const sessionId of [...this.sessions.keys()]) this.close(sessionId);
     const backend = this.backend;

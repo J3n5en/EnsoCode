@@ -45,6 +45,8 @@ export interface DesktopBackend {
   /** 窗口或 AX ref 所属 app 的规范身份；Main 据此授权与加锁，不信任 guest 传入的路径 */
   appForTarget?(target: string): Promise<TargetApp | null>;
   appForRef?(ref: string): Promise<TargetApp | null>;
+  /** desktop 级前台输入实际会落到的 app：有落点时取该点最上层窗口，否则取系统前台 */
+  appForDesktopInput?(input: { point?: { x: number; y: number } }): Promise<TargetApp | null>;
   displays(): Promise<ComputerDisplayInfo[]>;
   windows(): Promise<ComputerWindowInfo[]>;
   capture(target: string, maxWidth: number, maxHeight: number): Promise<CaptureBytes>;

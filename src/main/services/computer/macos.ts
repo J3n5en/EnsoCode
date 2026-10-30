@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { AxRegistry, axHandleEpoch } from '@shared/computer/axRegistry';
+import { AxRegistry, axHandleEpoch, isAxStaleHandleError } from '@shared/computer/axRegistry';
 import type { AxTreeNode } from '@shared/computer/axTree';
 import {
   BackgroundUnavailableError,
@@ -27,8 +27,8 @@ import type {
   PointerOptions,
   TargetApp,
 } from './backend';
-import { chooseClickPath, resolveClickRoute } from './clickRoute';
-import { FocusRegistry, isUserFacingFocusError } from './focusSession';
+import { chooseClickPath, pickWindowForElement, resolveClickRoute } from './clickRoute';
+import { FocusRegistry } from './focusSession';
 import { macClickCount, macModifierFlags } from './macKey';
 import { loadMacosNative, type MacosNative, type SkyPoint } from './macosNative';
 import { hidSecondsSinceLastEvent } from './occupancyHid';
@@ -347,6 +347,7 @@ export class MacosDesktopBackend implements DesktopBackend {
       const element = await this.rawElementAt(native, screenX, screenY, pid);
       const path = chooseClickPath({
         targetPid: pid,
+        targetWindowId: windowId,
         element,
         button,
         count,
@@ -357,8 +358,9 @@ export class MacosDesktopBackend implements DesktopBackend {
           await this.inFocus(native, pid, windowId, () => native.axPerform(element.ref, 'press'));
           return { via: 'axPress' };
         } catch (error) {
-          if (isUserFacingFocusError(error)) throw error;
-          // press 失败（控件不认、元素已变）时退回同一点的合成点击
+          // 只在“控件不认 press / 元素已失效”时退回合成点击；超时等错误下 press 可能已生效，
+          // 再点一次会让提交/发送类按钮触发两次
+          if (!isAxPressUnsupported(error) && !isAxStaleHandleError(error)) throw error;
         }
       }
       const window = (await this.windows()).find((item) => item.id === target);
@@ -511,24 +513,56 @@ export class MacosDesktopBackend implements DesktopBackend {
     this.axEnable?.releaseAll();
   }
 
+  /** 有 pid 却认不出 app 时拒绝（fail-closed），不能当成「没有 app」跳过授权 */
+  private identify(native: MacosNative, pid: number, name?: string): TargetApp {
+    const identity = native.appIdentity(pid);
+    if (!identity) {
+      throw new ComputerError(
+        'app-unknown',
+        `Cannot identify the app of process ${pid}; computer will not send input to it.`
+      );
+    }
+    return { ...identity, name: name || identity.name, pid };
+  }
+
   async appForTarget(target: string): Promise<TargetApp | null> {
     if (target === 'desktop') return null;
     const native = await this.nativeOrNull();
     const window = (await this.windows()).find((item) => item.id === target);
     if (!native || !window?.pid) return null;
-    const identity = native.appIdentity(window.pid);
-    return identity ? { ...identity, name: window.app || identity.name, pid: window.pid } : null;
+    return this.identify(native, window.pid, window.app);
   }
 
   async appForRef(ref: string): Promise<TargetApp | null> {
     const native = await this.nativeOrNull();
     if (!native) return null;
     const pid = await withAxErrors(() => native.axPid(this.registry.resolve(ref)), ref);
-    if (!pid) return null;
-    const identity = native.appIdentity(pid);
-    if (!identity) return null;
+    if (!pid) {
+      throw new ComputerError('app-unknown', `Cannot identify the app that owns ${ref}.`);
+    }
     const window = (await this.windows()).find((item) => item.pid === pid);
-    return { ...identity, name: window?.app || identity.name, pid };
+    return this.identify(native, pid, window?.app);
+  }
+
+  async appForDesktopInput(input: { point?: { x: number; y: number } }): Promise<TargetApp | null> {
+    const native = await this.nativeOrNull();
+    if (!native) return null;
+    const windows = await this.windows();
+    const point = input.point;
+    // 窗口列表按显示层级从前到后；取落点处最上层的普通窗口
+    const hit = point
+      ? windows.find(
+          (item) =>
+            item.pid &&
+            point.x >= item.x &&
+            point.y >= item.y &&
+            point.x < item.x + item.width &&
+            point.y < item.y + item.height
+        )
+      : undefined;
+    const pid = hit?.pid ?? native.frontPid();
+    if (!pid) return null;
+    return this.identify(native, pid, (hit ?? windows.find((item) => item.pid === pid))?.app);
   }
 
   async raise(windowId: string) {
@@ -660,17 +694,16 @@ export class MacosDesktopBackend implements DesktopBackend {
       if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
         throw new Error(axPressFallbackMessage(node.role, ref));
       }
-      const target = this.registry.targetOf(ref);
-      const window =
-        target === AX_DESKTOP_TARGET && node.pid
-          ? (await this.windows()).find((item) => item.pid === node.pid)
-          : undefined;
-      await this.click(
-        window?.id ?? target,
-        bounds.x + bounds.width / 2,
-        bounds.y + bounds.height / 2,
-        { delivery: opts?.delivery ?? 'background' }
-      );
+      const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+      const window = pickWindowForElement(await this.windows(), {
+        pid: node.pid,
+        windowId: node.windowId,
+        center,
+        fallback: this.registry.targetOf(ref),
+      });
+      await this.click(window, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, {
+        delivery: opts?.delivery ?? 'background',
+      });
     }
   }
 
