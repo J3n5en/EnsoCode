@@ -48,6 +48,8 @@ export const FREQUENCY_MAX_COUNT = 100;
 export const MIN_FLOOR = 0.3;
 export const IMP_MULT = 0.2;
 export const DECAY_WEIGHT = 0.15;
+/** 查询年份与记忆 event_start 年份一致时的加分上限；只作同分附近的次要依据，不能压过语义 */
+export const TEMPORAL_YEAR_BOOST = 0.1;
 
 export const RRF_K = 60;
 // MMR = λ·relevance − (1−λ)·max(sim to selected)

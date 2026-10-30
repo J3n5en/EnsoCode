@@ -62,8 +62,8 @@ describe('finalScore', () => {
     expect(finalScore(0.4, 1)).toBeCloseTo(0.49, 12);
   });
 
-  it('uses 0.70/0.15 + boost when boost > 0', () => {
-    expect(finalScore(1, 0.5, 0.1)).toBeCloseTo(0.875, 12);
+  it('boost 只在同一公式上叠加，不改语义权重', () => {
+    expect(finalScore(1, 0.5, 0.1)).toBeCloseTo(1.025, 12);
   });
 
   it('keeps RRF order when decay is equal, and decay order when RRF is equal', () => {

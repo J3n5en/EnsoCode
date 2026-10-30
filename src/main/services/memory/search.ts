@@ -372,7 +372,7 @@ export async function searchMemories(
       importance: memory.importance,
       now,
     });
-    const boost = temporalIntent ? computeTemporalBoost(memory.eventStart, now, temporalIntent) : 0;
+    const boost = temporalIntent ? computeTemporalBoost(memory.eventStart, temporalIntent) : 0;
     // crystal 是多源合成的结论，同分时应压过任一单源记忆：乘法 boost
     const score = finalScore(semantic[i], decay, boost) * (memory.isCrystal ? CRYSTAL_BOOST : 1);
     hits.push({ memory, rrf: rrfScore, decay, score });

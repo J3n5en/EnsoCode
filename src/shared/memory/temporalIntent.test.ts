@@ -30,25 +30,15 @@ describe('detectTemporalIntent（正则门）', () => {
 });
 
 describe('computeTemporalBoost', () => {
-  const now = new Date('2025-01-01T00:00:00Z');
-  it('无 event_start 为 0', () => {
-    expect(computeTemporalBoost(null, now, { type: 'year', value: '2020', confidence: 1 })).toBe(0);
+  const year = { type: 'year' as const, value: '2026', confidence: 1 };
+  it('只有查询年份与 event_start 年份一致才加分，最多 0.1', () => {
+    expect(computeTemporalBoost('2026-10-29', year)).toBeCloseTo(0.1, 12);
+    expect(computeTemporalBoost('2026-01-01', { ...year, confidence: 0.5 })).toBeCloseTo(0.05, 12);
+    expect(computeTemporalBoost('2025-12-31', year)).toBe(0);
+    expect(computeTemporalBoost(null, year)).toBe(0);
   });
-  it('年份匹配：base*0.3 + 0.8*conf*0.7', () => {
-    // 2020-01-01 距 now 1827 天
-    const base = 1 / (1 + 1827 / 365);
-    expect(
-      computeTemporalBoost('2020-01-01', now, { type: 'year', value: '2020', confidence: 1 })
-    ).toBeCloseTo(base * 0.3 + 0.8 * 0.7, 10);
-    expect(
-      computeTemporalBoost('2021-01-01', now, { type: 'year', value: '2020', confidence: 1 })
-    ).toBeCloseTo((1 / (1 + 1461 / 365)) * 0.3, 10);
-  });
-  it('relative 意图只剩 recency 基线的 30%，事件越近越高', () => {
-    const intent = { type: 'relative' as const, value: null, confidence: 0.5 };
-    const near = computeTemporalBoost('2024-12-31', now, intent);
-    const far = computeTemporalBoost('2015-01-01', now, intent);
-    expect(near).toBeGreaterThan(far);
-    expect(near).toBeCloseTo((1 / (1 + 1 / 365)) * 0.3, 10);
+  it('相对时间词不加分', () => {
+    const relative = { type: 'relative' as const, value: null, confidence: 0.5 };
+    expect(computeTemporalBoost('2026-10-29', relative)).toBe(0);
   });
 });

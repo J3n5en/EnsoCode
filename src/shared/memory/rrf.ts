@@ -23,10 +23,9 @@ export function rrf(
   return [...scores.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-// V1 blend：semantic*(1-w)+decay*w，w=0.15；有 temporal boost 时走 0.7/0.15 + boost 分支。
+// semantic*(1-w)+decay*w，w=0.15；年份加分只在同一公式上叠加，不改语义权重（#166）。
 export function finalScore(semantic: number, decay: number, temporalBoost = 0): number {
-  if (temporalBoost > 0) return semantic * 0.7 + decay * DECAY_WEIGHT + temporalBoost;
-  return semantic * 0.85 + decay * DECAY_WEIGHT;
+  return semantic * (1 - DECAY_WEIGHT) + decay * DECAY_WEIGHT + temporalBoost;
 }
 
 // 页内归一化；全部相同时 semantic=1.0，否则裸 rrf≈0.016 会被 decay 主导。

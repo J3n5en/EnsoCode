@@ -196,32 +196,49 @@ describe('searchMemories — 双时间检索', () => {
     ).rejects.toMatchObject({ code: 'date_range' });
   });
 
-  it('时间意图（正则门）：年份匹配的记忆获得 temporal boost，进入 finalScore 第三参', async () => {
-    const hit = await add('postgres decision made', 'global', undefined, { eventStart: '2020' });
-    const other = await add('postgres decision revisited', 'global', undefined, {
-      eventStart: '2023',
-    });
-    const plain = await add('postgres decision undated');
-    const hits = await searchMemories(db, {
-      q: 'postgres decision 2020',
+  it('查询带年份：相关记忆不被年份对得上的无关记忆压下去（#166）', async () => {
+    const answer = await add('Cloudflare MCP direct http config');
+    const dated = { eventStart: '2026-10-29' };
+    const others = [
+      await add('relay migrated config', 'global', undefined, dated),
+      await add('browser path config', 'global', undefined, dated),
+      await add('cleanup scan config', 'global', undefined, dated),
+    ];
+    const withYear = await searchMemories(db, {
+      q: '2026 Cloudflare MCP config',
       spaceIds: ['global'],
       now: NOW,
     });
-    expect(hits).toHaveLength(3);
-    expect(hits[0].memory.id).toBe(hit.id);
-    expect(hits[0].score).toBeGreaterThan(1);
-    // 无 event_start 的记忆 boost=0，走无意图公式，不可能超过 1
-    expect(hits.find((h) => h.memory.id === plain.id)!.score).toBeLessThanOrEqual(1);
-    expect(hits.find((h) => h.memory.id === other.id)!.score).toBeLessThan(hits[0].score);
-    // 单结果 semantic=1：年份匹配的精确公式 0.7 + decay*0.15 + (recency*0.3 + 0.8*conf*0.7)
-    const [only] = await searchMemories(db, { q: 'made 2020', spaceIds: ['global'], now: NOW });
-    expect(only.memory.id).toBe(hit.id);
-    const days = (NOW.getTime() - Date.parse('2020-01-01T00:00:00Z')) / 86_400_000;
-    const boost = (1 / (1 + days / 365)) * 0.3 + 0.8 * 1 * 0.7;
-    expect(only.score).toBeCloseTo(0.7 + 0.15 * only.decay + boost, 9);
-    // 没有时间意图时不加 boost
-    const [plainHit] = await searchMemories(db, { q: 'made', spaceIds: ['global'], now: NOW });
-    expect(plainHit.score).toBeCloseTo(0.85 + 0.15 * plainHit.decay, 9);
+    const withoutYear = await searchMemories(db, {
+      q: 'Cloudflare MCP config',
+      spaceIds: ['global'],
+      now: NOW,
+    });
+    expect(withYear[0].memory.id).toBe(answer.id);
+    expect(withoutYear[0].memory.id).toBe(answer.id);
+    for (const hit of withYear) expect(hit.score).toBeLessThanOrEqual(1.1);
+    // 年份一致的同分记忆只多出年份加分
+    const year = withYear.find((h) => h.memory.id === others[0].id)!;
+    const plain = withoutYear.find((h) => h.memory.id === others[0].id)!;
+    expect(year.score - plain.score).toBeLessThanOrEqual(0.1 + 1e-9);
+  });
+
+  it('相对时间词既不加分也不过滤（#166）', async () => {
+    await add('parameter sweep paired design', 'global', undefined, { eventStart: '2026-10-29' });
+    await add('parameter sweep notes');
+    const plain = await searchMemories(db, {
+      q: 'parameter sweep',
+      spaceIds: ['global'],
+      now: NOW,
+    });
+    const before = await searchMemories(db, {
+      q: '之前 parameter sweep',
+      spaceIds: ['global'],
+      now: NOW,
+    });
+    expect(before.map((h) => [h.memory.id, h.score])).toEqual(
+      plain.map((h) => [h.memory.id, h.score])
+    );
   });
 });
 
