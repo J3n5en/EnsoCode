@@ -31,6 +31,7 @@ describe('parseExtensionPluginManifest', () => {
     if (!result.ok) return;
     expect(result.manifest.id).toBe('example.demo');
     expect(result.manifest.contributes.views).toEqual([]);
+    expect(result.manifest.contributes.presets).toEqual([]);
     expect(result.manifest.fs).toEqual({ read: [], write: [] });
     expect(result.manifest.net.domains).toEqual([]);
   });
@@ -268,6 +269,65 @@ describe('parseExtensionPluginManifest', () => {
           contributes: { configuration: [{ key: 'a', title: 'x' }] },
         })
       )
+    ).not.toEqual([]);
+  });
+
+  it('接受预设，并拒绝未声明的 skill、MCP、越界正文和缺少推脱正文', () => {
+    const preset = {
+      id: 'review',
+      name: 'Review',
+      skills: ['skills/review'],
+      mcpServers: ['lint'],
+      instruction: 'prompts/instruction.md',
+      systemPrompt: 'prompts/role.md',
+      systemPromptTail: 'prompts/tail.md',
+      boostPrompt: 'prompts/boost.md',
+      refusalRetry: true,
+      refusalRetryPrompt: 'prompts/retry.md',
+    };
+    const raw = {
+      ...base(),
+      permissions: ['agent.tool', 'mcp.server'],
+      contributes: {
+        ...base().contributes,
+        skills: ['skills/review'],
+        mcpServers: [{ name: 'lint', command: 'node', args: ['lint.js'] }],
+        presets: [preset],
+      },
+    };
+    const ok = parseExtensionPluginManifest(raw, '0.2.12');
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.manifest.contributes.presets).toEqual([preset]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: { ...raw.contributes, presets: [{ ...preset, skills: ['skills/other'] }] },
+      })
+    ).not.toEqual([]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: { ...raw.contributes, presets: [{ ...preset, mcpServers: ['missing'] }] },
+      })
+    ).not.toEqual([]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: {
+          ...raw.contributes,
+          presets: [{ ...preset, systemPrompt: '../role.md' }],
+        },
+      })
+    ).not.toEqual([]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: {
+          ...raw.contributes,
+          presets: [{ ...preset, refusalRetry: true, refusalRetryPrompt: undefined }],
+        },
+      })
     ).not.toEqual([]);
   });
 });

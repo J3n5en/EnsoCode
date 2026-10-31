@@ -25,6 +25,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     mcpServers: [],
     methods: [],
     configuration: [],
+    presets: [],
   },
   ...patch,
 });

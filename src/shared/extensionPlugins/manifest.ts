@@ -54,6 +54,19 @@ export interface PluginConfigContrib {
   description: string;
   secret: boolean;
 }
+/** 插件自带的会话预设。skill / MCP 只能引用本插件已声明的贡献 */
+export interface PluginPresetContrib {
+  id: string;
+  name: string;
+  skills: string[];
+  mcpServers: string[];
+  instruction?: string;
+  systemPrompt?: string;
+  systemPromptTail?: string;
+  boostPrompt?: string;
+  refusalRetry?: boolean;
+  refusalRetryPrompt?: string;
+}
 
 export interface ExtensionPluginManifest {
   schemaVersion: 1;
@@ -78,6 +91,7 @@ export interface ExtensionPluginManifest {
     mcpServers: PluginMcpContrib[];
     methods: PluginMethodContrib[];
     configuration: PluginConfigContrib[];
+    presets: PluginPresetContrib[];
   };
 }
 
@@ -95,6 +109,7 @@ const MCP_TOOL = /^[A-Za-z0-9_.-]{1,64}$/;
 const CONFIG_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 export const MAX_METHOD_TIMEOUT_MS = 120_000;
 const MAX_CONFIG_ITEMS = 20;
+const MAX_PRESETS = 20;
 const TOP_LEVEL = new Set([
   'schemaVersion',
   'id',
@@ -332,6 +347,66 @@ export function parseExtensionPluginManifest(
   }
   uniqueIds(mcpServers, 'MCP 服务');
 
+  const promptPath = (value: unknown, label: string): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string' || !isPluginRelativePath(value) || value === '.') {
+      errors.push(`${label} 路径不合法`);
+      return undefined;
+    }
+    return value;
+  };
+  const presets: PluginPresetContrib[] = [];
+  const presetRaw = list('presets');
+  if (presetRaw.length > MAX_PRESETS) errors.push(`预设最多 ${MAX_PRESETS} 个`);
+  for (const item of presetRaw) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !LOCAL_ID.test(item.id)) {
+      errors.push('预设不合法');
+      continue;
+    }
+    if (!isNonEmptyString(item.name, 60)) errors.push(`预设 ${item.id} 的名称不合法`);
+    const presetSkills = stringList(
+      item.skills,
+      `预设 ${item.id} 的 skills`,
+      (p) => typeof p === 'string' && skills.includes(p)
+    );
+    if (Array.isArray(item.skills) && item.skills.some((p) => !skills.includes(p)))
+      errors.push(`预设 ${item.id} 引用了未声明的 skill`);
+    const presetMcp = stringList(
+      item.mcpServers,
+      `预设 ${item.id} 的 mcpServers`,
+      (name) => typeof name === 'string' && mcpServers.some((server) => server.name === name)
+    );
+    if (
+      Array.isArray(item.mcpServers) &&
+      item.mcpServers.some(
+        (name) => typeof name !== 'string' || !mcpServers.some((server) => server.name === name)
+      )
+    )
+      errors.push(`预设 ${item.id} 引用了未声明的 MCP 服务`);
+    const instruction = promptPath(item.instruction, `预设 ${item.id} 的指令`);
+    const systemPrompt = promptPath(item.systemPrompt, `预设 ${item.id} 的角色描述`);
+    const systemPromptTail = promptPath(item.systemPromptTail, `预设 ${item.id} 的真尾`);
+    const boostPrompt = promptPath(item.boostPrompt, `预设 ${item.id} 的 boost`);
+    const refusalRetryPrompt = promptPath(item.refusalRetryPrompt, `预设 ${item.id} 的推脱补发`);
+    if (item.refusalRetry !== undefined && typeof item.refusalRetry !== 'boolean')
+      errors.push(`预设 ${item.id} 的 refusalRetry 不合法`);
+    if (item.refusalRetry === true && !refusalRetryPrompt)
+      errors.push(`预设 ${item.id} 开启了推脱补发但没有正文`);
+    presets.push({
+      id: item.id,
+      name: typeof item.name === 'string' ? item.name.trim() : '',
+      skills: presetSkills,
+      mcpServers: presetMcp,
+      ...(instruction ? { instruction } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(systemPromptTail ? { systemPromptTail } : {}),
+      ...(boostPrompt ? { boostPrompt } : {}),
+      ...(item.refusalRetry === true ? { refusalRetry: true } : {}),
+      ...(refusalRetryPrompt ? { refusalRetryPrompt } : {}),
+    });
+  }
+  uniqueIds(presets, '预设');
+
   const methods: PluginMethodContrib[] = [];
   for (const m of list('methods')) {
     if (
@@ -424,6 +499,7 @@ export function parseExtensionPluginManifest(
         mcpServers,
         methods,
         configuration,
+        presets,
       },
     },
   };

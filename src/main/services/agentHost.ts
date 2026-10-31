@@ -922,33 +922,54 @@ export function spawnSession(
   }
   const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
+  const extensionPlugins = bot ? null : getExtensionPlugins();
+  const pluginPreset = extensionPlugins?.presetForSpawn(request.presetId);
+  if (pluginPreset && !pluginPreset.ok) return { ok: false, error: pluginPreset.error };
   const preset: Preset | undefined = bot
     ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
-    : resolvePreset(request.presetId);
+    : pluginPreset?.ok
+      ? undefined
+      : resolvePreset(request.presetId);
   const promptKit = bot
     ? { ok: true as const, systemPrompt: bot.systemPrompt }
-    : resolvePresetPromptKit(preset);
+    : pluginPreset?.ok
+      ? {
+          ok: true as const,
+          ...(pluginPreset.systemPrompt ? { systemPrompt: pluginPreset.systemPrompt } : {}),
+          ...(pluginPreset.systemPromptAppend
+            ? { systemPromptAppend: pluginPreset.systemPromptAppend }
+            : {}),
+          ...(pluginPreset.systemPromptBoost
+            ? { systemPromptBoost: pluginPreset.systemPromptBoost }
+            : {}),
+          ...(pluginPreset.refusalRetryPrompt
+            ? { refusalRetryPrompt: pluginPreset.refusalRetryPrompt }
+            : {}),
+        }
+      : resolvePresetPromptKit(preset);
   if (!promptKit.ok) {
     return { ok: false, error: '自定义系统提示词正文读取失败，请重新保存或恢复默认。' };
   }
   const instruction = bot
     ? bot.instruction
-    : resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
+    : pluginPreset?.ok
+      ? pluginPreset.instruction
+      : resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
   const plugins = enabledPlugins(state);
   // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
-  const extensionPlugins = bot ? null : getExtensionPlugins();
+  const activePluginPreset = pluginPreset?.ok ? request.presetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
     ...(bot ? [] : plugins.skillPaths),
-    ...(extensionPlugins?.skillPathsForSpawn() ?? []),
+    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
   ];
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
     ...(bot ? [] : plugins.mcpServers),
-    ...(extensionPlugins?.mcpServersForSpawn() ?? []),
+    ...(extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? []),
   ]) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);

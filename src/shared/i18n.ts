@@ -1986,6 +1986,8 @@ export const zhTranslations: Record<string, string> = {
     '这是 pi 开头的角色段落。自定义预设只替换这段，工具、使用准则和项目上下文均保持不变。',
   Global: '全局',
   'Set as default': '设为默认',
+  'Plugin preset unavailable': '插件预设不可用',
+  'Bundled by {{plugin}}': '由插件 {{plugin}} 提供',
   Default: '默认',
   None: '不注入',
   'Injection bundles of skills, MCP servers and instruction files, chosen per conversation':

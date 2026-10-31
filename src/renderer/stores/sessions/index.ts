@@ -9,6 +9,7 @@ import {
   resolveChatReasoning,
   scopedDefaultModels,
 } from '@shared/defaultModel';
+import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import {
   EMPTY_PLAN_STATE,
   type PlanRespondAction,
@@ -2488,7 +2489,9 @@ export const useSessionsStore = create<SessionsState>()(
             defaultThinkingLevel,
           });
           const defaultPreset =
-            defaultPresetId !== 'default' && presets.some((preset) => preset.id === defaultPresetId)
+            defaultPresetId !== 'default' &&
+            (presets.some((preset) => preset.id === defaultPresetId) ||
+              isPluginPresetId(defaultPresetId))
               ? { presetId: defaultPresetId }
               : {};
           const conversation: Conversation = {

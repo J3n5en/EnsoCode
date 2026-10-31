@@ -1,9 +1,11 @@
+import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { DEFAULT_PRESET_ID } from '@shared/types';
 import { Check, ChevronDown, Layers } from 'lucide-react';
 import { useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useEnabledPluginPresets } from '@/plugins/usePluginPresets';
 import { useSettingsStore } from '@/stores/settings';
 
 interface PresetPickerProps {
@@ -17,14 +19,18 @@ interface PresetPickerProps {
 export function PresetPicker({ presetId, onSelect, disabled }: PresetPickerProps) {
   const { t } = useI18n();
   const presets = useSettingsStore((state) => state.presets);
+  const pluginPresets = useEnabledPluginPresets();
   const [open, setOpen] = useState(false);
 
   const options = [
     { id: DEFAULT_PRESET_ID, name: t('Global') },
     ...presets.map((preset) => ({ id: preset.id, name: preset.name })),
+    ...pluginPresets.map((preset) => ({ id: preset.id, name: preset.name })),
   ];
-  // 被删除的预设回落默认显示
-  const current = options.find((option) => option.id === presetId) ?? options[0];
+  const current = options.find((option) => option.id === presetId) ?? {
+    id: presetId,
+    name: isPluginPresetId(presetId) ? t('Plugin preset unavailable') : (options[0]?.name ?? ''),
+  };
 
   if (disabled) {
     return (

@@ -244,6 +244,73 @@ describe('ExtensionPluginService', () => {
     expect(server?.args?.[0]).toMatch(/packages\/example\.demo\/[^/]+\/server\.js$/);
   });
 
+  it('预设点名的 skill 和 MCP 只在选中该预设时下发，并读出角色与指令', async () => {
+    await install({
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'mcp.server'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          skills: ['skills/always', 'skills/review'],
+          mcpServers: [
+            { name: 'always', command: 'node', args: ['a.js'] },
+            { name: 'review', command: 'node', args: ['b.js'] },
+          ],
+          presets: [
+            {
+              id: 'review',
+              name: 'Review',
+              skills: ['skills/review'],
+              mcpServers: ['review'],
+              instruction: 'prompts/instruction.md',
+              systemPrompt: 'prompts/role.md',
+              systemPromptTail: 'prompts/tail.md',
+              boostPrompt: 'prompts/boost.md',
+              refusalRetry: true,
+              refusalRetryPrompt: 'prompts/retry.md',
+            },
+          ],
+        },
+      }),
+      'main.mjs': mainJs,
+      'skills/always/SKILL.md': '# always',
+      'skills/review/SKILL.md': '# review',
+      'a.js': '',
+      'b.js': '',
+      'prompts/instruction.md': 'do this',
+      'prompts/role.md': 'you are a reviewer',
+      'prompts/tail.md': 'tail',
+      'prompts/boost.md': 'boost',
+      'prompts/retry.md': 'retry',
+    });
+    service.setEnabled('example.demo', true);
+    const ends = (paths: string[], name: string) => paths.some((path) => path.endsWith(name));
+    expect(ends(service.skillPathsForSpawn(), 'skills/always')).toBe(true);
+    expect(ends(service.skillPathsForSpawn(), 'skills/review')).toBe(false);
+    expect(service.mcpServersForSpawn().map((server) => server.name)).toEqual([
+      'plugin-example-demo-always',
+    ]);
+    const id = 'plugin:example.demo:review';
+    expect(ends(service.skillPathsForSpawn(id), 'skills/always')).toBe(true);
+    expect(ends(service.skillPathsForSpawn(id), 'skills/review')).toBe(true);
+    expect(service.mcpServersForSpawn(id).map((server) => server.name)).toEqual([
+      'plugin-example-demo-always',
+      'plugin-example-demo-review',
+    ]);
+    expect(service.presetForSpawn(id)).toMatchObject({
+      ok: true,
+      instruction: { content: 'do this' },
+      systemPrompt: 'you are a reviewer',
+      systemPromptAppend: 'tail',
+      systemPromptBoost: 'boost',
+      refusalRetryPrompt: 'retry',
+    });
+    expect(service.presetForSpawn('plugin:example.demo:missing')?.ok).toBe(false);
+    expect(service.presetForSpawn('user-preset')).toBeUndefined();
+    expect(service.list()[0]?.presets).toEqual([
+      { id, name: 'Review', skills: 1, mcpServers: 1, instruction: true },
+    ]);
+  });
+
   it('处理器上下文带上 Main 推导的项目根', async () => {
     await install({
       'enso-plugin.json': manifest(),

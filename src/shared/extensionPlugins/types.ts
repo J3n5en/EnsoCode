@@ -18,6 +18,8 @@ export interface ExtensionPluginSummary {
   renderer?: string;
   /** 清单声明了配置项 */
   configurable: boolean;
+  /** 插件自带的预设；id 是会话里使用的 plugin:<插件 id>:<预设 id> */
+  presets: { id: string; name: string; skills: number; mcpServers: number; instruction: boolean }[];
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
 }

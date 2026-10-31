@@ -1,11 +1,21 @@
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { grantExpands, grantOf } from '@shared/extensionPlugins/grant';
 import {
   type ExtensionPluginManifest,
   isPluginRelativePath,
+  type PluginPresetContrib,
   parseExtensionPluginManifest,
 } from '@shared/extensionPlugins/manifest';
+import { parsePluginPresetId, pluginPresetId } from '@shared/extensionPlugins/preset';
 import type { PluginCallMethod, PluginToolResult } from '@shared/extensionPlugins/protocol';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
 import type {
@@ -46,6 +56,7 @@ const UI_RATE_PER_SECOND = 10;
 const BREAKER_FAILURES = 5;
 const BREAKER_COOLDOWN_MS = 30_000;
 const MAX_CONFIG_VALUE_CHARS = 4096;
+const MAX_PRESET_TEXT_BYTES = 256 * 1024;
 
 export interface ExtensionPluginServiceOptions {
   root: string;
@@ -132,6 +143,13 @@ export class ExtensionPluginService {
           hasRenderer: manifest.renderer !== undefined,
           ...(manifest.renderer ? { renderer: manifest.renderer } : {}),
           configurable: manifest.contributes.configuration.length > 0,
+          presets: manifest.contributes.presets.map((preset) => ({
+            id: pluginPresetId(record.id, preset.id),
+            name: preset.name,
+            skills: preset.skills.length,
+            mcpServers: preset.mcpServers.length,
+            instruction: preset.instruction !== undefined,
+          })),
           ...(record.pending && pending
             ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
             : {}),
@@ -333,31 +351,116 @@ export class ExtensionPluginService {
     );
   }
 
-  skillPathsForSpawn(): string[] {
-    return this.enabled().flatMap(({ id, dir, manifest }) =>
-      manifest.contributes.skills.map((rel) =>
-        resolve(pluginPackagePath(this.options.root, id, dir), rel)
-      )
-    );
+  skillPathsForSpawn(activePresetId?: string): string[] {
+    return this.enabled().flatMap(({ id, dir, manifest }) => {
+      const root = pluginPackagePath(this.options.root, id, dir);
+      return this.contributedSkills(id, manifest, activePresetId).map((rel) => resolve(root, rel));
+    });
   }
 
   /** 服务名加 `plugin-<id>-` 前缀；`${ENSO_PLUGIN_ROOT}` 展开为安装目录，env 只含清单字面量 */
-  mcpServersForSpawn(): McpServerSpawnConfig[] {
+  mcpServersForSpawn(activePresetId?: string): McpServerSpawnConfig[] {
     return this.enabled().flatMap(({ id, dir, manifest }) => {
       const pluginRoot = pluginPackagePath(this.options.root, id, dir);
       const expand = (value: string) => value.replaceAll(PLUGIN_ROOT_TOKEN, pluginRoot);
-      return manifest.contributes.mcpServers.map((s) => ({
-        name: `plugin-${id.replaceAll('.', '-')}-${s.name}`,
-        description: `${manifest.name} 插件`,
-        transport: 'stdio' as const,
-        command: expand(s.command),
-        args: s.args.map(expand),
-        env: {
-          ...Object.fromEntries(Object.entries(s.env).map(([k, v]) => [k, expand(v)])),
-          ENSO_PLUGIN_ROOT: pluginRoot,
-        },
-      }));
+      const names = this.contributedMcp(id, manifest, activePresetId);
+      return manifest.contributes.mcpServers
+        .filter((server) => names.has(server.name))
+        .map((s) => ({
+          name: `plugin-${id.replaceAll('.', '-')}-${s.name}`,
+          description: `${manifest.name} 插件`,
+          transport: 'stdio' as const,
+          command: expand(s.command),
+          args: s.args.map(expand),
+          env: {
+            ...Object.fromEntries(Object.entries(s.env).map(([k, v]) => [k, expand(v)])),
+            ENSO_PLUGIN_ROOT: pluginRoot,
+          },
+        }));
     });
+  }
+
+  /**
+   * 解析会话选中的插件预设。不是插件预设 id 时返回 undefined。
+   * 插件未启用、预设不存在或正文读不出时失败，不回落成全局预设。
+   */
+  presetForSpawn(presetId?: string):
+    | {
+        ok: true;
+        instruction?: { path: string; content: string };
+        systemPrompt?: string;
+        systemPromptAppend?: string;
+        systemPromptBoost?: string;
+        refusalRetryPrompt?: string;
+      }
+    | { ok: false; error: string }
+    | undefined {
+    if (!presetId) return undefined;
+    const parsed = parsePluginPresetId(presetId);
+    if (!parsed) return undefined;
+    const loaded = this.enabled().find((entry) => entry.id === parsed.pluginId);
+    const preset = loaded?.manifest.contributes.presets.find((item) => item.id === parsed.localId);
+    if (!loaded || !preset) return { ok: false, error: '插件预设不可用，请重新选择或恢复默认。' };
+    const root = pluginPackagePath(this.options.root, loaded.id, loaded.dir);
+    const read = (rel?: string): { ok: true; content: string } | { ok: false } | undefined => {
+      if (!rel) return undefined;
+      return readPluginText(root, rel);
+    };
+    const instruction = read(preset.instruction);
+    const role = read(preset.systemPrompt);
+    const tail = read(preset.systemPromptTail);
+    const boost = read(preset.boostPrompt);
+    const retry = read(preset.refusalRetryPrompt);
+    if (
+      instruction?.ok === false ||
+      role?.ok === false ||
+      tail?.ok === false ||
+      boost?.ok === false ||
+      retry?.ok === false
+    )
+      return { ok: false, error: '插件预设的正文读取失败，请重新安装插件。' };
+    return {
+      ok: true,
+      ...(instruction?.ok
+        ? { instruction: { path: join(root, preset.instruction!), content: instruction.content } }
+        : {}),
+      ...(role?.ok ? { systemPrompt: role.content } : {}),
+      ...(tail?.ok ? { systemPromptAppend: tail.content } : {}),
+      ...(boost?.ok ? { systemPromptBoost: boost.content } : {}),
+      ...(preset.refusalRetry === true && retry?.ok ? { refusalRetryPrompt: retry.content } : {}),
+    };
+  }
+
+  private contributedSkills(
+    pluginId: string,
+    manifest: ExtensionPluginManifest,
+    activePresetId?: string
+  ): string[] {
+    const { scoped, selected } = presetSelection(
+      manifest,
+      pluginId,
+      activePresetId,
+      (preset) => preset.skills
+    );
+    return manifest.contributes.skills.filter((rel) => !scoped.has(rel) || selected.has(rel));
+  }
+
+  private contributedMcp(
+    pluginId: string,
+    manifest: ExtensionPluginManifest,
+    activePresetId?: string
+  ): Set<string> {
+    const { scoped, selected } = presetSelection(
+      manifest,
+      pluginId,
+      activePresetId,
+      (preset) => preset.mcpServers
+    );
+    return new Set(
+      manifest.contributes.mcpServers
+        .map((server) => server.name)
+        .filter((name) => !scoped.has(name) || selected.has(name))
+    );
   }
 
   async callTool(input: {
@@ -646,5 +749,38 @@ export class ExtensionPluginService {
       state.failures = 0;
       state.openUntil = Date.now() + BREAKER_COOLDOWN_MS;
     }
+  }
+}
+
+function presetSelection(
+  manifest: ExtensionPluginManifest,
+  pluginId: string,
+  activePresetId: string | undefined,
+  pick: (preset: PluginPresetContrib) => readonly string[]
+): { scoped: Set<string>; selected: Set<string> } {
+  const parsed = activePresetId ? parsePluginPresetId(activePresetId) : undefined;
+  const active =
+    parsed?.pluginId === pluginId
+      ? manifest.contributes.presets.find((preset) => preset.id === parsed.localId)
+      : undefined;
+  return {
+    scoped: new Set(manifest.contributes.presets.flatMap((preset) => pick(preset))),
+    selected: new Set(active ? pick(active) : []),
+  };
+}
+
+function readPluginText(root: string, rel: string): { ok: true; content: string } | { ok: false } {
+  if (!isPluginRelativePath(rel) || rel === '.') return { ok: false };
+  const path = resolve(root, rel);
+  const fromRoot = relative(root, path);
+  if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) return { ok: false };
+  try {
+    const info = statSync(path);
+    if (!info.isFile() || info.size > MAX_PRESET_TEXT_BYTES) return { ok: false };
+    const content = readFileSync(path, 'utf8');
+    if (!content.trim()) return { ok: false };
+    return { ok: true, content };
+  } catch {
+    return { ok: false };
   }
 }

@@ -132,6 +132,18 @@ async function verifyReferences(
     if (!(await exists(resolve(pluginRoot, rel), 'dir')))
       throw new Error(`清单引用的 skill 目录不存在：${rel}`);
   }
+  for (const preset of manifest.contributes.presets) {
+    for (const rel of [
+      preset.instruction,
+      preset.systemPrompt,
+      preset.systemPromptTail,
+      preset.boostPrompt,
+      preset.refusalRetryPrompt,
+    ]) {
+      if (rel && !(await exists(resolve(pluginRoot, rel), 'file')))
+        throw new Error(`清单引用的文件不存在：${rel}`);
+    }
+  }
 }
 
 export async function stagePlugin(
