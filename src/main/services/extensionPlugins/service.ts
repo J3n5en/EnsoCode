@@ -21,6 +21,7 @@ import {
   commitStaged,
   discardStaged,
   MANIFEST_FILE,
+  type PluginInstallSource,
   pluginDataPath,
   pluginPackagePath,
   removePackage,
@@ -145,7 +146,7 @@ export class ExtensionPluginService {
     return record?.state === 'enabled' ? this.load(record.id, record.dir) : null;
   }
 
-  async stage(source: { kind: 'dir' | 'zip'; path: string }) {
+  async stage(source: PluginInstallSource) {
     this.sweepStaged();
     const result = await stagePlugin(this.options.root, source, this.options.hostVersion);
     if (!result.ok) return result;

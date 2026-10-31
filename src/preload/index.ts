@@ -1621,6 +1621,11 @@ const electronAPI = {
       | { ok: true; cancelled: true }
       | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_PICK_AND_STAGE, kind),
+    stageFromUrl: (
+      url: string
+    ): Promise<
+      { ok: true; preview: ExtensionPluginInstallPreview } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL, url),
     commit: (token: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, token),
     discard: (token: string): Promise<{ ok: boolean }> =>

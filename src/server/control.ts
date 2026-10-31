@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { parsePluginInstallUrl } from '@shared/extensionPlugins/installUrl';
 
 const PLUGIN_ID_ACTIONS = ['enable', 'disable', 'approve', 'reject', 'uninstall'] as const;
 const PLUGIN_TOKEN_ACTIONS = ['commit', 'discard'] as const;
@@ -6,6 +7,7 @@ const PLUGIN_TOKEN_ACTIONS = ['commit', 'discard'] as const;
 export type PluginControlCommand =
   | { cmd: 'plugin'; action: 'list' }
   | { cmd: 'plugin'; action: 'stage'; path: string }
+  | { cmd: 'plugin'; action: 'stage'; url: string }
   | { cmd: 'plugin'; action: (typeof PLUGIN_TOKEN_ACTIONS)[number]; token: string }
   | { cmd: 'plugin'; action: (typeof PLUGIN_ID_ACTIONS)[number]; id: string }
   | { cmd: 'plugin'; action: 'config-get'; id: string }
@@ -45,6 +47,13 @@ function parsePluginCommand(
   }
   if (action === 'stage') {
     const path = text('path');
+    const url = text('url');
+    if (path && url) return { error: 'plugin stage requires an absolute path or an http(s) url' };
+    if (url) {
+      const parsed = parsePluginInstallUrl(url);
+      if (!parsed.ok) return { error: 'plugin stage url must be http or https' };
+      return { cmd: 'plugin', action, url: parsed.url.href };
+    }
     if (!path || !isAbsolute(path)) return { error: 'plugin stage requires an absolute path' };
     return { cmd: 'plugin', action, path };
   }

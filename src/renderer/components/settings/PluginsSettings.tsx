@@ -105,6 +105,8 @@ function ExtensionPluginsSection() {
   const [configuring, setConfiguring] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [url, setUrl] = React.useState('');
+  const [downloading, setDownloading] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -121,9 +123,25 @@ function ExtensionPluginsSection() {
 
   const stage = async (kind: 'dir' | 'zip') => {
     setError(null);
+    if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
+    setPreview(null);
     const result = await window.electronAPI.extensionPlugins.pickAndStage(kind);
     if (!result.ok) setError(result.error);
     else if (!('cancelled' in result)) setPreview(result.preview);
+  };
+
+  const stageUrl = async () => {
+    const value = url.trim();
+    if (!value) return;
+    setError(null);
+    setDownloading(true);
+    if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
+    setPreview(null);
+    const result = await window.electronAPI.extensionPlugins.stageFromUrl(value).finally(() => {
+      setDownloading(false);
+    });
+    if (!result.ok) setError(result.error);
+    else setPreview(result.preview);
   };
 
   const commit = async () => {
@@ -155,13 +173,41 @@ function ExtensionPluginsSection() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => void stage('dir')}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || downloading}
+            onClick={() => void stage('dir')}
+          >
             {t('Install from folder')}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void stage('zip')}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || downloading}
+            onClick={() => void stage('zip')}
+          >
             {t('Install from zip')}
           </Button>
         </div>
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={url}
+          placeholder={t('https://github.com/owner/repo')}
+          onChange={(event) => setUrl(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void stageUrl();
+          }}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || downloading || url.trim() === ''}
+          onClick={() => void stageUrl()}
+        >
+          {downloading ? <Spinner /> : t('Install from URL')}
+        </Button>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       {preview && (

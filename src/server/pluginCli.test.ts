@@ -91,6 +91,16 @@ describe('enso-server plugin', () => {
     expect(call).toHaveBeenNthCalledWith(2, { cmd: 'plugin', action: 'commit', token: 't1' });
   });
 
+  it('install：http(s) 链接原样暂存，不拼到 cwd 上', async () => {
+    const { call, deps: d } = deps(true);
+    await runPluginCommand(['install', 'https://example.com/hello.zip', '--yes'], d);
+    expect(call).toHaveBeenNthCalledWith(1, {
+      cmd: 'plugin',
+      action: 'stage',
+      url: 'https://example.com/hello.zip',
+    });
+  });
+
   it('install：拒绝确认则丢弃暂存', async () => {
     const { call, deps: d } = deps(false);
     await runPluginCommand(['install', '/srv/hello'], d);

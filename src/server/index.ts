@@ -72,10 +72,14 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
     case 'list':
       return { ok: true, plugins: plugins.list() };
     case 'stage':
-      return plugins.stage({
-        kind: command.path.toLowerCase().endsWith('.zip') ? 'zip' : 'dir',
-        path: command.path,
-      });
+      return plugins.stage(
+        'url' in command
+          ? { kind: 'url', url: command.url }
+          : {
+              kind: command.path.toLowerCase().endsWith('.zip') ? 'zip' : 'dir',
+              path: command.path,
+            }
+      );
     case 'commit':
       return plugins.commit(command.token);
     case 'discard':

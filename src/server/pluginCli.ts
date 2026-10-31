@@ -9,7 +9,7 @@ import type { PluginControlCommand } from './control';
 export const PLUGIN_USAGE = `用法: enso-server plugin <action>
 
   list                         已安装插件与状态
-  install <目录|zip> [--yes]    安装或更新；先展示权限，确认后落盘（新装默认停用）
+  install <目录|zip|url> [--yes] 安装或更新。url 可以是 zip，或 GitHub 仓库。先展示权限，确认后落盘（新装默认停用）
   enable <id> / disable <id>   启用 / 停用
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
   uninstall <id>               卸载并删除插件数据
@@ -53,7 +53,7 @@ export function formatInstallPreview(p: ExtensionPluginInstallPreview): string {
 }
 
 export function formatPluginList(plugins: readonly ExtensionPluginSummary[]): string {
-  if (plugins.length === 0) return '  （无）用 `enso-server plugin install <目录|zip>` 安装';
+  if (plugins.length === 0) return '  （无）用 `enso-server plugin install <目录|zip|url>` 安装';
   return plugins
     .map((p) => {
       const pending = p.pendingVersion ? `  待同意更新 ${p.pendingVersion}` : '';
@@ -118,9 +118,10 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
     return;
   }
   if (action === 'install' && target) {
-    const reply = ensureOk(
-      await deps.call({ cmd: 'plugin', action: 'stage', path: resolve(deps.cwd, target) })
-    );
+    const stage = /^https?:\/\//i.test(target)
+      ? { cmd: 'plugin' as const, action: 'stage' as const, url: target }
+      : { cmd: 'plugin' as const, action: 'stage' as const, path: resolve(deps.cwd, target) };
+    const reply = ensureOk(await deps.call(stage));
     const preview = reply.preview as ExtensionPluginInstallPreview;
     deps.log(formatInstallPreview(preview));
     const yes = flags.includes('--yes') || flags.includes('-y');

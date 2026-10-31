@@ -31,6 +31,7 @@ describe('isRemoteChannelAllowed', () => {
     ]) {
       expect(isRemoteChannelAllowed(ch, true)).toBe(false);
     }
+    expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL, true)).toBe(false);
   });
 
   it('lets only the leader push the pair catalog', () => {

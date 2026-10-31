@@ -33,6 +33,24 @@ describe('parseControlCommand', () => {
     expect(parse({ cmd: 'plugin', action: 'stage', path: 'rel/p' })).toEqual({
       error: 'plugin stage requires an absolute path',
     });
+    expect(parse({ cmd: 'plugin', action: 'stage', url: 'https://example.com/a.zip' })).toEqual({
+      cmd: 'plugin',
+      action: 'stage',
+      url: 'https://example.com/a.zip',
+    });
+    expect(parse({ cmd: 'plugin', action: 'stage', url: 'file:///tmp/a.zip' })).toEqual({
+      error: 'plugin stage url must be http or https',
+    });
+    expect(
+      parse({
+        cmd: 'plugin',
+        action: 'stage',
+        path: '/srv/p.zip',
+        url: 'https://example.com/a.zip',
+      })
+    ).toEqual({
+      error: 'plugin stage requires an absolute path or an http(s) url',
+    });
     expect(parse({ cmd: 'plugin', action: 'commit', token: 't1' })).toEqual({
       cmd: 'plugin',
       action: 'commit',

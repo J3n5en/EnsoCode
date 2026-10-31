@@ -888,6 +888,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_REJECT_PENDING: excluded('Enso 插件更新扩大授权后的拒绝，保留旧版本。'),
   EXTENSION_PLUGINS_UNINSTALL: excluded('Enso 插件卸载。'),
   EXTENSION_PLUGINS_PICK_AND_STAGE: excluded('桌面专用：弹系统对话框选择插件目录或 zip。'),
+  EXTENSION_PLUGINS_STAGE_URL: excluded('Enso 插件从 http(s) zip 链接暂存，渲染层只传链接。'),
   EXTENSION_PLUGINS_CALL: excluded('Enso 插件运行期调用：命令、挂件、侧栏页面与补全。'),
   EXTENSION_PLUGINS_ASSET: excluded('Enso 插件渲染资源读取：只收插件 id 与相对路径。'),
   EXTENSION_PLUGINS_DRAFT_REQUEST: excluded('Enso 插件草稿请求：Main 推给发起手势的窗口。'),

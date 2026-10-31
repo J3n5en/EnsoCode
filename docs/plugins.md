@@ -7,7 +7,8 @@
 ## 安装与管理
 
 - 桌面：设置 → 插件 → Enso plugins → 安装目录。
-- 服务端：`enso-server plugin install <目录或 zip>`，确认后 `enso-server plugin enable <id>`。
+- 桌面也可以粘贴链接安装：http(s) 的 zip，或 GitHub 仓库（`https://github.com/owner/repo`；仓库里的子目录用 `.../tree/分支/子目录`）。本机下载 zip 后复制进数据目录，不保留原地址。私有仓库不支持。
+- 服务端：`enso-server plugin install <目录、zip 或 http(s) 链接>`，确认后 `enso-server plugin enable <id>`。
 - 新装的插件默认停用，需要手动启用。
 - 同 id 再装一次按更新处理。权限没有变大就直接换新版；权限变大则旧版继续运行，需要 `enso-server plugin approve <id>`（或设置页同意）才切到新版，`reject` 则留在旧版。
 - 10 分钟内非预期崩溃 3 次，插件会被自动停用，状态变成 `crashed`，重新启用即可。

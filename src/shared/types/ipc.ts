@@ -513,6 +513,8 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_UNINSTALL: 'extension-plugins:uninstall',
   /** 桌面专用：弹系统对话框选目录或 zip，远端不可调 */
   EXTENSION_PLUGINS_PICK_AND_STAGE: 'extension-plugins:pick-and-stage',
+  /** 从 http(s) zip 链接暂存；渲染层只传链接，远端不可调 */
+  EXTENSION_PLUGINS_STAGE_URL: 'extension-plugins:stage-url',
   /** 运行期：界面发起的插件调用（命令、挂件、侧栏页面、补全），算用户手势 */
   EXTENSION_PLUGINS_CALL: 'extension-plugins:call',
   /** 运行期：按插件 id + 相对路径取渲染资源，渲染层不传磁盘路径 */

@@ -49,6 +49,11 @@ export function registerExtensionPluginHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LIST, () => plugins().list());
 
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL, (_e, url: unknown) => {
+    if (typeof url !== 'string' || url.length > 2048) return { ok: false, error: '参数不合法' };
+    return plugins().stage({ kind: 'url', url });
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, (_e, token: unknown) => {
     if (typeof token !== 'string') return { ok: false, error: '参数不合法' };
     return plugins().commit(token);
