@@ -75,6 +75,10 @@ function createView(onUserClose: (windowId: string) => void): PreviewView {
   let anchor: { right: number; bottom: number } | undefined;
   let disposing = false;
   const icons = new Map<string, string>();
+  // 每次动作都会调 show：同一窗口只在内容真的变了才动浮窗，避免闪烁、跳位
+  const sizes = new Map<string, { width: number; height: number }>();
+  let label: string | undefined;
+  let iconPath: string | undefined;
   // 只允许本预览页取窗口画面
   previewSession.setPermissionRequestHandler((contents, permission, callback) =>
     callback(permission === 'media' && contents === win?.webContents)
@@ -159,15 +163,32 @@ function createView(onUserClose: (windowId: string) => void): PreviewView {
     show(input) {
       if (!app.isReady() || !/^\d+$/.test(input.windowId)) return;
       const target = ensure();
-      const size = previewSize(input.size);
-      const display = anchor
-        ? screen.getDisplayNearestPoint({ x: anchor.right, y: anchor.bottom })
+      if (input.size) sizes.set(input.windowId, input.size);
+      const size = previewSize(sizes.get(input.windowId));
+      const visible = target.isVisible();
+      const now = target.getBounds();
+      const keep =
+        anchor ?? (visible ? { right: now.x + now.width, bottom: now.y + now.height } : undefined);
+      const display = keep
+        ? screen.getDisplayNearestPoint({ x: keep.right, y: keep.bottom })
         : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-      target.setBounds(placePreview(display.workArea, size, anchor));
-      run(
-        `window.__label(${JSON.stringify(zh ? `AI 正在操作 · ${input.app}` : `AI is using ${input.app}`)})`
-      );
-      if (input.path) {
+      const next = placePreview(display.workArea, size, keep);
+      if (
+        !visible ||
+        next.x !== now.x ||
+        next.y !== now.y ||
+        next.width !== now.width ||
+        next.height !== now.height
+      ) {
+        target.setBounds(next);
+      }
+      const nextLabel = zh ? `AI 正在操作 · ${input.app}` : `AI is using ${input.app}`;
+      if (nextLabel !== label) {
+        label = nextLabel;
+        run(`window.__label(${JSON.stringify(nextLabel)})`);
+      }
+      if (input.path && input.path !== iconPath) {
+        iconPath = input.path;
         void icon(input.path).then(
           (url) => run(`window.__icon(${JSON.stringify(url)})`),
           () => undefined
@@ -199,7 +220,7 @@ export function createAppPreview(options: { enabled: () => boolean }) {
   const controller: PreviewController = new PreviewController({
     enabled: () => process.platform === 'darwin' && options.enabled(),
     view: () => createView((windowId) => controller.userClosed(windowId)),
-    hideDelayMs: 4000,
+    hideDelayMs: 10_000,
   });
   return controller;
 }
