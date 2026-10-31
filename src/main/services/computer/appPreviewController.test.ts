@@ -7,6 +7,7 @@ function setup(enabled = true) {
     show: (input) => log.push(`show ${input.windowId} ${input.app}`),
     hide: () => log.push('hide'),
     dispose: () => log.push('dispose'),
+    pointer: (fx, fy) => log.push(`pointer ${fx} ${fy}`),
   };
   const state = { enabled };
   const controller = new PreviewController({
@@ -81,5 +82,24 @@ describe('PreviewController', () => {
     controller.runEnd('zzz');
     await vi.advanceTimersByTimeAsync(5000);
     expect(log).toEqual(['show w1 Notes']);
+  });
+
+  it('指针只画在正在显示同一窗口的画中画里', async () => {
+    const { controller, log, activity } = setup();
+    expect(controller.pointer('w1', 0.5, 0.5)).toBe(false);
+    await activity('a');
+    expect(controller.pointer('w2', 0.5, 0.5)).toBe(false);
+    expect(controller.pointer('w1', 0.25, 0.75)).toBe(true);
+    expect(log.at(-1)).toBe('pointer 0.25 0.75');
+    controller.userClosed('w1');
+    expect(controller.pointer('w1', 0.5, 0.5)).toBe(false);
+  });
+
+  it('收起后不再画指针', async () => {
+    const { controller, activity } = setup();
+    await activity('a');
+    controller.runEnd('a');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(controller.pointer('w1', 0.5, 0.5)).toBe(false);
   });
 });

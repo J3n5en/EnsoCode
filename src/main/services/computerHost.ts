@@ -25,6 +25,7 @@ import { openMacPrivacySettings } from './computer/macPrivacySettings';
 import { ComputerOccupancy } from './computer/occupancy';
 import { createElectronOccupancyDeps } from './computer/occupancyOverlay';
 import { createDesktopBackend } from './computer/platform';
+import { pointerPlacement } from './computer/pointerPlacement';
 import { createVirtualCursor } from './computer/virtualCursor';
 
 const DEFAULT_LEASE_WAIT_MS = 20_000;
@@ -56,6 +57,12 @@ export interface ComputerFeedback {
     screenX: number;
     screenY: number;
     action: string;
+    /** 被操作的窗口与落点在其中的比例 */
+    windowId?: string;
+    fx?: number;
+    fy?: number;
+    /** 屏幕上这一点能否看到目标窗口；被盖住（如用户正在用的 app）时为 false */
+    exposed?: boolean;
   }): void;
   /** 后台操作某个窗口：预览（画中画）跟随它 */
   activity?(input: {
@@ -230,14 +237,23 @@ export class ComputerHost {
                     screenY: number;
                     action: string;
                   }) => {
-                    void backend.appForTarget?.(input.target).then(
-                      (app) =>
+                    void Promise.all([
+                      backend.appForTarget?.(input.target),
+                      backend.windows(),
+                    ]).then(
+                      ([app, windows]) => {
+                        const point = { x: input.screenX, y: input.screenY };
+                        const placement = pointerPlacement(windows, input.target, point);
                         feedback.pointer({
                           screenX: input.screenX,
                           screenY: input.screenY,
                           action: input.action,
+                          windowId: input.target,
+                          exposed: placement?.exposed ?? false,
+                          ...(placement ? { fx: placement.fx, fy: placement.fy } : {}),
                           ...(app ? { pid: app.pid, app: app.name } : {}),
-                        }),
+                        });
+                      },
                       () => undefined
                     );
                   },
@@ -331,12 +347,20 @@ function readComputerPreviewEnabled(): boolean {
   return state?.computerPreview !== false;
 }
 
+/** 指针画在画中画里；屏幕上只在真能看到目标窗口时画，免得盖在用户正在用的 app 上 */
 function composeFeedback(
   cursor: Pick<ComputerFeedback, 'pointer' | 'dispose'>,
-  preview: Pick<ComputerFeedback, 'activity' | 'runEnd' | 'dispose'>
+  preview: Pick<ComputerFeedback, 'activity' | 'runEnd' | 'dispose'> & {
+    pointer(windowId: string, fx: number, fy: number): boolean;
+  }
 ): ComputerFeedback {
   return {
-    pointer: (input) => cursor.pointer(input),
+    pointer: (input) => {
+      if (input.windowId && input.fx !== undefined && input.fy !== undefined) {
+        preview.pointer(input.windowId, input.fx, input.fy);
+      }
+      if (input.exposed !== false) cursor.pointer(input);
+    },
     activity: (input) => void preview.activity?.(input),
     runEnd: (owner) => preview.runEnd?.(owner),
     dispose: () => {

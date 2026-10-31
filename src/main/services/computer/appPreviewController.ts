@@ -16,6 +16,8 @@ export interface PreviewView {
   }): void;
   hide(): void;
   dispose(): void;
+  /** 在画面里标出点击位置（相对窗口的比例） */
+  pointer(fx: number, fy: number): void;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface PreviewView {
 export class PreviewController {
   private readonly active = new Set<string>();
   private closed: string | undefined;
+  private shown: string | undefined;
   private hideTimer: ReturnType<typeof setTimeout> | undefined;
   private view: PreviewView | undefined;
 
@@ -46,6 +49,14 @@ export class PreviewController {
     if (!this.active.has(target.owner) || this.closed === target.windowId) return;
     this.view ??= this.deps.view();
     this.view.show({ windowId: target.windowId, app: target.app, path: target.path, size });
+    this.shown = target.windowId;
+  }
+
+  /** 正在显示这个窗口时把指针画进画中画；返回是否画了 */
+  pointer(windowId: string, fx: number, fy: number): boolean {
+    if (!this.view || this.shown !== windowId) return false;
+    this.view.pointer(fx, fy);
+    return true;
   }
 
   runEnd(owner: string): void {
@@ -54,12 +65,14 @@ export class PreviewController {
     this.hideTimer = setTimeout(() => {
       this.hideTimer = undefined;
       this.closed = undefined;
+      this.shown = undefined;
       this.view?.hide();
     }, this.deps.hideDelayMs);
   }
 
   userClosed(windowId: string): void {
     this.closed = windowId;
+    this.shown = undefined;
     this.view?.hide();
   }
 
@@ -68,6 +81,7 @@ export class PreviewController {
     this.hideTimer = undefined;
     this.active.clear();
     this.closed = undefined;
+    this.shown = undefined;
     this.view?.dispose();
     this.view = undefined;
   }

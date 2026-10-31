@@ -19,6 +19,11 @@ font:12px/16px -apple-system,BlinkMacSystemFont,sans-serif;color:#f5f5f7}
 box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
 #s{flex:1;min-height:0;position:relative;background:#000}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#p{position:absolute;left:0;top:0;width:22px;height:26px;margin:-2px 0 0 -2px;opacity:0;transition:opacity .18s ease-out;pointer-events:none}
+#p.on{opacity:1}
+#r{position:absolute;left:-9px;top:-9px;width:18px;height:18px;border-radius:9px;border:2px solid #147ce5;box-sizing:border-box;opacity:0}
+#p.on #r{animation:ring .5s ease-out}
+@keyframes ring{from{opacity:1;transform:scale(.4)}to{opacity:0;transform:scale(1.6)}}
 #e{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:12px;text-align:center;color:#aeaeb2}
 body.err #e{display:flex}
 #b{height:28px;display:flex;align-items:center;gap:6px;padding:0 6px 0 8px}
@@ -28,7 +33,7 @@ body.err #e{display:flex}
 #x{-webkit-app-region:no-drag;border:0;background:transparent;color:#aeaeb2;font-size:15px;line-height:20px;width:20px;height:20px;
 border-radius:5px;padding:0;cursor:default}
 #x:hover{background:rgba(255,255,255,.12);color:#fff}
-</style></head><body><div id="f"><div id="s"><video id="v" autoplay muted playsinline></video><div id="e">${failed}</div></div>
+</style></head><body><div id="f"><div id="s"><video id="v" autoplay muted playsinline></video><div id="p"><div id="r"></div><svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 20 L7 15.5 L10.5 23 L13.5 21.7 L10 14.3 L17 14.3 Z" fill="#147ce5" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg></div><div id="e">${failed}</div></div>
 <div id="b"><span id="d"></span><img id="i" alt=""><span id="l"></span><button id="x" title="${zh ? '关闭' : 'Close'}">×</button></div></div>
 <script>
 const v = document.getElementById('v');
@@ -59,6 +64,21 @@ window.__set = async (id) => {
   }
 };
 window.__stop = stop;
+let pt;
+// 点击位置按窗口比例换算到画面（object-fit: contain 留出的黑边要扣掉）
+window.__pointer = (fx, fy) => {
+  const box = document.getElementById('s').getBoundingClientRect();
+  const vw = v.videoWidth || box.width, vh = v.videoHeight || box.height;
+  const k = Math.min(box.width / vw, box.height / vh);
+  const p = document.getElementById('p');
+  p.style.left = (box.width - vw * k) / 2 + fx * vw * k + 'px';
+  p.style.top = (box.height - vh * k) / 2 + fy * vh * k + 'px';
+  p.classList.remove('on');
+  void p.offsetWidth;
+  p.classList.add('on');
+  clearTimeout(pt);
+  pt = setTimeout(() => p.classList.remove('on'), 1400);
+};
 // 页面没有 preload；用标题变化告诉 Main“用户点了关闭”（window.close() 会直接销毁窗口）
 document.getElementById('x').addEventListener('click', () => { document.title = 'close:' + Date.now(); });
 </script></body></html>`;
@@ -205,6 +225,10 @@ function createView(onUserClose: (windowId: string) => void): PreviewView {
       if (!win || win.isDestroyed()) return;
       run('window.__stop()');
       win.hide();
+    },
+    pointer(fx, fy) {
+      if (!current) return;
+      run(`window.__pointer(${Number(fx)}, ${Number(fy)})`);
     },
     dispose() {
       disposing = true;

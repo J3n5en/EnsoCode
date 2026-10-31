@@ -303,6 +303,21 @@ describe('ComputerHost', () => {
     expect(events).toEqual(['end']);
   });
 
+  it('后台点击的指针反馈带上落点在目标窗口里的比例，并标出目标是否被别的窗口盖住', async () => {
+    const points: Array<Record<string, unknown>> = [];
+    const host = new ComputerHost(twoApps, undefined, {
+      feedback: { pointer: (input) => points.push(input) },
+    });
+    // w1 在最上层且与 w2 重叠：点 w2 时用户看到的是 w1
+    await host.invoke('s1', 'run', {
+      code: 'const w = await desktop.window("w2"); await w.screenshot(); await w.click(50, 25)',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(points).toEqual([
+      expect.objectContaining({ windowId: 'w2', exposed: false, fx: 0.5, fy: 0.5, pid: 2 }),
+    ]);
+  });
+
   it('app 授权被拒：动作不投递，错误回给模型', async () => {
     const backend = new FakeDesktopBackend();
     const file = path.join(mkdtempSync(path.join(tmpdir(), 'enso-host-')), 'apps.json');
