@@ -10,6 +10,7 @@
 - 后台点击按钮总是走合成点击，`via` 从不是 `axPress`。
 - 开发版（未签名 Electron）里 SkyLight 激活报 `focus 1002`，或 `ax()` 报 tcc-denied。
 - 正式版里输入都走后台了，被操作的 app 仍然每次调用都弹到前台（如系统设置）。
+- iMe（Telegram 系 Qt app）里 `el.click()` / `perform("AXPress")` 返回成功，界面却没反应；模型随后改用前台点击抢了前台。
 
 ## 根因
 
@@ -29,6 +30,7 @@
   另见过一次已授权的开发版整个实例持续 1002、重启即恢复，根因未定位。
 - `desktop.app(name, { pane })` 用 `open` 打开应用 / 设置面板；`open` 不带 `-g` 会激活目标。
   模型习惯每次调用都先 `desktop.app("系统设置", { pane })`，于是每次都抢前台。
+- Qt 自绘按钮不在 `AXActionNames` 里声明 `AXPress`，但 `AXUIElementPerformAction(AXPress)` 照样返回成功、什么也不做。
 
 ## 修法
 
@@ -42,6 +44,7 @@
 - 激活后补发 0x01/0x02 两条 key-window 记录（窗口号在 0x3c，0x3a=0x10，0x20–0x2f 为 0xff），只改 key 不提升层级。
 - 点击判 AXPress 前先打开目标 AX 树，并用 `AXUIElementCreateApplication(pid)` 做 app 内命中；命中不到可按控件时合成点击。
 - 激活被拒时报 `BackgroundUnavailable`（提示可能是辅助功能授权），不自动改走前台。
+- `el.click()` 只在元素声明了 `AXPress` 时 press，否则按元素中心坐标后台合成点击（真机验证 iMe 的 Jump to bottom 生效）。
 - `launchApp` 一律 `open -g`（面板 URL 同样生效，未运行的 app 也只在后台启动）；工具说明要求窗口已开时直接复用、不为查看而 `raise()`。
 
 ## 回归防线
@@ -50,6 +53,7 @@
 - `skyClick.test.ts`：右键/中键无 primer、拖拽配方与路径插值。
 - `macKey.test.ts`：修饰键键码到标志位。
 - `appLaunch.test.ts`：`backgroundOpenArgs` 带 `-g`。
+- `clickRoute.test.ts`：`axClickPath` 未声明 `AXPress` 时走坐标。
 - `skyClick.test.ts` 覆盖 key-window 记录字节布局。
 - 真机（macOS 27.0.1）用 Electron 测试窗口验证：后台单击/右键菜单/菜单键盘选择/滚动/拖拽/`cmd+a` 后输入中英文混合文本均到达，
   全程 `GetFrontProcess` 仍是用户原来的前台 app。

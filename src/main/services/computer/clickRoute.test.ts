@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { chooseClickPath, pickWindowForElement, resolveClickRoute } from './clickRoute';
+import {
+  axClickPath,
+  chooseClickPath,
+  pickWindowForElement,
+  resolveClickRoute,
+} from './clickRoute';
 
 describe('resolveClickRoute', () => {
   it('后台：有 pid 和 windowId 时走 sky 窗口事件', () => {
@@ -118,5 +123,24 @@ describe('pickWindowForElement', () => {
     expect(pickWindowForElement(windows, { center: { x: 900, y: 900 }, fallback: 'desktop' })).toBe(
       'desktop'
     );
+  });
+});
+
+describe('axClickPath', () => {
+  const bounds = { x: 10, y: 20, width: 30, height: 40 };
+
+  it('元素声明了 AXPress 才走 press', () => {
+    expect(axClickPath({ actions: ['AXPress'], bounds })).toBe('axPress');
+  });
+
+  it('没声明 AXPress（Qt 等 app 对它静默无效）但有位置时按坐标点击', () => {
+    expect(axClickPath({ bounds })).toBe('coordinates');
+    expect(axClickPath({ actions: [], bounds })).toBe('coordinates');
+    expect(axClickPath({ actions: ['AXShowMenu'], bounds })).toBe('coordinates');
+  });
+
+  it('没有可点的位置时仍尝试 press', () => {
+    expect(axClickPath({})).toBe('axPress');
+    expect(axClickPath({ bounds: { ...bounds, width: 0 } })).toBe('axPress');
   });
 });

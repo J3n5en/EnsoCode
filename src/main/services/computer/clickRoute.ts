@@ -30,6 +30,19 @@ export const PRESSABLE_ROLES = new Set([
 export const PRESS_LABEL_ROLES = new Set(['AXStaticText', 'AXImage', 'AXGroup']);
 export const PRESS_ANCESTOR_DEPTH = 3;
 
+/**
+ * el.click()：元素声明了 AXPress 才 press。Qt 等 app 的按钮不声明却对 AXPress 返回成功、实际无效，
+ * 有位置时改按坐标点击。
+ */
+export function axClickPath(node: {
+  actions?: string[];
+  bounds?: { width: number; height: number };
+}): 'axPress' | 'coordinates' {
+  if (node.actions?.includes('AXPress')) return 'axPress';
+  const bounds = node.bounds;
+  return bounds && bounds.width > 0 && bounds.height > 0 ? 'coordinates' : 'axPress';
+}
+
 /** 同一个点击意图只走一个入口：可 press 的目标控件用 AXPress，其余合成点击。 */
 export function chooseClickPath(input: {
   targetPid: number;

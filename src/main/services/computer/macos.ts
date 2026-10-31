@@ -27,7 +27,12 @@ import type {
   PointerOptions,
   TargetApp,
 } from './backend';
-import { chooseClickPath, pickWindowForElement, resolveClickRoute } from './clickRoute';
+import {
+  axClickPath,
+  chooseClickPath,
+  pickWindowForElement,
+  resolveClickRoute,
+} from './clickRoute';
 import { FocusRegistry } from './focusSession';
 import { macClickCount, macModifierFlags } from './macKey';
 import { loadMacosNative, type MacosNative, type SkyPoint } from './macosNative';
@@ -689,26 +694,28 @@ export class MacosDesktopBackend implements DesktopBackend {
 
   /** press 不被支持时退回控件中心点的点击，投递方式沿用调用方（缺省后台） */
   async axClick(ref: string, opts?: PointerOptions) {
-    try {
-      await this.axPerform(ref, 'press');
-    } catch (error) {
-      if (!isAxPressUnsupported(error)) throw error;
-      const node = await this.axNode(ref);
-      const bounds = node.bounds;
-      if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
-        throw new Error(axPressFallbackMessage(node.role, ref));
+    let node = await this.axNode(ref);
+    if (axClickPath(node) === 'axPress') {
+      try {
+        await this.axPerform(ref, 'press');
+        return;
+      } catch (error) {
+        if (!isAxPressUnsupported(error)) throw error;
       }
-      const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-      const window = pickWindowForElement(await this.windows(), {
-        pid: node.pid,
-        windowId: node.windowId,
-        center,
-        fallback: this.registry.targetOf(ref),
-      });
-      await this.click(window, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, {
-        delivery: opts?.delivery ?? 'background',
-      });
+      node = await this.axNode(ref);
     }
+    const bounds = node.bounds;
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+      throw new Error(axPressFallbackMessage(node.role, ref));
+    }
+    const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    const window = pickWindowForElement(await this.windows(), {
+      pid: node.pid,
+      windowId: node.windowId,
+      center,
+      fallback: this.registry.targetOf(ref),
+    });
+    await this.click(window, center.x, center.y, { delivery: opts?.delivery ?? 'background' });
   }
 
   async clipboardRead() {
