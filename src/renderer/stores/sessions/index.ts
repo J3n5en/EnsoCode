@@ -127,6 +127,12 @@ import {
   upsertOutOfRange,
 } from './reducer';
 import { applyConversationReload } from './reload';
+import {
+  armRemoteActiveMemory,
+  installRemoteActiveMemory,
+  mergeWithRememberedActive,
+  readCurrentRememberedActive,
+} from './remoteActive';
 import { applyConversationsPatchToState } from './remotePatch';
 import { isPairViewed, nextUnread } from './unread';
 import {
@@ -4023,8 +4029,14 @@ export const useSessionsStore = create<SessionsState>()(
       storage: createElectronPersistStorage(),
       // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
       partialize: (state) => cachedPartializeSessions(state),
+      // 远程界面的当前会话不在共享补丁里，水合时用本机记住的值盖过磁盘
+      merge: (persisted, current) =>
+        mergeWithRememberedActive(current, persisted, readCurrentRememberedActive()),
       onRehydrateStorage: () => (_state, error) => {
-        if (!error) openPersistWriteGate('enso-conversations');
+        if (!error) {
+          openPersistWriteGate('enso-conversations');
+          armRemoteActiveMemory(useSessionsStore);
+        }
         // 刷新时 worker 仍活着：只补当前正在看的会话正文。其它会话点开再 snapshot。
         const state = useSessionsStore.getState();
         const viewed = viewedFromState(state);
@@ -4039,6 +4051,8 @@ export const useSessionsStore = create<SessionsState>()(
     }
   )
 );
+
+installRemoteActiveMemory(useSessionsStore);
 
 async function syncConversationProjectIds(): Promise<void> {
   const authority = await window.electronAPI.sourceAuthority.read();

@@ -24,6 +24,9 @@ commands 不持久化，commands 仍由 snapshot / commands 事件恢复到内�
 过期 seq 的事件在 reducer 里丢弃。改事件处理逻辑时改 `reducer.ts`（纯函数，有测试），
 不要把逻辑写进订阅回调。
 
+完整模式和桌面窗口共用 `enso-conversations`，但多端合并补丁不含 `activeId`。
+远程界面的当前会话记在本机 `localStorage`（`remoteActive.ts`），不要把 `activeId` 加进共享补丁。
+
 ## 加字段的完整流程
 
 漏掉任何一步都会出问题：

@@ -10,6 +10,7 @@
 | [ui-component-classname.md](ui-component-classname.md) | 输入框左侧一大片留白、图标不见了 |
 | [dialog-layering.md](dialog-layering.md) | 弹窗内的下拉点开没反应 |
 | [ios-pwa-header-blur.md](ios-pwa-header-blur.md) | Safari 正常，独立 PWA 顶部标题模糊；透明遮罩又留下灰色状态栏 |
+| [pwa-desk-active-conversation.md](pwa-desk-active-conversation.md) | 手机完整模式切了会话，重启后仍是上一条 |
 | [dedupe-identity.md](dedupe-identity.md) | 去重没生效，同一个东西导入了三份 |
 | [agent-end-run-scoped-messages.md](agent-end-run-scoped-messages.md) | 多轮对话后历史消息消失，只剩最近一轮 |
 | [checkpoint-cross-session-wipe.md](checkpoint-cross-session-wipe.md) | 「回退+文件」不还原文件，无报错 |

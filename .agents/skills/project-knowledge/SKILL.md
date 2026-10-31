@@ -38,6 +38,7 @@ description: >
 | 状态不更新、一直加载、推送无效 | `main/ipc.md`、`main/windows.md` |
 | 同一个资源被导入多份 | `big-question/dedupe-identity.md` |
 | 冷会话 / 历史为空，先发消息后正文消失 | `big-question/optimistic-echo-blocks-snapshot.md` |
+| PWA 完整模式切了会话，重启仍是上一条 | `big-question/pwa-desk-active-conversation.md` |
 | 多轮后历史消息消失 | `big-question/agent-end-run-scoped-messages.md` |
 | worktree 切换后文件写错位置 | `big-question/worktree-move-races.md` |
 | CDP 点击、拖拽或输入时好时坏 | `big-question/cdp-hidden-window-input.md` |
