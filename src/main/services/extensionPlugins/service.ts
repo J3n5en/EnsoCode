@@ -16,12 +16,15 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   applyInterceptResult,
   BEFORE_COMPACT_TIMEOUT_MS,
+  CHILD_INTERCEPT_TIMEOUT_MS,
+  CHILD_INTERCEPT_TOTAL_TIMEOUT_MS,
   failClosedResult,
   INTERCEPT_TIMEOUT_MS,
   INTERCEPT_TOTAL_TIMEOUT_MS,
   type InterceptPayload,
   type InterceptResult,
   initialInterceptState,
+  isChildInterceptEvent,
   OBSERVE_TIMEOUT_MS,
   type PluginEventName,
   type PluginInterceptEvent,
@@ -39,6 +42,7 @@ import {
 import { parsePluginPresetId, pluginPresetId } from '@shared/extensionPlugins/preset';
 import {
   PLUGIN_PROGRESS_MAX_CHARS,
+  type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginCallMethod,
   type PluginHostCapabilities,
@@ -93,6 +97,12 @@ const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 
 const INTERCEPT_BREAKER_FAILURES = 3;
 const INTERCEPT_BREAKER_MS = 30_000;
+/** 子会话的拦截单独熔断：它的预算更紧，失败不能让主会话的检查被跳过 */
+const CHILD_BREAKER_PREFIX = 'child:';
+const breakerLabel = (key: string): string =>
+  key.startsWith(CHILD_BREAKER_PREFIX)
+    ? `${key.slice(CHILD_BREAKER_PREFIX.length)}（子代理与 coworker）`
+    : key;
 
 class InterceptDeadlineError extends Error {
   constructor() {
@@ -843,6 +853,8 @@ export class ExtensionPluginService {
     projectRoot: string | null;
     signal?: AbortSignal;
     onProgress?: (text: string) => void;
+    /** 子会话发起时的来源；sessionId 仍是所属主会话 */
+    agent?: PluginAgentSource;
   }): Promise<PluginToolOutcome> {
     const parsed = parsePluginToolName(input.toolName);
     if (!parsed) throw pluginError('NOT_FOUND', `不是插件工具：${input.toolName}`);
@@ -863,6 +875,7 @@ export class ExtensionPluginService {
         timeoutMs: declared.timeoutMs ?? TOOL_TIMEOUT_MS,
         kind: 'tool',
         onProgress: input.onProgress,
+        ...(input.agent ? { agent: input.agent } : {}),
       },
       input.signal
     );
@@ -889,11 +902,15 @@ export class ExtensionPluginService {
     projectRoot: string | null;
     event: PluginEventName;
     data: unknown;
+    /** 子会话事件：只投给通知型订阅，也不等 before_compact，避免并行子代理互相拖慢 */
+    agent?: PluginAgentSource;
   }): Promise<void> {
     const targets = this.enabled().filter((entry) =>
-      entry.manifest.contributes.events.some((sub) => sub.event === input.event)
+      entry.manifest.contributes.events.some(
+        (sub) => sub.event === input.event && (!input.agent || sub.mode === 'observe')
+      )
     );
-    const wait = input.event === 'before_compact';
+    const wait = input.event === 'before_compact' && !input.agent;
     const send = (id: string) =>
       this.invoke(
         id,
@@ -905,6 +922,7 @@ export class ExtensionPluginService {
           gesture: false,
           timeoutMs: wait ? BEFORE_COMPACT_TIMEOUT_MS : OBSERVE_TIMEOUT_MS,
           kind: 'event',
+          ...(input.agent ? { agent: input.agent } : {}),
         }
       ).catch((error: unknown) => {
         this.appendLog(
@@ -926,9 +944,20 @@ export class ExtensionPluginService {
     event: E;
     payload: InterceptPayload[E];
     deadlineMs?: number;
+    /**
+     * 子会话发起：只拦 tool_call，单插件 2 秒、合计 5 秒，熔断与主会话分开计数；
+     * 其余事件不询问插件直接放行。每次拦截从自己开始时计时，不占别的会话的预算。
+     */
+    agent?: PluginAgentSource;
   }): Promise<InterceptResult[E]> {
     const initial = initialInterceptState(input.event, input.payload);
-    const deadline = Date.now() + (input.deadlineMs ?? INTERCEPT_TOTAL_TIMEOUT_MS);
+    const child = input.agent !== undefined;
+    if (child && !isChildInterceptEvent(input.event)) return initial.result;
+    const deadline =
+      Date.now() +
+      (input.deadlineMs ?? (child ? CHILD_INTERCEPT_TOTAL_TIMEOUT_MS : INTERCEPT_TOTAL_TIMEOUT_MS));
+    const perPluginMs = child ? CHILD_INTERCEPT_TIMEOUT_MS : INTERCEPT_TIMEOUT_MS;
+    const breakerKey = child ? `${CHILD_BREAKER_PREFIX}${input.event}` : input.event;
     let targets: (Loaded & { id: string })[];
     try {
       targets = this.enabled()
@@ -954,7 +983,7 @@ export class ExtensionPluginService {
     for (const entry of targets) {
       if (state.done) break;
       const sub = entry.manifest.contributes.events.find((item) => item.event === input.event);
-      const breaker = this.interceptBreaker(entry.id, input.event);
+      const breaker = this.interceptBreaker(entry.id, breakerKey);
       if (breaker === 'open') continue;
       const remaining = deadline - Date.now();
       try {
@@ -967,12 +996,13 @@ export class ExtensionPluginService {
             sessionId: input.sessionId,
             projectRoot: input.projectRoot,
             gesture: false,
-            timeoutMs: Math.min(INTERCEPT_TIMEOUT_MS, remaining),
+            timeoutMs: Math.min(perPluginMs, remaining),
             kind: 'event',
+            ...(input.agent ? { agent: input.agent } : {}),
           }
         );
         state = applyInterceptResult(state, value);
-        this.settleIntercept(entry.id, input.event, true, entry.manifest.name);
+        this.settleIntercept(entry.id, breakerKey, true, entry.manifest.name);
       } catch (error) {
         this.appendLog(
           entry.id,
@@ -981,7 +1011,7 @@ export class ExtensionPluginService {
         );
         // 总时长用尽是前面插件拖慢的，不计入本插件的失败
         if (!(error instanceof InterceptDeadlineError))
-          this.settleIntercept(entry.id, input.event, false, entry.manifest.name);
+          this.settleIntercept(entry.id, breakerKey, false, entry.manifest.name);
         if (sub?.failClosed) return failClosedResult(input.event, entry.manifest.name);
       }
     }
@@ -1000,7 +1030,7 @@ export class ExtensionPluginService {
     const state = this.interceptFailures.get(key) ?? { failures: 0, openUntil: 0 };
     if (ok) {
       if (!this.interceptFailures.delete(key) || state.openUntil === 0) return;
-      this.appendLog(pluginId, 'info', `插件 ${name} 的 ${event} 检查已恢复`);
+      this.appendLog(pluginId, 'info', `插件 ${name} 的 ${breakerLabel(event)} 检查已恢复`);
       this.touch();
       return;
     }
@@ -1011,7 +1041,7 @@ export class ExtensionPluginService {
     this.appendLog(
       pluginId,
       'warn',
-      `插件 ${name} 的 ${event} 检查连续失败，已临时放行 ${INTERCEPT_BREAKER_MS / 1000} 秒`
+      `插件 ${name} 的 ${breakerLabel(event)} 检查连续失败，已临时放行 ${INTERCEPT_BREAKER_MS / 1000} 秒`
     );
     this.touch();
   }
@@ -1030,7 +1060,10 @@ export class ExtensionPluginService {
     const prefix = `${pluginId}:`;
     return [...this.interceptFailures]
       .filter(([key, state]) => key.startsWith(prefix) && now < state.openUntil)
-      .map(([key, state]) => ({ event: key.slice(prefix.length), until: state.openUntil }));
+      .map(([key, state]) => ({
+        event: breakerLabel(key.slice(prefix.length)),
+        until: state.openUntil,
+      }));
   }
 
   listArtifacts(pluginId?: string): PluginArtifactInfo[] {
@@ -1301,6 +1334,7 @@ export class ExtensionPluginService {
       kind?: 'tool' | 'ui' | 'event' | 'schedule' | 'export';
       depth?: number;
       onProgress?: (text: string) => void;
+      agent?: PluginAgentSource;
     },
     signal?: AbortSignal
   ): Promise<unknown> {
@@ -1327,6 +1361,7 @@ export class ExtensionPluginService {
         invocationId,
         sessionId: ctx.sessionId,
         projectRoot: ctx.projectRoot,
+        ...(ctx.agent ? { agent: ctx.agent } : {}),
         timeoutMs: ctx.timeoutMs,
       });
     } catch (error) {

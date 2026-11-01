@@ -802,4 +802,303 @@ describe('插件能力', () => {
     expect(children.length).toBe(offset + 6);
     expect(running()).toContain('a.a');
   });
+
+  describe('子会话来源', () => {
+    const agent = {
+      kind: 'subagent' as const,
+      sessionId: 's::cw-scout',
+      name: 'Scout-1',
+      agentType: 'Scout',
+    };
+
+    it('子会话发起的工具调用经 ctx.agent 标明来源；主会话 ctx.agent 为 null', async () => {
+      const { service } = createService();
+      await install(service, {
+        'enso-plugin.json': manifest(),
+        'main.mjs': `export function activate(enso) {
+          enso.tools.register('lookup', async (_args, ctx) =>
+            JSON.stringify({ sessionId: ctx.sessionId, agent: ctx.agent }));
+        }`,
+      });
+      service.setEnabled('example.demo', true);
+      const call = (extra: Record<string, unknown>) =>
+        service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: {},
+          sessionId: 's',
+          projectRoot: null,
+          ...extra,
+        });
+      expect(JSON.parse((await call({})).content)).toEqual({ sessionId: 's', agent: null });
+      expect(JSON.parse((await call({ agent })).content)).toEqual({ sessionId: 's', agent });
+    });
+
+    it('子会话事件只投给通知型订阅者，before_compact 不等插件处理', async () => {
+      const { service } = createService();
+      const recorder = (id: string, mode: 'observe' | 'intercept') => ({
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          permissions: ['agent.tool', mode === 'observe' ? 'agent.observe' : 'agent.intercept'],
+          contributes: {
+            agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+            events: [
+              { event: 'tool_call', mode },
+              ...(mode === 'observe' ? [{ event: 'before_compact', mode }] : []),
+            ],
+          },
+        }),
+        'main.mjs': `const seen = [];
+          export function activate(enso) {
+            enso.events.on('tool_call', (data, ctx) => { seen.push(['tool_call', ctx.agent]); });
+            ${
+              mode === 'observe'
+                ? `enso.events.on('before_compact', (data, ctx) => {
+                    seen.push(['before_compact', ctx.agent]);
+                    return new Promise(() => {});
+                  });`
+                : ''
+            }
+            enso.tools.register('lookup', async () => JSON.stringify(seen));
+          }`,
+      });
+      await install(service, recorder('o.o', 'observe'));
+      await install(service, recorder('i.i', 'intercept'));
+      service.setEnabled('o.o', true);
+      service.setEnabled('i.i', true);
+      const read = async (id: string) =>
+        JSON.parse(
+          (
+            await service.callTool({
+              toolName: `plugin_${id.replace('.', '-')}__lookup`,
+              args: {},
+              sessionId: 's',
+              projectRoot: null,
+            })
+          ).content
+        );
+      // 先拉起两个进程，避免把启动耗时算进 before_compact 的等待
+      await read('o.o');
+      await read('i.i');
+      await service.dispatchEvent({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        data: { toolCallId: 'c', toolName: 'bash', input: {} },
+        agent,
+      });
+      const started = Date.now();
+      await service.dispatchEvent({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'before_compact',
+        data: { reason: 'threshold' },
+        agent,
+      });
+      expect(Date.now() - started).toBeLessThan(1_000);
+      await flush();
+      expect(await read('o.o')).toEqual([
+        ['tool_call', agent],
+        ['before_compact', agent],
+      ]);
+      expect(await read('i.i')).toEqual([]);
+    });
+
+    const guard = (id: string, failClosed: boolean, body: string, events = ['tool_call']) => ({
+      'enso-plugin.json': manifest({
+        id,
+        name: id,
+        permissions: ['agent.intercept'],
+        contributes: {
+          events: events.map((event) => ({ event, mode: 'intercept', failClosed })),
+        },
+      }),
+      'main.mjs': body,
+    });
+    const toolCall = { toolCallId: '1', toolName: 'bash', input: { command: 'rm' } };
+
+    it('子会话的 tool_call 拦截生效且带来源；input / tool_result 不询问插件', async () => {
+      const { service, root } = createService();
+      const log = join(root, 'asked');
+      await install(
+        service,
+        guard(
+          'g.g',
+          false,
+          `import { appendFileSync } from 'node:fs';
+          export function activate(enso) {
+            for (const name of ['tool_call', 'tool_result', 'input'])
+              enso.events.on(name, (data, ctx) => {
+                appendFileSync(${JSON.stringify(log)}, name + '\\n');
+                if (name !== 'tool_call') return { action: 'handled', content: 'x' };
+                return ctx.agent
+                  ? { block: true, reason: 'from ' + ctx.agent.name }
+                  : { input: { ...data.input, checked: true } };
+              });
+          }`,
+          ['tool_call', 'tool_result', 'input']
+        )
+      );
+      service.setEnabled('g.g', true);
+      const asked = () => {
+        try {
+          return readFileSync(log, 'utf8').trim().split('\n');
+        } catch {
+          return [];
+        }
+      };
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_call',
+          payload: toolCall,
+          agent,
+        })
+      ).resolves.toEqual({ block: true, reason: 'from Scout-1' });
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'input',
+          payload: { text: 'hi', source: 'interactive' },
+          agent,
+        })
+      ).resolves.toEqual({ action: 'continue' });
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_result',
+          payload: { ...toolCall, content: 'ok', isError: false },
+          agent,
+        })
+      ).resolves.toEqual({});
+      expect(asked()).toEqual(['tool_call']);
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_call',
+          payload: toolCall,
+        })
+      ).resolves.toEqual({ input: { command: 'rm', checked: true } });
+    });
+
+    it('子会话单插件限时 2 秒并按 failClosed 拒绝；主会话仍按 5 秒等到答复', async () => {
+      const { service } = createService();
+      await install(
+        service,
+        guard(
+          's.s',
+          true,
+          `export function activate(enso) {
+            enso.events.on('tool_call', async (data) => {
+              await new Promise((r) => setTimeout(r, 2_500));
+              return { input: { ...data.input, slow: true } };
+            });
+          }`
+        )
+      );
+      service.setEnabled('s.s', true);
+      let started = Date.now();
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_call',
+          payload: toolCall,
+          agent,
+        })
+      ).resolves.toMatchObject({ block: true });
+      expect(Date.now() - started).toBeLessThan(2_400);
+      started = Date.now();
+      await expect(
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_call',
+          payload: toolCall,
+        })
+      ).resolves.toEqual({ input: { command: 'rm', slow: true } });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
+    }, 15_000);
+
+    it('子会话一次拦截合计不超过 5 秒，来不及询问的按各自 failClosed 处理', async () => {
+      const { service } = createService();
+      for (const [id, failClosed] of [
+        ['t.a', false],
+        ['t.b', false],
+        ['t.c', false],
+        ['t.d', true],
+      ] as const) {
+        await install(
+          service,
+          guard(
+            id,
+            failClosed,
+            `export function activate(enso) {
+              enso.events.on('tool_call', async (data) => {
+                await new Promise((r) => setTimeout(r, 1_800));
+                return { input: { ...data.input, ${JSON.stringify(id)}: 1 } };
+              });
+            }`
+          )
+        );
+        service.setEnabled(id, true);
+      }
+      const started = Date.now();
+      const result = await service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: toolCall,
+        agent,
+      });
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(5_500);
+      expect(elapsed).toBeGreaterThanOrEqual(4_900);
+      expect(result).toMatchObject({ block: true });
+    }, 20_000);
+
+    it('子会话的失败单独熔断：子会话放行时主会话仍询问并按 failClosed 拒绝', async () => {
+      const now = 1_000_000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      try {
+        const { service } = createService();
+        await install(
+          service,
+          guard(
+            'c.guard',
+            true,
+            `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('down'); }); }`
+          )
+        );
+        service.setEnabled('c.guard', true);
+        const ask = (child: boolean) =>
+          service.intercept({
+            sessionId: 's',
+            projectRoot: null,
+            event: 'tool_call',
+            payload: toolCall,
+            ...(child ? { agent } : {}),
+          });
+        for (let i = 0; i < 3; i++) expect(await ask(true)).toMatchObject({ block: true });
+        expect(service.list()[0]?.interceptBreakers).toEqual([
+          { event: 'tool_call（子代理与 coworker）', until: now + 30_000 },
+        ]);
+        expect(await ask(true)).toEqual({});
+        expect(await ask(false)).toMatchObject({ block: true });
+        expect(await ask(false)).toMatchObject({ block: true });
+        expect(service.list()[0]?.interceptBreakers).toHaveLength(1);
+        expect(await ask(false)).toMatchObject({ block: true });
+        expect(service.list()[0]?.interceptBreakers).toEqual([
+          { event: 'tool_call（子代理与 coworker）', until: now + 30_000 },
+          { event: 'tool_call', until: now + 30_000 },
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });

@@ -6,6 +6,7 @@ import type { PluginEventName } from '@shared/extensionPlugins/events';
 import { MAX_TOOL_TIMEOUT_MS } from '@shared/extensionPlugins/manifest';
 import type {
   MainToPluginHost,
+  PluginAgentSource,
   PluginCallMethod,
   PluginErrorShape,
   PluginHostApi,
@@ -29,6 +30,8 @@ interface Invocation {
 interface HandlerContext {
   sessionId: string | null;
   projectRoot: string | null;
+  /** 来自子会话时的来源；主会话与非会话调用为 null */
+  agent: PluginAgentSource | null;
   invocationId: string;
   signal: AbortSignal;
   progress(text: string): Promise<unknown>;
@@ -447,6 +450,7 @@ export function runPluginHost(transport: HostTransport): void {
     const ctx: HandlerContext = {
       sessionId: message.sessionId,
       projectRoot: message.projectRoot ?? null,
+      agent: message.agent ?? null,
       invocationId: invocation.id,
       signal: invocation.controller.signal,
       progress: (text: string) => {

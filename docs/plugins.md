@@ -164,7 +164,7 @@ export async function activate(enso) {
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
 | `mcp.tools()` / `mcp.call(server, tool, args?)` | 见下 |
 
-每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`invocationId`、`signal`（调用被取消或超时时 abort）和 `progress(text)`（只在工具调用里有效，见下）。
+每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`agent`（来自子会话时的来源，主会话和非会话调用为 `null`，见「子代理与 coworker」）、`invocationId`、`signal`（调用被取消或超时时 abort）和 `progress(text)`（只在工具调用里有效，见下）。
 
 插件进程不继承 Enso 的环境变量，只保留 `PATH`、`HOME` 等运行必需项、`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`（含小写写法）和清单 `env` 里声明的变量。上面这些宿主接口每次调用都回到主进程校验，校验失败抛带 `code` 的错误，见文末错误码。
 
@@ -180,7 +180,7 @@ export async function activate(enso) {
 
 ### 会话事件
 
-清单 `events` 里的每一项是 `{ event, mode?, failClosed?, tools? }`。`mode` 缺省 `observe`（只通知，需要 `agent.observe`），设为 `intercept` 时可以改写或拦下（需要 `agent.intercept`）。子代理和 Bot 会话不发事件。
+清单 `events` 里的每一项是 `{ event, mode?, failClosed?, tools? }`。`mode` 缺省 `observe`（只通知，需要 `agent.observe`），设为 `intercept` 时可以改写或拦下（需要 `agent.intercept`）。Bot 会话（含其子代理）不发事件；子代理与 coworker 只拦截 `tool_call`，其余只发通知，见「子代理与 coworker」。
 
 | 事件 | 时机 | `data` | 可拦截 |
 | --- | --- | --- | --- |
@@ -197,6 +197,19 @@ export async function activate(enso) {
 多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。合计时长用尽时，还没轮到的插件也按各自的 `failClosed` 处理。只有 Enso 自身出错（与任何插件无关）时才无条件放行。
 
 同一插件的同一事件连续失败 3 次（报错或超时）后熔断：之后 30 秒内该事件不再询问它，直接放行，即使设了 `failClosed`。界面会提示「插件 X 的检查连续失败，已临时放行」，设置页的插件行显示放行到何时，日志里有记录。到期后下一次事件会试探询问：成功则恢复，失败则按 `failClosed` 处理并再熔断 30 秒。因前面的插件拖慢而没轮到的不计入失败次数。停用、卸载、更新插件会立即解除它的熔断并重新计数。
+
+### 子代理与 coworker
+
+Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）也能用插件，边界如下：
+
+- **工具**：子会话拿到主会话的全部插件工具，不按 agent 类型另设白名单。例外：只读类型（`tools: readonly`，如 scout）不拿——插件工具可能有副作用，Plan 模式靠只读子代理保证不写；内置 Enso 系统代理（锁定档）不拿任何插件能力。启用、停用插件只对之后新开的主会话生效，子会话沿用所属主会话拿到的那一份。
+- **审批**：走子会话自己的审批，审批条出现在子会话里，档位继承自主会话。在主会话里选的「本会话内允许」不带到子会话，反之亦然，与 MCP 工具一致。
+- **来源**：子会话里的工具调用和事件，`ctx.sessionId` 与 `ctx.projectRoot` 仍是所属主会话的（`session.inject` 缺省也发到主会话），`ctx.agent` 标明来源：`{ kind: 'subagent' | 'coworker', sessionId, name, agentType? }`。`sessionId` 是子会话 id（形如 `<主会话 id>::…`），`name` 是子代理实例名或 coworker 名，`agentType` 是类型名（未指定类型的 coworker 没有）。主会话的 `ctx.agent` 是 `null`。
+- **只拦 `tool_call`**：主会话里能拦下的工具调用，派给子会话同样拦得下：`mode: 'intercept'` 的 `tool_call` 订阅会收到子会话的工具调用（`ctx.agent` 标明来源），可以拦下或改写参数，`tools` 过滤、合并顺序与主会话相同。`tool_result` 与 `input` 在子会话里不拦截，只投给 `mode: 'observe'` 的订阅。子会话的拦截单独计时：每个插件限时 2 秒，一次拦截合计不超过 5 秒，从这次拦截自己开始时算起，不占主会话或其他子会话的时间。超时与报错按 `failClosed` 处理，与主会话一致；熔断规则也一致，但与主会话分开计数：子会话里连续失败只放行子会话，主会话照常询问（设置页显示为「tool_call（子代理与 coworker）」）。插件自己把事件串行处理时，子会话的一次检查最多给别的会话增加约 5 秒延迟；超时时 `ctx.signal` 会 abort，请据此尽早结束。
+- **其余事件只通知**：`before_compact` 在子会话里只是通知，不等插件处理完就压缩。子会话也不接受注入。
+- **生命周期**：子会话建好后发 `session_start`（`reason` 是 `startup` 或 `resume`）；被解雇时发 `session_end`（`reason: 'dismissed'`），所属主会话被释放时发 `session_end`（`reason: 'parent_ended'`）。Agent 进程退出时不再发事件。
+- **收敛**：子会话被中断、解雇、随主会话释放，或 Agent 进程退出时，它正在进行的插件工具调用被取消，插件侧的 `ctx.signal` abort；之后这个子会话不再发事件，晚到的工具结果和检查结果被丢弃。被中断、解雇或随主会话释放时，还在等检查的工具调用按拦下结束，不会在之后执行。插件侧的这次检查仍按上面的时限结束。
+- **限制**：与主会话相同。工具结果 1MB、按声明超时（最长 600 秒）；每次调用各自计时，不同子会话之间不互相等待，并发量受同时在岗的子会话数上限约束，不另设上限。
 
 ### 向会话发消息
 
@@ -343,9 +356,9 @@ export function onLoad(enso) {
 | 工具进度 | 每 200ms 一次，单条 16K 字符 |
 | 产出文件 | 单个 50MB，每插件 200 个 |
 | 侧栏页面状态 | 每插件 1MB |
-| 会话拦截 | 每插件 5 秒，合计 25 秒；`before_compact` 10 秒 |
+| 会话拦截 | 每插件 5 秒，合计 25 秒；`before_compact` 10 秒；子代理与 coworker 只拦 `tool_call`，每插件 2 秒、合计 5 秒（单独计时），其余事件只通知、不等待 |
 | 注入消息 | 32K 字符；每插件 10 秒 5 条 |
-| 拦截熔断 | 同事件连续失败 3 次放行 30 秒 |
+| 拦截熔断 | 同事件连续失败 3 次放行 30 秒；子代理与 coworker 单独计数 |
 | 剪贴板 | 1MB |
 | 动态注册 | 工具 50 个，命令 20 个 |
 | 定时任务 | 最多 10 个，间隔 60–86400 秒，单次缺省 60 秒 |

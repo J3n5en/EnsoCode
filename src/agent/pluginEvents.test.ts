@@ -1,6 +1,7 @@
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  childPluginEventPlan,
   createPluginEventsExtension,
   PluginEventInvoker,
   type PluginSessionEmit,
@@ -15,7 +16,7 @@ const plan = (patch: Partial<PluginEventPlan> = {}): PluginEventPlan => ({
 
 function harness(
   events: PluginEventPlan,
-  options?: { interceptTimeoutMs?: number; compactTimeoutMs?: number }
+  options?: { interceptTimeoutMs?: number; compactTimeoutMs?: number; childSession?: boolean }
 ) {
   const emit = vi.fn<(event: PluginSessionEmit) => void>();
   const invoker = new PluginEventInvoker(events, emit, options);
@@ -245,5 +246,166 @@ describe('插件事件扩展', () => {
       },
       { deliverAs: 'steer', triggerTurn: true }
     );
+  });
+});
+
+describe('子会话的插件事件', () => {
+  it('子会话计划保留通知型与 tool_call 拦截，去掉其余拦截与注入；什么都没订阅时不下发', () => {
+    expect(
+      childPluginEventPlan(
+        plan({
+          observe: ['agent_end', 'before_compact'],
+          intercept: [
+            { event: 'tool_call', tools: ['bash'] },
+            { event: 'tool_result' },
+            { event: 'input' },
+          ],
+          inject: true,
+        })
+      )
+    ).toEqual({
+      observe: ['agent_end', 'before_compact'],
+      intercept: [{ event: 'tool_call', tools: ['bash'] }],
+      inject: false,
+    });
+    expect(
+      childPluginEventPlan(plan({ intercept: [{ event: 'tool_call' }], inject: true }))
+    ).toEqual({ observe: [], intercept: [{ event: 'tool_call' }], inject: false });
+    expect(
+      childPluginEventPlan(plan({ intercept: [{ event: 'input' }, { event: 'tool_result' }] }))
+    ).toBeUndefined();
+    expect(childPluginEventPlan(undefined)).toBeUndefined();
+  });
+
+  it('子会话：before_compact 不等回复；tool_call 拦截生效，可以拦下', async () => {
+    const { emit, handlers, invoker } = harness(
+      plan({ observe: ['before_compact', 'tool_call'], intercept: [{ event: 'tool_call' }] }),
+      { childSession: true }
+    );
+    await expect(
+      handlers.get('session_before_compact')?.({ reason: 'threshold' } as never)
+    ).resolves.toBeUndefined();
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      { type: 'plugin-event', event: 'before_compact', data: { reason: 'threshold' } },
+    ]);
+    const input = { command: 'rm' };
+    const pending = handlers.get('tool_call')?.({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input,
+    } as never);
+    const request = emit.mock.calls[1]?.[0] as { type: string; requestId: string };
+    expect(request).toMatchObject({
+      type: 'plugin-intercept',
+      event: 'tool_call',
+      payload: { toolCallId: 'c', toolName: 'bash', input: { command: 'rm' } },
+    });
+    invoker.resolve({
+      requestId: request.requestId,
+      ok: true,
+      result: { block: true, reason: 'no' },
+    });
+    await expect(pending).resolves.toEqual({ block: true, reason: 'no' });
+    // 拦下后不再通知观察者
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(invoker.pendingCount).toBe(0);
+  });
+
+  it('子会话：tool_call 改写参数生效', async () => {
+    const { emit, handlers, invoker } = harness(plan({ intercept: [{ event: 'tool_call' }] }), {
+      childSession: true,
+    });
+    const input: Record<string, unknown> = { command: 'rm -rf /' };
+    const pending = handlers.get('tool_call')?.({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input,
+    } as never);
+    reply(emit, invoker, { input: { command: 'ls' } });
+    await expect(pending).resolves.toBeUndefined();
+    expect(input).toEqual({ command: 'ls' });
+  });
+
+  it('子会话：input / tool_result 即使计划里有拦截也只通知，没有观察订阅就不挂处理器', async () => {
+    const { handlers } = harness(plan({ intercept: [{ event: 'input' }] }), { childSession: true });
+    expect(handlers.has('input')).toBe(false);
+    const observed = harness(
+      plan({
+        observe: ['tool_result'],
+        intercept: [{ event: 'tool_result' }, { event: 'input' }],
+      }),
+      { childSession: true }
+    );
+    expect(observed.handlers.has('input')).toBe(false);
+    await expect(
+      observed.handlers.get('tool_result')?.({
+        toolCallId: 'c',
+        toolName: 'bash',
+        input: {},
+        content: [{ type: 'text', text: 'ok' }],
+        isError: false,
+      } as never)
+    ).resolves.toBeUndefined();
+    expect(observed.emit.mock.calls.map((call) => call[0])).toEqual([
+      {
+        type: 'plugin-event',
+        event: 'tool_result',
+        data: { toolCallId: 'c', toolName: 'bash', input: {}, content: 'ok', isError: false },
+      },
+    ]);
+  });
+
+  it('子会话拦截的本地兜底短于主会话：Main 不回复时 8 秒内放行', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handlers, invoker } = harness(plan({ intercept: [{ event: 'tool_call' }] }), {
+        childSession: true,
+      });
+      let done = false;
+      const pending = Promise.resolve(
+        handlers.get('tool_call')?.({ toolCallId: 'c', toolName: 'bash', input: {} } as never)
+      ).then((value) => {
+        done = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(7_000);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBeUndefined();
+      expect(invoker.pendingCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('收敛时按给定结果结束挂起的拦截，不让 turn 挂死', async () => {
+    const { handlers, invoker } = harness(plan({ intercept: [{ event: 'tool_call' }] }), {
+      childSession: true,
+    });
+    const pending = handlers.get('tool_call')?.({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input: {},
+    } as never);
+    expect(invoker.pendingCount).toBe(1);
+    invoker.cancelAll({ block: true, reason: 'closed' });
+    await expect(pending).resolves.toEqual({ block: true, reason: 'closed' });
+    expect(invoker.pendingCount).toBe(0);
+    // 中断 / shutdown 不带结果时：子会话也按拦下收敛，主会话照旧放行
+    const aborted = handlers.get('tool_call')?.({
+      toolCallId: 'd',
+      toolName: 'bash',
+      input: {},
+    } as never);
+    invoker.cancelAll();
+    await expect(aborted).resolves.toMatchObject({ block: true });
+    const parent = harness(plan({ intercept: [{ event: 'tool_call' }] }));
+    const released = parent.handlers.get('tool_call')?.({
+      toolCallId: 'e',
+      toolName: 'bash',
+      input: {},
+    } as never);
+    parent.invoker.cancelAll();
+    await expect(released).resolves.toBeUndefined();
   });
 });

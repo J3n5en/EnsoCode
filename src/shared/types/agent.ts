@@ -35,12 +35,14 @@ import type {
   PluginEventName,
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
-import { isInterceptEvent, PLUGIN_EVENTS } from '../extensionPlugins/events';
+import { isChildInterceptEvent, isInterceptEvent, PLUGIN_EVENTS } from '../extensionPlugins/events';
 import {
   PLUGIN_INJECT_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
+  type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginMessageSource,
+  parsePluginAgentSource,
   parsePluginMessageSource,
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
@@ -1989,6 +1991,8 @@ export type AgentWorkerEvent =
       requestId: string;
       toolName: string;
       args: unknown;
+      /** 子会话发起时的来源；主会话不带 */
+      agent?: PluginAgentSource;
     }
   | { type: 'plugin-tool-cancel'; identity: SessionIdentity; seq: number; requestId: string }
   | {
@@ -1997,12 +2001,16 @@ export type AgentWorkerEvent =
       seq: number;
       event: PluginEventName;
       data: unknown;
+      /** 子会话事件的来源；子会话只通知，before_compact 也走这里且不等待 */
+      agent?: PluginAgentSource;
     }
   | ({
       type: 'plugin-intercept';
       identity: SessionIdentity;
       seq: number;
       requestId: string;
+      /** 子会话的拦截来源；只允许 tool_call，Main 按子会话预算处理 */
+      agent?: PluginAgentSource;
     } & PluginInterceptRequest)
   | { type: 'task-started'; identity: SessionIdentity; seq: number; task: BackgroundTaskInfo }
   | {
@@ -2170,6 +2178,17 @@ function isPluginEventPlan(value: unknown): value is PluginEventPlan {
   }
   return true;
 }
+
+/** 插件上行事件：固定字段之外只允许属于本子会话的 agent 来源 */
+const hasPluginAgentKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
+  if (value.agent === undefined) return hasExactKeys(value, keys);
+  const identity = value.identity as { sessionId?: unknown } | undefined;
+  return (
+    hasExactKeys(value, [...keys, 'agent']) &&
+    typeof identity?.sessionId === 'string' &&
+    parsePluginAgentSource(value.agent, identity.sessionId) !== null
+  );
+};
 
 const isPluginObserveData = (event: string, data: unknown): boolean => {
   if (!isRecord(data)) return false;
@@ -4161,7 +4180,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'plugin-tool-invoke':
-      return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'toolName', 'args']) &&
+      return hasPluginAgentKeys(value, [
+        'type',
+        'identity',
+        'seq',
+        'requestId',
+        'toolName',
+        'args',
+      ]) &&
         isNonEmptyString(value.requestId) &&
         typeof value.toolName === 'string' &&
         parsePluginToolName(value.toolName) !== null
@@ -4173,21 +4199,31 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'plugin-event':
-      return hasExactKeys(value, ['type', 'identity', 'seq', 'event', 'data']) &&
+      return hasPluginAgentKeys(value, ['type', 'identity', 'seq', 'event', 'data']) &&
         parseSessionIdentity(value.identity) &&
         typeof value.event === 'string' &&
         (PLUGIN_EVENTS as readonly string[]).includes(value.event) &&
-        value.event !== 'before_compact' &&
-        isPluginObserveData(value.event, value.data)
+        // 主会话的 before_compact 要等插件，走 plugin-intercept；只有子会话的只通知
+        (value.event === 'before_compact'
+          ? value.agent !== undefined && isPluginInterceptPayload(value.event, value.data)
+          : isPluginObserveData(value.event, value.data))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'plugin-intercept':
-      return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'event', 'payload']) &&
+      return hasPluginAgentKeys(value, [
+        'type',
+        'identity',
+        'seq',
+        'requestId',
+        'event',
+        'payload',
+      ]) &&
         parseSessionIdentity(value.identity) &&
         isNonEmptyString(value.requestId) &&
         (value.event === 'before_compact' ||
           (typeof value.event === 'string' && isInterceptEvent(value.event))) &&
         typeof value.event === 'string' &&
+        (value.agent === undefined || isChildInterceptEvent(value.event)) &&
         isPluginInterceptPayload(value.event, value.payload)
         ? (value as unknown as AgentWorkerEvent)
         : null;

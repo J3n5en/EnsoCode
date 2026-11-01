@@ -30,6 +30,7 @@ import {
 } from '@shared/builtinAgents';
 import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
+import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
@@ -199,7 +200,11 @@ import {
 } from './oauthAccountPool';
 import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
-import { createPluginEventsExtension, PluginEventInvoker } from './pluginEvents';
+import {
+  childPluginEventPlan,
+  createPluginEventsExtension,
+  PluginEventInvoker,
+} from './pluginEvents';
 import {
   configurePrivacyMasking,
   installPrivacyMasking,
@@ -297,6 +302,15 @@ interface ChildSessionResult {
   safeJournal?: EnsoSafeJournal;
   runawayGuard?: RunawayGuard;
   requestBudget?: RequestBudget;
+  pluginTools?: PluginToolInvoker;
+  pluginEvents?: PluginEventInvoker;
+}
+
+/** 子会话在插件侧的身份；没有就不挂插件能力 */
+interface ChildPluginSource {
+  identity: SessionIdentity;
+  kind: PluginAgentSource['kind'];
+  name: string;
 }
 
 /** 会话工厂：父 runtime/resource/tool 配置的唯一 child 创建入口。 */
@@ -319,6 +333,7 @@ interface SessionFactory {
     askManager?: AskManager;
     resumeFile?: string;
     extraTools?: unknown[];
+    pluginSource?: ChildPluginSource;
   }): Promise<ChildSessionResult>;
 }
 
@@ -1152,6 +1167,7 @@ export class SessionSupervisor {
     // 先收掉整棵子会话（coworker/child 都以 `${parentId}::` 为键前缀）
     for (const [id, child] of [...this.sessions]) {
       if (!id.startsWith(`${parentId}::`)) continue;
+      this.closeChildPlugins(child, 'parent_ended');
       child.gate.cancelAll();
       child.asks.cancelAll();
       cancelContinuousMemory(child.session.sessionManager);
@@ -2544,8 +2560,22 @@ export class SessionSupervisor {
         askManager,
         resumeFile: childResume,
         extraTools = [],
+        pluginSource,
       }) => {
         const isLockedEnso = resolved?.tools === 'enso-locked';
+        // 插件能力下沉：锁定档不挂任何插件能力；只读档不挂插件工具（可能有副作用，
+        // Plan 模式靠只读子代理保证不写）；事件只拦 tool_call（独立预算），其余只通知
+        const childPlugins =
+          pluginSource && !isLockedEnso
+            ? this.childPluginBridge(
+                pluginSource,
+                resolved?.displayName ?? agentType?.name,
+                resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
+                  ? []
+                  : pluginToolDescriptors,
+                childPluginEventPlan(pluginEventPlan)
+              )
+            : undefined;
         const selectedMcp = resolved?.mcpServers ?? agentType?.mcpServers ?? [];
         // 冷连接最长 3s：与模型解析、资源加载并行，不串在首字节前的关键路径最前面
         const mcpPending =
@@ -2619,6 +2649,7 @@ export class SessionSupervisor {
                 },
                 resumed: Boolean(childResume),
               },
+              ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
               ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
               codemode: childCodemode.extension,
               childContract: true,
@@ -2664,6 +2695,12 @@ export class SessionSupervisor {
                 }
               )
             : undefined;
+        // 子会话自己的门：审批条落在子会话 tab，allowSession 不跨会话（同 MCP）
+        const childPluginTools = childPlugins?.tools
+          ? createPluginTools([...childPlugins.descriptors], childPlugins.tools).map((tool) =>
+              withApproval(childGate, 'mcp', tool)
+            )
+          : [];
         const childTools = isLockedEnso
           ? [createEnsoCapabilitiesTool(), createEnsoAppTool(ensoApp!), createAskTool(askManager!)]
           : [
@@ -2678,6 +2715,7 @@ export class SessionSupervisor {
                     childIdentity?.sessionId
                   )),
               ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
+              ...childPluginTools,
               ...(extraTools as Def[]),
               ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
             ];
@@ -2765,14 +2803,18 @@ export class SessionSupervisor {
           ...(safeJournal ? { safeJournal } : {}),
           modelRef: settingsModelRef(selectedModel),
           toolIds: [...subTools.map((tool) => tool.name), ...childExtraTools],
-          // Decorators clone tools; exclude MCP by identity before decoration.
+          // Decorators clone tools; exclude MCP and plugin tools by identity before decoration.
           proofToolIds: [
-            ...rawSubTools.filter((tool) => !typeMcpTools.includes(tool)).map((tool) => tool.name),
+            ...rawSubTools
+              .filter((tool) => !typeMcpTools.includes(tool) && !childPluginTools.includes(tool))
+              .map((tool) => tool.name),
             ...childExtraTools,
           ],
           ...(ensoApp ? { ensoApp } : {}),
           ...(isLockedEnso ? {} : { runawayGuard: childRunaway }),
           requestBudget,
+          ...(childPlugins?.tools ? { pluginTools: childPlugins.tools } : {}),
+          ...(childPlugins?.events ? { pluginEvents: childPlugins.events } : {}),
         };
       },
     };
@@ -3341,6 +3383,107 @@ export class SessionSupervisor {
     return managed;
   }
 
+  /**
+   * 子会话的插件桥：工具与事件都以子会话自己的普通身份上报（Main 按 rootSessionId 归到主会话），
+   * 并带 agent 来源。只在子会话仍是当前代时上报；解雇前先 cancelAll，取消才发得出去。
+   */
+  private childPluginBridge(
+    source: ChildPluginSource,
+    agentType: string | undefined,
+    descriptors: readonly PluginToolDescriptor[],
+    plan: PluginEventPlan | undefined
+  ): {
+    descriptors: readonly PluginToolDescriptor[];
+    tools?: PluginToolInvoker;
+    events?: PluginEventInvoker;
+  } {
+    const identity: SessionIdentity = {
+      sessionId: source.identity.sessionId,
+      generation: source.identity.generation,
+    };
+    const agent: PluginAgentSource = {
+      kind: source.kind,
+      sessionId: identity.sessionId,
+      name: source.name,
+      ...(agentType ? { agentType } : {}),
+    };
+    const current = () => {
+      const managed = this.sessions.get(identity.sessionId);
+      return managed && isSameGeneration(managed.identity, identity) ? managed : undefined;
+    };
+    const tools =
+      descriptors.length > 0
+        ? new PluginToolInvoker(
+            identity,
+            (request) => {
+              const managed = current();
+              if (!managed) throw new Error('Session is not ready for plugin tools.');
+              this.options.emit({
+                type: 'plugin-tool-invoke',
+                identity,
+                seq: ++managed.seq,
+                requestId: request.requestId,
+                toolName: request.toolName,
+                args: request.args,
+                agent,
+              });
+            },
+            {
+              emitCancel: (requestId) => {
+                const managed = current();
+                if (!managed) return;
+                this.options.emit({
+                  type: 'plugin-tool-cancel',
+                  identity,
+                  seq: ++managed.seq,
+                  requestId,
+                });
+              },
+            }
+          )
+        : undefined;
+    const events = plan
+      ? new PluginEventInvoker(
+          plan,
+          (event) => {
+            // 子会话只拦 tool_call；其余拦截不上报，抛错让等待立即放行
+            if (event.type === 'plugin-intercept' && event.event !== 'tool_call')
+              throw new Error('Child sessions only intercept tool_call.');
+            const managed = current();
+            if (!managed) throw new Error('Child session is closed.');
+            this.options.emit({ ...event, identity, seq: ++managed.seq, agent });
+          },
+          { childSession: true }
+        )
+      : undefined;
+    return { descriptors, ...(tools ? { tools } : {}), ...(events ? { events } : {}) };
+  }
+
+  /** 子会话登记后挂上插件能力并通知 session_start */
+  private attachChildPlugins(
+    managed: ManagedSession,
+    result: Pick<ChildSessionResult, 'pluginTools' | 'pluginEvents'>,
+    resumed: boolean
+  ): void {
+    if (result.pluginTools) managed.pluginTools = result.pluginTools;
+    if (!result.pluginEvents) return;
+    managed.pluginEvents = result.pluginEvents;
+    if (result.pluginEvents.plan.observe.includes('session_start')) {
+      result.pluginEvents.notify('session_start', { reason: resumed ? 'resume' : 'startup' });
+    }
+  }
+
+  /**
+   * 子会话收尾：仍在会话表里时先发 session_end，再取消挂起的插件调用（通知 Main 一并取消）。
+   * 挂起的 tool_call 检查由子会话 invoker 按拦下结束：不等本地兜底，也不让没检查完的工具在关闭后执行。
+   */
+  private closeChildPlugins(managed: ManagedSession, reason: string): void {
+    const events = managed.pluginEvents;
+    if (events?.plan.observe.includes('session_end')) events.notify('session_end', { reason });
+    managed.pluginTools?.cancelAll('Child session closed');
+    events?.cancelAll();
+  }
+
   private async spawnTypedChild(
     identity: ChildSessionIdentity,
     cwd: string,
@@ -3435,6 +3578,7 @@ export class SessionSupervisor {
               ),
               this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
             ],
+            pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
           }),
     });
     const metadata: ChildConversationMetadata = {
@@ -3477,6 +3621,7 @@ export class SessionSupervisor {
       ...(result.runawayGuard ? { runawayGuard: result.runawayGuard } : {}),
       ...(result.requestBudget ? { requestBudget: result.requestBudget } : {}),
     });
+    this.attachChildPlugins(managedRef, result, Boolean(resumeFile));
     if (!resumeFile) managedRef.pendingRole = config.systemPrompt;
     this.options.emit({
       type: 'child-ready',
@@ -3551,7 +3696,7 @@ export class SessionSupervisor {
       parent.gate.floorOptions
     );
     const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
-    const { session, modelId, toolIds, runawayGuard, requestBudget } =
+    const { session, modelId, toolIds, runawayGuard, requestBudget, pluginTools, pluginEvents } =
       await factory.createChildSession({
         agentType,
         modelOverride,
@@ -3567,6 +3712,7 @@ export class SessionSupervisor {
           ),
           this.createPeerMessageTool(parentId, name),
         ],
+        pluginSource: { identity, kind: 'coworker', name },
       });
     const info: CoworkerInfo = {
       id: coworkerId,
@@ -3593,6 +3739,7 @@ export class SessionSupervisor {
       ...(runawayGuard ? { runawayGuard } : {}),
       ...(requestBudget ? { requestBudget } : {}),
     });
+    this.attachChildPlugins(managed, { pluginTools, pluginEvents }, Boolean(resumeFile));
     // 角色提示在首条消息前缀注入(无论来自主 agent send 还是用户 tab);resume 时 jsonl 已有
     if (!resumeFile && agentType?.systemPrompt) {
       managed.pendingRole = agentType.systemPrompt;
@@ -3606,6 +3753,7 @@ export class SessionSupervisor {
     const parent = this.mustCurrent(parentId);
     const managed = this.sessions.get(coworkerId);
     if (managed) {
+      this.closeChildPlugins(managed, 'dismissed');
       managed.gate.cancelAll();
       managed.asks.cancelAll();
       cancelContinuousMemory(managed.session.sessionManager);

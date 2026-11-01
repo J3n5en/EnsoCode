@@ -23,11 +23,23 @@ export const BEFORE_COMPACT_TIMEOUT_MS = 10_000;
 export const INTERCEPT_TIMEOUT_MS = 5_000;
 /** 一次拦截串行询问所有插件的总上限；须小于 worker 本地兜底 */
 export const INTERCEPT_TOTAL_TIMEOUT_MS = 25_000;
+/**
+ * 子会话（子代理、coworker）只拦 tool_call，预算独立且更紧：并行的子会话各自计时，
+ * 不占主会话的 5s/25s，插件侧串行时最多给别的会话增加一次合计的延迟
+ */
+export const CHILD_INTERCEPT_EVENTS = [
+  'tool_call',
+] as const satisfies readonly PluginInterceptEvent[];
+export const CHILD_INTERCEPT_TIMEOUT_MS = 2_000;
+export const CHILD_INTERCEPT_TOTAL_TIMEOUT_MS = 5_000;
 /** 通知型事件在插件侧的处理上限；只用于收敛，不阻塞会话 */
 export const OBSERVE_TIMEOUT_MS = 30_000;
 
 export const isInterceptEvent = (event: string): event is PluginInterceptEvent =>
   (PLUGIN_INTERCEPT_EVENTS as readonly string[]).includes(event);
+
+export const isChildInterceptEvent = (event: string): event is 'tool_call' =>
+  (CHILD_INTERCEPT_EVENTS as readonly string[]).includes(event);
 
 export interface PluginEventSubscription {
   event: PluginEventName;

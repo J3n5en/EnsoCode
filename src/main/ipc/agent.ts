@@ -1427,13 +1427,15 @@ export function registerAgentHandlers(): void {
       return;
     }
     if (workerEvent.type === 'plugin-event') {
-      const sessionId = workerEvent.identity.sessionId;
+      // 子会话事件按所属主会话推项目根，来源经 agent 带给插件
+      const sessionId = rootSessionId(workerEvent.identity);
       void getExtensionPlugins()
         .dispatchEvent({
           sessionId,
           projectRoot: pluginProjectRoot(sessionId),
           event: workerEvent.event,
           data: workerEvent.data,
+          ...(workerEvent.agent ? { agent: workerEvent.agent } : {}),
         })
         .catch((error: unknown) => {
           console.warn('[plugins] event failed:', error instanceof Error ? error.message : error);
@@ -1442,21 +1444,32 @@ export function registerAgentHandlers(): void {
     }
     if (workerEvent.type === 'plugin-intercept') {
       const { identity, requestId, event, payload } = workerEvent;
-      const projectRoot = pluginProjectRoot(identity.sessionId);
+      const sessionId = rootSessionId(identity);
+      const agent = sessionId !== identity.sessionId ? workerEvent.agent : undefined;
+      // 子会话只拦 tool_call（带来源、走子会话自己的预算）；其余的 worker 不会发，发了也直接放行
+      if (sessionId !== identity.sessionId && (!agent || event !== 'tool_call')) {
+        sendPluginInterceptResultToSession(identity, requestId, {
+          ok: true,
+          ...(event === 'before_compact' ? {} : { result: {} }),
+        });
+        return;
+      }
+      const projectRoot = pluginProjectRoot(sessionId);
       const service = getExtensionPlugins();
       const task =
         event === 'before_compact'
           ? service.dispatchEvent({
-              sessionId: identity.sessionId,
+              sessionId,
               projectRoot,
               event,
               data: payload,
             })
           : service.intercept({
-              sessionId: identity.sessionId,
+              sessionId,
               projectRoot,
               event,
               payload,
+              ...(agent ? { agent } : {}),
             });
       void Promise.resolve(task).then(
         (result) =>
@@ -1476,12 +1489,15 @@ export function registerAgentHandlers(): void {
       const { identity, requestId, toolName, args } = workerEvent;
       const controller = new AbortController();
       pendingPluginTools.set(requestId, controller);
+      // 子会话的调用归属主会话（项目根、注入缺省目标），来源经 agent 带给插件
+      const sessionId = rootSessionId(identity);
       void getExtensionPlugins()
         .callTool({
           toolName,
           args,
-          sessionId: identity.sessionId,
-          projectRoot: pluginProjectRoot(identity.sessionId),
+          sessionId,
+          projectRoot: pluginProjectRoot(sessionId),
+          ...(workerEvent.agent ? { agent: workerEvent.agent } : {}),
           signal: controller.signal,
           onProgress: (text: string) => {
             if (typeof text !== 'string' || text.length > 16 * 1024) return;

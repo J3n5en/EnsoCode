@@ -6,7 +6,11 @@ import type {
   ToolCallEventResult,
   ToolResultEventResult,
 } from '@earendil-works/pi-coding-agent';
-import type { PluginEventName, PluginInterceptEvent } from '@shared/extensionPlugins/events';
+import {
+  isChildInterceptEvent,
+  type PluginEventName,
+  type PluginInterceptEvent,
+} from '@shared/extensionPlugins/events';
 import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import type { PluginInterceptRequest } from '@shared/types/agent';
@@ -15,6 +19,8 @@ import type { PluginInterceptRequest } from '@shared/types/agent';
 export const PLUGIN_COMPACT_TIMEOUT_MS = 12_000;
 /** 拦截在 Main 侧按插件串行，本地兜底后放行 */
 export const PLUGIN_INTERCEPT_TIMEOUT_MS = 30_000;
+/** 子会话拦截在 Main 合计不超过 5 秒，本地再留余量后放行 */
+export const PLUGIN_CHILD_INTERCEPT_TIMEOUT_MS = 8_000;
 
 export type PluginSessionEmit =
   | { type: 'plugin-event'; event: PluginEventName; data: unknown }
@@ -35,6 +41,19 @@ export interface PluginInjectMessage {
 type SendPluginMessage = ExtensionAPI['sendMessage'];
 
 /**
+ * 子会话（子代理、coworker）的事件计划：通知型订阅全保留，拦截只保留 tool_call
+ * （否则派子代理就能绕过工具拦截）；input / tool_result 的改写与注入只对主会话开放。
+ */
+export function childPluginEventPlan(
+  plan: PluginEventPlan | undefined
+): PluginEventPlan | undefined {
+  if (!plan) return undefined;
+  const intercept = plan.intercept.filter((item) => isChildInterceptEvent(item.event));
+  if (plan.observe.length === 0 && intercept.length === 0) return undefined;
+  return { observe: [...plan.observe], intercept, inject: false };
+}
+
+/**
  * 插件事件挂起表。通知型只上抛；拦截与 before_compact 等 Main 回复。
  * 超时、失败、shutdown 都放行，不把异常抛回 pi。
  */
@@ -45,8 +64,23 @@ export class PluginEventInvoker {
   constructor(
     readonly plan: PluginEventPlan,
     private readonly emit: (event: PluginSessionEmit) => void,
-    private readonly options: { interceptTimeoutMs?: number; compactTimeoutMs?: number } = {}
+    private readonly options: {
+      interceptTimeoutMs?: number;
+      compactTimeoutMs?: number;
+      /** 子会话：只拦 tool_call（本地兜底更短），其余拦截项忽略，before_compact 只通知不等 */
+      childSession?: boolean;
+    } = {}
   ) {}
+
+  get childSession(): boolean {
+    return this.options.childSession === true;
+  }
+
+  /** 计划里声明了拦截，且本会话允许拦这个事件 */
+  intercepts(event: PluginInterceptEvent): boolean {
+    if (this.childSession && !isChildInterceptEvent(event)) return false;
+    return this.plan.intercept.some((item) => item.event === event);
+  }
 
   bindSender(sender: SendPluginMessage): void {
     this.sender = sender;
@@ -68,7 +102,8 @@ export class PluginEventInvoker {
     const timeoutMs =
       event === 'before_compact'
         ? (this.options.compactTimeoutMs ?? PLUGIN_COMPACT_TIMEOUT_MS)
-        : (this.options.interceptTimeoutMs ?? PLUGIN_INTERCEPT_TIMEOUT_MS);
+        : (this.options.interceptTimeoutMs ??
+          (this.childSession ? PLUGIN_CHILD_INTERCEPT_TIMEOUT_MS : PLUGIN_INTERCEPT_TIMEOUT_MS));
     let settled = false;
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout>;
@@ -96,9 +131,17 @@ export class PluginEventInvoker {
     return true;
   }
 
-  /** 超时与释放都放行，不把插件失败变成工具失败 */
-  cancelAll(): void {
-    for (const entry of [...this.pending.values()]) entry.settle(undefined);
+  /**
+   * 结束所有挂起的等待。主会话缺省放行，不把插件失败变成工具失败；
+   * 子会话只挂 tool_call，缺省按拦下收敛，避免未检查完的工具在中断或解雇后继续执行。
+   */
+  cancelAll(outcome?: unknown): void {
+    const value =
+      outcome ??
+      (this.childSession
+        ? { block: true, reason: '子会话已中断或关闭，插件检查未完成' }
+        : undefined);
+    for (const entry of [...this.pending.values()]) entry.settle(value);
   }
 
   deliver(message: PluginInjectMessage): { ok: true } | { ok: false; error: string } {
@@ -213,6 +256,10 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
       }
       if (observe.has('before_compact')) {
         pi.on('session_before_compact', async (event) => {
+          if (invoker.childSession) {
+            invoker.notify('before_compact', { reason: event.reason });
+            return;
+          }
           try {
             await invoker.intercept('before_compact', { reason: event.reason });
           } catch {
@@ -225,7 +272,7 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
           invoker.notify('after_compact', { reason: event.reason });
         });
       }
-      const intercepts = (event: string) => invoker.plan.intercept.some((i) => i.event === event);
+      const intercepts = (event: PluginInterceptEvent) => invoker.intercepts(event);
       if (intercepts('tool_call') || observe.has('tool_call')) {
         pi.on('tool_call', async (event) => {
           const input = event.input as Record<string, unknown>;

@@ -26,6 +26,41 @@ export function parsePluginMessageSource(raw: unknown): PluginMessageSource | nu
   return { pluginId, pluginName };
 }
 
+/**
+ * 调用或事件来自子会话（subagent 派出的子代理、coworker）时的来源；主会话没有。
+ * 插件侧是 `ctx.agent`，主会话与非会话调用为 null。
+ */
+export interface PluginAgentSource {
+  kind: 'subagent' | 'coworker';
+  /** 子会话 id，形如 `<主会话 id>::…`；`ctx.sessionId` 仍是所属主会话 */
+  sessionId: string;
+  /** 子代理实例名或 coworker 名 */
+  name: string;
+  /** agent 类型名；未指定类型的 coworker 没有 */
+  agentType?: string;
+}
+
+/** 来源必须属于 `ownerSessionId` 这个子会话；主会话不能带来源 */
+export function parsePluginAgentSource(
+  raw: unknown,
+  ownerSessionId: string
+): PluginAgentSource | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  if (Object.keys(value).some((key) => !['kind', 'sessionId', 'name', 'agentType'].includes(key)))
+    return null;
+  const { kind, sessionId, name, agentType } = value;
+  if (kind !== 'subagent' && kind !== 'coworker') return null;
+  if (sessionId !== ownerSessionId || !ownerSessionId.includes('::')) return null;
+  if (typeof name !== 'string' || name.length === 0 || name.length > 128) return null;
+  if (
+    agentType !== undefined &&
+    (typeof agentType !== 'string' || agentType.length === 0 || agentType.length > 128)
+  )
+    return null;
+  return { kind, sessionId, name, ...(agentType !== undefined ? { agentType } : {}) };
+}
+
 export const PLUGIN_CALL_METHODS = [
   'tool.execute',
   'command.run',
@@ -100,6 +135,8 @@ export type MainToPluginHost =
       sessionId: string | null;
       /** Main 推导的项目根；无本机项目为 null */
       projectRoot: string | null;
+      /** 来自子会话时的来源；主会话不带 */
+      agent?: PluginAgentSource;
     }
   | { t: 'cancel'; invocationId: string }
   /** 宿主正在收敛进程（停用、卸载、退出）；插件有短暂时间清理子进程 */

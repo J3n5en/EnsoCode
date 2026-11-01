@@ -1,5 +1,6 @@
 import type {
   MainToPluginHost,
+  PluginAgentSource,
   PluginCallMethod,
   PluginHostApi,
   PluginRegistrations,
@@ -74,6 +75,7 @@ export class PluginProcess {
       invocationId: string;
       sessionId: string | null;
       projectRoot: string | null;
+      agent?: PluginAgentSource;
       timeoutMs: number;
     }
   ): Promise<unknown> {
@@ -98,6 +100,7 @@ export class PluginProcess {
         invocationId: options.invocationId,
         sessionId: options.sessionId,
         projectRoot: options.projectRoot,
+        ...(options.agent ? { agent: options.agent } : {}),
       });
     });
   }
