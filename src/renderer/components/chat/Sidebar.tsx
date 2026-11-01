@@ -157,6 +157,7 @@ import { WorktreeBadge } from './WorktreeBadge';
 import { WorktreeRenameDialog } from './WorktreeRenameDialog';
 
 const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
+const SCRATCH_COLLAPSED_KEY = 'enso-collapsed-scratch';
 
 const ICON_BUTTON_CLASS =
   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
@@ -229,6 +230,34 @@ export function Sidebar({
       const next = { ...prev, [id]: !prev[id] };
       localStorage.setItem('enso-collapsed-projects', JSON.stringify(next));
       return next;
+    });
+  };
+  const [scratchCollapsed, setScratchCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SCRATCH_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const persistScratchCollapsed = (collapsed: boolean) => {
+    try {
+      localStorage.setItem(SCRATCH_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      // 隐私模式或配额满时只保留本次内存状态
+    }
+  };
+  const toggleScratchCollapsed = () => {
+    setScratchCollapsed((prev) => {
+      const next = !prev;
+      persistScratchCollapsed(next);
+      return next;
+    });
+  };
+  const expandScratch = () => {
+    setScratchCollapsed((prev) => {
+      if (!prev) return prev;
+      persistScratchCollapsed(false);
+      return false;
     });
   };
 
@@ -537,6 +566,13 @@ export function Sidebar({
   const searching = listQuery.trim().length > 0;
   const convMatches = (id: string) =>
     matchesQuery(listQuery, [conversations[id]?.title || t('New conversation')]);
+  const scratchVisibleIds = scratchProject
+    ? projectConversationIds(order, conversations, scratchProject.id).filter(
+        (id) => !searching || convMatches(id)
+      )
+    : [];
+  // 搜索时强制展开，避免命中的临时会话被收起状态挡住
+  const scratchFolded = searching ? false : scratchCollapsed;
   const inActiveGroup = (id: string) => {
     const projectId = conversations[id]?.projectId;
     return !projectId || slicedIdSet.has(projectId);
@@ -936,7 +972,10 @@ export function Sidebar({
           {orderedProjects.length === 0 && scratchSessionsEnabled && scratchProject && (
             <button
               type="button"
-              onClick={() => void newConversation(scratchProject.id)}
+              onClick={() => {
+                expandScratch();
+                void newConversation(scratchProject.id);
+              }}
               className="w-full rounded-lg px-3 py-2 text-center text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               {t('Start a temporary chat')}
@@ -1031,43 +1070,75 @@ export function Sidebar({
           )}
           {scratchSessionsEnabled && scratchProject && (
             <div data-slot="scratch-section">
-              <div className="flex items-center justify-between pr-1">
-                <SidebarSectionLabel>{t('Temporary chats')}</SidebarSectionLabel>
+              <div className="group flex items-center pr-1">
+                <button
+                  type="button"
+                  onClick={toggleScratchCollapsed}
+                  aria-expanded={!scratchFolded}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                >
+                  <span className="min-w-0 truncate">{t('Temporary chats')}</span>
+                  <ChevronRight
+                    className={cn(
+                      'size-3 shrink-0 transition-[opacity,transform] duration-150',
+                      !scratchFolded && 'rotate-90 opacity-0 group-hover:opacity-100'
+                    )}
+                  />
+                  <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                    {scratchVisibleIds.length}
+                  </span>
+                </button>
                 <button
                   type="button"
                   className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   title={t('Start a temporary chat')}
                   aria-label={t('Start a temporary chat')}
-                  onClick={() => void newConversation(scratchProject.id)}
+                  onClick={() => {
+                    expandScratch();
+                    void newConversation(scratchProject.id);
+                  }}
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <div className="flex flex-col gap-y-0.5">
-                {projectConversationIds(order, conversations, scratchProject.id)
-                  .filter((id) => !searching || convMatches(id))
-                  .map((id) => (
-                    <ConversationRow
-                      key={id}
-                      id={id}
-                      conversation={conversations[id]}
-                      active={activeId === id}
-                      switchHint={switchHintFor(id, 'project')}
-                      locale={locale}
-                      nowTick={nowTick}
-                      onSelect={selectConversation}
-                      onTogglePin={togglePinConversation}
-                      onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                      onCleanupWorktree={(conversationId) =>
-                        void handleCleanupWorktree(conversationId)
-                      }
-                      onMoveToWorktree={(conversationId) =>
-                        void handleMoveToWorktree(conversationId)
-                      }
-                      onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                    />
-                  ))}
-              </div>
+              <AnimatePresence initial={false}>
+                {!scratchFolded && (
+                  <motion.div
+                    key="scratch-conversations"
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    variants={heightVariants}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex flex-col gap-y-0.5">
+                      {scratchVisibleIds.map((id) => (
+                        <ConversationRow
+                          key={id}
+                          id={id}
+                          conversation={conversations[id]}
+                          active={activeId === id}
+                          switchHint={switchHintFor(id, 'project')}
+                          locale={locale}
+                          nowTick={nowTick}
+                          onSelect={selectConversation}
+                          onTogglePin={togglePinConversation}
+                          onToggleArchive={(conversationId) =>
+                            void handleToggleArchive(conversationId)
+                          }
+                          onCleanupWorktree={(conversationId) =>
+                            void handleCleanupWorktree(conversationId)
+                          }
+                          onMoveToWorktree={(conversationId) =>
+                            void handleMoveToWorktree(conversationId)
+                          }
+                          onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
           {pendingProject && (
