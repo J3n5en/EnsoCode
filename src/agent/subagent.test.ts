@@ -84,6 +84,16 @@ describe('subagent unified control', () => {
     expect(guidelines).toMatch(/review or re-check/);
     expect(guidelines).toMatch(/same message/);
   });
+
+  it('工具指引给出正向触发条件、直调兜底与「报告即事实源」', () => {
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke: vi.fn() });
+    const guidelines = (tool.promptGuidelines ?? []).join('\n');
+    expect(guidelines).toMatch(/Delegate when the work matches an available agent type/);
+    expect(guidelines).toMatch(/two independent investigations can run in parallel/);
+    expect(guidelines).toMatch(/broad exploration across several files/);
+    expect(guidelines).toMatch(/For a known file, symbol, or single fact, use the direct tool/);
+    expect(guidelines).toMatch(/Treat the delivered report as your source of record/);
+  });
 });
 
 describe('CoworkerIdleReminder', () => {
