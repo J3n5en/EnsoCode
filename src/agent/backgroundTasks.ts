@@ -41,6 +41,11 @@ interface Task {
   /** 模型已经由工具返回值知情（阻塞等到结束 / kill 已回执），不再通知 */
   consumed: boolean;
   killedByUser: boolean;
+  /** 移交后台时模型显式 timeout 折算的剩余截止（秒）；用于到点杀进程并说明是超时 */
+  deadlineSec?: number;
+  /** 到点被截止时间杀掉：既不是模型主动停，也不是命令本身失败 */
+  killedByDeadline?: boolean;
+  deadlineTimer?: NodeJS.Timeout;
   waiters: Array<() => void>;
   details?: unknown;
   finalize?: () => Promise<unknown>;
@@ -175,7 +180,7 @@ export class BackgroundTaskManager {
   adopt(
     sessionId: string,
     proc: DetachableProcess,
-    opts: { command: string; startedAt: number }
+    opts: { command: string; startedAt: number; deadlineSec?: number }
   ): string {
     const taskId = this.reserveId();
     const task = this.register(sessionId, taskId, opts.command, {
@@ -192,7 +197,29 @@ export class BackgroundTaskManager {
       }
     );
     this.announce(task);
+    if (opts.deadlineSec !== undefined) this.armDeadline(task, opts.deadlineSec);
     return taskId;
+  }
+
+  /**
+   * 模型显式 timeout 折算的后台截止：到点 SIGTERM（宽限后 SIGKILL）。
+   * 与 `stop()` 的区别是不抑制通知——命令是被截止时间杀掉的，模型需要知道这不是命令自身的失败。
+   */
+  private armDeadline(task: Task, remainingSec: number): void {
+    task.deadlineSec = remainingSec;
+    task.deadlineTimer = setTimeout(
+      () => {
+        task.deadlineTimer = undefined;
+        if (task.info.status !== 'running') return;
+        task.killedByDeadline = true;
+        task.kill('SIGTERM');
+        setTimeout(() => {
+          if (task.info.status === 'running') task.kill('SIGKILL');
+        }, KILL_GRACE_MS).unref?.();
+      },
+      Math.max(0, remainingSec * 1000)
+    );
+    task.deadlineTimer.unref?.();
   }
 
   /** 前台收尾（如 rtk 统计）推迟到后台任务结束；任务已结束则立即执行 */
@@ -342,6 +369,10 @@ export class BackgroundTaskManager {
     task.info.status = status;
     task.info.exitCode = exitCode;
     task.info.tail = task.output.slice(-TAIL_LIMIT);
+    if (task.deadlineTimer) {
+      clearTimeout(task.deadlineTimer);
+      task.deadlineTimer = undefined;
+    }
     task.logStream?.end();
     // 有阻塞等待者 = 结束态将经工具返回值送达模型（blockWaited 语义），无需再通知
     const hadWaiters = task.waiters.length > 0;
@@ -376,6 +407,11 @@ export class BackgroundTaskManager {
     if (task.killedByUser) {
       lines.push(
         'This task was stopped by the user — do not restart it unless the user asks; briefly acknowledge the stop.'
+      );
+    }
+    if (task.killedByDeadline) {
+      lines.push(
+        `It was stopped at the ${Math.round(task.deadlineSec ?? 0)}s timeout you set — treat this as a timeout, not as a command failure.`
       );
     }
     lines.push(
@@ -506,8 +542,55 @@ export class BackgroundTaskManager {
   }
 }
 
-/** 前台命令尾部 & 检测：引导改用 background 参数 */
-const TRAILING_AMP = /(?:^|[^&])&\s*$/;
+/** 引号内的文本不参与 shell 后台化判断（避免误伤 echo "a & b"） */
+const QUOTED_SEGMENT = /'[^']*'|"(?:[^"\\]|\\.)*"/g;
+/** heredoc 正文同样不参与（写脚本时正文里常有 &） */
+const HEREDOC_BODY = /<<-?\s*(['"]?)([A-Za-z_]\w*)\1[ \t]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g;
+/** 裸 & ：排除 && 、&> 、>& */
+const SHELL_AMP = /(^|[^&>])&(?![&>])/;
+
+/**
+ * 用 shell 语法把命令丢到后台的写法；命中即拒绝，引导改用 background 参数。
+ * 这类写法逃出任务跟踪，命令既不进后台任务列表，也不会在结束时唤醒模型。
+ */
+export function shellBackgroundEscape(command: string): string | null {
+  const bare = command.replace(HEREDOC_BODY, ' ').replace(QUOTED_SEGMENT, ' ');
+  if (/(?:^|[;&|])\s*(?:nohup|setsid)\b/.test(bare)) return 'nohup/setsid';
+  if (/(?:^|[;|])\s*disown\b/.test(bare)) return 'disown';
+  if (SHELL_AMP.test(bare)) return 'a shell "&"';
+  return null;
+}
+
+const READLIKE_SHELL = [
+  /^\s*(?:cat|head|tail|nl|less|more)\b/,
+  /^\s*sed\s+(?!-i\b)/,
+  /^\s*(?:rg|grep|ack|ag)\b/,
+  /^\s*(?:fd|find)\b/,
+];
+
+/**
+ * shell 读文件/搜内容的提示：这类命令绕过 read/grep 的行范围与输出预算，
+ * 在长会话里尤其容易退化成一把梭。只对只读用法提示，写文件（sed -i）不提示。
+ */
+export function shellReadHint(command: string): string {
+  if (!READLIKE_SHELL.some((pattern) => pattern.test(command))) return '';
+  return (
+    'Shell read-only shortcut: prefer read (offset/limit) for files, grep for content, ' +
+    'find for paths — the dedicated tools handle line ranges and stream far less output.'
+  );
+}
+
+/** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
+function withReadHint<T>(result: T, command: string): T {
+  const hint = shellReadHint(command);
+  if (!hint) return result;
+  const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
+  if (!Array.isArray(content)) return result;
+  const first = content.find((part) => part?.type === 'text');
+  if (first && typeof first.text === 'string') first.text = `${hint}\n\n${first.text}`;
+  else content.unshift({ type: 'text', text: hint });
+  return result;
+}
 
 /** 前台 bash 默认超时（秒）。background=true 不限。 */
 export const DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC = 120;
@@ -565,6 +648,52 @@ function hasExplicitTimeout(record: Record<string, unknown>): boolean {
   );
 }
 
+export interface ForegroundLimits {
+  /** 前台实际等待预算（秒）；background=true 时不注入 */
+  budgetSec?: number;
+  /** 预算用尽后的动作：转后台，或按模型给的 timeout 直接杀 */
+  timeoutAction: 'background' | 'kill';
+  /** 转后台后按模型显式 timeout 折算的总截止（秒，自命令启动算起） */
+  deadlineSec?: number;
+}
+
+/**
+ * 前台命令的等待语义。
+ *
+ * 模型写 `timeout: 600` 的意图是「卡住就杀」，不是「前台静默等 10 分钟」；
+ * 所以长于默认预算的显式 timeout 只在后台生效（作为截止时间），前台仍按默认预算让位，
+ * 让模型拿回控制权去做别的事。短于默认值的 timeout 保持原样：模型要的是硬超时。
+ */
+export function foregroundLimits(params: unknown): ForegroundLimits {
+  const record =
+    params && typeof params === 'object' && !Array.isArray(params)
+      ? (params as Record<string, unknown>)
+      : {};
+  if (record.background === true) return { timeoutAction: 'background' };
+  if (!hasExplicitTimeout(record)) {
+    return { budgetSec: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC, timeoutAction: 'background' };
+  }
+  const explicit = record.timeout as number;
+  if (explicit <= DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC) {
+    return { budgetSec: explicit, timeoutAction: 'kill' };
+  }
+  return {
+    budgetSec: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+    timeoutAction: 'background',
+    deadlineSec: explicit,
+  };
+}
+
+/** 按前台预算改写参数：命令到点转后台，而不是让工具调用一直挂着 */
+function withForegroundBudget(params: unknown, budgetSec: number | undefined): unknown {
+  const record =
+    params && typeof params === 'object' && !Array.isArray(params)
+      ? { ...(params as Record<string, unknown>) }
+      : {};
+  if (record.background === true || budgetSec === undefined) return record;
+  return { ...record, timeout: budgetSec };
+}
+
 const DETACH_REASON_TEXT: Record<DetachReason, string> = {
   user: 'The user moved this command to the background',
   timeout: `The command exceeded the default ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s foreground timeout and was moved to the background`,
@@ -579,6 +708,7 @@ function detachedResult(error: ForegroundDetachedError) {
     'The process is still running — it was not cancelled.\n' +
     (tail ? `Output so far:\n${tail}\n` : '') +
     'You will be notified automatically when it finishes — do not rerun it or poll. ' +
+    'If no independent work remains, end your turn; the completion wakes you in a new turn. ' +
     `task_output("${taskId}") shows a snapshot, task_stop("${taskId}") stops it.`;
   const details =
     error.details && typeof error.details === 'object' && !Array.isArray(error.details)
@@ -619,22 +749,28 @@ export function withBackground(
       timeout: {
         type: 'number',
         description:
-          `Timeout in seconds; an explicit timeout kills the command. Without it, a foreground command ` +
-          `still running after ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s is moved to the background ` +
-          'instead. No timeout when background=true.',
+          `Timeout in seconds. Up to ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s it kills the command; ` +
+          `longer values only cap the background run — a foreground command still running after ` +
+          `${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s is moved to the background instead, so a long build ` +
+          'never blocks the turn. No timeout when background=true.',
       },
       background: {
         type: 'boolean',
         description:
           'Run in the background and return immediately with a task id. ' +
           'Use for long-running commands (dev servers, watchers, long builds). ' +
-          'You will be notified automatically when it finishes — do not poll or sleep-wait.',
+          'Commands that never exit on their own (dev servers, watch modes, tail -f) must use this ' +
+          'instead of running in the foreground. You will be notified automatically when it finishes — ' +
+          'do not poll or sleep-wait; end your turn instead.',
       },
     },
   } as ToolDefinition['parameters'];
   return {
     ...definition,
     parameters,
+    description:
+      `${definition.description} Read files with read (offset/limit) instead of cat/head/tail/sed/nl; ` +
+      'search with grep and locate with find instead of running rg/grep/find in a shell command.',
     promptSnippet:
       `${definition.name}: run shell commands; pass background=true for long-running commands ` +
       `(dev servers, watchers, long builds). Foreground default timeout ${DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC}s.`,
@@ -669,16 +805,19 @@ export function withBackground(
             {
               type: 'text',
               text:
-                `Started background task ${taskId}. You will be notified when it finishes; ` +
-                `continue with other work. task_output("${taskId}") shows a snapshot, task_stop("${taskId}") stops it.`,
+                `Started background task ${taskId}. You will be notified when it finishes. ` +
+                `If no independent work remains, end your turn — the completion wakes you in a new turn; ` +
+                `do not poll or sleep-wait. task_output("${taskId}") shows a snapshot, task_stop("${taskId}") stops it.`,
             },
           ],
           details: prepared.details,
         };
       }
-      if (typeof record.command === 'string' && TRAILING_AMP.test(record.command.trim())) {
+      const shellEscape =
+        typeof record.command === 'string' ? shellBackgroundEscape(record.command) : null;
+      if (shellEscape) {
         throw new Error(
-          'Do not use a trailing "&" to background a foreground command — ' +
+          `Do not background a foreground command with ${shellEscape} — ` +
             'set background: true on this tool instead, which tracks the process and notifies you on completion.'
         );
       }
@@ -695,24 +834,32 @@ export function withBackground(
       // 每次调用独立 signal：并行工具共享轮次 signal，不能以它区分调用
       const callSignal = signal ? AbortSignal.any([signal]) : new AbortController().signal;
       const startedAt = Date.now();
-      const foreground = new ForegroundCommand(
-        hasExplicitTimeout(record as Record<string, unknown>) ? 'kill' : 'background',
-        {
-          adopt: (proc) => manager.adopt(sessionId, proc, { command, startedAt }),
-          attachFinalize: (taskId, details, finalize) =>
-            manager.attachFinalize(taskId, details, finalize),
-        }
-      );
+      const limits = foregroundLimits(params);
+      const foreground = new ForegroundCommand(limits.timeoutAction, {
+        adopt: (proc) =>
+          manager.adopt(sessionId, proc, {
+            command,
+            startedAt,
+            ...(limits.deadlineSec === undefined
+              ? {}
+              : {
+                  deadlineSec: Math.max(0, limits.deadlineSec - (Date.now() - startedAt) / 1000),
+                }),
+          }),
+        attachFinalize: (taskId, details, finalize) =>
+          manager.attachFinalize(taskId, details, finalize),
+      });
       bindForegroundCommand(callSignal, foreground);
       const untrack = manager.trackForeground(foregroundSessionId, toolCallId, foreground);
       try {
-        return await definition.execute(
+        const result = await definition.execute(
           toolCallId,
-          withForegroundBashTimeout(params),
+          withForegroundBudget(params, limits.budgetSec),
           callSignal,
           onUpdate,
           ctx
         );
+        return withReadHint(result, command);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) return detachedResult(error);
         throw error;

@@ -10,7 +10,10 @@ import {
   createTaskTools,
   DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
   foregroundCommandTimeoutMs,
+  foregroundLimits,
   resolveBackgroundLaunch,
+  shellBackgroundEscape,
+  shellReadHint,
   type TaskEvents,
   withBackground,
   withForegroundBashTimeout,
@@ -622,5 +625,209 @@ describe('前台命令转后台', () => {
     await until(() => ended.includes(taskId));
     expect(finalized).toBe(1);
     expect((await manager.read(taskId))?.details).toEqual({ stage: 'final' });
+  });
+});
+
+describe('foregroundLimits', () => {
+  it('未给 timeout：前台预算为默认值，用尽后转后台', () => {
+    expect(foregroundLimits({ command: 'npm test' })).toEqual({
+      budgetSec: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+      timeoutAction: 'background',
+    });
+  });
+
+  it('显式 timeout 不长于默认值：按该值杀，不转后台', () => {
+    expect(foregroundLimits({ command: 'npm test', timeout: 60 })).toEqual({
+      budgetSec: 60,
+      timeoutAction: 'kill',
+    });
+  });
+
+  it('显式 timeout 长于默认值：前台只等默认预算，原值转为后台截止时间', () => {
+    expect(foregroundLimits({ command: 'npm run build', timeout: 300 })).toEqual({
+      budgetSec: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+      timeoutAction: 'background',
+      deadlineSec: 300,
+    });
+  });
+
+  it('background=true 不注入前台预算', () => {
+    expect(foregroundLimits({ command: 'dev', background: true })).toEqual({
+      timeoutAction: 'background',
+    });
+  });
+});
+
+describe('shellBackgroundEscape', () => {
+  it('拦下用 shell 逃逸代替 background 参数的写法', () => {
+    for (const command of [
+      'npm run dev &',
+      'a & b',
+      'nohup node server.js > /tmp/out.log 2>&1',
+      'setsid ./run.sh',
+      'sleep 5 & disown',
+    ]) {
+      expect(shellBackgroundEscape(command), command).not.toBeNull();
+    }
+  });
+
+  it('不误报普通重定向、&& 链与引号内的 &', () => {
+    for (const command of [
+      'npm test 2>&1 | tail -20',
+      'pnpm build && pnpm test',
+      'echo "a & b"',
+      "echo 'x && y'",
+      'cat file > out.txt',
+    ]) {
+      expect(shellBackgroundEscape(command), command).toBeNull();
+    }
+  });
+
+  it('heredoc 正文里的 & 不算逃逸，但链式 nohup 仍要拦', () => {
+    const heredoc = ["cat > run.sh <<'EOF'", 'npm start &', 'EOF'].join('\n');
+    expect(shellBackgroundEscape(heredoc)).toBeNull();
+    expect(shellBackgroundEscape('cd app && nohup npm start > /tmp/a.log 2>&1')).toBe(
+      'nohup/setsid'
+    );
+  });
+});
+
+describe('shellReadHint', () => {
+  it('用 shell 读文件/搜内容时给出专用工具提示', () => {
+    expect(shellReadHint('cat src/a.ts')).toMatch(/read/);
+    expect(shellReadHint('sed -n 1,20p src/a.ts')).toMatch(/read/);
+    expect(shellReadHint('rg -n "foo" src')).toMatch(/grep/);
+    expect(shellReadHint('find . -name "*.ts"')).toMatch(/find/);
+  });
+
+  it('普通命令与写文件不改写结果', () => {
+    expect(shellReadHint('pnpm test')).toBe('');
+    expect(shellReadHint('sed -i "" s/a/b/ src/a.ts')).toBe('');
+    expect(shellReadHint('git status')).toBe('');
+  });
+});
+
+describe('withBackground 前台预算与回执', () => {
+  const makeTool = () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const base = {
+      name: 'bash',
+      label: 'bash',
+      description: 'Run a shell command.',
+      parameters: { type: 'object', properties: {} },
+      execute: async (_id: string, params: unknown) => {
+        seen.push(params as Record<string, unknown>);
+        return { content: [{ type: 'text' as const, text: 'ok' }], details: undefined };
+      },
+    } as unknown as ToolDefinition;
+    return { base, seen };
+  };
+
+  it('显式 timeout 长于默认值时，前台只按默认预算等待', async () => {
+    const { manager } = makeManager();
+    const { base, seen } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    await wrapped.execute(
+      't1',
+      { command: 'npm run build', timeout: 300 },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(seen[0]).toEqual({
+      command: 'npm run build',
+      timeout: DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC,
+    });
+  });
+
+  it('显式 timeout 不长于默认值时不改写参数', async () => {
+    const { manager } = makeManager();
+    const { base, seen } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    await wrapped.execute(
+      't1',
+      { command: 'npm test', timeout: 90 },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(seen[0]).toEqual({ command: 'npm test', timeout: 90 });
+  });
+
+  it('后台启动回执说明：没有独立工作就结束本轮，完成会唤醒', async () => {
+    const { manager } = makeManager();
+    const { base } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', process.cwd());
+    const result = await wrapped.execute(
+      't1',
+      { command: 'sleep 0.2', background: true },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+    expect(text).toMatch(/end your turn/i);
+    expect(text).toMatch(/wake you|notified/i);
+  });
+
+  it('用 & / nohup 逃逸时拒绝执行并指回 background 参数', async () => {
+    const { manager } = makeManager();
+    const { base } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    await expect(
+      wrapped.execute('t1', { command: 'npm run dev &' }, undefined, undefined, undefined as never)
+    ).rejects.toThrow(/background: true/);
+    await expect(
+      wrapped.execute(
+        't2',
+        { command: 'nohup node app.js > /tmp/a.log 2>&1' },
+        undefined,
+        undefined,
+        undefined as never
+      )
+    ).rejects.toThrow(/background: true/);
+  });
+
+  it('shell 读文件的结果里附带专用工具提示', async () => {
+    const { manager } = makeManager();
+    const { base } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', '/tmp');
+    const result = await wrapped.execute(
+      't1',
+      { command: 'cat src/a.ts' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+    expect(text).toMatch(/read/);
+  });
+});
+
+describe('后台截止时间', () => {
+  it('转后台的显式 timeout 到点杀进程，并在通知里说明是超时', async () => {
+    const { manager, notified, ended } = makeManager();
+    let killed = 0;
+    let resolveDone: (code: number | null) => void = () => {};
+    const proc = {
+      output: () => '',
+      pipe: () => {},
+      done: new Promise<number | null>((resolve) => {
+        resolveDone = resolve;
+      }),
+      kill: () => {
+        killed += 1;
+        resolveDone(null);
+      },
+    };
+    const taskId = manager.adopt('s1', proc, {
+      command: 'npm run build',
+      startedAt: Date.now(),
+      deadlineSec: 0.15,
+    });
+    await until(() => killed > 0, 3000);
+    expect(killed).toBeGreaterThan(0);
+    await until(() => ended.includes(taskId), 3000);
+    expect(notified.join('\n')).toMatch(/timeout/i);
   });
 });
