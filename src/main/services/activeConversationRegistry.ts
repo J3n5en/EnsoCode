@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SessionIdentity } from '@shared/builtinAgents';
+import { conversationCwd } from '@shared/conversationCwd';
 import type { ModelRef } from '@shared/types/agent';
 import type {
   MainModelSelectionBinding,
@@ -311,6 +312,23 @@ export class ActiveConversationRegistry {
       if (selected === conversationId) this.invalidateOwner(owner);
     for (const [id, value] of this.parentBindings)
       if (value.parentConversationId === conversationId) this.parentBindings.delete(id);
+  }
+
+  /**
+   * 父会话实际工作目录，与 spawn-parent 同一口径（conversationCwd）：scratch 为 <根>/<会话 id>，
+   * 本地项目优先 worktree。parentProjectPath 只是项目身份，不能直接当 cwd。
+   */
+  spawnCwd(conversationId: string, worktreePath?: string): string | null {
+    const conversation = this.options.authority.conversation(conversationId);
+    if (conversation?.kind !== 'root' || conversation.lifecycle === 'ended') return null;
+    const project = this.options.authority.project(conversation.projectId);
+    if (project?.state !== 'active') return null;
+    return conversationCwd({
+      kind: project.kind,
+      canonicalPath: project.canonicalPath,
+      conversationId,
+      ...(worktreePath ? { worktreePath } : {}),
+    });
   }
 
   resolveParentSource(conversationId: string): ResolvedParentSource | null {

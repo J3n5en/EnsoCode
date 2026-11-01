@@ -2061,4 +2061,26 @@ describe('SessionSupervisor custom parent system prompt', () => {
     );
     await supervisor.shutdown();
   });
+
+  it('清理从未建成的子会话是 no-op，不把父会话标成 failed（#184）', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-dismiss-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    supervisor.handleCommand({ type: 'dismiss-child', parent, child, notify: false });
+    for (let i = 0; i < 5; i++) await settle();
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'status' &&
+          event.identity.sessionId === parent.sessionId &&
+          event.status === 'failed'
+      )
+    ).toEqual([]);
+    await supervisor.shutdown();
+  });
 });

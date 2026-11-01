@@ -1093,7 +1093,7 @@ export function registerAgentHandlers(): void {
         const source = sourceBindings?.resolveParentSource(input.context.owner.ownerId);
         if (!source) return { ok: false, error: 'Agent parent workspace is unavailable.' };
         return validateAgentRun({
-          cwd: source.parentProjectPath,
+          cwd: authoritativeSpawnCwd(source.parentConversationId) ?? source.parentProjectPath,
           ...(input.text !== undefined ? { text: input.text } : {}),
           ...(input.schema !== undefined ? { schema: input.schema } : {}),
           ...(input.gate ? { gate: input.gate } : {}),

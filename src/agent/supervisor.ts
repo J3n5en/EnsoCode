@@ -1499,6 +1499,11 @@ export class SessionSupervisor {
           });
           return;
         }
+        if (command.type === 'dismiss-child' || command.type === 'dismiss-coworker') {
+          // 清理失败不影响父会话本身，不能把它标成 failed（之后所有委派都会被拒）
+          console.error(`[${command.type}] failed:`, message);
+          return;
+        }
         const managed = this.sessions.get(identity.sessionId);
         if (!managed || !isSameGeneration(managed.identity, identity)) {
           // 会话已不在 worker（驱逐 / 释放 / 换代）而 renderer 仍认为 started：静默丢弃会让
@@ -1584,9 +1589,10 @@ export class SessionSupervisor {
         return;
       case 'dismiss-child': {
         this.must(command.parent);
-        const child = this.must(command.child);
+        // 清理幂等：子会话从未建成（spawn 被拒）或已换代时无事可做，不能抛错连累父会话
+        const child = this.sessions.get(command.child.sessionId);
         if (
-          !child.childIdentity ||
+          !child?.childIdentity ||
           !isSameChildSessionIdentity(command.child, child.childIdentity)
         ) {
           return;
