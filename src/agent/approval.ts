@@ -12,7 +12,12 @@ import { rememberApprovalReview } from './approvalReviewRecords';
 import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
-type ApprovalResult = 'allow' | 'deny' | 'block' | 'cancel' | 'timeout';
+type ApprovalResult = 'allow' | 'deny' | 'block' | 'cancel' | 'timeout' | 'unattended';
+
+/** unattended 档的拒绝文案：不指名工具，避免同一句文案因工具不同而被归成不同错误族 */
+export const APPROVAL_UNATTENDED_ERROR =
+  'Blocked: this session runs unattended, so any action that needs approval is rejected without asking. ' +
+  'Do not retry the same call; use an action that needs no approval, or ask the user to switch the approval mode.';
 
 interface PendingApproval {
   info: ApprovalRequestInfo;
@@ -79,6 +84,8 @@ export class ApprovalGate {
   }
 
   needsApproval(kind: ApprovalKind, tool: string): boolean {
+    // 无人值守：需要确认的一律要「确认」，只是确认会被拒绝而不是等人
+    if (this.mode === 'unattended') return true;
     if (this.mode === 'full') return false;
     if (this.mode === 'auto-edits' && (kind === 'file-edit' || kind === 'file-write')) return false;
     return !this.sessionAllowed.has(tool);
@@ -94,6 +101,8 @@ export class ApprovalGate {
     filePaths?: string[],
     protectedCategory?: ProtectedActionCategory
   ): Promise<ApprovalResult> {
+    // 无人值守：不建 pending、不占人，直接拒绝
+    if (this.mode === 'unattended') return Promise.resolve('unattended');
     const requestId = `apr-${++this.counter}-${Date.now()}`;
     let info: ApprovalRequestInfo = {
       requestId,
@@ -143,6 +152,19 @@ export class ApprovalGate {
         .then(() => review(info, signal))
         .then((result) => {
           if (settled) return;
+          // 代审期间档位被改过：旧档的结论不再算数，按当前档位重新路由
+          if (this.mode !== 'assistant') {
+            if (this.mode === 'unattended') {
+              settle('unattended');
+              return;
+            }
+            if (!info.protected && !this.needsApproval(info.kind, info.tool)) {
+              settle('allow');
+              return;
+            }
+            askHuman();
+            return;
+          }
           if (result.decision !== 'ask_user' && result.record && toolCallId) {
             rememberApprovalReview(toolCallId, result.record);
           }
@@ -186,6 +208,20 @@ export class ApprovalGate {
     for (const entry of [...this.pending.values()]) entry.settle('cancel');
   }
 
+  /** 档位变更后重判挂起请求：切档即时生效，不让卡片一直等到超时 */
+  reconsider(): void {
+    for (const entry of [...this.pending.values()]) {
+      if (this.mode === 'unattended') {
+        entry.settle('unattended');
+        continue;
+      }
+      // 受保护动作永远要真人，不随档位放行
+      if (!entry.info.protected && !this.needsApproval(entry.info.kind, entry.info.tool)) {
+        entry.settle('allow');
+      }
+    }
+  }
+
   snapshot(): ApprovalRequestInfo[] {
     return [...this.pending.values()].map((entry) => entry.info);
   }
@@ -207,6 +243,7 @@ export function summarizeApproval(kind: ApprovalKind, params: unknown, toolName 
 }
 
 export function throwUnlessAllowed(result: ApprovalResult): void {
+  if (result === 'unattended') throw new Error(APPROVAL_UNATTENDED_ERROR);
   if (result === 'block') throw new Error('Assistant approval blocked this operation');
   if (result === 'deny') throw new Error('User denied this operation');
   if (result === 'cancel') throw new Error('Approval cancelled');

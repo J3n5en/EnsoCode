@@ -1004,6 +1004,16 @@ export class SessionSupervisor {
     });
   }
 
+  /** 子会话（coworker / child）创建时拷贝父档位，父会话切档后同步下去：
+   *  否则子会话里已挂起的卡片仍会等人，与「切档即时生效」矛盾 */
+  private applyApprovalModeToChildren(parentId: string, mode: ApprovalMode): void {
+    for (const [id, child] of this.sessions) {
+      if (id === parentId || child.parentId !== parentId) continue;
+      child.gate.mode = mode;
+      child.gate.reconsider();
+    }
+  }
+
   private deliverNotification(sessionId: string, text: string): void {
     const managed = this.sessions.get(sessionId);
     if (!managed) return;
@@ -1832,9 +1842,14 @@ export class SessionSupervisor {
         this.notifier.notify(managed.identity.sessionId, command.text, { urgent: command.urgent });
         return;
       }
-      case 'set-approval-mode':
-        this.must(command.identity).gate.mode = command.mode;
+      case 'set-approval-mode': {
+        const managed = this.must(command.identity);
+        managed.gate.mode = command.mode;
+        // 切档即时生效：已挂起的请求按新档位重判，不留在原地等超时
+        managed.gate.reconsider();
+        this.applyApprovalModeToChildren(managed.identity.sessionId, command.mode);
         return;
+      }
       case 'set-plan-mode':
         this.must(command.identity).plan?.setActive(command.active);
         return;
@@ -3284,6 +3299,8 @@ export class SessionSupervisor {
     if (parentId) {
       const parent = this.sessions.get(parentId);
       if (parent?.refusalRetryPrompt) managed.refusalRetryPrompt = parent.refusalRetryPrompt;
+      // 子门在 await 建会话之前就按父档位铸好了：其间父会话若切过档，以注册时刻为准补同步
+      if (parent) managed.gate.mode = parent.gate.mode;
     }
     this.flushPendingMcpTools(managed);
     this.bindAutoRetryLimit(session);

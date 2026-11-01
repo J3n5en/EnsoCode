@@ -1,5 +1,5 @@
 import {
-  type ApprovalMode,
+  type ApprovalMode as PairApprovalMode,
   type ProjectEntry,
   type ProviderEntry,
   pairProjectListLabel,
@@ -35,7 +35,7 @@ export interface NewRemoteSessionRequest {
   projectId: string;
   providerId: string;
   modelId: string;
-  approvalMode?: ApprovalMode;
+  approvalMode?: PairApprovalMode;
   reasoningEnabled?: boolean;
   thinkingLevel?: ThinkingLevel;
 }
@@ -48,12 +48,13 @@ interface Props {
   onCreate: (request: NewRemoteSessionRequest) => void;
 }
 
-// 与桌面 ApprovalModePicker 同 key
-const APPROVAL_KEYS: Record<ApprovalMode, string> = {
+// 与桌面 ApprovalModePicker 同 key；pair 协议与桌面同五档，远程会话可直接用 unattended
+const APPROVAL_KEYS: Record<PairApprovalMode, string> = {
   supervised: 'Supervised',
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
   assistant: 'Assistant approval',
+  unattended: 'Unattended',
 };
 const LEVEL_KEYS: Record<ThinkingLevel, string> = {
   minimal: 'Min',
@@ -91,7 +92,7 @@ export function NewRemoteSessionDialog({
   const [pickedProject, setPickedProject] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(initialApprovalMode);
+  const [approvalMode, setApprovalMode] = useState<PairApprovalMode>(initialApprovalMode);
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
 
@@ -192,18 +193,18 @@ export function NewRemoteSessionDialog({
           </Field>
           <Field label={t('Approval mode')}>
             <Select
-              items={(Object.keys(APPROVAL_KEYS) as ApprovalMode[]).map((mode) => ({
+              items={(Object.keys(APPROVAL_KEYS) as PairApprovalMode[]).map((mode) => ({
                 value: mode,
                 label: t(APPROVAL_KEYS[mode]),
               }))}
               value={approvalMode}
-              onValueChange={(v) => setApprovalMode(v as ApprovalMode)}
+              onValueChange={(v) => setApprovalMode(v as PairApprovalMode)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                {(Object.keys(APPROVAL_KEYS) as ApprovalMode[]).map((mode) => (
+                {(Object.keys(APPROVAL_KEYS) as PairApprovalMode[]).map((mode) => (
                   <SelectItem key={mode} value={mode}>
                     {t(APPROVAL_KEYS[mode])}
                   </SelectItem>

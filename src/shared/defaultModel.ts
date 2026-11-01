@@ -212,6 +212,8 @@ export function defaultApprovalMode(
 ): ApprovalMode {
   const reviewerUsable = isUsableApprovalReviewer(reviewer, providers, credentials);
   if (lastMode === 'assistant') return reviewerUsable ? 'assistant' : 'full';
+  // unattended 不依赖代审模型：原样保留，不能落到兜底档把最严的档升成最宽的档
+  if (lastMode === 'unattended') return 'unattended';
   if (lastMode === 'supervised' || lastMode === 'auto-edits' || lastMode === 'full') {
     return lastMode;
   }

@@ -1,4 +1,6 @@
 import {
+  APPROVAL_MODES,
+  type ApprovalMode,
   DIRECT_SIGNAL_MAX_CHARS,
   isPairSyncCursor,
   type PhoneToHost,
@@ -316,6 +318,13 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       }
       if (v.thinkingLevel !== undefined && !isThinkingLevel(v.thinkingLevel)) {
         return { ok: false, error: 'invalid thinkingLevel' };
+      }
+      // 审批档给了就必须是本机认识的档位：不认识的值到下游只会被静默丢弃，档位会比用户选的更宽
+      if (
+        v.approvalMode !== undefined &&
+        !APPROVAL_MODES.includes(v.approvalMode as ApprovalMode)
+      ) {
+        return { ok: false, error: 'invalid approvalMode' };
       }
       return { ok: true, command: value as PhoneToHost };
     case 'set-model':

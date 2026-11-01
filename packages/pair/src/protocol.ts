@@ -12,7 +12,15 @@ export interface AttachedImage {
   mimeType: string;
 }
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type ApprovalMode = 'supervised' | 'auto-edits' | 'full' | 'assistant';
+/** pair 协议审批档：与桌面 APPROVAL_MODES 同集合（含 unattended），两边漂移由测试守住 */
+export const APPROVAL_MODES = [
+  'supervised',
+  'auto-edits',
+  'full',
+  'assistant',
+  'unattended',
+] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
 // ── 中继明文控制帧（中继可见，不加密）──────────────────────────────────

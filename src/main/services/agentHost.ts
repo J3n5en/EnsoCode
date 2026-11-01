@@ -1115,6 +1115,8 @@ export function spawnSession(
 }
 
 const APPROVAL_RANK: Record<ApprovalMode, number> = {
+  // 无人值守比「逐条问人」更严：需要确认的动作一律拒绝，所以插件预设不能把它降成 supervised
+  unattended: 4,
   supervised: 3,
   'auto-edits': 2,
   assistant: 1,

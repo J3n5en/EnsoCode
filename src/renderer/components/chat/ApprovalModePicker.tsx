@@ -1,6 +1,6 @@
 import type { ApprovalMode } from '@shared/types/agent';
-import { Check, ChevronDown, Shield, ShieldCheck, ShieldOff, Sparkles } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Check, ChevronDown, Moon, Shield, ShieldCheck, ShieldOff, Sparkles } from 'lucide-react';
+import { Fragment, useMemo, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,11 @@ export const APPROVAL_MODE_META: Record<
     labelKey: 'Assistant approval',
     descKey: 'A configured model reviews each action first',
   },
+  unattended: {
+    icon: Moon,
+    labelKey: 'Unattended',
+    descKey: 'Never asks: actions that need approval are rejected immediately',
+  },
 };
 
 export const APPROVAL_MODE_ORDER: ApprovalMode[] = [
@@ -34,6 +39,7 @@ export const APPROVAL_MODE_ORDER: ApprovalMode[] = [
   'auto-edits',
   'full',
   'assistant',
+  'unattended',
 ];
 
 interface ApprovalModePickerProps {
@@ -82,32 +88,40 @@ export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) 
           const selected = option === mode;
           const disabled = option === 'assistant' && !reviewerReady;
           return (
-            <button
-              key={option}
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                if (disabled) return;
-                onSelect(option);
-                setOpen(false);
-              }}
-              className={cn(
-                'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-                selected ? 'bg-muted' : 'hover:bg-muted/60',
-                disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+            <Fragment key={option}>
+              {option === 'unattended' && (
+                <div className="my-1 flex items-center gap-2 px-2 text-[11px] text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  {t('Opposite of Full access: never asks, rejects instead')}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
               )}
-            >
-              <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block">{t(meta.labelKey)}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {disabled
-                    ? t('Select an assistant approval model in Settings first')
-                    : t(meta.descKey)}
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSelect(option);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                  selected ? 'bg-muted' : 'hover:bg-muted/60',
+                  disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+                )}
+              >
+                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block">{t(meta.labelKey)}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {disabled
+                      ? t('Select an assistant approval model in Settings first')
+                      : t(meta.descKey)}
+                  </span>
                 </span>
-              </span>
-              {selected && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-            </button>
+                {selected && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              </button>
+            </Fragment>
           );
         })}
       </PopoverPopup>

@@ -78,5 +78,15 @@ describe('applyPluginPresetOverrides', () => {
         resolveModel,
       })
     ).toMatchObject({ ok: true, approvalMode: 'supervised' });
+    // 无人值守最严：预设的 supervised 也不能把它换成「逐条问人」
+    expect(
+      applyPluginPresetOverrides({
+        model: { modelId: 'base' },
+        approvalMode: 'unattended',
+        disabledTools: [],
+        preset: { approvalMode: 'supervised' },
+        resolveModel,
+      })
+    ).toMatchObject({ ok: true, approvalMode: 'unattended' });
   });
 });

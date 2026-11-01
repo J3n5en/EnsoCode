@@ -1,3 +1,5 @@
+import { APPROVAL_MODES } from '@enso/pair';
+import { APPROVAL_MODES as LOCAL_APPROVAL_MODES } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import {
   botCommandError,
@@ -229,6 +231,19 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ ...base, reasoningEnabled: true, thinkingLevel: 'high' }).ok).toBe(
       true
     );
+  });
+
+  it('spawn 校验审批档：五档全收，不认识的值拒（否则下游静默丢弃＝档位变宽）', () => {
+    const base = { type: 'spawn', sessionId: 's', projectId: 'p', providerId: 'pr', modelId: 'm' };
+    for (const mode of APPROVAL_MODES) {
+      expect(parsePhoneCommand({ ...base, approvalMode: mode }).ok, mode).toBe(true);
+    }
+    expect(parsePhoneCommand({ ...base, approvalMode: 'unattended2' }).ok).toBe(false);
+    expect(parsePhoneCommand({ ...base, approvalMode: 1 }).ok).toBe(false);
+  });
+
+  it('pair 协议审批档与桌面 APPROVAL_MODES 同集合（漂移会让档位在边界上丢）', () => {
+    expect([...APPROVAL_MODES]).toEqual([...LOCAL_APPROVAL_MODES]);
   });
 
   it('push-subscribe 结构校验：endpoint 必须 https，keys 必填', () => {
