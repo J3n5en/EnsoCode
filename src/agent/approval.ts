@@ -9,6 +9,7 @@ import type {
   ProtectedActionCategory,
 } from '@shared/types/agent';
 import { rememberApprovalReview } from './approvalReviewRecords';
+import type { CommandGuard, CommandGuardHit } from './dcg';
 import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
@@ -44,6 +45,8 @@ export interface ApprovalGateOptions {
   exemptFull?: boolean;
   /** 等真人处理的时限：真人阶段的请求带 expiresAt，由 Main 到期发 request-timeout */
   humanTimeoutMs?: number;
+  /** dcg 命令守卫：命中即按 destructive 强制真人确认；豁免规则同底线 */
+  commandGuard?: CommandGuard;
 }
 
 /**
@@ -70,13 +73,19 @@ export class ApprovalGate {
   /** 子会话沿用底线配置，再按自身档位判断 */
   get floorOptions(): Pick<
     ApprovalGateOptions,
-    'protectedFloor' | 'exemptFull' | 'humanTimeoutMs'
+    'protectedFloor' | 'exemptFull' | 'humanTimeoutMs' | 'commandGuard'
   > {
     return {
       protectedFloor: this.options?.protectedFloor === true,
       exemptFull: this.options?.exemptFull === true,
       humanTimeoutMs: this.options?.humanTimeoutMs,
+      commandGuard: this.options?.commandGuard,
     };
+  }
+
+  get commandGuard(): CommandGuard | undefined {
+    if (this.options?.exemptFull === true && this.mode === 'full') return undefined;
+    return this.options?.commandGuard;
   }
 
   get humanTimeoutMs(): number | undefined {
@@ -99,7 +108,8 @@ export class ApprovalGate {
     signal: AbortSignal | undefined,
     toolCallId?: string,
     filePaths?: string[],
-    protectedCategory?: ProtectedActionCategory
+    protectedCategory?: ProtectedActionCategory,
+    guard?: CommandGuardHit
   ): Promise<ApprovalResult> {
     // 无人值守：不建 pending、不占人，直接拒绝
     if (this.mode === 'unattended') return Promise.resolve('unattended');
@@ -112,6 +122,7 @@ export class ApprovalGate {
       ...(filePaths?.length ? { filePaths: [...filePaths] } : {}),
       ...(toolCallId ? { toolCallId } : {}),
       ...(protectedCategory ? { protected: protectedCategory } : {}),
+      ...(guard ? { guard: { ...guard } } : {}),
     };
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -259,9 +270,15 @@ export function withApproval(
   return {
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const protectedCategory = gate.protectedFloor
+      const floorCategory = gate.protectedFloor
         ? classifyProtectedTool(definition.name, kind, params)
         : null;
+      const command = (params as { command?: unknown } | undefined)?.command;
+      const guard =
+        kind === 'command' && typeof command === 'string'
+          ? await gate.commandGuard?.(definition.name, command, signal)
+          : undefined;
+      const protectedCategory = floorCategory ?? (guard ? 'destructive' : null);
       if (protectedCategory || gate.needsApproval(kind, definition.name)) {
         const filePaths =
           kind === 'file-edit' || kind === 'file-write'
@@ -275,7 +292,8 @@ export function withApproval(
             signal,
             toolCallId,
             filePaths,
-            protectedCategory ?? undefined
+            protectedCategory ?? undefined,
+            guard ?? undefined
           )
         );
       }

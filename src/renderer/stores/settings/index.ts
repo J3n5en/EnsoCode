@@ -168,6 +168,7 @@ const initialState = {
   rtkEnabled: true,
   computerPreview: true,
   protectedActionsInCode: false,
+  dcgEnabled: false,
   editMode: 'apply_patch' as import('@shared/types').EditMode,
   compactStrategy: 'standard' as import('@shared/compactStrategy').CompactStrategy,
   smartCompactEnabled: false,
@@ -343,6 +344,7 @@ export const useSettingsStore = create<SettingsState>()(
       setRtkEnabled: (rtkEnabled) => set({ rtkEnabled }),
       setComputerPreview: (computerPreview) => set({ computerPreview }),
       setProtectedActionsInCode: (protectedActionsInCode) => set({ protectedActionsInCode }),
+      setDcgEnabled: (dcgEnabled) => set({ dcgEnabled }),
       setMemoryEmbeddingModel: (memoryEmbeddingModel) => set({ memoryEmbeddingModel }),
       setMemoryEmbeddingAutoDownload: (memoryEmbeddingAutoDownload) =>
         set({ memoryEmbeddingAutoDownload }),

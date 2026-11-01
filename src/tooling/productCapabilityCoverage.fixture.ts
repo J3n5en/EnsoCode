@@ -54,6 +54,7 @@ export const SETTINGS_DATA_COVERAGE = {
   protectedActionsInCode: excluded(
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),
+  dcgEnabled: excluded('dcg command guard depends on a device-local binary.'),
   botModeEnabled: excluded('Experimental Bot mode toggle; device-local, not an Enso capability.'),
   scratchSessionsEnabled: excluded(
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
@@ -189,6 +190,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setProtectedActionsInCode: excluded(
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),
+  setDcgEnabled: excluded('dcg command guard depends on a device-local binary.'),
   setMemoryEmbeddingModel: excluded('Memory embedding model choice is a desktop preference.'),
   setMemoryEmbeddingAutoDownload: excluded('Memory model download policy is a device preference.'),
   setMemoryModelIdleMinutes: excluded('Memory model idle unloading policy is a device preference.'),
@@ -785,6 +787,9 @@ export const IPC_PRODUCT_COVERAGE = {
   MEMORY_CHAT_MODEL_CANCEL: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_CHAT_MODEL_DELETE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_CHAT_MODEL_PROGRESS: excluded('Memory desktop UI; not an Enso capability.'),
+  DCG_STATUS: excluded('dcg install settings UI; not an Enso capability.'),
+  DCG_INSTALL: excluded('dcg install settings UI; not an Enso capability.'),
+  DCG_UNINSTALL: excluded('dcg install settings UI; not an Enso capability.'),
   SPEECH_STATUS: excluded('Voice input settings UI; not an Enso capability.'),
   SPEECH_DOWNLOAD: excluded('Voice input settings UI; not an Enso capability.'),
   SPEECH_CANCEL: excluded('Voice input settings UI; not an Enso capability.'),

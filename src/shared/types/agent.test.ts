@@ -2695,6 +2695,30 @@ describe('受保护动作底线协议', () => {
     ).toBeNull();
   });
 
+  it('approval-request 的 guard 只接受非空 ruleId / reason；spawn-parent 的 dcgPath 须为非空字符串', () => {
+    const event = {
+      type: 'approval-request',
+      identity: parent,
+      seq: 1,
+      request: {
+        requestId: 'r1',
+        tool: 'bash',
+        kind: 'command',
+        summary: 'git reset --hard',
+        protected: 'destructive',
+        guard: { ruleId: 'core.git:reset-hard', reason: 'destroys changes' },
+      },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    for (const guard of [{ ruleId: '', reason: 'x' }, { ruleId: 'r' }, 'x']) {
+      expect(parseAgentWorkerEvent({ ...event, request: { ...event.request, guard } })).toBeNull();
+    }
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    expect(parseAgentCommand({ ...base, dcgPath: '/data/dcg/dcg' })).not.toBeNull();
+    expect(parseAgentCommand({ ...base, dcgPath: '' })).toBeNull();
+    expect(parseAgentCommand({ ...base, dcgPath: 1 })).toBeNull();
+  });
+
   it('spawn-parent 携真尾 / boost / 拒答正文：非空字符串通过,脏值拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     expect(parseAgentCommand({ ...base, systemPromptAppend: 'tail' })).not.toBeNull();

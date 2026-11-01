@@ -252,6 +252,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
       'Compress supported command output before it enters the model context. Takes effect on new conversations.',
   },
   {
+    id: 'tools.dcgEnabled',
+    category: 'tools',
+    title: 'Destructive command guard (dcg)',
+    description:
+      'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.',
+  },
+  {
     id: 'voice.root',
     category: 'voice',
     title: 'Voice input',

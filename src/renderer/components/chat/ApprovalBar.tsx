@@ -119,6 +119,11 @@ export function ApprovalBar({
           {t(REVIEW_FALLBACK_LABELS[active.reviewFallback])}
         </p>
       )}
+      {active.guard && (
+        <p className="mt-1 text-[11px] text-destructive" title={active.guard.ruleId}>
+          {t('dcg: {{reason}}', { reason: active.guard.reason })}
+        </p>
+      )}
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">

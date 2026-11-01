@@ -136,6 +136,9 @@ export interface SettingsState {
   /** Code 会话也启用受保护动作底线（Bot 会话恒开）；缺省关，新建或冷恢复会话生效。 */
   protectedActionsInCode: boolean;
 
+  /** dcg 命令守卫：命中危险命令强制真人确认；需先安装二进制，新建或冷恢复会话生效。 */
+  dcgEnabled: boolean;
+
   /** 文件编辑工具模式；缺省 apply_patch，新建或冷恢复会话生效。 */
   editMode: EditMode;
 
@@ -360,6 +363,7 @@ export interface SettingsState {
   setRtkEnabled: (value: boolean) => void;
   setComputerPreview: (value: boolean) => void;
   setProtectedActionsInCode: (value: boolean) => void;
+  setDcgEnabled: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;
   setMemoryEmbeddingAutoDownload: (value: boolean) => void;
   setMemoryModelIdleMinutes: (value: number) => void;

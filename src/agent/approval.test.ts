@@ -899,3 +899,101 @@ describe('代审期间切档：旧档结论不再算数', () => {
     expect(await pending).toBe('allow');
   });
 });
+
+describe('dcg 命令守卫', () => {
+  const hit = { ruleId: 'core.git:reset-hard', reason: 'destroys uncommitted changes' };
+  const setup = (
+    mode: GateMode,
+    options: { exemptFull?: boolean; protectedFloor?: boolean } = {},
+    verdict: typeof hit | null = hit
+  ) => {
+    const infos: ApprovalRequestInfo[] = [];
+    const commandGuard = vi.fn().mockResolvedValue(verdict);
+    const gate = new ApprovalGate(
+      mode,
+      (info) => infos.push(info),
+      () => undefined,
+      { ...options, commandGuard }
+    );
+    const execute = vi.fn().mockResolvedValue({ content: [], details: {} });
+    const wrap = (name: string, kind: 'command' | 'file-edit' = 'command') =>
+      withApproval(gate, kind, {
+        name,
+        label: name,
+        description: '',
+        parameters: {} as never,
+        execute,
+      });
+    const run = (name: string, params: unknown, kind?: 'command' | 'file-edit') =>
+      wrap(name, kind).execute('c1', params as never, undefined, undefined, undefined as never);
+    return { gate, infos, commandGuard, execute, run };
+  };
+
+  it('full 档命中也强制真人确认，卡片带 destructive 类别与原因；拒绝则不执行', async () => {
+    const { gate, infos, commandGuard, execute, run } = setup('full');
+    const pending = run('powershell', { command: 'Remove-Item -Recurse x' });
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(commandGuard).toHaveBeenCalledWith('powershell', 'Remove-Item -Recurse x', undefined);
+    expect(infos[0]).toMatchObject({ protected: 'destructive', guard: hit });
+    gate.respond(infos[0].requestId, 'allowSession');
+    await pending;
+    expect(execute).toHaveBeenCalledOnce();
+    const again = run('powershell', { command: 'Remove-Item -Recurse y' });
+    await vi.waitFor(() => expect(infos).toHaveLength(2));
+    gate.respond(infos[1].requestId, 'deny');
+    await expect(again).rejects.toThrow(/denied/);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('未命中按原档位放行；非命令工具不调用守卫', async () => {
+    const { infos, commandGuard, execute, run } = setup('full', {}, null);
+    await run('bash', { command: 'ls' });
+    expect(infos).toHaveLength(0);
+    expect(execute).toHaveBeenCalledOnce();
+    const edits = setup('full');
+    await edits.run('edit', { path: '/repo/a.ts' }, 'file-edit');
+    expect(edits.commandGuard).not.toHaveBeenCalled();
+    expect(commandGuard).toHaveBeenCalledOnce();
+  });
+
+  it('底线已判出类别时保留原类别并附带原因', async () => {
+    const { gate, infos, run } = setup('supervised', { protectedFloor: true });
+    const pending = run('bash', { command: 'rm -rf build' });
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(infos[0]).toMatchObject({ protected: 'delete', guard: hit });
+    gate.respond(infos[0].requestId, 'allow');
+    await pending;
+  });
+
+  it('bot 完全放行豁免守卫；子会话经 floorOptions 继承守卫', async () => {
+    const bot = setup('full', { protectedFloor: true, exemptFull: true });
+    await bot.run('bash', { command: 'git reset --hard' });
+    expect(bot.infos).toHaveLength(0);
+    expect(bot.commandGuard).not.toHaveBeenCalled();
+
+    const parent = setup('supervised');
+    const childInfos: ApprovalRequestInfo[] = [];
+    const child = new ApprovalGate(
+      'full',
+      (info) => childInfos.push(info),
+      () => undefined,
+      parent.gate.floorOptions
+    );
+    const pending = withApproval(child, 'command', {
+      name: 'bash',
+      label: 'bash',
+      description: '',
+      parameters: {} as never,
+      execute: vi.fn(),
+    }).execute(
+      'c2',
+      { command: 'git reset --hard' } as never,
+      undefined,
+      undefined,
+      undefined as never
+    );
+    await vi.waitFor(() => expect(childInfos).toHaveLength(1));
+    child.respond(childInfos[0].requestId, 'deny');
+    await expect(pending).rejects.toThrow(/denied/);
+  });
+});

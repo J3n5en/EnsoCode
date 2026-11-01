@@ -6,6 +6,7 @@ const LABELS: Record<ProtectedActionCategory, string> = {
   payment: 'Protected: payment',
   deploy: 'Protected: deploy / production',
   secret: 'Protected: secrets',
+  destructive: 'Protected: destructive command',
 };
 
 export function protectedActionLabel(

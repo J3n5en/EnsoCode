@@ -172,6 +172,7 @@ import {
   previewModelDirectoryPush,
   registerCustomProviderModels,
 } from './customProviderRegistry';
+import { createDcgGuard } from './dcg';
 import { createNormalizedEditTool } from './editTool';
 import type { EnsoCompactOptions } from './ensoCompact/types';
 import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
@@ -1635,7 +1636,8 @@ export class SessionSupervisor {
           command.botWriteLock,
           command.botDelegationTask,
           command.pluginTools,
-          command.pluginEvents
+          command.pluginEvents,
+          command.dcgPath
         );
         return;
       case 'spawn-child':
@@ -2204,7 +2206,8 @@ export class SessionSupervisor {
     botWriteLock?: { label: string; ancestors: string[] },
     botDelegationTask = false,
     pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
-    pluginEvents?: PluginEventPlan
+    pluginEvents?: PluginEventPlan,
+    dcgPath?: string
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2354,6 +2357,7 @@ export class SessionSupervisor {
         review: (info, signal) => this.reviewApproval(info, signal),
         protectedFloor: botMode || protectedActions,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
+        ...(dcgPath ? { commandGuard: createDcgGuard(dcgPath) } : {}),
       }
     );
     const checkpoints = new CheckpointManager(

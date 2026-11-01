@@ -206,6 +206,7 @@ import type {
   BrowserDesignModeEvent,
   BrowserTabState,
 } from '@shared/types/browser';
+import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import type {
   AgentComposerPrefillEvent,
@@ -456,6 +457,12 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.MEMORY_CHAT_MODEL_PROGRESS, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_CHAT_MODEL_PROGRESS, handler);
     },
+  },
+
+  dcg: {
+    status: (): Promise<DcgStatus> => ipcRenderer.invoke(IPC_CHANNELS.DCG_STATUS),
+    install: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_INSTALL),
+    uninstall: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_UNINSTALL),
   },
 
   speech: {

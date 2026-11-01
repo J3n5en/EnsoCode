@@ -3,6 +3,7 @@ import type { ComputerCapabilities } from '@shared/computer/types';
 import { BUILTIN_TOOLS, EDIT_MODES, type EditMode, isEditMode } from '@shared/types';
 import type { AgentMode } from '@shared/types/agent';
 import type { BrowserClearKind } from '@shared/types/browser';
+import type { DcgStatus } from '@shared/types/dcg';
 import {
   WEB_SEARCH_CHAIN_MAX,
   type WebSearchChainEntry,
@@ -22,6 +23,7 @@ import {
   Monitor,
   Search,
   ShieldAlert,
+  ShieldX,
   Shrink,
   SquareTerminal,
   Trash2,
@@ -515,6 +517,8 @@ export function BuiltinToolsSettings() {
           }
         />
 
+        <DcgGuardRow />
+
         <ToolRow
           rowId="tools.editMode"
           newSession
@@ -546,6 +550,115 @@ export function BuiltinToolsSettings() {
         />
       </div>
     </div>
+  );
+}
+
+function DcgGuardRow() {
+  const { t } = useI18n();
+  const enabled = useSettingsStore((state) => state.dcgEnabled);
+  const setEnabled = useSettingsStore((state) => state.setDcgEnabled);
+  const [status, setStatus] = useState<DcgStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI.dcg.status().then((next) => {
+      if (!cancelled) setStatus(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const run = async (action: 'install' | 'uninstall') => {
+    setConfirmOpen(false);
+    setBusy(true);
+    setError(null);
+    const result = await window.electronAPI.dcg[action]();
+    setStatus(result.status);
+    if (!result.ok) setError(result.error ?? t('Operation failed'));
+    else setEnabled(action === 'install');
+    setBusy(false);
+  };
+  const installed = status?.installed === true;
+
+  return (
+    <ToolRow
+      rowId="tools.dcgEnabled"
+      newSession
+      icon={ShieldX}
+      title={t('Destructive command guard (dcg)')}
+      description={t(
+        'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.'
+      )}
+      control={
+        <Switch checked={enabled && installed} disabled={!installed} onCheckedChange={setEnabled} />
+      }
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">
+          {!status
+            ? t('Loading…')
+            : !status.supported
+              ? t('Not available on this platform')
+              : installed
+                ? t('Installed v{{version}}', { version: status.version })
+                : t('Not installed')}
+        </span>
+        {status?.supported &&
+          (installed ? (
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={busy}
+              onClick={() => void run('uninstall')}
+            >
+              {t('Uninstall')}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={busy}
+              onClick={() => setConfirmOpen(true)}
+            >
+              {busy ? t('Installing…') : t('Install')}
+            </Button>
+          ))}
+      </div>
+      {error && <p className="text-destructive text-xs">{error}</p>}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-md" zIndexLevel="nested">
+          <DialogHeader>
+            <DialogTitle>{t('Install dcg')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'Downloads dcg v{{version}} from its GitHub release and verifies the checksum. dcg is a third-party tool, not part of EnsoCode.',
+                { version: status?.version ?? '' }
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <div className="flex gap-2 rounded-md border border-destructive/32 bg-destructive/8 p-3 text-sm">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <p>
+                {t(
+                  'dcg is licensed under MIT with an additional rider: no rights are granted to OpenAI, Anthropic, their affiliates, or anyone acting on their behalf. Install only if this restriction does not apply to you.'
+                )}
+              </p>
+            </div>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button size="sm" onClick={() => void run('install')}>
+              {t('Agree and install')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </ToolRow>
   );
 }
 

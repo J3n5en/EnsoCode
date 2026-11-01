@@ -103,6 +103,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   botRouteClassifier: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   botAssistantModel: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   protectedActionsInCode: { mode: 'excluded', reason: 'device-local safety preference' },
+  dcgEnabled: { mode: 'excluded', reason: 'dcg binary is installed on this device' },
   voiceInputDevice: { mode: 'excluded', reason: 'microphones belong to this device' },
   voiceModel: { mode: 'excluded', reason: 'speech model lives on this device' },
   voiceCorrectionEnabled: { mode: 'excluded', reason: 'voice input is configured per device' },

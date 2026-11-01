@@ -116,6 +116,7 @@ import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentTyp
 import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
+import { dcgRoot, installedDcgPath } from './dcgBinary';
 import {
   getExtensionPlugins,
   setPluginMcpBridge,
@@ -1043,6 +1044,7 @@ export function spawnSession(
   const pluginEvents = extensionPlugins?.eventPlanForSpawn() ?? null;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
+  const dcgPath = state?.dcgEnabled === true ? installedDcgPath(dcgRoot()) : null;
   const sent = sendAgentCommand({
     type: 'spawn-parent',
     identity,
@@ -1056,6 +1058,7 @@ export function spawnSession(
     ...(trustedProjectCode.length > 0 ? { trustedProjectCode } : {}),
     ...(windowsLocalShell !== 'auto' ? { windowsLocalShell } : {}),
     rtkEnabled: state?.rtkEnabled !== false,
+    ...(dcgPath ? { dcgPath } : {}),
     ...(exploreFoldEnabled ? { exploreFoldEnabled: true } : {}),
     editMode,
     ...(compactStrategy !== 'standard' ? { compactStrategy } : {}),

@@ -8,6 +8,7 @@ import { registerBtwHandlers } from './btw';
 import { registerCapabilityHandlers } from './capabilities';
 import { registerChangesHandlers } from './changes';
 import { registerCompactionHandlers } from './compaction';
+import { registerDcgHandlers } from './dcg';
 import { registerExtensionPluginHandlers } from './extensionPlugins';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
@@ -64,4 +65,5 @@ export function registerIpcHandlers(): void {
   registerPairBotHandlers();
   registerAppBadgeHandlers();
   registerSpeechHandlers();
+  registerDcgHandlers();
 }

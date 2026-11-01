@@ -232,6 +232,7 @@ export const PROTECTED_ACTION_CATEGORIES = [
   'payment',
   'deploy',
   'secret',
+  'destructive',
 ] as const;
 export type ProtectedActionCategory = (typeof PROTECTED_ACTION_CATEGORIES)[number];
 
@@ -284,6 +285,8 @@ export interface ApprovalRequestInfo {
   expiresAt?: number;
   /** 托管判定无效（超时 / 出错 / 缺字段）退回人工的原因 */
   reviewFallback?: ApprovalReviewFallback;
+  /** dcg 命令守卫命中的规则与原因 */
+  guard?: { ruleId: string; reason: string };
 }
 
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */
@@ -1188,6 +1191,8 @@ export type AgentCommand =
       windowsLocalShell?: WindowsLocalShell;
       /** 内置 RTK；未设置时默认启用。 */
       rtkEnabled?: boolean;
+      /** dcg 命令守卫二进制；Main 仅在启用且已安装时下发 */
+      dcgPath?: string;
       /** ssh 项目：工具执行切到远端。Main 从项目权威派生，不信任 renderer。 */
       remote?: AgentRemoteConfig;
       /** 旁路会话：首条 prompt 前缀注入，消费一次 */
@@ -3330,6 +3335,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'disabledTools',
           'windowsLocalShell',
           'rtkEnabled',
+          'dcgPath',
           'remote',
           'rolePrompt',
           'systemPrompt',
@@ -3363,6 +3369,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.pluginEvents !== undefined && !isPluginEventPlan(value.pluginEvents)) ||
         (value.pluginHooks !== undefined && parsePluginHooks(value.pluginHooks) === null) ||
         (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||
+        (value.dcgPath !== undefined && !isNonEmptyString(value.dcgPath)) ||
         (value.planMode !== undefined && typeof value.planMode !== 'boolean') ||
         (value.windowsLocalShell !== undefined &&
           !(WINDOWS_LOCAL_SHELLS as readonly string[]).includes(
@@ -4337,7 +4344,12 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
           (PROTECTED_ACTION_CATEGORIES as readonly unknown[]).includes(value.request.protected)) &&
         isOptionalTimestamp(value.request.expiresAt) &&
         (value.request.reviewFallback === undefined ||
-          APPROVAL_REVIEW_FALLBACKS.includes(value.request.reviewFallback as never))
+          APPROVAL_REVIEW_FALLBACKS.includes(value.request.reviewFallback as never)) &&
+        (value.request.guard === undefined ||
+          (isRecord(value.request.guard) &&
+            hasOnlyKeys(value.request.guard, ['ruleId', 'reason']) &&
+            isNonEmptyString(value.request.guard.ruleId) &&
+            isNonEmptyString(value.request.guard.reason)))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'approval-resolved':
