@@ -14,6 +14,8 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
   reload <id> [--yes]          从上次安装的来源（目录、zip 或链接）重新安装；开发时改完代码用它更新
   uninstall <id>               卸载并删除插件数据
+  inject-anywhere <id>         允许插件向任意运行中的会话发消息（默认只能发到发起调用的会话）
+  inject-current <id>          恢复为只能发到发起调用的会话
   check                        检查 GitHub 安装的插件有没有新版本
   logs <id>                    插件进程日志末尾（console 输出与异常）
   config <id>                  查看配置项（密钥只显示是否已设置）
@@ -183,7 +185,9 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
       action === 'disable' ||
       action === 'approve' ||
       action === 'reject' ||
-      action === 'uninstall') &&
+      action === 'uninstall' ||
+      action === 'inject-anywhere' ||
+      action === 'inject-current') &&
     target
   ) {
     ensureOk(await deps.call({ cmd: 'plugin', action, id: target }));

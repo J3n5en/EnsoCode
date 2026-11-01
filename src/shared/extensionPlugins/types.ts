@@ -35,6 +35,10 @@ export interface ExtensionPluginSummary {
   running?: boolean;
   schedules?: { id: string; intervalSeconds: number; lastRunAt?: number; lastError?: string }[];
   events?: { event: string; mode: 'observe' | 'intercept' }[];
+  /** 连续失败而临时放行的拦截事件；until 为恢复试探的时间 */
+  interceptBreakers?: { event: string; until: number }[];
+  /** 申请了 agent.inject 时：用户是否允许向非发起会话注入 */
+  crossSessionInject?: boolean;
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
   /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */

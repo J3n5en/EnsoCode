@@ -7,6 +7,7 @@ import type {
   ToolResultEventResult,
 } from '@earendil-works/pi-coding-agent';
 import type { PluginEventName, PluginInterceptEvent } from '@shared/extensionPlugins/events';
+import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import type { PluginInterceptRequest } from '@shared/types/agent';
 
@@ -106,7 +107,7 @@ export class PluginEventInvoker {
     try {
       this.sender(
         {
-          customType: 'enso-plugin-message',
+          customType: PLUGIN_MESSAGE_TYPE,
           content: message.text,
           display: true,
           details: { pluginId: message.pluginId, pluginName: message.pluginName },

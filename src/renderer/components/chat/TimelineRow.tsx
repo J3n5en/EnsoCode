@@ -39,6 +39,7 @@ import {
   MessagesSquare,
   PackageMinus,
   Pencil,
+  Puzzle,
   RefreshCw,
   Search,
   SkipForward,
@@ -247,6 +248,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'session-custom' && a.entry === b.entry;
     case 'divider':
       return b.kind === 'divider' && a.text === b.text;
+    case 'plugin-message':
+      return b.kind === 'plugin-message' && a.text === b.text && a.pluginId === b.pluginId;
   }
 }
 
@@ -814,6 +817,8 @@ export const TimelineRow = memo(function TimelineRow({
       return <CompactionProgressRow state={item.state} />;
     case 'session-custom':
       return <SessionCustomRow entry={item.entry} />;
+    case 'plugin-message':
+      return <PluginMessageRow item={item} />;
     case 'divider':
       return (
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -855,6 +860,24 @@ function OauthAccountRow({
     <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-xs">
       <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <p className="min-w-0 break-words text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
+/** 插件注入的消息：标明来源，样式与用户消息、模型回复都不同 */
+function PluginMessageRow({ item }: { item: Extract<TimelineItem, { kind: 'plugin-message' }> }) {
+  const { t } = useI18n();
+  return (
+    <div
+      data-plugin-message={item.pluginId}
+      className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs"
+    >
+      <p className="mb-1 flex items-center gap-1.5 text-muted-foreground">
+        <Puzzle className="h-3.5 w-3.5 shrink-0" />
+        <span>{t('From plugin {{name}}', { name: item.pluginName })}</span>
+        <span className="font-mono opacity-70">{item.pluginId}</span>
+      </p>
+      <p className="whitespace-pre-wrap break-words text-foreground">{item.text}</p>
     </div>
   );
 }

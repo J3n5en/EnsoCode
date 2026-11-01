@@ -96,6 +96,9 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
       return plugins.rejectPending(command.id);
     case 'uninstall':
       return plugins.uninstall(command.id);
+    case 'inject-anywhere':
+    case 'inject-current':
+      return plugins.setCrossSessionInject(command.id, command.action === 'inject-anywhere');
     case 'config-get':
       return plugins.configView(command.id);
     case 'restage':

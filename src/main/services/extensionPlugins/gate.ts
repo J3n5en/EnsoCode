@@ -23,6 +23,8 @@ const MAX_MCP_ARGS_BYTES = 64 * 1024;
 const MAX_CALL_DEPTH = 3;
 const MAX_CLIPBOARD_BYTES = 1024 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+const INJECT_PER_WINDOW = 5;
+const INJECT_WINDOW_MS = 10_000;
 
 export type ComposerOp = 'readDraft' | 'insertText' | 'replaceDraft';
 
@@ -68,6 +70,8 @@ export interface GateDeps {
   now(): number;
   progress?(invocationId: string, text: string): void;
   writeArtifact?(pluginId: string, input: Record<string, unknown>): PluginArtifactInfo;
+  /** 用户是否允许该插件向非发起会话注入 */
+  crossSessionInject?(pluginId: string): boolean;
   inject?(
     pluginId: string,
     input: {
@@ -170,9 +174,19 @@ const utf8Bytes = (s: string) => Buffer.byteLength(s, 'utf8');
 
 export class PluginHostGate {
   readonly invocations: InvocationTable;
+  private readonly injects = new Map<string, number[]>();
 
   constructor(private readonly deps: GateDeps) {
     this.invocations = new InvocationTable(deps.now);
+  }
+
+  /** 每个插件 10 秒内最多注入 5 条，防止失控的常驻插件撑爆会话上下文 */
+  private admitInject(pluginId: string): void {
+    const now = this.deps.now();
+    const recent = (this.injects.get(pluginId) ?? []).filter((t) => now - t < INJECT_WINDOW_MS);
+    if (recent.length >= INJECT_PER_WINDOW) throw pluginError('RATE_LIMITED', '注入消息过于频繁');
+    recent.push(now);
+    this.injects.set(pluginId, recent);
   }
 
   async handle(
@@ -293,6 +307,9 @@ export class PluginHostGate {
         const inv = invocation();
         const sessionId = typeof a.sessionId === 'string' ? a.sessionId : inv.sessionId;
         if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
+        if (sessionId !== inv.sessionId && !this.deps.crossSessionInject?.(pluginId))
+          throw pluginError('PERMISSION_DENIED', '未允许向其他会话发送消息');
+        this.admitInject(pluginId);
         if (
           typeof a.text !== 'string' ||
           a.text.length === 0 ||

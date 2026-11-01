@@ -158,7 +158,9 @@ export type TimelineItem =
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
   | { kind: 'session-custom'; key: string; entry: AgentSessionCustomEntry }
   /** 带字分隔线（委派子会话的「第 N 次执行」） */
-  | { kind: 'divider'; key: string; text: string };
+  | { kind: 'divider'; key: string; text: string }
+  /** 插件经 session.inject 写入的消息；必须标明来源 */
+  | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string };
 
 export function formatApplyPatchOutcome(outcome: ProjectedApplyPatchOutcome): string {
   const list = (label: string, paths: string[]): string =>
@@ -967,6 +969,17 @@ function buildMessageTimeline(
       }
       return;
     }
+    if (message.role === 'custom') {
+      if (message.pluginSource) {
+        items.push({
+          kind: 'plugin-message',
+          key: `${absIndex}`,
+          text: partText(message),
+          ...message.pluginSource,
+        });
+      }
+      return;
+    }
     if (message.role === 'compactionSummary') {
       items.push({
         kind: 'compaction',
@@ -1541,6 +1554,7 @@ function isTurnSwallowable(item: TimelineItem): boolean {
     case 'compaction-progress':
     case 'error':
     case 'divider':
+    case 'plugin-message':
       return false;
     default:
       return true;

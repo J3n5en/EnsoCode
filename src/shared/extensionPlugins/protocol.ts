@@ -5,6 +5,26 @@ import type { PluginEventName } from './events';
 /** 注入消息与工具进度的字符上限；gate、Main、worker 共用 */
 export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
 export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
+/** 插件注入消息在会话里的 customType */
+export const PLUGIN_MESSAGE_TYPE = 'enso-plugin-message';
+
+/** 注入消息的来源；界面据此标明是哪个插件发的 */
+export interface PluginMessageSource {
+  pluginId: string;
+  pluginName: string;
+}
+
+const PLUGIN_ID = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
+
+export function parsePluginMessageSource(raw: unknown): PluginMessageSource | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const { pluginId, pluginName } = raw as Record<string, unknown>;
+  if (typeof pluginId !== 'string' || pluginId.length > 40 || !PLUGIN_ID.test(pluginId))
+    return null;
+  if (typeof pluginName !== 'string' || pluginName.length === 0 || pluginName.length > 60)
+    return null;
+  return { pluginId, pluginName };
+}
 
 export const PLUGIN_CALL_METHODS = [
   'tool.execute',

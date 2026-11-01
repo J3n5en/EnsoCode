@@ -82,6 +82,14 @@ const UI_TIMEOUT_MS = 2_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const SCHEDULE_TIMEOUT_MS = 60_000;
 const PREPARE_TIMEOUT_MS = 5_000;
+const INTERCEPT_BREAKER_FAILURES = 3;
+const INTERCEPT_BREAKER_MS = 30_000;
+
+class InterceptDeadlineError extends Error {
+  constructor() {
+    super('拦截总时长已用尽');
+  }
+}
 const RESIDENT_LIMIT = 5;
 const RESIDENT_RESTART_MS = 5_000;
 const PROGRESS_INTERVAL_MS = 200;
@@ -172,6 +180,7 @@ export class ExtensionPluginService {
   private readonly crashes = new Map<string, number[]>();
   /** 进程内最近一条错误日志；崩溃停用时写进登记 */
   private readonly recentErrors = new Map<string, { at: number; message: string }>();
+  private readonly interceptFailures = new Map<string, { failures: number; openUntil: number }>();
   private readonly uiCalls = new Map<
     string,
     { stamps: number[]; failures: number; openUntil: number }
@@ -213,6 +222,8 @@ export class ExtensionPluginService {
       progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
       writeArtifact: (pluginId, input) => this.artifacts.write(pluginId, input),
       inject: (pluginId, input) => this.inject(pluginId, input),
+      crossSessionInject: (pluginId) =>
+        this.records.find((r) => r.id === pluginId)?.crossSessionInject === true,
       callPlugin: (callerId, targetId, name, args, depth, caller) =>
         this.callExport(callerId, targetId, name, args, depth, caller),
       registerContrib: (pluginId, input) => this.registerContrib(pluginId, input),
@@ -285,6 +296,12 @@ export class ExtensionPluginService {
             };
           }),
           events: manifest.contributes.events.map(({ event, mode }) => ({ event, mode })),
+          ...(this.openInterceptBreakers(record.id).length > 0
+            ? { interceptBreakers: this.openInterceptBreakers(record.id) }
+            : {}),
+          ...(record.grant.permissions.includes('agent.inject')
+            ? { crossSessionInject: record.crossSessionInject }
+            : {}),
           ...(record.pending && pending
             ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
             : {}),
@@ -390,6 +407,7 @@ export class ExtensionPluginService {
         state: 'disabled',
         grant,
         installedAt: Date.now(),
+        crossSessionInject: false,
         source,
       });
     } else {
@@ -417,6 +435,17 @@ export class ExtensionPluginService {
     const result = this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
     if (result.ok) this.syncBackground();
     return result;
+  }
+
+  /** 允许或禁止插件向非发起会话注入消息；只对申请了 agent.inject 的插件有效 */
+  setCrossSessionInject(id: string, allowed: boolean): { ok: boolean; error?: string } {
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return { ok: false, error: '插件未安装' };
+    if (!record.grant.permissions.includes('agent.inject'))
+      return { ok: false, error: '插件没有申请 agent.inject' };
+    record.crossSessionInject = allowed;
+    this.persist();
+    return { ok: true };
   }
 
   approvePending(id: string) {
@@ -805,8 +834,9 @@ export class ExtensionPluginService {
   }): Promise<InterceptResult[E]> {
     const initial = initialInterceptState(input.event, input.payload);
     const deadline = Date.now() + (input.deadlineMs ?? INTERCEPT_TOTAL_TIMEOUT_MS);
+    let targets: (Loaded & { id: string })[];
     try {
-      const targets = this.enabled()
+      targets = this.enabled()
         .filter((entry) =>
           entry.manifest.contributes.events.some(
             (sub) =>
@@ -816,37 +846,8 @@ export class ExtensionPluginService {
           )
         )
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      let state = initial;
-      for (const entry of targets) {
-        if (state.done) break;
-        const sub = entry.manifest.contributes.events.find((item) => item.event === input.event);
-        try {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) throw new Error('拦截总时长已用尽');
-          const value = await this.invoke(
-            entry.id,
-            'event.dispatch',
-            { event: input.event, data: state.payload },
-            {
-              sessionId: input.sessionId,
-              projectRoot: input.projectRoot,
-              gesture: false,
-              timeoutMs: Math.min(INTERCEPT_TIMEOUT_MS, remaining),
-              kind: 'event',
-            }
-          );
-          state = applyInterceptResult(state, value);
-        } catch (error) {
-          this.appendLog(
-            entry.id,
-            'warn',
-            `拦截 ${input.event} 失败：${error instanceof Error ? error.message : String(error)}`
-          );
-          if (sub?.failClosed) return failClosedResult(input.event, entry.manifest.name);
-        }
-      }
-      return state.result;
     } catch (error) {
+      // 宿主自身出错（不属于任何插件）时放行；插件的失败在下面逐个按 failClosed 处理
       this.appendLog(
         'extension-plugins',
         'warn',
@@ -854,6 +855,78 @@ export class ExtensionPluginService {
       );
       return initial.result;
     }
+    let state = initial;
+    for (const entry of targets) {
+      if (state.done) break;
+      const sub = entry.manifest.contributes.events.find((item) => item.event === input.event);
+      const breaker = this.interceptBreaker(entry.id, input.event);
+      if (breaker === 'open') continue;
+      const remaining = deadline - Date.now();
+      try {
+        if (remaining <= 0) throw new InterceptDeadlineError();
+        const value = await this.invoke(
+          entry.id,
+          'event.dispatch',
+          { event: input.event, data: state.payload },
+          {
+            sessionId: input.sessionId,
+            projectRoot: input.projectRoot,
+            gesture: false,
+            timeoutMs: Math.min(INTERCEPT_TIMEOUT_MS, remaining),
+            kind: 'event',
+          }
+        );
+        state = applyInterceptResult(state, value);
+        this.settleIntercept(entry.id, input.event, true, entry.manifest.name);
+      } catch (error) {
+        this.appendLog(
+          entry.id,
+          'warn',
+          `拦截 ${input.event} 失败：${error instanceof Error ? error.message : String(error)}`
+        );
+        // 总时长用尽是前面插件拖慢的，不计入本插件的失败
+        if (!(error instanceof InterceptDeadlineError))
+          this.settleIntercept(entry.id, input.event, false, entry.manifest.name);
+        if (sub?.failClosed) return failClosedResult(input.event, entry.manifest.name);
+      }
+    }
+    return state.result;
+  }
+
+  /** 拦截熔断：open 期间跳过该插件（放行）；到期后放一次试探 */
+  private interceptBreaker(pluginId: string, event: string): 'closed' | 'open' | 'trial' {
+    const state = this.interceptFailures.get(`${pluginId}:${event}`);
+    if (!state || state.openUntil === 0) return 'closed';
+    return Date.now() < state.openUntil ? 'open' : 'trial';
+  }
+
+  private settleIntercept(pluginId: string, event: string, ok: boolean, name: string): void {
+    const key = `${pluginId}:${event}`;
+    const state = this.interceptFailures.get(key) ?? { failures: 0, openUntil: 0 };
+    if (ok) {
+      if (!this.interceptFailures.delete(key) || state.openUntil === 0) return;
+      this.appendLog(pluginId, 'info', `插件 ${name} 的 ${event} 检查已恢复`);
+      this.touch();
+      return;
+    }
+    state.failures += 1;
+    this.interceptFailures.set(key, state);
+    if (state.failures < INTERCEPT_BREAKER_FAILURES) return;
+    state.openUntil = Date.now() + INTERCEPT_BREAKER_MS;
+    this.appendLog(
+      pluginId,
+      'warn',
+      `插件 ${name} 的 ${event} 检查连续失败，已临时放行 ${INTERCEPT_BREAKER_MS / 1000} 秒`
+    );
+    this.touch();
+  }
+
+  private openInterceptBreakers(pluginId: string): { event: string; until: number }[] {
+    const now = Date.now();
+    const prefix = `${pluginId}:`;
+    return [...this.interceptFailures]
+      .filter(([key, state]) => key.startsWith(prefix) && now < state.openUntil)
+      .map(([key, state]) => ({ event: key.slice(prefix.length), until: state.openUntil }));
   }
 
   listArtifacts(pluginId?: string): PluginArtifactInfo[] {

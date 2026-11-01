@@ -40,6 +40,8 @@ import {
   PLUGIN_INJECT_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
   type PluginArtifactInfo,
+  type PluginMessageSource,
+  parsePluginMessageSource,
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
 import type { PluginEventPlan, PluginToolDescriptor } from '../extensionPlugins/types';
@@ -1539,6 +1541,8 @@ export interface ProjectedMessage {
   backgroundTaskId?: string;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
+  /** 插件注入的消息（role=custom）的来源 */
+  pluginSource?: PluginMessageSource;
   role: string;
   content: ProjectedPart[];
   /** toolResult 消息附带 */
@@ -2342,6 +2346,8 @@ function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
   if (value.backgroundTaskId !== undefined && !isBackgroundTaskId(value.backgroundTaskId)) {
     return false;
   }
+  if (value.pluginSource !== undefined && !parsePluginMessageSource(value.pluginSource))
+    return false;
   if (
     value.pluginArtifacts !== undefined &&
     (!Array.isArray(value.pluginArtifacts) ||

@@ -661,6 +661,12 @@ function ExtensionPluginsSection() {
               </Button>
             </div>
           </div>
+          {plugin.interceptBreakers?.map((breaker) => (
+            <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
+              {breaker.event} 检查连续失败，临时放行到{' '}
+              {new Date(breaker.until).toLocaleTimeString()}
+            </p>
+          ))}
           <PluginCapabilityBlock
             permissions={plugin.permissions}
             resident={plugin.resident}
@@ -668,6 +674,23 @@ function ExtensionPluginsSection() {
             events={plugin.events}
             schedules={plugin.schedules}
           />
+          {plugin.crossSessionInject !== undefined && (
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span>
+                <span className="block">允许向任意运行中的会话发送消息</span>
+                <span className="block text-muted-foreground">
+                  关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
+                </span>
+              </span>
+              <Switch
+                aria-label="允许向任意运行中的会话发送消息"
+                checked={plugin.crossSessionInject}
+                onCheckedChange={(allowed) =>
+                  void window.electronAPI.extensionPlugins.setCrossSessionInject(plugin.id, allowed)
+                }
+              />
+            </div>
+          )}
           {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
             <div className="space-y-1">
               <p className="text-muted-foreground text-xs">待同意的权限</p>

@@ -95,7 +95,7 @@
 | `mcp.call` | 有 `mcp.tools` | 调用用户已配置的 MCP 服务里、清单列出的工具 |
 | `agent.observe` | 有通知型 `events` | 收到会话事件 |
 | `agent.intercept` | 有拦截型 `events` | 拦截并改写工具调用、工具结果和用户输入 |
-| `agent.inject` | 要向会话发消息 | `enso.session.inject` |
+| `agent.inject` | 要向会话发消息 | `enso.session.inject`：向会话发送消息，并可触发该会话继续执行。默认只能发到发起调用的会话；用户单独允许后可发到任意运行中的会话 |
 | `process.background` | `resident` 或有 `schedules` | 常驻进程、定时任务 |
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
 | `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
@@ -192,13 +192,17 @@ export async function activate(enso) {
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。
 
-多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。
+多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。合计时长用尽时，还没轮到的插件也按各自的 `failClosed` 处理。只有 Enso 自身出错（与任何插件无关）时才无条件放行。
+
+同一插件的同一事件连续失败 3 次（报错或超时）后熔断：之后 30 秒内该事件不再询问它，直接放行，即使设了 `failClosed`。界面会提示「插件 X 的检查连续失败，已临时放行」，设置页的插件行显示放行到何时，日志里有记录。到期后下一次事件会试探询问：成功则恢复，失败则按 `failClosed` 处理并再熔断 30 秒。因前面的插件拖慢而没轮到的不计入失败次数。
 
 ### 向会话发消息
 
-`session.inject({ text, sessionId?, deliverAs?, triggerTurn? })` 把一条消息加进会话，用户能看到来自哪个插件。需要 `agent.inject`。
+`session.inject({ text, sessionId?, deliverAs?, triggerTurn? })` 把一条消息加进会话。需要 `agent.inject`。消息在会话里单独成行，标明「来自插件 <名称>」和插件 id，样式与用户消息、模型回复都不同。模型侧按用户角色收到原文，不带来源标记；需要模型知道来源时请在文本里自己写明。
 
 - `sessionId` 缺省取当前调用所属的会话，都没有则返回 `NO_SESSION`。会话必须正在运行，否则返回 `INJECT_FAILED`。
+- 发到发起调用以外的会话（包括定时任务、常驻进程里没有当前会话时指定的 `sessionId`）要用户在设置页该插件下打开「允许向任意运行中的会话发送消息」（命令行 `enso-server plugin inject-anywhere <id>`），否则返回 `PERMISSION_DENIED`。新装的插件默认关闭。
+- 每个插件 10 秒内最多 5 条，超过返回 `RATE_LIMITED`。
 - `deliverAs`：`nextTurn`（缺省，并入下一轮）、`steer`（插入正在进行的回复）、`followUp`（当前回复结束后排队）。
 - `triggerTurn: true` 时会话空闲也会立即开始一轮。
 - 文本不超过 32K 字符。
@@ -338,7 +342,8 @@ export function onLoad(enso) {
 | 产出文件 | 单个 50MB，每插件 200 个 |
 | 侧栏页面状态 | 每插件 1MB |
 | 会话拦截 | 每插件 5 秒，合计 25 秒；`before_compact` 10 秒 |
-| 注入消息 | 32K 字符 |
+| 注入消息 | 32K 字符；每插件 10 秒 5 条 |
+| 拦截熔断 | 同事件连续失败 3 次放行 30 秒 |
 | 剪贴板 | 1MB |
 | 动态注册 | 工具 50 个，命令 20 个 |
 | 定时任务 | 最多 10 个，间隔 60–86400 秒，单次缺省 60 秒 |
@@ -381,7 +386,7 @@ export function onLoad(enso) {
 | `BAD_RESULT` | 工具返回值不是合法结果 |
 | `TIMEOUT` | 调用超时 |
 | `ABORTED` | 调用被取消 |
-| `RATE_LIMITED` | 调用过于频繁 |
+| `RATE_LIMITED` | 调用或注入过于频繁 |
 | `CIRCUIT_OPEN` | 连续失败，30 秒内拒绝 |
 | `QUOTA` | 动态工具或命令已达清单上限 |
 | `CALL_DEPTH` | 插件间调用嵌套超过 3 层 |

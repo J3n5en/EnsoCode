@@ -67,6 +67,40 @@ describe('projectMessage', () => {
     }
   });
 
+  it('插件注入的消息带来源投影，其它 custom 消息与脏来源不带', () => {
+    expect(
+      projectMessage({
+        role: 'custom',
+        customType: 'enso-plugin-message',
+        content: '来自插件',
+        display: true,
+        details: { pluginId: 'enso.example.notes', pluginName: 'Notes' },
+        timestamp: 5,
+      })
+    ).toEqual({
+      role: 'custom',
+      content: [{ type: 'text', text: '来自插件' }],
+      timestamp: 5,
+      pluginSource: { pluginId: 'enso.example.notes', pluginName: 'Notes' },
+    });
+    expect(
+      projectMessage({
+        role: 'custom',
+        customType: 'claude-hook-context',
+        content: 'x',
+        details: { pluginId: 'enso.example.notes', pluginName: 'Notes' },
+      })
+    ).not.toHaveProperty('pluginSource');
+    expect(
+      projectMessage({
+        role: 'custom',
+        customType: 'enso-plugin-message',
+        content: 'x',
+        details: { pluginId: 'Bad Id', pluginName: 'N' },
+      })
+    ).not.toHaveProperty('pluginSource');
+  });
+
   it('插件工具结果投影产出文件，非插件工具与脏条目不投影', () => {
     const artifact = {
       id: 'a1b2',

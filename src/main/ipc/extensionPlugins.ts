@@ -252,6 +252,14 @@ export function registerExtensionPluginHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT,
+    (_e, id: unknown, allowed: unknown) => {
+      if (!isId(id) || typeof allowed !== 'boolean') return { ok: false, error: '参数不合法' };
+      return plugins().setCrossSessionInject(id, allowed);
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING, (_e, id: unknown) => {
     if (!isId(id)) return { ok: false, error: '参数不合法' };
     return plugins().approvePending(id);

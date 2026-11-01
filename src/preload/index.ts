@@ -1639,6 +1639,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_DISCARD, token),
     setEnabled: (id: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_ENABLED, id, enabled),
+    setCrossSessionInject: (
+      id: string,
+      allowed: boolean
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT, id, allowed),
     approvePending: (id: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING, id),
     rejectPending: (id: string): Promise<{ ok: boolean; error?: string }> =>

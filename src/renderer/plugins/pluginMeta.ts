@@ -13,7 +13,8 @@ const LABELS: Record<ExtensionPluginPermission, string> = {
   'mcp.call': '调用宿主 MCP 工具',
   'agent.observe': '观察会话事件',
   'agent.intercept': '拦截并改写会话事件',
-  'agent.inject': '向会话注入消息',
+  'agent.inject':
+    '向会话发送消息，并可触发该会话继续执行；默认只发到发起调用的会话，允许后可发到任意运行中的会话',
   'process.background': '常驻后台并拉起子进程',
   'plugin.call': '调用其他插件',
   'ui.clipboard': '写入剪贴板',

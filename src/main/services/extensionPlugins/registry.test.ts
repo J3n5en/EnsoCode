@@ -33,6 +33,7 @@ const valid = {
     resident: false,
   },
   installedAt: 1,
+  crossSessionInject: false,
 };
 
 describe('插件登记表', () => {

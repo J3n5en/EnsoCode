@@ -12,6 +12,8 @@ export interface PluginRecord {
   state: PluginState;
   grant: PluginGrant;
   installedAt: number;
+  /** 用户单独允许该插件向非发起会话注入消息；默认关 */
+  crossSessionInject: boolean;
   /** 更新扩大了授权、等用户同意的新版本；期间旧版本照常运行 */
   pending?: { version: string; dir: string; grant: PluginGrant };
   /** 最近一次崩溃停用的原因；重新启用时清掉 */

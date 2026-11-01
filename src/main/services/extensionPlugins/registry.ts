@@ -58,6 +58,7 @@ function isPluginRecord(v: unknown): v is PluginRecord {
     (PLUGIN_STATES as readonly unknown[]).includes(v.state) &&
     isGrant(v.grant) &&
     typeof v.installedAt === 'number' &&
+    typeof v.crossSessionInject === 'boolean' &&
     pendingOk
   );
 }

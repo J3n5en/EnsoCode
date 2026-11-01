@@ -2436,6 +2436,29 @@ describe('mcp 代理调用行', () => {
 });
 
 describe('compaction 摘要行', () => {
+  it('插件注入的消息渲染为带来源的行，其它 custom 消息不显示', () => {
+    const timeline = buildTimeline(
+      [
+        user('hi'),
+        {
+          role: 'custom',
+          content: [{ type: 'text', text: '提醒：构建完成' }],
+          timestamp: 9,
+          pluginSource: { pluginId: 'enso.example.notes', pluginName: 'Notes' },
+        },
+        { role: 'custom', content: [{ type: 'text', text: 'hidden' }] },
+      ],
+      false
+    );
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'plugin-message']);
+    expect(timeline[1]).toMatchObject({
+      kind: 'plugin-message',
+      text: '提醒：构建完成',
+      pluginId: 'enso.example.notes',
+      pluginName: 'Notes',
+    });
+  });
+
   it('compactionSummary 消息渲染为 compaction 行，带摘要与压缩前 token 数', () => {
     const timeline = buildTimeline(
       [

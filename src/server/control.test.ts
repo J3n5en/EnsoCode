@@ -64,6 +64,12 @@ describe('parseControlCommand', () => {
     expect(parse({ cmd: 'plugin', action: 'enable' })).toEqual({
       error: 'plugin enable requires id',
     });
+    for (const action of ['inject-anywhere', 'inject-current'])
+      expect(parse({ cmd: 'plugin', action, id: 'a.b' })).toEqual({
+        cmd: 'plugin',
+        action,
+        id: 'a.b',
+      });
     expect(parse({ cmd: 'plugin', action: 'explode' })).toEqual({ error: 'unknown plugin action' });
   });
 

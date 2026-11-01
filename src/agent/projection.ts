@@ -1,5 +1,6 @@
 import { parseApprovalReviewRecord } from '@shared/approvalReviewRecord';
 import { pluginArtifactsFromToolDetails } from '@shared/extensionPlugins/artifacts';
+import { PLUGIN_MESSAGE_TYPE, parsePluginMessageSource } from '@shared/extensionPlugins/protocol';
 import { parsePluginToolName } from '@shared/extensionPlugins/toolName';
 import { parseMaskReport } from '@shared/privacyMask/report';
 import { parseRtkToolStats } from '@shared/rtk';
@@ -171,6 +172,10 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (value.role === 'assistant' && value.privacyMask !== undefined) {
     const privacyMask = parseMaskReport(value.privacyMask);
     if (privacyMask) projected.privacyMask = privacyMask;
+  }
+  if (value.role === 'custom' && value.customType === PLUGIN_MESSAGE_TYPE) {
+    const source = parsePluginMessageSource(value.details);
+    if (source) projected.pluginSource = source;
   }
   if (value.role === 'compactionSummary') {
     // pi 的 compaction 消息用 summary 字段而不是 content

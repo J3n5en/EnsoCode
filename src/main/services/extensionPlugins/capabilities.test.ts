@@ -285,6 +285,95 @@ describe('插件能力', () => {
     expect(await ask()).toMatchObject({ block: true });
   });
 
+  it('failClosed 拦截连续失败 3 次熔断：30 秒内放行且不再询问，到期后试探成功即恢复', async () => {
+    let now = 1_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { service, root } = createService();
+      const flag = join(root, 'healthy');
+      await install(service, {
+        'enso-plugin.json': manifest({
+          id: 'c.guard',
+          name: 'Guard',
+          permissions: ['agent.intercept'],
+          contributes: { events: [{ event: 'tool_call', mode: 'intercept', failClosed: true }] },
+        }),
+        'main.mjs': `import { existsSync, appendFileSync } from 'node:fs';
+          export function activate(enso) {
+            enso.events.on('tool_call', () => {
+              appendFileSync(${JSON.stringify(join(root, 'calls'))}, 'x');
+              if (!existsSync(${JSON.stringify(flag)})) throw new Error('down');
+              return {};
+            });
+          }`,
+      });
+      service.setEnabled('c.guard', true);
+      const calls = () => {
+        try {
+          return readFileSync(join(root, 'calls'), 'utf8').length;
+        } catch {
+          return 0;
+        }
+      };
+      const ask = () =>
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'tool_call',
+          payload: { toolCallId: '1', toolName: 'bash', input: { n: 1 } },
+        });
+      for (let i = 0; i < 3; i++) expect(await ask()).toMatchObject({ block: true });
+      expect(calls()).toBe(3);
+      expect(service.list()[0]?.interceptBreakers).toEqual([
+        { event: 'tool_call', until: now + 30_000 },
+      ]);
+      expect(await ask()).toEqual({});
+      expect(calls()).toBe(3);
+      expect(service.logs('c.guard')).toContain('已临时放行');
+      now += 30_001;
+      writeFileSync(flag, '');
+      expect(await ask()).toEqual({});
+      expect(calls()).toBe(4);
+      expect(service.list()[0]?.interceptBreakers).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('熔断到期后试探仍失败则立即重新熔断', async () => {
+    let now = 1_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { service } = createService();
+      await install(service, {
+        'enso-plugin.json': manifest({
+          id: 'c.guard',
+          name: 'Guard',
+          permissions: ['agent.intercept'],
+          contributes: { events: [{ event: 'input', mode: 'intercept', failClosed: true }] },
+        }),
+        'main.mjs': `export function activate(enso) { enso.events.on('input', () => { throw new Error('down'); }); }`,
+      });
+      service.setEnabled('c.guard', true);
+      const ask = () =>
+        service.intercept({
+          sessionId: 's',
+          projectRoot: null,
+          event: 'input',
+          payload: { text: 'hi', source: 'interactive' },
+        });
+      for (let i = 0; i < 3; i++) await ask();
+      now += 30_001;
+      expect(await ask()).toEqual({ action: 'handled' });
+      expect(service.list()[0]?.interceptBreakers).toEqual([
+        { event: 'input', until: now + 30_000 },
+      ]);
+      expect(await ask()).toEqual({ action: 'continue' });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('工具超时取声明值，进度节流，产出可列出、拒绝路径并随卸载删除', async () => {
     const { service, root } = createService();
     await install(service, {
@@ -525,6 +614,54 @@ describe('插件能力', () => {
       projectRoot: null,
     });
     expect(result.content).toBe('b.caller');
+  });
+
+  it('注入默认只到当前会话，跨会话要单独开关，且有频率上限', async () => {
+    const { service, bridge, root } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({ permissions: ['agent.tool', 'agent.inject'] }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async (args) => {
+          try {
+            await enso.session.inject({ text: 'hi', ...(args.to ? { sessionId: args.to } : {}) });
+            return 'ok';
+          } catch (e) { return e.code; }
+        });
+      }`,
+    });
+    service.setEnabled('example.demo', true);
+    const send = async (to?: string, sessionId = 's1') =>
+      (
+        await service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: to ? { to } : {},
+          sessionId,
+          projectRoot: null,
+        })
+      ).content;
+    expect(await send()).toBe('ok');
+    expect(await send('s1')).toBe('ok');
+    expect(await send('s2')).toBe('PERMISSION_DENIED');
+    expect(bridge.mock.calls.map((call) => (call as unknown[])[0])).toEqual(['s1', 's1']);
+    expect(service.list()[0]?.crossSessionInject).toBe(false);
+    expect(service.setCrossSessionInject('example.demo', true)).toEqual({ ok: true });
+    expect(await send('s2')).toBe('ok');
+    expect(
+      JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8')).plugins[0].crossSessionInject
+    ).toBe(true);
+    const results: string[] = [];
+    for (let i = 0; i < 12; i++) results.push(await send());
+    expect(results.filter((r) => r === 'RATE_LIMITED').length).toBeGreaterThan(0);
+  });
+
+  it('没有 agent.inject 的插件不能打开跨会话注入', async () => {
+    const { service } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest(),
+      'main.mjs': `export function activate(enso) { enso.tools.register('lookup', () => 'x'); }`,
+    });
+    expect(service.setCrossSessionInject('example.demo', true).ok).toBe(false);
+    expect(service.list()[0]?.crossSessionInject).toBeUndefined();
   });
 
   it('定时任务按间隔执行且不重叠，停用后不再跑', async () => {

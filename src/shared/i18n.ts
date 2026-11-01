@@ -796,6 +796,7 @@ export const zhTranslations: Record<string, string> = {
   'Reviews code or diffs; read-only, returns prioritized issues':
     '只读审查代码或差异，并按优先级返回问题',
   'Dispatched to': '已派发给',
+  'From plugin {{name}}': '来自插件 {{name}}',
   Completed: '已完成',
   Failed: '失败',
   succeeded: '已成功',

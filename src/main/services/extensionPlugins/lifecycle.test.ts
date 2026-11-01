@@ -23,6 +23,7 @@ const record = (patch: Partial<PluginRecord> = {}): PluginRecord => ({
   state: 'disabled',
   grant: grant(),
   installedAt: 1,
+  crossSessionInject: false,
   ...patch,
 });
 

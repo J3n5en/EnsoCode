@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { addToast } from '@/components/ui/toast';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
+import { newInterceptBreakers } from './breakers';
 import { mergePluginCommands, setPluginCommands } from './commands';
 import { handleDraftRequest } from './draftBridge';
 import { createRendererDeps, loadPluginRenderer } from './loader';
@@ -14,12 +16,20 @@ export function PluginUiHost() {
     const deps = createRendererDeps(() => displayedConversationId(useSessionsStore.getState()));
     let generation = 0;
     let handles: { dispose(): void }[] = [];
+    const breakers = new Set<string>();
     const reload = () => {
       const mine = ++generation;
       for (const handle of handles) handle.dispose();
       handles = [];
       void window.electronAPI.extensionPlugins.list().then(async (list) => {
         if (mine !== generation) return;
+        for (const { pluginName, event } of newInterceptBreakers(list, breakers)) {
+          addToast({
+            type: 'warning',
+            title: `插件 ${pluginName} 的检查连续失败，已临时放行`,
+            description: `${event} 事件 30 秒内不再经过该插件；详情见设置里的插件日志`,
+          });
+        }
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
         setPluginCommands(
           enabled.flatMap((plugin) =>

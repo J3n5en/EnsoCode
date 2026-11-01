@@ -1,7 +1,15 @@
 import { isAbsolute } from 'node:path';
 import { parsePluginInstallUrl } from '@shared/extensionPlugins/installUrl';
 
-const PLUGIN_ID_ACTIONS = ['enable', 'disable', 'approve', 'reject', 'uninstall'] as const;
+const PLUGIN_ID_ACTIONS = [
+  'enable',
+  'disable',
+  'approve',
+  'reject',
+  'uninstall',
+  'inject-anywhere',
+  'inject-current',
+] as const;
 const PLUGIN_TOKEN_ACTIONS = ['commit', 'discard'] as const;
 
 export type PluginControlCommand =

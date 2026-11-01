@@ -186,6 +186,8 @@ describe('enso-server plugin', () => {
     await runPluginCommand(['disable', 'demo.hello'], d);
     expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'disable', id: 'demo.hello' });
     await expect(runPluginCommand(['enable'], d)).rejects.toThrow('用法');
+    await runPluginCommand(['inject-anywhere', 'a.b'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'inject-anywhere', id: 'a.b' });
     await expect(runPluginCommand(['bogus'], d)).rejects.toThrow('用法');
   });
 

@@ -884,6 +884,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_COMMIT: excluded('Enso 插件安装确认：用户同意权限后落盘。'),
   EXTENSION_PLUGINS_DISCARD: excluded('Enso 插件安装取消：丢弃暂存。'),
   EXTENSION_PLUGINS_SET_ENABLED: excluded('Enso 插件启用 / 停用开关。'),
+  EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT: excluded('Enso 插件跨会话注入消息的授权开关。'),
   EXTENSION_PLUGINS_APPROVE_PENDING: excluded('Enso 插件更新扩大授权后的重新同意。'),
   EXTENSION_PLUGINS_REJECT_PENDING: excluded('Enso 插件更新扩大授权后的拒绝，保留旧版本。'),
   EXTENSION_PLUGINS_UNINSTALL: excluded('Enso 插件卸载。'),

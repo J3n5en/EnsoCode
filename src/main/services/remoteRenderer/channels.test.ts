@@ -37,6 +37,9 @@ describe('isRemoteChannelAllowed', () => {
     expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_DELETE, true)).toBe(
       false
     );
+    expect(
+      isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT, true)
+    ).toBe(false);
   });
 
   it('lets only the leader push the pair catalog', () => {

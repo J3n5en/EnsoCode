@@ -247,4 +247,18 @@ describe('插件工具协议', () => {
       })
     ).not.toBeNull();
   });
+
+  it('投影消息的插件来源必须完整合法', () => {
+    const snapshot = (pluginSource: unknown) =>
+      parseAgentWorkerEvent({
+        type: 'message-upsert',
+        identity: parent,
+        seq: 9,
+        index: 0,
+        message: { role: 'custom', content: [], pluginSource },
+      });
+    expect(snapshot({ pluginId: 'enso.example.notes', pluginName: 'Notes' })).not.toBeNull();
+    expect(snapshot({ pluginId: 'enso.example.notes' })).toBeNull();
+    expect(snapshot({ pluginId: '../x', pluginName: 'N' })).toBeNull();
+  });
 });
