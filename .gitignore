@@ -46,3 +46,6 @@ __pycache__/
 resources/rtk/*/rtk
 resources/rtk/*/rtk.exe
 resources/rtk/*/rtk.tmp-*
+
+# 本地开发用插件（不入库）
+local-plugins/

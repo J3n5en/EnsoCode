@@ -7,6 +7,7 @@ import type {
 } from '@shared/extensionPlugins/types';
 import type { InstalledPluginInfo, PluginComponentSummary, PluginEntry } from '@shared/types';
 import {
+  ChevronDown,
   ChevronRight,
   Files,
   FileText,
@@ -19,6 +20,13 @@ import {
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogPanel,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -39,7 +47,7 @@ import { NewSessionBadge } from './NewSessionBadge';
 import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
 /** 插件配置表单：密钥不回显，留空保持不变 */
-function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
+function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const { t } = useI18n();
   const [fields, setFields] = React.useState<ExtensionPluginConfigField[]>([]);
   const [draft, setDraft] = React.useState<Record<string, string | boolean | null>>({});
@@ -94,7 +102,7 @@ function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
   };
 
   return (
-    <div className="space-y-2 rounded-md border border-border p-3">
+    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
       {fields.map((field) => (
         <div key={field.key} className="space-y-1">
           <p className="text-sm">
@@ -190,7 +198,7 @@ function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
 }
 
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
-function ExtensionPluginLogs({ pluginId }: { pluginId: string }) {
+function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const { t } = useI18n();
   const [text, setText] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
@@ -201,7 +209,7 @@ function ExtensionPluginLogs({ pluginId }: { pluginId: string }) {
     void load();
   }, [load]);
   return (
-    <div className="space-y-2 rounded-md border border-border p-3">
+    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
       <div className="flex items-center justify-between">
         <p className="text-sm">{t('Plugin logs')}</p>
         <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
@@ -241,6 +249,18 @@ function scheduleLine(item: {
       : `每 ${item.intervalSeconds} 秒`;
   const last = item.lastRunAt ? ` · 最近 ${new Date(item.lastRunAt).toLocaleString()}` : '';
   return `${item.id} · ${every}${last}${item.lastError ? ` · ${item.lastError}` : ''}`;
+}
+
+/** 折叠状态下的一行摘要：不展开也能看出这个插件要了多少能力 */
+function capabilitySummary(plugin: ExtensionPluginSummary): string {
+  return [
+    plugin.permissions.length > 0 ? `${plugin.permissions.length} 项权限` : '',
+    (plugin.events?.length ?? 0) > 0 ? `${plugin.events?.length} 个事件` : '',
+    (plugin.schedules?.length ?? 0) > 0 ? `${plugin.schedules?.length} 个定时任务` : '',
+    plugin.crossSessionInject !== undefined ? '跨会话投递开关' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function PluginCapabilityBlock({
@@ -299,7 +319,7 @@ function PluginCapabilityBlock({
   );
 }
 
-function ExtensionPluginArtifacts({ pluginId }: { pluginId: string }) {
+function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain?: boolean }) {
   const [items, setItems] = React.useState<PluginArtifactInfo[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
@@ -313,7 +333,7 @@ function ExtensionPluginArtifacts({ pluginId }: { pluginId: string }) {
     void load();
   }, [load]);
   return (
-    <div className="space-y-2 rounded-md border border-border p-3">
+    <div className={cn('space-y-2', plain ? '' : 'rounded-md border border-border p-3')}>
       <div className="flex items-center justify-between">
         <p className="text-sm">产出文件</p>
         <Button size="icon" variant="ghost" aria-label="刷新" onClick={() => void load()}>
@@ -339,9 +359,12 @@ function ExtensionPluginsSection() {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
-  const [configuring, setConfiguring] = React.useState<string | null>(null);
-  const [viewingLogs, setViewingLogs] = React.useState<string | null>(null);
-  const [viewingArtifacts, setViewingArtifacts] = React.useState<string | null>(null);
+  const [panel, setPanel] = React.useState<{
+    kind: 'config' | 'logs' | 'artifacts';
+    pluginId: string;
+    pluginName: string;
+  } | null>(null);
+  const [expanded, setExpanded] = React.useState<readonly string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
@@ -641,7 +664,9 @@ function ExtensionPluginsSection() {
                 variant="ghost"
                 aria-label="产出文件"
                 title="产出文件"
-                onClick={() => setViewingArtifacts((id) => (id === plugin.id ? null : plugin.id))}
+                onClick={() =>
+                  setPanel({ kind: 'artifacts', pluginId: plugin.id, pluginName: plugin.name })
+                }
               >
                 <Files className="size-4" />
               </Button>
@@ -650,7 +675,9 @@ function ExtensionPluginsSection() {
                 variant="ghost"
                 aria-label={t('Plugin logs')}
                 title={t('Plugin logs')}
-                onClick={() => setViewingLogs((id) => (id === plugin.id ? null : plugin.id))}
+                onClick={() =>
+                  setPanel({ kind: 'logs', pluginId: plugin.id, pluginName: plugin.name })
+                }
               >
                 <FileText className="size-4" />
               </Button>
@@ -660,7 +687,9 @@ function ExtensionPluginsSection() {
                   variant="ghost"
                   aria-label={t('Configure')}
                   title={t('Configure')}
-                  onClick={() => setConfiguring((id) => (id === plugin.id ? null : plugin.id))}
+                  onClick={() =>
+                    setPanel({ kind: 'config', pluginId: plugin.id, pluginName: plugin.name })
+                  }
                 >
                   <Settings2 className="size-4" />
                 </Button>
@@ -680,47 +709,99 @@ function ExtensionPluginsSection() {
               </Button>
             </div>
           </div>
-          {plugin.interceptBreakers?.map((breaker) => (
-            <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
-              {breaker.event} 检查连续失败，临时放行到{' '}
-              {new Date(breaker.until).toLocaleTimeString()}
-            </p>
-          ))}
-          <PluginCapabilityBlock
-            permissions={plugin.permissions}
-            resident={plugin.resident}
-            running={plugin.running}
-            events={plugin.events}
-            schedules={plugin.schedules}
-          />
-          {plugin.crossSessionInject !== undefined && (
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span>
-                <span className="block">允许向任意运行中的会话发送消息</span>
-                <span className="block text-muted-foreground">
-                  关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
-                </span>
-              </span>
-              <Switch
-                aria-label="允许向任意运行中的会话发送消息"
-                checked={plugin.crossSessionInject}
-                onCheckedChange={(allowed) =>
-                  void window.electronAPI.extensionPlugins.setCrossSessionInject(plugin.id, allowed)
-                }
+          <button
+            type="button"
+            aria-expanded={expanded.includes(plugin.id)}
+            className={cn(
+              'flex items-center gap-1 self-start text-xs',
+              'text-muted-foreground hover:text-foreground'
+            )}
+            onClick={() =>
+              setExpanded((prev) =>
+                prev.includes(plugin.id)
+                  ? prev.filter((id) => id !== plugin.id)
+                  : [...prev, plugin.id]
+              )
+            }
+          >
+            {expanded.includes(plugin.id) ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+            {expanded.includes(plugin.id) ? '收起详情' : '详情'}
+            {!expanded.includes(plugin.id) && capabilitySummary(plugin) && (
+              <span className="ml-1 opacity-70">{capabilitySummary(plugin)}</span>
+            )}
+          </button>
+          {expanded.includes(plugin.id) && (
+            <div className="space-y-2">
+              {plugin.interceptBreakers?.map((breaker) => (
+                <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
+                  {breaker.event} 检查连续失败，临时放行到{' '}
+                  {new Date(breaker.until).toLocaleTimeString()}
+                </p>
+              ))}
+              <PluginCapabilityBlock
+                permissions={plugin.permissions}
+                resident={plugin.resident}
+                running={plugin.running}
+                events={plugin.events}
+                schedules={plugin.schedules}
               />
+              {plugin.crossSessionInject !== undefined && (
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span>
+                    <span className="block">允许向任意运行中的会话发送消息</span>
+                    <span className="block text-muted-foreground">
+                      关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
+                    </span>
+                  </span>
+                  <Switch
+                    aria-label="允许向任意运行中的会话发送消息"
+                    checked={plugin.crossSessionInject}
+                    onCheckedChange={(allowed) =>
+                      void window.electronAPI.extensionPlugins.setCrossSessionInject(
+                        plugin.id,
+                        allowed
+                      )
+                    }
+                  />
+                </div>
+              )}
+              {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-xs">待同意的权限</p>
+                  <PermissionLines permissions={plugin.pendingPermissions} />
+                </div>
+              )}
             </div>
           )}
-          {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-muted-foreground text-xs">待同意的权限</p>
-              <PermissionLines permissions={plugin.pendingPermissions} />
-            </div>
-          )}
-          {configuring === plugin.id && <ExtensionPluginConfigForm pluginId={plugin.id} />}
-          {viewingLogs === plugin.id && <ExtensionPluginLogs pluginId={plugin.id} />}
-          {viewingArtifacts === plugin.id && <ExtensionPluginArtifacts pluginId={plugin.id} />}
         </div>
       ))}
+      <Dialog open={panel !== null} onOpenChange={(open) => !open && setPanel(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {panel?.kind === 'config'
+                ? t('Configure')
+                : panel?.kind === 'logs'
+                  ? t('Plugin logs')
+                  : '产出文件'}
+              {panel ? ` · ${panel.pluginName}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            {panel?.kind === 'config' && (
+              <ExtensionPluginConfigForm pluginId={panel.pluginId} plain />
+            )}
+            {panel?.kind === 'logs' && <ExtensionPluginLogs pluginId={panel.pluginId} plain />}
+            {panel?.kind === 'artifacts' && (
+              <ExtensionPluginArtifacts pluginId={panel.pluginId} plain />
+            )}
+          </DialogPanel>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
