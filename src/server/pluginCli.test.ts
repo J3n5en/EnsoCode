@@ -32,7 +32,8 @@ function deps(answer = true) {
   const out: string[] = [];
   const call = vi.fn(async (command: Record<string, unknown>) => {
     if (command.action === 'stage' || command.action === 'restage') return { ok: true, preview };
-    if (command.action === 'list') return { ok: true, plugins: [], discarded: ['old.one'] };
+    if (command.action === 'list')
+      return { ok: true, plugins: [], notice: { discarded: ['old.one'], unreadable: true } };
     if (command.action === 'check')
       return {
         ok: true,
@@ -130,11 +131,15 @@ describe('enso-server plugin', () => {
     expect(text).toContain('sweep');
   });
 
-  it('list 提示启动时丢弃的旧登记记录', async () => {
-    const { out, deps: d } = deps();
+  it('list 提示登记表问题，notice-dismiss 确认后不再提示', async () => {
+    const { out, call, deps: d } = deps();
     await runPluginCommand(['list'], d);
-    expect(out.join('\n')).toContain('old.one');
-    expect(out.join('\n')).toContain('重新安装');
+    const text = out.join('\n');
+    expect(text).toContain('old.one');
+    expect(text).toContain('registry.json.unreadable');
+    expect(text).toContain('notice-dismiss');
+    await runPluginCommand(['notice-dismiss'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'notice-dismiss' });
   });
 
   it('列表为空时给出提示', () => {

@@ -51,6 +51,7 @@ import type {
   ExtensionPluginSummary,
   PluginEventPlan,
   PluginToolDescriptor,
+  RegistryNotice,
 } from '@shared/extensionPlugins/types';
 import type { McpServerSpawnConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
@@ -70,7 +71,12 @@ import {
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
-import { REGISTRY_VERSION, readRegistry, writeRegistry } from './registry';
+import {
+  preserveUnreadableRegistry,
+  REGISTRY_VERSION,
+  readRegistry,
+  writeRegistry,
+} from './registry';
 import { ViewStateStore } from './viewState';
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: 清单里的占位符字面量
@@ -84,6 +90,7 @@ const COMMAND_TIMEOUT_MS = 60_000;
 const SCHEDULE_TIMEOUT_MS = 60_000;
 const PREPARE_TIMEOUT_MS = 5_000;
 const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
+
 const INTERCEPT_BREAKER_FAILURES = 3;
 const INTERCEPT_BREAKER_MS = 30_000;
 
@@ -173,7 +180,6 @@ const within = (parent: string, child: string) => {
 export class ExtensionPluginService {
   readonly gate: PluginHostGate;
   private records: PluginRecord[];
-  private readonly discarded: string[];
   private readonly loaded = new Map<string, Loaded>();
   private readonly processes = new Map<string, PluginProcess>();
   private readonly staged = new Map<
@@ -219,7 +225,6 @@ export class ExtensionPluginService {
     this.viewState = new ViewStateStore(options.root);
     const registry = readRegistry(options.root);
     this.records = registry.plugins;
-    this.discarded = registry.discarded;
     this.gate = new PluginHostGate({
       ...options.gate,
       manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
@@ -244,7 +249,7 @@ export class ExtensionPluginService {
           composer: true,
         },
     });
-    this.sweepOrphans();
+    this.settleRegistry(registry.discarded, registry.unreadable);
   }
 
   onChange(listener: () => void): () => void {
@@ -488,9 +493,17 @@ export class ExtensionPluginService {
     return { ok: true };
   }
 
-  /** 启动时因格式过旧或字段不全被丢弃的登记记录；界面据此提示重新安装 */
-  discardedRecords(): string[] {
-    return [...this.discarded];
+  /** 登记表问题的待确认提示；落盘保存，重启不丢，用户确认或重装后消失 */
+  registryNotice(): RegistryNotice | null {
+    const notice = this.readNotice();
+    if (!notice) return null;
+    const discarded = notice.discarded.filter((id) => !this.records.some((r) => r.id === id));
+    if (discarded.length === 0 && !notice.unreadable) return null;
+    return { discarded, ...(notice.unreadable ? { unreadable: true } : {}) };
+  }
+
+  dismissRegistryNotice(): void {
+    rmSync(this.noticePath(), { force: true });
   }
 
   /** 插件包、数据、配置、产出与页面状态；日志由调用方决定是否保留 */
@@ -502,16 +515,33 @@ export class ExtensionPluginService {
     this.viewState.remove(id);
   }
 
-  /** 丢弃的记录和没有登记的包都会在重装时撞上旧目录，启动时一并清掉 */
-  private sweepOrphans(): void {
-    if (this.discarded.length > 0) {
-      this.appendLog(
-        'extension-plugins',
-        'warn',
-        `登记记录格式已变更，已丢弃并清理：${this.discarded.join(', ')}；请重新安装`
-      );
+  /**
+   * 启动时处理登记表问题。只删确实读到并决定丢弃的 id；登记表读不出时不碰任何文件，
+   * 也不按「磁盘上有、登记表里没有」推断残留——登记表坏过一次后再装新插件，它会变得可读但不完整。
+   */
+  private settleRegistry(discarded: string[], unreadable: boolean): void {
+    const log = (message: string) => this.appendLog('extension-plugins', 'warn', message);
+    if (unreadable) {
+      preserveUnreadableRegistry(this.options.root);
+      log('登记表读取失败，已另存为 registry.json.unreadable，未清理任何插件文件');
+      this.writeNotice({ discarded: [], unreadable: true });
+    }
+    if (discarded.length > 0) {
+      log(`登记记录格式已变更，已丢弃并清理：${discarded.join(', ')}；请重新安装`);
+      const previous = this.readNotice();
+      this.writeNotice({
+        discarded: [...new Set([...(previous?.discarded ?? []), ...discarded])],
+        ...(previous?.unreadable ? { unreadable: true } : {}),
+      });
+      for (const id of discarded) {
+        if (this.records.some((r) => r.id === id)) continue;
+        this.removeLocalFiles(id);
+        rmSync(this.logPath(id), { force: true });
+        rmSync(`${this.logPath(id)}.1`, { force: true });
+      }
       this.persist();
     }
+    if (unreadable) return;
     const known = new Set(this.records.map((record) => record.id));
     let names: string[];
     try {
@@ -519,10 +549,36 @@ export class ExtensionPluginService {
     } catch {
       names = [];
     }
-    for (const id of new Set([...this.discarded, ...names])) {
-      if (known.has(id) || !PLUGIN_ID_PATTERN.test(id)) continue;
-      this.removeLocalFiles(id);
+    const strays = names.filter((id) => !known.has(id) && !discarded.includes(id));
+    if (strays.length > 0) log(`发现没有登记的插件目录，已保留未删除：${strays.join(', ')}`);
+  }
+
+  private noticePath(): string {
+    return join(this.options.root, 'registry-notice.json');
+  }
+
+  private readNotice(): RegistryNotice | null {
+    try {
+      const raw = JSON.parse(readFileSync(this.noticePath(), 'utf8')) as unknown;
+      if (typeof raw !== 'object' || raw === null) return null;
+      const { discarded, unreadable } = raw as Record<string, unknown>;
+      if (!Array.isArray(discarded)) return null;
+      return {
+        discarded: discarded.filter(
+          (id): id is string => typeof id === 'string' && PLUGIN_ID_PATTERN.test(id)
+        ),
+        ...(unreadable === true ? { unreadable: true } : {}),
+      };
+    } catch {
+      return null;
     }
+  }
+
+  private writeNotice(notice: RegistryNotice): void {
+    try {
+      mkdirSync(this.options.root, { recursive: true });
+      writeFileSync(this.noticePath(), JSON.stringify(notice), { mode: 0o600 });
+    } catch {}
   }
 
   /** 已保存的配置值（含密钥），不含缺省 */

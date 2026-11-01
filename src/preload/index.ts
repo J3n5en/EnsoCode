@@ -1609,8 +1609,10 @@ const electronAPI = {
   extensionPlugins: {
     list: (): Promise<ExtensionPluginSummary[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_LIST),
-    discarded: (): Promise<string[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_DISCARDED),
+    registryNotice: (): Promise<RegistryNotice | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_REGISTRY_NOTICE),
+    dismissRegistryNotice: (): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_DISMISS_REGISTRY_NOTICE),
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.EXTENSION_PLUGINS_CHANGED, listener);
@@ -1740,4 +1742,5 @@ import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
+  RegistryNotice,
 } from '@shared/extensionPlugins/types';

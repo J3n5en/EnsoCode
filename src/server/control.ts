@@ -14,6 +14,7 @@ const PLUGIN_TOKEN_ACTIONS = ['commit', 'discard'] as const;
 
 export type PluginControlCommand =
   | { cmd: 'plugin'; action: 'list' }
+  | { cmd: 'plugin'; action: 'notice-dismiss' }
   | { cmd: 'plugin'; action: 'check' }
   | { cmd: 'plugin'; action: 'stage'; path: string }
   | { cmd: 'plugin'; action: 'stage'; url: string }
@@ -40,7 +41,8 @@ function parsePluginCommand(
     const value = input[key];
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   };
-  if (action === 'list' || action === 'check') return { cmd: 'plugin', action };
+  if (action === 'list' || action === 'check' || action === 'notice-dismiss')
+    return { cmd: 'plugin', action };
   if (action === 'config-get' || action === 'logs' || action === 'restage') {
     const id = text('id');
     return id ? { cmd: 'plugin', action, id } : { error: `plugin ${action} requires id` };

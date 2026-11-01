@@ -3,6 +3,7 @@ import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
+  RegistryNotice,
 } from '@shared/extensionPlugins/types';
 import type { InstalledPluginInfo, PluginComponentSummary, PluginEntry } from '@shared/types';
 import {
@@ -346,7 +347,7 @@ function ExtensionPluginsSection() {
   const [downloading, setDownloading] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
   const [checkResult, setCheckResult] = React.useState<string | null>(null);
-  const [discarded, setDiscarded] = React.useState<string[]>([]);
+  const [notice, setNotice] = React.useState<RegistryNotice | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -359,9 +360,9 @@ function ExtensionPluginsSection() {
   React.useEffect(() => {
     void refresh();
     void window.electronAPI.extensionPlugins
-      .discarded()
-      .then(setDiscarded)
-      .catch(() => setDiscarded([]));
+      .registryNotice()
+      .then(setNotice)
+      .catch(() => setNotice(null));
     return window.electronAPI.extensionPlugins.onChanged(() => void refresh());
   }, [refresh]);
 
@@ -494,11 +495,32 @@ function ExtensionPluginsSection() {
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
-      {discarded.length > 0 && (
-        <p className="text-amber-600 text-sm dark:text-amber-400">
-          检测到旧格式的登记记录，已丢弃并清理，请重新安装：
-          <span className="font-mono">{discarded.join(', ')}</span>
-        </p>
+      {notice && (
+        <div className="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-amber-700 text-sm dark:text-amber-400">
+          {notice.unreadable && (
+            <p>
+              插件登记表曾读取失败，下面的列表可能不全。插件文件没有删除，原文保存在数据目录的
+              extension-plugins/registry.json.unreadable。
+            </p>
+          )}
+          {notice.discarded.length > 0 && (
+            <p>
+              检测到旧格式的登记记录，已丢弃并清理，请重新安装：
+              <span className="font-mono">{notice.discarded.join(', ')}</span>
+            </p>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              void window.electronAPI.extensionPlugins
+                .dismissRegistryNotice()
+                .then(() => setNotice(null))
+            }
+          >
+            知道了
+          </Button>
+        </div>
       )}
       {preview && (
         <div className="space-y-2 rounded-md border border-border p-3">

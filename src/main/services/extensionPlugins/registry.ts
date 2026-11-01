@@ -1,4 +1,11 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { PLUGIN_STATES, type PluginRecord } from './lifecycle';
 
@@ -66,16 +73,37 @@ function isPluginRecord(v: unknown): v is PluginRecord {
   );
 }
 
+export interface RegistryRead extends RegistryFile {
+  /** 被丢弃且能读出合法 id 的记录 */
+  discarded: string[];
+  /** 文件存在但读不出（不是 JSON、形状不对）；此时不能据它推断磁盘上哪些文件是残留 */
+  unreadable: boolean;
+}
+
+const registryPath = (root: string) => join(root, 'registry.json');
+
 /** Main 私有文件，不放进 settings.json：远端渲染进程能写设置，不能让它自己给插件授权 */
-/** discarded：被丢弃且能读出合法 id 的记录，供日志与界面提示 */
-export function readRegistry(root: string): RegistryFile & { discarded: string[] } {
+export function readRegistry(root: string): RegistryRead {
+  const empty = (unreadable: boolean): RegistryRead => ({
+    version: REGISTRY_VERSION,
+    plugins: [],
+    discarded: [],
+    unreadable,
+  });
+  let text: string;
+  try {
+    text = readFileSync(registryPath(root), 'utf8');
+  } catch {
+    return empty(existsSync(registryPath(root)));
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8'));
+    parsed = JSON.parse(text);
   } catch {
-    return { version: REGISTRY_VERSION, plugins: [], discarded: [] };
+    return empty(true);
   }
-  const list = isRecord(parsed) && Array.isArray(parsed.plugins) ? parsed.plugins : [];
+  if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) return empty(true);
+  const list = parsed.plugins;
   const current = isRecord(parsed) && parsed.version === REGISTRY_VERSION;
   const seen = new Set<string>();
   const plugins: PluginRecord[] = [];
@@ -95,7 +123,7 @@ export function readRegistry(root: string): RegistryFile & { discarded: string[]
       ...(isSource(source) ? { source } : {}),
     });
   }
-  return { version: REGISTRY_VERSION, plugins, discarded };
+  return { version: REGISTRY_VERSION, plugins, discarded, unreadable: false };
 }
 
 const isLastError = (v: unknown) =>
@@ -108,9 +136,22 @@ function isSource(v: unknown): v is NonNullable<PluginRecord['source']> {
   return v.kind === 'url' && typeof v.url === 'string' && /^https?:\/\//i.test(v.url);
 }
 
+/** 读不出的登记表原样另存；已有一份时保留最早那份 */
+export function preserveUnreadableRegistry(root: string): void {
+  const target = `${registryPath(root)}.unreadable`;
+  if (existsSync(target)) return;
+  try {
+    copyFileSync(registryPath(root), target);
+  } catch {}
+}
+
+/** 原子写入；覆盖前把上一份留成 registry.json.bak */
 export function writeRegistry(root: string, file: RegistryFile): void {
   mkdirSync(root, { recursive: true });
-  const target = join(root, 'registry.json');
+  const target = registryPath(root);
+  try {
+    copyFileSync(target, `${target}.bak`);
+  } catch {}
   const tmp = `${target}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
   renameSync(tmp, target);

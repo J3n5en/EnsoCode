@@ -37,21 +37,35 @@ const valid = {
 };
 
 describe('插件登记表', () => {
-  it('文件不存在时为空', () => {
-    expect(readRegistry(tempRoot()).plugins).toEqual([]);
+  it('文件不存在时为空，不算读不出', () => {
+    expect(readRegistry(tempRoot())).toMatchObject({ plugins: [], unreadable: false });
+  });
+
+  it.each([
+    ['不是 JSON', '{bad'],
+    ['不是对象', '[]'],
+    ['plugins 不是数组', JSON.stringify({ version: 2, plugins: null })],
+  ])('读不出（%s）时标记 unreadable，与空表区分', (_label, raw) => {
+    const root = tempRoot();
+    writeFileSync(join(root, 'registry.json'), raw);
+    expect(readRegistry(root)).toEqual({
+      version: 2,
+      plugins: [],
+      discarded: [],
+      unreadable: true,
+    });
   });
 
   it('写入后读回', () => {
     const root = tempRoot();
     writeRegistry(root, { version: 2, plugins: [valid as never] });
-    expect(readRegistry(root)).toEqual({ version: 2, plugins: [valid], discarded: [] });
+    expect(readRegistry(root)).toEqual({
+      version: 2,
+      plugins: [valid],
+      discarded: [],
+      unreadable: false,
+    });
     expect(JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8')).version).toBe(2);
-  });
-
-  it('损坏的文件按空处理，不抛错', () => {
-    const root = tempRoot();
-    writeFileSync(join(root, 'registry.json'), '{bad');
-    expect(readRegistry(root).plugins).toEqual([]);
   });
 
   it('丢弃字段不合法的记录，保留其余', () => {
@@ -82,6 +96,7 @@ describe('插件登记表', () => {
       version: 2,
       plugins: [],
       discarded: ['example.demo', 'x.y'],
+      unreadable: false,
     });
   });
 

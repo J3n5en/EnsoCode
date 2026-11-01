@@ -3,12 +3,14 @@ import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
+  RegistryNotice,
 } from '@shared/extensionPlugins/types';
 import type { PluginControlCommand } from './control';
 
 export const PLUGIN_USAGE = `用法: enso-server plugin <action>
 
   list                         已安装插件与状态
+  notice-dismiss               确认并清除登记表问题提示
   install <目录|zip|url> [--yes] 安装或更新。url 可以是 zip，或 GitHub 仓库。先展示权限，确认后落盘（新装默认停用）
   enable <id> / disable <id>   启用 / 停用
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
@@ -123,9 +125,23 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
   if (action === 'list') {
     const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'list' }));
     deps.log(formatPluginList((reply.plugins as ExtensionPluginSummary[]) ?? []));
-    const discarded = Array.isArray(reply.discarded) ? (reply.discarded as string[]) : [];
-    if (discarded.length > 0)
-      deps.log(`⚠ 以下插件的登记记录格式已变更，已丢弃并清理，请重新安装：${discarded.join(', ')}`);
+    const notice = reply.notice as RegistryNotice | null | undefined;
+    if (notice) {
+      if (notice.unreadable)
+        deps.log(
+          '⚠ 插件登记表曾读取失败，列表可能不全；插件文件未删除，原文在数据目录 extension-plugins/registry.json.unreadable'
+        );
+      if (notice.discarded.length > 0)
+        deps.log(
+          `⚠ 以下插件的登记记录格式已变更，已丢弃并清理，请重新安装：${notice.discarded.join(', ')}`
+        );
+      deps.log('  处理完后运行 enso-server plugin notice-dismiss 不再提示');
+    }
+    return;
+  }
+  if (action === 'notice-dismiss') {
+    ensureOk(await deps.call({ cmd: 'plugin', action: 'notice-dismiss' }));
+    deps.log('完成');
     return;
   }
   if (action === 'check') {

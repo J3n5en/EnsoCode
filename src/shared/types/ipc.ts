@@ -504,7 +504,8 @@ export const IPC_CHANNELS = {
   BOT_TEMPLATES_CHANGED: 'bots:templates-changed',
   /** Enso 插件：管理操作只能在本机界面或服务端 CLI 上做 */
   EXTENSION_PLUGINS_LIST: 'extension-plugins:list',
-  EXTENSION_PLUGINS_DISCARDED: 'extension-plugins:discarded',
+  EXTENSION_PLUGINS_REGISTRY_NOTICE: 'extension-plugins:registry-notice',
+  EXTENSION_PLUGINS_DISMISS_REGISTRY_NOTICE: 'extension-plugins:dismiss-registry-notice',
   EXTENSION_PLUGINS_CHANGED: 'extension-plugins:changed',
   EXTENSION_PLUGINS_COMMIT: 'extension-plugins:commit',
   EXTENSION_PLUGINS_DISCARD: 'extension-plugins:discard',

@@ -70,7 +70,10 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
   const plugins = getExtensionPlugins();
   switch (command.action) {
     case 'list':
-      return { ok: true, plugins: plugins.list(), discarded: plugins.discardedRecords() };
+      return { ok: true, plugins: plugins.list(), notice: plugins.registryNotice() };
+    case 'notice-dismiss':
+      plugins.dismissRegistryNotice();
+      return { ok: true };
     case 'check':
       return { ok: true, ...(await plugins.checkUpdates()), plugins: plugins.list() };
     case 'stage':

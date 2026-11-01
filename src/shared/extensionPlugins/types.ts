@@ -112,3 +112,11 @@ export interface PluginEventPlan {
   /** 允许向本会话注入消息 */
   inject: boolean;
 }
+
+/** 插件登记表问题的待确认提示；由 Main 落盘，用户确认或重装后消失 */
+export interface RegistryNotice {
+  /** 被丢弃、还没重新安装的插件 id */
+  discarded: string[];
+  /** 登记表曾经读不出；插件列表可能不全，原文在 registry.json.unreadable */
+  unreadable?: true;
+}

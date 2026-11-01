@@ -70,6 +70,10 @@ describe('parseControlCommand', () => {
         action,
         id: 'a.b',
       });
+    expect(parse({ cmd: 'plugin', action: 'notice-dismiss' })).toEqual({
+      cmd: 'plugin',
+      action: 'notice-dismiss',
+    });
     expect(parse({ cmd: 'plugin', action: 'explode' })).toEqual({ error: 'unknown plugin action' });
   });
 

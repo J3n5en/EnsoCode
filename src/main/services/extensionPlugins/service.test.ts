@@ -1,5 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -623,22 +631,8 @@ describe('uiCallTimeout', () => {
 });
 
 describe('丢弃的登记记录', () => {
-  it('启动时记日志、对外报告，并清理没有登记的包与数据目录', () => {
-    const root = temp('plugins-root-');
-    for (const sub of [
-      'packages/old.one/abc',
-      'data/old.one',
-      'packages/keep.me/d1',
-      'data/keep.me',
-    ])
-      mkdirSync(join(root, sub), { recursive: true });
-    mkdirSync(join(root, 'config'), { recursive: true });
-    writeFileSync(join(root, 'config', 'old.one.json'), '{}');
-    writeFileSync(
-      join(root, 'registry.json'),
-      JSON.stringify({ version: 1, plugins: [{ id: 'old.one', dir: 'abc' }] })
-    );
-    const service = new ExtensionPluginService({
+  const boot = (root: string) =>
+    new ExtensionPluginService({
       root,
       hostVersion: '0.2.12',
       hostPath: '/unused',
@@ -653,12 +647,103 @@ describe('丢弃的登记记录', () => {
         now: () => Date.now(),
       },
     });
-    expect(service.discardedRecords()).toEqual(['old.one']);
-    expect(existsSync(join(root, 'packages', 'old.one'))).toBe(false);
-    expect(existsSync(join(root, 'data', 'old.one'))).toBe(false);
-    expect(existsSync(join(root, 'config', 'old.one.json'))).toBe(false);
-    expect(existsSync(join(root, 'packages', 'keep.me'))).toBe(false);
-    expect(service.logs('extension-plugins')).toContain('old.one');
+  const seed = (root: string, ids: string[]) => {
+    mkdirSync(join(root, 'config'), { recursive: true });
+    mkdirSync(join(root, 'logs'), { recursive: true });
+    for (const id of ids) {
+      mkdirSync(join(root, 'packages', id, 'd1'), { recursive: true });
+      mkdirSync(join(root, 'data', id), { recursive: true });
+      writeFileSync(join(root, 'config', `${id}.json`), '{}');
+      writeFileSync(join(root, 'logs', `${id}.log`), 'old');
+    }
+  };
+  const has = (root: string, id: string) => ({
+    pkg: existsSync(join(root, 'packages', id)),
+    data: existsSync(join(root, 'data', id)),
+    config: existsSync(join(root, 'config', `${id}.json`)),
+    log: existsSync(join(root, 'logs', `${id}.log`)),
+  });
+  const all = { pkg: true, data: true, config: true, log: true };
+  const none = { pkg: false, data: false, config: false, log: false };
+
+  it('只清理读到并决定丢弃的 id（含日志），没登记的目录只记日志不删', () => {
+    const root = temp('plugins-root-');
+    seed(root, ['old.one', 'stray.dir']);
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({ version: 1, plugins: [{ id: 'old.one', dir: 'd1' }] })
+    );
+    const service = boot(root);
+    expect(service.registryNotice()).toEqual({ discarded: ['old.one'] });
+    expect(has(root, 'old.one')).toEqual(none);
+    expect(has(root, 'stray.dir')).toEqual(all);
+    expect(service.logs('extension-plugins')).toContain('stray.dir');
     expect(readRegistry(root)).toMatchObject({ version: 2, plugins: [], discarded: [] });
+  });
+
+  it('丢弃提示落盘，重启后仍在，用户确认或重装后消失', async () => {
+    const root = temp('plugins-root-');
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({ version: 1, plugins: [{ id: 'old.one' }, { id: 'old.two' }] })
+    );
+    boot(root);
+    const again = boot(root);
+    expect(again.registryNotice()).toEqual({ discarded: ['old.one', 'old.two'] });
+    const src = temp('plugin-src-');
+    writeFileSync(join(src, 'enso-plugin.json'), manifest({ id: 'old.one' }));
+    writeFileSync(join(src, 'main.mjs'), 'export function activate() {}');
+    const staged = await again.stage({ kind: 'dir', path: src });
+    if (!staged.ok) throw new Error(staged.error);
+    await again.commit(staged.preview.token);
+    expect(boot(root).registryNotice()).toEqual({ discarded: ['old.two'] });
+    again.dismissRegistryNotice();
+    expect(boot(root).registryNotice()).toBeNull();
+  });
+
+  it.each([
+    ['不是 JSON', '{ not json'],
+    ['plugins 不是数组', JSON.stringify({ version: 2, plugins: null })],
+    ['不是对象', '[]'],
+  ])('登记表读不出（%s）时不删任何文件、不覆盖原文件，另存原文并提示', (_label, raw) => {
+    const root = temp('plugins-root-');
+    seed(root, ['a.demo']);
+    writeFileSync(join(root, 'registry.json'), raw);
+    const service = boot(root);
+    expect(has(root, 'a.demo')).toEqual(all);
+    expect(readFileSync(join(root, 'registry.json'), 'utf8')).toBe(raw);
+    expect(readFileSync(join(root, 'registry.json.unreadable'), 'utf8')).toBe(raw);
+    expect(service.registryNotice()).toEqual({ discarded: [], unreadable: true });
+    expect(service.logs('extension-plugins')).toContain('登记表读取失败');
+  });
+
+  it('登记表读不出后又安装了插件，下次启动也不会把原来的包当成孤儿删掉', async () => {
+    const root = temp('plugins-root-');
+    seed(root, ['a.demo']);
+    writeFileSync(join(root, 'registry.json'), '{ broken');
+    const service = boot(root);
+    const src = temp('plugin-src-');
+    writeFileSync(join(src, 'enso-plugin.json'), manifest({ id: 'b.new' }));
+    writeFileSync(join(src, 'main.mjs'), 'export function activate() {}');
+    const staged = await service.stage({ kind: 'dir', path: src });
+    if (!staged.ok) throw new Error(staged.error);
+    await service.commit(staged.preview.token);
+    expect(readFileSync(join(root, 'registry.json.unreadable'), 'utf8')).toBe('{ broken');
+    boot(root);
+    expect(has(root, 'a.demo')).toEqual(all);
+  });
+
+  it('覆盖登记表前保留上一份备份', async () => {
+    const root = temp('plugins-root-');
+    const service = boot(root);
+    const src = temp('plugin-src-');
+    writeFileSync(join(src, 'enso-plugin.json'), manifest());
+    writeFileSync(join(src, 'main.mjs'), 'export function activate() {}');
+    const staged = await service.stage({ kind: 'dir', path: src });
+    if (!staged.ok) throw new Error(staged.error);
+    await service.commit(staged.preview.token);
+    const first = readFileSync(join(root, 'registry.json'), 'utf8');
+    service.setEnabled('example.demo', true);
+    expect(readFileSync(join(root, 'registry.json.bak'), 'utf8')).toBe(first);
   });
 });
