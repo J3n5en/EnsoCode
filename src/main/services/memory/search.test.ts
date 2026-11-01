@@ -423,6 +423,26 @@ describe('searchMemories — hybrid', () => {
   });
 });
 
+describe('searchMemories — 向量通道同距离', () => {
+  it('距离相同时按插入顺序稳定排列，不受随机 id 影响', async () => {
+    const same: Embedder = {
+      model: 'same',
+      dim: 3,
+      embed: async () => Float32Array.from([1, 0, 0]),
+    };
+    const inserted: string[] = [];
+    for (let i = 0; i < 8; i++) inserted.push((await add(`alpha item ${i}`, 'global', same)).id);
+    const hits = await searchMemories(db, {
+      q: 'zzzz',
+      spaceIds: ['global'],
+      embedder: same,
+      limit: 8,
+      mmr: false,
+    });
+    expect(ids(hits)).toEqual(inserted);
+  });
+});
+
 describe('searchMemories — MMR 去冗余', () => {
   // 三条 redis 近似记忆共享同一向量方向，一条 kafka 异题但与查询仍有中等相关；再加一条只命中 FTS
   // 的长杂项垄底（min-max 归一化后它是 0，避免 kafka 被归一化压到 0 失去可比性）

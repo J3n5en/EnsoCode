@@ -240,7 +240,7 @@ async function vectorChannel(
              WHERE embedding MATCH ? AND k = ? AND model = ? AND space_id IN (${spacePlaceholders})) v
        JOIN memories m ON m.rowid = v.rowid
        WHERE ${scope.sql} AND m.embedding_model = ?
-       ORDER BY v.distance ASC, m.id ASC LIMIT ?`
+       ORDER BY v.distance ASC, m.rowid ASC LIMIT ?`
     )
     .all(
       encodeEmbedding(query),
