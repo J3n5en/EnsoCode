@@ -283,6 +283,12 @@ import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createWebTools } from './tools/web';
+import {
+  consumeUnattendedNote,
+  UNATTENDED_OFF_NOTE,
+  UNATTENDED_ON_NOTE,
+  UNATTENDED_PROMPT,
+} from './unattended';
 import { createVirtualChooser, resolveClassifierModel } from './virtualClassifier';
 import { registerVirtualModel } from './virtualModels';
 import { createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
@@ -371,6 +377,8 @@ interface ManagedSession {
   pluginEvents?: PluginEventInvoker;
   /** 最近一次 auto_retry_start 携带的原始错误（取消重试时的终态错误文案） */
   lastRetryError?: string;
+  /** 无人值守开关翻转后待告知模型的一条提示（只追加，不重开会话） */
+  unattendedNote?: string;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
   /** 当前用户轮已做过一次空回复自动续跑 */
@@ -555,6 +563,8 @@ function createSessionResourceLoader(options: {
   systemPromptBoost?: string;
   /** 仅子会话：追加子代理行为合同到系统提示词（进 system prompt 才不会随压缩丢失） */
   childContract?: boolean;
+  /** 无人值守：把「没人在线」写进系统提示词（同样为了不随压缩丢失） */
+  autoRejectApprovals?: boolean;
 }): DefaultResourceLoader {
   const harness = options.loadHarnessAssets && !options.remoteAgentsFiles;
   const skillPaths = harness
@@ -653,6 +663,9 @@ function createSessionResourceLoader(options: {
       appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
       ...(options.childContract
         ? [appendSystemPromptExtension('subagent-contract', SUBAGENT_CONTRACT_PROMPT)]
+        : []),
+      ...(options.autoRejectApprovals
+        ? [appendSystemPromptExtension('unattended', UNATTENDED_PROMPT)]
         : []),
       ...(options.systemPromptAppend
         ? [tailSystemPromptSection('preset_tail', options.systemPromptAppend)]
@@ -1011,9 +1024,11 @@ export class SessionSupervisor {
     const autoReject = this.sessions.get(parentId)?.gate.autoReject ?? false;
     for (const [id, child] of this.sessions) {
       if (id === parentId || child.parentId !== parentId) continue;
+      const flipped = child.gate.autoReject !== autoReject;
       child.gate.mode = mode;
       child.gate.autoReject = autoReject;
       child.asks.autoReject = autoReject;
+      if (flipped) child.unattendedNote = autoReject ? UNATTENDED_ON_NOTE : UNATTENDED_OFF_NOTE;
       child.gate.reconsider();
     }
   }
@@ -1852,6 +1867,10 @@ export class SessionSupervisor {
         const managed = this.must(command.identity);
         managed.gate.mode = command.mode;
         if (command.autoReject !== undefined) {
+          if (managed.gate.autoReject !== command.autoReject) {
+            // 系统提示词改不了，用一次性提示告知模型「人没了 / 人回来了」
+            managed.unattendedNote = command.autoReject ? UNATTENDED_ON_NOTE : UNATTENDED_OFF_NOTE;
+          }
           managed.gate.autoReject = command.autoReject;
           managed.asks.autoReject = command.autoReject;
         }
@@ -2322,6 +2341,7 @@ export class SessionSupervisor {
       persona: systemPrompt,
       systemPromptAppend,
       systemPromptBoost,
+      autoRejectApprovals,
       ...(compactStrategy !== 'standard'
         ? {
             compactStrategy,
@@ -2395,6 +2415,14 @@ export class SessionSupervisor {
       return taken;
     };
     const reminders = new SystemReminderRegistry();
+    // 无人值守开关翻转的提示优先走工具结果（无人值守时可能很久没有用户消息，等不到下一条就白说了）
+    reminders.register('unattended', () => {
+      const managed = managedRef ?? this.sessions.get(sessionId);
+      const note = managed?.unattendedNote;
+      if (!note || !managed) return [];
+      managed.unattendedNote = undefined;
+      return [note];
+    });
     reminders.register('background-task', () => {
       const pending = takePendingReminders();
       return pending.map((text) => `<background-task-update>\n${text}\n</background-task-update>`);
@@ -2682,6 +2710,7 @@ export class SessionSupervisor {
               ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
               codemode: childCodemode.extension,
               childContract: true,
+              autoRejectApprovals: childGate.autoReject,
               systemPromptAppend,
               systemPromptBoost,
             });
@@ -5606,8 +5635,12 @@ function planFreeEditorText(text: string): string {
   return message ? (message.kind === 'feedback' ? message.feedback : '') : rest;
 }
 
-/** Plan 状态变化后的一次性提示，随下一条进入模型的用户消息前置 */
-function withPendingPlanNote(managed: { plan?: PlanController }, text: string): string {
+/** Plan / 无人值守状态变化后的一次性提示，随下一条进入模型的用户消息前置 */
+function withPendingPlanNote(
+  managed: { plan?: PlanController; unattendedNote?: string },
+  text: string
+): string {
+  text = consumeUnattendedNote(managed, text);
   const note = managed.plan?.takeNote();
   return note ? withPlanNote(note, text) : text;
 }

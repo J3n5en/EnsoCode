@@ -13,8 +13,10 @@ let counter = 0;
 
 /** 无人值守下的提问拒绝文案：对齐 factory 的 no_approver_available——不是被拒，是没人能答 */
 export const ASK_NO_USER_ERROR =
-  'Blocked: this session has no user available to answer questions. Decide with the most ' +
-  'reasonable assumption and continue, or stop and report what needs a human decision.';
+  'Blocked: this session has no user available to answer questions, and asking is not available ' +
+  'here. Do not ask in prose and wait. Decide on the most reasonable assumption, state it in one ' +
+  "line, and continue. Stop only if the decision is irreversible and would change the user's " +
+  'data — then say which decision is needed and what you already did.';
 
 /** agent → 用户提问的挂起管理(与 ApprovalGate 同构:请求经事件上抛,答复经命令回落) */
 export class AskManager {

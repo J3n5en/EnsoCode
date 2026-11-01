@@ -23,7 +23,9 @@ type ApprovalResult = 'allow' | 'deny' | 'block' | 'cancel' | 'timeout' | 'no-ap
 export function approvalNoUserMessage(label: string, mode: ApprovalMode): string {
   const base =
     `Blocked: ${label} requires approval, but this session has no user available to approve it. ` +
-    'Do not retry the same call; use an action that does not require approval, or stop and report what is blocked.';
+    'Do not retry the same call, and do not ask in prose and wait. Use an action that needs no ' +
+    'approval, or make the most reasonable assumption and continue. Stop only if the action is ' +
+    'unavoidable and irreversible — then say what is blocked and why.';
   if (mode !== 'full') return base;
   return (
     `${base} Full access is on: nearly all actions run without confirmation, only always-confirm ` +

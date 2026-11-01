@@ -931,7 +931,10 @@ describe('无人值守：需要审批的动作直接拒绝，不建 pending（�
     expect((error as Error).message).toMatch(/Bash/);
     expect((error as Error).message).toMatch(/no user available to approve/i);
     expect((error as Error).message).toMatch(/Do not retry/i);
-    expect((error as Error).message).toMatch(/does not require approval/i);
+    expect((error as Error).message).toMatch(/needs no approval/i);
+    // 「继续干活」在主位，「停下」只留给不可逆决定
+    expect((error as Error).message).toMatch(/most reasonable assumption and continue/i);
+    expect((error as Error).message).toMatch(/unavoidable and irreversible/i);
     expect(execute).not.toHaveBeenCalled();
   });
 
