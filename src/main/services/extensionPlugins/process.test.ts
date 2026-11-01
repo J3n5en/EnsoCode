@@ -189,10 +189,34 @@ describe('PluginProcess', () => {
     const s = setup();
     await readyProcess(s);
     await vi.advanceTimersByTimeAsync(1100);
+    expect(s.child().inbox).toContainEqual({ t: 'shutdown' });
+    expect(s.children[0]?.killed).toBe(false);
+    await vi.advanceTimersByTimeAsync(3000);
     expect(s.children[0]?.killed).toBe(true);
     expect(s.onExit).toHaveBeenCalledWith({ unexpected: false });
     await readyProcess(s);
     expect(s.children).toHaveLength(2);
+  });
+
+  it('常驻进程不因空闲退出', async () => {
+    const s = setup({ resident: true });
+    await readyProcess(s);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(s.children[0]?.killed).toBe(false);
+    expect(s.onExit).not.toHaveBeenCalled();
+  });
+
+  it('stop 先发 shutdown，进程自己退出就不再 kill', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const stopped = s.proc.whenStopped();
+    expect(s.child().inbox).toContainEqual({ t: 'shutdown' });
+    expect(s.child().killed).toBe(false);
+    s.child().emit('exit', 0);
+    await flush();
+    await stopped;
+    expect(s.child().killed).toBe(false);
+    expect(s.onExit).toHaveBeenCalledWith({ unexpected: false });
   });
 
   it('ready 超时视为加载失败', async () => {

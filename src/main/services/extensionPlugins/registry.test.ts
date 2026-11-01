@@ -19,7 +19,19 @@ const valid = {
   version: '1.0.0',
   dir: 'abc',
   state: 'enabled',
-  grant: { permissions: [], fsRead: [], fsWrite: [], netDomains: [], mcp: [], renderer: false },
+  grant: {
+    permissions: [],
+    fsRead: [],
+    fsWrite: [],
+    netDomains: [],
+    mcp: [],
+    mcpTools: [],
+    renderer: false,
+    env: [],
+    interop: [],
+    intercepts: [],
+    resident: false,
+  },
   installedAt: 1,
 };
 
@@ -48,6 +60,7 @@ describe('插件登记表', () => {
       { ...valid, id: 'a.b', dir: '../escape' },
       { ...valid, id: 'a.c', state: 'root' },
       { ...valid, id: 'a.d', grant: null },
+      { ...valid, id: 'a.e', grant: { ...valid.grant, env: undefined } },
     ];
     writeFileSync(
       join(root, 'registry.json'),

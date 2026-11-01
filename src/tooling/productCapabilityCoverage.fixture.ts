@@ -898,6 +898,15 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_CONFIG_GET: excluded('Enso 插件配置项读取：密钥只报告是否已设置。'),
   EXTENSION_PLUGINS_CONFIG_SET: excluded('Enso 插件配置项写入，Main 私有文件保存。'),
   EXTENSION_PLUGINS_LOGS: excluded('Enso 插件进程日志末尾，只给本机界面。'),
+  EXTENSION_PLUGINS_ARTIFACTS_LIST: excluded('Enso 插件产出文件列表，渲染层只传插件 id。'),
+  EXTENSION_PLUGINS_ARTIFACT_READ: excluded('Enso 插件产出预览，只收产出 id，路径由 Main 推导。'),
+  EXTENSION_PLUGINS_ARTIFACT_DELETE: excluded('Enso 插件产出删除，只收产出 id。'),
+  EXTENSION_PLUGINS_ARTIFACT_SAVE: excluded(
+    '桌面专用：把产出另存到用户选择的位置，渲染层只传产出 id。'
+  ),
+  EXTENSION_PLUGINS_VIEW_STATE_GET: excluded('Enso 插件侧栏页面状态读取，替代 localStorage。'),
+  EXTENSION_PLUGINS_VIEW_STATE_SET: excluded('Enso 插件侧栏页面状态写入，按插件 id 存在 Main。'),
+  EXTENSION_PLUGINS_PICK_PATH: excluded('桌面专用：插件配置项选择文件或目录。'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

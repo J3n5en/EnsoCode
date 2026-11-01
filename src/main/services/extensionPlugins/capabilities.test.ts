@@ -1,0 +1,632 @@
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runPluginHost } from '../../../pluginHost/host';
+import type { WorkerForkOptions } from '../../platform/types';
+import { pluginDataPath } from './install';
+import { ExtensionPluginService } from './service';
+
+class InProcessChild extends EventEmitter {
+  pid = 1;
+  private handler: (m: unknown) => void = () => {};
+  constructor() {
+    super();
+    runPluginHost({
+      send: (m) => queueMicrotask(() => this.emit('message', m)),
+      onMessage: (h) => (this.handler = h),
+    });
+    queueMicrotask(() => this.emit('spawn'));
+  }
+  postMessage(m: unknown) {
+    queueMicrotask(() => {
+      this.handler(m);
+      if (typeof m === 'object' && m !== null && (m as { t?: string }).t === 'shutdown')
+        this.emit('exit', 0);
+    });
+  }
+  kill() {
+    queueMicrotask(() => this.emit('exit', 0));
+    return true;
+  }
+}
+
+const temps: string[] = [];
+const temp = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+};
+afterEach(() => {
+  vi.useRealTimers();
+  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function writePlugin(files: Record<string, string>) {
+  const dir = temp('plugin-src-');
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
+  return dir;
+}
+
+const manifest = (patch: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    schemaVersion: 1,
+    id: 'example.demo',
+    name: 'Demo',
+    version: '1.0.0',
+    main: 'main.mjs',
+    permissions: ['agent.tool'],
+    contributes: {
+      agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+    },
+    ...patch,
+  });
+
+function createService(
+  fork: (modulePath: string, args: string[], options: WorkerForkOptions) => EventEmitter = () =>
+    new InProcessChild(),
+  extra: { env?: NodeJS.ProcessEnv; sourceEnv?: NodeJS.ProcessEnv } = {}
+) {
+  const root = temp('plugins-root-');
+  const bridge = vi.fn(() => ({ ok: true as const }));
+  const service = new ExtensionPluginService({
+    root,
+    hostVersion: '0.2.12',
+    hostPath: '/unused',
+    env: extra.env ?? { PATH: '/bin' },
+    sourceEnv: extra.sourceEnv,
+    sessionBridge: () => ({ inject: bridge }),
+    fork: fork as never,
+    gate: {
+      fetch: vi.fn(),
+      notify: () => true,
+      composer: async () => null,
+      mcpTools: async () => [],
+      mcpCall: async () => ({ content: '', isError: false }),
+      now: () => Date.now(),
+      clipboard: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+    },
+  });
+  return { root, service, bridge };
+}
+
+async function install(service: ExtensionPluginService, files: Record<string, string>) {
+  const preview = await service.stage({ kind: 'dir', path: writePlugin(files) });
+  if (!preview.ok) throw new Error(preview.error);
+  const committed = await service.commit(preview.preview.token);
+  if (!committed.ok) throw new Error(committed.error);
+  return preview.preview;
+}
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe('插件能力', () => {
+  it('未声明的事件收不到，停用后也不再收到', async () => {
+    let forks = 0;
+    const { service } = createService(() => {
+      forks += 1;
+      return new InProcessChild();
+    });
+    await install(service, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'session_start', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `let n = 0;
+        export function activate(enso) {
+          enso.events.on('session_start', () => { n += 1; });
+          enso.tools.register('lookup', async () => String(n));
+        }`,
+    });
+    service.setEnabled('example.demo', true);
+    await service.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_end',
+      data: {},
+    });
+    await service.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await flush();
+    const read = () =>
+      service.callTool({
+        toolName: 'plugin_example-demo__lookup',
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      });
+    expect((await read()).content).toBe('1');
+    const forksAfter = forks;
+    service.setEnabled('example.demo', false);
+    await service.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: {},
+    });
+    await flush();
+    expect(forks).toBe(forksAfter);
+    expect(service.list()[0]?.running).toBe(false);
+    await expect(
+      service.dispatchEvent({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'before_compact',
+        data: { reason: 'overflow' },
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('拦截按 id 合并，失败按 failClosed 决定拒绝或放行', async () => {
+    const { service } = createService();
+    const files = (id: string, fail: boolean, body: string) => ({
+      'enso-plugin.json': manifest({
+        id,
+        name: id,
+        permissions: ['agent.intercept'],
+        contributes: {
+          events: [{ event: 'tool_call', mode: 'intercept', failClosed: fail }],
+        },
+      }),
+      'main.mjs': body,
+    });
+    await install(
+      service,
+      files(
+        'a.a',
+        false,
+        `export function activate(enso) { enso.events.on('tool_call', (data) => ({ input: { ...data.input, a: 1 } })); }`
+      )
+    );
+    await install(
+      service,
+      files(
+        'a.b',
+        true,
+        `export function activate(enso) { enso.events.on('tool_call', (data) => ({ input: { ...data.input, b: 1 } })); }`
+      )
+    );
+    service.setEnabled('a.b', true);
+    service.setEnabled('a.a', true);
+    await expect(
+      service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: { toolCallId: '1', toolName: 'bash', input: {} },
+      })
+    ).resolves.toEqual({ input: { a: 1, b: 1 } });
+    service.setEnabled('a.a', false);
+    await install(service, {
+      'enso-plugin.json': manifest({
+        id: 'a.c',
+        permissions: ['agent.intercept'],
+        contributes: {
+          events: [{ event: 'tool_call', mode: 'intercept', failClosed: true }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('down'); }); }`,
+    });
+    service.setEnabled('a.c', true);
+    const blocked = await service.intercept({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'tool_call',
+      payload: { toolCallId: '1', toolName: 'bash', input: {} },
+    });
+    expect(blocked).toMatchObject({ block: true });
+    service.setEnabled('a.c', false);
+    await install(service, {
+      'enso-plugin.json': manifest({
+        id: 'a.d',
+        permissions: ['agent.intercept'],
+        contributes: {
+          events: [{ event: 'tool_call', mode: 'intercept', failClosed: false }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('skip'); }); }`,
+    });
+    service.setEnabled('a.d', true);
+    await expect(
+      service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: { toolCallId: '1', toolName: 'bash', input: { n: 1 } },
+      })
+    ).resolves.toEqual({ input: { n: 1, b: 1 } });
+  });
+
+  it('拦截总时长有上限：超时的按失败处理，来不及询问的 failClosed 插件拒绝', async () => {
+    const { service } = createService();
+    const slow = (id: string, failClosed: boolean) => ({
+      'enso-plugin.json': manifest({
+        id,
+        name: id,
+        permissions: ['agent.intercept'],
+        contributes: { events: [{ event: 'tool_call', mode: 'intercept', failClosed }] },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.events.on('tool_call', async (data) => {
+          await new Promise((r) => setTimeout(r, 60));
+          return { input: { ...data.input, ${JSON.stringify(id)}: 1 } };
+        });
+      }`,
+    });
+    const ask = () =>
+      service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: { toolCallId: '1', toolName: 'bash', input: {} },
+        deadlineMs: 100,
+      });
+    for (const id of ['t.a', 't.b']) {
+      await install(service, slow(id, false));
+      service.setEnabled(id, true);
+    }
+    await ask();
+    expect(await ask()).toEqual({ input: { 't.a': 1 } });
+    await install(service, slow('t.c', true));
+    service.setEnabled('t.c', true);
+    await ask();
+    expect(await ask()).toMatchObject({ block: true });
+  });
+
+  it('工具超时取声明值，进度节流，产出可列出、拒绝路径并随卸载删除', async () => {
+    const { service, root } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({
+        contributes: {
+          agentTools: [
+            {
+              name: 'lookup',
+              description: '查询',
+              parameters: { type: 'object' },
+              timeoutMs: 1000,
+            },
+          ],
+        },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async (args, ctx) => {
+          if (args.hang) return new Promise(() => {});
+          await ctx.progress('a');
+          await ctx.progress('b'.repeat(20_000));
+          if (args.bad) {
+            try { await enso.artifacts.write({ name: '../x', text: 'no' }); return 'wrote'; }
+            catch (e) { return e.message; }
+          }
+          const file = await enso.artifacts.write({ name: 'note.txt', text: 'hi' });
+          return file.name;
+        });
+      }`,
+    });
+    service.setEnabled('example.demo', true);
+    const progress: string[] = [];
+    const result = await service.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+      onProgress: (text) => progress.push(text),
+    });
+    expect(progress).toEqual(['a']);
+    expect(result.artifacts[0]).toMatchObject({
+      name: 'note.txt',
+      mime: 'text/plain; charset=utf-8',
+    });
+    expect(service.listArtifacts('example.demo')).toHaveLength(1);
+    const path = service.artifactPath(result.artifacts[0]?.id ?? '');
+    expect(path && readFileSync(path, 'utf8')).toBe('hi');
+    expect(
+      (
+        await service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: { bad: true },
+          sessionId: 's',
+          projectRoot: null,
+        })
+      ).content
+    ).toContain('路径');
+    const hanging = service.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: { hang: true },
+      sessionId: 's',
+      projectRoot: null,
+    });
+    await expect(hanging).rejects.toMatchObject({ code: 'TIMEOUT' });
+    expect(service.deleteArtifact(result.artifacts[0]?.id ?? '')).toBe(true);
+    await service.uninstall('example.demo');
+    expect(existsSync(join(root, 'artifacts', 'example.demo'))).toBe(false);
+  }, 8_000);
+
+  it('配置按类型校验并补默认值；动态工具在拉起后进入下发列表', async () => {
+    const { service } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          dynamic: { tools: 1, commands: 1 },
+          configuration: [
+            { key: 'limit', title: '上限', type: 'number', default: 3, min: 1, max: 9 },
+          ],
+        },
+      }),
+      'main.mjs': `export async function activate(enso) {
+        await enso.tools.register('extra', async () => 'dyn', {
+          description: 'extra',
+          parameters: { type: 'object' },
+          timeoutMs: 1500,
+        });
+        await enso.commands.register('ping', async () => {}, { title: 'Ping' });
+        enso.tools.register('lookup', async () => JSON.stringify(await enso.config.get()));
+      }`,
+    });
+    expect(service.setConfig('example.demo', { limit: 'nope' }).ok).toBe(false);
+    expect(service.setConfig('example.demo', { limit: 4 }).ok).toBe(true);
+    service.setEnabled('example.demo', true);
+    expect(service.toolsForSpawn().map((tool) => tool.name)).toEqual([
+      'plugin_example-demo__lookup',
+    ]);
+    await service.prepareForSpawn();
+    expect(service.toolsForSpawn()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'plugin_example-demo__extra', timeoutMs: 1500 }),
+      ])
+    );
+    expect(
+      JSON.parse(
+        (
+          await service.callTool({
+            toolName: 'plugin_example-demo__lookup',
+            args: {},
+            sessionId: 's',
+            projectRoot: null,
+          })
+        ).content
+      )
+    ).toEqual({ limit: 4 });
+    service.setConfig('example.demo', { limit: null });
+    expect(
+      JSON.parse(
+        (
+          await service.callTool({
+            toolName: 'plugin_example-demo__extra',
+            args: {},
+            sessionId: 's',
+            projectRoot: null,
+          })
+        ).content === 'dyn'
+          ? '{"ok":true}'
+          : '{}'
+      ).ok
+    ).toBe(true);
+    const again = JSON.parse(
+      (
+        await service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: {},
+          sessionId: 's',
+          projectRoot: null,
+        })
+      ).content
+    );
+    expect(again.limit).toBe(3);
+    await expect(
+      service.callUi({
+        pluginId: 'example.demo',
+        method: 'command.run',
+        payload: { id: 'ping' },
+        sessionId: null,
+        projectRoot: null,
+      })
+    ).resolves.toBeNull();
+    service.setEnabled('example.demo', false);
+    service.setEnabled('example.demo', true);
+    expect(service.toolsForSpawn().some((tool) => tool.name.endsWith('extra'))).toBe(false);
+    expect(service.viewStateSet('example.demo', { a: '1' })).toEqual({ ok: true });
+    expect(service.viewStateGet('example.demo')).toEqual({ a: '1' });
+    expect(service.viewStateSet('example.demo', { b: 'x'.repeat(1_100_000) }).ok).toBe(false);
+    expect(service.viewStateGet('example.demo')).toEqual({ a: '1' });
+  });
+
+  it('插件间调用受清单和深度限制，环境变量只透传声明项', async () => {
+    const envs: NodeJS.ProcessEnv[] = [];
+    const { service } = createService(
+      (_m, _a, options) => {
+        envs.push({ ...options.env });
+        return new InProcessChild();
+      },
+      { sourceEnv: { MY_TOKEN: 's3', OTHER: 'no' } }
+    );
+    const hop = (id: string, next: string | null, permissions: string[], interop: string[]) => ({
+      'enso-plugin.json': manifest({
+        id,
+        name: id,
+        permissions,
+        env: id === 'a.a' ? ['MY_TOKEN'] : [],
+        interop: { call: interop },
+        contributes: {
+          ...(id === 'a.a'
+            ? {
+                agentTools: [
+                  { name: 'lookup', description: '查询', parameters: { type: 'object' } },
+                ],
+              }
+            : {}),
+          exports: [{ name: 'hop' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) {
+        ${id === 'a.a' ? `enso.tools.register('lookup', async () => enso.plugins.call('a.b', 'hop', {}));` : ''}
+        enso.exports.handle('hop', async () => {
+          ${next ? `return enso.plugins.call('${next}', 'hop', {});` : `try { await enso.plugins.call('a.e', 'hop', {}); return 'called'; } catch (e) { return e.message; }`}
+        });
+      }`,
+    });
+    await install(service, hop('a.a', 'a.b', ['agent.tool', 'plugin.call'], ['a.b']));
+    await install(service, hop('a.b', 'a.c', ['plugin.call'], ['a.c']));
+    await install(service, hop('a.c', 'a.d', ['plugin.call'], ['a.d']));
+    await install(service, hop('a.d', null, ['plugin.call'], ['a.e']));
+    for (const id of ['a.a', 'a.b', 'a.c', 'a.d']) service.setEnabled(id, true);
+    expect(
+      (
+        await service.callTool({
+          toolName: 'plugin_a-a__lookup',
+          args: {},
+          sessionId: 's',
+          projectRoot: null,
+        })
+      ).content
+    ).toContain('嵌套');
+    expect(envs.some((item) => item.MY_TOKEN === 's3' && item.PATH === '/bin')).toBe(true);
+    expect(envs.every((item) => item.OTHER === undefined)).toBe(true);
+  });
+
+  it('被调方从 ctx.caller 知道谁在调用', async () => {
+    const { service } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({
+        id: 'b.callee',
+        name: 'callee',
+        permissions: [],
+        contributes: { exports: [{ name: 'who' }] },
+      }),
+      'main.mjs': `export function activate(enso) { enso.exports.handle('who', async (_a, ctx) => ctx.caller); }`,
+    });
+    await install(service, {
+      'enso-plugin.json': manifest({
+        id: 'b.caller',
+        name: 'caller',
+        permissions: ['agent.tool', 'plugin.call'],
+        interop: { call: ['b.callee'] },
+      }),
+      'main.mjs': `export function activate(enso) { enso.tools.register('lookup', () => enso.plugins.call('b.callee', 'who')); }`,
+    });
+    service.setEnabled('b.callee', true);
+    service.setEnabled('b.caller', true);
+    const result = await service.callTool({
+      toolName: 'plugin_b-caller__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    expect(result.content).toBe('b.caller');
+  });
+
+  it('定时任务按间隔执行且不重叠，停用后不再跑', async () => {
+    const { service, root } = createService();
+    await install(service, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'process.background'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          schedules: [{ id: 'tick', intervalSeconds: 60, timeoutMs: 600_000 }],
+        },
+      }),
+      'main.mjs': `import { appendFileSync } from 'node:fs';
+        export function activate(enso) {
+          enso.schedules.register('tick', () => {
+            appendFileSync(enso.dataDir + '/ticks.txt', 'x');
+            return new Promise(() => {});
+          });
+          enso.tools.register('lookup', async () => 'ok');
+        }`,
+    });
+    service.setEnabled('example.demo', true);
+    await service.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    vi.useFakeTimers();
+    service.startBackground();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const ticks = join(pluginDataPath(root, 'example.demo'), 'ticks.txt');
+    expect(readFileSync(ticks, 'utf8')).toBe('x');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readFileSync(ticks, 'utf8')).toBe('x');
+    service.setEnabled('example.demo', false);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(readFileSync(ticks, 'utf8')).toBe('x');
+    expect(service.list()[0]?.schedules?.[0]?.lastRunAt).toBeUndefined();
+  });
+
+  it('常驻不超过 5 个，意外退出 5 秒后重拉', async () => {
+    vi.useFakeTimers();
+    const children: EventEmitter[] = [];
+    const { service } = createService(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        postMessage(message: unknown): void;
+        kill(): boolean;
+      };
+      child.postMessage = (message: unknown) => {
+        const kind = (message as { t?: string }).t;
+        if (kind === 'init')
+          queueMicrotask(() =>
+            child.emit('message', {
+              t: 'ready',
+              registered: {
+                tools: [],
+                commands: [],
+                triggers: [],
+                rendererMethods: [],
+                events: [],
+                schedules: [],
+                exports: [],
+              },
+            })
+          );
+        if (kind === 'shutdown') queueMicrotask(() => child.emit('exit', 0));
+      };
+      child.kill = () => {
+        queueMicrotask(() => child.emit('exit', 0));
+        return true;
+      };
+      children.push(child);
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+    for (const id of ['a.a', 'a.b', 'a.c', 'a.d', 'a.e', 'a.f']) {
+      await install(service, {
+        'enso-plugin.json': manifest({
+          id,
+          name: id,
+          permissions: ['process.background'],
+          resident: true,
+          contributes: {},
+        }),
+        'main.mjs': 'export function activate() {}',
+      });
+      service.setEnabled(id, true);
+    }
+    const offset = children.length;
+    service.startBackground();
+    await vi.advanceTimersByTimeAsync(0);
+    const running = () =>
+      service
+        .list()
+        .filter((item) => item.running)
+        .map((item) => item.id);
+    expect(running()).toEqual(['a.a', 'a.b', 'a.c', 'a.d', 'a.e']);
+    expect(service.list().find((item) => item.id === 'a.f')?.lastError?.message).toContain('上限');
+    children[offset]?.emit('exit', 1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(children.length).toBe(offset + 6);
+    expect(running()).toContain('a.a');
+  });
+});

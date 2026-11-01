@@ -1,4 +1,5 @@
 import type { ApprovalReviewRecord } from '@shared/approvalReviewRecord';
+import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
 import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
@@ -112,6 +113,8 @@ export type TimelineItem =
       subagentOp?: SubagentOp;
       /** wait / list 行：agentId → spawn 时起的名字，展开后逐个标注；其它缺省 */
       subagentTitles?: Record<string, string>;
+      /** 插件工具写出的产出文件；其它缺省 */
+      pluginArtifacts?: PluginArtifactInfo[];
     }
   | {
       kind: 'tool-group';
@@ -854,6 +857,7 @@ function buildMessageTimeline(
       rtk?: RtkToolStats;
       approvalReview?: ApprovalReviewRecord;
       backgroundTaskId?: string;
+      pluginArtifacts?: PluginArtifactInfo[];
     }
   >();
   for (const message of messages) {
@@ -871,6 +875,7 @@ function buildMessageTimeline(
         rtk: message.rtk,
         approvalReview: message.approvalReview,
         backgroundTaskId: message.backgroundTaskId,
+        pluginArtifacts: message.pluginArtifacts,
       });
     }
   }
@@ -1214,6 +1219,7 @@ function buildMessageTimeline(
             ...(asked ? { ask: asked.ask } : {}),
             ...(subagent?.op ? { subagentOp: subagent.op } : {}),
             ...(subagent?.titles ? { subagentTitles: subagent.titles } : {}),
+            ...(result?.pluginArtifacts ? { pluginArtifacts: result.pluginArtifacts } : {}),
             ...(result || !toolStartedAt ? {} : { startedAt: toolStartedAt[part.id] ?? null }),
           });
           return;

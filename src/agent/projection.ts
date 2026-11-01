@@ -1,4 +1,6 @@
 import { parseApprovalReviewRecord } from '@shared/approvalReviewRecord';
+import { pluginArtifactsFromToolDetails } from '@shared/extensionPlugins/artifacts';
+import { parsePluginToolName } from '@shared/extensionPlugins/toolName';
 import { parseMaskReport } from '@shared/privacyMask/report';
 import { parseRtkToolStats } from '@shared/rtk';
 import {
@@ -198,6 +200,14 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     isBackgroundTaskId(value.details.backgroundTaskId)
   ) {
     projected.backgroundTaskId = value.details.backgroundTaskId;
+  }
+  if (
+    value.role === 'toolResult' &&
+    typeof value.toolName === 'string' &&
+    parsePluginToolName(value.toolName)
+  ) {
+    const artifacts = pluginArtifactsFromToolDetails(value.details);
+    if (artifacts.length > 0) projected.pluginArtifacts = artifacts;
   }
   if (value.role === 'toolResult' && isRecord(value.details)) {
     const approvalReview = parseApprovalReviewRecord(value.details.approvalReview);

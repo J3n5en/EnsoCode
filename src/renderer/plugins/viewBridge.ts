@@ -29,6 +29,23 @@ export function decodeUtf8Base64(base64: string): string {
   return new TextDecoder().decode(Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)));
 }
 
+/** 侧栏壳经 MessagePort 提交的 localStorage / enso.storage 补丁；不是插件调用 */
+export function viewStoragePatch(data: unknown): Record<string, string | null> | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const record = data as Record<string, unknown>;
+  if (record.type !== 'enso-storage' || typeof record.patch !== 'object' || record.patch === null)
+    return null;
+  if (Array.isArray(record.patch)) return null;
+  const patch: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(record.patch as Record<string, unknown>)) {
+    if (key.length === 0 || key.length > 256) return null;
+    if (value === null) patch[key] = null;
+    else if (typeof value === 'string') patch[key] = value;
+    else return null;
+  }
+  return patch;
+}
+
 export interface PluginViewRef {
   pluginId: string;
   pluginName: string;

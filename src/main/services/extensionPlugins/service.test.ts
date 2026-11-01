@@ -20,7 +20,11 @@ class InProcessChild extends EventEmitter {
     queueMicrotask(() => this.emit('spawn'));
   }
   postMessage(m: unknown) {
-    queueMicrotask(() => this.handler(m));
+    queueMicrotask(() => {
+      this.handler(m);
+      if (typeof m === 'object' && m !== null && (m as { t?: string }).t === 'shutdown')
+        this.emit('exit', 0);
+    });
   }
   kill() {
     queueMicrotask(() => this.emit('exit', 0));
@@ -119,7 +123,7 @@ describe('ExtensionPluginService', () => {
       sessionId: 's1',
       projectRoot: null,
     });
-    expect(result).toEqual({ content: 'got x in s1' });
+    expect(result).toEqual({ content: 'got x in s1', artifacts: [] });
   });
 
   it('停用的插件调用直接失败，不拉起进程', async () => {
@@ -524,7 +528,7 @@ describe('ExtensionPluginService', () => {
         sessionId: 's1',
         projectRoot: '/work/repo',
       })
-    ).resolves.toEqual({ content: '/work/repo' });
+    ).resolves.toEqual({ content: '/work/repo', artifacts: [] });
   });
 
   describe('配置项', () => {
@@ -553,10 +557,18 @@ describe('ExtensionPluginService', () => {
             title: '地址',
             description: '',
             secret: false,
+            type: 'string',
             set: true,
             value: 'https://x',
           },
-          { key: 'token', title: 'Token', description: '', secret: true, set: true },
+          {
+            key: 'token',
+            title: 'Token',
+            description: '',
+            secret: true,
+            type: 'string',
+            set: true,
+          },
         ],
       });
       const file = join(root, 'config', 'example.demo.json');

@@ -1,11 +1,22 @@
 import { join } from 'node:path';
-import { app, notification, pluginHostPath, utilityProcess } from '@platform';
+import {
+  app,
+  clipboard,
+  hostKind,
+  notification,
+  pluginHostPath,
+  shell,
+  utilityProcess,
+} from '@platform';
+import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { rendererById } from '../renderers';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
 import { pluginError } from './process';
-import { ExtensionPluginService } from './service';
+import { ExtensionPluginService, type PluginSessionBridge } from './service';
+
+export type { PluginSessionBridge };
 
 /** 宿主 MCP 由 agentHost 注入（经 worker 执行），避免这里反向依赖 agentHost */
 export type PluginMcpBridge = Pick<GateDeps, 'mcpTools' | 'mcpCall'>;
@@ -13,6 +24,31 @@ export type PluginMcpBridge = Pick<GateDeps, 'mcpTools' | 'mcpCall'>;
 let service: ExtensionPluginService | null = null;
 let mcpBridge: PluginMcpBridge | null = null;
 let draftBroker: DraftBroker | null = null;
+let sessionBridge: PluginSessionBridge | null = null;
+
+export function setPluginSessionBridge(bridge: PluginSessionBridge | null): void {
+  sessionBridge = bridge;
+}
+
+/** 服务端的剪贴板和外链是空操作，capabilities 按宿主种类如实报告 */
+export function pluginHostCapabilities(input: {
+  host: 'desktop' | 'server';
+  hostVersion: string;
+  notify: boolean;
+  clipboard: boolean;
+  openExternal: boolean;
+}): PluginHostCapabilities {
+  const desktop = input.host === 'desktop';
+  return {
+    host: input.host,
+    hostVersion: input.hostVersion,
+    notify: input.notify,
+    mcp: true,
+    clipboard: desktop && input.clipboard,
+    openExternal: desktop && input.openExternal,
+    composer: true,
+  };
+}
 
 const ENV_ALLOWLIST = [
   'PATH',
@@ -61,11 +97,21 @@ const noMcp = () => Promise.reject(pluginError('UNSUPPORTED', '当前环境无�
 
 export function getExtensionPlugins(): ExtensionPluginService {
   if (service) return service;
+  const capabilities = pluginHostCapabilities({
+    host: hostKind,
+    hostVersion: app.getVersion(),
+    notify: notification.isSupported(),
+    clipboard: typeof clipboard.writeText === 'function',
+    openExternal: typeof shell.openExternal === 'function',
+  });
   service = new ExtensionPluginService({
     root: join(app.getPath('userData'), 'extension-plugins'),
     hostVersion: app.getVersion(),
     hostPath: pluginHostPath,
     env: pluginHostEnv(process.env),
+    sourceEnv: process.env,
+    capabilities,
+    sessionBridge: () => sessionBridge,
     fork: (modulePath, args, options) => utilityProcess.fork(modulePath, args, options),
     gate: {
       fetch: (url, init) => fetch(url, init),
@@ -80,9 +126,14 @@ export function getExtensionPlugins(): ExtensionPluginService {
       mcpCall: (target, server, tool, args, signal) =>
         mcpBridge ? mcpBridge.mcpCall(target, server, tool, args, signal) : noMcp(),
       now: Date.now,
+      ...(capabilities.clipboard ? { clipboard: (text: string) => clipboard.writeText(text) } : {}),
+      ...(capabilities.openExternal
+        ? { openExternal: (url: string) => shell.openExternal(url) }
+        : {}),
     },
   });
   service.startUpdateChecks();
+  service.startBackground();
   app.on('before-quit', () => service?.dispose());
   return service;
 }

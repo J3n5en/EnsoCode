@@ -12,6 +12,7 @@
 | `notes` | 侧栏页面（sandbox iframe）+ 插件私有数据目录，笔记一键插入输入框 | `ui.view` `composer.draft` |
 | `github-repo` | Agent 工具经 `net.fetch` 访问白名单域名，系统通知 | `agent.tool` `net.fetch` `ui.notify` |
 | `prompt-enhance` | 移植自 [dsh-bce](https://github.com/linqiu919/dsh-bce)：输入框左侧按钮调用已配置的 bce-tool MCP 索引项目并改写草稿，可恢复原文；演示宿主 MCP、长耗时方法、配置项、渲染模块直接改草稿 | `ui.slot` `composer.draft` `mcp.call` |
+| `digest` | 会话开始事件、常驻、定时任务、工具进度与产出文件 | `agent.tool` `agent.observe` `process.background` |
 
 ## 结构
 

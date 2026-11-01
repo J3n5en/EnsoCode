@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "enso.example.digest",
+  "name": "Digest",
+  "version": "1.0.0",
+  "description": "演示会话事件、常驻进程、定时任务、工具进度和产出文件。",
+  "main": "main.mjs",
+  "permissions": ["agent.tool", "agent.observe", "process.background"],
+  "resident": true,
+  "contributes": {
+    "agentTools": [
+      {
+        "name": "summarize",
+        "description": "Summarize text, report progress, and write a digest file.",
+        "timeoutMs": 15000,
+        "parameters": {
+          "type": "object",
+          "properties": { "text": { "type": "string", "description": "Text to summarize" } },
+          "required": ["text"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "events": [{ "event": "session_start", "mode": "observe" }],
+    "schedules": [{ "id": "sweep", "intervalSeconds": 3600 }]
+  }
+}

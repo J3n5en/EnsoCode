@@ -1,11 +1,23 @@
 /** Main ↔ 插件进程的帧协议；一帧一条 JSON 消息 */
 
+import type { PluginEventName } from './events';
+
+/** 注入消息与工具进度的字符上限；gate、Main、worker 共用 */
+export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
+export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
+
 export const PLUGIN_CALL_METHODS = [
   'tool.execute',
   'command.run',
   'trigger.candidates',
   'trigger.pick',
   'renderer.call',
+  /** 会话事件；payload { event, data }，拦截型的返回值就是拦截结果 */
+  'event.dispatch',
+  /** 定时任务；payload { id } */
+  'schedule.run',
+  /** 其他插件调用本插件的导出方法；payload { name, args, caller } */
+  'export.call',
 ] as const;
 export type PluginCallMethod = (typeof PLUGIN_CALL_METHODS)[number];
 
@@ -20,6 +32,21 @@ export const PLUGIN_HOST_APIS = [
   'config.get',
   'mcp.tools',
   'mcp.call',
+  /** 工具执行中上报进度；args { text } */
+  'tool.progress',
+  /** 写一份产出文件；args { name, text | base64, mime? }，返回 { id, name, size, mime } */
+  'artifact.write',
+  /** 向会话注入消息；args { sessionId?, text, deliverAs?, triggerTurn? } */
+  'session.inject',
+  /** 调用其他插件导出的方法；args { pluginId, name, args } */
+  'plugin.call',
+  'ui.clipboard',
+  'ui.openExternal',
+  /** 运行期增减工具与命令；args { kind, name, ...meta } */
+  'contrib.register',
+  'contrib.unregister',
+  /** 宿主能力探测 */
+  'host.capabilities',
 ] as const;
 export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 
@@ -33,6 +60,9 @@ export interface PluginRegistrations {
   commands: string[];
   triggers: string[];
   rendererMethods: string[];
+  events: PluginEventName[];
+  schedules: string[];
+  exports: string[];
 }
 
 export type PluginResponse =
@@ -52,6 +82,8 @@ export type MainToPluginHost =
       projectRoot: string | null;
     }
   | { t: 'cancel'; invocationId: string }
+  /** 宿主正在收敛进程（停用、卸载、退出）；插件有短暂时间清理子进程 */
+  | { t: 'shutdown' }
   | PluginResponse;
 
 export type PluginHostToMain =
@@ -65,4 +97,27 @@ export type PluginHostToMain =
 export interface PluginToolResult {
   content: string;
   details?: unknown;
+  /** artifact.write 返回的产出 id；界面据此提供预览与另存 */
+  artifacts?: string[];
+}
+
+/** 插件产出文件的公开描述；不含磁盘路径 */
+export interface PluginArtifactInfo {
+  id: string;
+  pluginId: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: number;
+}
+
+/** 宿主能力；插件据此在桌面与服务端之间降级 */
+export interface PluginHostCapabilities {
+  host: 'desktop' | 'server';
+  hostVersion: string;
+  notify: boolean;
+  mcp: boolean;
+  clipboard: boolean;
+  openExternal: boolean;
+  composer: boolean;
 }

@@ -72,6 +72,9 @@
 | `fs.read` / `fs.write` | 相对项目根的目录范围，`.` 表示整个项目。填了就必须申请对应权限 |
 | `net.domains` | 主机名，如 `api.github.com`，不含协议和路径。填了就必须申请 `net.fetch` |
 | `mcp.tools` | 允许调用的宿主 MCP 工具名（字母、数字、`_ . -`，最长 64）。填了就必须申请 `mcp.call`，申请了 `mcp.call` 也必须填 |
+| `resident` | 可选，`true` 表示常驻：启用即拉起进程，不因空闲退出。需要 `process.background` |
+| `env` | 可选，额外透传给插件进程的环境变量名，最多 20 个。不能是 `ENSO_*`、`ELECTRON_*`、`LD_*`、`DYLD_*`、`NODE_OPTIONS`、`NODE_PATH`、`NODE_EXTRA_CA_CERTS` |
+| `interop.call` | 可选，允许调用的其他插件 id。填了就必须申请 `plugin.call`，申请了也必须填 |
 
 路径一律是插件目录内的相对路径：不能是绝对路径、不能含 `..`、不能含反斜杠。
 
@@ -90,26 +93,41 @@
 | `net.fetch` | 声明了域名 | 访问这些域名 |
 | `mcp.server` | 有 `mcpServers` | 随会话拉起 MCP 服务 |
 | `mcp.call` | 有 `mcp.tools` | 调用用户已配置的 MCP 服务里、清单列出的工具 |
+| `agent.observe` | 有通知型 `events` | 收到会话事件 |
+| `agent.intercept` | 有拦截型 `events` | 拦截并改写工具调用、工具结果和用户输入 |
+| `agent.inject` | 要向会话发消息 | `enso.session.inject` |
+| `process.background` | `resident` 或有 `schedules` | 常驻进程、定时任务 |
+| `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
+| `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
+| `ui.openExternal` | 要打开外部链接 | `enso.ui.openExternal` |
+
+升级时如果权限、文件范围、域名、MCP 工具、透传变量、可调用的插件、拦截事件变多，或改成常驻，需要重新确认。
 
 安装时展示的是这些权限，但插件的 `main` 本身是完整的 Node 进程，权限只约束它能向 Enso 申请的能力，不约束它自己的代码。只安装你信任的插件。
 
 ### 贡献
 
-- `agentTools`：`{ name, description, parameters }`。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
+- `agentTools`：`{ name, description, parameters, timeoutMs? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
 - `commands`：`{ id, title }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
 - `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
-- `presets`：`{ id, name, skills, mcpServers, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt? }`，最多 20 个。`skills` 和 `mcpServers` 只能引用本插件已经声明的 skill 目录和 MCP 服务名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改。会话 id 是 `plugin:<插件 id>:<预设 id>`。
+- `presets`：`{ id, name, skills, mcpServers, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills` 和 `mcpServers` 只能引用本插件已经声明的 skill 目录和 MCP 服务名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
 - `methods`：`{ name, timeoutMs }`，给 `renderer.handle` 注册的方法声明更长的超时，1000 到 120000 毫秒的整数。没声明的方法 2 秒超时。
-- `configuration`：`{ key, title, description?, secret? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
+- `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）或 `path`（可带 `pathKind: 'file' | 'directory'`）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
+- `events`：`{ event, mode?, failClosed?, tools? }`，订阅会话事件，见下文「会话事件」。
+- `schedules`：`{ id, intervalSeconds, timeoutMs? }`，最多 10 个。间隔 60 到 86400 秒，单次缺省 60 秒超时。
+- `exports`：`{ name, timeoutMs? }`，允许其他插件调用的方法。
+- `dynamic`：`{ tools?, commands? }`，运行期最多能额外注册多少工具（0–50）和命令（0–20），缺省都是 0。
 
 同一类贡献里的 `id` 或 `name` 不能重复。
 
 ## `main.mjs`
 
-导出 `activate(enso)`，Enso 在插件进程启动时调用它。进程空闲 5 分钟后退出，下次调用时重新启动，所以不要依赖常驻内存的状态，要持久化就写 `enso.dataDir`。
+导出 `activate(enso)`，Enso 在插件进程启动时调用它。非常驻插件的进程空闲 5 分钟后退出，下次调用时重新启动，所以不要依赖内存里的状态，要持久化就写 `enso.dataDir`。
+
+可以再导出 `deactivate()`：停用、卸载、升级或 Enso 退出时调用，最多等 3 秒。之后经 `node:child_process` 拉起的子进程会被结束。
 
 ```js
 export async function activate(enso) {
@@ -126,24 +144,78 @@ export async function activate(enso) {
 | --- | --- |
 | `pluginId` | 清单里的 id |
 | `dataDir` | 插件私有目录，卸载时删除。进程环境变量 `ENSO_PLUGIN_DATA` 指向同一位置 |
-| `tools.register(name, handler)` | `handler(args, ctx)` 返回字符串，或 `{ content, details? }`。其它返回值会被序列化成 JSON 字符串 |
-| `commands.register(id, handler)` | `handler(ctx)` |
+| `tools.register(name, handler, meta?)` | `handler(args, ctx)` 返回字符串，或 `{ content, details? }`。其它返回值会被序列化成 JSON 字符串。清单里没有的名字要带 `meta = { description, parameters, timeoutMs? }`，算动态工具，见下 |
+| `commands.register(id, handler, meta?)` | `handler(ctx)`。清单里没有的 id 要带 `meta = { title }`，算动态命令 |
+| `events.on(event, handler)` | 只能订阅清单 `events` 声明过的事件，见「会话事件」 |
+| `schedules.register(id, handler)` | 只能注册清单 `schedules` 声明过的 id |
+| `exports.handle(name, handler)` / `plugins.call(pluginId, name, args?)` | 见「插件间调用」 |
+| `artifacts.write(input)` | 见「产出文件」 |
+| `session.inject(input)` | 见「向会话发消息」 |
+| `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
 | `triggers.register(name, handlers)` | `handlers.candidates(query, ctx)` 与 `handlers.pick(item, ctx)` |
 | `renderer.handle(method, handler)` | 供渲染模块和侧栏页面调用，`handler(args, ctx)` |
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
+| `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
-| `config.get()` | 本插件的配置值 `{ [key]: string }`，未设置的键不出现。不需要权限，`activate` 里也能调 |
+| `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
 | `mcp.tools()` / `mcp.call(server, tool, args?)` | 见下 |
 
-每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`invocationId` 和 `signal`（调用被取消或超时时 abort）。
+每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`invocationId`、`signal`（调用被取消或超时时 abort）和 `progress(text)`（只在工具调用里有效，见下）。
 
-插件进程不继承 Enso 的环境变量，只保留 `PATH`、`HOME` 等运行必需项和 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`（含小写写法）。上面这些宿主接口每次调用都回到主进程校验，校验失败抛带 `code` 的错误，见文末错误码。
+插件进程不继承 Enso 的环境变量，只保留 `PATH`、`HOME` 等运行必需项、`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`（含小写写法）和清单 `env` 里声明的变量。上面这些宿主接口每次调用都回到主进程校验，校验失败抛带 `code` 的错误，见文末错误码。
 
 ### 工具返回值
 
-`content` 是给模型看的文本，`details` 是任意 JSON，只给界面用（比如结果卡片）。整个结果不超过 1MB，单次调用限时 60 秒。工具调用走和 MCP 工具相同的审批，用户的审批档位同样生效。
+`content` 是给模型看的文本，`details` 是任意 JSON，只给界面用（比如结果卡片）。整个结果不超过 1MB，单次调用按清单的 `timeoutMs` 限时，缺省 60 秒。工具调用走和 MCP 工具相同的审批，用户的审批档位同样生效。
+
+耗时的工具可以调 `ctx.progress(text)` 上报进度，工具卡片会实时显示。每 200ms 最多生效一次，单条不超过 16K 字符。
+
+### 动态工具与命令
+
+清单 `dynamic` 给出上限后，插件可以在运行期用 `tools.register(name, handler, meta)` / `commands.register(id, handler, meta)` 注册清单里没有的工具和命令，名字规则与清单相同，`parameters` 必须是 `type` 为 `object` 的 JSON Schema，超出上限返回 `QUOTA`。返回的取消函数会把它们撤掉。动态工具对之后新开的会话生效：Enso 启动会话前会先拉起声明了动态工具的插件（最多等 5 秒）。插件进程退出后，动态注册全部清空。
+
+### 会话事件
+
+清单 `events` 里的每一项是 `{ event, mode?, failClosed?, tools? }`。`mode` 缺省 `observe`（只通知，需要 `agent.observe`），设为 `intercept` 时可以改写或拦下（需要 `agent.intercept`）。子代理和 Bot 会话不发事件。
+
+| 事件 | 时机 | `data` | 可拦截 |
+| --- | --- | --- | --- |
+| `session_start` / `session_end` | 会话开始 / 结束 | `{ reason }` | 否 |
+| `agent_start` / `agent_end` | 一轮回复开始 / 结束 | `{}` | 否 |
+| `before_compact` | 上下文压缩前 | `{ reason }` | 否，但会等所有插件处理完（最多 10 秒）再压缩 |
+| `after_compact` | 压缩后 | `{ reason }` | 否 |
+| `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
+| `tool_result` | 工具执行后 | `{ toolCallId, toolName, input, content, isError }` | 返回 `{ content?, isError? }` 改写结果 |
+| `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
+
+`tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。
+
+多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。
+
+### 向会话发消息
+
+`session.inject({ text, sessionId?, deliverAs?, triggerTurn? })` 把一条消息加进会话，用户能看到来自哪个插件。需要 `agent.inject`。
+
+- `sessionId` 缺省取当前调用所属的会话，都没有则返回 `NO_SESSION`。会话必须正在运行，否则返回 `INJECT_FAILED`。
+- `deliverAs`：`nextTurn`（缺省，并入下一轮）、`steer`（插入正在进行的回复）、`followUp`（当前回复结束后排队）。
+- `triggerTurn: true` 时会话空闲也会立即开始一轮。
+- 文本不超过 32K 字符。
+
+### 产出文件
+
+`artifacts.write({ name, text })` 或 `artifacts.write({ name, base64, mime? })` 保存一份文件，返回 `{ id, pluginId, name, mime, size, createdAt }`。不需要权限，但只能在宿主发起的调用里用。`name` 是不带路径的文件名（最长 200 字符，不能含 `/`、`\`）。单个不超过 50MB，每个插件最多保留 200 个，超出时删掉最旧的；卸载插件时全部删除。
+
+在工具调用里写的产出会自动挂到这次工具结果上：模型看到的文本末尾多一行产出列表，工具卡片下方可以预览（文本、图片）和另存。设置页的插件详情里可以查看和删除全部产出。
+
+### 常驻与定时任务
+
+`resident: true` 的插件启用后就拉起进程并一直运行，意外退出 5 秒后重启；同时最多 5 个常驻插件，超出的不启动并在设置页显示原因。清单 `schedules` 声明的任务按间隔执行，同一个任务上一次没跑完时跳过这一次；设置页显示最近一次的运行时间和错误。停用插件后常驻进程退出、定时任务停止。崩溃停用规则同样适用。
+
+### 插件间调用
+
+被调方在清单 `exports` 里声明方法，并用 `exports.handle(name, handler)` 注册，`handler(args, ctx)` 的 `ctx.caller` 是调用方插件 id。调用方申请 `plugin.call`，把对方 id 列进 `interop.call`，再用 `plugins.call(pluginId, name, args)`。对方必须已启用；调用最多嵌套 3 层，超出返回 `CALL_DEPTH`。
 
 ### 网络
 
@@ -226,12 +298,13 @@ export function onLoad(enso) {
 
 ## 侧栏页面
 
-`views` 里声明的 HTML 跑在 `sandbox="allow-scripts"` 的 iframe 里，和主界面不同源，拿不到主界面的任何接口，也不能加载外部资源。页面必须自包含：脚本和样式内联，图片只用 `data:` 或 `blob:`。
+`views` 里声明的 HTML 跑在 `sandbox="allow-scripts"` 的 iframe 里，和主界面不同源，拿不到主界面的任何接口，也不能加载外部资源。页面里用相对路径引用的插件内文件——`<script src>`、`<link rel="stylesheet" href>`、`<img src>`——会在打开时内联进页面（脚本和样式转成内联，图片转成 `data:`），路径相对页面所在目录；绝对路径、带协议的 URL 和超出插件目录的引用保持原样，不会加载。脚本里的 `import` 不会被解析，需要先打包成单文件。
 
 页面里用 `window.enso`：
 
 - `enso.theme`：`'light'` 或 `'dark'`，打开页面时确定，不会随主题切换更新。`<html>` 上同时有 `data-theme`。
 - `enso.call(method, args)`：调用本插件 `renderer.handle` 注册的方法，返回 Promise。
+- `enso.storage.getItem / setItem / removeItem`：页面状态，关闭重开后仍在。页面里的 `localStorage` 也指向同一份数据。读取是同步的（打开页面时的快照加本页写入），写入异步保存。每个插件合计不超过 1MB，卸载时删除。
 
 ```html
 <button id="add">添加</button>
@@ -260,7 +333,18 @@ export function onLoad(enso) {
 | 插件包 | 5000 个文件、合计 200MB（目录、zip、链接安装一致） |
 | 文件读写 | 单文件 5MB |
 | 网络响应 | 5MB，最多 5 次重定向 |
-| 工具结果 | 1MB，60 秒超时 |
+| 工具结果 | 1MB；按声明超时（1–600 秒），缺省 60 秒 |
+| 工具进度 | 每 200ms 一次，单条 16K 字符 |
+| 产出文件 | 单个 50MB，每插件 200 个 |
+| 侧栏页面状态 | 每插件 1MB |
+| 会话拦截 | 每插件 5 秒，合计 25 秒；`before_compact` 10 秒 |
+| 注入消息 | 32K 字符 |
+| 剪贴板 | 1MB |
+| 动态注册 | 工具 50 个，命令 20 个 |
+| 定时任务 | 最多 10 个，间隔 60–86400 秒，单次缺省 60 秒 |
+| 常驻插件 | 同时 5 个，意外退出 5 秒后重启 |
+| 插件间调用 | 嵌套 3 层 |
+| 透传环境变量 | 20 个 |
 | 界面调用 | 参数与返回值各 64KB；命令 60 秒，声明过的渲染方法按声明（最长 120 秒），其余 2 秒 |
 | 宿主 MCP | 参数 64KB；单次最长 120 秒 |
 | 配置项 | 最多 20 项，每个值 4096 字符 |
@@ -268,7 +352,7 @@ export function onLoad(enso) {
 | 系统通知 | 标题 200 字符，正文 1000 字符 |
 | 补全 | 50 条，label 64 字符，detail 120 字符，插入文本 32KB |
 | 调用频率 | 每插件每秒 10 次；连续失败 5 次熔断 30 秒 |
-| 进程 | 启动限时 10 秒；空闲 5 分钟退出；10 分钟内崩溃 3 次自动停用 |
+| 进程 | 启动限时 10 秒；非常驻空闲 5 分钟退出；10 分钟内崩溃 3 次自动停用；退出前 `deactivate` 最多 3 秒 |
 
 ## 错误码
 
@@ -299,4 +383,7 @@ export function onLoad(enso) {
 | `ABORTED` | 调用被取消 |
 | `RATE_LIMITED` | 调用过于频繁 |
 | `CIRCUIT_OPEN` | 连续失败，30 秒内拒绝 |
-| `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、Agent 进程不可用时的 MCP 调用） |
+| `QUOTA` | 动态工具或命令已达清单上限 |
+| `CALL_DEPTH` | 插件间调用嵌套超过 3 层 |
+| `INJECT_FAILED` | 会话不在运行或未接受注入 |
+| `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、剪贴板和外链，Agent 进程不可用时的 MCP 调用）。用 `host.capabilities()` 提前判断 |

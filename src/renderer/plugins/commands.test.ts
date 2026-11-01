@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { pluginCommandFor, pluginSlashCommands, setPluginCommands } from './commands';
+import {
+  mergePluginCommands,
+  pluginCommandFor,
+  pluginSlashCommands,
+  setPluginCommands,
+} from './commands';
 
 afterEach(() => setPluginCommands([]));
 
@@ -20,5 +25,23 @@ describe('插件斜杠命令', () => {
     expect(pluginCommandFor('/skill:refresh')).toBeNull();
     setPluginCommands([]);
     expect(pluginCommandFor('/enso.example.notes:refresh')).toBeNull();
+  });
+
+  it('动态命令并进命令入口，同 id 保留清单里的', () => {
+    expect(
+      mergePluginCommands(
+        [{ id: 'refresh', title: '刷新' }],
+        [
+          { id: 'refresh', title: '运行期刷新' },
+          { id: 'export', title: '导出' },
+        ]
+      )
+    ).toEqual([
+      { id: 'refresh', title: '刷新' },
+      { id: 'export', title: '导出' },
+    ]);
+    expect(mergePluginCommands([{ id: 'refresh', title: '刷新' }], undefined)).toEqual([
+      { id: 'refresh', title: '刷新' },
+    ]);
   });
 });

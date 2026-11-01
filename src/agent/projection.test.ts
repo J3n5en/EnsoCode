@@ -67,6 +67,34 @@ describe('projectMessage', () => {
     }
   });
 
+  it('插件工具结果投影产出文件，非插件工具与脏条目不投影', () => {
+    const artifact = {
+      id: 'a1b2',
+      pluginId: 'enso.example.notes',
+      name: '报告.txt',
+      mime: 'text/plain',
+      size: 12,
+      createdAt: 1,
+    };
+    const details = { details: { x: 1 }, artifacts: [artifact, { id: 'bad' }] };
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'plugin_enso-example-notes__save',
+        content: [],
+        details,
+      })
+    ).toEqual({
+      role: 'toolResult',
+      toolName: 'plugin_enso-example-notes__save',
+      content: [],
+      pluginArtifacts: [artifact],
+    });
+    expect(
+      projectMessage({ role: 'toolResult', toolName: 'bash', content: [], details })
+    ).not.toHaveProperty('pluginArtifacts');
+  });
+
   it('assistant 消息只保留白名单字段，provider 原始数据不出 worker', () => {
     const projected = projectMessage({
       role: 'assistant',

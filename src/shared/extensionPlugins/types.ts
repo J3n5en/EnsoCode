@@ -1,4 +1,4 @@
-import type { ExtensionPluginPermission, PluginTriggerSymbol } from './manifest';
+import type { ExtensionPluginPermission, PluginConfigType, PluginTriggerSymbol } from './manifest';
 
 /** 设置页、安装确认页看到的插件摘要；不含任何磁盘路径 */
 export interface ExtensionPluginSummary {
@@ -19,7 +19,22 @@ export interface ExtensionPluginSummary {
   /** 清单声明了配置项 */
   configurable: boolean;
   /** 插件自带的预设；id 是会话里使用的 plugin:<插件 id>:<预设 id> */
-  presets: { id: string; name: string; skills: number; mcpServers: number; instruction: boolean }[];
+  presets: {
+    id: string;
+    name: string;
+    skills: number;
+    mcpServers: number;
+    instruction: boolean;
+    /** 预设指定的模型；界面选中预设时优先使用 */
+    model?: { providerId: string; modelId: string };
+  }[];
+  /** 运行期注册的命令（不在清单里） */
+  dynamicCommands?: { id: string; title: string }[];
+  resident?: boolean;
+  /** 常驻进程当前是否在跑 */
+  running?: boolean;
+  schedules?: { id: string; intervalSeconds: number; lastRunAt?: number; lastError?: string }[];
+  events?: { event: string; mode: 'observe' | 'intercept' }[];
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
   /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */
@@ -38,6 +53,12 @@ export interface ExtensionPluginConfigField {
   title: string;
   description: string;
   secret: boolean;
+  type: PluginConfigType;
+  default?: string | number | boolean;
+  options?: string[];
+  min?: number;
+  max?: number;
+  pathKind?: 'file' | 'directory';
   set: boolean;
   value?: string;
 }
@@ -55,6 +76,11 @@ export interface ExtensionPluginInstallPreview {
   mcpServers: { name: string; command: string; args: string[]; envKeys: string[] }[];
   /** 允许调用的宿主 MCP 工具名 */
   mcpTools: string[];
+  env: string[];
+  interop: string[];
+  resident: boolean;
+  events: { event: string; mode: 'observe' | 'intercept'; failClosed: boolean }[];
+  schedules: { id: string; intervalSeconds: number }[];
   tools: { name: string; description: string }[];
   hasRenderer: boolean;
   warnings: string[];
@@ -69,4 +95,16 @@ export interface PluginToolDescriptor {
   description: string;
   parameters: Record<string, unknown>;
   pluginId: string;
+  /** 清单声明的单次上限；worker 据此放宽本地超时 */
+  timeoutMs?: number;
+}
+
+/** 会话下发给 worker 的插件事件订阅；事件本身只流向 Main，插件身份由 Main 保留 */
+export interface PluginEventPlan {
+  /** 至少一个插件订阅的通知型事件 */
+  observe: string[];
+  /** 拦截型事件；tools 为空表示全部工具 */
+  intercept: { event: string; tools?: string[] }[];
+  /** 允许向本会话注入消息 */
+  inject: boolean;
 }

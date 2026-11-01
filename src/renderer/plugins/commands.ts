@@ -14,6 +14,15 @@ const listeners = new Set<() => void>();
 
 const slashName = (command: PluginCommandRef) => `/${command.pluginId}:${command.id}`;
 
+/** 清单命令在前；运行期动态命令追加，同 id 不覆盖清单 */
+export function mergePluginCommands<T extends { id: string }>(
+  declared: readonly T[],
+  dynamic: readonly T[] | undefined
+): T[] {
+  const seen = new Set(declared.map((command) => command.id));
+  return [...declared, ...(dynamic ?? []).filter((command) => !seen.has(command.id))];
+}
+
 /** 已启用插件声明的命令，由 PluginUiHost 随插件列表刷新 */
 export function setPluginCommands(next: PluginCommandRef[]): void {
   commands = next;

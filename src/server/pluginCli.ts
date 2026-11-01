@@ -46,6 +46,11 @@ export function formatInstallPreview(p: ExtensionPluginInstallPreview): string {
     `  工具：${list(p.tools.map((t) => `${t.name}（${t.description}）`))}`,
     `  MCP：${list(p.mcpServers.map((m) => `${m.name}: ${[m.command, ...m.args].join(' ')}`))}`,
     `  可调用的宿主 MCP 工具：${list(p.mcpTools)}`,
+    `  环境变量：${list(p.env)}`,
+    `  可调用插件：${list(p.interop)}`,
+    `  常驻：${p.resident ? '是' : '否'}`,
+    `  事件：${list(p.events.map((event) => `${event.event}（${event.mode}${event.failClosed ? '，失败即拒绝' : ''}）`))}`,
+    `  定时任务：${list(p.schedules.map((schedule) => `${schedule.id}（${schedule.intervalSeconds}s）`))}`,
     `  界面模块：${p.hasRenderer ? '有（运行在主界面里）' : '无'}`,
   ];
   if (p.existingVersion && !p.expands) lines.push('', '授权没有扩大，确认后直接替换。');

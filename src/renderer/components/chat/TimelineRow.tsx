@@ -98,6 +98,7 @@ import {
 } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { useSubagentRunsStore } from '@/stores/subagentRuns';
+import { PluginArtifactsCard } from '../../plugins/artifactViews';
 import { PluginMessageActions, PluginToolCardSlot } from '../../plugins/slots';
 import { ApprovalReviewBar } from './ApprovalReviewBar';
 import { AskUserResult } from './AskUserResult';
@@ -208,7 +209,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.ask?.autoSelected === b.ask?.autoSelected &&
         a.subagentOp === b.subagentOp &&
         JSON.stringify(a.subagentTitles) === JSON.stringify(b.subagentTitles) &&
-        a.waiting === b.waiting
+        a.waiting === b.waiting &&
+        a.pluginArtifacts === b.pluginArtifacts
       );
     case 'tool-group':
       return (
@@ -790,6 +792,7 @@ export const TimelineRow = memo(function TimelineRow({
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
           <ToolRow item={item} />
+          {item.pluginArtifacts ? <PluginArtifactsCard artifacts={item.pluginArtifacts} /> : null}
         </>
       );
     case 'tool-group':

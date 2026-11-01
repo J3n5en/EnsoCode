@@ -30,7 +30,11 @@ class InProcessChild extends EventEmitter {
     queueMicrotask(() => this.emit('spawn'));
   }
   postMessage(m: unknown) {
-    queueMicrotask(() => this.handler(m));
+    queueMicrotask(() => {
+      this.handler(m);
+      if (typeof m === 'object' && m !== null && (m as { t?: string }).t === 'shutdown')
+        this.emit('exit', 0);
+    });
   }
   kill() {
     queueMicrotask(() => this.emit('exit', 0));
@@ -224,6 +228,41 @@ describe('示例插件', () => {
       'api.github.com',
     ]);
   });
+
+  it('digest：进度、产出文件和 session_start', async () => {
+    const id = await installExample('digest');
+    const progress: string[] = [];
+    const result = await service.callTool({
+      toolName: 'plugin_enso-example-digest__summarize',
+      args: { text: 'hello digest' },
+      sessionId: 'c1',
+      projectRoot: null,
+      onProgress: (text) => progress.push(text),
+    });
+    expect(progress).toEqual(['正在摘要']);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0]).toMatchObject({ name: 'digest.txt', pluginId: id });
+    await service.dispatchEvent({
+      sessionId: 'c1',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const again = await service.callTool({
+      toolName: 'plugin_enso-example-digest__summarize',
+      args: { text: 'again' },
+      sessionId: 'c1',
+      projectRoot: null,
+    });
+    expect(again.content).toContain('会话开始 1 次');
+    expect(service.list().find((item) => item.id === id)).toMatchObject({
+      resident: true,
+      events: [{ event: 'session_start', mode: 'observe' }],
+      schedules: [{ id: 'sweep', intervalSeconds: 3600 }],
+    });
+  });
+
   describe('prompt-enhance（移植自 dsh-bce）', () => {
     const enhance = (id: string, prompt: string, projectRoot: string | null = '/repo') =>
       service.callUi({

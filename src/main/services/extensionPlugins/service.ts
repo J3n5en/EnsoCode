@@ -12,26 +12,49 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import {
+  applyInterceptResult,
+  BEFORE_COMPACT_TIMEOUT_MS,
+  failClosedResult,
+  INTERCEPT_TIMEOUT_MS,
+  INTERCEPT_TOTAL_TIMEOUT_MS,
+  type InterceptPayload,
+  type InterceptResult,
+  initialInterceptState,
+  OBSERVE_TIMEOUT_MS,
+  type PluginEventName,
+  type PluginInterceptEvent,
+} from '@shared/extensionPlugins/events';
 import { grantExpands, grantOf } from '@shared/extensionPlugins/grant';
 import { pluginManifestProbeUrl } from '@shared/extensionPlugins/installUrl';
 import {
   type ExtensionPluginManifest,
   isNewerPluginVersion,
   isPluginRelativePath,
+  type PluginConfigContrib,
   type PluginPresetContrib,
   parseExtensionPluginManifest,
 } from '@shared/extensionPlugins/manifest';
 import { parsePluginPresetId, pluginPresetId } from '@shared/extensionPlugins/preset';
-import type { PluginCallMethod, PluginToolResult } from '@shared/extensionPlugins/protocol';
+import {
+  PLUGIN_PROGRESS_MAX_CHARS,
+  type PluginArtifactInfo,
+  type PluginCallMethod,
+  type PluginHostCapabilities,
+  type PluginToolResult,
+} from '@shared/extensionPlugins/protocol';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
+  PluginEventPlan,
   PluginToolDescriptor,
 } from '@shared/extensionPlugins/types';
 import type { McpServerSpawnConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
+import { ArtifactStore } from './artifacts';
+import { DynamicContribs } from './dynamic';
 import { type GateDeps, PluginHostGate } from './gate';
 import {
   commitStaged,
@@ -47,6 +70,7 @@ import {
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
 import { readRegistry, writeRegistry } from './registry';
+import { ViewStateStore } from './viewState';
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: 清单里的占位符字面量
 const PLUGIN_ROOT_TOKEN = '${ENSO_PLUGIN_ROOT}';
@@ -56,6 +80,11 @@ const CRASH_LIMIT = 3;
 const TOOL_TIMEOUT_MS = 60_000;
 const UI_TIMEOUT_MS = 2_000;
 const COMMAND_TIMEOUT_MS = 60_000;
+const SCHEDULE_TIMEOUT_MS = 60_000;
+const PREPARE_TIMEOUT_MS = 5_000;
+const RESIDENT_LIMIT = 5;
+const RESIDENT_RESTART_MS = 5_000;
+const PROGRESS_INTERVAL_MS = 200;
 const MAX_TOOL_RESULT_BYTES = 1024 * 1024;
 const MAX_UI_PAYLOAD_BYTES = 64 * 1024;
 const UI_RATE_PER_SECOND = 10;
@@ -71,11 +100,36 @@ const UPDATE_CHECK_FIRST_DELAY_MS = 60_000;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
 const MAX_PROBE_BYTES = 256 * 1024;
 
+export interface PluginSessionBridge {
+  inject(
+    sessionId: string,
+    message: {
+      pluginId: string;
+      pluginName: string;
+      text: string;
+      deliverAs: 'steer' | 'followUp' | 'nextTurn';
+      triggerTurn: boolean;
+    }
+  ): { ok: true } | { ok: false; error: string };
+}
+
+export interface PluginToolOutcome {
+  content: string;
+  details?: unknown;
+  artifacts: PluginArtifactInfo[];
+}
+
+type ConfigValue = string | number | boolean;
+
 export interface ExtensionPluginServiceOptions {
   root: string;
   hostVersion: string;
   hostPath: string;
   env: NodeJS.ProcessEnv;
+  /** 声明的环境变量从这里取；缺省不额外透传 */
+  sourceEnv?: NodeJS.ProcessEnv;
+  capabilities?: PluginHostCapabilities;
+  sessionBridge?: () => PluginSessionBridge | null;
   fork(modulePath: string, args: string[], options: WorkerForkOptions): WorkerProcess;
   gate: Omit<GateDeps, 'manifest' | 'config'>;
 }
@@ -126,13 +180,53 @@ export class ExtensionPluginService {
   /** 检查更新的结果，只在内存；装上不低于该版本的包后清掉 */
   private readonly updates = new Map<string, { version?: string; error?: string }>();
   private updateTimer: NodeJS.Timeout | null = null;
+  private readonly artifacts: ArtifactStore;
+  private readonly viewState: ViewStateStore;
+  private readonly dynamic = new DynamicContribs();
+  private readonly progressTaps = new Map<string, (text: string) => void>();
+  private readonly gateManifests = new Map<string, ExtensionPluginManifest>();
+  private readonly trialing = new Set<string>();
+  private readonly trialCounts = new Map<string, { tools: number; commands: number }>();
+  private background = false;
+  private disposed: Promise<void> | null = null;
+  private readonly starting = new Set<string>();
+  private readonly residentTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly restartGen = new Map<string, number>();
+  private readonly scheduleRuns = new Map<
+    string,
+    {
+      running: boolean;
+      timer: ReturnType<typeof setInterval>;
+      lastRunAt?: number;
+      lastError?: string;
+    }
+  >();
 
   constructor(private readonly options: ExtensionPluginServiceOptions) {
+    this.artifacts = new ArtifactStore(options.root);
+    this.viewState = new ViewStateStore(options.root);
     this.records = readRegistry(options.root).plugins;
     this.gate = new PluginHostGate({
       ...options.gate,
-      manifest: (id) => this.enabledManifest(id),
-      config: (id) => this.configValues(id),
+      manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
+      config: (id) => this.pluginConfig(id),
+      progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
+      writeArtifact: (pluginId, input) => this.artifacts.write(pluginId, input),
+      inject: (pluginId, input) => this.inject(pluginId, input),
+      callPlugin: (callerId, targetId, name, args, depth, caller) =>
+        this.callExport(callerId, targetId, name, args, depth, caller),
+      registerContrib: (pluginId, input) => this.registerContrib(pluginId, input),
+      unregisterContrib: (pluginId, input) => this.unregisterContrib(pluginId, input),
+      capabilities: () =>
+        options.capabilities ?? {
+          host: 'desktop',
+          hostVersion: options.hostVersion,
+          notify: true,
+          mcp: true,
+          clipboard: false,
+          openExternal: false,
+          composer: true,
+        },
     });
   }
 
@@ -170,7 +264,27 @@ export class ExtensionPluginService {
             skills: preset.skills.length,
             mcpServers: preset.mcpServers.length,
             instruction: preset.instruction !== undefined,
+            ...(preset.model ? { model: preset.model } : {}),
           })),
+          ...(this.dynamic.commandsFor(record.id).length > 0
+            ? {
+                dynamicCommands: this.dynamic
+                  .commandsFor(record.id)
+                  .map(({ id, title }) => ({ id, title })),
+              }
+            : {}),
+          resident: manifest.resident,
+          running: manifest.resident ? (this.processes.get(record.id)?.running ?? false) : false,
+          schedules: manifest.contributes.schedules.map((schedule) => {
+            const state = this.scheduleRuns.get(scheduleKey(record.id, schedule.id));
+            return {
+              id: schedule.id,
+              intervalSeconds: schedule.intervalSeconds,
+              ...(state?.lastRunAt !== undefined ? { lastRunAt: state.lastRunAt } : {}),
+              ...(state?.lastError ? { lastError: state.lastError } : {}),
+            };
+          }),
+          events: manifest.contributes.events.map(({ event, mode }) => ({ event, mode })),
           ...(record.pending && pending
             ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
             : {}),
@@ -209,6 +323,18 @@ export class ExtensionPluginService {
       netDomains: m.net.domains,
       mcpServers: grant.mcp,
       mcpTools: m.mcp.tools,
+      env: m.env,
+      interop: m.interop.call,
+      resident: m.resident,
+      events: m.contributes.events.map(({ event, mode, failClosed }) => ({
+        event,
+        mode,
+        failClosed,
+      })),
+      schedules: m.contributes.schedules.map(({ id, intervalSeconds }) => ({
+        id,
+        intervalSeconds,
+      })),
       tools: m.contributes.agentTools.map(({ name, description }) => ({ name, description })),
       hasRenderer: m.renderer !== undefined,
       warnings: [...staged.warnings, ...versionWarnings(m.version, existing?.version)],
@@ -288,7 +414,9 @@ export class ExtensionPluginService {
   setEnabled(id: string, enabled: boolean): { ok: boolean; error?: string } {
     if (!enabled) this.stopProcess(id);
     else this.recentErrors.delete(id);
-    return this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
+    const result = this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
+    if (result.ok) this.syncBackground();
+    return result;
   }
 
   approvePending(id: string) {
@@ -297,6 +425,7 @@ export class ExtensionPluginService {
     if (result.ok && oldDir) {
       this.stopProcess(id);
       removePackage(this.options.root, id, oldDir);
+      this.syncBackground();
     }
     return result;
   }
@@ -322,11 +451,14 @@ export class ExtensionPluginService {
     rmSync(`${this.logPath(id)}.1`, { force: true });
     this.recentErrors.delete(id);
     for (const key of this.loaded.keys()) if (key.startsWith(`${id}/`)) this.loaded.delete(key);
+    this.artifacts.removePlugin(id);
+    this.viewState.remove(id);
+    this.syncBackground();
     return { ok: true };
   }
 
-  /** 插件配置值（含密钥），只给插件进程 */
-  configValues(id: string): Record<string, string> {
+  /** 已保存的配置值（含密钥），不含缺省 */
+  configValues(id: string): Record<string, ConfigValue> {
     const manifest = this.installedManifest(id);
     if (!manifest) return {};
     let raw: unknown;
@@ -335,11 +467,26 @@ export class ExtensionPluginService {
     } catch {
       return {};
     }
-    const out: Record<string, string> = {};
+    const out: Record<string, ConfigValue> = {};
     if (typeof raw !== 'object' || raw === null) return out;
     for (const field of manifest.contributes.configuration) {
       const value = (raw as Record<string, unknown>)[field.key];
-      if (typeof value === 'string') out[field.key] = value;
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+        out[field.key] = value;
+    }
+    return out;
+  }
+
+  /** 给插件进程：类型化的当前值，缺省补上 default */
+  pluginConfig(id: string): Record<string, ConfigValue> {
+    const manifest = this.installedManifest(id);
+    if (!manifest) return {};
+    const stored = this.configValues(id);
+    const out: Record<string, ConfigValue> = {};
+    for (const field of manifest.contributes.configuration) {
+      const value = stored[field.key];
+      if (value !== undefined && configMatches(field, value)) out[field.key] = value;
+      else if (field.default !== undefined) out[field.key] = field.default;
     }
     return out;
   }
@@ -358,24 +505,30 @@ export class ExtensionPluginService {
         return {
           ...f,
           set: value !== undefined,
-          ...(!f.secret && value !== undefined ? { value } : {}),
+          ...(!f.secret && value !== undefined ? { value: String(value) } : {}),
         };
       }),
     };
   }
 
   /** 省略的键不变，null 清除；只接受清单声明的键 */
-  setConfig(id: string, patch: Record<string, string | null>): { ok: boolean; error?: string } {
+  setConfig(
+    id: string,
+    patch: Record<string, string | number | boolean | null>
+  ): { ok: boolean; error?: string } {
     const manifest = this.installedManifest(id);
     if (!manifest) return { ok: false, error: '插件未安装' };
-    const keys = new Set(manifest.contributes.configuration.map((f) => f.key));
+    const fields = new Map(manifest.contributes.configuration.map((field) => [field.key, field]));
     const next = this.configValues(id);
     for (const [key, value] of Object.entries(patch)) {
-      if (!keys.has(key)) return { ok: false, error: `未知配置项 ${key}` };
+      const field = fields.get(key);
+      if (!field) return { ok: false, error: `未知配置项 ${key}` };
       if (value === null) delete next[key];
-      else if (typeof value !== 'string' || value.length > MAX_CONFIG_VALUE_CHARS)
-        return { ok: false, error: `配置项 ${key} 不合法或过长` };
-      else next[key] = value;
+      else {
+        const parsed = coerceConfig(field, value);
+        if (typeof parsed === 'object') return { ok: false, error: parsed.error };
+        next[key] = parsed;
+      }
     }
     const target = this.configPath(id);
     mkdirSync(join(this.options.root, 'config'), { recursive: true });
@@ -387,13 +540,55 @@ export class ExtensionPluginService {
   }
 
   toolsForSpawn(): PluginToolDescriptor[] {
-    return this.enabled().flatMap(({ id, manifest }) =>
-      manifest.contributes.agentTools.map((tool) => ({
-        name: pluginToolName(id, tool.name),
-        description: tool.description,
-        parameters: tool.parameters,
-        pluginId: id,
-      }))
+    return this.enabled().flatMap(({ id, manifest }) => [
+      ...manifest.contributes.agentTools.map((tool) => this.describeTool(id, tool)),
+      ...this.dynamic.toolsFor(id).map((tool) => this.describeTool(id, tool)),
+    ]);
+  }
+
+  /** 无订阅且没有 agent.inject 时不给会话下发事件计划 */
+  eventPlanForSpawn(): PluginEventPlan | null {
+    const observe = new Set<string>();
+    const intercept: { event: string; tools?: string[] }[] = [];
+    let inject = false;
+    for (const { manifest } of this.enabled()) {
+      if (manifest.permissions.includes('agent.inject')) inject = true;
+      for (const sub of manifest.contributes.events) {
+        if (sub.mode === 'observe') {
+          observe.add(sub.event);
+          continue;
+        }
+        const existing = intercept.find((item) => item.event === sub.event);
+        if (!existing) {
+          intercept.push({ event: sub.event, ...(sub.tools ? { tools: [...sub.tools] } : {}) });
+          continue;
+        }
+        if (!sub.tools || !existing.tools) delete existing.tools;
+        else existing.tools = [...new Set([...existing.tools, ...sub.tools])];
+      }
+    }
+    if (observe.size === 0 && intercept.length === 0 && !inject) return null;
+    return { observe: [...observe].sort(), intercept, inject };
+  }
+
+  /** 拉起声明了动态工具的插件，让 toolsForSpawn 能看到它们；单个最多等 5 秒 */
+  async prepareForSpawn(): Promise<void> {
+    const targets = this.enabled().filter(
+      (entry) => entry.manifest.contributes.dynamic.tools > 0 && entry.manifest.main
+    );
+    await Promise.all(
+      targets.map(async ({ id }) => {
+        try {
+          await Promise.race([
+            this.processFor(id).ready(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('timeout')), PREPARE_TIMEOUT_MS)
+            ),
+          ]);
+        } catch {
+          // 单个插件拉起失败不影响会话启动
+        }
+      })
     );
   }
 
@@ -438,6 +633,10 @@ export class ExtensionPluginService {
         systemPromptAppend?: string;
         systemPromptBoost?: string;
         refusalRetryPrompt?: string;
+        model?: { providerId: string; modelId: string };
+        thinkingLevel?: PluginPresetContrib['thinkingLevel'];
+        approvalMode?: PluginPresetContrib['approvalMode'];
+        disabledTools?: string[];
       }
     | { ok: false; error: string }
     | undefined {
@@ -474,6 +673,10 @@ export class ExtensionPluginService {
       ...(tail?.ok ? { systemPromptAppend: tail.content } : {}),
       ...(boost?.ok ? { systemPromptBoost: boost.content } : {}),
       ...(preset.refusalRetry === true && retry?.ok ? { refusalRetryPrompt: retry.content } : {}),
+      ...(preset.model ? { model: preset.model } : {}),
+      ...(preset.thinkingLevel ? { thinkingLevel: preset.thinkingLevel } : {}),
+      ...(preset.approvalMode ? { approvalMode: preset.approvalMode } : {}),
+      ...(preset.disabledTools?.length ? { disabledTools: [...preset.disabledTools] } : {}),
     };
   }
 
@@ -515,13 +718,16 @@ export class ExtensionPluginService {
     sessionId: string;
     projectRoot: string | null;
     signal?: AbortSignal;
-  }): Promise<PluginToolResult> {
+    onProgress?: (text: string) => void;
+  }): Promise<PluginToolOutcome> {
     const parsed = parsePluginToolName(input.toolName);
     if (!parsed) throw pluginError('NOT_FOUND', `不是插件工具：${input.toolName}`);
     const manifest = this.enabledManifest(parsed.pluginId);
     if (!manifest) throw pluginError('PLUGIN_DISABLED', '插件未启用');
-    if (!manifest.contributes.agentTools.some((t) => t.name === parsed.toolName))
-      throw pluginError('NOT_FOUND', `插件没有声明工具 ${parsed.toolName}`);
+    const declared =
+      manifest.contributes.agentTools.find((tool) => tool.name === parsed.toolName) ??
+      this.dynamic.toolsFor(parsed.pluginId).find((tool) => tool.name === parsed.toolName);
+    if (!declared) throw pluginError('NOT_FOUND', `插件没有声明工具 ${parsed.toolName}`);
     const value = await this.invoke(
       parsed.pluginId,
       'tool.execute',
@@ -530,7 +736,9 @@ export class ExtensionPluginService {
         sessionId: input.sessionId,
         projectRoot: input.projectRoot,
         gesture: false,
-        timeoutMs: TOOL_TIMEOUT_MS,
+        timeoutMs: declared.timeoutMs ?? TOOL_TIMEOUT_MS,
+        kind: 'tool',
+        onProgress: input.onProgress,
       },
       input.signal
     );
@@ -539,7 +747,169 @@ export class ExtensionPluginService {
       throw pluginError('BAD_RESULT', '插件工具返回值不合法');
     if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_TOOL_RESULT_BYTES)
       throw pluginError('TOO_LARGE', '插件工具结果超过 1MB');
-    return result;
+    const ids = Array.isArray(result.artifacts)
+      ? result.artifacts.filter((id): id is string => typeof id === 'string')
+      : [];
+    return {
+      content: result.content,
+      ...(result.details !== undefined ? { details: result.details } : {}),
+      artifacts: ids.flatMap((id) => {
+        const info = this.artifacts.info(id);
+        return info?.pluginId === parsed.pluginId ? [info] : [];
+      }),
+    };
+  }
+
+  async dispatchEvent(input: {
+    sessionId: string;
+    projectRoot: string | null;
+    event: PluginEventName;
+    data: unknown;
+  }): Promise<void> {
+    const targets = this.enabled().filter((entry) =>
+      entry.manifest.contributes.events.some((sub) => sub.event === input.event)
+    );
+    const wait = input.event === 'before_compact';
+    const send = (id: string) =>
+      this.invoke(
+        id,
+        'event.dispatch',
+        { event: input.event, data: input.data },
+        {
+          sessionId: input.sessionId,
+          projectRoot: input.projectRoot,
+          gesture: false,
+          timeoutMs: wait ? BEFORE_COMPACT_TIMEOUT_MS : OBSERVE_TIMEOUT_MS,
+          kind: 'event',
+        }
+      ).catch((error: unknown) => {
+        this.appendLog(
+          id,
+          'warn',
+          `事件 ${input.event} 失败：${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    if (wait) {
+      await Promise.all(targets.map((entry) => send(entry.id)));
+      return;
+    }
+    for (const entry of targets) void send(entry.id);
+  }
+
+  async intercept<E extends PluginInterceptEvent>(input: {
+    sessionId: string;
+    projectRoot: string | null;
+    event: E;
+    payload: InterceptPayload[E];
+    deadlineMs?: number;
+  }): Promise<InterceptResult[E]> {
+    const initial = initialInterceptState(input.event, input.payload);
+    const deadline = Date.now() + (input.deadlineMs ?? INTERCEPT_TOTAL_TIMEOUT_MS);
+    try {
+      const targets = this.enabled()
+        .filter((entry) =>
+          entry.manifest.contributes.events.some(
+            (sub) =>
+              sub.event === input.event &&
+              sub.mode === 'intercept' &&
+              interceptsTool(sub, input.payload)
+          )
+        )
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      let state = initial;
+      for (const entry of targets) {
+        if (state.done) break;
+        const sub = entry.manifest.contributes.events.find((item) => item.event === input.event);
+        try {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) throw new Error('拦截总时长已用尽');
+          const value = await this.invoke(
+            entry.id,
+            'event.dispatch',
+            { event: input.event, data: state.payload },
+            {
+              sessionId: input.sessionId,
+              projectRoot: input.projectRoot,
+              gesture: false,
+              timeoutMs: Math.min(INTERCEPT_TIMEOUT_MS, remaining),
+              kind: 'event',
+            }
+          );
+          state = applyInterceptResult(state, value);
+        } catch (error) {
+          this.appendLog(
+            entry.id,
+            'warn',
+            `拦截 ${input.event} 失败：${error instanceof Error ? error.message : String(error)}`
+          );
+          if (sub?.failClosed) return failClosedResult(input.event, entry.manifest.name);
+        }
+      }
+      return state.result;
+    } catch (error) {
+      this.appendLog(
+        'extension-plugins',
+        'warn',
+        `拦截失败：${error instanceof Error ? error.message : String(error)}`
+      );
+      return initial.result;
+    }
+  }
+
+  listArtifacts(pluginId?: string): PluginArtifactInfo[] {
+    return this.artifacts.list(pluginId);
+  }
+
+  artifactInfo(id: string): PluginArtifactInfo | null {
+    return this.artifacts.info(id);
+  }
+
+  artifactPath(id: string): string | null {
+    return this.artifacts.path(id);
+  }
+
+  deleteArtifact(id: string): boolean {
+    return this.artifacts.delete(id);
+  }
+
+  viewStateGet(pluginId: string): Record<string, string> {
+    return this.viewState.get(pluginId);
+  }
+
+  viewStateSet(
+    pluginId: string,
+    patch: Record<string, string | null>
+  ): { ok: boolean; error?: string } {
+    return this.viewState.set(pluginId, patch);
+  }
+
+  /** 启动后拉起常驻插件并挂上定时任务；重复调用只同步一次 */
+  startBackground(): void {
+    this.background = true;
+    this.syncBackground();
+  }
+
+  hasRunningPlugins(): boolean {
+    for (const proc of this.processes.values()) if (proc.running) return true;
+    return false;
+  }
+
+  private describeTool(
+    pluginId: string,
+    tool: {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+      timeoutMs?: number;
+    }
+  ): PluginToolDescriptor {
+    return {
+      name: pluginToolName(pluginId, tool.name),
+      description: tool.description,
+      parameters: tool.parameters,
+      pluginId,
+      ...(tool.timeoutMs !== undefined ? { timeoutMs: tool.timeoutMs } : {}),
+    };
   }
 
   /** 界面发起的调用（命令、挂件、侧栏页面、补全）：算用户手势 */
@@ -551,12 +921,15 @@ export class ExtensionPluginService {
     projectRoot: string | null;
     /** 发起调用的窗口 webContents id，草稿请求只回到这里 */
     origin?: number | null;
+    /** 来自远端窗口：不能动宿主桌面（剪贴板、外链） */
+    remote?: boolean;
   }): Promise<unknown> {
     const manifest = this.enabledManifest(input.pluginId);
     if (!manifest) throw pluginError('PLUGIN_DISABLED', '插件未启用');
     const declared =
       input.method === 'command.run'
-        ? manifest.contributes.commands.some((c) => c.id === input.payload.id)
+        ? manifest.contributes.commands.some((c) => c.id === input.payload.id) ||
+          this.dynamic.commandsFor(input.pluginId).some((c) => c.id === input.payload.id)
         : input.method === 'renderer.call'
           ? manifest.permissions.includes('ui.slot') || manifest.permissions.includes('ui.view')
           : manifest.contributes.triggers.some((t) => t.name === input.payload.name);
@@ -570,7 +943,9 @@ export class ExtensionPluginService {
         projectRoot: input.projectRoot,
         gesture: true,
         origin: input.origin ?? null,
+        remote: input.remote === true,
         timeoutMs: uiCallTimeout(manifest, input.method, input.payload),
+        kind: 'ui',
       });
       if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > MAX_UI_PAYLOAD_BYTES)
         throw pluginError('TOO_LARGE', '返回值超过 64KB');
@@ -614,6 +989,7 @@ export class ExtensionPluginService {
         lastError: this.recentErrors.get(id) ?? { at: now, message: '插件进程反复异常退出' },
       };
     this.persist();
+    this.syncBackground();
   }
 
   /** 插件进程的输出与异常，落在 Main 私有目录；超过 1MB 轮转一次 */
@@ -721,10 +1097,17 @@ export class ExtensionPluginService {
     return parsed.manifest.version;
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
+    if (this.disposed) return this.disposed;
+    this.background = false;
     if (this.updateTimer) clearTimeout(this.updateTimer);
     this.updateTimer = null;
+    this.armSchedules();
+    for (const id of [...this.residentTimers.keys()]) this.cancelRestart(id);
+    const waits = [...this.processes.values()].map((proc) => proc.whenStopped());
     for (const id of [...this.processes.keys()]) this.stopProcess(id);
+    this.disposed = Promise.all(waits).then(() => undefined);
+    return this.disposed;
   }
 
   private async invoke(
@@ -736,7 +1119,11 @@ export class ExtensionPluginService {
       projectRoot: string | null;
       gesture: boolean;
       origin?: number | null;
+      remote?: boolean;
       timeoutMs: number;
+      kind?: 'tool' | 'ui' | 'event' | 'schedule' | 'export';
+      depth?: number;
+      onProgress?: (text: string) => void;
     },
     signal?: AbortSignal
   ): Promise<unknown> {
@@ -748,7 +1135,11 @@ export class ExtensionPluginService {
       projectRoot: ctx.projectRoot,
       gesture: ctx.gesture,
       origin: ctx.origin ?? null,
+      remote: ctx.remote === true,
+      kind: ctx.kind,
+      depth: ctx.depth,
     });
+    if (ctx.onProgress) this.progressTaps.set(invocationId, createProgressTap(ctx.onProgress));
     const onAbort = () => {
       this.gate.invocations.cancel(invocationId);
       proc.cancel(invocationId);
@@ -769,6 +1160,7 @@ export class ExtensionPluginService {
     } finally {
       signal?.removeEventListener('abort', onAbort);
       this.gate.invocations.finish(invocationId);
+      this.progressTaps.delete(invocationId);
     }
   }
 
@@ -779,7 +1171,9 @@ export class ExtensionPluginService {
     const manifest = record ? this.load(record.id, record.dir) : null;
     if (!record || !manifest?.main) throw pluginError('NOT_FOUND', '插件没有 main');
     const proc = this.createProcess(manifest, record.dir, (unexpected) => {
-      if (unexpected) this.recordCrash(pluginId);
+      if (!unexpected) return;
+      this.recordCrash(pluginId);
+      this.scheduleResidentRestart(pluginId);
     });
     this.processes.set(pluginId, proc);
     return proc;
@@ -792,10 +1186,15 @@ export class ExtensionPluginService {
   ) {
     const dataDir = pluginDataPath(this.options.root, manifest.id);
     mkdirSync(dataDir, { recursive: true });
-    return new PluginProcess({
+    let proc!: PluginProcess;
+    proc = new PluginProcess({
       fork: this.options.fork,
       hostPath: this.options.hostPath,
-      env: { ...this.options.env, ENSO_PLUGIN_DATA: dataDir },
+      env: {
+        ...pluginProcessEnv(this.options.env, this.options.sourceEnv, manifest.env),
+        ENSO_PLUGIN_DATA: dataDir,
+      },
+      resident: manifest.resident,
       init: {
         pluginId: manifest.id,
         pluginRoot: pluginPackagePath(this.options.root, manifest.id, dir),
@@ -806,14 +1205,21 @@ export class ExtensionPluginService {
         this.gate.handle(manifest.id, api, args, invocationId),
       onExit: ({ unexpected }) => {
         if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
+        if (this.processes.get(manifest.id) === proc && this.dynamic.clear(manifest.id))
+          this.touch();
         onExit(unexpected);
       },
       onLog: (level, message) => this.appendLog(manifest.id, level, message),
     });
+    return proc;
   }
 
   private async trialLoad(manifest: ExtensionPluginManifest, dir: string) {
     if (!manifest.main) return { ok: true as const };
+    const previous = this.gateManifests.get(manifest.id);
+    this.gateManifests.set(manifest.id, manifest);
+    this.trialing.add(manifest.id);
+    this.trialCounts.set(manifest.id, { tools: 0, commands: 0 });
     const proc = this.createProcess(manifest, dir, () => {});
     try {
       await proc.ready();
@@ -824,14 +1230,239 @@ export class ExtensionPluginService {
         error: `插件加载失败：${error instanceof Error ? error.message : String(error)}`,
       };
     } finally {
+      this.trialing.delete(manifest.id);
+      this.trialCounts.delete(manifest.id);
+      if (previous) this.gateManifests.set(manifest.id, previous);
+      else this.gateManifests.delete(manifest.id);
       proc.stop();
+      if (!this.processes.has(manifest.id) && this.dynamic.clear(manifest.id)) this.touch();
     }
   }
 
   private stopProcess(id: string): void {
+    this.cancelRestart(id);
     this.gate.invocations.cancelPlugin(id);
     this.processes.get(id)?.stop();
     this.processes.delete(id);
+    if (this.dynamic.clear(id)) this.touch();
+  }
+
+  private touch(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private inject(
+    pluginId: string,
+    input: {
+      sessionId: string;
+      text: string;
+      deliverAs: 'steer' | 'followUp' | 'nextTurn';
+      triggerTurn: boolean;
+    }
+  ): { ok: true } | { ok: false; error: string } {
+    const manifest = this.enabledManifest(pluginId) ?? this.gateManifests.get(pluginId);
+    const bridge = this.options.sessionBridge?.() ?? null;
+    if (!manifest || !bridge) return { ok: false, error: '当前环境不能注入消息' };
+    return bridge.inject(input.sessionId, {
+      pluginId,
+      pluginName: manifest.name,
+      text: input.text,
+      deliverAs: input.deliverAs,
+      triggerTurn: input.triggerTurn,
+    });
+  }
+
+  private callExport(
+    callerId: string,
+    targetId: string,
+    name: string,
+    args: unknown,
+    depth: number,
+    caller: { sessionId: string | null; projectRoot: string | null; signal?: AbortSignal }
+  ): Promise<unknown> {
+    const target = this.enabledManifest(targetId);
+    if (!target) throw pluginError('PLUGIN_DISABLED', '目标插件未启用');
+    const exported = target.contributes.exports.find((item) => item.name === name);
+    if (!exported) throw pluginError('NOT_FOUND', `插件没有导出 ${name}`);
+    return this.invoke(
+      targetId,
+      'export.call',
+      { name, args, caller: callerId },
+      {
+        sessionId: caller.sessionId,
+        projectRoot: caller.projectRoot,
+        gesture: false,
+        timeoutMs: exported.timeoutMs ?? TOOL_TIMEOUT_MS,
+        kind: 'export',
+        depth,
+      },
+      caller.signal
+    );
+  }
+
+  private registerContrib(pluginId: string, input: Record<string, unknown>): void {
+    const manifest = this.gateManifests.get(pluginId) ?? this.enabledManifest(pluginId);
+    if (!manifest) throw pluginError('PLUGIN_DISABLED', '插件未启用');
+    if (this.trialing.has(pluginId)) {
+      this.noteTrialContrib(pluginId, manifest, input);
+      return;
+    }
+    this.dynamic.register(pluginId, manifest, input);
+    this.touch();
+  }
+
+  private unregisterContrib(pluginId: string, input: Record<string, unknown>): void {
+    if (this.trialing.has(pluginId)) return;
+    this.dynamic.unregister(pluginId, input);
+    this.touch();
+  }
+
+  /** 试加载只校验配额，不写进运行期注册表 */
+  private noteTrialContrib(
+    pluginId: string,
+    manifest: ExtensionPluginManifest,
+    input: Record<string, unknown>
+  ): void {
+    const counts = this.trialCounts.get(pluginId) ?? { tools: 0, commands: 0 };
+    this.dynamic.validate(pluginId, manifest, input, counts);
+    if (input.kind === 'tool') counts.tools += 1;
+    else if (input.kind === 'command') counts.commands += 1;
+    this.trialCounts.set(pluginId, counts);
+  }
+
+  private syncBackground(): void {
+    this.armSchedules();
+    if (!this.background) return;
+    const residents = this.enabled()
+      .filter((entry) => entry.manifest.resident && entry.manifest.main)
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const entry of residents) {
+      const live = this.processes.get(entry.id)?.running === true || this.starting.has(entry.id);
+      if (live || this.residentTimers.has(entry.id)) continue;
+      this.startResident(entry.id);
+    }
+  }
+
+  private residentCount(): number {
+    let count = 0;
+    for (const [id, proc] of this.processes) {
+      if (this.enabledManifest(id)?.resident && (proc.running || this.starting.has(id))) count += 1;
+    }
+    for (const id of this.residentTimers.keys()) {
+      if (this.starting.has(id) || this.processes.get(id)?.running) continue;
+      if (this.enabledManifest(id)?.resident) count += 1;
+    }
+    return count;
+  }
+
+  private startResident(id: string): void {
+    if (this.residentCount() >= RESIDENT_LIMIT) {
+      this.recordError(id, '常驻插件已达上限（5），未启动');
+      this.touch();
+      return;
+    }
+    if (this.processes.get(id)?.running || this.starting.has(id)) return;
+    this.starting.add(id);
+    void this.bootResident(id);
+  }
+
+  private async bootResident(id: string): Promise<void> {
+    try {
+      await this.processFor(id).ready();
+      this.touch();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.recordError(id, message);
+      if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED') this.recordCrash(id);
+      if (this.background && this.enabledManifest(id)?.resident) this.scheduleResidentRestart(id);
+      this.touch();
+    } finally {
+      this.starting.delete(id);
+    }
+  }
+
+  private scheduleResidentRestart(id: string): void {
+    if (!this.background || !this.enabledManifest(id)?.resident) return;
+    this.cancelRestart(id);
+    const gen = this.restartGen.get(id) ?? 0;
+    const timer = setTimeout(() => {
+      this.residentTimers.delete(id);
+      if (this.restartGen.get(id) !== gen) return;
+      if (!this.background || !this.enabledManifest(id)?.resident) return;
+      this.startResident(id);
+    }, RESIDENT_RESTART_MS);
+    this.residentTimers.set(id, timer);
+  }
+
+  private cancelRestart(id: string): void {
+    const timer = this.residentTimers.get(id);
+    if (timer) clearTimeout(timer);
+    this.residentTimers.delete(id);
+    this.restartGen.set(id, (this.restartGen.get(id) ?? 0) + 1);
+  }
+
+  private armSchedules(): void {
+    const wanted = new Set<string>();
+    if (this.background) {
+      for (const { id, manifest } of this.enabled()) {
+        for (const schedule of manifest.contributes.schedules) {
+          const key = scheduleKey(id, schedule.id);
+          wanted.add(key);
+          if (this.scheduleRuns.has(key)) continue;
+          const state: {
+            running: boolean;
+            timer: ReturnType<typeof setInterval>;
+            lastRunAt?: number;
+            lastError?: string;
+          } = {
+            running: false,
+            timer: setInterval(
+              () => void this.runSchedule(id, schedule),
+              schedule.intervalSeconds * 1000
+            ),
+          };
+          this.scheduleRuns.set(key, state);
+        }
+      }
+    }
+    for (const [key, state] of this.scheduleRuns) {
+      if (wanted.has(key)) continue;
+      clearInterval(state.timer);
+      this.scheduleRuns.delete(key);
+    }
+  }
+
+  private async runSchedule(
+    pluginId: string,
+    schedule: ExtensionPluginManifest['contributes']['schedules'][number]
+  ): Promise<void> {
+    const key = scheduleKey(pluginId, schedule.id);
+    const state = this.scheduleRuns.get(key);
+    if (!state || state.running || !this.enabledManifest(pluginId)) return;
+    state.running = true;
+    try {
+      await this.invoke(
+        pluginId,
+        'schedule.run',
+        { id: schedule.id },
+        {
+          sessionId: null,
+          projectRoot: null,
+          gesture: false,
+          timeoutMs: schedule.timeoutMs ?? SCHEDULE_TIMEOUT_MS,
+          kind: 'schedule',
+        }
+      );
+      state.lastRunAt = Date.now();
+      delete state.lastError;
+    } catch (error) {
+      state.lastRunAt = Date.now();
+      state.lastError = error instanceof Error ? error.message : String(error);
+      this.appendLog(pluginId, 'error', `定时任务 ${schedule.id} 失败：${state.lastError}`);
+    } finally {
+      if (this.scheduleRuns.get(key) === state) state.running = false;
+      this.touch();
+    }
   }
 
   private enabled(): (Loaded & { id: string })[] {
@@ -945,6 +1576,74 @@ function versionWarnings(next: string, current: string | undefined): string[] {
 
 const lastErrorField = (lastError: { at: number; message: string } | undefined) =>
   lastError ? { lastError: { at: lastError.at, message: lastError.message } } : {};
+
+const scheduleKey = (pluginId: string, id: string) => `${pluginId}\n${id}`;
+
+/** 基础环境加上清单声明的变量；未声明的（包括密钥）不透传 */
+export function pluginProcessEnv(
+  base: NodeJS.ProcessEnv,
+  source: NodeJS.ProcessEnv | undefined,
+  declared: readonly string[]
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (!source) return env;
+  for (const name of declared) if (source[name] !== undefined) env[name] = source[name];
+  return env;
+}
+
+function createProgressTap(emit: (text: string) => void, now: () => number = Date.now) {
+  let last = Number.NEGATIVE_INFINITY;
+  return (text: string) => {
+    const at = now();
+    if (at - last < PROGRESS_INTERVAL_MS) return;
+    last = at;
+    emit(text.slice(0, PLUGIN_PROGRESS_MAX_CHARS));
+  };
+}
+
+function configMatches(field: PluginConfigContrib, value: ConfigValue): boolean {
+  if (field.type === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (field.type === 'boolean') return typeof value === 'boolean';
+  return typeof value === 'string';
+}
+
+function coerceConfig(
+  field: PluginConfigContrib,
+  value: string | number | boolean
+): ConfigValue | { error: string } {
+  if (field.type === 'number') {
+    const numeric =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())
+          ? Number(value.trim())
+          : Number.NaN;
+    if (!Number.isFinite(numeric)) return { error: `配置项 ${field.key} 需要数字` };
+    if (field.min !== undefined && numeric < field.min)
+      return { error: `配置项 ${field.key} 小于最小值` };
+    if (field.max !== undefined && numeric > field.max)
+      return { error: `配置项 ${field.key} 大于最大值` };
+    return numeric;
+  }
+  if (field.type === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return { error: `配置项 ${field.key} 需要布尔值` };
+  }
+  if (typeof value !== 'string' || value.length > MAX_CONFIG_VALUE_CHARS)
+    return { error: `配置项 ${field.key} 不合法或过长` };
+  if (field.type === 'enum' && !field.options?.includes(value))
+    return { error: `配置项 ${field.key} 不在可选项里` };
+  return value;
+}
+
+function interceptsTool(sub: { tools?: string[] }, payload: unknown): boolean {
+  if (!sub.tools) return true;
+  if (typeof payload !== 'object' || payload === null) return true;
+  const toolName = (payload as { toolName?: unknown }).toolName;
+  return typeof toolName === 'string' ? sub.tools.includes(toolName) : true;
+}
 
 function presetSelection(
   manifest: ExtensionPluginManifest,

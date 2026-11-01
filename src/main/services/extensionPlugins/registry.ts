@@ -23,7 +23,11 @@ function isGrant(v: unknown): boolean {
     isStringArray(v.fsWrite) &&
     isStringArray(v.netDomains) &&
     typeof v.renderer === 'boolean' &&
-    (v.mcpTools === undefined || isStringArray(v.mcpTools)) &&
+    isStringArray(v.mcpTools) &&
+    isStringArray(v.env) &&
+    isStringArray(v.interop) &&
+    isStringArray(v.intercepts) &&
+    typeof v.resident === 'boolean' &&
     Array.isArray(v.mcp) &&
     v.mcp.every(
       (s) =>

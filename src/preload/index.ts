@@ -1654,9 +1654,38 @@ const electronAPI = {
     /** 省略的键不变，null 清除 */
     configSet: (
       id: string,
-      patch: Record<string, string | null>
+      patch: Record<string, string | number | boolean | null>
     ): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_CONFIG_SET, id, patch),
+    artifactsList: (
+      pluginId?: string
+    ): Promise<{ ok: true; artifacts: PluginArtifactInfo[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACTS_LIST, pluginId),
+    artifactRead: (
+      id: string
+    ): Promise<
+      { ok: true; info: PluginArtifactInfo; base64: string } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_READ, id),
+    artifactDelete: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_DELETE, id),
+    artifactSave: (
+      id: string
+    ): Promise<{ ok: true; cancelled?: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_SAVE, id),
+    viewStateGet: (
+      pluginId: string
+    ): Promise<{ ok: true; state: Record<string, string> } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_STATE_GET, pluginId),
+    viewStateSet: (
+      pluginId: string,
+      patch: Record<string, string | null>
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_STATE_SET, pluginId, patch),
+    pickPath: (
+      kind: 'file' | 'directory'
+    ): Promise<
+      { ok: true; path: string } | { ok: true; cancelled: true } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_PICK_PATH, kind),
     call: (request: {
       pluginId: string;
       method: 'command.run' | 'trigger.candidates' | 'trigger.pick' | 'renderer.call';
@@ -1699,6 +1728,7 @@ export type ElectronAPI = typeof electronAPI;
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 
 import type { ComputerAllowedApp, ComputerCapabilities } from '@shared/computer/types';
+import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,

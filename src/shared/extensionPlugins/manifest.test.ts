@@ -249,8 +249,8 @@ describe('parseExtensionPluginManifest', () => {
       '0.2.12'
     );
     expect(ok.ok && ok.manifest.contributes.configuration).toEqual([
-      { key: 'baseUrl', title: '地址', description: '', secret: false },
-      { key: 'token', title: 'Token', description: '只保存在本机', secret: true },
+      { key: 'baseUrl', title: '地址', description: '', secret: false, type: 'string' },
+      { key: 'token', title: 'Token', description: '只保存在本机', secret: true, type: 'string' },
     ]);
     expect(errorsOf(withConfig([{ key: 'bad-key', title: 'x' }]))).not.toEqual([]);
     expect(errorsOf(withConfig([{ key: 'a', title: 'x', secret: 'yes' }]))).not.toEqual([]);

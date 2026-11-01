@@ -7,9 +7,13 @@ export interface PluginGrant {
   fsWrite: string[];
   netDomains: string[];
   mcp: { name: string; command: string; args: string[]; envKeys: string[] }[];
-  /** 允许调用的宿主 MCP 工具名；旧记录可能没有 */
-  mcpTools?: string[];
+  mcpTools: string[];
   renderer: boolean;
+  env: string[];
+  interop: string[];
+  /** 拦截型订阅的事件；只通知的不计 */
+  intercepts: string[];
+  resident: boolean;
 }
 
 export function grantOf(manifest: ExtensionPluginManifest): PluginGrant {
@@ -26,6 +30,13 @@ export function grantOf(manifest: ExtensionPluginManifest): PluginGrant {
     })),
     mcpTools: [...manifest.mcp.tools].sort(),
     renderer: manifest.renderer !== undefined,
+    env: [...manifest.env].sort(),
+    interop: [...manifest.interop.call].sort(),
+    intercepts: manifest.contributes.events
+      .filter((e) => e.mode === 'intercept')
+      .map((e) => e.event)
+      .sort(),
+    resident: manifest.resident,
   };
 }
 
@@ -41,7 +52,11 @@ export function grantExpands(previous: PluginGrant, next: PluginGrant): boolean 
     JSON.stringify([s.name, s.command, s.args, s.envKeys]);
   const known = new Set(previous.mcp.map(key));
   if (next.mcp.some((s) => !known.has(key(s)))) return true;
-  const tools = previous.mcpTools ?? [];
-  if ((next.mcpTools ?? []).some((t) => !tools.includes(t))) return true;
+  const grew = (a: string[], b: string[]) => b.some((x) => !a.includes(x));
+  if (grew(previous.mcpTools, next.mcpTools)) return true;
+  if (grew(previous.env, next.env)) return true;
+  if (grew(previous.interop, next.interop)) return true;
+  if (grew(previous.intercepts, next.intercepts)) return true;
+  if (next.resident && !previous.resident) return true;
   return next.renderer && !previous.renderer;
 }

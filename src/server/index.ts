@@ -180,6 +180,7 @@ async function serve(web: WebConfig | null): Promise<void> {
   startPairHost();
   startPairGuest();
   listenControl(updater, web);
+  getExtensionPlugins().startBackground();
 
   app.on('before-quit', () => {
     void relay?.close();
@@ -191,6 +192,13 @@ async function serve(web: WebConfig | null): Promise<void> {
   attachAppQuitDrain(app, [
     { begin: disposeAllTerminals, shouldWait: hasPendingPtys, wait: waitPtyQuitIdle },
     { shouldWait: agentWorkerAlive, wait: () => stopAgentWorkerForQuit(3_000) },
+    {
+      begin: () => {
+        void getExtensionPlugins().dispose();
+      },
+      shouldWait: () => getExtensionPlugins().hasRunningPlugins(),
+      wait: () => getExtensionPlugins().dispose(),
+    },
   ]);
   let quitting = false;
   const quit = () => {

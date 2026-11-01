@@ -9,6 +9,10 @@ const grant = (patch: Partial<PluginGrant> = {}): PluginGrant => ({
   mcp: [{ name: 'demo', command: 'node', args: ['server.js'], envKeys: [] }],
   mcpTools: ['search_context'],
   renderer: false,
+  env: [],
+  interop: [],
+  intercepts: [],
+  resident: false,
   ...patch,
 });
 
@@ -25,12 +29,6 @@ describe('grantExpands', () => {
       )
     ).toBe(false);
     expect(grantExpands(grant(), grant({ fsRead: ['docs/api'] }))).toBe(false);
-  });
-
-  it('旧记录没有 mcpTools 字段时按空处理', () => {
-    const { mcpTools: _omit, ...legacy } = grant();
-    expect(grantExpands(legacy as PluginGrant, grant({ mcpTools: [] }))).toBe(false);
-    expect(grantExpands(legacy as PluginGrant, grant())).toBe(true);
   });
 
   it.each<[string, Partial<PluginGrant>]>([
@@ -52,6 +50,10 @@ describe('grantExpands', () => {
     ],
     ['新增 renderer', { renderer: true }],
     ['可调用的 MCP 工具变多', { mcpTools: ['search_context', 'enhance_prompt'] }],
+    ['新增透传环境变量', { env: ['JAVA_HOME'] }],
+    ['新增可调用的插件', { interop: ['other.plugin'] }],
+    ['新增拦截事件', { intercepts: ['tool_call'] }],
+    ['改为常驻', { resident: true }],
   ])('%s 算扩大', (_label, patch) => {
     expect(grantExpands(grant(), grant(patch))).toBe(true);
   });

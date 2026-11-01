@@ -25,6 +25,8 @@ export interface PluginProcessDeps {
   onLog?(level: PluginLogLevel, message: string): void;
   idleMs?: number;
   readyTimeoutMs?: number;
+  /** 常驻进程不因空闲退出 */
+  resident?: boolean;
 }
 
 interface Pending {
@@ -36,6 +38,7 @@ interface Pending {
 
 const DEFAULT_IDLE_MS = 5 * 60_000;
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
+const SHUTDOWN_GRACE_MS = 3_000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
@@ -49,6 +52,8 @@ export class PluginProcess {
   private stopping = false;
   private readonly pending = new Map<string, Pending>();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopWait: Promise<void> = Promise.resolve();
+  private finishStop: (() => void) | null = null;
   private nextId = 1;
 
   constructor(private readonly deps: PluginProcessDeps) {}
@@ -109,11 +114,35 @@ export class PluginProcess {
     this.armIdle();
   }
 
+  /** 先发 shutdown，最多等 3 秒再 kill；进程自己退出则不再杀 */
   stop(): void {
     this.clearIdle();
-    if (!this.child) return;
+    const child = this.child;
+    if (!child || this.stopping) return;
     this.stopping = true;
-    this.child.kill();
+    this.stopWait = new Promise((resolve) => {
+      this.finishStop = resolve;
+    });
+    this.post({ t: 'shutdown' });
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // 进程已经退出
+      }
+    }, SHUTDOWN_GRACE_MS);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      this.finishStop?.();
+      this.finishStop = null;
+    });
+  }
+
+  /** 停进程并等到它退出；没有进程时立即完成 */
+  whenStopped(): Promise<void> {
+    if (!this.child) return Promise.resolve();
+    if (!this.stopping) this.stop();
+    return this.stopWait;
   }
 
   private post(message: MainToPluginHost): void {
@@ -236,7 +265,7 @@ export class PluginProcess {
 
   private armIdle(): void {
     this.clearIdle();
-    if (this.pending.size > 0 || !this.child) return;
+    if (this.deps.resident || this.pending.size > 0 || !this.child) return;
     this.idleTimer = setTimeout(() => this.stop(), this.deps.idleMs ?? DEFAULT_IDLE_MS);
   }
 

@@ -30,7 +30,7 @@ import {
 } from '@shared/builtinAgents';
 import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
-import type { PluginToolDescriptor } from '@shared/extensionPlugins/types';
+import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { positiveContextWindow } from '@shared/modelCatalog';
@@ -199,6 +199,7 @@ import {
 } from './oauthAccountPool';
 import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
+import { createPluginEventsExtension, PluginEventInvoker } from './pluginEvents';
 import {
   configurePrivacyMasking,
   installPrivacyMasking,
@@ -351,6 +352,7 @@ interface ManagedSession {
   adaptiveDowngraded: Set<string>;
   computer?: ComputerInvoker;
   pluginTools?: PluginToolInvoker;
+  pluginEvents?: PluginEventInvoker;
   /** 最近一次 auto_retry_start 携带的原始错误（取消重试时的终态错误文案） */
   lastRetryError?: string;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
@@ -455,6 +457,7 @@ const PENDING_COUNTERS: Record<PendingCounterKey, true> = {
   agentControl: true,
   computer: true,
   pluginTools: true,
+  pluginEvents: true,
 };
 
 export function hasPendingCalls(managed: ManagedSession): boolean {
@@ -518,6 +521,7 @@ function createSessionResourceLoader(options: {
     role: Parameters<typeof createClaudeHooksExtension>[0]['role'];
     resumed?: boolean;
   };
+  pluginEvents?: { invoker: PluginEventInvoker };
   exploreFold?: ReturnType<typeof createExploreFoldState>;
   /** codemode / tool_search 与按需 MCP；排在最前，mcp_servers 段先于 persona 强制提示词写入 */
   codemode?: InlineExtension;
@@ -628,6 +632,7 @@ function createSessionResourceLoader(options: {
             }),
           ]
         : []),
+      ...(options.pluginEvents ? [createPluginEventsExtension(options.pluginEvents.invoker)] : []),
       options.silentTurnRecovery,
       appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
       ...(options.childContract
@@ -672,6 +677,18 @@ async function emitSessionShutdown(session: AgentSession): Promise<void> {
     const runner = session.extensionRunner;
     if (runner.hasHandlers('session_shutdown')) {
       await runner.emit({ type: 'session_shutdown', reason: 'quit' });
+    }
+  } catch {}
+}
+
+async function emitPluginSessionStart(
+  session: AgentSession,
+  reason: 'startup' | 'resume'
+): Promise<void> {
+  try {
+    const runner = session.extensionRunner;
+    if (runner.hasHandlers('session_start')) {
+      await runner.emit({ type: 'session_start', reason });
     }
   } catch {}
 }
@@ -1164,6 +1181,7 @@ export class SessionSupervisor {
     managed.agentControl?.close('Session released');
     managed.computer?.cancelAll('Session released');
     managed.pluginTools?.cancelAll('Session released');
+    managed.pluginEvents?.cancelAll();
     try {
       await managed.session.abort();
     } catch {}
@@ -1452,7 +1470,10 @@ export class SessionSupervisor {
             command.type === 'memory-result' ||
             command.type === 'delegation-result' ||
             command.type === 'computer-result' ||
-            command.type === 'plugin-tool-result'
+            command.type === 'plugin-tool-result' ||
+            command.type === 'plugin-tool-progress' ||
+            command.type === 'plugin-intercept-result' ||
+            command.type === 'plugin-inject'
           ? command.identity
           : command.type === 'dismiss-child' ||
               command.type === 'dismiss-coworker' ||
@@ -1468,6 +1489,17 @@ export class SessionSupervisor {
     if (command.type === 'abort') {
       void this.execute(command).catch((error) => {
         console.error('[abort] failed:', toErrorMessage(error));
+      });
+      return;
+    }
+    if (
+      command.type === 'plugin-tool-result' ||
+      command.type === 'plugin-tool-progress' ||
+      command.type === 'plugin-intercept-result' ||
+      command.type === 'plugin-inject'
+    ) {
+      void this.execute(command).catch((error) => {
+        console.error(`[${command.type}] failed:`, toErrorMessage(error));
       });
       return;
     }
@@ -1576,7 +1608,8 @@ export class SessionSupervisor {
           command.botRoutines,
           command.botWriteLock,
           command.botDelegationTask,
-          command.pluginTools
+          command.pluginTools,
+          command.pluginEvents
         );
         return;
       case 'spawn-child':
@@ -1852,6 +1885,33 @@ export class SessionSupervisor {
         this.must(command.identity).pluginTools?.resolve(command);
         return;
       }
+      case 'plugin-tool-progress': {
+        const managed = this.sessions.get(command.identity.sessionId);
+        if (!managed || !isSameGeneration(managed.identity, command.identity)) return;
+        managed.pluginTools?.progress(command.requestId, command.text);
+        return;
+      }
+      case 'plugin-intercept-result': {
+        const managed = this.sessions.get(command.identity.sessionId);
+        if (!managed || !isSameGeneration(managed.identity, command.identity)) return;
+        managed.pluginEvents?.resolve(command);
+        return;
+      }
+      case 'plugin-inject': {
+        const managed = this.sessions.get(command.identity.sessionId);
+        if (!managed || !isSameGeneration(managed.identity, command.identity)) return;
+        const delivered = managed.pluginEvents?.deliver({
+          pluginId: command.pluginId,
+          pluginName: command.pluginName,
+          text: command.text,
+          deliverAs: command.deliverAs,
+          triggerTurn: command.triggerTurn,
+        });
+        if (!delivered?.ok) {
+          console.warn('[plugin-inject]', delivered?.error ?? '会话未接受注入');
+        }
+        return;
+      }
       case 'append-session-custom-entry': {
         const managed = this.must(command.identity);
         managed.session.sessionManager.appendCustomEntry('enso-agent-session', command.entry);
@@ -2038,6 +2098,7 @@ export class SessionSupervisor {
         managed.requestBudget?.disarm();
         managed.computer?.cancelAll('Computer action aborted');
         managed.pluginTools?.cancelAll('Plugin tool aborted');
+        managed.pluginEvents?.cancelAll();
         // 立即收口投影：不 await session.abort()（内部 waitForIdle 会一直等到工具/流
         // 真正结束，工具不响应 signal 时永远等不到，UI 就卡在 running 上）。
         // 中断信号发出即视为本轮终止，后续 agent_end 回流由 status 守卫幂等吸收。
@@ -2111,7 +2172,8 @@ export class SessionSupervisor {
     botRoutines = false,
     botWriteLock?: { label: string; ancestors: string[] },
     botDelegationTask = false,
-    pluginToolDescriptors: readonly PluginToolDescriptor[] = []
+    pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
+    pluginEvents?: PluginEventPlan
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2180,6 +2242,18 @@ export class SessionSupervisor {
       codemode: toolEnabled('isolated_sandbox'),
       deferredServers: deferredMcp,
     });
+    const pluginEventPlan = botMode ? undefined : pluginEvents;
+    const pluginEventInvoker = pluginEventPlan
+      ? new PluginEventInvoker(pluginEventPlan, (event) => {
+          const managed = this.sessions.get(sessionId);
+          if (!managed || !isSameGeneration(managed.identity, identity)) return;
+          this.options.emit({
+            ...event,
+            identity: managed.identity,
+            seq: ++managed.seq,
+          });
+        })
+      : undefined;
     const resourceLoader = createSessionResourceLoader({
       branchContext: this.branchContextExtension(() => managedRef),
       oauthPoolRecovery: this.oauthPoolRecovery(),
@@ -2199,6 +2273,7 @@ export class SessionSupervisor {
       trustedProjectCode,
       pluginCommands,
       pluginHooks: { hooks: pluginHooks, role: { kind: 'parent' }, resumed: Boolean(resumeFile) },
+      ...(pluginEventInvoker ? { pluginEvents: { invoker: pluginEventInvoker } } : {}),
       exploreFold,
       codemode: codemodeHost.extension,
       persona: systemPrompt,
@@ -3042,7 +3117,11 @@ export class SessionSupervisor {
     if (managed.plan && planMode !== undefined) plan.setActive(planMode);
     managedRef.computer = computer;
     managedRef.pluginTools = pluginTools;
+    managedRef.pluginEvents = pluginEventInvoker;
     managedRef.delegation = delegation;
+    if (pluginEventInvoker) {
+      await emitPluginSessionStart(session, resumeFile ? 'resume' : 'startup');
+    }
     this.options.emit({
       type: 'parent-ready',
       identity,
@@ -4840,6 +4919,7 @@ export class SessionSupervisor {
       managed.currentTurnId = undefined;
       managed.computer?.cancelAll('Enso worker shutdown');
       managed.pluginTools?.cancelAll('Enso worker shutdown');
+      managed.pluginEvents?.cancelAll();
       // pi 的 bash 是 detached 进程组，只在中断信号上 killProcessTree；SDK 未导出退出清理，
       // 这里同步触发中断（不等 waitForIdle），否则 worker 退出后命令成孤儿进程
       void managed.session.abort().catch(() => {});

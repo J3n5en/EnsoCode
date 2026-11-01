@@ -66,6 +66,7 @@ import {
   promptChildSession,
   promptSession,
   readSettingsState,
+  registerPluginSessionBridge,
   releaseParentSession,
   reloadSession,
   requestSnapshot,
@@ -82,6 +83,8 @@ import {
   sendComputerResultToSession,
   sendDelegationResultToSession,
   sendMemoryResultToSession,
+  sendPluginInterceptResultToSession,
+  sendPluginToolProgressToSession,
   sendPluginToolResultToSession,
   setAgentEventListener,
   setPinnedSessions,
@@ -333,6 +336,17 @@ export function pluginProjectRoot(sessionId: string): string | null {
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
   if (project?.kind === 'ssh') return null;
   return authoritativeSpawnCwd(sessionId);
+}
+
+/** 拉起声明了动态工具的插件；失败不阻塞会话启动 */
+function preparePluginsForSpawn(): Promise<void> {
+  try {
+    return getExtensionPlugins()
+      .prepareForSpawn()
+      .catch(() => undefined);
+  } catch {
+    return Promise.resolve();
+  }
 }
 
 function removeConversationFiles(conversation: {
@@ -949,6 +963,11 @@ async function runAgentControl(
 }
 
 export function registerAgentHandlers(): void {
+  registerPluginSessionBridge((sessionId) => {
+    const identity = agentSessionIndex.currentIdentity(sessionId);
+    if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity)) return undefined;
+    return identity;
+  });
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });
@@ -1407,6 +1426,52 @@ export function registerAgentHandlers(): void {
       pendingPluginTools.get(workerEvent.requestId)?.abort();
       return;
     }
+    if (workerEvent.type === 'plugin-event') {
+      const sessionId = workerEvent.identity.sessionId;
+      void getExtensionPlugins()
+        .dispatchEvent({
+          sessionId,
+          projectRoot: pluginProjectRoot(sessionId),
+          event: workerEvent.event,
+          data: workerEvent.data,
+        })
+        .catch((error: unknown) => {
+          console.warn('[plugins] event failed:', error instanceof Error ? error.message : error);
+        });
+      return;
+    }
+    if (workerEvent.type === 'plugin-intercept') {
+      const { identity, requestId, event, payload } = workerEvent;
+      const projectRoot = pluginProjectRoot(identity.sessionId);
+      const service = getExtensionPlugins();
+      const task =
+        event === 'before_compact'
+          ? service.dispatchEvent({
+              sessionId: identity.sessionId,
+              projectRoot,
+              event,
+              data: payload,
+            })
+          : service.intercept({
+              sessionId: identity.sessionId,
+              projectRoot,
+              event,
+              payload,
+            });
+      void Promise.resolve(task).then(
+        (result) =>
+          sendPluginInterceptResultToSession(identity, requestId, {
+            ok: true,
+            ...(event === 'before_compact' ? {} : { result: result ?? {} }),
+          }),
+        (error: unknown) =>
+          sendPluginInterceptResultToSession(identity, requestId, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+      );
+      return;
+    }
     if (workerEvent.type === 'plugin-tool-invoke') {
       const { identity, requestId, toolName, args } = workerEvent;
       const controller = new AbortController();
@@ -1418,7 +1483,11 @@ export function registerAgentHandlers(): void {
           sessionId: identity.sessionId,
           projectRoot: pluginProjectRoot(identity.sessionId),
           signal: controller.signal,
-        })
+          onProgress: (text: string) => {
+            if (typeof text !== 'string' || text.length > 16 * 1024) return;
+            sendPluginToolProgressToSession(identity, requestId, text);
+          },
+        } as Parameters<ReturnType<typeof getExtensionPlugins>['callTool']>[0])
         .then(
           (result) => sendPluginToolResultToSession(identity, requestId, { ok: true, result }),
           (error: unknown) =>
@@ -1729,8 +1798,10 @@ export function registerAgentHandlers(): void {
     };
     agentSessionIndex.prepareParent(identity);
     let credentialKeys: ReadonlySet<string>;
+    const pluginsReady = preparePluginsForSpawn();
     try {
       credentialKeys = await readStoredOauthCredentialKeys();
+      await pluginsReady;
     } catch {
       return { ok: false, error: 'model credentials unavailable' };
     }

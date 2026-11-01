@@ -7,12 +7,55 @@
       content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
     />
     <script>
-      // Enso 插件侧栏页面壳：在 sandbox iframe（不同源）里运行，只认父窗口发来的第一条初始化消息。
+      // Enso 插件侧栏页面壳：sandbox iframe（不同源）里运行，只认父窗口第一条初始化消息。
+      // enso.storage 与 localStorage 读初始快照，写入经 MessagePort 交给宿主持久化。
       (() => {
         let port = null;
         let seq = 0;
         let theme = 'light';
         const pending = new Map();
+        const store = Object.create(null);
+        const persist = (patch) => {
+          if (port) port.postMessage({ type: 'enso-storage', patch });
+        };
+        const storage = {
+          getItem(key) {
+            const name = String(key);
+            return Object.hasOwn(store, name) ? String(store[name]) : null;
+          },
+          setItem(key, value) {
+            const name = String(key);
+            const text = String(value);
+            store[name] = text;
+            persist({ [name]: text });
+          },
+          removeItem(key) {
+            const name = String(key);
+            delete store[name];
+            persist({ [name]: null });
+          },
+          clear() {
+            const patch = {};
+            for (const name of Object.keys(store)) patch[name] = null;
+            for (const name of Object.keys(patch)) delete store[name];
+            persist(patch);
+          },
+          key(index) {
+            return Object.keys(store)[index] ?? null;
+          },
+          get length() {
+            return Object.keys(store).length;
+          },
+        };
+        try {
+          Object.defineProperty(window, 'localStorage', {
+            configurable: true,
+            enumerable: true,
+            value: storage,
+          });
+        } catch {
+          /* 原生 localStorage 不可替换时仍提供 enso.storage */
+        }
         Object.defineProperty(window, 'enso', {
           configurable: false,
           enumerable: false,
@@ -26,9 +69,24 @@
               const id = ++seq;
               return new Promise((resolve, reject) => {
                 pending.set(id, { resolve, reject });
-                port.postMessage({ id, method: String(method), args: args === undefined ? null : args });
+                port.postMessage({
+                  id,
+                  method: String(method),
+                  args: args === undefined ? null : args,
+                });
               });
             },
+            storage: Object.freeze({
+              get(key) {
+                return storage.getItem(key);
+              },
+              set(key, value) {
+                storage.setItem(key, value);
+              },
+              remove(key) {
+                storage.removeItem(key);
+              },
+            }),
           }),
         });
         const onInit = (event) => {
@@ -38,6 +96,11 @@
           window.removeEventListener('message', onInit);
           port = event.ports[0];
           theme = data.theme === 'dark' ? 'dark' : 'light';
+          const incoming = data.storage && typeof data.storage === 'object' ? data.storage : {};
+          for (const name of Object.keys(store)) delete store[name];
+          for (const name of Object.keys(incoming)) {
+            if (typeof incoming[name] === 'string') store[name] = incoming[name];
+          }
           port.onmessage = (message) => {
             const reply = message.data;
             const entry = reply && pending.get(reply.id);

@@ -532,6 +532,19 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_CONFIG_SET: 'extension-plugins:config-set',
   /** 插件进程日志末尾；只在本机界面或服务端 CLI 上看 */
   EXTENSION_PLUGINS_LOGS: 'extension-plugins:logs',
+  /** 产出文件列表；可选插件 id，渲染层不传磁盘路径 */
+  EXTENSION_PLUGINS_ARTIFACTS_LIST: 'extension-plugins:artifacts-list',
+  /** 按产出 id 读取内容（≤ 8MB），路径由 Main 推导 */
+  EXTENSION_PLUGINS_ARTIFACT_READ: 'extension-plugins:artifact-read',
+  /** 按产出 id 删除 */
+  EXTENSION_PLUGINS_ARTIFACT_DELETE: 'extension-plugins:artifact-delete',
+  /** 桌面专用：另存对话框，渲染层只传产出 id */
+  EXTENSION_PLUGINS_ARTIFACT_SAVE: 'extension-plugins:artifact-save',
+  /** 侧栏页面状态，替代 localStorage */
+  EXTENSION_PLUGINS_VIEW_STATE_GET: 'extension-plugins:view-state-get',
+  EXTENSION_PLUGINS_VIEW_STATE_SET: 'extension-plugins:view-state-set',
+  /** 桌面专用：配置项选择文件或目录，只把路径字符串交回界面 */
+  EXTENSION_PLUGINS_PICK_PATH: 'extension-plugins:pick-path',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

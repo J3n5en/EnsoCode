@@ -1,3 +1,10 @@
+import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
+import {
+  isInterceptEvent,
+  PLUGIN_EVENTS,
+  type PluginEventName,
+  type PluginEventSubscription,
+} from './events';
 import { pluginToolName } from './toolName';
 
 export const EXTENSION_PLUGIN_PERMISSIONS = [
@@ -11,6 +18,13 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'net.fetch',
   'mcp.server',
   'mcp.call',
+  'agent.observe',
+  'agent.intercept',
+  'agent.inject',
+  'process.background',
+  'plugin.call',
+  'ui.clipboard',
+  'ui.openExternal',
 ] as const;
 export type ExtensionPluginPermission = (typeof EXTENSION_PLUGIN_PERMISSIONS)[number];
 
@@ -22,6 +36,8 @@ export interface PluginAgentToolContrib {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /** 单次调用上限；缺省 60 秒 */
+  timeoutMs?: number;
 }
 export interface PluginCommandContrib {
   id: string;
@@ -47,11 +63,29 @@ export interface PluginMethodContrib {
   name: string;
   timeoutMs: number;
 }
+export const PLUGIN_CONFIG_TYPES = ['string', 'number', 'boolean', 'enum', 'path'] as const;
+export type PluginConfigType = (typeof PLUGIN_CONFIG_TYPES)[number];
 export interface PluginConfigContrib {
   key: string;
   title: string;
   description: string;
   secret: boolean;
+  type: PluginConfigType;
+  default?: string | number | boolean;
+  options?: string[];
+  min?: number;
+  max?: number;
+  pathKind?: 'file' | 'directory';
+}
+export interface PluginScheduleContrib {
+  id: string;
+  intervalSeconds: number;
+  timeoutMs?: number;
+}
+/** 允许其他插件调用的方法 */
+export interface PluginExportContrib {
+  name: string;
+  timeoutMs?: number;
 }
 /** 插件自带的会话预设。skill / MCP 只能引用本插件已声明的贡献 */
 export interface PluginPresetContrib {
@@ -65,6 +99,11 @@ export interface PluginPresetContrib {
   boostPrompt?: string;
   refusalRetry?: boolean;
   refusalRetryPrompt?: string;
+  model?: { providerId: string; modelId: string };
+  thinkingLevel?: ThinkingLevel;
+  /** 只能比用户默认更严：supervised / auto-edits */
+  approvalMode?: Extract<ApprovalMode, 'supervised' | 'auto-edits'>;
+  disabledTools?: string[];
 }
 
 export interface ExtensionPluginManifest {
@@ -81,6 +120,12 @@ export interface ExtensionPluginManifest {
   net: { domains: string[] };
   /** 允许调用的宿主 MCP 工具名（不限服务） */
   mcp: { tools: string[] };
+  /** 常驻：启用即拉起，不因空闲退出 */
+  resident: boolean;
+  /** 额外透传给插件进程的环境变量名 */
+  env: string[];
+  /** 允许调用的其他插件 */
+  interop: { call: string[] };
   contributes: {
     agentTools: PluginAgentToolContrib[];
     commands: PluginCommandContrib[];
@@ -91,6 +136,11 @@ export interface ExtensionPluginManifest {
     methods: PluginMethodContrib[];
     configuration: PluginConfigContrib[];
     presets: PluginPresetContrib[];
+    events: PluginEventSubscription[];
+    schedules: PluginScheduleContrib[];
+    exports: PluginExportContrib[];
+    /** 运行期可额外注册的工具 / 命令上限 */
+    dynamic: { tools: number; commands: number };
   };
 }
 
@@ -106,9 +156,20 @@ const ENGINE = /^>=(\d+)\.(\d+)\.(\d+)$/;
 const METHOD = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const MCP_TOOL = /^[A-Za-z0-9_.-]{1,64}$/;
 const CONFIG_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const TOOL_NAME_REF = /^[A-Za-z0-9_.-]{1,64}$/;
+/** 会改变 Node / Electron 行为或冒充宿主注入值的变量不能声明 */
+const RESERVED_ENV = /^(ENSO_|ELECTRON_|NODE_OPTIONS$|NODE_PATH$|NODE_EXTRA_CA_CERTS$|LD_|DYLD_)/;
 export const MAX_METHOD_TIMEOUT_MS = 120_000;
+export const MAX_TOOL_TIMEOUT_MS = 600_000;
+export const MIN_SCHEDULE_SECONDS = 60;
+export const MAX_SCHEDULE_SECONDS = 86_400;
+export const MAX_DYNAMIC_TOOLS = 50;
+export const MAX_DYNAMIC_COMMANDS = 20;
 const MAX_CONFIG_ITEMS = 20;
 const MAX_PRESETS = 20;
+const MAX_SCHEDULES = 10;
+const MAX_ENV = 20;
 const TOP_LEVEL = new Set([
   'schemaVersion',
   'id',
@@ -122,6 +183,9 @@ const TOP_LEVEL = new Set([
   'fs',
   'net',
   'mcp',
+  'resident',
+  'env',
+  'interop',
   'contributes',
 ]);
 
@@ -129,6 +193,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 const isNonEmptyString = (v: unknown, max = 200): v is string =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+const isTimeout = (v: unknown, max: number): v is number =>
+  Number.isInteger(v) && (v as number) >= 1000 && (v as number) <= max;
 
 /** 插件目录内的相对路径（`.` 表示根）；只做字符串层判定，符号链接由 Main 安装时校验 */
 export function isPluginRelativePath(path: unknown): path is string {
@@ -260,6 +326,25 @@ export function parseExtensionPluginManifest(
     ),
   };
 
+  if (raw.resident !== undefined && typeof raw.resident !== 'boolean')
+    errors.push('resident 不合法');
+  const resident = raw.resident === true;
+  const env = stringList(
+    raw.env,
+    'env',
+    (name) => typeof name === 'string' && ENV_NAME.test(name) && !RESERVED_ENV.test(name)
+  );
+  if (env.length > MAX_ENV) errors.push(`env 最多 ${MAX_ENV} 项`);
+  const interopRaw = raw.interop === undefined ? {} : raw.interop;
+  if (!isRecord(interopRaw)) errors.push('interop 不合法');
+  const interop = {
+    call: stringList(
+      isRecord(interopRaw) ? interopRaw.call : undefined,
+      'interop.call',
+      (target) => typeof target === 'string' && ID.test(target) && target !== id
+    ),
+  };
+
   const c = raw.contributes === undefined ? {} : raw.contributes;
   if (!isRecord(c)) errors.push('contributes 不合法');
   const contrib = isRecord(c) ? c : {};
@@ -295,6 +380,8 @@ export function parseExtensionPluginManifest(
       continue;
     }
     if (!isNonEmptyString(t.description, 1024)) errors.push(`工具 ${name} 缺少 description`);
+    if (t.timeoutMs !== undefined && !isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS))
+      errors.push(`工具 ${name} 的 timeoutMs 不合法（1000–${MAX_TOOL_TIMEOUT_MS} 毫秒的整数）`);
     if (!isRecord(t.parameters) || t.parameters.type !== 'object')
       errors.push(`工具 ${name} 的 parameters 必须是 type=object 的 JSON Schema`);
     else
@@ -302,6 +389,7 @@ export function parseExtensionPluginManifest(
         name: name as string,
         description: String(t.description ?? ''),
         parameters: t.parameters,
+        ...(isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS) ? { timeoutMs: t.timeoutMs } : {}),
       });
   }
   uniqueIds(agentTools, '工具');
@@ -423,6 +511,29 @@ export function parseExtensionPluginManifest(
       errors.push(`预设 ${item.id} 的 refusalRetry 不合法`);
     if (item.refusalRetry === true && !refusalRetryPrompt)
       errors.push(`预设 ${item.id} 开启了推脱补发但没有正文`);
+    const model = item.model;
+    const modelOk =
+      model === undefined ||
+      (isRecord(model) &&
+        isNonEmptyString(model.providerId, 120) &&
+        isNonEmptyString(model.modelId, 200));
+    if (!modelOk) errors.push(`预设 ${item.id} 的 model 不合法`);
+    if (
+      item.thinkingLevel !== undefined &&
+      !(THINKING_LEVELS as readonly unknown[]).includes(item.thinkingLevel)
+    )
+      errors.push(`预设 ${item.id} 的 thinkingLevel 不合法`);
+    if (
+      item.approvalMode !== undefined &&
+      item.approvalMode !== 'supervised' &&
+      item.approvalMode !== 'auto-edits'
+    )
+      errors.push(`预设 ${item.id} 的 approvalMode 只能是 supervised 或 auto-edits`);
+    const disabledTools = stringList(
+      item.disabledTools,
+      `预设 ${item.id} 的 disabledTools`,
+      (t) => typeof t === 'string' && TOOL_NAME_REF.test(t)
+    );
     presets.push({
       id: item.id,
       name: typeof item.name === 'string' ? item.name.trim() : '',
@@ -434,6 +545,16 @@ export function parseExtensionPluginManifest(
       ...(boostPrompt ? { boostPrompt } : {}),
       ...(item.refusalRetry === true ? { refusalRetry: true } : {}),
       ...(refusalRetryPrompt ? { refusalRetryPrompt } : {}),
+      ...(modelOk && isRecord(model)
+        ? { model: { providerId: model.providerId as string, modelId: model.modelId as string } }
+        : {}),
+      ...((THINKING_LEVELS as readonly unknown[]).includes(item.thinkingLevel)
+        ? { thinkingLevel: item.thinkingLevel as ThinkingLevel }
+        : {}),
+      ...(item.approvalMode === 'supervised' || item.approvalMode === 'auto-edits'
+        ? { approvalMode: item.approvalMode }
+        : {}),
+      ...(disabledTools.length > 0 ? { disabledTools } : {}),
     });
   }
   uniqueIds(presets, '预设');
@@ -457,33 +578,108 @@ export function parseExtensionPluginManifest(
   const configRaw = list('configuration');
   if (configRaw.length > MAX_CONFIG_ITEMS) errors.push(`配置项最多 ${MAX_CONFIG_ITEMS} 个`);
   for (const c of configRaw) {
-    if (
-      !isRecord(c) ||
-      typeof c.key !== 'string' ||
-      !CONFIG_KEY.test(c.key) ||
-      !isNonEmptyString(c.title, 60) ||
-      (c.description !== undefined && !isNonEmptyString(c.description, 500)) ||
-      (c.secret !== undefined && typeof c.secret !== 'boolean')
-    )
-      errors.push('配置项不合法');
-    else
-      configuration.push({
-        key: c.key,
-        title: c.title as string,
-        description: typeof c.description === 'string' ? c.description : '',
-        secret: c.secret === true,
-      });
+    const field = parseConfigField(c);
+    if (!field) errors.push(`配置项不合法：${isRecord(c) ? String(c.key) : ''}`);
+    else configuration.push(field);
   }
   uniqueIds(
     configuration.map((c) => ({ id: c.key })),
     '配置项'
   );
 
+  const events: PluginEventSubscription[] = [];
+  for (const e of list('events')) {
+    const sub = parseEventSubscription(e);
+    if (!sub) {
+      errors.push(`事件订阅不合法：${isRecord(e) ? String(e.event) : ''}`);
+      continue;
+    }
+    if (events.some((x) => x.event === sub.event)) errors.push(`事件重复：${sub.event}`);
+    events.push(sub);
+  }
+
+  const schedules: PluginScheduleContrib[] = [];
+  const scheduleRaw = list('schedules');
+  if (scheduleRaw.length > MAX_SCHEDULES) errors.push(`定时任务最多 ${MAX_SCHEDULES} 个`);
+  for (const s of scheduleRaw) {
+    if (
+      !isRecord(s) ||
+      typeof s.id !== 'string' ||
+      !LOCAL_ID.test(s.id) ||
+      !Number.isInteger(s.intervalSeconds) ||
+      (s.intervalSeconds as number) < MIN_SCHEDULE_SECONDS ||
+      (s.intervalSeconds as number) > MAX_SCHEDULE_SECONDS ||
+      (s.timeoutMs !== undefined && !isTimeout(s.timeoutMs, MAX_TOOL_TIMEOUT_MS))
+    )
+      errors.push(
+        `定时任务不合法（间隔 ${MIN_SCHEDULE_SECONDS}–${MAX_SCHEDULE_SECONDS} 秒的整数）`
+      );
+    else
+      schedules.push({
+        id: s.id,
+        intervalSeconds: s.intervalSeconds as number,
+        ...(s.timeoutMs !== undefined ? { timeoutMs: s.timeoutMs as number } : {}),
+      });
+  }
+  uniqueIds(schedules, '定时任务');
+
+  const exportsList: PluginExportContrib[] = [];
+  for (const x of list('exports')) {
+    if (
+      !isRecord(x) ||
+      typeof x.name !== 'string' ||
+      !METHOD.test(x.name) ||
+      (x.timeoutMs !== undefined && !isTimeout(x.timeoutMs, MAX_METHOD_TIMEOUT_MS))
+    )
+      errors.push('导出方法不合法');
+    else
+      exportsList.push({
+        name: x.name,
+        ...(x.timeoutMs !== undefined ? { timeoutMs: x.timeoutMs as number } : {}),
+      });
+  }
+  uniqueIds(exportsList, '导出方法');
+
+  const dynamicRaw = contrib.dynamic === undefined ? {} : contrib.dynamic;
+  const count = (value: unknown, max: number, label: string): number => {
+    if (value === undefined) return 0;
+    if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > max) {
+      errors.push(`contributes.dynamic.${label} 必须是 0–${max} 的整数`);
+      return 0;
+    }
+    return value as number;
+  };
+  if (!isRecord(dynamicRaw)) errors.push('contributes.dynamic 不合法');
+  const dynamic = {
+    tools: count(isRecord(dynamicRaw) ? dynamicRaw.tools : undefined, MAX_DYNAMIC_TOOLS, 'tools'),
+    commands: count(
+      isRecord(dynamicRaw) ? dynamicRaw.commands : undefined,
+      MAX_DYNAMIC_COMMANDS,
+      'commands'
+    ),
+  };
+
   const need = (present: boolean, permission: ExtensionPluginPermission, label: string) => {
     if (present && !permissions.includes(permission))
       errors.push(`${label} 需要权限 ${permission}`);
   };
   need(agentTools.length > 0, 'agent.tool', 'agentTools');
+  need(dynamic.tools > 0, 'agent.tool', 'contributes.dynamic.tools');
+  need(
+    events.some((e) => e.mode === 'observe'),
+    'agent.observe',
+    'events'
+  );
+  need(
+    events.some((e) => e.mode === 'intercept'),
+    'agent.intercept',
+    '拦截型 events'
+  );
+  need(resident, 'process.background', 'resident');
+  need(schedules.length > 0, 'process.background', 'schedules');
+  need(interop.call.length > 0, 'plugin.call', 'interop.call');
+  if (permissions.includes('plugin.call') && interop.call.length === 0)
+    errors.push('plugin.call 需要在 interop.call 里列出要调用的插件');
   need(renderer !== undefined, 'ui.slot', 'renderer');
   need(triggers.length > 0, 'ui.slot', 'triggers');
   need(views.length > 0, 'ui.view', 'views');
@@ -500,9 +696,15 @@ export function parseExtensionPluginManifest(
       commands.length > 0 ||
       triggers.length > 0 ||
       methods.length > 0 ||
-      configuration.length > 0)
+      configuration.length > 0 ||
+      events.length > 0 ||
+      schedules.length > 0 ||
+      exportsList.length > 0 ||
+      resident ||
+      dynamic.tools > 0 ||
+      dynamic.commands > 0)
   )
-    errors.push('声明了工具、命令、补全来源、方法或配置项时必须提供 main');
+    errors.push('声明了工具、命令、补全来源、方法、配置项、事件、定时或常驻时必须提供 main');
 
   if (errors.length > 0) return { ok: false, errors };
   return {
@@ -521,6 +723,9 @@ export function parseExtensionPluginManifest(
       fs,
       net,
       mcp,
+      resident,
+      env,
+      interop,
       contributes: {
         agentTools,
         commands,
@@ -531,7 +736,107 @@ export function parseExtensionPluginManifest(
         methods,
         configuration,
         presets,
+        events,
+        schedules,
+        exports: exportsList,
+        dynamic,
       },
     },
   };
+}
+
+function parseEventSubscription(raw: unknown): PluginEventSubscription | null {
+  if (!isRecord(raw) || !(PLUGIN_EVENTS as readonly unknown[]).includes(raw.event)) return null;
+  const event = raw.event as PluginEventName;
+  const mode = raw.mode ?? 'observe';
+  if (mode !== 'observe' && mode !== 'intercept') return null;
+  if (mode === 'intercept' && !isInterceptEvent(event)) return null;
+  if (raw.failClosed !== undefined && (typeof raw.failClosed !== 'boolean' || mode !== 'intercept'))
+    return null;
+  let tools: string[] | undefined;
+  if (raw.tools !== undefined) {
+    if (event !== 'tool_call' && event !== 'tool_result') return null;
+    if (
+      !Array.isArray(raw.tools) ||
+      raw.tools.length === 0 ||
+      raw.tools.length > 50 ||
+      !raw.tools.every((t) => typeof t === 'string' && TOOL_NAME_REF.test(t))
+    )
+      return null;
+    tools = [...new Set(raw.tools as string[])];
+  }
+  return { event, mode, failClosed: raw.failClosed === true, ...(tools ? { tools } : {}) };
+}
+
+function parseConfigField(c: unknown): PluginConfigContrib | null {
+  if (
+    !isRecord(c) ||
+    typeof c.key !== 'string' ||
+    !CONFIG_KEY.test(c.key) ||
+    !isNonEmptyString(c.title, 60) ||
+    (c.description !== undefined && !isNonEmptyString(c.description, 500)) ||
+    (c.secret !== undefined && typeof c.secret !== 'boolean')
+  )
+    return null;
+  const type = c.type ?? 'string';
+  if (!(PLUGIN_CONFIG_TYPES as readonly unknown[]).includes(type)) return null;
+  const secret = c.secret === true;
+  if (secret && type !== 'string') return null;
+  const field: PluginConfigContrib = {
+    key: c.key,
+    title: c.title as string,
+    description: typeof c.description === 'string' ? c.description : '',
+    secret,
+    type: type as PluginConfigType,
+  };
+  const has = (k: string) => c[k] !== undefined;
+  const only = (...allowed: string[]) =>
+    ['default', 'options', 'min', 'max', 'pathKind'].every((k) => allowed.includes(k) || !has(k));
+  switch (type) {
+    case 'string':
+      if (!only('default') || (has('default') && !isNonEmptyString(c.default, 4096))) return null;
+      if (has('default')) field.default = c.default as string;
+      return field;
+    case 'number': {
+      if (!only('default', 'min', 'max')) return null;
+      const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+      if ((has('min') && !finite(c.min)) || (has('max') && !finite(c.max))) return null;
+      if (has('min') && has('max') && (c.min as number) > (c.max as number)) return null;
+      if (has('default')) {
+        if (!finite(c.default)) return null;
+        const d = c.default as number;
+        if ((has('min') && d < (c.min as number)) || (has('max') && d > (c.max as number)))
+          return null;
+        field.default = d;
+      }
+      if (has('min')) field.min = c.min as number;
+      if (has('max')) field.max = c.max as number;
+      return field;
+    }
+    case 'boolean':
+      if (!only('default') || (has('default') && typeof c.default !== 'boolean')) return null;
+      if (has('default')) field.default = c.default as boolean;
+      return field;
+    case 'enum': {
+      if (!only('default', 'options')) return null;
+      const options = c.options;
+      if (
+        !Array.isArray(options) ||
+        options.length === 0 ||
+        options.length > 50 ||
+        !options.every((o) => isNonEmptyString(o, 200)) ||
+        new Set(options).size !== options.length
+      )
+        return null;
+      if (has('default') && !(options as unknown[]).includes(c.default)) return null;
+      field.options = options as string[];
+      if (has('default')) field.default = c.default as string;
+      return field;
+    }
+    default:
+      if (!only('pathKind')) return null;
+      if (has('pathKind') && c.pathKind !== 'file' && c.pathKind !== 'directory') return null;
+      field.pathKind = c.pathKind === 'directory' ? 'directory' : 'file';
+      return field;
+  }
 }

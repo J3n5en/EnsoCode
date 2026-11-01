@@ -6,7 +6,12 @@ import {
   type ExtensionPluginPermission,
   isPluginRelativePath,
 } from '@shared/extensionPlugins/manifest';
-import type { PluginHostApi } from '@shared/extensionPlugins/protocol';
+import {
+  PLUGIN_INJECT_MAX_CHARS,
+  type PluginArtifactInfo,
+  type PluginHostApi,
+  type PluginHostCapabilities,
+} from '@shared/extensionPlugins/protocol';
 import { pluginError } from './process';
 
 export const GESTURE_TTL_MS = 30_000;
@@ -15,6 +20,9 @@ const MAX_FETCH_BYTES = 5 * 1024 * 1024;
 const MAX_DRAFT_BYTES = 32 * 1024;
 const MAX_REDIRECTS = 5;
 const MAX_MCP_ARGS_BYTES = 64 * 1024;
+const MAX_CALL_DEPTH = 3;
+const MAX_CLIPBOARD_BYTES = 1024 * 1024;
+const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
 export type ComposerOp = 'readDraft' | 'insertText' | 'replaceDraft';
 
@@ -48,7 +56,7 @@ export interface GateDeps {
     payload: Record<string, unknown>
   ): Promise<unknown>;
   /** 插件自己的配置值（含密钥）；只交给插件进程，不进渲染层 */
-  config(pluginId: string): Record<string, string>;
+  config(pluginId: string): Record<string, string | number | boolean>;
   mcpTools(target: McpTarget, signal: AbortSignal): Promise<McpToolInfo[]>;
   mcpCall(
     target: McpTarget,
@@ -58,6 +66,30 @@ export interface GateDeps {
     signal: AbortSignal
   ): Promise<{ content: string; isError: boolean }>;
   now(): number;
+  progress?(invocationId: string, text: string): void;
+  writeArtifact?(pluginId: string, input: Record<string, unknown>): PluginArtifactInfo;
+  inject?(
+    pluginId: string,
+    input: {
+      sessionId: string;
+      text: string;
+      deliverAs: 'steer' | 'followUp' | 'nextTurn';
+      triggerTurn: boolean;
+    }
+  ): { ok: true } | { ok: false; error: string };
+  callPlugin?(
+    callerId: string,
+    targetId: string,
+    name: string,
+    args: unknown,
+    depth: number,
+    caller: { sessionId: string | null; projectRoot: string | null; signal?: AbortSignal }
+  ): Promise<unknown>;
+  clipboard?(text: string): void;
+  openExternal?(url: string): Promise<void> | void;
+  registerContrib?(pluginId: string, input: Record<string, unknown>): void;
+  unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
+  capabilities?(): PluginHostCapabilities;
 }
 
 export interface InvocationInit {
@@ -69,6 +101,11 @@ export interface InvocationInit {
   gesture: boolean;
   /** 发起调用的窗口；只有界面调用才有 */
   origin?: number | null;
+  /** 界面调用来自远端窗口：不能动宿主桌面 */
+  remote?: boolean;
+  /** 工具调用才能上报进度；导出调用带上嵌套深度 */
+  kind?: 'tool' | 'ui' | 'event' | 'schedule' | 'export';
+  depth?: number;
 }
 
 interface Invocation extends InvocationInit {
@@ -180,7 +217,7 @@ export class PluginHostGate {
       }
       case 'net.fetch':
         permit('net.fetch');
-        return this.fetch(manifest, a);
+        return this.fetch(manifest, a, this.invocations.get(invocationId)?.controller.signal);
       case 'ui.notify': {
         permit('ui.notify');
         if (typeof a.title !== 'string' || a.title.length === 0 || a.title.length > 200)
@@ -239,6 +276,112 @@ export class PluginHostGate {
           inv.controller.signal
         );
       }
+      case 'tool.progress': {
+        const inv = invocation();
+        if (inv.kind !== 'tool') throw pluginError('NO_INVOCATION', '只能在工具调用里上报进度');
+        if (typeof a.text !== 'string' || a.text.length === 0)
+          throw pluginError('INVALID_ARGS', 'text 不合法');
+        this.deps.progress?.(invocationId ?? '', a.text.slice(0, 16 * 1024));
+        return null;
+      }
+      case 'artifact.write': {
+        if (!this.deps.writeArtifact) throw pluginError('UNSUPPORTED', '当前环境不能写产出');
+        return this.deps.writeArtifact(pluginId, a);
+      }
+      case 'session.inject': {
+        permit('agent.inject');
+        const inv = invocation();
+        const sessionId = typeof a.sessionId === 'string' ? a.sessionId : inv.sessionId;
+        if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
+        if (
+          typeof a.text !== 'string' ||
+          a.text.length === 0 ||
+          a.text.length > PLUGIN_INJECT_MAX_CHARS
+        )
+          throw pluginError('INVALID_ARGS', 'text 不合法或超过 32K 字符');
+        const deliverAs = a.deliverAs === undefined ? 'nextTurn' : a.deliverAs;
+        if (deliverAs !== 'steer' && deliverAs !== 'followUp' && deliverAs !== 'nextTurn')
+          throw pluginError('INVALID_ARGS', 'deliverAs 不合法');
+        if (a.triggerTurn !== undefined && typeof a.triggerTurn !== 'boolean')
+          throw pluginError('INVALID_ARGS', 'triggerTurn 不合法');
+        const bridge = this.deps.inject;
+        if (!bridge) throw pluginError('UNSUPPORTED', '当前环境不能注入消息');
+        const result = bridge(pluginId, {
+          sessionId,
+          text: a.text,
+          deliverAs,
+          triggerTurn: a.triggerTurn === true,
+        });
+        if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
+        return null;
+      }
+      case 'plugin.call': {
+        permit('plugin.call');
+        const inv = invocation();
+        if ((inv.depth ?? 0) >= MAX_CALL_DEPTH) throw pluginError('CALL_DEPTH', '插件调用嵌套过深');
+        if (typeof a.pluginId !== 'string' || typeof a.name !== 'string' || a.name.length === 0)
+          throw pluginError('INVALID_ARGS', 'pluginId 或 name 不合法');
+        if (!manifest.interop.call.includes(a.pluginId))
+          throw pluginError('PERMISSION_DENIED', `清单没有允许调用 ${a.pluginId}`);
+        const args = a.args === undefined ? {} : a.args;
+        if (utf8Bytes(JSON.stringify(args ?? null)) > MAX_MCP_ARGS_BYTES)
+          throw pluginError('INVALID_ARGS', 'args 超过 64KB');
+        if (!this.deps.callPlugin) throw pluginError('UNSUPPORTED', '当前环境不能调用其他插件');
+        return this.deps.callPlugin(pluginId, a.pluginId, a.name, args, (inv.depth ?? 0) + 1, {
+          sessionId: inv.sessionId,
+          projectRoot: inv.projectRoot,
+          signal: inv.controller.signal,
+        });
+      }
+      case 'ui.clipboard': {
+        permit('ui.clipboard');
+        const inv = invocation();
+        if (!inv.gesture || this.deps.now() - inv.createdAt > GESTURE_TTL_MS)
+          throw pluginError('GESTURE_REQUIRED', '只能在用户操作触发的调用里写剪贴板');
+        if (typeof a.text !== 'string' || utf8Bytes(a.text) > MAX_CLIPBOARD_BYTES)
+          throw pluginError('INVALID_ARGS', 'text 不合法或过大');
+        if (!this.deps.clipboard || inv.remote)
+          throw pluginError('UNSUPPORTED', '当前环境不能写剪贴板');
+        this.deps.clipboard(a.text);
+        return null;
+      }
+      case 'ui.openExternal': {
+        permit('ui.openExternal');
+        const inv = invocation();
+        if (!inv.gesture || this.deps.now() - inv.createdAt > GESTURE_TTL_MS)
+          throw pluginError('GESTURE_REQUIRED', '只能在用户操作触发的调用里打开链接');
+        if (typeof a.url !== 'string') throw pluginError('INVALID_ARGS', 'url 不合法');
+        let parsed: URL;
+        try {
+          parsed = new URL(a.url);
+        } catch {
+          throw pluginError('INVALID_ARGS', 'url 不合法');
+        }
+        if (!OPEN_PROTOCOLS.has(parsed.protocol))
+          throw pluginError('INVALID_ARGS', '只接受 http、https 或 mailto');
+        if (!this.deps.openExternal || inv.remote)
+          throw pluginError('UNSUPPORTED', '当前环境不能打开链接');
+        await this.deps.openExternal(parsed.href);
+        return null;
+      }
+      case 'contrib.register':
+        this.deps.registerContrib?.(pluginId, a);
+        return null;
+      case 'contrib.unregister':
+        this.deps.unregisterContrib?.(pluginId, a);
+        return null;
+      case 'host.capabilities':
+        return (
+          this.deps.capabilities?.() ?? {
+            host: 'desktop' as const,
+            hostVersion: '',
+            notify: false,
+            mcp: false,
+            clipboard: false,
+            openExternal: false,
+            composer: false,
+          }
+        );
     }
   }
 
@@ -274,7 +417,11 @@ export class PluginHostGate {
     return real;
   }
 
-  private async fetch(manifest: ExtensionPluginManifest, a: Record<string, unknown>) {
+  private async fetch(
+    manifest: ExtensionPluginManifest,
+    a: Record<string, unknown>,
+    signal: AbortSignal | undefined
+  ) {
     const init = isRecord(a.init) ? a.init : {};
     const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET';
     const headers: Record<string, string> = {};
@@ -297,6 +444,7 @@ export class PluginHostGate {
         method,
         headers,
         ...(body !== undefined && hop === 0 ? { body } : {}),
+        ...(signal ? { signal } : {}),
         redirect: 'manual',
       });
       const location = response.headers.get('location');

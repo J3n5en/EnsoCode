@@ -17,6 +17,11 @@ const preview: ExtensionPluginInstallPreview = {
   netDomains: ['api.example.com'],
   mcpServers: [],
   mcpTools: [],
+  env: ['GITHUB_TOKEN'],
+  interop: ['enso.example.github'],
+  resident: true,
+  events: [{ event: 'session_start', mode: 'observe', failClosed: false }],
+  schedules: [{ id: 'sweep', intervalSeconds: 3600 }],
   tools: [{ name: 'greet', description: 'greet someone' }],
   hasRenderer: false,
   warnings: ['w1'],
@@ -119,6 +124,10 @@ describe('enso-server plugin', () => {
     const text = formatInstallPreview(preview);
     for (const part of ['demo.hello', '1.0.0', 'agent.tool', 'api.example.com', 'greet', 'w1'])
       expect(text).toContain(part);
+    expect(text).toContain('GITHUB_TOKEN');
+    expect(text).toContain('常驻：是');
+    expect(text).toContain('session_start');
+    expect(text).toContain('sweep');
   });
 
   it('列表为空时给出提示', () => {

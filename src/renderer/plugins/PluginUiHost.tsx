@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
-import { setPluginCommands } from './commands';
+import { mergePluginCommands, setPluginCommands } from './commands';
 import { handleDraftRequest } from './draftBridge';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginTriggers } from './triggers';
@@ -23,7 +23,7 @@ export function PluginUiHost() {
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
         setPluginCommands(
           enabled.flatMap((plugin) =>
-            plugin.commands.map((command) => ({
+            mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({
               pluginId: plugin.id,
               pluginName: plugin.name,
               ...command,

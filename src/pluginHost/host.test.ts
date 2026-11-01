@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MainToPluginHost, PluginHostToMain } from '@shared/extensionPlugins/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { captureConsole, runPluginHost } from './host';
 
 const dirs: string[] = [];
@@ -15,8 +15,15 @@ function harness(source: string) {
   dirs.push(dir);
   writeFileSync(join(dir, 'main.mjs'), source);
   const sent: PluginHostToMain[] = [];
+  let exited: number | null = null;
   let handler: (msg: unknown) => void = () => {};
-  runPluginHost({ send: (m) => sent.push(m), onMessage: (h) => (handler = h) });
+  runPluginHost({
+    send: (m) => sent.push(m),
+    onMessage: (h) => (handler = h),
+    exit: (code) => {
+      exited = code;
+    },
+  });
   const deliver = (msg: MainToPluginHost) => handler(msg);
   const next = async (pred: (m: PluginHostToMain) => boolean) => {
     for (let i = 0; i < 200; i++) {
@@ -27,7 +34,13 @@ function harness(source: string) {
     throw new Error('timeout');
   };
   deliver({ t: 'init', pluginId: 'a.b', pluginRoot: dir, main: 'main.mjs', dataDir: dir });
-  return { sent, deliver, next };
+  return {
+    dir,
+    sent,
+    deliver,
+    next,
+    exited: () => exited,
+  };
 }
 
 const call = (
@@ -61,6 +74,9 @@ describe('runPluginHost', () => {
         commands: ['refresh'],
         triggers: ['demo'],
         rendererMethods: ['ping'],
+        events: [],
+        schedules: [],
+        exports: [],
       },
     });
   });
@@ -148,6 +164,67 @@ describe('runPluginHost', () => {
       ok: true,
       value: { content: 'aborted:true' },
     });
+  });
+
+  it('未声明的事件不能订阅', async () => {
+    const h = harness(
+      `export function activate(enso) { enso.events.on('session_start', () => {}); }`
+    );
+    expect(await h.next((m) => m.t === 'init-error')).toMatchObject({
+      message: expect.stringContaining('清单未声明事件'),
+    });
+  });
+
+  it('shutdown 调用 deactivate，超时后杀掉子进程并退出', async () => {
+    const h = harness(`import { spawn } from 'node:child_process';
+      export function activate() {
+        spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 10000); setInterval(() => {}, 1000)']);
+      }
+      export function deactivate() { return new Promise(() => {}); }
+    `);
+    await h.next((m) => m.t === 'ready');
+    vi.useFakeTimers();
+    try {
+      h.deliver({ t: 'shutdown' });
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(h.exited()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.exited()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('子进程收敛', () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  it.each([
+    ['具名导入', `import { spawn } from 'node:child_process';`, 'spawn'],
+    ['命名空间导入', `import * as cp from 'node:child_process';`, 'cp.spawn'],
+    ['默认导入', `import cp from 'node:child_process';`, 'cp.spawn'],
+    ['不带 node: 前缀', `import { spawn } from 'child_process';`, 'spawn'],
+  ])('%s拉起的子进程在 shutdown 后退出', async (_label, importLine, spawnCall) => {
+    const h = harness(`${importLine}
+      export function activate(enso) {
+        const child = ${spawnCall}(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+        enso.tools.register('pid', () => String(child.pid));
+      }`);
+    await h.next((m) => m.t === 'ready');
+    h.deliver(call('c1', 'tool.execute', { name: 'pid', args: {} }));
+    const res = await h.next((m) => m.t === 'res' && m.id === 'c1');
+    const pid = Number((res as { value: { content: string } }).value.content);
+    expect(alive(pid)).toBe(true);
+    h.deliver({ t: 'shutdown' });
+    await h.next(() => h.exited() !== null);
+    for (let i = 0; i < 100 && alive(pid); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(alive(pid)).toBe(false);
   });
 });
 

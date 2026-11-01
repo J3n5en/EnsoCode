@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createViewBridge, decodeUtf8Base64 } from './viewBridge';
+import { createViewBridge, decodeUtf8Base64, viewStoragePatch } from './viewBridge';
 
 describe('侧栏页面桥', () => {
   it('转发 call 并带回结果', async () => {
@@ -37,5 +37,14 @@ describe('侧栏页面桥', () => {
     expect(decodeUtf8Base64(btoa(String.fromCharCode(...new TextEncoder().encode('你好'))))).toBe(
       '你好'
     );
+  });
+
+  it('只把侧栏存储补丁从端口消息里拆出来', () => {
+    expect(viewStoragePatch({ type: 'enso-storage', patch: { a: '1', b: null } })).toEqual({
+      a: '1',
+      b: null,
+    });
+    expect(viewStoragePatch({ type: 'enso-storage', patch: { a: 1 } })).toBeNull();
+    expect(viewStoragePatch({ id: 1, method: 'stats', args: {} })).toBeNull();
   });
 });

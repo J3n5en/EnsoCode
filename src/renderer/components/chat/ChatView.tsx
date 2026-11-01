@@ -508,6 +508,11 @@ export function ChatView() {
                       onSelect={(presetId) =>
                         useSessionsStore.getState().setPreset(chrome.id, presetId)
                       }
+                      onModel={(model) =>
+                        useSessionsStore
+                          .getState()
+                          .setModel(chrome.id, model.providerId, model.modelId)
+                      }
                     />
                     <WorktreePicker
                       conversationId={chrome.id}

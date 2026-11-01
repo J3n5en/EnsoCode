@@ -53,6 +53,23 @@ describe('PluginToolInvoker', () => {
     await expect(b).rejects.toThrow();
     expect(invoker.pendingCount).toBe(0);
   });
+
+  it('progress 转给对应调用的 onUpdate，结束后忽略', async () => {
+    const emit = vi.fn();
+    const updates: string[] = [];
+    const invoker = new PluginToolInvoker(identity, emit, {});
+    const pending = invoker.invoke('t', {}, undefined, {
+      onUpdate: (partial) => updates.push(partial.content[0].text),
+    });
+    const requestId = emit.mock.calls[0]?.[0].requestId as string;
+    invoker.progress('missing', 'nope');
+    invoker.progress(requestId, 'halfway');
+    expect(updates).toEqual(['halfway']);
+    invoker.resolve({ requestId, ok: true, result: { content: 'done' } });
+    await pending;
+    invoker.progress(requestId, 'late');
+    expect(updates).toEqual(['halfway']);
+  });
 });
 
 describe('createPluginTools', () => {
@@ -71,7 +88,68 @@ describe('createPluginTools', () => {
       undefined,
       undefined as never
     );
-    expect(invoker.invoke).toHaveBeenCalledWith(descriptor.name, { q: 'x' }, undefined);
-    expect(result).toEqual({ content: [{ type: 'text', text: 'hi' }], details: { n: 1 } });
+    expect(invoker.invoke).toHaveBeenCalledWith(
+      descriptor.name,
+      { q: 'x' },
+      undefined,
+      expect.objectContaining({ timeoutMs: 70_000 })
+    );
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'hi' }],
+      details: { details: { n: 1 }, artifacts: [] },
+    });
+  });
+
+  it('按描述符放宽本地超时，进度转给 onUpdate，产出追加到文本', async () => {
+    const invoker = {
+      invoke: vi.fn(async () => ({
+        content: 'hi',
+        details: { n: 1 },
+        artifacts: [
+          {
+            id: 'a1',
+            pluginId: 'example.demo',
+            name: 'report.md',
+            mime: 'text/markdown',
+            size: 12,
+            createdAt: 1,
+          },
+        ],
+      })),
+    };
+    const updates: unknown[] = [];
+    const [tool] = createPluginTools([{ ...descriptor, timeoutMs: 5_000 }], invoker as never);
+    const result = await tool?.execute(
+      'call-1',
+      { q: 'x' },
+      undefined,
+      (partial) => updates.push(partial),
+      undefined as never
+    );
+    expect(invoker.invoke).toHaveBeenCalledWith(descriptor.name, { q: 'x' }, undefined, {
+      timeoutMs: 15_000,
+      onUpdate: expect.any(Function),
+    });
+    const hooks = (invoker.invoke.mock.calls[0] as unknown[] | undefined)?.[3] as
+      | { onUpdate?: (partial: unknown) => void }
+      | undefined;
+    hooks?.onUpdate?.({ content: [{ type: 'text', text: 'halfway' }], details: undefined });
+    expect(updates).toEqual([{ content: [{ type: 'text', text: 'halfway' }], details: undefined }]);
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'hi\n[产出文件] report.md（text/markdown，12）' }],
+      details: {
+        details: { n: 1 },
+        artifacts: [
+          {
+            id: 'a1',
+            pluginId: 'example.demo',
+            name: 'report.md',
+            mime: 'text/markdown',
+            size: 12,
+            createdAt: 1,
+          },
+        ],
+      },
+    });
   });
 });

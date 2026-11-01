@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
-import { createViewBridge, decodeUtf8Base64, usePluginViews } from './viewBridge';
+import { inlinePluginViewHtml } from './inlineAssets';
+import { createViewBridge, decodeUtf8Base64, usePluginViews, viewStoragePatch } from './viewBridge';
 
 const SHELL = 'plugin-view.html';
 
@@ -42,22 +43,36 @@ export function PluginView({
       return res.value;
     });
     channel.port1.onmessage = (event) => {
+      const patch = viewStoragePatch(event.data);
+      if (patch) {
+        void window.electronAPI.extensionPlugins.viewStateSet(pluginId, patch);
+        return;
+      }
       void handle(event.data).then((reply) => {
         if (reply && !disposed) channel.port1.postMessage(reply);
       });
     };
     const onLoad = async () => {
-      const res = await window.electronAPI.extensionPlugins.asset(pluginId, entry);
+      const [res, state] = await Promise.all([
+        window.electronAPI.extensionPlugins.asset(pluginId, entry),
+        window.electronAPI.extensionPlugins.viewStateGet(pluginId),
+      ]);
       if (disposed) return;
       if (!res.ok) {
         setError(res.error);
         return;
       }
+      const html = await inlinePluginViewHtml(decodeUtf8Base64(res.base64), entry, async (rel) => {
+        const asset = await window.electronAPI.extensionPlugins.asset(pluginId, rel);
+        return asset.ok ? { mime: asset.mime, base64: asset.base64 } : null;
+      });
+      if (disposed) return;
       frame.contentWindow?.postMessage(
         {
           type: 'enso-view-init',
-          html: decodeUtf8Base64(res.base64),
+          html,
           theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+          storage: state.ok ? state.state : {},
         },
         '*',
         [channel.port2]
