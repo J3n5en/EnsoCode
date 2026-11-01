@@ -96,6 +96,8 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
       return plugins.uninstall(command.id);
     case 'config-get':
       return plugins.configView(command.id);
+    case 'restage':
+      return plugins.restage(command.id);
     case 'logs':
       return { ok: true, text: plugins.logs(command.id) };
     case 'config-set':

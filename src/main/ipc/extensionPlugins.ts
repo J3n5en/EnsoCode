@@ -54,6 +54,11 @@ export function registerExtensionPluginHandlers(): void {
     return plugins().stage({ kind: 'url', url });
   });
 
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, (_e, id: unknown) => {
+    if (!isId(id)) return { ok: false, error: '参数不合法' };
+    return plugins().restage(id);
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, (_e, token: unknown) => {
     if (typeof token !== 'string') return { ok: false, error: '参数不合法' };
     return plugins().commit(token);

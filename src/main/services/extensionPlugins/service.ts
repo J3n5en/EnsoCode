@@ -105,7 +105,10 @@ export class ExtensionPluginService {
   private records: PluginRecord[];
   private readonly loaded = new Map<string, Loaded>();
   private readonly processes = new Map<string, PluginProcess>();
-  private readonly staged = new Map<string, { staged: StagedPlugin; at: number }>();
+  private readonly staged = new Map<
+    string,
+    { staged: StagedPlugin; at: number; source: PluginInstallSource }
+  >();
   private readonly crashes = new Map<string, number[]>();
   /** 进程内最近一条错误日志；崩溃停用时写进登记 */
   private readonly recentErrors = new Map<string, { at: number; message: string }>();
@@ -163,6 +166,7 @@ export class ExtensionPluginService {
             ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
             : {}),
           ...lastErrorField(record.lastError ?? this.recentErrors.get(record.id)),
+          ...(record.source ? { source: sourceView(record.source) } : {}),
         },
       ];
     });
@@ -179,7 +183,7 @@ export class ExtensionPluginService {
     const result = await stagePlugin(this.options.root, source, this.options.hostVersion);
     if (!result.ok) return result;
     const { staged } = result;
-    this.staged.set(staged.token, { staged, at: Date.now() });
+    this.staged.set(staged.token, { staged, at: Date.now(), source });
     const m = staged.manifest;
     const grant = grantOf(m);
     const existing = this.records.find((r) => r.id === m.id);
@@ -204,6 +208,18 @@ export class ExtensionPluginService {
     return { ok: true as const, preview };
   }
 
+  /** 从记录的安装来源重新暂存；之后和普通更新一样确认、按授权是否扩大分流 */
+  async restage(id: string) {
+    const source = this.records.find((r) => r.id === id)?.source;
+    if (!source) return { ok: false as const, error: '没有记录安装来源，请重新选择插件' };
+    const result = await this.stage(source);
+    if (result.ok && result.preview.id !== id) {
+      this.discard(result.preview.token);
+      return { ok: false as const, error: `来源里的插件已经不是 ${id}` };
+    }
+    return result;
+  }
+
   discard(token: string): void {
     const entry = this.staged.get(token);
     if (!entry) return;
@@ -217,6 +233,7 @@ export class ExtensionPluginService {
     if (!entry) return { ok: false, error: '安装已过期，请重新选择插件' };
     this.staged.delete(token);
     const { manifest } = entry.staged;
+    const { source } = entry;
     const dir = commitStaged(this.options.root, entry.staged);
     const trial = await this.trialLoad(manifest, dir);
     if (!trial.ok) {
@@ -237,12 +254,14 @@ export class ExtensionPluginService {
         state: 'disabled',
         grant,
         installedAt: Date.now(),
+        source,
       });
     } else {
       const stalePending = existing.pending?.dir;
       const expands = grantExpands(existing.grant, grant);
       const oldDir = existing.dir;
       this.apply(existing.id, { type: 'update', version: manifest.version, dir, grant, expands });
+      this.setSource(existing.id, source);
       if (stalePending) removePackage(this.options.root, existing.id, stalePending);
       if (!expands) {
         this.stopProcess(existing.id);
@@ -748,6 +767,12 @@ export class ExtensionPluginService {
     return join(this.options.root, 'config', `${id}.json`);
   }
 
+  private setSource(id: string, source: PluginInstallSource): void {
+    const index = this.records.findIndex((r) => r.id === id);
+    const record = this.records[index];
+    if (record) this.records[index] = { ...record, source };
+  }
+
   private logPath(id: string): string {
     return join(this.options.root, 'logs', `${id}.log`);
   }
@@ -817,6 +842,10 @@ export class ExtensionPluginService {
     }
   }
 }
+
+/** 本地路径不下发给界面，只给类型；链接本来就是用户填的，可以显示 */
+const sourceView = (source: PluginInstallSource): ExtensionPluginSummary['source'] =>
+  source.kind === 'url' ? { kind: 'url', url: source.url } : { kind: source.kind };
 
 const lastErrorField = (lastError: { at: number; message: string } | undefined) =>
   lastError ? { lastError: { at: lastError.at, message: lastError.message } } : {};

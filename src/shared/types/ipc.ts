@@ -515,6 +515,8 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_PICK_AND_STAGE: 'extension-plugins:pick-and-stage',
   /** 从 http(s) zip 链接暂存；渲染层只传链接，远端不可调 */
   EXTENSION_PLUGINS_STAGE_URL: 'extension-plugins:stage-url',
+  /** 从已记录的安装来源重新暂存（更新 / 开发时重新加载），渲染层只传插件 id */
+  EXTENSION_PLUGINS_RESTAGE: 'extension-plugins:restage',
   /** 运行期：界面发起的插件调用（命令、挂件、侧栏页面、补全），算用户手势 */
   EXTENSION_PLUGINS_CALL: 'extension-plugins:call',
   /** 运行期：按插件 id + 相对路径取渲染资源，渲染层不传磁盘路径 */

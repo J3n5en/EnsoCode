@@ -12,6 +12,7 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   install <目录|zip|url> [--yes] 安装或更新。url 可以是 zip，或 GitHub 仓库。先展示权限，确认后落盘（新装默认停用）
   enable <id> / disable <id>   启用 / 停用
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
+  reload <id> [--yes]          从上次安装的来源（目录、zip 或链接）重新安装；开发时改完代码用它更新
   uninstall <id>               卸载并删除插件数据
   logs <id>                    插件进程日志末尾（console 输出与异常）
   config <id>                  查看配置项（密钥只显示是否已设置）
@@ -124,10 +125,13 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
     await runConfig(target, flags, deps);
     return;
   }
-  if (action === 'install' && target) {
-    const stage = /^https?:\/\//i.test(target)
-      ? { cmd: 'plugin' as const, action: 'stage' as const, url: target }
-      : { cmd: 'plugin' as const, action: 'stage' as const, path: resolve(deps.cwd, target) };
+  if ((action === 'install' || action === 'reload') && target) {
+    const stage: PluginControlCommand =
+      action === 'reload'
+        ? { cmd: 'plugin', action: 'restage', id: target }
+        : /^https?:\/\//i.test(target)
+          ? { cmd: 'plugin', action: 'stage', url: target }
+          : { cmd: 'plugin', action: 'stage', path: resolve(deps.cwd, target) };
     const reply = ensureOk(await deps.call(stage));
     const preview = reply.preview as ExtensionPluginInstallPreview;
     deps.log(formatInstallPreview(preview));

@@ -7,9 +7,10 @@
 ## 安装与管理
 
 - 桌面：设置 → 插件 → Enso plugins → 安装目录。
-- 桌面也可以粘贴链接安装：http(s) 的 zip，或 GitHub 仓库（`https://github.com/owner/repo`；仓库里的子目录用 `.../tree/分支/子目录`）。本机下载 zip 后复制进数据目录，不保留原地址。私有仓库不支持。
+- 桌面也可以粘贴链接安装：http(s) 的 zip，或 GitHub 仓库（`https://github.com/owner/repo`；仓库里的子目录用 `.../tree/分支/子目录`）。本机下载 zip 后复制进数据目录。私有仓库不支持。
 - 服务端：`enso-server plugin install <目录、zip 或 http(s) 链接>`，确认后 `enso-server plugin enable <id>`。
 - 新装的插件默认停用，需要手动启用。
+- Enso 记住每个插件最近一次的安装来源（目录、zip 路径或链接）。设置页插件行的「从来源重新安装」或 `enso-server plugin reload <id>` 会重新读取来源，走和更新一样的确认流程。链接安装的插件用它拉取新版；开发插件时从源目录安装，改完代码用它重新加载。
 - 同 id 再装一次按更新处理。权限没有变大就直接换新版；权限变大则旧版继续运行，需要 `enso-server plugin approve <id>`（或设置页同意）才切到新版，`reject` 则留在旧版。
 - 10 分钟内非预期崩溃 3 次，插件会被自动停用，状态变成 `crashed`，重新启用即可。停用原因会显示在设置页和 `enso-server plugin list` 里。
 - 日志：`main.mjs` 里的 `console.*` 输出、处理器抛出的异常和进程意外退出都会记下来，在设置页插件行的日志按钮或 `enso-server plugin logs <id>` 里看。单个日志文件超过 1MB 轮转一次，卸载时删除。

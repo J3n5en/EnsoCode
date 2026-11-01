@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { PLUGIN_STATES, type PluginRecord } from './lifecycle';
 
 export interface RegistryFile {
@@ -72,17 +72,25 @@ export function readRegistry(root: string): RegistryFile {
   for (const item of list) {
     if (!isPluginRecord(item) || seen.has(item.id)) continue;
     seen.add(item.id);
-    if (isLastError(item.lastError)) plugins.push(item);
-    else {
-      const { lastError: _bad, ...rest } = item;
-      plugins.push(rest);
-    }
+    const { lastError, source, ...rest } = item;
+    plugins.push({
+      ...rest,
+      ...(lastError && isLastError(lastError) ? { lastError } : {}),
+      ...(isSource(source) ? { source } : {}),
+    });
   }
   return { version: 1, plugins };
 }
 
 const isLastError = (v: unknown) =>
   v === undefined || (isRecord(v) && typeof v.at === 'number' && typeof v.message === 'string');
+
+/** 只认绝对路径与 http(s) 链接；其它一律当作没有记录来源 */
+function isSource(v: unknown): v is NonNullable<PluginRecord['source']> {
+  if (!isRecord(v)) return false;
+  if (v.kind === 'dir' || v.kind === 'zip') return typeof v.path === 'string' && isAbsolute(v.path);
+  return v.kind === 'url' && typeof v.url === 'string' && /^https?:\/\//i.test(v.url);
+}
 
 export function writeRegistry(root: string, file: RegistryFile): void {
   mkdirSync(root, { recursive: true });

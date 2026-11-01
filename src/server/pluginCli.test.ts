@@ -26,7 +26,7 @@ const preview: ExtensionPluginInstallPreview = {
 function deps(answer = true) {
   const out: string[] = [];
   const call = vi.fn(async (command: Record<string, unknown>) => {
-    if (command.action === 'stage') return { ok: true, preview };
+    if (command.action === 'stage' || command.action === 'restage') return { ok: true, preview };
     if (command.action === 'list') return { ok: true, plugins: [] };
     if (command.action === 'logs') return { ok: true, text: 'line-a\nline-b\n' };
     if (command.action === 'config-get')
@@ -61,6 +61,13 @@ function deps(answer = true) {
 }
 
 describe('enso-server plugin', () => {
+  it('reload：从记录的来源重新暂存，确认后提交', async () => {
+    const { call, deps: d } = deps(true);
+    await runPluginCommand(['reload', 'demo.hello'], d);
+    expect(call).toHaveBeenNthCalledWith(1, { cmd: 'plugin', action: 'restage', id: 'demo.hello' });
+    expect(call).toHaveBeenNthCalledWith(2, { cmd: 'plugin', action: 'commit', token: 't1' });
+  });
+
   it('logs：打印插件日志末尾', async () => {
     const { call, out, deps: d } = deps();
     await runPluginCommand(['logs', 'demo.hello'], d);

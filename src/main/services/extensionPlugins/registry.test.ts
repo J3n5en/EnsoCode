@@ -75,6 +75,31 @@ describe('插件登记表', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('安装来源不合法时丢掉该字段', () => {
+    const root = tempRoot();
+    const sources = [
+      { kind: 'dir', path: '/srv/p' },
+      { kind: 'url', url: 'https://github.com/a/b' },
+      { kind: 'dir', path: 'relative' },
+      { kind: 'url', url: 'file:///etc/passwd' },
+      { kind: 'exe', path: '/x' },
+    ];
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: sources.map((source, i) => ({ ...valid, id: `a.p${i}`, source })),
+      })
+    );
+    expect(readRegistry(root).plugins.map((p) => p.source)).toEqual([
+      sources[0],
+      sources[1],
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('同 id 重复时只保留第一条', () => {
     const root = tempRoot();
     writeFileSync(

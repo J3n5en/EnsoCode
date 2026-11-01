@@ -4,7 +4,15 @@ import type {
   ExtensionPluginSummary,
 } from '@shared/extensionPlugins/types';
 import type { InstalledPluginInfo, PluginComponentSummary, PluginEntry } from '@shared/types';
-import { ChevronRight, FileText, Puzzle, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import {
+  ChevronRight,
+  FileText,
+  Puzzle,
+  RefreshCw,
+  RotateCw,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -171,6 +179,18 @@ function ExtensionPluginsSection() {
     else setPreview(result.preview);
   };
 
+  const restage = async (id: string) => {
+    setError(null);
+    if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
+    setPreview(null);
+    setDownloading(true);
+    const result = await window.electronAPI.extensionPlugins.restage(id).finally(() => {
+      setDownloading(false);
+    });
+    if (!result.ok) setError(result.error);
+    else setPreview(result.preview);
+  };
+
   const commit = async () => {
     if (!preview) return;
     setBusy(true);
@@ -323,6 +343,22 @@ function ExtensionPluginsSection() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {plugin.source && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  disabled={busy || downloading}
+                  aria-label={t('Reinstall from source')}
+                  title={
+                    plugin.source.kind === 'url'
+                      ? `${t('Reinstall from source')}: ${plugin.source.url}`
+                      : t('Reinstall from source')
+                  }
+                  onClick={() => void restage(plugin.id)}
+                >
+                  <RotateCw className="size-4" />
+                </Button>
+              )}
               <Button
                 size="icon"
                 variant="ghost"

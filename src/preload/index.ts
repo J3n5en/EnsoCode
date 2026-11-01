@@ -1626,6 +1626,11 @@ const electronAPI = {
     ): Promise<
       { ok: true; preview: ExtensionPluginInstallPreview } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL, url),
+    restage: (
+      id: string
+    ): Promise<
+      { ok: true; preview: ExtensionPluginInstallPreview } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, id),
     commit: (token: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, token),
     discard: (token: string): Promise<{ ok: boolean }> =>

@@ -193,6 +193,55 @@ describe('ExtensionPluginService', () => {
     expect(service.toolsForSpawn()).toEqual([]);
   });
 
+  describe('从来源重新安装', () => {
+    it('记住安装来源；源目录改动后重新暂存得到新版本，确认后替换', async () => {
+      const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const first = await service.stage({ kind: 'dir', path: src });
+      if (!first.ok) throw new Error(first.error);
+      await service.commit(first.preview.token);
+      expect(service.list()[0]?.source).toEqual({ kind: 'dir' });
+      expect(readRegistry(root).plugins[0]?.source).toEqual({ kind: 'dir', path: src });
+      writeFileSync(join(src, 'enso-plugin.json'), manifest({ version: '1.1.0' }));
+      const again = await service.restage('example.demo');
+      if (!again.ok) throw new Error(again.error);
+      expect(again.preview).toMatchObject({
+        version: '1.1.0',
+        existingVersion: '1.0.0',
+        expands: false,
+      });
+      await service.commit(again.preview.token);
+      expect(service.list()[0]?.version).toBe('1.1.0');
+      expect(readRegistry(root).plugins[0]?.source).toEqual({ kind: 'dir', path: src });
+    });
+
+    it('链接安装的来源在列表里带链接；没有记录来源时拒绝', async () => {
+      expect((await service.restage('example.demo')).ok).toBe(false);
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const registry = readRegistry(root);
+      const record = registry.plugins[0];
+      if (!record) throw new Error('no record');
+      const { source: _source, ...legacy } = record;
+      writeFileSync(join(root, 'registry.json'), JSON.stringify({ version: 1, plugins: [legacy] }));
+      const reloaded = new ExtensionPluginService({
+        root,
+        hostVersion: '0.2.12',
+        hostPath: '/unused',
+        env: {},
+        fork: () => new InProcessChild() as never,
+        gate: {
+          fetch: vi.fn(),
+          notify: () => true,
+          composer: async () => null,
+          mcpTools: async () => [],
+          mcpCall: async () => ({ content: '', isError: false }),
+          now: () => Date.now(),
+        },
+      });
+      expect(reloaded.list()[0]?.source).toBeUndefined();
+      expect(await reloaded.restage('example.demo')).toMatchObject({ ok: false });
+    });
+  });
+
   describe('日志与最近错误', () => {
     const noisy = `export function activate(enso) {
       enso.commands.register('bad', async () => { throw new Error('kaput'); });

@@ -1,4 +1,5 @@
 import type { PluginGrant } from '@shared/extensionPlugins/grant';
+import type { PluginInstallSource } from './install';
 
 export const PLUGIN_STATES = ['disabled', 'enabled', 'crashed'] as const;
 export type PluginState = (typeof PLUGIN_STATES)[number];
@@ -15,6 +16,8 @@ export interface PluginRecord {
   pending?: { version: string; dir: string; grant: PluginGrant };
   /** 最近一次崩溃停用的原因；重新启用时清掉 */
   lastError?: { at: number; message: string };
+  /** 最近一次安装的来源，用于重新安装；只在 Main 里用，路径不下发给界面 */
+  source?: PluginInstallSource;
 }
 
 export type PluginAction =

@@ -24,6 +24,8 @@ export interface ExtensionPluginSummary {
   pendingPermissions?: ExtensionPluginPermission[];
   /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */
   lastError?: { at: number; message: string };
+  /** 安装来源；有就能「从来源重新安装」。本地路径不下发 */
+  source?: { kind: 'dir' | 'zip' } | { kind: 'url'; url: string };
 }
 
 /** 设置界面看到的配置项：密钥只报告是否已设置，不回显 */
