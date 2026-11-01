@@ -28,9 +28,17 @@ const ENV_ALLOWLIST = [
   'APPDATA',
   'LOCALAPPDATA',
   'USERPROFILE',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
 ];
 
-/** 插件进程不继承 Main 的环境变量，只给运行 Node 必需的几项 */
+/** 插件进程不继承 Main 的环境变量，只给运行 Node 必需的几项和代理设置 */
 export function pluginHostEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ENV_ALLOWLIST) if (source[key] !== undefined) env[key] = source[key];

@@ -139,7 +139,7 @@ export async function activate(enso) {
 
 每次 `register` 都返回一个取消函数。`ctx` 含 `sessionId`（可能为 `null`）、`projectRoot`（当前会话的本机项目绝对路径，没有本机项目时为 `null`）、`invocationId` 和 `signal`（调用被取消或超时时 abort）。
 
-插件进程不继承 Enso 的环境变量。上面这些宿主接口每次调用都回到主进程校验，校验失败抛带 `code` 的错误，见文末错误码。
+插件进程不继承 Enso 的环境变量，只保留 `PATH`、`HOME` 等运行必需项和 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`（含小写写法）。上面这些宿主接口每次调用都回到主进程校验，校验失败抛带 `code` 的错误，见文末错误码。
 
 ### 工具返回值
 
