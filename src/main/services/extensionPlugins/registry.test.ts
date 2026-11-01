@@ -43,9 +43,9 @@ describe('插件登记表', () => {
 
   it('写入后读回', () => {
     const root = tempRoot();
-    writeRegistry(root, { version: 1, plugins: [valid as never] });
-    expect(readRegistry(root).plugins).toEqual([valid]);
-    expect(JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8')).version).toBe(1);
+    writeRegistry(root, { version: 2, plugins: [valid as never] });
+    expect(readRegistry(root)).toEqual({ version: 2, plugins: [valid], discarded: [] });
+    expect(JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8')).version).toBe(2);
   });
 
   it('损坏的文件按空处理，不抛错', () => {
@@ -65,9 +65,24 @@ describe('插件登记表', () => {
     ];
     writeFileSync(
       join(root, 'registry.json'),
-      JSON.stringify({ version: 1, plugins: [valid, ...bad] })
+      JSON.stringify({ version: 2, plugins: [valid, ...bad] })
     );
-    expect(readRegistry(root).plugins.map((p) => p.id)).toEqual(['example.demo']);
+    const read = readRegistry(root);
+    expect(read.plugins.map((p) => p.id)).toEqual(['example.demo']);
+    expect(read.discarded).toEqual(['a.b', 'a.c', 'a.d', 'a.e']);
+  });
+
+  it('旧版本登记表整份丢弃，并列出被丢弃的插件 id', () => {
+    const root = tempRoot();
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({ version: 1, plugins: [valid, { id: 'x.y' }, { nope: 1 }] })
+    );
+    expect(readRegistry(root)).toEqual({
+      version: 2,
+      plugins: [],
+      discarded: ['example.demo', 'x.y'],
+    });
   });
 
   it('lastError 不合法时丢掉该字段，记录保留', () => {
@@ -75,7 +90,7 @@ describe('插件登记表', () => {
     writeFileSync(
       join(root, 'registry.json'),
       JSON.stringify({
-        version: 1,
+        version: 2,
         plugins: [
           { ...valid, lastError: { at: 1, message: 'boom' } },
           { ...valid, id: 'a.c', lastError: { at: 'x', message: 1 } },
@@ -101,7 +116,7 @@ describe('插件登记表', () => {
     writeFileSync(
       join(root, 'registry.json'),
       JSON.stringify({
-        version: 1,
+        version: 2,
         plugins: sources.map((source, i) => ({ ...valid, id: `a.p${i}`, source })),
       })
     );
@@ -118,7 +133,7 @@ describe('插件登记表', () => {
     const root = tempRoot();
     writeFileSync(
       join(root, 'registry.json'),
-      JSON.stringify({ version: 1, plugins: [valid, { ...valid, dir: 'x' }] })
+      JSON.stringify({ version: 2, plugins: [valid, { ...valid, dir: 'x' }] })
     );
     expect(readRegistry(root).plugins).toHaveLength(1);
   });

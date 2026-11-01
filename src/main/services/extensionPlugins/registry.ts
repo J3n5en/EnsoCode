@@ -2,8 +2,11 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { PLUGIN_STATES, type PluginRecord } from './lifecycle';
 
+/** 插件系统上线前不做兼容：版本不符或字段不全的记录直接丢弃 */
+export const REGISTRY_VERSION = 2;
+
 export interface RegistryFile {
-  version: 1;
+  version: typeof REGISTRY_VERSION;
   plugins: PluginRecord[];
 }
 
@@ -64,18 +67,26 @@ function isPluginRecord(v: unknown): v is PluginRecord {
 }
 
 /** Main 私有文件，不放进 settings.json：远端渲染进程能写设置，不能让它自己给插件授权 */
-export function readRegistry(root: string): RegistryFile {
+/** discarded：被丢弃且能读出合法 id 的记录，供日志与界面提示 */
+export function readRegistry(root: string): RegistryFile & { discarded: string[] } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(join(root, 'registry.json'), 'utf8'));
   } catch {
-    return { version: 1, plugins: [] };
+    return { version: REGISTRY_VERSION, plugins: [], discarded: [] };
   }
   const list = isRecord(parsed) && Array.isArray(parsed.plugins) ? parsed.plugins : [];
+  const current = isRecord(parsed) && parsed.version === REGISTRY_VERSION;
   const seen = new Set<string>();
   const plugins: PluginRecord[] = [];
+  const discarded: string[] = [];
   for (const item of list) {
-    if (!isPluginRecord(item) || seen.has(item.id)) continue;
+    if (!current || !isPluginRecord(item)) {
+      if (isRecord(item) && typeof item.id === 'string' && ID.test(item.id))
+        discarded.push(item.id);
+      continue;
+    }
+    if (seen.has(item.id)) continue;
     seen.add(item.id);
     const { lastError, source, ...rest } = item;
     plugins.push({
@@ -84,7 +95,7 @@ export function readRegistry(root: string): RegistryFile {
       ...(isSource(source) ? { source } : {}),
     });
   }
-  return { version: 1, plugins };
+  return { version: REGISTRY_VERSION, plugins, discarded };
 }
 
 const isLastError = (v: unknown) =>

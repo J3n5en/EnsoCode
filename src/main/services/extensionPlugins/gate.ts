@@ -309,7 +309,6 @@ export class PluginHostGate {
         if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
         if (sessionId !== inv.sessionId && !this.deps.crossSessionInject?.(pluginId))
           throw pluginError('PERMISSION_DENIED', '未允许向其他会话发送消息');
-        this.admitInject(pluginId);
         if (
           typeof a.text !== 'string' ||
           a.text.length === 0 ||
@@ -323,6 +322,7 @@ export class PluginHostGate {
           throw pluginError('INVALID_ARGS', 'triggerTurn 不合法');
         const bridge = this.deps.inject;
         if (!bridge) throw pluginError('UNSUPPORTED', '当前环境不能注入消息');
+        this.admitInject(pluginId);
         const result = bridge(pluginId, {
           sessionId,
           text: a.text,

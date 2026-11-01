@@ -1609,6 +1609,8 @@ const electronAPI = {
   extensionPlugins: {
     list: (): Promise<ExtensionPluginSummary[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_LIST),
+    discarded: (): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_DISCARDED),
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.EXTENSION_PLUGINS_CHANGED, listener);

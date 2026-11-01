@@ -123,6 +123,9 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
   if (action === 'list') {
     const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'list' }));
     deps.log(formatPluginList((reply.plugins as ExtensionPluginSummary[]) ?? []));
+    const discarded = Array.isArray(reply.discarded) ? (reply.discarded as string[]) : [];
+    if (discarded.length > 0)
+      deps.log(`⚠ 以下插件的登记记录格式已变更，已丢弃并清理，请重新安装：${discarded.join(', ')}`);
     return;
   }
   if (action === 'check') {

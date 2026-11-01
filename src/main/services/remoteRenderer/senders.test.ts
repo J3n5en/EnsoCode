@@ -219,6 +219,32 @@ describe('RemoteSender snapshot trimming', () => {
     expect(session?.messages[0]?.content.startsWith('m40 ')).toBe(true);
   });
 
+  it('keeps plugin-injected custom messages and their source in the tail and message upserts', () => {
+    const { sender, first } = setup();
+    const injected = {
+      role: 'custom',
+      content: [{ type: 'text', text: 'hello there' }],
+      pluginSource: { pluginId: 'test.notify', pluginName: 'Notifier' },
+    };
+    const base = snapshot(SNAPSHOT_TAIL_MESSAGES + 3);
+    base.sessions[0]?.messages.push(injected as never);
+    sender.send('agent:event', base);
+    const [event] = delivered(first);
+    expect(event?.sessions[0]?.messages.at(-1)).toEqual(injected);
+    sender.send('agent:event', {
+      type: 'message-upsert',
+      identity: { sessionId: 's1' },
+      seq: 9,
+      index: 5,
+      message: injected,
+    });
+    sender.send('agent:event', { type: 'status', identity: { sessionId: 's1' }, seq: 10 });
+    const upsert = decodeRemoteValue<[{ message: unknown }]>(
+      (first.at(-2) as { args: unknown }).args
+    )[0];
+    expect(upsert?.message).toEqual(injected);
+  });
+
   it('skips the deferred full resume snapshot when its tail matches the one just sent', () => {
     const { sender, first } = setup();
     const full = snapshot(SNAPSHOT_TAIL_MESSAGES + 40, { resumeFull: true });

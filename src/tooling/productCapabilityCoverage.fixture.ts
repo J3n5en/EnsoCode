@@ -880,6 +880,7 @@ export const IPC_PRODUCT_COVERAGE = {
   COMPUTER_ALLOWED_APPS: surfaces('coding-tools.computer'),
   COMPUTER_REVOKE_APP: surfaces('coding-tools.computer'),
   EXTENSION_PLUGINS_LIST: excluded('Enso 插件管理页：列出已安装插件。'),
+  EXTENSION_PLUGINS_DISCARDED: excluded('Enso 插件管理页：启动时因格式变更丢弃的登记记录。'),
   EXTENSION_PLUGINS_CHANGED: excluded('Enso 插件登记变更的跨窗口通知。'),
   EXTENSION_PLUGINS_COMMIT: excluded('Enso 插件安装确认：用户同意权限后落盘。'),
   EXTENSION_PLUGINS_DISCARD: excluded('Enso 插件安装取消：丢弃暂存。'),

@@ -621,3 +621,44 @@ describe('uiCallTimeout', () => {
     expect(uiCallTimeout(parsed, 'command.run', { id: 'x' })).toBe(60_000);
   });
 });
+
+describe('丢弃的登记记录', () => {
+  it('启动时记日志、对外报告，并清理没有登记的包与数据目录', () => {
+    const root = temp('plugins-root-');
+    for (const sub of [
+      'packages/old.one/abc',
+      'data/old.one',
+      'packages/keep.me/d1',
+      'data/keep.me',
+    ])
+      mkdirSync(join(root, sub), { recursive: true });
+    mkdirSync(join(root, 'config'), { recursive: true });
+    writeFileSync(join(root, 'config', 'old.one.json'), '{}');
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({ version: 1, plugins: [{ id: 'old.one', dir: 'abc' }] })
+    );
+    const service = new ExtensionPluginService({
+      root,
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: (() => new InProcessChild()) as never,
+      gate: {
+        fetch: vi.fn(),
+        notify: () => true,
+        composer: async () => null,
+        mcpTools: async () => [],
+        mcpCall: async () => ({ content: '', isError: false }),
+        now: () => Date.now(),
+      },
+    });
+    expect(service.discardedRecords()).toEqual(['old.one']);
+    expect(existsSync(join(root, 'packages', 'old.one'))).toBe(false);
+    expect(existsSync(join(root, 'data', 'old.one'))).toBe(false);
+    expect(existsSync(join(root, 'config', 'old.one.json'))).toBe(false);
+    expect(existsSync(join(root, 'packages', 'keep.me'))).toBe(false);
+    expect(service.logs('extension-plugins')).toContain('old.one');
+    expect(readRegistry(root)).toMatchObject({ version: 2, plugins: [], discarded: [] });
+  });
+});

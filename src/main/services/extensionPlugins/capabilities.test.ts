@@ -340,6 +340,42 @@ describe('插件能力', () => {
     }
   });
 
+  it('停用再启用或更新版本后熔断立即解除，不必等到期', async () => {
+    const { service } = createService();
+    const guard = (version: string, body: string) => ({
+      'enso-plugin.json': manifest({
+        id: 'c.guard',
+        name: 'Guard',
+        version,
+        permissions: ['agent.intercept'],
+        contributes: { events: [{ event: 'tool_call', mode: 'intercept', failClosed: true }] },
+      }),
+      'main.mjs': `export function activate(enso) { enso.events.on('tool_call', ${body}); }`,
+    });
+    await install(service, guard('1.0.0', `() => { throw new Error('down'); }`));
+    service.setEnabled('c.guard', true);
+    const ask = () =>
+      service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: { toolCallId: '1', toolName: 'bash', input: {} },
+      });
+    const trip = async () => {
+      for (let i = 0; i < 3; i++) await ask();
+      expect(service.list()[0]?.interceptBreakers).toHaveLength(1);
+    };
+    await trip();
+    service.setEnabled('c.guard', false);
+    service.setEnabled('c.guard', true);
+    expect(service.list()[0]?.interceptBreakers).toBeUndefined();
+    expect(await ask()).toMatchObject({ block: true });
+    await trip();
+    await install(service, guard('1.0.1', `() => ({ block: true, reason: 'fixed' })`));
+    expect(service.list()[0]?.interceptBreakers).toBeUndefined();
+    expect(await ask()).toEqual({ block: true, reason: 'fixed' });
+  });
+
   it('熔断到期后试探仍失败则立即重新熔断', async () => {
     let now = 1_000_000;
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);

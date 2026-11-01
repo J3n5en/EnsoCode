@@ -32,7 +32,7 @@ function deps(answer = true) {
   const out: string[] = [];
   const call = vi.fn(async (command: Record<string, unknown>) => {
     if (command.action === 'stage' || command.action === 'restage') return { ok: true, preview };
-    if (command.action === 'list') return { ok: true, plugins: [] };
+    if (command.action === 'list') return { ok: true, plugins: [], discarded: ['old.one'] };
     if (command.action === 'check')
       return {
         ok: true,
@@ -128,6 +128,13 @@ describe('enso-server plugin', () => {
     expect(text).toContain('常驻：是');
     expect(text).toContain('session_start');
     expect(text).toContain('sweep');
+  });
+
+  it('list 提示启动时丢弃的旧登记记录', async () => {
+    const { out, deps: d } = deps();
+    await runPluginCommand(['list'], d);
+    expect(out.join('\n')).toContain('old.one');
+    expect(out.join('\n')).toContain('重新安装');
   });
 
   it('列表为空时给出提示', () => {

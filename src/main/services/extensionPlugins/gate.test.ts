@@ -373,6 +373,29 @@ describe('PluginHostGate', () => {
     expect(deps.openExternal).not.toHaveBeenCalled();
   });
 
+  it('注入参数不合法或目标未授权时不消耗频率配额', async () => {
+    const inject = vi.fn(() => ({ ok: true as const }));
+    deps.inject = inject;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    for (let i = 0; i < 6; i++) {
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'x'.repeat(40_000) }, agentCall())
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 'other' }, agentCall())
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    }
+    for (let i = 0; i < 5; i++)
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+      ).resolves.toBeNull();
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(inject).toHaveBeenCalledTimes(5);
+  });
+
   it('net.fetch 随调用取消中止', async () => {
     let seen: AbortSignal | undefined;
     deps.fetch = vi.fn(async (_url: string, init?: RequestInit) => {

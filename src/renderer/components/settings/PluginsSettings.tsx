@@ -346,6 +346,7 @@ function ExtensionPluginsSection() {
   const [downloading, setDownloading] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
   const [checkResult, setCheckResult] = React.useState<string | null>(null);
+  const [discarded, setDiscarded] = React.useState<string[]>([]);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -357,6 +358,10 @@ function ExtensionPluginsSection() {
 
   React.useEffect(() => {
     void refresh();
+    void window.electronAPI.extensionPlugins
+      .discarded()
+      .then(setDiscarded)
+      .catch(() => setDiscarded([]));
     return window.electronAPI.extensionPlugins.onChanged(() => void refresh());
   }, [refresh]);
 
@@ -489,6 +494,12 @@ function ExtensionPluginsSection() {
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
+      {discarded.length > 0 && (
+        <p className="text-amber-600 text-sm dark:text-amber-400">
+          检测到旧格式的登记记录，已丢弃并清理，请重新安装：
+          <span className="font-mono">{discarded.join(', ')}</span>
+        </p>
+      )}
       {preview && (
         <div className="space-y-2 rounded-md border border-border p-3">
           <p className="font-medium text-sm">

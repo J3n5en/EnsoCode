@@ -3,6 +3,7 @@ import {
   closeSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   realpathSync,
@@ -69,7 +70,7 @@ import {
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
-import { readRegistry, writeRegistry } from './registry';
+import { REGISTRY_VERSION, readRegistry, writeRegistry } from './registry';
 import { ViewStateStore } from './viewState';
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: 清单里的占位符字面量
@@ -82,6 +83,7 @@ const UI_TIMEOUT_MS = 2_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const SCHEDULE_TIMEOUT_MS = 60_000;
 const PREPARE_TIMEOUT_MS = 5_000;
+const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 const INTERCEPT_BREAKER_FAILURES = 3;
 const INTERCEPT_BREAKER_MS = 30_000;
 
@@ -171,6 +173,7 @@ const within = (parent: string, child: string) => {
 export class ExtensionPluginService {
   readonly gate: PluginHostGate;
   private records: PluginRecord[];
+  private readonly discarded: string[];
   private readonly loaded = new Map<string, Loaded>();
   private readonly processes = new Map<string, PluginProcess>();
   private readonly staged = new Map<
@@ -214,7 +217,9 @@ export class ExtensionPluginService {
   constructor(private readonly options: ExtensionPluginServiceOptions) {
     this.artifacts = new ArtifactStore(options.root);
     this.viewState = new ViewStateStore(options.root);
-    this.records = readRegistry(options.root).plugins;
+    const registry = readRegistry(options.root);
+    this.records = registry.plugins;
+    this.discarded = registry.discarded;
     this.gate = new PluginHostGate({
       ...options.gate,
       manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
@@ -239,6 +244,7 @@ export class ExtensionPluginService {
           composer: true,
         },
     });
+    this.sweepOrphans();
   }
 
   onChange(listener: () => void): () => void {
@@ -473,17 +479,50 @@ export class ExtensionPluginService {
     this.records = this.records.filter((r) => r.id !== id);
     this.persist();
     this.stopProcess(id);
-    rmSync(join(this.options.root, 'packages', id), { recursive: true, force: true });
-    rmSync(pluginDataPath(this.options.root, id), { recursive: true, force: true });
-    rmSync(this.configPath(id), { force: true });
+    this.removeLocalFiles(id);
     rmSync(this.logPath(id), { force: true });
     rmSync(`${this.logPath(id)}.1`, { force: true });
     this.recentErrors.delete(id);
     for (const key of this.loaded.keys()) if (key.startsWith(`${id}/`)) this.loaded.delete(key);
-    this.artifacts.removePlugin(id);
-    this.viewState.remove(id);
     this.syncBackground();
     return { ok: true };
+  }
+
+  /** 启动时因格式过旧或字段不全被丢弃的登记记录；界面据此提示重新安装 */
+  discardedRecords(): string[] {
+    return [...this.discarded];
+  }
+
+  /** 插件包、数据、配置、产出与页面状态；日志由调用方决定是否保留 */
+  private removeLocalFiles(id: string): void {
+    rmSync(join(this.options.root, 'packages', id), { recursive: true, force: true });
+    rmSync(pluginDataPath(this.options.root, id), { recursive: true, force: true });
+    rmSync(this.configPath(id), { force: true });
+    this.artifacts.removePlugin(id);
+    this.viewState.remove(id);
+  }
+
+  /** 丢弃的记录和没有登记的包都会在重装时撞上旧目录，启动时一并清掉 */
+  private sweepOrphans(): void {
+    if (this.discarded.length > 0) {
+      this.appendLog(
+        'extension-plugins',
+        'warn',
+        `登记记录格式已变更，已丢弃并清理：${this.discarded.join(', ')}；请重新安装`
+      );
+      this.persist();
+    }
+    const known = new Set(this.records.map((record) => record.id));
+    let names: string[];
+    try {
+      names = readdirSync(join(this.options.root, 'packages'));
+    } catch {
+      names = [];
+    }
+    for (const id of new Set([...this.discarded, ...names])) {
+      if (known.has(id) || !PLUGIN_ID_PATTERN.test(id)) continue;
+      this.removeLocalFiles(id);
+    }
   }
 
   /** 已保存的配置值（含密钥），不含缺省 */
@@ -921,6 +960,15 @@ export class ExtensionPluginService {
     this.touch();
   }
 
+  /** 停用、卸载、更新后重新计数；修好发版后不必等熔断到期 */
+  private clearInterceptBreakers(pluginId: string): void {
+    const prefix = `${pluginId}:`;
+    let cleared = false;
+    for (const key of [...this.interceptFailures.keys()])
+      if (key.startsWith(prefix)) cleared = this.interceptFailures.delete(key) || cleared;
+    if (cleared) this.touch();
+  }
+
   private openInterceptBreakers(pluginId: string): { event: string; until: number }[] {
     const now = Date.now();
     const prefix = `${pluginId}:`;
@@ -1313,6 +1361,7 @@ export class ExtensionPluginService {
   }
 
   private stopProcess(id: string): void {
+    this.clearInterceptBreakers(id);
     this.cancelRestart(id);
     this.gate.invocations.cancelPlugin(id);
     this.processes.get(id)?.stop();
@@ -1600,7 +1649,7 @@ export class ExtensionPluginService {
   }
 
   private persist(): void {
-    writeRegistry(this.options.root, { version: 1, plugins: this.records });
+    writeRegistry(this.options.root, { version: REGISTRY_VERSION, plugins: this.records });
     for (const listener of this.listeners) listener();
   }
 
