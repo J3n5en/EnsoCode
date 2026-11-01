@@ -242,6 +242,116 @@ describe('ExtensionPluginService', () => {
     });
   });
 
+  describe('检查更新', () => {
+    const repo = 'https://github.com/acme/demo/tree/main/hello';
+    const probe = 'https://raw.githubusercontent.com/acme/demo/main/hello/enso-plugin.json';
+
+    /** 把已装插件的来源改成 GitHub 链接，用给定的 fetch 重开服务 */
+    function reopenWithRepo(fetch: (url: string) => Promise<Response>) {
+      const registry = readRegistry(root);
+      registry.plugins = registry.plugins.map((p) => ({
+        ...p,
+        source: { kind: 'url', url: repo },
+      }));
+      writeFileSync(join(root, 'registry.json'), JSON.stringify(registry));
+      return new ExtensionPluginService({
+        root,
+        hostVersion: '0.2.12',
+        hostPath: '/unused',
+        env: {},
+        fork: () => new InProcessChild() as never,
+        gate: {
+          fetch: vi.fn(fetch),
+          notify: () => true,
+          composer: async () => null,
+          mcpTools: async () => [],
+          mcpCall: async () => ({ content: '', isError: false }),
+          now: () => Date.now(),
+        },
+      });
+    }
+
+    it('GitHub 来源只拉清单；远端版本更高才提示可更新，并通知界面刷新', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const fetch = vi.fn(async () => new Response(manifest({ version: '1.2.0' })));
+      const svc = reopenWithRepo(fetch);
+      const changed = vi.fn();
+      svc.onChange(changed);
+      expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 1, failed: 0 });
+      expect(fetch).toHaveBeenCalledWith(probe, expect.anything());
+      expect(svc.list()[0]).toMatchObject({ availableVersion: '1.2.0' });
+      expect(svc.list()[0]?.updateCheckError).toBeUndefined();
+      expect(changed).toHaveBeenCalled();
+    });
+
+    it('远端版本不更高、本地目录来源都不提示', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      expect(await service.checkUpdates()).toEqual({ checked: 0, available: 0, failed: 0 });
+      const svc = reopenWithRepo(async () => new Response(manifest({ version: '1.0.0' })));
+      expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 0, failed: 0 });
+      expect(svc.list()[0]?.availableVersion).toBeUndefined();
+    });
+
+    it('请求失败、清单不合法或 id 不符时记下原因，不提示更新', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      for (const reply of [
+        new Response('nope', { status: 404 }),
+        new Response('{bad json'),
+        new Response(manifest({ id: 'other.plugin', version: '9.0.0' })),
+      ]) {
+        const svc = reopenWithRepo(async () => reply);
+        expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 0, failed: 1 });
+        expect(svc.list()[0]?.availableVersion).toBeUndefined();
+        expect(svc.list()[0]?.updateCheckError).toEqual(expect.any(String));
+      }
+    });
+
+    it('自动检查只查已启用的插件', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const fetch = vi.fn(async () => new Response(manifest({ version: '1.2.0' })));
+      const svc = reopenWithRepo(fetch);
+      expect(await svc.checkUpdates({ enabledOnly: true })).toEqual({
+        checked: 0,
+        available: 0,
+        failed: 0,
+      });
+      svc.setEnabled('example.demo', true);
+      expect(await svc.checkUpdates({ enabledOnly: true })).toMatchObject({ available: 1 });
+      svc.dispose();
+    });
+
+    it('装上新版后提示消失', async () => {
+      const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const first = await service.stage({ kind: 'dir', path: src });
+      if (!first.ok) throw new Error(first.error);
+      await service.commit(first.preview.token);
+      const svc = reopenWithRepo(async () => new Response(manifest({ version: '1.2.0' })));
+      await svc.checkUpdates();
+      writeFileSync(join(src, 'enso-plugin.json'), manifest({ version: '1.2.0' }));
+      const staged = await svc.stage({ kind: 'dir', path: src });
+      if (!staged.ok) throw new Error(staged.error);
+      await svc.commit(staged.preview.token);
+      expect(svc.list()[0]?.version).toBe('1.2.0');
+      expect(svc.list()[0]?.availableVersion).toBeUndefined();
+    });
+
+    it('重新安装时版本没变或更低，预览里给出提示', async () => {
+      const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      const first = await service.stage({ kind: 'dir', path: src });
+      if (!first.ok) throw new Error(first.error);
+      expect(first.preview.warnings).toEqual([]);
+      await service.commit(first.preview.token);
+      const same = await service.restage('example.demo');
+      if (!same.ok) throw new Error(same.error);
+      expect(same.preview.warnings.join()).toContain('版本号没有变化');
+      service.discard(same.preview.token);
+      writeFileSync(join(src, 'enso-plugin.json'), manifest({ version: '0.9.0' }));
+      const lower = await service.restage('example.demo');
+      if (!lower.ok) throw new Error(lower.error);
+      expect(lower.preview.warnings.join()).toContain('低于已安装的 1.0.0');
+    });
+  });
+
   describe('日志与最近错误', () => {
     const noisy = `export function activate(enso) {
       enso.commands.register('bad', async () => { throw new Error('kaput'); });

@@ -146,6 +146,38 @@ function compareVersion(a: number[], b: number[]): number {
   return 0;
 }
 
+const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/;
+
+function comparePrerelease(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  const x = a.split('.');
+  const y = b.split('.');
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const p = x[i];
+    const q = y[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    if (p === q) continue;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+/** 按 semver 判断 candidate 是否比 current 新；任一方不是 semver 时只看字面是否不同 */
+export function isNewerPluginVersion(candidate: string, current: string): boolean {
+  const a = SEMVER.exec(candidate.trim());
+  const b = SEMVER.exec(current.trim());
+  if (!a || !b) return candidate.trim() !== current.trim();
+  const core = compareVersion(a.slice(1, 4).map(Number), b.slice(1, 4).map(Number));
+  return core !== 0 ? core > 0 : comparePrerelease(a[4], b[4]) > 0;
+}
+
 export function parseExtensionPluginManifest(
   raw: unknown,
   hostVersion: string

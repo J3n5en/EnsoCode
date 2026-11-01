@@ -74,6 +74,7 @@ export function getExtensionPlugins(): ExtensionPluginService {
       now: Date.now,
     },
   });
+  service.startUpdateChecks();
   app.on('before-quit', () => service?.dispose());
   return service;
 }

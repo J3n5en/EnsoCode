@@ -14,6 +14,7 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
   reload <id> [--yes]          从上次安装的来源（目录、zip 或链接）重新安装；开发时改完代码用它更新
   uninstall <id>               卸载并删除插件数据
+  check                        检查 GitHub 安装的插件有没有新版本
   logs <id>                    插件进程日志末尾（console 输出与异常）
   config <id>                  查看配置项（密钥只显示是否已设置）
   config <id> key=value ...    设置；key= 留空则在终端里输入（不进 shell 历史）
@@ -59,8 +60,9 @@ export function formatPluginList(plugins: readonly ExtensionPluginSummary[]): st
   return plugins
     .map((p) => {
       const pending = p.pendingVersion ? `  待同意更新 ${p.pendingVersion}` : '';
+      const update = p.availableVersion ? `  有新版本 ${p.availableVersion}` : '';
       const error = p.lastError ? `\n      最近错误：${p.lastError.message.split('\n')[0]}` : '';
-      return `  ${p.id}  ${p.name} ${p.version}  ${p.state}${pending}${error}`;
+      return `  ${p.id}  ${p.name} ${p.version}  ${p.state}${pending}${update}${error}`;
     })
     .join('\n');
 }
@@ -114,6 +116,20 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
   if (action === 'list') {
     const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'list' }));
     deps.log(formatPluginList((reply.plugins as ExtensionPluginSummary[]) ?? []));
+    return;
+  }
+  if (action === 'check') {
+    const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'check' }));
+    const plugins = (reply.plugins as ExtensionPluginSummary[]) ?? [];
+    deps.log(`已检查 ${Number(reply.checked ?? 0)} 个插件（只支持 GitHub 安装的）`);
+    for (const p of plugins) {
+      if (p.availableVersion)
+        deps.log(
+          `  ${p.id} ${p.version} → ${p.availableVersion}，更新：enso-server plugin reload ${p.id}`
+        );
+      else if (p.updateCheckError) deps.log(`  ${p.id} 检查失败：${p.updateCheckError}`);
+    }
+    if (!Number(reply.available ?? 0)) deps.log('没有可用更新');
     return;
   }
   if (action === 'logs' && target) {

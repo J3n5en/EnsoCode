@@ -68,6 +68,10 @@ describe('parseControlCommand', () => {
   });
 
   it('插件配置命令：config-get 要 id，config-set 的值只能是字符串或 null', () => {
+    expect(parseControlCommand(JSON.stringify({ cmd: 'plugin', action: 'check' }))).toEqual({
+      cmd: 'plugin',
+      action: 'check',
+    });
     expect(
       parseControlCommand(JSON.stringify({ cmd: 'plugin', action: 'restage', id: 'a.b' }))
     ).toEqual({ cmd: 'plugin', action: 'restage', id: 'a.b' });

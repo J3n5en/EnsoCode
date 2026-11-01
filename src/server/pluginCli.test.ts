@@ -28,6 +28,14 @@ function deps(answer = true) {
   const call = vi.fn(async (command: Record<string, unknown>) => {
     if (command.action === 'stage' || command.action === 'restage') return { ok: true, preview };
     if (command.action === 'list') return { ok: true, plugins: [] };
+    if (command.action === 'check')
+      return {
+        ok: true,
+        checked: 2,
+        available: 1,
+        failed: 0,
+        plugins: [{ id: 'demo.hello', name: 'Hello', version: '1.0.0', availableVersion: '1.2.0' }],
+      };
     if (command.action === 'logs') return { ok: true, text: 'line-a\nline-b\n' };
     if (command.action === 'config-get')
       return {
@@ -61,6 +69,26 @@ function deps(answer = true) {
 }
 
 describe('enso-server plugin', () => {
+  it('check：列出有新版本的插件和更新命令', async () => {
+    const { call, out, deps: d } = deps();
+    await runPluginCommand(['check'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'check' });
+    const text = out.join('\n');
+    expect(text).toContain('demo.hello 1.0.0 → 1.2.0');
+    expect(text).toContain('enso-server plugin reload demo.hello');
+  });
+
+  it('列表里带上可更新版本', () => {
+    const summary = {
+      id: 'demo.hello',
+      name: 'Hello',
+      version: '1.0.0',
+      state: 'enabled',
+      availableVersion: '1.2.0',
+    } as ExtensionPluginSummary;
+    expect(formatPluginList([summary])).toContain('有新版本 1.2.0');
+  });
+
   it('reload：从记录的来源重新暂存，确认后提交', async () => {
     const { call, deps: d } = deps(true);
     await runPluginCommand(['reload', 'demo.hello'], d);

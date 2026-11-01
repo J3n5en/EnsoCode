@@ -142,6 +142,8 @@ function ExtensionPluginsSection() {
   const [error, setError] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
   const [downloading, setDownloading] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
+  const [checkResult, setCheckResult] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -191,6 +193,23 @@ function ExtensionPluginsSection() {
     else setPreview(result.preview);
   };
 
+  const checkUpdates = async () => {
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const result = await window.electronAPI.extensionPlugins.checkUpdates();
+      setCheckResult(
+        result.checked === 0
+          ? t('No plugins installed from GitHub to check')
+          : result.available > 0
+            ? t('{{count}} update(s) available', { count: result.available })
+            : t('All plugins are up to date')
+      );
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const commit = async () => {
     if (!preview) return;
     setBusy(true);
@@ -220,6 +239,16 @@ function ExtensionPluginsSection() {
           </p>
         </div>
         <div className="flex gap-2">
+          {plugins.some((plugin) => plugin.source?.kind === 'url') && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={checking}
+              onClick={() => void checkUpdates()}
+            >
+              {checking ? <Spinner /> : t('Check for updates')}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -257,6 +286,7 @@ function ExtensionPluginsSection() {
         </Button>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
+      {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
       {preview && (
         <div className="space-y-2 rounded-md border border-border p-3">
           <p className="font-medium text-sm">
@@ -311,6 +341,24 @@ function ExtensionPluginsSection() {
                   </Badge>
                 )}
               </p>
+              {plugin.availableVersion && (
+                <p className="text-xs">
+                  {t('Version {{version}} is available', { version: plugin.availableVersion })}
+                  <button
+                    type="button"
+                    className="ml-2 underline"
+                    disabled={busy || downloading}
+                    onClick={() => void restage(plugin.id)}
+                  >
+                    {t('Update')}
+                  </button>
+                </p>
+              )}
+              {plugin.updateCheckError && (
+                <p className="text-muted-foreground text-xs">
+                  {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
+                </p>
+              )}
               {plugin.lastError && (
                 <p className="line-clamp-2 break-all font-mono text-destructive text-xs">
                   {plugin.lastError.message}

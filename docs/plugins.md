@@ -11,6 +11,7 @@
 - 服务端：`enso-server plugin install <目录、zip 或 http(s) 链接>`，确认后 `enso-server plugin enable <id>`。
 - 新装的插件默认停用，需要手动启用。
 - Enso 记住每个插件最近一次的安装来源（目录、zip 路径或链接）。设置页插件行的「从来源重新安装」或 `enso-server plugin reload <id>` 会重新读取来源，走和更新一样的确认流程。链接安装的插件用它拉取新版；开发插件时从源目录安装，改完代码用它重新加载。
+- 检查更新：从 GitHub 仓库链接安装的插件，Enso 启动后约 1 分钟检查一次、之后每天一次（只查已启用的），只拉仓库里的 `enso-plugin.json` 比较 `version`，不下载整包、不自动安装。有新版本时设置页插件行会提示，点「更新」走上面的确认流程；也可以点「检查更新」或用 `enso-server plugin check` 立即检查。版本号按 semver 比较，作者不改 `version` 就不算新版。普通 zip 链接不自动检查，只能手动重新安装。重新安装时新包版本没变或更低，预览里会提示。
 - 同 id 再装一次按更新处理。权限没有变大就直接换新版；权限变大则旧版继续运行，需要 `enso-server plugin approve <id>`（或设置页同意）才切到新版，`reject` 则留在旧版。
 - 10 分钟内非预期崩溃 3 次，插件会被自动停用，状态变成 `crashed`，重新启用即可。停用原因会显示在设置页和 `enso-server plugin list` 里。
 - 日志：`main.mjs` 里的 `console.*` 输出、处理器抛出的异常和进程意外退出都会记下来，在设置页插件行的日志按钮或 `enso-server plugin logs <id>` 里看。单个日志文件超过 1MB 轮转一次，卸载时删除。

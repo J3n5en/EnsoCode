@@ -13,8 +13,10 @@ import {
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { grantExpands, grantOf } from '@shared/extensionPlugins/grant';
+import { pluginManifestProbeUrl } from '@shared/extensionPlugins/installUrl';
 import {
   type ExtensionPluginManifest,
+  isNewerPluginVersion,
   isPluginRelativePath,
   type PluginPresetContrib,
   parseExtensionPluginManifest,
@@ -64,6 +66,10 @@ const MAX_PRESET_TEXT_BYTES = 256 * 1024;
 const MAX_LOG_BYTES = 1024 * 1024;
 const DEFAULT_LOG_TAIL_BYTES = 64 * 1024;
 const MAX_ERROR_CHARS = 2000;
+const UPDATE_CHECK_TIMEOUT_MS = 15_000;
+const UPDATE_CHECK_FIRST_DELAY_MS = 60_000;
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
+const MAX_PROBE_BYTES = 256 * 1024;
 
 export interface ExtensionPluginServiceOptions {
   root: string;
@@ -117,6 +123,9 @@ export class ExtensionPluginService {
     { stamps: number[]; failures: number; openUntil: number }
   >();
   private readonly listeners = new Set<() => void>();
+  /** 检查更新的结果，只在内存；装上不低于该版本的包后清掉 */
+  private readonly updates = new Map<string, { version?: string; error?: string }>();
+  private updateTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: ExtensionPluginServiceOptions) {
     this.records = readRegistry(options.root).plugins;
@@ -167,6 +176,7 @@ export class ExtensionPluginService {
             : {}),
           ...lastErrorField(record.lastError ?? this.recentErrors.get(record.id)),
           ...(record.source ? { source: sourceView(record.source) } : {}),
+          ...updateFields(this.updates.get(record.id)),
         },
       ];
     });
@@ -201,7 +211,7 @@ export class ExtensionPluginService {
       mcpTools: m.mcp.tools,
       tools: m.contributes.agentTools.map(({ name, description }) => ({ name, description })),
       hasRenderer: m.renderer !== undefined,
-      warnings: staged.warnings,
+      warnings: [...staged.warnings, ...versionWarnings(m.version, existing?.version)],
       ...(existing ? { existingVersion: existing.version } : {}),
       expands: existing ? grantExpands(existing.grant, grant) : true,
     };
@@ -263,6 +273,9 @@ export class ExtensionPluginService {
       this.apply(existing.id, { type: 'update', version: manifest.version, dir, grant, expands });
       this.setSource(existing.id, source);
       if (stalePending) removePackage(this.options.root, existing.id, stalePending);
+      const available = this.updates.get(existing.id)?.version;
+      if (available && !isNewerPluginVersion(available, manifest.version))
+        this.updates.delete(existing.id);
       if (!expands) {
         this.stopProcess(existing.id);
         removePackage(this.options.root, existing.id, oldDir);
@@ -638,7 +651,79 @@ export class ExtensionPluginService {
     }
   }
 
+  /** 启动后稍等检查一次，之后每天一次；只查已启用的插件 */
+  startUpdateChecks(): void {
+    if (this.updateTimer) return;
+    const run = (delay: number) => {
+      this.updateTimer = setTimeout(() => {
+        void this.checkUpdates({ enabledOnly: true }).finally(() => {
+          if (this.updateTimer) run(UPDATE_CHECK_INTERVAL_MS);
+        });
+      }, delay);
+      this.updateTimer.unref?.();
+    };
+    run(UPDATE_CHECK_FIRST_DELAY_MS);
+  }
+
+  /** 只拉 GitHub 来源里的清单比较版本，不下载整包、不自动安装 */
+  async checkUpdates(options: { enabledOnly?: boolean } = {}) {
+    const targets = this.records.flatMap((record) => {
+      if (options.enabledOnly && record.state !== 'enabled') return [];
+      if (record.source?.kind !== 'url') return [];
+      const probe = pluginManifestProbeUrl(new URL(record.source.url));
+      return probe ? [{ record, probe }] : [];
+    });
+    const results = await Promise.all(
+      targets.map(async ({ record, probe }) => {
+        try {
+          const version = await this.probeVersion(record.id, probe);
+          const update = isNewerPluginVersion(version, record.version) ? { version } : {};
+          this.updates.set(record.id, update);
+          return update.version ? 'available' : 'current';
+        } catch (error) {
+          this.updates.set(record.id, {
+            error: error instanceof Error ? error.message : '检查更新失败',
+          });
+          return 'failed';
+        }
+      })
+    );
+    if (targets.length > 0) for (const listener of this.listeners) listener();
+    return {
+      checked: targets.length,
+      available: results.filter((r) => r === 'available').length,
+      failed: results.filter((r) => r === 'failed').length,
+    };
+  }
+
+  private async probeVersion(id: string, probe: URL): Promise<string> {
+    let text: string;
+    try {
+      const response = await this.options.gate.fetch(probe.href, {
+        signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`检查更新失败（HTTP ${response.status}）`);
+      text = await response.text();
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('检查更新失败')) throw error;
+      throw new Error('无法连接更新来源');
+    }
+    if (text.length > MAX_PROBE_BYTES) throw new Error('远端清单过大');
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw new Error('远端清单不是合法的 JSON');
+    }
+    const parsed = parseExtensionPluginManifest(raw, this.options.hostVersion);
+    if (!parsed.ok) throw new Error(`远端清单不可用：${parsed.errors[0] ?? ''}`);
+    if (parsed.manifest.id !== id) throw new Error(`来源里的插件已经不是 ${id}`);
+    return parsed.manifest.version;
+  }
+
   dispose(): void {
+    if (this.updateTimer) clearTimeout(this.updateTimer);
+    this.updateTimer = null;
     for (const id of [...this.processes.keys()]) this.stopProcess(id);
   }
 
@@ -846,6 +931,17 @@ export class ExtensionPluginService {
 /** 本地路径不下发给界面，只给类型；链接本来就是用户填的，可以显示 */
 const sourceView = (source: PluginInstallSource): ExtensionPluginSummary['source'] =>
   source.kind === 'url' ? { kind: 'url', url: source.url } : { kind: source.kind };
+
+const updateFields = (update: { version?: string; error?: string } | undefined) => ({
+  ...(update?.version ? { availableVersion: update.version } : {}),
+  ...(update?.error ? { updateCheckError: update.error } : {}),
+});
+
+function versionWarnings(next: string, current: string | undefined): string[] {
+  if (current === undefined || isNewerPluginVersion(next, current)) return [];
+  if (next.trim() === current.trim()) return [`版本号没有变化（${current}），确认后会覆盖当前安装`];
+  return [`版本 ${next} 低于已安装的 ${current}，确认后会降级`];
+}
 
 const lastErrorField = (lastError: { at: number; message: string } | undefined) =>
   lastError ? { lastError: { at: lastError.at, message: lastError.message } } : {};

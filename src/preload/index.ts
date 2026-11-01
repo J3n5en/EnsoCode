@@ -1631,6 +1631,8 @@ const electronAPI = {
     ): Promise<
       { ok: true; preview: ExtensionPluginInstallPreview } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, id),
+    checkUpdates: (): Promise<{ checked: number; available: number; failed: number }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_CHECK_UPDATES),
     commit: (token: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, token),
     discard: (token: string): Promise<{ ok: boolean }> =>

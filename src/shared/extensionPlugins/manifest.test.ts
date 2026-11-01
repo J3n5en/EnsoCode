@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseExtensionPluginManifest } from './manifest';
+import { isNewerPluginVersion, parseExtensionPluginManifest } from './manifest';
 
 const base = () => ({
   schemaVersion: 1,
@@ -330,5 +330,22 @@ describe('parseExtensionPluginManifest', () => {
         },
       })
     ).not.toEqual([]);
+  });
+});
+
+describe('isNewerPluginVersion', () => {
+  it('按 x.y.z 数字比较，预发布版低于正式版', () => {
+    expect(isNewerPluginVersion('1.10.0', '1.9.3')).toBe(true);
+    expect(isNewerPluginVersion('1.0.0', '1.0.0')).toBe(false);
+    expect(isNewerPluginVersion('0.9.9', '1.0.0')).toBe(false);
+    expect(isNewerPluginVersion('1.0.0', '1.0.0-beta.2')).toBe(true);
+    expect(isNewerPluginVersion('1.0.0-beta.2', '1.0.0')).toBe(false);
+    expect(isNewerPluginVersion('1.0.0-beta.2', '1.0.0-beta.1')).toBe(true);
+    expect(isNewerPluginVersion('v1.2.0', '1.1.0')).toBe(true);
+  });
+
+  it('看不懂的版本号只有字面不同才算更新', () => {
+    expect(isNewerPluginVersion('2024-06', '2024-05')).toBe(true);
+    expect(isNewerPluginVersion('nightly', 'nightly')).toBe(false);
   });
 });

@@ -26,6 +26,10 @@ export interface ExtensionPluginSummary {
   lastError?: { at: number; message: string };
   /** 安装来源；有就能「从来源重新安装」。本地路径不下发 */
   source?: { kind: 'dir' | 'zip' } | { kind: 'url'; url: string };
+  /** 检查更新发现的新版本（仅 GitHub 来源） */
+  availableVersion?: string;
+  /** 最近一次检查更新失败的原因 */
+  updateCheckError?: string;
 }
 
 /** 设置界面看到的配置项：密钥只报告是否已设置，不回显 */

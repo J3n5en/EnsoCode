@@ -32,15 +32,13 @@ function githubName(segment: string): boolean {
   return GITHUB_NAME.test(segment) && segment !== '.' && !segment.includes('..');
 }
 
-/** GitHub 仓库页面改写成 zipball；其它链接仍当作 zip。分支名不能含斜杠 */
-export function resolvePluginArchive(url: URL): PluginArchiveSource {
+type GithubRepo = { owner: string; repo: string; ref: string | null; subdir: string[] };
+
+/** GitHub 仓库页面拆成仓库/分支/子目录；非 GitHub 或 .zip 链接返回 null，形状不对返回 'invalid' */
+function parseGithubRepo(url: URL): GithubRepo | null | 'invalid' {
   const host = url.hostname.toLowerCase();
-  if (host !== 'github.com' && host !== 'www.github.com') {
-    return { ok: true, archive: url, subdir: null };
-  }
-  if (url.pathname.toLowerCase().endsWith('.zip')) {
-    return { ok: true, archive: url, subdir: null };
-  }
+  if (host !== 'github.com' && host !== 'www.github.com') return null;
+  if (url.pathname.toLowerCase().endsWith('.zip')) return null;
   let parts: string[];
   try {
     parts = url.pathname
@@ -48,31 +46,46 @@ export function resolvePluginArchive(url: URL): PluginArchiveSource {
       .filter(Boolean)
       .map((segment) => decodeURIComponent(segment));
   } catch {
-    return { ok: false, error: GITHUB_HINT };
+    return 'invalid';
   }
   if (parts[1]?.toLowerCase().endsWith('.git')) parts[1] = parts[1].slice(0, -4);
   const owner = parts[0];
   const repo = parts[1];
-  if (!owner || !repo || !githubName(owner) || !githubName(repo)) {
-    return { ok: false, error: GITHUB_HINT };
-  }
-  let ref: string | null = null;
-  let subdir: string[] = [];
-  if (parts.length === 2) {
-    // 仓库根，用默认分支
-  } else if (parts[2] === 'tree' && parts[3]) {
-    ref = parts[3];
-    subdir = parts.slice(4);
-    if (!githubName(ref) || subdir.some((segment) => !githubName(segment))) {
-      return { ok: false, error: GITHUB_HINT };
-    }
-  } else {
-    return { ok: false, error: GITHUB_HINT };
-  }
+  if (!owner || !repo || !githubName(owner) || !githubName(repo)) return 'invalid';
+  if (parts.length === 2) return { owner, repo, ref: null, subdir: [] };
+  const ref = parts[3];
+  const subdir = parts.slice(4);
+  if (parts[2] !== 'tree' || !ref || !githubName(ref) || !subdir.every(githubName))
+    return 'invalid';
+  return { owner, repo, ref, subdir };
+}
+
+/** GitHub 仓库页面改写成 zipball；其它链接仍当作 zip。分支名不能含斜杠 */
+export function resolvePluginArchive(url: URL): PluginArchiveSource {
+  const github = parseGithubRepo(url);
+  if (github === 'invalid') return { ok: false, error: GITHUB_HINT };
+  if (!github) return { ok: true, archive: url, subdir: null };
+  const { owner, repo, ref, subdir } = github;
   const archive = new URL(
     ref
       ? `https://api.github.com/repos/${owner}/${repo}/zipball/${encodeURIComponent(ref)}`
       : `https://api.github.com/repos/${owner}/${repo}/zipball`
   );
   return { ok: true, archive, subdir: subdir.length > 0 ? subdir.join('/') : null };
+}
+
+/** 检查更新用：只拉清单原文而不是整包；只支持 GitHub 仓库链接 */
+export function pluginManifestProbeUrl(url: URL): URL | null {
+  const github = parseGithubRepo(url);
+  if (!github || github === 'invalid') return null;
+  const path = [
+    github.owner,
+    github.repo,
+    github.ref ?? 'HEAD',
+    ...github.subdir,
+    'enso-plugin.json',
+  ]
+    .map(encodeURIComponent)
+    .join('/');
+  return new URL(`https://raw.githubusercontent.com/${path}`);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePluginArchive } from './installUrl';
+import { pluginManifestProbeUrl, resolvePluginArchive } from './installUrl';
 
 const href = (input: string) => {
   const result = resolvePluginArchive(new URL(input));
@@ -41,5 +41,27 @@ describe('resolvePluginArchive', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain('github.com/owner/repo');
+  });
+});
+
+describe('pluginManifestProbeUrl', () => {
+  const probe = (input: string) => pluginManifestProbeUrl(new URL(input))?.href ?? null;
+
+  it('GitHub 仓库链接指向对应分支与子目录里的清单原文', () => {
+    expect(probe('https://github.com/acme/demo')).toBe(
+      'https://raw.githubusercontent.com/acme/demo/HEAD/enso-plugin.json'
+    );
+    expect(probe('https://github.com/acme/demo.git')).toBe(
+      'https://raw.githubusercontent.com/acme/demo/HEAD/enso-plugin.json'
+    );
+    expect(probe('https://github.com/acme/demo/tree/dev/plugins/hello')).toBe(
+      'https://raw.githubusercontent.com/acme/demo/dev/plugins/hello/enso-plugin.json'
+    );
+  });
+
+  it('普通 zip 链接与不合法的 GitHub 链接不探测', () => {
+    expect(probe('https://example.com/plugin.zip')).toBeNull();
+    expect(probe('https://github.com/acme/demo/archive/main.zip')).toBeNull();
+    expect(probe('https://github.com/acme/demo/blob/main/x')).toBeNull();
   });
 });

@@ -71,6 +71,8 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
   switch (command.action) {
     case 'list':
       return { ok: true, plugins: plugins.list() };
+    case 'check':
+      return { ok: true, ...(await plugins.checkUpdates()), plugins: plugins.list() };
     case 'stage':
       return plugins.stage(
         'url' in command
