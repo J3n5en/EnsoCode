@@ -73,6 +73,10 @@ interface SetupOptions {
   /** 跳过写入 draft selection，模拟新对话尚未选过模型 */
   persistSelection?: boolean;
   resolveDefaultModel?: () => { providerId: string; modelId: string } | null;
+  /** 临时会话项目：会话 cwd = <根>/<会话 id> */
+  scratch?: boolean;
+  /** worker 拒绝子会话时的原因 */
+  rejectChild?: string;
 }
 
 async function setup(
@@ -84,7 +88,12 @@ async function setup(
   mkdirSync(projectPath, { recursive: true });
   roots.push(root);
   const authority = new SourceAuthorityRegistry({ registryFile: path.join(root, 'registry.json') });
-  const project = authority.createProject({ requestId: 'p', path: projectPath });
+  const scratchProject = options.scratch
+    ? authority.ensureScratchProject(path.join(root, 'scratch'))
+    : undefined;
+  const project = scratchProject
+    ? { accepted: true as const, value: scratchProject }
+    : authority.createProject({ requestId: 'p', path: projectPath });
   if (!project.accepted) throw new Error(project.error);
   const conversation = authority.createConversation({
     requestId: 'c',
@@ -236,6 +245,13 @@ async function setup(
       },
       spawnChild: (identity, cwd, _config, resumeFile) => {
         spawnChildCalls.push({ identity, cwd, ...(resumeFile ? { resumeFile } : {}) });
+        if (options.rejectChild) {
+          const reason = options.rejectChild;
+          queueMicrotask(() =>
+            service.observe({ type: 'child-rejected', identity, seq: 0, reason })
+          );
+          return { ok: true };
+        }
         const altered = proofOverride?.(config) ?? {};
         queueMicrotask(() =>
           service.observe({
@@ -676,6 +692,32 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     expect(fixture.spawnParentCalls).toHaveLength(0);
     expect(fixture.spawnChildCalls).toHaveLength(1);
     expect(fixture.spawnChildCalls[0].cwd).toBe(cwd);
+  });
+
+  it('临时会话的子会话 cwd 与父会话一致：<根>/<会话 id>（#184）', async () => {
+    const fixture = await setup(undefined, { scratch: true });
+    await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    const result = await fixture.service.hireCoworker(
+      fixture.conversationId,
+      'helper',
+      'agent:enso'
+    );
+    expect(result.ok).toBe(true);
+    expect(fixture.spawnChildCalls[0]?.cwd).toBe(
+      path.join(fixture.projectPath, fixture.conversationId)
+    );
+  });
+
+  it('worker 拒绝子会话时把原因带给调用方（#184）', async () => {
+    const fixture = await setup(undefined, { rejectChild: 'Child source does not match.' });
+    await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    const result = await fixture.service.hireCoworker(
+      fixture.conversationId,
+      'helper',
+      'agent:enso'
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toContain('Child source does not match.');
   });
 
   it.each([true, false])(
