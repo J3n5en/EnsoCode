@@ -3,18 +3,19 @@ import {
   attachHeartbeat,
   backoffDelay,
   claimPairing,
+  createFrameReplay,
   DirectLink,
+  type FrameReplay,
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
   isConnectStuck,
-  openFrame,
+  isReplayHello,
   type PairedDevice,
   type PhoneToHost,
   parsePairUri,
   RELAY_CONNECT_TIMEOUT_MS,
   revokePairing,
-  sealFrame,
   shouldReplaceOnNudge,
   toBase64Url,
   toWebSocketUrl,
@@ -71,6 +72,8 @@ interface Connection {
   generation: number;
   probeNonce: number;
   probeSentAt: number | null;
+  /** 直连和中继共用：一帧只封一次 */
+  replay: FrameReplay;
 }
 
 const connections = new Map<string, Connection>();
@@ -279,6 +282,7 @@ function openConnection(node: RemoteNode): void {
     generation: 0,
     probeNonce: 0,
     probeSentAt: null,
+    replay: createFrameReplay(),
   };
   conn.direct = new DirectLink({
     role: 'guest',
@@ -312,6 +316,7 @@ function openConnection(node: RemoteNode): void {
 
 function connect(conn: Connection): void {
   if (conn.closed) return;
+  conn.replay.peerReset();
   const generation = ++conn.generation;
   const base = toWebSocketUrl(conn.node.relayUrl);
   const url = `${base}/v1/pair/${encodeURIComponent(conn.node.pairId)}?role=guest&token=${encodeURIComponent(conn.node.token)}`;
@@ -383,6 +388,7 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
       try {
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'host-online') {
+          conn.replay.peerReset();
           conn.hostOnline = true;
           conn.direct.peerOnline(true);
           notifyStatus();
@@ -433,11 +439,15 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   }
   let payload: HostToPhone;
   try {
-    payload = (await openFrame(conn.contentKey, frame)) as HostToPhone;
+    const opened = await conn.replay.open(conn.contentKey, frame);
+    if (opened === undefined) return;
+    payload = opened as HostToPhone;
   } catch {
     console.warn('[nodes] frame decrypt failed, dropped');
     return;
   }
+  if (conn.replay.takeHello()) void sendFrame(conn, { type: 'replay-hello' } as PhoneToHost);
+  if (isReplayHello(payload)) return;
   if (typeof payload !== 'object' || payload === null || typeof payload.type !== 'string') return;
   switch (payload.type) {
     case 'host-info': {
@@ -488,7 +498,7 @@ async function sendFrame(conn: Connection, command: PhoneToHost): Promise<NodeAc
   const direct = conn.direct.transport() === 'direct';
   if (!direct && conn.ws?.readyState !== 1) return { ok: false, error: 'offline' };
   try {
-    const frame = await sealFrame(conn.contentKey, command);
+    const frame = await conn.replay.seal(conn.contentKey, command);
     if (frame.byteLength > 1_000_000) {
       return { ok: false, error: 'frame over relay limit' };
     }
@@ -509,7 +519,7 @@ function sendFrameViaRelay(conn: Connection, frame: Uint8Array): boolean {
 /** 直连信令只能走中继 */
 async function sendViaRelay(conn: Connection, command: PhoneToHost): Promise<void> {
   try {
-    sendFrameViaRelay(conn, await sealFrame(conn.contentKey, command));
+    sendFrameViaRelay(conn, await conn.replay.seal(conn.contentKey, command));
   } catch (error) {
     console.warn('[nodes] signal send failed', error);
   }

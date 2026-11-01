@@ -3,6 +3,12 @@ import type { RendererAgentEvent } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PairReplayLog } from './pairReplay';
 
+function stripReplay(payload: unknown): Record<string, unknown> {
+  const record = payload as Record<string, unknown>;
+  const { replay: _, ...rest } = record;
+  return rest;
+}
+
 interface TestSocket {
   readyState: number;
   binaryType: string;
@@ -328,10 +334,7 @@ describe('pairHost session-sync 接线', () => {
   async function sentPayloads(): Promise<Record<string, unknown>[]> {
     const calls = hostMocks.socket?.send.mock.calls ?? [];
     return Promise.all(
-      calls.map(
-        async ([data]) =>
-          (await openFrame(contentKey, new Uint8Array(data))) as Record<string, unknown>
-      )
+      calls.map(async ([data]) => stripReplay(await openFrame(contentKey, new Uint8Array(data))))
     );
   }
 
@@ -645,10 +648,7 @@ describe('pairHost Bot 会话接线', () => {
   async function sentPayloads(): Promise<Record<string, unknown>[]> {
     const calls = hostMocks.socket?.send.mock.calls ?? [];
     return Promise.all(
-      calls.map(
-        async ([data]) =>
-          (await openFrame(contentKey, new Uint8Array(data))) as Record<string, unknown>
-      )
+      calls.map(async ([data]) => stripReplay(await openFrame(contentKey, new Uint8Array(data))))
     );
   }
 

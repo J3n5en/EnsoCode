@@ -5,10 +5,12 @@ import {
   backoffDelay,
   buildPairLink,
   type CatalogEntry,
+  createFrameReplay,
   createRemotePartAssembler,
   DEFAULT_RELAY_URL,
   DirectLink,
   type DirectSignal,
+  type FrameReplay,
   fromBase64Url,
   gzipRemoteJson,
   type Heartbeat,
@@ -17,7 +19,7 @@ import {
   type HostToPhone,
   isConnectStuck,
   isRemotePart,
-  openFrame,
+  isReplayHello,
   type PairedDevice,
   type PairScope,
   type PairSyncCursor,
@@ -30,7 +32,6 @@ import {
   REMOTE_GZIP_MIN_CHARS,
   type RemotePartAssembler,
   revokePairing,
-  sealFrame,
   shouldReplaceOnNudge,
   splitRemoteFrame,
   startHostPairing,
@@ -197,6 +198,8 @@ interface Connection {
   /** 浏览器声明能解 gzip：大帧压缩后再发（桌面上行常是瓶颈） */
   remoteGzip: boolean;
   voiceUploads: VoiceUploads;
+  /** 直连和中继共用：一帧只封一次 */
+  replay: FrameReplay;
 }
 
 const connections = new Map<string, Connection>();
@@ -686,6 +689,7 @@ function openConnection(device: PairedDevice): void {
           ...(correcting ? { correcting: true as const } : {}),
         }),
     }),
+    replay: createFrameReplay(),
   };
   conn.direct = new DirectLink({
     role: 'host',
@@ -812,6 +816,7 @@ function attachHostSocket(conn: Connection, ws: WebSocket, generation: number): 
       try {
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'peer-joined') {
+          conn.replay.peerReset();
           conn.phoneOnline = true;
           conn.phoneVisible = true;
           conn.direct.peerOnline(true);
@@ -923,12 +928,15 @@ async function handleFrame(
 ): Promise<void> {
   let payload: unknown;
   try {
-    payload = await openFrame(conn.contentKey, frame);
+    payload = await conn.replay.open(conn.contentKey, frame);
   } catch {
     console.warn('[pair] frame decrypt failed, dropped');
     return;
   }
+  if (payload === undefined) return;
   if (!connectionCurrent(conn, generation, ioEpoch)) return;
+  if (conn.replay.takeHello()) void send(conn, { type: 'replay-hello' } as HostToPhone);
+  if (isReplayHello(payload)) return;
   // 解密成功才证明当前连接的手机仍在房间里，旧队列不能复活已关闭连接。
   if (!conn.phoneOnline) {
     conn.phoneOnline = true;
@@ -1235,7 +1243,7 @@ async function sendNow(
     if (!relayOnly && message.type === 'providers') sentProviderFp.delete(conn.device.pairId);
   };
   try {
-    const frame = await sealFrame(conn.contentKey, message);
+    const frame = await conn.replay.seal(conn.contentKey, message);
     if (!connectionCurrent(conn, generation, ioEpoch) || (guard && !guard())) {
       releaseProviderFp();
       return false;

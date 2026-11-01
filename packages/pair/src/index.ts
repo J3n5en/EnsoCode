@@ -132,6 +132,7 @@ export {
   type RemoteToHost,
   splitRemoteFrame,
 } from './remote';
+export { createFrameReplay, type FrameReplay, isReplayHello } from './replay';
 export {
   createCachedHostLookup,
   isConnectStuck,

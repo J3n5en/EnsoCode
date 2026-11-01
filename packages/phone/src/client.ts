@@ -3,10 +3,12 @@ import {
   backoffDelay,
   type CatalogEntry,
   createBrowserDirectPeerFactory,
+  createFrameReplay,
   DirectLink,
   type DirectPeerFactory,
   type DirectTransport,
   encodeVoiceChunks,
+  type FrameReplay,
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
@@ -15,6 +17,7 @@ import {
   isForegroundSocketStale,
   isHostRemoteFrame,
   isPairSyncCursor,
+  isReplayHello,
   type NudgeReason,
   openFrame,
   type PairBotActivity,
@@ -150,6 +153,8 @@ export class PairClient {
   private ws: WebSocket | null = null;
   private heartbeat: Heartbeat | null = null;
   private contentKey: Uint8Array;
+  /** 直连和中继共用这一份：帧只封一次，再选路 */
+  private replay: FrameReplay = createFrameReplay(sealFrame, openFrame);
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -239,6 +244,7 @@ export class PairClient {
   connect(): void {
     if (this.closed || this.revoked || this.cacheLoading || (this.ws && this.ws.readyState < 2))
       return;
+    this.replay.peerReset();
     if (!this.cacheReady) {
       this.cacheLoading = true;
       void this.cache
@@ -342,6 +348,7 @@ export class PairClient {
         try {
           const control = JSON.parse(event.data) as { type?: string };
           if (control.type === 'host-online') {
+            this.replay.peerReset();
             this.events.onState('online');
             this.direct.peerOnline(true);
             this.flushDirectRestart();
@@ -460,11 +467,15 @@ export class PairClient {
   private async handleFrame(frame: Uint8Array, socket?: WebSocket): Promise<void> {
     let payload: HostToPhone;
     try {
-      payload = (await openFrame(this.contentKey, frame)) as HostToPhone;
+      const opened = await this.replay.open(this.contentKey, frame);
+      if (opened === undefined) return;
+      payload = opened as HostToPhone;
     } catch {
       return;
     }
     if (this.closed || this.revoked || (socket && socket !== this.ws)) return;
+    if (this.replay.takeHello()) this.send({ type: 'replay-hello' } as PhoneToHost);
+    if (isReplayHello(payload)) return;
     if (isHostRemoteFrame(payload)) {
       this.events.onRemoteFrame?.(payload);
       return;
@@ -920,7 +931,7 @@ export class PairClient {
     this.sendQueue = this.sendQueue
       .then(async () => {
         if (this.closed || this.revoked) return;
-        const frame = await sealFrame(this.contentKey, command);
+        const frame = await this.replay.seal(this.contentKey, command);
         if (this.closed || this.revoked) return;
         // 直连优先；背压/刚好断掉时无缝退回中继
         if (this.direct.send(frame)) return;
@@ -944,7 +955,7 @@ export class PairClient {
     this.sendQueue = this.sendQueue
       .then(async () => {
         if (this.closed || this.revoked) return;
-        const frame = await sealFrame(this.contentKey, command);
+        const frame = await this.replay.seal(this.contentKey, command);
         if (!this.closed && !this.revoked) this.sendFrameViaRelay(frame);
       })
       .catch(() => {});

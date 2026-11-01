@@ -72,6 +72,8 @@ export type PairSessionSync = {
 
 // ── 上行：手机 → Electron（加密 payload，白名单）─────────────────────────
 export type PhoneToHost =
+  /** 防重放握手回声：收到对端质询后回一帧，对端据此锁定收发前缀与计数窗口 */
+  | { type: 'replay-hello' }
   | { type: 'prompt'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'steer'; sessionId: string; text: string; images?: AttachedImage[] }
   | { type: 'abort'; sessionId: string }
@@ -532,6 +534,8 @@ export interface TerminalPalette {
 
 /** 下行信封：pair 自有的目录类帧 + 透传的现有 RendererAgentEvent（此处不重定义，按 unknown 透传） */
 export type HostToPhone =
+  /** 防重放握手回声：收到对端质询后回一帧，对端据此锁定收发前缀与计数窗口 */
+  | { type: 'replay-hello' }
   | {
       type: 'catalog';
       entries: CatalogEntry[];

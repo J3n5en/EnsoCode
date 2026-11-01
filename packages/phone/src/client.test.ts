@@ -42,7 +42,11 @@ class Socket {
     this.onopen?.();
   }
   send(frame: ArrayBuffer) {
-    this.sent.push(JSON.parse(new TextDecoder().decode(frame)));
+    const parsed = JSON.parse(new TextDecoder().decode(frame)) as PhoneToHost & {
+      replay?: unknown;
+    };
+    delete parsed.replay;
+    this.sent.push(parsed);
   }
   receive(payload: unknown) {
     this.onmessage?.({ data: new TextEncoder().encode(JSON.stringify(payload)).buffer });
