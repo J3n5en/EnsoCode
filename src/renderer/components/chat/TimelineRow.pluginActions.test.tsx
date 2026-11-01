@@ -9,7 +9,10 @@ vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: object) => unknown) => select({}),
 }));
-vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => null }));
+const sessions = { activeId: 's1', conversations: { s1: { id: 's1' } } };
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: (select: (state: object) => unknown) => select(sessions),
+}));
 vi.mock('./Markdown', () => ({ Markdown: () => null }));
 
 afterEach(() => resetPluginSlots());
@@ -38,5 +41,20 @@ describe('message.action 挂点', () => {
     expect(left).toBeGreaterThan(-1);
     expect(copy).toBeGreaterThan(left);
     expect(right).toBeGreaterThan(copy);
+  });
+
+  it('组件拿到消息下标和当前会话 id', () => {
+    const seen: Record<string, unknown>[] = [];
+    registerPluginSlot({
+      pluginId: 'a.b',
+      slot: 'message.action',
+      position: 'right',
+      component: (props) => {
+        seen.push(props);
+        return null;
+      },
+    });
+    renderToStaticMarkup(createElement(TimelineRow, { item }));
+    expect(seen[0]).toEqual({ position: 'right', text: 'hello', messageIndex: 3, sessionId: 's1' });
   });
 });

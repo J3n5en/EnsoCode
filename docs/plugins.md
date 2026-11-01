@@ -213,7 +213,7 @@ export function onLoad(enso) {
 
 | `slot` | 额外字段 | 组件收到的 props | 状态 |
 | --- | --- | --- | --- |
-| `message.action` | `position: 'left' \| 'right'` | `{ position, text }` | 可用。位于回复正文下方的操作条，`left` 在复制按钮之前，`right` 在复制按钮之后 |
+| `message.action` | `position: 'left' \| 'right'` | `{ position, text, messageIndex, sessionId }` | 可用。位于回复正文下方的操作条，`left` 在复制按钮之前，`right` 在复制按钮之后。`messageIndex` 是这条消息在会话里的下标，`sessionId` 是当前展示的会话 |
 | `tool.card` | `toolName` | `{ toolName, output, state }` | 可用。`output` 是工具结果文本，可能为 `null` |
 | `block` | `language` | `{ language, source }` | 可用 |
 | `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |

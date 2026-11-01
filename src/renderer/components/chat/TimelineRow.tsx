@@ -1291,6 +1291,12 @@ function TextRow({
   const { t } = useI18n();
   const host = useChatHost();
   const perfStr = item.perf ? formatPerf(item.perf, t, item.turnDurationMs !== undefined) : '';
+  const localSessionId = useSessionsStore((state) => displayedConversation(state)?.id ?? null);
+  const pluginActionProps = {
+    text: item.text,
+    messageIndex: Number(item.key.split('-')[0]),
+    sessionId: host ? host.sessionId : localSessionId,
+  };
   return (
     <div className="group text-sm">
       <Markdown
@@ -1302,9 +1308,9 @@ function TextRow({
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-          <PluginMessageActions position="left" text={item.text} />
+          <PluginMessageActions position="left" {...pluginActionProps} />
           <CopyButton text={item.text} />
-          <PluginMessageActions position="right" text={item.text} />
+          <PluginMessageActions position="right" {...pluginActionProps} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
           {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
           {item.turnDurationMs !== undefined && (

@@ -6,9 +6,15 @@ import { usePluginSlotsVersion } from './usePluginSlots';
 export function PluginMessageActions({
   position,
   text,
+  messageIndex,
+  sessionId,
 }: {
   position: 'left' | 'right';
   text: string;
+  /** 消息在会话里的绝对下标 */
+  messageIndex: number;
+  /** 当前展示的会话；远程节点视图为远程会话 id */
+  sessionId: string | null;
 }) {
   usePluginSlotsVersion();
   const actions = pluginMessageActions(position);
@@ -19,7 +25,7 @@ export function PluginMessageActions({
         <PluginSlotView
           key={`${entry.pluginId}:${position}`}
           entry={entry}
-          props={{ position, text }}
+          props={{ position, text, messageIndex, sessionId }}
         />
       ))}
     </>
