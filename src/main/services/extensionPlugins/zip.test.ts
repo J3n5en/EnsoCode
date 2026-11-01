@@ -150,6 +150,24 @@ describe('extractZip', () => {
     expect(existsSync(path.join(dest, 'link'))).toBe(false);
   });
 
+  it.skipIf(process.platform === 'win32')('保留 Unix 可执行位', async () => {
+    const zipPath = writeZip(
+      'mode.zip',
+      buildZip([
+        { name: 'bin/tool', data: '#!/bin/sh', method: 0, unixMode: 0o100755 },
+        { name: 'bin/data', data: 'x', method: 8, unixMode: 0o100644 },
+        { name: 'plain', data: 'y', method: 0 },
+      ])
+    );
+    const dest = destDir();
+
+    await extractZip(zipPath, dest);
+
+    expect(statSync(path.join(dest, 'bin/tool')).mode & 0o111).not.toBe(0);
+    expect(statSync(path.join(dest, 'bin/data')).mode & 0o111).toBe(0);
+    expect(statSync(path.join(dest, 'plain')).mode & 0o111).toBe(0);
+  });
+
   it('条目数超过上限时抛错', async () => {
     const zipPath = writeZip(
       'many.zip',
@@ -170,7 +188,7 @@ describe('extractZip', () => {
     );
 
     await expect(extractZip(zipPath, destDir(), { maxEntryBytes: 8 })).rejects.toThrow(
-      /单个条目超过大小限制/
+      /单个条目超过大小限制：big\.txt/
     );
   });
 

@@ -13,6 +13,7 @@ import { extractZip } from './zip';
 export const MANIFEST_FILE = 'enso-plugin.json';
 const MAX_FILES = 5000;
 const MAX_BYTES = 200 * 1024 * 1024;
+const ZIP_LIMITS = { maxEntries: MAX_FILES, maxEntryBytes: MAX_BYTES, maxTotalBytes: MAX_BYTES };
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const SKIPPED = new Set(['.git', '.DS_Store']);
 
@@ -163,7 +164,7 @@ export async function stagePlugin(
       await copyTree(real, staging, { files: 0, bytes: 0 });
     } else if (source.kind === 'zip') {
       await mkdir(staging, { recursive: true });
-      await extractZip(source.path, staging, { maxEntries: MAX_FILES, maxTotalBytes: MAX_BYTES });
+      await extractZip(source.path, staging, ZIP_LIMITS);
       await assertNoSymlinks(staging);
     } else {
       const parsed = parsePluginInstallUrl(source.url);
@@ -178,7 +179,7 @@ export async function stagePlugin(
         maxBytes: MAX_BYTES,
         ...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
       });
-      await extractZip(zipPath, tree, { maxEntries: MAX_FILES, maxTotalBytes: MAX_BYTES });
+      await extractZip(zipPath, tree, ZIP_LIMITS);
       await rm(zipPath, { force: true });
       await assertNoSymlinks(tree);
       scanRoot = await pluginTreeRoot(tree, resolved.subdir);

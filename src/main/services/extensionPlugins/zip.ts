@@ -18,9 +18,11 @@ const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const ZIP64_EXTRA_ID = 0x0001;
 const S_IFMT = 0o170000;
 const S_IFLNK = 0o120000;
+const MADE_BY_UNIX = 3;
 
 interface CentralEntry {
   name: string;
+  madeBy: number;
   flags: number;
   method: number;
   compressedSize: number;
@@ -60,8 +62,12 @@ export async function extractZip(
       continue;
     }
     await mkdir(path.dirname(item.target), { recursive: true });
-    await writeFile(item.target, data);
+    await writeFile(item.target, data, { mode: isExecutable(item.entry) ? 0o755 : 0o644 });
   }
+}
+
+function isExecutable(entry: CentralEntry): boolean {
+  return entry.madeBy >>> 8 === MADE_BY_UNIX && ((entry.externalAttrs >>> 16) & 0o111) !== 0;
 }
 
 async function readZip(zipPath: string): Promise<Buffer> {
@@ -115,6 +121,7 @@ function readCentralDirectory(buf: Buffer, maxEntries: number): CentralEntry[] {
     if (cursor + 46 > cdEnd || buf.readUInt32LE(cursor) !== CENTRAL_DIRECTORY_HEADER) {
       throw new Error('压缩包已损坏');
     }
+    const madeBy = buf.readUInt16LE(cursor + 4);
     const flags = buf.readUInt16LE(cursor + 8);
     const method = buf.readUInt16LE(cursor + 10);
     const compressedSize = buf.readUInt32LE(cursor + 20);
@@ -139,6 +146,7 @@ function readCentralDirectory(buf: Buffer, maxEntries: number): CentralEntry[] {
     assertNoZip64Extra(buf, extraStart, extraStart + extraLength);
     entries.push({
       name: buf.toString('utf8', nameStart, extraStart),
+      madeBy,
       flags,
       method,
       compressedSize,
@@ -177,7 +185,9 @@ function planEntries(
     if (((entry.externalAttrs >>> 16) & S_IFMT) === S_IFLNK) {
       throw new Error('压缩包包含符号链接');
     }
-    if (entry.uncompressedSize > maxEntryBytes) throw new Error('压缩包单个条目超过大小限制');
+    if (entry.uncompressedSize > maxEntryBytes) {
+      throw new Error(`压缩包单个条目超过大小限制：${entry.name}`);
+    }
     if (total > maxTotalBytes - entry.uncompressedSize) {
       throw new Error('压缩包解压后总大小超过限制');
     }
