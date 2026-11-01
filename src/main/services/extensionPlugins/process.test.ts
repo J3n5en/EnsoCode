@@ -103,6 +103,19 @@ describe('PluginProcess', () => {
     await expect(result).resolves.toEqual({ content: 'ok' });
   });
 
+  it('插件日志交给 onLog，级别不合法按 info', async () => {
+    const onLog = vi.fn();
+    const s = setup({ onLog });
+    await readyProcess(s);
+    s.child().reply({ t: 'log', level: 'error', message: 'boom' });
+    s.child().reply({ t: 'log', level: 'nope', message: 'x' });
+    s.child().reply({ t: 'log', level: 'info', message: 42 });
+    expect(onLog.mock.calls).toEqual([
+      ['error', 'boom'],
+      ['info', 'x'],
+    ]);
+  });
+
   it('未知宿主接口直接拒绝，不交给 Main', async () => {
     const handleHostCall = vi.fn(async () => 'host-value');
     const s = setup({ handleHostCall });

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MainToPluginHost, PluginHostToMain } from '@shared/extensionPlugins/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runPluginHost } from './host';
+import { captureConsole, runPluginHost } from './host';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -84,6 +84,23 @@ describe('runPluginHost', () => {
     expect(await h.next((m) => m.t === 'init-error')).toMatchObject({
       message: expect.stringContaining('boom'),
     });
+    expect(await h.next((m) => m.t === 'log')).toMatchObject({
+      level: 'error',
+      message: expect.stringContaining('boom'),
+    });
+  });
+
+  it('处理器抛错时把堆栈写进日志', async () => {
+    const h = harness(`export function activate(enso) {
+      enso.commands.register('bad', async () => { throw new Error('kaput'); });
+    }`);
+    await h.next((m) => m.t === 'ready');
+    h.deliver(call('5', 'command.run', { id: 'bad' }));
+    await h.next((m) => m.t === 'res' && m.id === '5');
+    expect(await h.next((m) => m.t === 'log')).toMatchObject({
+      level: 'error',
+      message: expect.stringMatching(/command\.run[\s\S]*kaput/),
+    });
   });
 
   it('未注册的处理器返回 NOT_FOUND', async () => {
@@ -130,6 +147,25 @@ describe('runPluginHost', () => {
     expect(await h.next((m) => m.t === 'res' && m.id === '4')).toMatchObject({
       ok: true,
       value: { content: 'aborted:true' },
+    });
+  });
+});
+
+describe('captureConsole', () => {
+  it('console 输出按级别转成日志消息', () => {
+    const sent: PluginHostToMain[] = [];
+    const noop = (..._args: unknown[]) => {};
+    const target = { log: noop, info: noop, warn: noop, error: noop, debug: noop };
+    captureConsole(target, (m) => sent.push(m));
+    target.log('a', 1, { b: 2 });
+    target.warn('w');
+    target.error(new Error('e'));
+    expect(sent[0]).toEqual({ t: 'log', level: 'info', message: 'a 1 {"b":2}' });
+    expect(sent[1]).toEqual({ t: 'log', level: 'warn', message: 'w' });
+    expect(sent[2]).toMatchObject({
+      t: 'log',
+      level: 'error',
+      message: expect.stringContaining('Error: e'),
     });
   });
 });

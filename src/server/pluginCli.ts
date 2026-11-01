@@ -13,6 +13,7 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   enable <id> / disable <id>   启用 / 停用
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
   uninstall <id>               卸载并删除插件数据
+  logs <id>                    插件进程日志末尾（console 输出与异常）
   config <id>                  查看配置项（密钥只显示是否已设置）
   config <id> key=value ...    设置；key= 留空则在终端里输入（不进 shell 历史）
            [--unset key]       清除某项`;
@@ -57,7 +58,8 @@ export function formatPluginList(plugins: readonly ExtensionPluginSummary[]): st
   return plugins
     .map((p) => {
       const pending = p.pendingVersion ? `  待同意更新 ${p.pendingVersion}` : '';
-      return `  ${p.id}  ${p.name} ${p.version}  ${p.state}${pending}`;
+      const error = p.lastError ? `\n      最近错误：${p.lastError.message.split('\n')[0]}` : '';
+      return `  ${p.id}  ${p.name} ${p.version}  ${p.state}${pending}${error}`;
     })
     .join('\n');
 }
@@ -111,6 +113,11 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
   if (action === 'list') {
     const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'list' }));
     deps.log(formatPluginList((reply.plugins as ExtensionPluginSummary[]) ?? []));
+    return;
+  }
+  if (action === 'logs' && target) {
+    const reply = ensureOk(await deps.call({ cmd: 'plugin', action: 'logs', id: target }));
+    deps.log(String(reply.text ?? '') || '（暂无日志）');
     return;
   }
   if (action === 'config' && target) {

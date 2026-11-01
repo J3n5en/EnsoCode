@@ -193,6 +193,48 @@ describe('ExtensionPluginService', () => {
     expect(service.toolsForSpawn()).toEqual([]);
   });
 
+  describe('日志与最近错误', () => {
+    const noisy = `export function activate(enso) {
+      enso.commands.register('bad', async () => { throw new Error('kaput'); });
+    }`;
+    const withCommand = () =>
+      manifest({ permissions: [], contributes: { commands: [{ id: 'bad', title: 'Bad' }] } });
+
+    it('处理器异常进日志，最近错误出现在列表里', async () => {
+      await install({ 'enso-plugin.json': withCommand(), 'main.mjs': noisy });
+      service.setEnabled('example.demo', true);
+      const call = { pluginId: 'example.demo', sessionId: null, projectRoot: null } as const;
+      await expect(
+        service.callUi({ ...call, method: 'command.run', payload: { id: 'bad' } })
+      ).rejects.toThrow('kaput');
+      await vi.waitFor(() => expect(service.logs('example.demo')).toContain('kaput'));
+      expect(service.list()[0]?.lastError?.message).toContain('kaput');
+    });
+
+    it('崩溃停用时把原因写进登记，重启后仍可见；重新启用清掉', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      service.setEnabled('example.demo', true);
+      service.recordError('example.demo', 'segfault');
+      for (let i = 0; i < 3; i++) service.recordCrash('example.demo');
+      expect(readRegistry(root).plugins[0]?.lastError?.message).toBe('segfault');
+      service.setEnabled('example.demo', true);
+      expect(service.list()[0]?.lastError).toBeUndefined();
+      expect(readRegistry(root).plugins[0]?.lastError).toBeUndefined();
+    });
+
+    it('日志只返回末尾，卸载时删除', async () => {
+      await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+      for (let i = 0; i < 2000; i++)
+        service.appendLog('example.demo', 'info', `line-${i}-${'x'.repeat(40)}`);
+      const tail = service.logs('example.demo', 4096);
+      expect(tail.length).toBeLessThanOrEqual(4096);
+      expect(tail).toContain('line-1999');
+      expect(tail).not.toContain('line-0-');
+      await service.uninstall('example.demo');
+      expect(service.logs('example.demo')).toBe('');
+    });
+  });
+
   it('暂存令牌只能提交一次', async () => {
     const preview = await service.stage({
       kind: 'dir',

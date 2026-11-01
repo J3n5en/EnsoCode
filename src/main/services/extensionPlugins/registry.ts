@@ -72,10 +72,17 @@ export function readRegistry(root: string): RegistryFile {
   for (const item of list) {
     if (!isPluginRecord(item) || seen.has(item.id)) continue;
     seen.add(item.id);
-    plugins.push(item);
+    if (isLastError(item.lastError)) plugins.push(item);
+    else {
+      const { lastError: _bad, ...rest } = item;
+      plugins.push(rest);
+    }
   }
   return { version: 1, plugins };
 }
+
+const isLastError = (v: unknown) =>
+  v === undefined || (isRecord(v) && typeof v.at === 'number' && typeof v.message === 'string');
 
 export function writeRegistry(root: string, file: RegistryFile): void {
   mkdirSync(root, { recursive: true });

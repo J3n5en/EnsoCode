@@ -1642,6 +1642,8 @@ const electronAPI = {
       id: string
     ): Promise<{ ok: true; fields: ExtensionPluginConfigField[] } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_CONFIG_GET, id),
+    logs: (id: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_LOGS, id),
     /** 省略的键不变，null 清除 */
     configSet: (
       id: string,

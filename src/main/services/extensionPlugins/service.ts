@@ -1,6 +1,10 @@
 import {
+  appendFileSync,
+  closeSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -39,7 +43,7 @@ import {
   stagePlugin,
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
-import { PluginProcess, pluginError } from './process';
+import { type PluginLogLevel, PluginProcess, pluginError } from './process';
 import { readRegistry, writeRegistry } from './registry';
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: 清单里的占位符字面量
@@ -57,6 +61,9 @@ const BREAKER_FAILURES = 5;
 const BREAKER_COOLDOWN_MS = 30_000;
 const MAX_CONFIG_VALUE_CHARS = 4096;
 const MAX_PRESET_TEXT_BYTES = 256 * 1024;
+const MAX_LOG_BYTES = 1024 * 1024;
+const DEFAULT_LOG_TAIL_BYTES = 64 * 1024;
+const MAX_ERROR_CHARS = 2000;
 
 export interface ExtensionPluginServiceOptions {
   root: string;
@@ -100,6 +107,8 @@ export class ExtensionPluginService {
   private readonly processes = new Map<string, PluginProcess>();
   private readonly staged = new Map<string, { staged: StagedPlugin; at: number }>();
   private readonly crashes = new Map<string, number[]>();
+  /** 进程内最近一条错误日志；崩溃停用时写进登记 */
+  private readonly recentErrors = new Map<string, { at: number; message: string }>();
   private readonly uiCalls = new Map<
     string,
     { stamps: number[]; failures: number; openUntil: number }
@@ -153,6 +162,7 @@ export class ExtensionPluginService {
           ...(record.pending && pending
             ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
             : {}),
+          ...lastErrorField(record.lastError ?? this.recentErrors.get(record.id)),
         },
       ];
     });
@@ -245,6 +255,7 @@ export class ExtensionPluginService {
 
   setEnabled(id: string, enabled: boolean): { ok: boolean; error?: string } {
     if (!enabled) this.stopProcess(id);
+    else this.recentErrors.delete(id);
     return this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
   }
 
@@ -275,6 +286,9 @@ export class ExtensionPluginService {
     rmSync(join(this.options.root, 'packages', id), { recursive: true, force: true });
     rmSync(pluginDataPath(this.options.root, id), { recursive: true, force: true });
     rmSync(this.configPath(id), { force: true });
+    rmSync(this.logPath(id), { force: true });
+    rmSync(`${this.logPath(id)}.1`, { force: true });
+    this.recentErrors.delete(id);
     for (const key of this.loaded.keys()) if (key.startsWith(`${id}/`)) this.loaded.delete(key);
     return { ok: true };
   }
@@ -558,7 +572,51 @@ export class ExtensionPluginService {
     if (recent.length < CRASH_LIMIT) return;
     this.crashes.delete(id);
     this.stopProcess(id);
-    this.applyAndPersist(id, { type: 'crash' });
+    const result = this.apply(id, { type: 'crash' });
+    if (!result.ok) return;
+    const index = this.records.findIndex((r) => r.id === id);
+    const record = this.records[index];
+    if (record)
+      this.records[index] = {
+        ...record,
+        lastError: this.recentErrors.get(id) ?? { at: now, message: '插件进程反复异常退出' },
+      };
+    this.persist();
+  }
+
+  /** 插件进程的输出与异常，落在 Main 私有目录；超过 1MB 轮转一次 */
+  appendLog(id: string, level: PluginLogLevel, message: string): void {
+    const path = this.logPath(id);
+    try {
+      mkdirSync(join(this.options.root, 'logs'), { recursive: true });
+      try {
+        if (statSync(path).size > MAX_LOG_BYTES) renameSync(path, `${path}.1`);
+      } catch {}
+      appendFileSync(path, `${new Date().toISOString()} [${level}] ${message}\n`, { mode: 0o600 });
+    } catch {}
+    if (level === 'error') this.recordError(id, message);
+  }
+
+  recordError(id: string, message: string): void {
+    this.recentErrors.set(id, { at: Date.now(), message: message.slice(0, MAX_ERROR_CHARS) });
+  }
+
+  /** 日志末尾；没有日志返回空串 */
+  logs(id: string, maxBytes = DEFAULT_LOG_TAIL_BYTES): string {
+    let fd: number | null = null;
+    try {
+      const size = statSync(this.logPath(id)).size;
+      const length = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(length);
+      fd = openSync(this.logPath(id), 'r');
+      readSync(fd, buffer, 0, length, size - length);
+      const text = buffer.toString('utf8');
+      return length < size ? text.slice(text.indexOf('\n') + 1) : text;
+    } catch {
+      return '';
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
   }
 
   dispose(): void {
@@ -642,7 +700,11 @@ export class ExtensionPluginService {
       },
       handleHostCall: (api, args, invocationId) =>
         this.gate.handle(manifest.id, api, args, invocationId),
-      onExit: ({ unexpected }) => onExit(unexpected),
+      onExit: ({ unexpected }) => {
+        if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
+        onExit(unexpected);
+      },
+      onLog: (level, message) => this.appendLog(manifest.id, level, message),
     });
   }
 
@@ -684,6 +746,10 @@ export class ExtensionPluginService {
 
   private configPath(id: string): string {
     return join(this.options.root, 'config', `${id}.json`);
+  }
+
+  private logPath(id: string): string {
+    return join(this.options.root, 'logs', `${id}.log`);
   }
 
   private load(id: string, dir: string): ExtensionPluginManifest | null {
@@ -751,6 +817,9 @@ export class ExtensionPluginService {
     }
   }
 }
+
+const lastErrorField = (lastError: { at: number; message: string } | undefined) =>
+  lastError ? { lastError: { at: lastError.at, message: lastError.message } } : {};
 
 function presetSelection(
   manifest: ExtensionPluginManifest,

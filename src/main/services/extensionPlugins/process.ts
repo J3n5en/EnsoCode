@@ -22,6 +22,7 @@ export interface PluginProcessDeps {
     invocationId: string | undefined
   ): Promise<unknown>;
   onExit(info: { unexpected: boolean }): void;
+  onLog?(level: PluginLogLevel, message: string): void;
   idleMs?: number;
   readyTimeoutMs?: number;
 }
@@ -37,6 +38,9 @@ const DEFAULT_IDLE_MS = 5 * 60_000;
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+export type PluginLogLevel = 'info' | 'warn' | 'error';
+const LOG_LEVELS: readonly unknown[] = ['info', 'warn', 'error'];
 
 /** 一个插件一个进程：按需拉起、闲置退出；超时先 cancel 再失败，晚到结果丢弃 */
 export class PluginProcess {
@@ -173,6 +177,12 @@ export class PluginProcess {
   }
 
   private onMessage(message: Record<string, unknown>): void {
+    if (message.t === 'log') {
+      if (typeof message.message !== 'string') return;
+      const level = LOG_LEVELS.includes(message.level) ? (message.level as PluginLogLevel) : 'info';
+      this.deps.onLog?.(level, message.message);
+      return;
+    }
     if (message.t === 'res' && typeof message.id === 'string') {
       const entry = this.pending.get(message.id);
       if (!entry) return;

@@ -11,6 +11,7 @@ export type PluginControlCommand =
   | { cmd: 'plugin'; action: (typeof PLUGIN_TOKEN_ACTIONS)[number]; token: string }
   | { cmd: 'plugin'; action: (typeof PLUGIN_ID_ACTIONS)[number]; id: string }
   | { cmd: 'plugin'; action: 'config-get'; id: string }
+  | { cmd: 'plugin'; action: 'logs'; id: string }
   | { cmd: 'plugin'; action: 'config-set'; id: string; values: Record<string, string | null> };
 
 export type ControlCommand =
@@ -30,9 +31,9 @@ function parsePluginCommand(
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   };
   if (action === 'list') return { cmd: 'plugin', action };
-  if (action === 'config-get') {
+  if (action === 'config-get' || action === 'logs') {
     const id = text('id');
-    return id ? { cmd: 'plugin', action, id } : { error: 'plugin config-get requires id' };
+    return id ? { cmd: 'plugin', action, id } : { error: `plugin ${action} requires id` };
   }
   if (action === 'config-set') {
     const id = text('id');

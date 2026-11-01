@@ -98,6 +98,11 @@ export function registerExtensionPluginHandlers(): void {
     return plugins().setConfig(id, patch);
   });
 
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LOGS, (_e, id: unknown) => {
+    if (!isId(id)) return { ok: false, error: '参数不合法' };
+    return { ok: true, text: plugins().logs(id) };
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_CALL, async (e, raw: unknown) => {
     if (
       !isRecord(raw) ||

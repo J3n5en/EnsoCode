@@ -28,6 +28,7 @@ function deps(answer = true) {
   const call = vi.fn(async (command: Record<string, unknown>) => {
     if (command.action === 'stage') return { ok: true, preview };
     if (command.action === 'list') return { ok: true, plugins: [] };
+    if (command.action === 'logs') return { ok: true, text: 'line-a\nline-b\n' };
     if (command.action === 'config-get')
       return {
         ok: true,
@@ -60,6 +61,25 @@ function deps(answer = true) {
 }
 
 describe('enso-server plugin', () => {
+  it('logs：打印插件日志末尾', async () => {
+    const { call, out, deps: d } = deps();
+    await runPluginCommand(['logs', 'demo.hello'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'logs', id: 'demo.hello' });
+    expect(out.join('\n')).toContain('line-b');
+  });
+
+  it('列表里带上最近错误', () => {
+    const summary = {
+      id: 'demo.hello',
+      name: 'Hello',
+      version: '1.0.0',
+      state: 'crashed',
+      lastError: { at: 1, message: 'Error: kaput\n    at x' },
+    } as ExtensionPluginSummary;
+    expect(formatPluginList([summary])).toContain('Error: kaput');
+    expect(formatPluginList([summary])).not.toContain('at x');
+  });
+
   it('安装预览列出权限、网络域名、工具与警告', () => {
     const text = formatInstallPreview(preview);
     for (const part of ['demo.hello', '1.0.0', 'agent.tool', 'api.example.com', 'greet', 'w1'])

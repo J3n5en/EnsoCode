@@ -895,6 +895,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_DRAFT_RESPONSE: excluded('Enso 插件草稿请求的回包。'),
   EXTENSION_PLUGINS_CONFIG_GET: excluded('Enso 插件配置项读取：密钥只报告是否已设置。'),
   EXTENSION_PLUGINS_CONFIG_SET: excluded('Enso 插件配置项写入，Main 私有文件保存。'),
+  EXTENSION_PLUGINS_LOGS: excluded('Enso 插件进程日志末尾，只给本机界面。'),
 } satisfies Record<keyof typeof IPC_CHANNELS, CoverageDisposition>;
 
 export const AUTHORITATIVE_COVERAGE_SOURCES = {

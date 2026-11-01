@@ -4,7 +4,7 @@ import type {
   ExtensionPluginSummary,
 } from '@shared/extensionPlugins/types';
 import type { InstalledPluginInfo, PluginComponentSummary, PluginEntry } from '@shared/types';
-import { ChevronRight, Puzzle, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { ChevronRight, FileText, Puzzle, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -98,11 +98,38 @@ function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
 }
 
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
+function ExtensionPluginLogs({ pluginId }: { pluginId: string }) {
+  const { t } = useI18n();
+  const [text, setText] = React.useState<string | null>(null);
+  const load = React.useCallback(async () => {
+    const result = await window.electronAPI.extensionPlugins.logs(pluginId);
+    setText(result.ok ? result.text : result.error);
+  }, [pluginId]);
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm">{t('Plugin logs')}</p>
+        <Button size="icon" variant="ghost" aria-label={t('Refresh')} onClick={() => void load()}>
+          <RefreshCw className="size-4" />
+        </Button>
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-muted-foreground text-xs">
+        {text === null ? '' : text || t('No logs yet')}
+      </pre>
+    </div>
+  );
+}
+
+/** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
 function ExtensionPluginsSection() {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
   const [configuring, setConfiguring] = React.useState<string | null>(null);
+  const [viewingLogs, setViewingLogs] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
@@ -264,6 +291,11 @@ function ExtensionPluginsSection() {
                   </Badge>
                 )}
               </p>
+              {plugin.lastError && (
+                <p className="line-clamp-2 break-all font-mono text-destructive text-xs">
+                  {plugin.lastError.message}
+                </p>
+              )}
               {plugin.pendingVersion && (
                 <p className="text-muted-foreground text-xs">
                   {t('{{version}} asks for more and is waiting for approval', {
@@ -291,6 +323,15 @@ function ExtensionPluginsSection() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={t('Plugin logs')}
+                title={t('Plugin logs')}
+                onClick={() => setViewingLogs((id) => (id === plugin.id ? null : plugin.id))}
+              >
+                <FileText className="size-4" />
+              </Button>
               {plugin.configurable && (
                 <Button
                   size="icon"
@@ -318,6 +359,7 @@ function ExtensionPluginsSection() {
             </div>
           </div>
           {configuring === plugin.id && <ExtensionPluginConfigForm pluginId={plugin.id} />}
+          {viewingLogs === plugin.id && <ExtensionPluginLogs pluginId={plugin.id} />}
         </div>
       ))}
     </div>

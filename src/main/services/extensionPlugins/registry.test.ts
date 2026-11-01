@@ -56,6 +56,25 @@ describe('插件登记表', () => {
     expect(readRegistry(root).plugins.map((p) => p.id)).toEqual(['example.demo']);
   });
 
+  it('lastError 不合法时丢掉该字段，记录保留', () => {
+    const root = mkdtempSync(join(tmpdir(), 'registry-'));
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { ...valid, lastError: { at: 1, message: 'boom' } },
+          { ...valid, id: 'a.c', lastError: { at: 'x', message: 1 } },
+        ],
+      })
+    );
+    const plugins = readRegistry(root).plugins;
+    expect(plugins[0]?.lastError).toEqual({ at: 1, message: 'boom' });
+    expect(plugins[1]?.id).toBe('a.c');
+    expect(plugins[1]?.lastError).toBeUndefined();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('同 id 重复时只保留第一条', () => {
     const root = tempRoot();
     writeFileSync(

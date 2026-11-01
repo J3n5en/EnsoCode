@@ -22,6 +22,8 @@ export interface ExtensionPluginSummary {
   presets: { id: string; name: string; skills: number; mcpServers: number; instruction: boolean }[];
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
+  /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */
+  lastError?: { at: number; message: string };
 }
 
 /** 设置界面看到的配置项：密钥只报告是否已设置，不回显 */

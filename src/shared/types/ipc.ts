@@ -526,6 +526,8 @@ export const IPC_CHANNELS = {
   /** 插件配置项：读（密钥不回显）与写；只在本机界面或服务端 CLI 上做 */
   EXTENSION_PLUGINS_CONFIG_GET: 'extension-plugins:config-get',
   EXTENSION_PLUGINS_CONFIG_SET: 'extension-plugins:config-set',
+  /** 插件进程日志末尾；只在本机界面或服务端 CLI 上看 */
+  EXTENSION_PLUGINS_LOGS: 'extension-plugins:logs',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

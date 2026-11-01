@@ -35,6 +35,41 @@ interface TriggerHandlers {
 
 const codedError = (code: string, message: string) => Object.assign(new Error(message), { code });
 
+type LogLevel = Extract<PluginHostToMain, { t: 'log' }>['level'];
+const MAX_LOG_CHARS = 8 * 1024;
+
+const formatLogArg = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.stack ?? String(value);
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const logMessage = (level: LogLevel, args: unknown[]): PluginHostToMain => ({
+  t: 'log',
+  level,
+  message: args.map(formatLogArg).join(' ').slice(0, MAX_LOG_CHARS),
+});
+
+/** 插件里的 console 输出转给 Main 落盘；桌面端子进程的 stdout 没人看 */
+export function captureConsole(
+  target: Pick<Console, 'log' | 'info' | 'warn' | 'error' | 'debug'>,
+  send: (message: PluginHostToMain) => void
+): void {
+  const levels: Record<'log' | 'info' | 'warn' | 'error' | 'debug', LogLevel> = {
+    log: 'info',
+    info: 'info',
+    debug: 'info',
+    warn: 'warn',
+    error: 'error',
+  };
+  for (const [method, level] of Object.entries(levels) as [keyof typeof levels, LogLevel][])
+    target[method] = (...args: unknown[]) => send(logMessage(level, args));
+}
+
 function toErrorShape(error: unknown): PluginErrorShape {
   const code = (error as { code?: unknown })?.code;
   return {
@@ -172,6 +207,7 @@ export function runPluginHost(transport: HostTransport): void {
       );
       transport.send({ t: 'res', id: message.id, ok: true, value });
     } catch (error) {
+      transport.send(logMessage('error', [`${message.method} 失败：`, error]));
       transport.send({ t: 'res', id: message.id, ok: false, error: toErrorShape(error) });
     } finally {
       invocations.delete(invocation.id);
@@ -197,6 +233,7 @@ export function runPluginHost(transport: HostTransport): void {
         },
       });
     } catch (error) {
+      transport.send(logMessage('error', ['activate 失败：', error]));
       transport.send({
         t: 'init-error',
         message: error instanceof Error ? error.message : String(error),

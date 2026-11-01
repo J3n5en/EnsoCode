@@ -13,6 +13,8 @@ export interface PluginRecord {
   installedAt: number;
   /** 更新扩大了授权、等用户同意的新版本；期间旧版本照常运行 */
   pending?: { version: string; dir: string; grant: PluginGrant };
+  /** 最近一次崩溃停用的原因；重新启用时清掉 */
+  lastError?: { at: number; message: string };
 }
 
 export type PluginAction =
@@ -29,7 +31,8 @@ export function applyPluginAction(
 ): PluginRecord | { error: string } {
   switch (action.type) {
     case 'enable':
-      return record.state === 'enabled' ? record : { ...record, state: 'enabled' };
+      if (record.state === 'enabled') return record;
+      return { ...withoutLastError(record), state: 'enabled' };
     case 'disable':
       return { ...record, state: 'disabled' };
     case 'crash':
@@ -50,4 +53,9 @@ export function applyPluginAction(
       return rest;
     }
   }
+}
+
+function withoutLastError(record: PluginRecord): PluginRecord {
+  const { lastError: _cleared, ...rest } = record;
+  return rest;
 }

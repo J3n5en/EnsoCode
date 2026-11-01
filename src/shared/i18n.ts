@@ -1656,6 +1656,8 @@ export const zhTranslations: Record<string, string> = {
   Plugins: '插件',
   'Install from URL': '从链接安装',
   'Plugin command failed': '插件命令执行失败',
+  'Plugin logs': '插件日志',
+  'No logs yet': '暂无日志',
   Commands: '命令',
   '{{count}} enabled': '已启用 {{count}} 个',
   'No supported components': '没有可用组件',

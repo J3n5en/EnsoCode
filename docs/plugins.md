@@ -11,7 +11,8 @@
 - 服务端：`enso-server plugin install <目录、zip 或 http(s) 链接>`，确认后 `enso-server plugin enable <id>`。
 - 新装的插件默认停用，需要手动启用。
 - 同 id 再装一次按更新处理。权限没有变大就直接换新版；权限变大则旧版继续运行，需要 `enso-server plugin approve <id>`（或设置页同意）才切到新版，`reject` 则留在旧版。
-- 10 分钟内非预期崩溃 3 次，插件会被自动停用，状态变成 `crashed`，重新启用即可。
+- 10 分钟内非预期崩溃 3 次，插件会被自动停用，状态变成 `crashed`，重新启用即可。停用原因会显示在设置页和 `enso-server plugin list` 里。
+- 日志：`main.mjs` 里的 `console.*` 输出、处理器抛出的异常和进程意外退出都会记下来，在设置页插件行的日志按钮或 `enso-server plugin logs <id>` 里看。单个日志文件超过 1MB 轮转一次，卸载时删除。
 - 有配置项的插件：设置页插件行的齿轮按钮，或 `enso-server plugin config <id>`（查看）/ `enso-server plugin config <id> key=value`（设置；`key=` 留空会在终端里提示输入，不进 shell 历史；`--unset key` 清除）。
 
 ## 清单 `enso-plugin.json`
