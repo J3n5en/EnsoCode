@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   attachBackgroundCommandHooks,
   BackgroundTaskManager,
@@ -400,6 +400,35 @@ describe('BackgroundTaskManager', () => {
     await until(() => ended.includes(byUser));
     expect(notified).toHaveLength(1);
     expect(notified[0]).toContain('do not restart');
+  });
+
+  it('kill 后进程仍不收口（Windows 孙进程占着 stdio）：两次宽限后强制结束，不占配额不锁工作区（#185）', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, ended, notified } = makeManager();
+      const kill = vi.fn();
+      const taskId = manager.adopt(
+        'root',
+        {
+          output: () => '',
+          pipe: () => {},
+          done: new Promise<number | null>(() => {}),
+          kill,
+        },
+        { command: 'python -m http.server', startedAt: Date.now() }
+      );
+      expect(manager.stop(taskId, true)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(kill).toHaveBeenCalledTimes(2);
+      expect(manager.snapshot('root')[0]?.status).toBe('running');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(manager.snapshot('root')[0]?.status).toBe('failed');
+      expect(ended).toEqual([taskId]);
+      expect(manager.hasRunningInWorkspace(['root'])).toBe(false);
+      expect(notified[0]).toContain('do not restart');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('task_output 阻塞时插话提前返回，任务继续跑，结束后照常通知', async () => {

@@ -11,6 +11,7 @@ import {
   ForegroundCommand,
   ForegroundDetachedError,
 } from './foregroundCommand';
+import { killProcessTree } from './killTree';
 
 /** 内存缓冲上限（超出截头保尾；磁盘 log 始终全量） */
 const MAX_BUFFER = 200_000;
@@ -152,20 +153,12 @@ export class BackgroundTaskManager {
     }
   ): string {
     const taskId = this.reserveId();
-    // detached：独立进程组，kill 时整棵树一起清
+    // detached：POSIX 下是独立进程组；kill 时整棵树一起清（Windows 走 taskkill /T）
     const child = spawnBackground(command, cwd, spawnOpts);
-    const pid = child.pid;
     const task = this.register(sessionId, taskId, spawnOpts?.displayCommand ?? command, {
       details: spawnOpts?.details,
       finalize: spawnOpts?.finalize,
-      kill: (signal) => {
-        try {
-          if (pid) process.kill(-pid, signal);
-          else child.kill(signal);
-        } catch {
-          child.kill(signal);
-        }
-      },
+      kill: (signal) => killProcessTree(child, signal),
     });
     child.stdout?.on('data', (chunk: Buffer) => this.append(task, chunk));
     child.stderr?.on('data', (chunk: Buffer) => this.append(task, chunk));
@@ -465,15 +458,25 @@ export class BackgroundTaskManager {
     };
   }
 
-  /** 终止：SIGTERM 整个进程组，宽限后 SIGKILL */
+  /**
+   * 终止：SIGTERM 整个进程树，宽限后 SIGKILL；再不收口（如孙进程脱离但仍占着 stdio，
+   * close 永不到）就按失败强制结束，免得僵尸任务占配额、锁工作区。
+   */
   stop(taskId: string, byUser = false): boolean {
     const task = this.tasks.get(taskId);
     if (task?.info.status !== 'running') return false;
     if (byUser) task.killedByUser = true;
     else task.consumed = true; // 模型自己停的：kill 回执即知情，不再通知
+    const stillRunning = () => task.info.status === 'running' && !task.settling;
     task.kill('SIGTERM');
     setTimeout(() => {
-      if (task.info.status === 'running') task.kill('SIGKILL');
+      if (!stillRunning()) return;
+      task.kill('SIGKILL');
+      setTimeout(() => {
+        if (!stillRunning()) return;
+        task.output += '\n[process did not exit after SIGKILL; marked as stopped]';
+        void this.settle(task, 'failed');
+      }, KILL_GRACE_MS).unref?.();
     }, KILL_GRACE_MS).unref?.();
     return true;
   }
