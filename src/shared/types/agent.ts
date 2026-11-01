@@ -211,15 +211,8 @@ export interface VirtualSpawnConfig {
 export const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-/** 审批档位：supervised 全审 / auto-edits 免文件 / assistant 助手代审 / full 全放行 /
- *  unattended 无人值守（需要确认的动作直接拒绝，绝不阻塞等人） */
-export const APPROVAL_MODES = [
-  'supervised',
-  'auto-edits',
-  'full',
-  'assistant',
-  'unattended',
-] as const;
+/** 审批档位：supervised 全审 / auto-edits 免文件 / assistant 助手代审 / full 全放行 */
+export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full', 'assistant'] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 /** 审批请求的操作类别 */

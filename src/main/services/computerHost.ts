@@ -331,6 +331,7 @@ export const computerHost = new ComputerHost(
     authorizer: new AppAuthorizer({
       file: () => path.join(app.getPath('userData'), 'computer', 'allowed-apps.json'),
       prompt: promptComputerAppAccess,
+      allowAll: readComputerAllowAllApps,
     }),
     feedback: composeFeedback(
       createVirtualCursor(),
@@ -345,6 +346,14 @@ function readComputerPreviewEnabled(): boolean {
     readSettings()?.['enso-settings'] as { state?: { computerPreview?: boolean } } | undefined
   )?.state;
   return state?.computerPreview !== false;
+}
+
+/** 缺省关闭：开启后 computer 操作任何 app 都不再询问 */
+function readComputerAllowAllApps(): boolean {
+  const state = (
+    readSettings()?.['enso-settings'] as { state?: { computerAllowAllApps?: boolean } } | undefined
+  )?.state;
+  return state?.computerAllowAllApps === true;
 }
 
 /** 指针画在画中画里；屏幕上只在真能看到目标窗口时画，免得盖在用户正在用的 app 上 */

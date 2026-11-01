@@ -58,7 +58,6 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
   'auto-edits': '自动接受编辑',
   full: '完全放行',
   assistant: '助手代审',
-  unattended: '无人值守（需确认即拒绝）',
 };
 
 // 与 SessionConfigSheet 同一套档位文案，保持两处选择器观感一致

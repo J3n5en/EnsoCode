@@ -17,7 +17,6 @@ import {
   Gauge,
   Hourglass,
   type LucideIcon,
-  Moon,
   Package,
   Repeat,
   Settings2,
@@ -122,7 +121,6 @@ const APPROVAL_LABEL_KEYS: Record<ApprovalMode, string> = {
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
   assistant: 'Assistant approval',
-  unattended: 'Unattended',
 };
 
 const APPROVAL_ICONS: Record<ApprovalMode, LucideIcon> = {
@@ -130,7 +128,6 @@ const APPROVAL_ICONS: Record<ApprovalMode, LucideIcon> = {
   'auto-edits': Shield,
   full: ShieldOff,
   assistant: Sparkles,
-  unattended: Moon,
 };
 
 /** 设置弹层里代表每段的 icon（全部 13 段恒有值），`approval` 的 icon 随档位变化；

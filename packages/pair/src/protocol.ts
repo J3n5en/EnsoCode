@@ -12,14 +12,8 @@ export interface AttachedImage {
   mimeType: string;
 }
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-/** pair 协议审批档：与桌面 APPROVAL_MODES 同集合（含 unattended），两边漂移由测试守住 */
-export const APPROVAL_MODES = [
-  'supervised',
-  'auto-edits',
-  'full',
-  'assistant',
-  'unattended',
-] as const;
+/** pair 协议审批档：与桌面 APPROVAL_MODES 同集合，两边漂移由测试守住 */
+export const APPROVAL_MODES = ['supervised', 'auto-edits', 'full', 'assistant'] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 

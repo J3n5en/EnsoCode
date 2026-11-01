@@ -1,7 +1,9 @@
 import type { ComputerAllowedApp } from '@shared/computer/types';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { useSettingsStore } from '@/stores/settings';
 
 function appKey(app: ComputerAllowedApp): string {
   return app.bundleId || app.path;
@@ -11,6 +13,8 @@ function appKey(app: ComputerAllowedApp): string {
 export function ComputerAllowedApps() {
   const { t } = useI18n();
   const [apps, setApps] = useState<ComputerAllowedApp[] | null>(null);
+  const allowAll = useSettingsStore((state) => state.computerAllowAllApps);
+  const setAllowAll = useSettingsStore((state) => state.setComputerAllowAllApps);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +39,17 @@ export function ComputerAllowedApps() {
           'The first time the AI clicks or types in an app, EnsoCode asks you. Apps you always allow are listed here; it can then read everything in their windows.'
         )}
       </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-medium text-sm">{t('Allow all apps')}</div>
+          <p className="text-muted-foreground text-xs">
+            {t(
+              'The AI can click, type and read in any app without asking. It can see everything in their windows, including chats and passwords.'
+            )}
+          </p>
+        </div>
+        <Switch checked={allowAll} onCheckedChange={setAllowAll} />
+      </div>
       {apps && apps.length === 0 ? (
         <p className="text-muted-foreground text-xs">{t('No apps are always allowed yet.')}</p>
       ) : null}

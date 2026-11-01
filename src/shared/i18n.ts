@@ -1720,6 +1720,9 @@ export const zhTranslations: Record<string, string> = {
   'Grant Computer permissions': '授权电脑操控权限',
   'Show permission guide': '打开权限引导',
   'Apps the AI may control': 'AI 可操作的应用',
+  'Allow all apps': '允许所有应用',
+  'The AI can click, type and read in any app without asking. It can see everything in their windows, including chats and passwords.':
+    'AI 操作任何应用都不再询问，可点击、输入并读取所有应用窗口里的内容，包括聊天记录和密码等。',
   'Show the app being operated': '显示正在操作的应用',
   'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.':
     'AI 在后台操作某个应用时，用一个小浮窗实时显示这个应用的画面，可随时关掉。',
@@ -1908,10 +1911,6 @@ export const zhTranslations: Record<string, string> = {
   'Full access': '完全放行',
   'Run everything without asking': '所有操作不经确认直接执行',
   'Assistant approval': '助手代审',
-  Unattended: '无人值守',
-  'Never asks: actions that need approval are rejected immediately':
-    '从不询问：需要确认的动作直接拒绝',
-  'Opposite of Full access: never asks, rejects instead': '与「完全放行」相反：从不询问，直接拒绝',
   'Assistant reviewing…': '代审中…',
   'A configured model reviews each action first': '由设置中的模型先审每一步操作',
   'Select an assistant approval model in Settings first': '请先在设置里选择助手代审模型',

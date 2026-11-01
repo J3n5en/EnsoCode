@@ -233,12 +233,12 @@ describe('手机命令白名单', () => {
     );
   });
 
-  it('spawn 校验审批档：五档全收，不认识的值拒（否则下游静默丢弃＝档位变宽）', () => {
+  it('spawn 校验审批档：四档全收，不认识的值拒（否则下游静默丢弃＝档位变宽）', () => {
     const base = { type: 'spawn', sessionId: 's', projectId: 'p', providerId: 'pr', modelId: 'm' };
     for (const mode of APPROVAL_MODES) {
       expect(parsePhoneCommand({ ...base, approvalMode: mode }).ok, mode).toBe(true);
     }
-    expect(parsePhoneCommand({ ...base, approvalMode: 'unattended2' }).ok).toBe(false);
+    expect(parsePhoneCommand({ ...base, approvalMode: 'auto-edit' }).ok).toBe(false);
     expect(parsePhoneCommand({ ...base, approvalMode: 1 }).ok).toBe(false);
   });
 

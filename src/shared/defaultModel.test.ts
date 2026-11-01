@@ -315,9 +315,6 @@ describe('defaultApprovalMode', () => {
     expect(defaultApprovalMode(reviewer, providers, ready(), 'supervised')).toBe('supervised');
     expect(defaultApprovalMode(reviewer, providers, ready(), 'auto-edits')).toBe('auto-edits');
     expect(defaultApprovalMode(reviewer, providers, ready(), 'full')).toBe('full');
-    // 最严的档不能被兜底成最宽的档
-    expect(defaultApprovalMode(reviewer, providers, ready(), 'unattended')).toBe('unattended');
-    expect(defaultApprovalMode(null, providers, ready(), 'unattended')).toBe('unattended');
   });
 
   it('分类器专用供应商（Jev）可作代审：需启用、有 apiKey、模型在清单内', () => {

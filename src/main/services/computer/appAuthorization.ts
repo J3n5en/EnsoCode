@@ -99,6 +99,8 @@ export class AppAuthorizer {
       ) => Promise<AppPromptAnswer>;
       promptTimeoutMs?: number;
       now?: () => number;
+      /** 用户开启「允许所有应用」：直接放行，不询问也不落名单 */
+      allowAll?: () => boolean;
     }
   ) {}
 
@@ -139,6 +141,7 @@ export class AppAuthorizer {
     app: ComputerAppIdentity,
     signal: AbortSignal = new AbortController().signal
   ): Promise<void> {
+    if (this.deps.allowAll?.()) return;
     const key = appIdentityKey(app);
     const listed = this.allowed(app);
     if (listed) {

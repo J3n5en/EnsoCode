@@ -209,4 +209,27 @@ describe('AppAuthorizer', () => {
     });
     await expect(auth.authorize('s1', textEdit)).rejects.toMatchObject({ code: 'app-denied' });
   });
+
+  it('允许所有应用：不询问、不落名单，且覆盖本 session 的拒绝；关掉后恢复询问', async () => {
+    const file = tempFile();
+    let allowAll = false;
+    const prompts: string[] = [];
+    const auth = new AppAuthorizer({
+      file,
+      allowAll: () => allowAll,
+      prompt: async (app) => {
+        prompts.push(app.name);
+        return 'deny';
+      },
+    });
+    await expect(auth.authorize('s1', textEdit)).rejects.toMatchObject({ code: 'app-denied' });
+    allowAll = true;
+    await expect(auth.authorize('s1', textEdit)).resolves.toBeUndefined();
+    await expect(auth.authorize('s2', textEdit)).resolves.toBeUndefined();
+    expect(prompts).toEqual(['TextEdit']);
+    expect(readAllowedApps(file)).toEqual([]);
+    allowAll = false;
+    await expect(auth.authorize('s2', textEdit)).rejects.toMatchObject({ code: 'app-denied' });
+    expect(prompts).toEqual(['TextEdit', 'TextEdit']);
+  });
 });

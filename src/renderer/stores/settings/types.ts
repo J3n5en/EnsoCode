@@ -132,6 +132,8 @@ export interface SettingsState {
   rtkEnabled: boolean;
   /** 后台操作电脑时显示被操作窗口的画中画（macOS） */
   computerPreview: boolean;
+  /** computer 操作任何 app 都不再询问（macOS），缺省关 */
+  computerAllowAllApps: boolean;
 
   /** Code 会话也启用受保护动作底线（Bot 会话恒开）；缺省关，新建或冷恢复会话生效。 */
   protectedActionsInCode: boolean;
@@ -362,6 +364,7 @@ export interface SettingsState {
   setExploreFoldEnabled: (value: boolean) => void;
   setRtkEnabled: (value: boolean) => void;
   setComputerPreview: (value: boolean) => void;
+  setComputerAllowAllApps: (value: boolean) => void;
   setProtectedActionsInCode: (value: boolean) => void;
   setDcgEnabled: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;

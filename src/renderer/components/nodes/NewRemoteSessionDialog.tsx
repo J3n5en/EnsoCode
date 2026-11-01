@@ -48,13 +48,12 @@ interface Props {
   onCreate: (request: NewRemoteSessionRequest) => void;
 }
 
-// 与桌面 ApprovalModePicker 同 key；pair 协议与桌面同五档，远程会话可直接用 unattended
+// 与桌面 ApprovalModePicker 同 key；pair 协议与桌面同集合
 const APPROVAL_KEYS: Record<PairApprovalMode, string> = {
   supervised: 'Supervised',
   'auto-edits': 'Auto-accept edits',
   full: 'Full access',
   assistant: 'Assistant approval',
-  unattended: 'Unattended',
 };
 const LEVEL_KEYS: Record<ThinkingLevel, string> = {
   minimal: 'Min',
