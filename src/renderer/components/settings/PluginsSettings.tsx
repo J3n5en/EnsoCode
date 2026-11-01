@@ -36,6 +36,7 @@ import { coerceConfigValue } from '@/plugins/configValue';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
+import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
 /** 插件配置表单：密钥不回显，留空保持不变 */
 function ExtensionPluginConfigForm({ pluginId }: { pluginId: string }) {
@@ -496,31 +497,16 @@ function ExtensionPluginsSection() {
       {error && <p className="text-destructive text-sm">{error}</p>}
       {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
       {notice && (
-        <div className="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-amber-700 text-sm dark:text-amber-400">
-          {notice.unreadable && (
-            <p>
-              插件登记表曾读取失败，下面的列表可能不全。插件文件没有删除，原文保存在数据目录的
-              extension-plugins/registry.json.unreadable。
-            </p>
-          )}
-          {notice.discarded.length > 0 && (
-            <p>
-              检测到旧格式的登记记录，已丢弃并清理，请重新安装：
-              <span className="font-mono">{notice.discarded.join(', ')}</span>
-            </p>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              void window.electronAPI.extensionPlugins
-                .dismissRegistryNotice()
-                .then(() => setNotice(null))
-            }
-          >
-            知道了
-          </Button>
-        </div>
+        <RegistryNoticeBanner
+          notice={notice}
+          remote={Boolean(window.electronAPI.remote)}
+          onDismiss={() =>
+            void window.electronAPI.extensionPlugins
+              .dismissRegistryNotice()
+              .then(() => setNotice(null))
+              .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+          }
+        />
       )}
       {preview && (
         <div className="space-y-2 rounded-md border border-border p-3">

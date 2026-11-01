@@ -733,6 +733,17 @@ describe('丢弃的登记记录', () => {
     expect(has(root, 'a.demo')).toEqual(all);
   });
 
+  it('丢弃提示未确认时登记表又读不出，两类提示都保留', () => {
+    const root = temp('plugins-root-');
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({ version: 1, plugins: [{ id: 'old.one' }] })
+    );
+    boot(root);
+    writeFileSync(join(root, 'registry.json'), '{ broken');
+    expect(boot(root).registryNotice()).toEqual({ discarded: ['old.one'], unreadable: true });
+  });
+
   it('覆盖登记表前保留上一份备份', async () => {
     const root = temp('plugins-root-');
     const service = boot(root);

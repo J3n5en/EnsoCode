@@ -524,7 +524,7 @@ export class ExtensionPluginService {
     if (unreadable) {
       preserveUnreadableRegistry(this.options.root);
       log('登记表读取失败，已另存为 registry.json.unreadable，未清理任何插件文件');
-      this.writeNotice({ discarded: [], unreadable: true });
+      this.writeNotice({ discarded: this.readNotice()?.discarded ?? [], unreadable: true });
     }
     if (discarded.length > 0) {
       log(`登记记录格式已变更，已丢弃并清理：${discarded.join(', ')}；请重新安装`);
