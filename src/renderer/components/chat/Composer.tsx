@@ -36,6 +36,7 @@ import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, formatBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
+import { pluginCommandFor, runPluginCommand } from '../../plugins/commands';
 import { registerDraftTarget } from '../../plugins/draftBridge';
 import { PluginComposerSlots } from '../../plugins/slots';
 import {
@@ -444,6 +445,25 @@ export function Composer({
     [images, onSend, recipient, slash]
   );
 
+  /** 插件命令选中即执行，不进草稿；其它斜杠命令变成芯片随消息发送 */
+  const pickSlash = useCallback(
+    (name: string) => {
+      editorRef.current?.consumeToken(skillQuery !== null ? '$' : '/');
+      setSlashQuery(null);
+      setSkillQuery(null);
+      const command = pluginCommandFor(name);
+      if (!command) {
+        setSlash(name);
+        return;
+      }
+      void runPluginCommand(command, isolated ? null : (focusKey ?? null)).then((error) => {
+        if (error)
+          addToast({ type: 'error', title: t('Plugin command failed'), description: error });
+      });
+    },
+    [skillQuery, isolated, focusKey, t]
+  );
+
   const pickActive = useCallback(
     (submitSubcommand = false) => {
       if (popupKind === 'mention') {
@@ -459,11 +479,7 @@ export function Composer({
         if (item) pickPlugin(item);
       } else if (popupKind === 'slash') {
         const item = slashResults[activeIndex];
-        if (!item) return;
-        editorRef.current?.consumeToken(skillQuery !== null ? '$' : '/');
-        setSlashQuery(null);
-        setSkillQuery(null);
-        setSlash(item.name);
+        if (item) pickSlash(item.name);
       } else if (popupKind === 'slash-sub') {
         const item = subResults[activeIndex];
         if (!item) return;
@@ -481,7 +497,7 @@ export function Composer({
       pluginItems,
       popupKind,
       slashResults,
-      skillQuery,
+      pickSlash,
       subResults,
       applySlashSubcommand,
     ]
@@ -718,10 +734,7 @@ export function Composer({
               onClick={() => {
                 setActiveIndex(index);
                 if (popupKind === 'slash') {
-                  editorRef.current?.consumeToken(skillQuery !== null ? '$' : '/');
-                  setSlashQuery(null);
-                  setSkillQuery(null);
-                  setSlash(item.name);
+                  pickSlash(item.name);
                 } else {
                   applySlashSubcommand(item.name, false);
                 }

@@ -21,6 +21,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { selectChatChrome } from '@/stores/sessions/chatChrome';
 import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
 import { useSettingsStore } from '@/stores/settings';
+import { usePluginSlashCommands } from '../../plugins/commands';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
@@ -248,6 +249,7 @@ export function ChatView() {
   }, [project?.path, loadLocalSkills]);
 
   const chromeCommands = chrome?.commands;
+  const pluginCommands = usePluginSlashCommands();
   const slashCommands = useMemo(() => {
     if (!chromeCommands) return [];
     const goal = {
@@ -280,8 +282,9 @@ export function ChatView() {
       ...fromSettings,
       ...fromProject,
       ...chromeCommands,
+      ...pluginCommands,
     ]);
-  }, [t, skills, projectSkills, chromeCommands, planAvailable]);
+  }, [t, skills, projectSkills, chromeCommands, pluginCommands, planAvailable]);
 
   const timelineRef = useRef<MessageTimelineHandle>(null);
   const planning =

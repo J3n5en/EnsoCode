@@ -1655,6 +1655,7 @@ export const zhTranslations: Record<string, string> = {
   'Trust and load': '信任并加载',
   Plugins: '插件',
   'Install from URL': '从链接安装',
+  'Plugin command failed': '插件命令执行失败',
   Commands: '命令',
   '{{count}} enabled': '已启用 {{count}} 个',
   'No supported components': '没有可用组件',
