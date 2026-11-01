@@ -1,9 +1,11 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -83,6 +85,67 @@ describe('stagePlugin（目录来源）', () => {
     symlinkSync('/etc', join(src, 'escape'));
     const result = await stagePlugin(root, { kind: 'dir', path: src }, '0.2.12');
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('符号链接越界：escape');
+  });
+
+  it.skipIf(process.platform === 'win32')('复制插件内相对符号链接，且不跟随目录链接', async () => {
+    const src = temp('src-');
+    const root = temp('root-');
+    writePlugin(src, {
+      'enso-plugin.json': JSON.stringify(manifest),
+      'main.js': 'export {}',
+      'lib/util.js': 'export const n = 1\n',
+      'realdir/secret.txt': 'secret',
+    });
+    mkdirSync(join(src, 'bin'));
+    symlinkSync('../lib/util.js', join(src, 'bin/tool'));
+    symlinkSync('realdir', join(src, 'linkdir'));
+    symlinkSync('mid.js', join(src, 'chain.js'));
+    symlinkSync('main.js', join(src, 'mid.js'));
+    const result = await stagePlugin(root, { kind: 'dir', path: src }, '0.2.12');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const tool = join(result.staged.pluginRoot, 'bin/tool');
+    expect(lstatSync(tool).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(tool)).toBe('../lib/util.js');
+    expect(readFileSync(tool, 'utf8')).toBe('export const n = 1\n');
+    const linkdir = join(result.staged.pluginRoot, 'linkdir');
+    expect(lstatSync(linkdir).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(linkdir)).toBe('realdir');
+    expect(lstatSync(join(result.staged.pluginRoot, 'realdir')).isDirectory()).toBe(true);
+    expect(readlinkSync(join(result.staged.pluginRoot, 'chain.js'))).toBe('mid.js');
+  });
+
+  it.skipIf(process.platform === 'win32')('拒绝越界、悬空和链接链最终落到插件外', async () => {
+    const root = temp('root-');
+    const outside = temp('src-');
+    writePlugin(outside, { 'enso-plugin.json': JSON.stringify(manifest), 'main.js': '' });
+    symlinkSync('../outside', join(outside, 'escape'));
+    const relative = await stagePlugin(root, { kind: 'dir', path: outside }, '0.2.12');
+    expect(relative.ok).toBe(false);
+    if (!relative.ok) expect(relative.error).toContain('符号链接越界：escape');
+
+    const inside = temp('src-');
+    writePlugin(inside, { 'enso-plugin.json': JSON.stringify(manifest), 'main.js': '' });
+    symlinkSync(join(inside, 'main.js'), join(inside, 'abs.js'));
+    const absolute = await stagePlugin(root, { kind: 'dir', path: inside }, '0.2.12');
+    expect(absolute.ok).toBe(false);
+    if (!absolute.ok) expect(absolute.error).toContain('符号链接越界：abs.js');
+
+    const dangling = temp('src-');
+    writePlugin(dangling, { 'enso-plugin.json': JSON.stringify(manifest), 'main.js': '' });
+    symlinkSync('missing.js', join(dangling, 'ghost.js'));
+    const missing = await stagePlugin(root, { kind: 'dir', path: dangling }, '0.2.12');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error).toContain('符号链接越界：ghost.js');
+
+    const chained = temp('src-');
+    writePlugin(chained, { 'enso-plugin.json': JSON.stringify(manifest), 'main.js': '' });
+    symlinkSync('mid', join(chained, 'escape'));
+    symlinkSync('/etc', join(chained, 'mid'));
+    const chain = await stagePlugin(root, { kind: 'dir', path: chained }, '0.2.12');
+    expect(chain.ok).toBe(false);
+    if (!chain.ok) expect(chain.error).toMatch(/符号链接越界：(escape|mid)/);
   });
 
   it('引用的 skills 必须是插件内的目录', async () => {
@@ -125,12 +188,16 @@ describe('stagePlugin（目录来源）', () => {
 });
 
 function storedZip(files: Record<string, string>): Buffer {
+  return entryZip(Object.entries(files).map(([name, data]) => ({ name, data })));
+}
+
+function entryZip(entries: { name: string; data: string; unixMode?: number }[]): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
-  for (const [name, data] of Object.entries(files)) {
-    const nameBuf = Buffer.from(name);
-    const raw = Buffer.from(data);
+  for (const entry of entries) {
+    const nameBuf = Buffer.from(entry.name);
+    const raw = Buffer.from(entry.data);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
@@ -140,11 +207,14 @@ function storedZip(files: Record<string, string>): Buffer {
     const localRecord = Buffer.concat([local, nameBuf, raw]);
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(entry.unixMode === undefined ? 20 : (3 << 8) | 20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt32LE(raw.length, 20);
     central.writeUInt32LE(raw.length, 24);
     central.writeUInt16LE(nameBuf.length, 28);
+    if (entry.unixMode !== undefined) {
+      central.writeUInt32LE((entry.unixMode & 0xffff) * 0x10000, 38);
+    }
     central.writeUInt32LE(offset, 42);
     locals.push(localRecord);
     centrals.push(Buffer.concat([central, nameBuf]));
@@ -153,11 +223,141 @@ function storedZip(files: Record<string, string>): Buffer {
   const centralDir = Buffer.concat(centrals);
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(Object.keys(files).length, 8);
-  eocd.writeUInt16LE(Object.keys(files).length, 10);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
   eocd.writeUInt32LE(centralDir.length, 12);
   eocd.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, centralDir, eocd]);
+}
+
+const LINK_MODE = 0o120777;
+
+function zipResponse(zip: Buffer): ArchiveFetch {
+  return async () => ({
+    status: 200,
+    headers: { get: () => null },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(zip);
+        controller.close();
+      },
+    }),
+  });
+}
+
+describe('stagePlugin（zip 与链接里的符号链接）', () => {
+  const pluginFiles = [
+    { name: 'enso-plugin.json', data: JSON.stringify(manifest) },
+    { name: 'main.js', data: 'export {}' },
+    { name: 'alias.js', data: 'main.js', unixMode: LINK_MODE },
+    { name: 'chain.js', data: 'alias.js', unixMode: LINK_MODE },
+  ];
+
+  it.skipIf(process.platform === 'win32')('zip 与下载包都保留插件内相对链接', async () => {
+    const zip = entryZip(pluginFiles);
+    for (const via of ['zip', 'url'] as const) {
+      const root = temp('root-');
+      const result =
+        via === 'zip'
+          ? await stagePlugin(root, { kind: 'zip', path: writeZipFile(zip) }, '0.2.12')
+          : await stagePlugin(
+              root,
+              { kind: 'url', url: 'https://example.com/demo.zip' },
+              '0.2.12',
+              {
+                fetch: zipResponse(zip),
+              }
+            );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(lstatSync(join(result.staged.pluginRoot, 'alias.js')).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(result.staged.pluginRoot, 'alias.js'))).toBe('main.js');
+      expect(readlinkSync(join(result.staged.pluginRoot, 'chain.js'))).toBe('alias.js');
+      expect(readFileSync(join(result.staged.pluginRoot, 'chain.js'), 'utf8')).toBe('export {}');
+    }
+  });
+
+  it('zip 与下载包拒绝越界符号链接', async () => {
+    const zip = entryZip([
+      { name: 'enso-plugin.json', data: JSON.stringify(manifest) },
+      { name: 'main.js', data: 'export {}' },
+      { name: 'escape', data: '../outside', unixMode: LINK_MODE },
+    ]);
+    for (const via of ['zip', 'url'] as const) {
+      const root = temp('root-');
+      const result =
+        via === 'zip'
+          ? await stagePlugin(root, { kind: 'zip', path: writeZipFile(zip) }, '0.2.12')
+          : await stagePlugin(
+              root,
+              { kind: 'url', url: 'https://example.com/demo.zip' },
+              '0.2.12',
+              {
+                fetch: zipResponse(zip),
+              }
+            );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('符号链接越界：escape');
+      expect(existsSync(join(root, 'staging')) ? readdirSync(join(root, 'staging')) : []).toEqual(
+        []
+      );
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('解包后的悬空链接会被拒绝', async () => {
+    const zip = entryZip([
+      { name: 'enso-plugin.json', data: JSON.stringify(manifest) },
+      { name: 'main.js', data: 'export {}' },
+      { name: 'ghost.js', data: 'missing.js', unixMode: LINK_MODE },
+    ]);
+    const root = temp('root-');
+    const result = await stagePlugin(root, { kind: 'zip', path: writeZipFile(zip) }, '0.2.12');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('符号链接越界：ghost.js');
+  });
+
+  it.skipIf(process.platform === 'win32')('仓库子目录安装时，链接不能爬出最终插件根', async () => {
+    const root = temp('root-');
+    const escaped = entryZip([
+      { name: 'demo-main/README.md', data: 'readme' },
+      { name: 'demo-main/plugins/demo/enso-plugin.json', data: JSON.stringify(manifest) },
+      { name: 'demo-main/plugins/demo/main.js', data: 'export {}' },
+      {
+        name: 'demo-main/plugins/demo/link.js',
+        data: '../../README.md',
+        unixMode: LINK_MODE,
+      },
+    ]);
+    const bad = await stagePlugin(
+      root,
+      { kind: 'url', url: 'https://github.com/acme/demo/tree/main/plugins/demo' },
+      '0.2.12',
+      { fetch: zipResponse(escaped) }
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('符号链接越界：link.js');
+
+    const kept = entryZip([
+      { name: 'demo-main/plugins/demo/enso-plugin.json', data: JSON.stringify(manifest) },
+      { name: 'demo-main/plugins/demo/main.js', data: 'export {}' },
+      { name: 'demo-main/plugins/demo/alias.js', data: 'main.js', unixMode: LINK_MODE },
+    ]);
+    const good = await stagePlugin(
+      root,
+      { kind: 'url', url: 'https://github.com/acme/demo/tree/main/plugins/demo' },
+      '0.2.12',
+      { fetch: zipResponse(kept) }
+    );
+    expect(good.ok).toBe(true);
+    if (!good.ok) return;
+    expect(readlinkSync(join(good.staged.pluginRoot, 'alias.js'))).toBe('main.js');
+  });
+});
+
+function writeZipFile(bytes: Buffer): string {
+  const zipPath = join(temp('zip-'), 'plugin.zip');
+  writeFileSync(zipPath, bytes);
+  return zipPath;
 }
 
 describe('stagePlugin（URL 来源）', () => {

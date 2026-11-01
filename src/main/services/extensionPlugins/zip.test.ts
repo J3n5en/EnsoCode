@@ -1,8 +1,10 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -11,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractZip } from './zip';
+import { assertContainedLinkTarget, extractZip } from './zip';
 
 interface ZipEntryInput {
   name: string;
@@ -139,15 +141,155 @@ describe('extractZip', () => {
     await expect(extractZip(zipPath, destDir())).rejects.toThrow(/反斜杠/);
   });
 
-  it('拒绝符号链接条目', async () => {
+  it.skipIf(process.platform === 'win32')('创建插件目录内的相对符号链接', async () => {
     const zipPath = writeZip(
       'link.zip',
-      buildZip([{ name: 'link', data: 'target', method: 0, unixMode: 0o120777 }])
+      buildZip([
+        { name: 'bin/tool', data: '../lib/util.txt', method: 0, unixMode: 0o120777 },
+        { name: 'lib/util.txt', data: 'hello', method: 0 },
+      ])
     );
     const dest = destDir();
 
-    await expect(extractZip(zipPath, dest)).rejects.toThrow(/符号链接/);
-    expect(existsSync(path.join(dest, 'link'))).toBe(false);
+    await extractZip(zipPath, dest);
+
+    const link = path.join(dest, 'bin/tool');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe('../lib/util.txt');
+    expect(readFileSync(link, 'utf8')).toBe('hello');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    '允许回到插件根内的相对链接，拒绝再往上的链接',
+    async () => {
+      const dest = destDir();
+      const inside = writeZip(
+        'inside.zip',
+        buildZip([
+          { name: 'outside', data: 'safe', method: 0 },
+          { name: 'bin/x', data: '../outside', method: 0, unixMode: 0o120777 },
+        ])
+      );
+      await extractZip(inside, dest);
+      expect(readlinkSync(path.join(dest, 'bin/x'))).toBe('../outside');
+
+      const base = path.basename(dest);
+      const viaParent = writeZip(
+        'via-parent.zip',
+        buildZip([
+          { name: 'main.js', data: 'x', method: 0 },
+          { name: 'link.js', data: `../${base}/main.js`, method: 0, unixMode: 0o120777 },
+        ])
+      );
+      await expect(extractZip(viaParent, dest)).rejects.toThrow('符号链接越界：link.js');
+    }
+  );
+
+  it('拒绝越界、绝对路径和非法符号链接目标', async () => {
+    const cases: Array<[string, string, string]> = [
+      ['../outside', 'escape', 'rel.zip'],
+      ['../../outside', 'bin/x', 'deep.zip'],
+      ['/etc', 'bin/x', 'abs.zip'],
+      ['C:/Windows', 'bin/x', 'drive.zip'],
+      ['C:foo', 'bin/x', 'drive-rel.zip'],
+      ['..\\outside', 'bin/x', 'slash.zip'],
+      ['foo\0bar', 'bin/x', 'nul.zip'],
+    ];
+    for (const [data, name, file] of cases) {
+      const zipPath = writeZip(file, buildZip([{ name, data, method: 0, unixMode: 0o120777 }]));
+      const dest = path.join(tmp, `${file}-out`);
+      mkdirSync(dest);
+      await expect(extractZip(zipPath, dest)).rejects.toThrow(`符号链接越界：${name}`);
+      expect(existsSync(path.join(dest, name))).toBe(false);
+    }
+  });
+
+  it('拒绝指向解包目录内部的绝对符号链接', async () => {
+    const dest = destDir();
+    const zipPath = writeZip(
+      'abs-inside.zip',
+      buildZip([
+        { name: 'enso-plugin.json', data: '{}', method: 0 },
+        {
+          name: 'inside-link',
+          data: path.join(dest, 'enso-plugin.json'),
+          method: 0,
+          unixMode: 0o120777,
+        },
+      ])
+    );
+
+    await expect(extractZip(zipPath, dest)).rejects.toThrow('符号链接越界：inside-link');
+    expect(existsSync(path.join(dest, 'inside-link'))).toBe(false);
+  });
+
+  it('拒绝符号链接与其他条目同路径，或经由链接写入', async () => {
+    const dup = writeZip(
+      'dup.zip',
+      buildZip([
+        { name: 'bin/x', data: 'file', method: 0 },
+        { name: 'bin/x', data: 'target', method: 0, unixMode: 0o120777 },
+      ])
+    );
+    const dupDest = path.join(tmp, 'dup-out');
+    mkdirSync(dupDest);
+    await expect(extractZip(dup, dupDest)).rejects.toThrow('符号链接路径冲突：bin/x');
+
+    const through = writeZip(
+      'through.zip',
+      buildZip([
+        { name: 'sub', data: 'inner', method: 0, unixMode: 0o120777 },
+        { name: 'sub/file.txt', data: 'pwn', method: 0 },
+      ])
+    );
+    const dest = destDir();
+    await expect(extractZip(through, dest)).rejects.toThrow('符号链接路径冲突：sub/file.txt');
+    expect(existsSync(path.join(dest, 'sub/file.txt'))).toBe(false);
+  });
+
+  it('拒绝超过 1024 字节的符号链接目标', async () => {
+    const zipPath = writeZip(
+      'long.zip',
+      buildZip([{ name: 'l', data: 'a'.repeat(1025), method: 0, unixMode: 0o120777 }])
+    );
+
+    await expect(extractZip(zipPath, destDir())).rejects.toThrow('符号链接越界：l');
+  });
+
+  it('相对目标最长 1024 字节', () => {
+    const root = path.resolve('/plugin-root');
+    const link = path.join(root, 'bin/tool');
+    assertContainedLinkTarget(root, link, `../${'a'.repeat(1021)}`, 'bin/tool');
+    expect(() =>
+      assertContainedLinkTarget(root, link, `../${'a'.repeat(1022)}`, 'bin/tool')
+    ).toThrow('符号链接越界：bin/tool');
+  });
+
+  it.skipIf(process.platform === 'win32')('符号链接计入条目上限', async () => {
+    const target = `${'nested/'.repeat(20)}file`;
+    const zipPath = writeZip(
+      'limit.zip',
+      buildZip([
+        { name: 'a.txt', data: 'a', method: 0 },
+        { name: 'b', data: target, method: 0, unixMode: 0o120777 },
+      ])
+    );
+    const dest = destDir();
+
+    await extractZip(zipPath, dest, { maxEntries: 2 });
+    expect(readlinkSync(path.join(dest, 'b'))).toBe(target);
+    await expect(extractZip(zipPath, dest, { maxEntries: 1 })).rejects.toThrow(/条目过多/);
+  });
+
+  it('符号链接目标仍受单条目大小限制', async () => {
+    const zipPath = writeZip(
+      'tiny.zip',
+      buildZip([{ name: 'l', data: 'abcdef', method: 0, unixMode: 0o120777 }])
+    );
+
+    await expect(extractZip(zipPath, destDir(), { maxEntryBytes: 4 })).rejects.toThrow(
+      /单个条目超过大小限制：l/
+    );
   });
 
   it.skipIf(process.platform === 'win32')('保留 Unix 可执行位', async () => {

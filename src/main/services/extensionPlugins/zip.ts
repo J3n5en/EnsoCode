@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
@@ -19,6 +19,7 @@ const ZIP64_EXTRA_ID = 0x0001;
 const S_IFMT = 0o170000;
 const S_IFLNK = 0o120000;
 const MADE_BY_UNIX = 3;
+const MAX_LINK_TARGET_BYTES = 1024;
 
 interface CentralEntry {
   name: string;
@@ -34,6 +35,7 @@ interface CentralEntry {
 interface PlannedEntry {
   entry: CentralEntry;
   isDir: boolean;
+  isLink: boolean;
   target: string;
 }
 
@@ -53,9 +55,20 @@ export async function extractZip(
     maxEntryBytes,
     maxTotalBytes
   );
+  const links: { path: string; target: string }[] = [];
+  for (const item of plan) {
+    if (!item.isLink) continue;
+    const data = readEntryBytes(buf, item.entry);
+    const label = entryLabel(item.entry.name);
+    const target = data.toString('utf8');
+    if (!Buffer.from(target, 'utf8').equals(data)) throw new Error(`符号链接越界：${label}`);
+    assertContainedLinkTarget(root, item.target, target, label);
+    links.push({ path: item.target, target });
+  }
 
   await mkdir(root, { recursive: true });
   for (const item of plan) {
+    if (item.isLink) continue;
     const data = readEntryBytes(buf, item.entry);
     if (item.isDir) {
       await mkdir(item.target, { recursive: true });
@@ -63,6 +76,10 @@ export async function extractZip(
     }
     await mkdir(path.dirname(item.target), { recursive: true });
     await writeFile(item.target, data, { mode: isExecutable(item.entry) ? 0o755 : 0o644 });
+  }
+  for (const link of links) {
+    await mkdir(path.dirname(link.path), { recursive: true });
+    await symlink(link.target, link.path);
   }
 }
 
@@ -182,20 +199,96 @@ function planEntries(
   for (const entry of entries) {
     if ((entry.flags & 0x1) !== 0) throw new Error('不支持加密的压缩条目');
     if (entry.method !== 0 && entry.method !== 8) throw new Error('不支持的压缩方法');
-    if (((entry.externalAttrs >>> 16) & S_IFMT) === S_IFLNK) {
-      throw new Error('压缩包包含符号链接');
-    }
+    const isLink = ((entry.externalAttrs >>> 16) & S_IFMT) === S_IFLNK;
     if (entry.uncompressedSize > maxEntryBytes) {
       throw new Error(`压缩包单个条目超过大小限制：${entry.name}`);
+    }
+    if (isLink && entry.uncompressedSize > MAX_LINK_TARGET_BYTES) {
+      throw new Error(`符号链接越界：${entryLabel(entry.name)}`);
     }
     if (total > maxTotalBytes - entry.uncompressedSize) {
       throw new Error('压缩包解压后总大小超过限制');
     }
     total += entry.uncompressedSize;
     const located = locateEntry(root, entry.name);
-    planned.push({ entry, isDir: located.isDir, target: located.target });
+    planned.push({
+      entry,
+      isDir: located.isDir && !isLink,
+      isLink,
+      target: located.target,
+    });
   }
+  assertLinkLayout(root, planned);
   return planned;
+}
+
+export function assertContainedLinkTarget(
+  root: string,
+  linkPath: string,
+  target: string,
+  label: string
+): void {
+  const linkDir = path.resolve(path.dirname(linkPath));
+  const resolved = path.resolve(linkDir, target);
+  if (
+    !isSafeRelativeTarget(target) ||
+    !isInside(root, linkDir) ||
+    !isInside(root, resolved) ||
+    !staysWithin(root, linkDir, target)
+  ) {
+    throw new Error(`符号链接越界：${label}`);
+  }
+}
+
+function isSafeRelativeTarget(target: string): boolean {
+  if (target.length === 0 || Buffer.byteLength(target) > MAX_LINK_TARGET_BYTES) return false;
+  if (target.includes('\0') || target.includes('\\')) return false;
+  if (path.posix.isAbsolute(target) || path.win32.isAbsolute(target)) return false;
+  return target.split('/').every((segment) => !/^[A-Za-z]:/.test(segment));
+}
+
+/** 逐段解析，中途不能离开 root。避免 ../<根目录名>/... 在目录改名后爬出去。 */
+function staysWithin(root: string, linkDir: string, target: string): boolean {
+  let current = linkDir;
+  for (const segment of target.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      const parent = path.dirname(current);
+      if (parent === current || !isInside(root, parent)) return false;
+      current = parent;
+      continue;
+    }
+    current = path.join(current, segment);
+  }
+  return isInside(root, current);
+}
+
+function assertLinkLayout(root: string, planned: PlannedEntry[]): void {
+  const relOf = (item: PlannedEntry) => path.relative(root, item.target).split(path.sep).join('/');
+  const seen = new Map<string, boolean>();
+  for (const item of planned) {
+    const rel = relOf(item);
+    const previous = seen.get(rel);
+    if (previous !== undefined && (previous || item.isLink)) {
+      throw new Error(`符号链接路径冲突：${entryLabel(item.entry.name)}`);
+    }
+    if (previous === undefined) seen.set(rel, item.isLink);
+  }
+  const links = new Set(planned.filter((item) => item.isLink).map(relOf));
+  for (const item of planned) {
+    const parts = relOf(item).split('/');
+    let prefix = '';
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const part = parts[index];
+      if (part === undefined) continue;
+      prefix = prefix.length === 0 ? part : `${prefix}/${part}`;
+      if (links.has(prefix)) throw new Error(`符号链接路径冲突：${entryLabel(item.entry.name)}`);
+    }
+  }
+}
+
+function entryLabel(name: string): string {
+  return name.endsWith('/') ? name.slice(0, -1) : name;
 }
 
 function locateEntry(root: string, name: string): { isDir: boolean; target: string } {

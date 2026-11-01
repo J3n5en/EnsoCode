@@ -1,14 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync } from 'node:fs';
-import { copyFile, lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  stat,
+  symlink,
+} from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parsePluginInstallUrl, resolvePluginArchive } from '@shared/extensionPlugins/installUrl';
 import {
   type ExtensionPluginManifest,
   parseExtensionPluginManifest,
 } from '@shared/extensionPlugins/manifest';
 import { type ArchiveFetch, downloadPluginArchive } from './download';
-import { extractZip } from './zip';
+import { assertContainedLinkTarget, extractZip } from './zip';
 
 export const MANIFEST_FILE = 'enso-plugin.json';
 const MAX_FILES = 5000;
@@ -46,11 +57,21 @@ const within = (parent: string, child: string) => {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 };
 
-/** 逐个复制普通文件；任何符号链接都拒绝，避免安装后经链接读到插件目录外 */
 async function copyTree(
   src: string,
   dest: string,
   budget: { files: number; bytes: number }
+): Promise<void> {
+  await copyInside(src, dest, budget, src, dest, await realpath(src));
+}
+
+async function copyInside(
+  src: string,
+  dest: string,
+  budget: { files: number; bytes: number },
+  sourceRoot: string,
+  destRoot: string,
+  realSourceRoot: string
 ): Promise<void> {
   await mkdir(dest, { recursive: true });
   for (const name of await readdir(src)) {
@@ -58,9 +79,18 @@ async function copyTree(
     const from = join(src, name);
     const to = join(dest, name);
     const info = await lstat(from);
-    if (info.isSymbolicLink()) throw new Error(`插件目录不能包含符号链接：${name}`);
+    if (info.isSymbolicLink()) {
+      const linkTarget = await readContainedLink(sourceRoot, realSourceRoot, from);
+      const label = relative(sourceRoot, from).split(sep).join('/');
+      assertContainedLinkTarget(destRoot, to, linkTarget, label);
+      budget.files += 1;
+      budget.bytes += info.size;
+      if (budget.files > MAX_FILES || budget.bytes > MAX_BYTES) throw new Error('插件过大');
+      await symlink(linkTarget, to);
+      continue;
+    }
     if (info.isDirectory()) {
-      await copyTree(from, to, budget);
+      await copyInside(from, to, budget, sourceRoot, destRoot, realSourceRoot);
       continue;
     }
     if (!info.isFile()) throw new Error(`插件目录包含不支持的文件类型：${name}`);
@@ -71,13 +101,50 @@ async function copyTree(
   }
 }
 
-async function assertNoSymlinks(dir: string): Promise<void> {
+async function assertContainedSymlinks(dir: string): Promise<void> {
+  const realRoot = await realpath(dir);
   for (const name of await readdir(dir)) {
-    const path = join(dir, name);
-    const info = await lstat(path);
-    if (info.isSymbolicLink()) throw new Error(`插件包不能包含符号链接：${name}`);
-    if (info.isDirectory()) await assertNoSymlinks(path);
+    await assertContainedEntry(dir, realRoot, join(dir, name));
   }
+}
+
+async function assertContainedEntry(
+  root: string,
+  realRoot: string,
+  entryPath: string
+): Promise<void> {
+  const info = await lstat(entryPath);
+  if (info.isSymbolicLink()) {
+    await readContainedLink(root, realRoot, entryPath);
+    return;
+  }
+  if (!info.isDirectory()) return;
+  for (const name of await readdir(entryPath)) {
+    await assertContainedEntry(root, realRoot, join(entryPath, name));
+  }
+}
+
+async function readContainedLink(
+  root: string,
+  realRoot: string,
+  linkPath: string
+): Promise<string> {
+  const target = await readlink(linkPath);
+  const label = relative(root, linkPath).split(sep).join('/');
+  assertContainedLinkTarget(root, linkPath, target, label);
+  let realTarget: string;
+  try {
+    realTarget = await realpath(linkPath);
+  } catch {
+    throw new Error(`符号链接越界：${label}`);
+  }
+  if (!containsPath(realRoot, realTarget)) throw new Error(`符号链接越界：${label}`);
+  return target;
+}
+
+function containsPath(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (!isAbsolute(rel) && !rel.split(sep).includes('..'));
 }
 
 async function exists(path: string, kind: 'file' | 'dir'): Promise<boolean> {
@@ -157,6 +224,7 @@ export async function stagePlugin(
   const staging = stagingPath(root, token);
   try {
     let scanRoot = staging;
+    let unpacked: string | null = null;
     if (source.kind === 'dir') {
       const real = resolve(source.path);
       if (within(root, real) || within(real, root))
@@ -165,7 +233,8 @@ export async function stagePlugin(
     } else if (source.kind === 'zip') {
       await mkdir(staging, { recursive: true });
       await extractZip(source.path, staging, ZIP_LIMITS);
-      await assertNoSymlinks(staging);
+      await assertContainedSymlinks(staging);
+      unpacked = staging;
     } else {
       const parsed = parsePluginInstallUrl(source.url);
       if (!parsed.ok) throw new Error(parsed.error);
@@ -181,10 +250,12 @@ export async function stagePlugin(
       });
       await extractZip(zipPath, tree, ZIP_LIMITS);
       await rm(zipPath, { force: true });
-      await assertNoSymlinks(tree);
+      await assertContainedSymlinks(tree);
+      unpacked = tree;
       scanRoot = await pluginTreeRoot(tree, resolved.subdir);
     }
     const pluginRoot = await locatePluginRoot(scanRoot);
+    if (unpacked === null || pluginRoot !== unpacked) await assertContainedSymlinks(pluginRoot);
     const manifestPath = join(pluginRoot, MANIFEST_FILE);
     if ((await stat(manifestPath)).size > MAX_MANIFEST_BYTES) throw new Error('清单过大');
     let raw: unknown;
