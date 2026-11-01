@@ -199,7 +199,13 @@ describe('executeMemoryOp', () => {
         if (kind === 'query') return Float32Array.from([0.9, 0, 0.44]);
         const t = text.toLowerCase();
         if (t.includes('kafka')) return Float32Array.from([0, 0, 1]);
-        if (t.includes('redis')) return Float32Array.from([1, t.includes('cluster') ? 0.1 : 0, 0]);
+        // replica 略偏：向量完全相同时向量通道按随机 UUID 定序，会与 FTS 的先后顺序交叉出并列第一
+        if (t.includes('redis'))
+          return Float32Array.from([
+            1,
+            t.includes('cluster') ? 0.1 : t.includes('replica') ? 0.01 : 0,
+            0,
+          ]);
         return Float32Array.from([0, 1, 0]);
       },
     };
