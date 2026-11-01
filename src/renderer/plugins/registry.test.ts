@@ -56,6 +56,10 @@ describe('插件挂点登记', () => {
     expect(() =>
       registerPluginSlot({ pluginId: 'a.b', slot: 'message.action', component })
     ).toThrow();
+    for (const slot of ['composer.activity', 'composer.dock'])
+      expect(() =>
+        registerPluginSlot({ pluginId: 'a.b', slot: slot as never, component })
+      ).toThrow();
   });
 
   it('解析插件代码块标记', () => {

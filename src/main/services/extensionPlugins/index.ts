@@ -7,12 +7,10 @@ import type { GateDeps } from './gate';
 import { pluginError } from './process';
 import { ExtensionPluginService } from './service';
 
-type SessionMessagesReader = (sessionId: string) => Promise<unknown>;
 /** 宿主 MCP 由 agentHost 注入（经 worker 执行），避免这里反向依赖 agentHost */
 export type PluginMcpBridge = Pick<GateDeps, 'mcpTools' | 'mcpCall'>;
 
 let service: ExtensionPluginService | null = null;
-let sessionMessagesReader: SessionMessagesReader | null = null;
 let mcpBridge: PluginMcpBridge | null = null;
 let draftBroker: DraftBroker | null = null;
 
@@ -47,10 +45,6 @@ export function getDraftBroker(): DraftBroker {
   return draftBroker;
 }
 
-export function setSessionMessagesReader(reader: SessionMessagesReader | null): void {
-  sessionMessagesReader = reader;
-}
-
 export function setPluginMcpBridge(bridge: PluginMcpBridge | null): void {
   mcpBridge = bridge;
 }
@@ -74,10 +68,6 @@ export function getExtensionPlugins(): ExtensionPluginService {
       },
       composer: (target, op, payload) =>
         getDraftBroker().request(target.origin, target.sessionId, op, payload),
-      sessionMessages: (sessionId) =>
-        sessionMessagesReader
-          ? sessionMessagesReader(sessionId)
-          : Promise.reject(pluginError('UNSUPPORTED', '无法读取会话')),
       mcpTools: (target, signal) => (mcpBridge ? mcpBridge.mcpTools(target, signal) : noMcp()),
       mcpCall: (target, server, tool, args, signal) =>
         mcpBridge ? mcpBridge.mcpCall(target, server, tool, args, signal) : noMcp(),

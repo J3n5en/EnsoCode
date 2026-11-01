@@ -3,9 +3,7 @@ export type PluginSlotName =
   | 'tool.card'
   | 'block'
   | 'composer.left'
-  | 'composer.right'
-  | 'composer.activity'
-  | 'composer.dock';
+  | 'composer.right';
 
 export type PluginSlotComponent = (props: Record<string, unknown>) => unknown;
 
@@ -24,8 +22,6 @@ const SLOTS = new Set<PluginSlotName>([
   'block',
   'composer.left',
   'composer.right',
-  'composer.activity',
-  'composer.dock',
 ]);
 
 let entries: PluginSlotEntry[] = [];

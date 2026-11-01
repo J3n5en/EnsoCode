@@ -12,7 +12,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
   version: '1',
   description: '',
   main: 'main.js',
-  permissions: ['fs.read', 'fs.write', 'net.fetch', 'composer.draft', 'ui.notify', 'session.read'],
+  permissions: ['fs.read', 'fs.write', 'net.fetch', 'composer.draft', 'ui.notify'],
   fs: { read: ['docs'], write: ['out'] },
   net: { domains: ['api.example.com'] },
   mcp: { tools: [] },
@@ -52,7 +52,6 @@ beforeEach(() => {
     ),
     notify: vi.fn(() => true),
     composer: vi.fn(async () => ({ ok: true })),
-    sessionMessages: vi.fn(async () => []),
     config: vi.fn(() => ({ baseUrl: 'https://bce.example.com' })),
     mcpTools: vi.fn(async () => [
       { server: 'bce', name: 'enhance_prompt', description: '改写' },

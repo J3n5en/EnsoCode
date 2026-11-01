@@ -69,7 +69,6 @@ beforeEach(() => {
       fetch: fetchMock,
       notify: () => true,
       composer,
-      sessionMessages: async () => [],
       mcpTools,
       mcpCall,
       now: () => Date.now(),

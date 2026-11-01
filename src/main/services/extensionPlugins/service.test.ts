@@ -78,7 +78,6 @@ beforeEach(() => {
       fetch: vi.fn(),
       notify: () => true,
       composer: async () => null,
-      sessionMessages: async () => [],
       mcpTools: async () => [],
       mcpCall: async () => ({ content: '', isError: false }),
       now: () => Date.now(),

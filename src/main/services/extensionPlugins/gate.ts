@@ -47,7 +47,6 @@ export interface GateDeps {
     op: ComposerOp,
     payload: Record<string, unknown>
   ): Promise<unknown>;
-  sessionMessages(sessionId: string): Promise<unknown>;
   /** 插件自己的配置值（含密钥）；只交给插件进程，不进渲染层 */
   config(pluginId: string): Record<string, string>;
   mcpTools(target: McpTarget, signal: AbortSignal): Promise<McpToolInfo[]>;
@@ -206,12 +205,6 @@ export class PluginHostGate {
         )
           throw pluginError('INVALID_ARGS', 'text 不合法或超过 32KB');
         return this.deps.composer({ sessionId: inv.sessionId, origin: inv.origin ?? null }, op, a);
-      }
-      case 'session.messages': {
-        permit('session.read');
-        const inv = invocation();
-        if (!inv.sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
-        return this.deps.sessionMessages(inv.sessionId);
       }
       case 'config.get':
         return this.deps.config(pluginId);

@@ -84,7 +84,6 @@
 | `composer.draft` | 要读写输入框 | `enso.composer.*` |
 | `fs.read` / `fs.write` | 声明了对应范围 | 读写当前会话的项目文件 |
 | `net.fetch` | 声明了域名 | 访问这些域名 |
-| `session.read` | 要读会话消息 | 见下方「当前未接通」 |
 | `mcp.server` | 有 `mcpServers` | 随会话拉起 MCP 服务 |
 | `mcp.call` | 有 `mcp.tools` | 调用用户已配置的 MCP 服务里、清单列出的工具 |
 
@@ -131,7 +130,6 @@ export async function activate(enso) {
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
-| `session.messages()` | 见「当前未接通」 |
 | `config.get()` | 本插件的配置值 `{ [key]: string }`，未设置的键不出现。不需要权限，`activate` 里也能调 |
 | `mcp.tools()` / `mcp.call(server, tool, args?)` | 见下 |
 
@@ -217,7 +215,8 @@ export function onLoad(enso) {
 | `tool.card` | `toolName` | `{ toolName, output, state }` | 可用。`output` 是工具结果文本，可能为 `null` |
 | `block` | `language` | `{ language, source }` | 可用 |
 | `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |
-| `composer.activity` / `composer.dock` | 无 | — | 已保留，界面还没有挂载，注册了也不会显示 |
+
+其它 `slot` 注册时直接报错。
 
 `tool.card` 只在该插件自己的工具结果上显示。`block` 对应代码块语言标记 `` ```<pluginId>:<language> ``，例如 `enso.example.wordstats` 插件注册 `language: 'bars'` 后，`` ```enso.example.wordstats:bars `` 会交给它渲染，`source` 是代码块内容。语言标记不区分大小写。
 
@@ -248,13 +247,6 @@ export function onLoad(enso) {
 `mcpServers` 在会话启动时拉起，生命周期和审批沿用 Enso 现有的 MCP 实现。
 
 选中插件预设时，用它的指令文件代替当前启用的全局指令；没写 `instruction` 就不注入指令。角色描述、真尾、boost 和推脱补发按文件内容下发，缺的字段沿用默认。用户自己启用的 skill 和 MCP 仍然保留。插件停用或预设被删掉之后，已经选中的会话在启动时会失败，需要改回别的预设。
-
-## 当前未接通
-
-这两项清单和接口都已接受，但还没有接到界面或数据上，写插件时不要依赖：
-
-- `enso.session.messages()` 始终返回 `UNSUPPORTED`。`session.read` 权限可以声明，目前没有效果。
-- `composer.activity`、`composer.dock` 注册后不会显示。
 
 ## 限制汇总
 
@@ -303,4 +295,4 @@ export function onLoad(enso) {
 | `ABORTED` | 调用被取消 |
 | `RATE_LIMITED` | 调用过于频繁 |
 | `CIRCUIT_OPEN` | 连续失败，30 秒内拒绝 |
-| `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、尚未接通的会话消息、Agent 进程不可用时的 MCP 调用） |
+| `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、Agent 进程不可用时的 MCP 调用） |

@@ -123,7 +123,6 @@ export function runPluginHost(transport: HostTransport): void {
         insertText: (input: unknown) => hostCall('composer.insertText', input),
         replaceDraft: (input: unknown) => hostCall('composer.replaceDraft', input),
       },
-      session: { messages: () => hostCall('session.messages', {}) },
       config: { get: () => hostCall('config.get', {}) },
       mcp: {
         tools: () => hostCall('mcp.tools', {}),

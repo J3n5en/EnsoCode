@@ -17,7 +17,6 @@ export const PLUGIN_HOST_APIS = [
   'composer.readDraft',
   'composer.insertText',
   'composer.replaceDraft',
-  'session.messages',
   'config.get',
   'mcp.tools',
   'mcp.call',

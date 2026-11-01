@@ -103,6 +103,22 @@ describe('PluginProcess', () => {
     await expect(result).resolves.toEqual({ content: 'ok' });
   });
 
+  it('未知宿主接口直接拒绝，不交给 Main', async () => {
+    const handleHostCall = vi.fn(async () => 'host-value');
+    const s = setup({ handleHostCall });
+    await readyProcess(s);
+    s.child().reply({ t: 'call', id: 'h2', api: 'session.messages', args: {} });
+    await flush();
+    expect(handleHostCall).not.toHaveBeenCalled();
+    expect(s.child().inbox).toContainEqual(
+      expect.objectContaining({
+        id: 'h2',
+        ok: false,
+        error: expect.objectContaining({ code: 'UNKNOWN_API' }),
+      })
+    );
+  });
+
   it('超时：发送 cancel 并以 TIMEOUT 失败，晚到结果被丢弃', async () => {
     const s = setup();
     await readyProcess(s);

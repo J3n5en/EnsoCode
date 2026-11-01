@@ -9,7 +9,6 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'fs.read',
   'fs.write',
   'net.fetch',
-  'session.read',
   'mcp.server',
   'mcp.call',
 ] as const;
