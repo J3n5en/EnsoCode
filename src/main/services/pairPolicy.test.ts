@@ -242,6 +242,13 @@ describe('手机命令白名单', () => {
     expect(parsePhoneCommand({ ...base, approvalMode: 1 }).ok).toBe(false);
   });
 
+  it('spawn 校验无人值守开关：布尔可带，非布尔拒（否则下游静默丢弃）', () => {
+    const base = { type: 'spawn', sessionId: 's', projectId: 'p', providerId: 'pr', modelId: 'm' };
+    expect(parsePhoneCommand({ ...base, autoRejectApprovals: true }).ok).toBe(true);
+    expect(parsePhoneCommand({ ...base, autoRejectApprovals: false }).ok).toBe(true);
+    expect(parsePhoneCommand({ ...base, autoRejectApprovals: 'yes' }).ok).toBe(false);
+  });
+
   it('pair 协议审批档与桌面 APPROVAL_MODES 同集合（漂移会让档位在边界上丢）', () => {
     expect([...APPROVAL_MODES]).toEqual([...LOCAL_APPROVAL_MODES]);
   });

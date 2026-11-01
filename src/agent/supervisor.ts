@@ -1008,9 +1008,12 @@ export class SessionSupervisor {
   /** 子会话（coworker / child）创建时拷贝父档位，父会话切档后同步下去：
    *  否则子会话里已挂起的卡片仍会等人，与「切档即时生效」矛盾 */
   private applyApprovalModeToChildren(parentId: string, mode: ApprovalMode): void {
+    const autoReject = this.sessions.get(parentId)?.gate.autoReject ?? false;
     for (const [id, child] of this.sessions) {
       if (id === parentId || child.parentId !== parentId) continue;
       child.gate.mode = mode;
+      child.gate.autoReject = autoReject;
+      child.asks.autoReject = autoReject;
       child.gate.reconsider();
     }
   }
@@ -1637,7 +1640,8 @@ export class SessionSupervisor {
           command.botDelegationTask,
           command.pluginTools,
           command.pluginEvents,
-          command.dcgPath
+          command.dcgPath,
+          command.autoRejectApprovals ?? false
         );
         return;
       case 'spawn-child':
@@ -1847,6 +1851,10 @@ export class SessionSupervisor {
       case 'set-approval-mode': {
         const managed = this.must(command.identity);
         managed.gate.mode = command.mode;
+        if (command.autoReject !== undefined) {
+          managed.gate.autoReject = command.autoReject;
+          managed.asks.autoReject = command.autoReject;
+        }
         // 切档即时生效：已挂起的请求按新档位重判，不留在原地等超时
         managed.gate.reconsider();
         this.applyApprovalModeToChildren(managed.identity.sessionId, command.mode);
@@ -2207,7 +2215,8 @@ export class SessionSupervisor {
     botDelegationTask = false,
     pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
     pluginEvents?: PluginEventPlan,
-    dcgPath?: string
+    dcgPath?: string,
+    autoRejectApprovals = false
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2356,6 +2365,7 @@ export class SessionSupervisor {
       {
         review: (info, signal) => this.reviewApproval(info, signal),
         protectedFloor: botMode || protectedActions,
+        autoReject: autoRejectApprovals,
         ...(botMode ? { exemptFull: true, humanTimeoutMs: HUMAN_REQUEST_TIMEOUT_MS } : {}),
         ...(dcgPath ? { commandGuard: createDcgGuard(dcgPath) } : {}),
       }
@@ -2877,6 +2887,7 @@ export class SessionSupervisor {
       trackWait: (toolCallId) => this.bgTasks.trackBlockingWait(sessionId, toolCallId),
     });
     const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
+    askManager.autoReject = gate.autoReject;
     // 可热切的内置工具始终注册；激活与否由 applyBuiltinTools 按当前设置决定
     const builtinGroups = new Map<string, string[]>();
     const builtin = (id: string, tools: Def[]): Def[] => {

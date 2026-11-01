@@ -43,6 +43,7 @@ export interface PairCreatedSession {
   thinkingLevel?: string;
   presetId?: string;
   approvalMode?: string;
+  autoRejectApprovals?: boolean;
 }
 
 /** 手机端会话配置变更（已过白名单校验），renderer 应用到会话 store（与桌面选择器同一路径） */

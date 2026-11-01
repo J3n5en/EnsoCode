@@ -11,9 +11,16 @@ interface PendingAsk {
 
 let counter = 0;
 
+/** 无人值守下的提问拒绝文案：对齐 factory 的 no_approver_available——不是被拒，是没人能答 */
+export const ASK_NO_USER_ERROR =
+  'Blocked: this session has no user available to answer questions. Decide with the most ' +
+  'reasonable assumption and continue, or stop and report what needs a human decision.';
+
 /** agent → 用户提问的挂起管理(与 ApprovalGate 同构:请求经事件上抛,答复经命令回落) */
 export class AskManager {
   private readonly pending = new Map<string, PendingAsk>();
+  /** 无人值守：没人能回答，提问前就失败，不占卡片也不干等超时 */
+  autoReject = false;
 
   constructor(
     private readonly onRequest: (info: AskRequestInfo) => void,
@@ -27,6 +34,7 @@ export class AskManager {
     options?: string[],
     opts: { signal?: AbortSignal; timeoutMs?: number; defaultAnswer?: string } = {}
   ): Promise<string> {
+    if (this.autoReject) return Promise.reject(new Error(ASK_NO_USER_ERROR));
     const requestId = `ask-${++counter}-${Date.now().toString(36)}`;
     const info: AskRequestInfo = {
       requestId,

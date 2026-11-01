@@ -1074,6 +1074,7 @@ export function spawnSession(
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),
+    ...(request.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
     ...(request.planMode !== undefined ? { planMode: request.planMode } : {}),
     ...approvalReviewerSpawnFields(approvalReviewerSource),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
@@ -1829,7 +1830,8 @@ export function stopSubagent(
 export function setSessionApprovalMode(
   identity: SessionIdentity,
   mode: ApprovalMode,
-  authenticatedAccountKeys: ReadonlySet<string> = new Set()
+  authenticatedAccountKeys: ReadonlySet<string> = new Set(),
+  autoReject?: boolean
 ): { ok: boolean; error?: string } {
   if (mode === 'assistant') {
     const reviewer = resolveApprovalReviewer(authenticatedAccountKeys);
@@ -1839,7 +1841,12 @@ export function setSessionApprovalMode(
     }
     pushApprovalReviewer(authenticatedAccountKeys);
   }
-  return sendAgentCommand({ type: 'set-approval-mode', identity, mode });
+  return sendAgentCommand({
+    type: 'set-approval-mode',
+    identity,
+    mode,
+    ...(autoReject === undefined ? {} : { autoReject }),
+  });
 }
 
 export function requestSnapshot(sessionId?: string): { ok: boolean; error?: string } {

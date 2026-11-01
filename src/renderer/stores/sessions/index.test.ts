@@ -135,6 +135,10 @@ const agentSetPlanMode = vi.fn(
       error?: string;
     }
 );
+const agentSetApprovalMode = vi.fn(
+  async (_id: string, _mode: string, _autoReject?: boolean) =>
+    ({ ok: true }) as { ok: boolean; error?: string }
+);
 
 vi.stubGlobal('navigator', { language: 'en-US' });
 vi.stubGlobal('document', {
@@ -182,6 +186,7 @@ vi.stubGlobal('window', {
       fork: agentFork,
       steer: vi.fn(async () => ({ ok: true })),
       setPlanMode: agentSetPlanMode,
+      setApprovalMode: agentSetApprovalMode,
     },
     btw: {
       spawn: btwSpawn,
@@ -5242,5 +5247,50 @@ describe('Plan 模式', () => {
     settle({ ok: false, error: 'stale' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(conv()).toBeUndefined();
+  });
+});
+
+describe('无人值守开关：已启动即时下发，未启动随 spawn', () => {
+  beforeAll(async () => {
+    settingsModule = await import('../settings');
+    sessionsModule = await import('./index');
+  });
+
+  beforeEach(async () => {
+    await seedParent();
+    agentSetApprovalMode.mockClear();
+    agentSpawn.mockClear();
+  });
+
+  const conv = () => sessionsModule.useSessionsStore.getState().conversations['plan-parent'];
+
+  it('已启动：随当前档位一起下发；失败回滚', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        'plan-parent': {
+          ...state.conversations['plan-parent'],
+          started: true,
+          approvalMode: 'auto-edits',
+        },
+      },
+    }));
+    sessionsModule.useSessionsStore.getState().setAutoRejectApprovals('plan-parent', true);
+    expect(conv()?.autoRejectApprovals).toBe(true);
+    expect(agentSetApprovalMode).toHaveBeenCalledWith('plan-parent', 'auto-edits', true);
+
+    agentSetApprovalMode.mockResolvedValueOnce({ ok: false, error: 'stale' });
+    sessionsModule.useSessionsStore.getState().setAutoRejectApprovals('plan-parent', false);
+    await vi.waitFor(() => expect(conv()?.autoRejectApprovals).toBe(true));
+  });
+
+  it('未启动：只记在会话上，不下发，spawn 时带上', async () => {
+    sessionsModule.useSessionsStore.getState().setAutoRejectApprovals('plan-parent', true);
+    expect(agentSetApprovalMode).not.toHaveBeenCalled();
+    expect(conv()?.autoRejectApprovals).toBe(true);
+    await sessionsModule.useSessionsStore
+      .getState()
+      .send('继续', { providerId: 'provider-1', modelId: 'model-1', cwd: '/workspace' });
+    expect(agentSpawn).toHaveBeenCalledWith(expect.objectContaining({ autoRejectApprovals: true }));
   });
 });

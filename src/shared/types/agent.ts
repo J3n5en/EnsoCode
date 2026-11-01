@@ -1169,6 +1169,8 @@ export type AgentCommand =
       pluginEvents?: PluginEventPlan;
       instruction?: { path: string; content: string };
       approvalMode?: ApprovalMode;
+      /** 无人值守：需要人工确认的动作直接拒绝，不等真人 */
+      autoRejectApprovals?: boolean;
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
       /** 代审改用分类器（System One）；与 approvalReviewer 互斥 */
@@ -1289,7 +1291,13 @@ export type AgentCommand =
     }
   /** Main 记录的子代理 Run 结束且模型尚未知情：投给父会话（空闲唤醒、忙时搭车） */
   | { type: 'agent-notify'; identity: SessionIdentity; text: string; urgent: boolean }
-  | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  | {
+      type: 'set-approval-mode';
+      identity: SessionIdentity;
+      mode: ApprovalMode;
+      /** 省略表示不改动无人值守开关 */
+      autoReject?: boolean;
+    }
   | { type: 'set-plan-mode'; identity: SessionIdentity; active: boolean }
   | {
       type: 'plan-respond';
@@ -1656,6 +1664,8 @@ export interface AgentSpawnRequest {
   disabledTools?: string[];
   presetId?: string;
   approvalMode?: ApprovalMode;
+  /** 无人值守：新会话一起带上该开关，避免恢复后悄悄变回「等人确认」 */
+  autoRejectApprovals?: boolean;
   planMode?: boolean;
 }
 
@@ -3319,6 +3329,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'pluginHooks',
           'instruction',
           'approvalMode',
+          'autoRejectApprovals',
           'approvalReviewer',
           'approvalReviewerClassifier',
           'approvalReviewerManaged',
@@ -3621,9 +3632,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-approval-mode':
-      return hasExactKeys(value, ['type', 'identity', 'mode']) &&
+      return hasOnlyKeys(value, ['type', 'identity', 'mode', 'autoReject']) &&
         parseAnySessionIdentity(value.identity) &&
-        APPROVAL_MODES.includes(value.mode as ApprovalMode)
+        APPROVAL_MODES.includes(value.mode as ApprovalMode) &&
+        (value.autoReject === undefined || typeof value.autoReject === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-plan-mode':

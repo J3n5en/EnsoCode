@@ -326,6 +326,9 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       ) {
         return { ok: false, error: 'invalid approvalMode' };
       }
+      if (v.autoRejectApprovals !== undefined && typeof v.autoRejectApprovals !== 'boolean') {
+        return { ok: false, error: 'invalid autoRejectApprovals' };
+      }
       return { ok: true, command: value as PhoneToHost };
     case 'set-model':
       if (!isStr(v.sessionId) || !isStr(v.providerId) || !isStr(v.modelId)) {

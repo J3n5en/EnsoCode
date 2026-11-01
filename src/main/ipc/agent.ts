@@ -2066,17 +2066,27 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SET_APPROVAL_MODE,
-    async (_event, sessionId: unknown, mode: unknown): Promise<AgentActionResult> => {
+    async (
+      _event,
+      sessionId: unknown,
+      mode: unknown,
+      autoReject: unknown
+    ): Promise<AgentActionResult> => {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
       const identity = exactIdentity(sessionId);
-      if (!identity || !APPROVAL_MODES.includes(mode as ApprovalMode)) {
+      if (
+        !identity ||
+        !APPROVAL_MODES.includes(mode as ApprovalMode) ||
+        (autoReject !== undefined && typeof autoReject !== 'boolean')
+      ) {
         return { ok: false, error: 'invalid approval mode or stale generation' };
       }
       return setSessionApprovalMode(
         identity,
         mode as ApprovalMode,
-        await readStoredOauthCredentialKeys()
+        await readStoredOauthCredentialKeys(),
+        autoReject === undefined ? undefined : autoReject
       );
     }
   );

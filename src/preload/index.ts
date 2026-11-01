@@ -910,8 +910,12 @@ const electronAPI = {
       decision: ApprovalDecision
     ): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, sessionId, requestId, decision),
-    setApprovalMode: (sessionId: string, mode: ApprovalMode): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode),
+    setApprovalMode: (
+      sessionId: string,
+      mode: ApprovalMode,
+      autoReject?: boolean
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE, sessionId, mode, autoReject),
     setPlanMode: (sessionId: string, active: boolean): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_PLAN_MODE, sessionId, active),
     respondPlan: (

@@ -1,5 +1,5 @@
 import type { ApprovalMode } from '@shared/types/agent';
-import { Check, ChevronDown, Shield, ShieldCheck, ShieldOff, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, Moon, Shield, ShieldCheck, ShieldOff, Sparkles } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
@@ -39,6 +39,9 @@ export const APPROVAL_MODE_ORDER: ApprovalMode[] = [
 interface ApprovalModePickerProps {
   mode: ApprovalMode;
   onSelect: (mode: ApprovalMode) => void;
+  /** 无人值守：需要确认的动作直接拒绝，不等真人（与档位正交） */
+  autoReject: boolean;
+  onToggleAutoReject: (value: boolean) => void;
 }
 
 /** 助手代审档位可用：设置里选了启用中的代审模型 */
@@ -57,7 +60,12 @@ export function useApprovalReviewerReady(): boolean {
 }
 
 /** composer 工具行的审批档位选择（盾牌 pill），会话中途可切换即时生效 */
-export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) {
+export function ApprovalModePicker({
+  mode,
+  onSelect,
+  autoReject,
+  onToggleAutoReject,
+}: ApprovalModePickerProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const reviewerReady = useApprovalReviewerReady();
@@ -73,6 +81,7 @@ export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) 
         <span className="hidden min-w-0 truncate @min-[28rem]:inline">
           {t(APPROVAL_MODE_META[mode].labelKey)}
         </span>
+        {autoReject && <Moon className="h-3 w-3 shrink-0" aria-label={t('Unattended')} />}
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-80 [&_[data-slot=popover-viewport]]:p-1">
@@ -111,6 +120,30 @@ export function ApprovalModePicker({ mode, onSelect }: ApprovalModePickerProps) 
             </Fragment>
           );
         })}
+        <div className="my-1 h-px bg-border" />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoReject}
+          onClick={() => onToggleAutoReject(!autoReject)}
+          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60"
+        >
+          <Moon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block">{t('Unattended')}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t('Rejects actions that need approval instead of waiting for you')}
+            </span>
+          </span>
+          <span
+            className={cn(
+              'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border',
+              autoReject ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+            )}
+          >
+            {autoReject && <Check className="h-3 w-3" />}
+          </span>
+        </button>
       </PopoverPopup>
     </Popover>
   );

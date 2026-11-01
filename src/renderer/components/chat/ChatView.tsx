@@ -528,8 +528,12 @@ export function ChatView() {
                     )}
                     <ApprovalModePicker
                       mode={chrome.approvalMode ?? 'full'}
+                      autoReject={chrome.autoRejectApprovals === true}
                       onSelect={(mode) =>
                         useSessionsStore.getState().setApprovalMode(chrome.id, mode)
+                      }
+                      onToggleAutoReject={(value) =>
+                        useSessionsStore.getState().setAutoRejectApprovals(chrome.id, value)
                       }
                     />
                     <ModelPicker

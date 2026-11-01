@@ -2058,6 +2058,15 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ ...base, mode: undefined })).toBeNull();
   });
 
+  it('set-approval-mode 的无人值守开关：布尔可选，非布尔与未知键整体拒绝', () => {
+    const base = { type: 'set-approval-mode', identity: parent, mode: 'supervised' };
+    expect(parseAgentCommand({ ...base, autoReject: true })).toEqual({ ...base, autoReject: true });
+    expect(parseAgentCommand(base)).toEqual(base);
+    expect(parseAgentCommand({ ...base, autoReject: 'yes' })).toBeNull();
+    expect(parseAgentCommand({ ...base, autoReject: 1 })).toBeNull();
+    expect(parseAgentCommand({ ...base, bogus: true })).toBeNull();
+  });
+
   it('pin-sessions 只接受字符串数组（脏项整体拒绝）', () => {
     expect(parseAgentCommand({ type: 'pin-sessions', sessionIds: [] })).toEqual({
       type: 'pin-sessions',

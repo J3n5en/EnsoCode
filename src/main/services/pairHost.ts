@@ -1163,6 +1163,7 @@ async function handleFrame(
         cwd: check.resolved.cwd,
         ...(command.presetId ? { presetId: command.presetId } : {}),
         ...(command.approvalMode ? { approvalMode: command.approvalMode } : {}),
+        ...(command.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
         ...(command.reasoningEnabled ? { reasoningEnabled: true } : {}),
         ...(command.thinkingLevel ? { thinkingLevel: command.thinkingLevel } : {}),
       })) ?? { ok: false, error: 'pair agent bridge is not wired' };
@@ -1188,6 +1189,7 @@ async function handleFrame(
         ...(command.thinkingLevel ? { thinkingLevel: command.thinkingLevel } : {}),
         ...(command.presetId ? { presetId: command.presetId } : {}),
         ...(command.approvalMode ? { approvalMode: command.approvalMode } : {}),
+        ...(command.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
       });
       break;
     }

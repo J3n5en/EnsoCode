@@ -1,6 +1,6 @@
 import type { AskRequestInfo } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { AskManager } from './ask';
+import { ASK_NO_USER_ERROR, AskManager, createAskTool } from './ask';
 
 const make = (humanTimeoutMs?: number) => {
   const infos: AskRequestInfo[] = [];
@@ -38,6 +38,34 @@ describe('AskManager 等人超时', () => {
     const { manager, infos } = make();
     void manager.ask('q').catch(() => undefined);
     expect(infos[0].expiresAt).toBeUndefined();
+    manager.cancelAll();
+  });
+});
+
+describe('无人值守：没人能回答提问', () => {
+  it('开关打开时 ask 不发请求也不建 pending，直接按「没人回答」失败', async () => {
+    const { manager, infos } = make(600_000);
+    manager.autoReject = true;
+    await expect(manager.ask('选哪个？', ['a', 'b'])).rejects.toThrow(ASK_NO_USER_ERROR);
+    expect(infos).toHaveLength(0);
+    expect(manager.snapshot()).toHaveLength(0);
+  });
+
+  it('ask_user 工具在开关打开时直接失败，提示按最合理假设继续', async () => {
+    const { manager } = make(600_000);
+    manager.autoReject = true;
+    const tool = createAskTool(manager);
+    await expect(
+      tool.execute('call-ask', { question: '用哪个分支？' }, undefined, undefined, {} as never)
+    ).rejects.toThrow(/no user available/i);
+  });
+
+  it('开关关闭后恢复等人', () => {
+    const { manager, infos } = make();
+    manager.autoReject = true;
+    manager.autoReject = false;
+    void manager.ask('q').catch(() => undefined);
+    expect(infos).toHaveLength(1);
     manager.cancelAll();
   });
 });

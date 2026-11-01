@@ -1911,6 +1911,9 @@ export const zhTranslations: Record<string, string> = {
   'Full access': '完全放行',
   'Run everything without asking': '所有操作不经确认直接执行',
   'Assistant approval': '助手代审',
+  Unattended: '无人值守',
+  'Rejects actions that need approval instead of waiting for you':
+    '需要确认的动作直接拒绝，不再弹卡片等人',
   'Assistant reviewing…': '代审中…',
   'A configured model reviews each action first': '由设置中的模型先审每一步操作',
   'Select an assistant approval model in Settings first': '请先在设置里选择助手代审模型',

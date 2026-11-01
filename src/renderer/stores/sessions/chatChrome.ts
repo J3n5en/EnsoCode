@@ -25,6 +25,7 @@ export interface ChatChrome {
   thinkingLevel: Conversation['thinkingLevel'];
   presetId?: string;
   approvalMode: Conversation['approvalMode'];
+  autoRejectApprovals: Conversation['autoRejectApprovals'];
   draftText?: Conversation['draftText'];
   draftImages?: Conversation['draftImages'];
   draftAppend?: Conversation['draftAppend'];
@@ -92,6 +93,7 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
     thinkingLevel: displayed.thinkingLevel,
     presetId: displayed.presetId,
     approvalMode: displayed.approvalMode,
+    autoRejectApprovals: displayed.autoRejectApprovals,
     draftText: displayed.draftText,
     draftImages: displayed.draftImages,
     draftAppend: displayed.draftAppend,

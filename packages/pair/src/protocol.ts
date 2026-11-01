@@ -88,6 +88,8 @@ export type PhoneToHost =
       modelId: string;
       presetId?: string;
       approvalMode?: ApprovalMode;
+      /** 无人值守：需要人工确认的动作直接拒绝，不等真人 */
+      autoRejectApprovals?: boolean;
       reasoningEnabled?: boolean;
       thinkingLevel?: ThinkingLevel;
     }

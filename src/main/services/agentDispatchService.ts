@@ -924,6 +924,7 @@ export class AgentDispatchService {
         ...(typeof persisted.approvalMode === 'string'
           ? { approvalMode: persisted.approvalMode as AgentSpawnRequest['approvalMode'] }
           : {}),
+        ...(persisted.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
       };
       const spawned = this.options.host.spawnParent(parent, request, credentialKeys);
       if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to spawn parent container.');

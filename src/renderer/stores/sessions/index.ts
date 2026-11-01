@@ -283,6 +283,8 @@ export interface Conversation extends SessionProjection {
   presetId?: string;
   /** 审批档位（per 会话记忆）；缺省 full（完全放行） */
   approvalMode?: ApprovalMode;
+  /** 无人值守：需要人工确认的动作直接拒绝，不等真人（与档位正交，随会话持久化） */
+  autoRejectApprovals?: boolean;
   /** coworker 会话专有：父会话 id（有值则不进 order/侧栏） */
   parentId?: string;
   /** 旁路会话：挂在主会话下，不进侧栏/持久化；关 tab 即销毁 */
@@ -463,6 +465,8 @@ interface SessionsState {
   setModel(id: string, providerId: string, modelId: string): void;
   /** 设置审批档位；已 spawn 的会话即时下发 */
   setApprovalMode(id: string, mode: ApprovalMode): void;
+  /** 无人值守开关：已 spawn 的会话即时下发，未 spawn 的随下次 spawn 生效 */
+  setAutoRejectApprovals(id: string, value: boolean): void;
   /** 开关 Plan 模式；已 spawn 即时下发，否则随下次 spawn 生效 */
   setPlanMode(id: string, active: boolean): void;
   /** 审批条决策；状态以 worker 回流的 plan-state 为准 */
@@ -2557,6 +2561,7 @@ export const useSessionsStore = create<SessionsState>()(
             ...(session.approvalMode
               ? { approvalMode: session.approvalMode as Conversation['approvalMode'] }
               : {}),
+            ...(session.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
           };
           set((state) => ({
             conversations: { ...state.conversations, [session.sessionId]: conversation },
@@ -3260,6 +3265,7 @@ export const useSessionsStore = create<SessionsState>()(
                   loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
                   presetId: conversation.presetId,
                   approvalMode: conversation.approvalMode ?? 'full',
+                  ...(conversation.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
                   ...(get().conversations[id]?.planState
                     ? { planMode: get().conversations[id]?.planState?.active }
                     : {}),
@@ -3385,6 +3391,7 @@ export const useSessionsStore = create<SessionsState>()(
             loadLocalSkills: settings.loadLocalSkills,
             presetId: conversation.presetId,
             approvalMode: conversation.approvalMode ?? 'full',
+            ...(conversation.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
             ...(conversation.planState ? { planMode: conversation.planState.active } : {}),
           });
           set((state) =>
@@ -3578,6 +3585,22 @@ export const useSessionsStore = create<SessionsState>()(
               }
             });
           }
+        },
+
+        setAutoRejectApprovals(id, value) {
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          const previous = conversation.autoRejectApprovals ?? false;
+          if (previous === value) return;
+          set((state) => patch(state, id, { autoRejectApprovals: value }));
+          if (!conversation.started) return;
+          void window.electronAPI.agent
+            .setApprovalMode(id, conversation.approvalMode ?? 'full', value)
+            .then((result) => {
+              if (result && !result.ok) {
+                set((state) => patch(state, id, { autoRejectApprovals: previous }));
+              }
+            });
         },
 
         setPlanMode(id, active) {
