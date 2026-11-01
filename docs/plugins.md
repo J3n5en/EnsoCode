@@ -213,7 +213,7 @@ export function onLoad(enso) {
 
 | `slot` | 额外字段 | 组件收到的 props | 状态 |
 | --- | --- | --- | --- |
-| `message.action` | `position: 'left' \| 'right'` | `{ position, text }` | 只渲染 `right`，位于消息文本右侧 |
+| `message.action` | `position: 'left' \| 'right'` | `{ position, text }` | 可用。位于回复正文下方的操作条，`left` 在复制按钮之前，`right` 在复制按钮之后 |
 | `tool.card` | `toolName` | `{ toolName, output, state }` | 可用。`output` 是工具结果文本，可能为 `null` |
 | `block` | `language` | `{ language, source }` | 可用 |
 | `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |
@@ -254,7 +254,7 @@ export function onLoad(enso) {
 这两项清单和接口都已接受，但还没有接到界面或数据上，写插件时不要依赖：
 
 - `enso.session.messages()` 始终返回 `UNSUPPORTED`。`session.read` 权限可以声明，目前没有效果。
-- `message.action` 的 `position: 'left'`、`composer.activity`、`composer.dock` 注册后不会显示。
+- `composer.activity`、`composer.dock` 注册后不会显示。
 
 ## 限制汇总
 

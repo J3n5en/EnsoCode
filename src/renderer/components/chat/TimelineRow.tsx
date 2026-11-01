@@ -1302,6 +1302,7 @@ function TextRow({
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+          <PluginMessageActions position="left" text={item.text} />
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" text={item.text} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
