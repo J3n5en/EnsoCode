@@ -1866,7 +1866,8 @@ export class SessionSupervisor {
         return;
       case 'task-stop':
         this.must(command.identity);
-        this.bgTasks.stop(command.taskId);
+        // 卡片上的停止按钮：用户主动停的，完成通知要告诉模型别重启
+        this.bgTasks.stop(command.taskId, true);
         return;
       case 'tool-background':
         this.must(command.identity);

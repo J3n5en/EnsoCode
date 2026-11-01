@@ -6,6 +6,7 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 import type { ClaudeHookEvent, PluginHookSpawn } from '../shared/types/plugins';
+import { killProcessTree } from './killTree';
 
 export type HookRunner = (
   hook: PluginHookSpawn,
@@ -166,20 +167,6 @@ function collector() {
   };
 }
 
-function killTree(child: ChildProcess): void {
-  const pid = child.pid;
-  try {
-    if (pid === undefined) child.kill('SIGKILL');
-    else if (process.platform === 'win32')
-      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }).on('error', () =>
-        child.kill()
-      );
-    else process.kill(-pid, 'SIGKILL');
-  } catch {
-    child.kill('SIGKILL');
-  }
-}
-
 export function createProcessHookRunner(cwd: string): HookRunner {
   return (hook, input, signal) =>
     new Promise((resolve) => {
@@ -223,7 +210,7 @@ export function createProcessHookRunner(cwd: string): HookRunner {
         });
       };
       function kill() {
-        killTree(child);
+        killProcessTree(child, 'SIGKILL');
         setTimeout(() => finish(null), 1000).unref();
       }
       const timer = setTimeout(
