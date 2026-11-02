@@ -37,7 +37,7 @@ import { effectiveKeybindings, eventToBinding, formatBinding } from '@/lib/keybi
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { pluginCommandFor, runPluginCommand } from '../../plugins/commands';
-import { registerDraftTarget } from '../../plugins/draftBridge';
+import { registerDraftTarget, takePendingDraft } from '../../plugins/draftBridge';
 import { PluginComposerSlots } from '../../plugins/slots';
 import {
   type PluginCandidate,
@@ -293,7 +293,10 @@ export function Composer({
         });
       }
       const draft = focusKey ? drafts.get(focusKey) : undefined;
-      editorRef.current?.setSegments(draft?.segments ?? []);
+      const prefill = focusKey ? takePendingDraft(focusKey) : undefined;
+      editorRef.current?.setSegments(
+        prefill ? [{ type: 'text', text: prefill }] : (draft?.segments ?? [])
+      );
       boundIds.current = new Set(
         (draft?.segments ?? [])
           .filter((segment) => segment.type === 'ui-element' && segment.imageId)

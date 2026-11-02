@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MentionSegment } from '@/components/chat/mentionComposer';
-import { draftRev, handleDraftRequest, registerDraftTarget } from './draftBridge';
+import {
+  draftRev,
+  handleDraftRequest,
+  prefillDraft,
+  registerDraftTarget,
+  takePendingDraft,
+} from './draftBridge';
 
 function fakeTarget(key: string, initial: MentionSegment[]) {
   const state = { segments: initial, busy: false };
@@ -27,6 +33,19 @@ afterEach(() => {
 });
 
 describe('草稿桥', () => {
+  it('预填：输入框已切到该会话时直接写入，否则留到切过去时取走一次', () => {
+    const { state, target } = fakeTarget('s1', []);
+    dispose = registerDraftTarget(target);
+    prefillDraft('s1', '已在前台');
+    expect(state.segments).toEqual([{ type: 'text', text: '已在前台' }]);
+    expect(takePendingDraft('s1')).toBeUndefined();
+
+    prefillDraft('s2', '稍后');
+    expect(state.segments).toEqual([{ type: 'text', text: '已在前台' }]);
+    expect(takePendingDraft('s2')).toBe('稍后');
+    expect(takePendingDraft('s2')).toBeUndefined();
+  });
+
   it('读取当前会话草稿，返回版本信息', () => {
     const { target } = fakeTarget('c1', [{ type: 'text', text: 'hello' }]);
     dispose = registerDraftTarget(target);

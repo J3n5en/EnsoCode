@@ -370,7 +370,12 @@ export function runPluginHost(transport: HostTransport): void {
           hostCall('plugin.call', { pluginId: targetId, name, args: args ?? {} }),
       },
       artifacts: { write: (input: unknown) => hostCall('artifact.write', input) },
-      session: { inject: (input: unknown) => hostCall('session.inject', input ?? {}) },
+      session: {
+        inject: (input: unknown) => hostCall('session.inject', input ?? {}),
+        list: () => hostCall('session.list', {}),
+        focus: (sessionId: string) => hostCall('session.focus', { sessionId }),
+        create: (input?: unknown) => hostCall('session.create', input ?? {}),
+      },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
       fs: {
         readText: (path: string) => hostCall('fs.readText', { path }),

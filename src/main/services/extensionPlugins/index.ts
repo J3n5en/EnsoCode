@@ -14,7 +14,7 @@ import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { rendererById } from '../renderers';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
-import type { GateDeps } from './gate';
+import type { GateDeps, PluginSessionInfo } from './gate';
 import { envMarketSources, marketPublicKeys, PluginMarket } from './market';
 import { pluginError } from './process';
 import { ExtensionPluginService, type PluginSessionBridge } from './service';
@@ -28,10 +28,21 @@ let service: ExtensionPluginService | null = null;
 let mcpBridge: PluginMcpBridge | null = null;
 let draftBroker: DraftBroker | null = null;
 let sessionBridge: PluginSessionBridge | null = null;
+let sessionDirectory: ((origin: string) => PluginSessionInfo[]) | null = null;
 
 export function setPluginSessionBridge(bridge: PluginSessionBridge | null): void {
   sessionBridge = bridge;
 }
+
+/** 会话列表由持有权威记录的 agent IPC 注入，避免这里反向依赖它 */
+export function setPluginSessionDirectory(
+  directory: ((origin: string) => PluginSessionInfo[]) | null
+): void {
+  sessionDirectory = directory;
+}
+
+/** 新建会话要等权威记录创建完成，比草稿操作慢 */
+const SESSION_UI_TIMEOUT_MS = 15_000;
 
 /** 服务端的剪贴板和外链是空操作，capabilities 按宿主种类如实报告 */
 export function pluginHostCapabilities(input: {
@@ -135,6 +146,15 @@ export function getExtensionPlugins(): ExtensionPluginService {
       },
       composer: (target, op, payload) =>
         getDraftBroker().request(target.origin, target.sessionId, op, payload),
+      sessions: { list: (origin) => sessionDirectory?.(origin) ?? [] },
+      sessionUi: (target, op, payload) =>
+        getDraftBroker().request(
+          target.origin,
+          target.sessionId,
+          op,
+          payload,
+          SESSION_UI_TIMEOUT_MS
+        ),
       mcpTools: (target, signal) => (mcpBridge ? mcpBridge.mcpTools(target, signal) : noMcp()),
       mcpCall: (target, server, tool, args, signal) =>
         mcpBridge ? mcpBridge.mcpCall(target, server, tool, args, signal) : noMcp(),

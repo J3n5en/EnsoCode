@@ -1732,7 +1732,7 @@ const electronAPI = {
       callback: (request: {
         requestId: string;
         sessionId: string;
-        op: 'readDraft' | 'insertText' | 'replaceDraft';
+        op: 'readDraft' | 'insertText' | 'replaceDraft' | 'focusSession' | 'createSession';
         payload: Record<string, unknown>;
       }) => void
     ): (() => void) => {

@@ -27,6 +27,17 @@ const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
 
 export type ComposerOp = 'readDraft' | 'insertText' | 'replaceDraft';
+/** 需要发起窗口配合的会话操作：切换到会话、在发起会话的项目里新建会话 */
+export type SessionUiOp = 'focusSession' | 'createSession';
+
+/** 插件看到的会话：只有标识与展示字段，不含路径 */
+export interface PluginSessionInfo {
+  id: string;
+  title: string;
+  updatedAt: number;
+  running?: boolean;
+  archived?: boolean;
+}
 
 /** 草稿请求的目标：会话 + 发起手势的窗口（webContents id），草稿只回写到发起窗口 */
 export interface ComposerTarget {
@@ -94,6 +105,13 @@ export interface GateDeps {
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
   unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
   capabilities?(): PluginHostCapabilities;
+  /** 与 sessionId 同项目的主会话；按最近活动排序 */
+  sessions?: { list(sessionId: string): PluginSessionInfo[] };
+  sessionUi?(
+    target: ComposerTarget,
+    op: SessionUiOp,
+    payload: Record<string, unknown>
+  ): Promise<unknown>;
 }
 
 export interface InvocationInit {
@@ -208,6 +226,21 @@ export class PluginHostGate {
         throw pluginError('NO_INVOCATION', '此接口只能在宿主发起的调用内使用');
       if (inv.cancelled) throw pluginError('ABORTED', '调用已取消');
       return inv;
+    };
+    const gestured = (what: string) => {
+      const inv = invocation();
+      if (!inv.gesture || this.deps.now() - inv.createdAt > GESTURE_TTL_MS)
+        throw pluginError('GESTURE_REQUIRED', `只能在用户操作触发的调用里${what}`);
+      return inv;
+    };
+    const sessionOf = (inv: Invocation) => {
+      if (!inv.sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
+      return inv.sessionId;
+    };
+    const sessionUi = () => {
+      const ui = this.deps.sessionUi;
+      if (!ui) throw pluginError('UNSUPPORTED', '当前环境不能操作会话');
+      return ui;
     };
 
     switch (api) {
@@ -399,6 +432,45 @@ export class PluginHostGate {
             composer: false,
           }
         );
+      case 'session.list': {
+        permit('session.read');
+        const current = sessionOf(invocation());
+        if (!this.deps.sessions) throw pluginError('UNSUPPORTED', '当前环境不能列出会话');
+        return { current, sessions: this.deps.sessions.list(current) };
+      }
+      case 'session.focus': {
+        permit('session.focus');
+        const inv = gestured('切换会话');
+        const current = sessionOf(inv);
+        if (typeof a.sessionId !== 'string' || a.sessionId.length === 0 || a.sessionId.length > 256)
+          throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+        const target = a.sessionId;
+        if (!this.deps.sessions?.list(current).some((s) => s.id === target))
+          throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
+        await sessionUi()({ sessionId: current, origin: inv.origin ?? null }, 'focusSession', {
+          sessionId: target,
+        });
+        return null;
+      }
+      case 'session.create': {
+        permit('session.create');
+        const inv = gestured('新建会话');
+        const current = sessionOf(inv);
+        if (
+          a.text !== undefined &&
+          (typeof a.text !== 'string' || utf8Bytes(a.text) > MAX_DRAFT_BYTES)
+        )
+          throw pluginError('INVALID_ARGS', 'text 不合法或超过 32KB');
+        const created = await sessionUi()(
+          { sessionId: current, origin: inv.origin ?? null },
+          'createSession',
+          a.text ? { text: a.text } : {}
+        );
+        const id = isRecord(created) ? created.sessionId : undefined;
+        if (typeof id !== 'string' || id.length === 0)
+          throw pluginError('CREATE_FAILED', '新建会话失败');
+        return { sessionId: id };
+      }
     }
   }
 

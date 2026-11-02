@@ -102,6 +102,12 @@ export const PLUGIN_HOST_APIS = [
   'contrib.unregister',
   /** 宿主能力探测 */
   'host.capabilities',
+  /** 列出与发起会话同项目的会话；返回 { current, sessions } */
+  'session.list',
+  /** 切换到会话；args { sessionId }，需用户手势 */
+  'session.focus',
+  /** 在发起会话的项目里新建会话并切过去；args { text? } 预填输入框，需用户手势 */
+  'session.create',
 ] as const;
 export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 

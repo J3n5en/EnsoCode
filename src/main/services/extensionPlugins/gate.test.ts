@@ -351,6 +351,78 @@ describe('PluginHostGate', () => {
     ).resolves.toBeNull();
   });
 
+  it('会话接口：列表需要 session.read，跳转与新建需要各自权限和用户手势', async () => {
+    const list = vi.fn(() => [
+      { id: 's1', title: '当前', updatedAt: 2 },
+      { id: 's2', title: '另一个', updatedAt: 1, running: true },
+    ]);
+    const sessionUi = vi.fn(async (_target: unknown, op: string) =>
+      op === 'createSession' ? { sessionId: 's3' } : null
+    );
+    deps.sessions = { list };
+    deps.sessionUi = sessionUi;
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    for (const api of ['session.list', 'session.focus', 'session.create'] as const)
+      await expect(gate.handle('a.b', api, { sessionId: 's2' }, uiCall())).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+      });
+
+    deps.manifest = () =>
+      manifest({ permissions: ['session.read', 'session.focus', 'session.create'] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.list', {}, agentCall())).resolves.toEqual({
+      current: 's1',
+      sessions: list(),
+    });
+    expect(list).toHaveBeenCalledWith('s1');
+
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 's2' }, agentCall())
+    ).rejects.toMatchObject({ code: 'GESTURE_REQUIRED' });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'elsewhere' }, uiCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 's2' }, uiCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'focusSession', {
+      sessionId: 's2',
+    });
+
+    await expect(gate.handle('a.b', 'session.create', {}, agentCall())).rejects.toMatchObject({
+      code: 'GESTURE_REQUIRED',
+    });
+    await expect(
+      gate.handle('a.b', 'session.create', { text: 'x'.repeat(40 * 1024) }, uiCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle('a.b', 'session.create', { text: '整理看板' }, uiCall())
+    ).resolves.toEqual({ sessionId: 's3' });
+    expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'createSession', {
+      text: '整理看板',
+    });
+  });
+
+  it('会话接口在调用不属于任何会话时拒绝', async () => {
+    deps.sessions = { list: vi.fn(() => []) };
+    deps.sessionUi = vi.fn(async () => ({ sessionId: 'x' }));
+    deps.manifest = () =>
+      manifest({ permissions: ['session.read', 'session.focus', 'session.create'] });
+    gate = new PluginHostGate(deps);
+    const orphan = () =>
+      gate.invocations.create({
+        pluginId: 'a.b',
+        sessionId: null,
+        projectRoot: null,
+        gesture: true,
+      });
+    for (const api of ['session.list', 'session.focus', 'session.create'] as const)
+      await expect(gate.handle('a.b', api, { sessionId: 's2' }, orphan())).rejects.toMatchObject({
+        code: 'NO_SESSION',
+      });
+  });
+
   it('远端窗口发起的调用不能动宿主桌面的剪贴板和外链', async () => {
     deps.clipboard = vi.fn();
     deps.openExternal = vi.fn(async () => undefined);

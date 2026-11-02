@@ -12,19 +12,35 @@ export interface DraftTarget {
 
 export interface DraftRequest {
   sessionId: string;
-  op: 'readDraft' | 'insertText' | 'replaceDraft';
+  op: 'readDraft' | 'insertText' | 'replaceDraft' | 'focusSession' | 'createSession';
   payload: Record<string, unknown>;
 }
 
 export type DraftResult = { ok: true; value: unknown } | { ok: false; code: string; error: string };
 
 let current: DraftTarget | null = null;
+/** 新建会话时插件给的首条文本：输入框切到该会话时取走，只填不发 */
+const pending = new Map<string, string>();
 
 export function registerDraftTarget(target: DraftTarget): () => void {
   current = target;
   return () => {
     if (current === target) current = null;
   };
+}
+
+export function prefillDraft(key: string, text: string): void {
+  if (current?.key === key && !current.busy()) {
+    current.setText(text);
+    return;
+  }
+  pending.set(key, text);
+}
+
+export function takePendingDraft(key: string): string | undefined {
+  const text = pending.get(key);
+  pending.delete(key);
+  return text;
 }
 
 /** 草稿内容指纹：内容不变指纹不变，用作 replaceDraft 的乐观锁 */
@@ -41,6 +57,8 @@ export function draftRev(segments: readonly MentionSegment[]): string {
 const fail = (code: string, error: string): DraftResult => ({ ok: false, code, error });
 
 export function handleDraftRequest(req: DraftRequest): DraftResult {
+  if (req.op === 'focusSession' || req.op === 'createSession')
+    return fail('INVALID_ARGS', '不是草稿操作');
   const target = current;
   if (!target || target.key !== req.sessionId) return fail('NO_COMPOSER', '该会话的输入框不在前台');
   const segments = target.segments();

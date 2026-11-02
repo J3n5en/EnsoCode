@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ComposerOp } from './gate';
+import type { ComposerOp, SessionUiOp } from './gate';
 import { pluginError } from './process';
 
 export interface DraftSink {
@@ -33,8 +33,9 @@ export class DraftBroker {
   request(
     origin: number | null,
     sessionId: string,
-    op: ComposerOp,
-    payload: Record<string, unknown>
+    op: ComposerOp | SessionUiOp,
+    payload: Record<string, unknown>,
+    timeoutMs = this.deps.timeoutMs ?? 5000
   ): Promise<unknown> {
     const sink = origin === null ? null : this.deps.find(origin);
     if (origin === null || !sink || sink.isDestroyed())
@@ -44,7 +45,7 @@ export class DraftBroker {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(pluginError('TIMEOUT', '输入框没有响应'));
-      }, this.deps.timeoutMs ?? 5000);
+      }, timeoutMs);
       this.pending.set(requestId, { origin, resolve, reject, timer });
       sink.send(this.deps.channel, { requestId, sessionId, op, payload });
     });

@@ -108,7 +108,8 @@ import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { reloadConversation } from '../services/conversationReload';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
-import { getExtensionPlugins } from '../services/extensionPlugins';
+import { getExtensionPlugins, setPluginSessionDirectory } from '../services/extensionPlugins';
+import { listProjectSessions } from '../services/extensionPlugins/sessions';
 import { searchFiles } from '../services/fileSearch';
 import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
 import {
@@ -988,6 +989,14 @@ export function registerAgentHandlers(): void {
     if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity)) return undefined;
     return identity;
   });
+  setPluginSessionDirectory((origin) =>
+    listProjectSessions({
+      origin,
+      conversations: sourceAuthority?.projection().conversations ?? [],
+      persisted: (id) => agentSessionIndex.persistedConversation(id),
+      running: (id) => agentSessionIndex.workspaceTreeRunning(id),
+    })
+  );
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });

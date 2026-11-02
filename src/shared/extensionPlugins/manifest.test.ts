@@ -86,7 +86,7 @@ describe('parseExtensionPluginManifest', () => {
 
   it('拒绝未知权限', () => {
     expect(errorsOf({ ...base(), permissions: ['agent.tool', 'root'] })).not.toEqual([]);
-    expect(errorsOf({ ...base(), permissions: ['agent.tool', 'session.read'] })).not.toEqual([]);
+    expect(errorsOf({ ...base(), permissions: ['agent.tool', 'session.delete'] })).not.toEqual([]);
   });
 
   it('忽略未知字段但给出提示', () => {

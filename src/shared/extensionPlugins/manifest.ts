@@ -27,6 +27,9 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'plugin.call',
   'ui.clipboard',
   'ui.openExternal',
+  'session.read',
+  'session.focus',
+  'session.create',
 ] as const;
 export type ExtensionPluginPermission = (typeof EXTENSION_PLUGIN_PERMISSIONS)[number];
 

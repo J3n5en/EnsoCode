@@ -111,6 +111,9 @@
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
 | `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
 | `ui.openExternal` | 要打开外部链接 | `enso.ui.openExternal` |
+| `session.read` | 要列出会话 | `enso.session.list` |
+| `session.focus` | 要切换到会话 | `enso.session.focus` |
+| `session.create` | 要新建会话 | `enso.session.create` |
 
 升级时如果权限、文件范围、域名、MCP 工具、透传变量、可调用的插件、拦截事件变多，或改成常驻，需要重新确认。
 
@@ -173,6 +176,9 @@ export async function activate(enso) {
 | `exports.handle(name, handler)` / `plugins.call(pluginId, name, args?)` | 见「插件间调用」 |
 | `artifacts.write(input)` | 见「产出文件」 |
 | `session.inject(input)` | 见「向会话发消息」 |
+| `session.list()` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, running?, archived? }`。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除 |
+| `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
+| `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
 | `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
 | `triggers.register(name, handlers)` | `handlers.candidates(query, ctx)` 与 `handlers.pick(item, ctx)` |
 | `renderer.handle(method, handler)` | 供渲染模块和侧栏页面调用，`handler(args, ctx)` |
