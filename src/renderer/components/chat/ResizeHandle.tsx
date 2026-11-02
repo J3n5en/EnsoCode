@@ -44,6 +44,8 @@ export function ResizeHandle({ onResize, onResizingChange }: ResizeHandleProps) 
           resizing && 'after:bg-ring'
         )}
       />
+      {/* 拖拽期间遮住 iframe（插件页等），否则鼠标进入 iframe 后父文档收不到 mousemove/mouseup */}
+      {resizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
     </div>
   );
 }
