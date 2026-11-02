@@ -14,6 +14,10 @@ import { loadMarketIndex, type MarketIndex } from './marketIndex';
 
 const MARKET_REPO = 'J3n5en/enso-plugins';
 const MARKET_WORKER = 'https://enso-plugins.j3.do/v1/';
+
+/** 市场 icon 是任意 https 图片，经 Worker 代理（渲染层 CSP 只放行该源） */
+export const marketIconUrl = (icon: string | undefined): string | undefined =>
+  icon?.startsWith('https://') ? `${MARKET_WORKER}icon?url=${encodeURIComponent(icon)}` : undefined;
 /** 官方索引签名公钥（SPKI PEM），可放多把用于轮换 */
 const MARKET_PUBLIC_KEYS: string[] = [
   `-----BEGIN PUBLIC KEY-----

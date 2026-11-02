@@ -44,9 +44,7 @@ export function PluginUiHost() {
           });
         }
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
-        setPluginIcons(
-          Object.fromEntries(enabled.flatMap((p) => (p.icon ? [[p.id, p.icon]] : [])))
-        );
+        setPluginIcons(Object.fromEntries(list.flatMap((p) => (p.icon ? [[p.id, p.icon]] : []))));
         setPluginCommands(
           enabled.flatMap((plugin) =>
             mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({

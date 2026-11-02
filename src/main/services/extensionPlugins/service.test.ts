@@ -903,6 +903,7 @@ describe('插件市场', () => {
               description: '',
               tier: 'official' as const,
               tags: [],
+              icon: 'https://cdn.example/a b.svg',
               latest: state.latest,
               versions: [
                 {
@@ -963,6 +964,7 @@ describe('插件市场', () => {
     expect(list.ok && list.plugins[0]).toMatchObject({
       installedVersion: '1.0.0',
       updateAvailable: false,
+      icon: 'https://enso-plugins.j3.do/v1/icon?url=https%3A%2F%2Fcdn.example%2Fa%20b.svg',
     });
 
     state.latest = '1.1.0';

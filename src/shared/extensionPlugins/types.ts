@@ -61,6 +61,8 @@ export interface ExtensionPluginMarketEntry {
   tier: 'official' | 'community';
   tags: string[];
   homepage?: string;
+  /** 已转成 Worker 代理地址 */
+  icon?: string;
   latest: string;
   permissions: string[];
   installedVersion?: string;

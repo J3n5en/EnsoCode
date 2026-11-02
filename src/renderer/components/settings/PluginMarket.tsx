@@ -1,4 +1,5 @@
 import type { ExtensionPluginMarketList } from '@shared/extensionPlugins/types';
+import { Puzzle } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -91,8 +92,9 @@ export function PluginMarket({
         <p className="text-muted-foreground text-sm">{t('No matching plugins')}</p>
       )}
       {plugins.map((p) => (
-        <div key={p.id} className="flex items-start justify-between gap-3 py-1">
-          <div className="min-w-0 space-y-0.5">
+        <div key={p.id} className="flex items-start gap-3 py-1">
+          <MarketIcon src={p.icon} />
+          <div className="min-w-0 flex-1 space-y-0.5">
             <p className="truncate text-sm">
               {p.name}
               <span className="ml-2 text-muted-foreground text-xs">{p.latest}</span>
@@ -122,6 +124,19 @@ export function PluginMarket({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function MarketIcon({ src }: { src?: string }) {
+  const [broken, setBroken] = React.useState(false);
+  return (
+    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+      {src && !broken ? (
+        <img src={src} alt="" className="size-5 object-contain" onError={() => setBroken(true)} />
+      ) : (
+        <Puzzle className="size-4 text-muted-foreground" />
+      )}
     </div>
   );
 }

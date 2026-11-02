@@ -81,7 +81,7 @@ import {
   stagePlugin,
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
-import type { PluginMarket } from './market';
+import { marketIconUrl, type PluginMarket } from './market';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
 import {
   preserveUnreadableRegistry,
@@ -434,6 +434,7 @@ export class ExtensionPluginService {
       chinaMirror,
       plugins: r.index.plugins.map((p) => {
         const installed = this.records.find((rec) => rec.id === p.id)?.version;
+        const icon = marketIconUrl(p.icon);
         return {
           id: p.id,
           name: p.name,
@@ -441,6 +442,7 @@ export class ExtensionPluginService {
           tier: p.tier,
           tags: p.tags,
           ...(p.homepage ? { homepage: p.homepage } : {}),
+          ...(icon ? { icon } : {}),
           latest: p.latest,
           permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
           ...(installed ? { installedVersion: installed } : {}),
@@ -1297,7 +1299,9 @@ export class ExtensionPluginService {
   /** 渲染资源（ui.js / 侧栏页面）在安装目录内的真实路径；未启用或越界返回 null */
   assetPath(pluginId: string, rel: string): string | null {
     const record = this.records.find((r) => r.id === pluginId);
-    if (record?.state !== 'enabled' || !isPluginRelativePath(rel) || rel === '.') return null;
+    if (!record || !isPluginRelativePath(rel) || rel === '.') return null;
+    // 停用的插件只放出清单 icon，供设置页显示
+    if (record.state !== 'enabled' && this.load(record.id, record.dir)?.icon !== rel) return null;
     const base = pluginPackagePath(this.options.root, record.id, record.dir);
     try {
       const real = realpathSync(resolve(base, rel));
