@@ -58,7 +58,16 @@ describe('hardenedEnv', () => {
   });
 
   it('HARDENED_ENV 覆盖裁决列出的全部键', () => {
-    expect(Object.keys(HARDENED_ENV)).toHaveLength(21);
+    expect(Object.keys(HARDENED_ENV)).toHaveLength(23);
+  });
+
+  it('清空 BASH_ENV / ENV，避免调用方环境里的 rc 脚本在每条命令前执行', () => {
+    const env = hardenedEnv(
+      { BASH_ENV: '/home/john.doe/slow-setup.sh', ENV: '/home/john.doe/env.sh' },
+      { shell: 'bash' }
+    );
+    expect(env.BASH_ENV).toBe('');
+    expect(env.ENV).toBe('');
   });
 });
 

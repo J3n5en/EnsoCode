@@ -29,6 +29,10 @@ export const HARDENED_ENV: Readonly<Record<string, string>> = Object.freeze({
   PYTHONUNBUFFERED: '1',
   PYTHONIOENCODING: 'utf-8',
   npm_config_yes: 'true',
+  // 非登录非交互的 `bash -c` 本来不读任何 rc，但 bash 会无条件 source $BASH_ENV（sh 读 $ENV）：
+  // 用户环境里若有这个变量，其内容会在每条命令执行前跑一遍，慢或阻塞的脚本会把每次 bash 调用都拖住。
+  BASH_ENV: '',
+  ENV: '',
 });
 
 /** 只对 bash 有意义的提示符变量 */
