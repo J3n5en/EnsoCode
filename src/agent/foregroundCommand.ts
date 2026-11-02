@@ -1,6 +1,7 @@
 import type { BashOperations } from '@earendil-works/pi-coding-agent';
 
-export type DetachReason = 'user' | 'timeout' | 'steer';
+/** 转后台的原因：用户点「转后台」、插话、到让位时刻 */
+export type DetachReason = 'user' | 'yield' | 'steer';
 
 /** 移交给后台任务的在跑进程：输出改接到新的接收者，退出码经 done 送达 */
 export interface DetachableProcess {
@@ -37,6 +38,18 @@ export class ForegroundDetachedError extends Error {
   }
 }
 
+/** 到让位时刻却移交不了后台（如配额满）：命令已停止，带已有输出与原因上抛 */
+export class ForegroundYieldError extends Error {
+  constructor(
+    readonly output: string,
+    readonly reason: string,
+    readonly yieldMs: number
+  ) {
+    super(reason);
+    this.name = 'ForegroundYieldError';
+  }
+}
+
 /** 与后台任务缓冲同量级：移交时作为任务初始输出 */
 const SEED_OUTPUT_LIMIT = 200_000;
 /** setTimeout 上限；超出交还底层 exec 按 pi 规则报错 */
@@ -47,13 +60,21 @@ interface Running {
   release(error: Error): void;
 }
 
-/** 一次前台命令调用：进程在跑时可随时移交后台，不杀不重启 */
+/**
+ * 一次前台命令调用：进程在跑时可随时移交后台，不杀不重启。
+ *
+ * 两个独立计时：让位（yieldMs，按命令分类）到点转后台、工具立即回执；
+ * 截止（模型显式 timeout）到点杀进程。让位先到则截止交给后台任务继续计时。
+ */
 export class ForegroundCommand {
   private running: Running | undefined;
+  private adoptError: unknown;
+  /** 本次调用被截止时间（模型显式 timeout）杀掉 */
+  deadlineHit = false;
 
   constructor(
-    private readonly timeoutAction: 'background' | 'kill',
-    private readonly owner: ForegroundOwner
+    private readonly owner: ForegroundOwner,
+    readonly yieldMs?: number
   ) {}
 
   detach(reason: DetachReason): string | null {
@@ -62,7 +83,8 @@ export class ForegroundCommand {
     let taskId: string;
     try {
       taskId = this.owner.adopt(entry.proc, reason);
-    } catch {
+    } catch (error) {
+      this.adoptError = error;
       return null;
     }
     entry.release(new ForegroundDetachedError(taskId, reason, entry.proc.output(), this.owner));
@@ -74,10 +96,11 @@ export class ForegroundCommand {
     command: string,
     cwd: string,
     options: Parameters<BashOperations['exec']>[2],
-    timeoutMs: number | undefined
+    timeoutMs: number | undefined,
+    yieldMs: number | undefined
   ): Promise<{ exitCode: number | null }> {
     const { onData, signal, env, timeout } = options;
-    // 超时由这里计时：转后台后底层不能再按前台超时杀进程
+    // 截止由这里计时：转后台后底层不能再按前台截止杀进程（后台任务另行计时）
     const controller = new AbortController();
     let sink = onData;
     let capture = true;
@@ -103,15 +126,37 @@ export class ForegroundCommand {
     };
     return new Promise((resolve, reject) => {
       let timedOut = false;
+      let yieldFailed = false;
       const onAbort = () => controller.abort();
-      const timer =
+      const deadlineTimer =
         timeoutMs === undefined
           ? undefined
           : setTimeout(() => {
-              if (this.timeoutAction === 'background' && this.detach('timeout')) return;
               timedOut = true;
+              this.deadlineHit = true;
               controller.abort();
             }, timeoutMs);
+      const yieldTimer =
+        yieldMs === undefined || (timeoutMs !== undefined && timeoutMs <= yieldMs)
+          ? undefined
+          : setTimeout(() => {
+              if (this.detach('yield')) return;
+              // 移交不了就停掉：到点必回，不能让调用无限挂着
+              yieldFailed = true;
+              controller.abort();
+            }, yieldMs);
+      const failure = (error: unknown): unknown =>
+        timedOut
+          ? new Error(`timeout:${timeout}`)
+          : yieldFailed
+            ? new ForegroundYieldError(
+                output,
+                this.adoptError instanceof Error
+                  ? this.adoptError.message
+                  : String(this.adoptError ?? 'could not move the command to the background'),
+                yieldMs ?? 0
+              )
+            : error;
       const entry: Running = {
         proc,
         release: (error) => {
@@ -121,7 +166,8 @@ export class ForegroundCommand {
       };
       const settle = () => {
         this.running = undefined;
-        clearTimeout(timer);
+        clearTimeout(deadlineTimer);
+        clearTimeout(yieldTimer);
         signal?.removeEventListener('abort', onAbort);
       };
       this.running = entry;
@@ -129,13 +175,13 @@ export class ForegroundCommand {
         (exitCode) => {
           if (this.running !== entry) return;
           settle();
-          if (timedOut) reject(new Error(`timeout:${timeout}`));
+          if (timedOut || yieldFailed) reject(failure(null));
           else resolve({ exitCode });
         },
         (error: unknown) => {
           if (this.running !== entry) return;
           settle();
-          reject(timedOut ? new Error(`timeout:${timeout}`) : error);
+          reject(failure(error));
         }
       );
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -159,7 +205,7 @@ export function withDetachableExec(inner: BashOperations): BashOperations {
       const timeoutMs = options.timeout === undefined ? undefined : options.timeout * 1000;
       const validTimeout = timeoutMs === undefined || (timeoutMs > 0 && timeoutMs <= MAX_TIMER_MS);
       if (!foreground || !validTimeout) return inner.exec(command, cwd, options);
-      return foreground.run(inner, command, cwd, options, timeoutMs);
+      return foreground.run(inner, command, cwd, options, timeoutMs, foreground.yieldMs);
     },
   };
 }

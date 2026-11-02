@@ -243,11 +243,11 @@ describe('SessionSupervisor tool duration', () => {
       (event): event is Extract<AgentWorkerEvent, { type: 'tool-output' }> =>
         event.type === 'tool-output' && event.toolCallId === 'bash-1'
     );
-    // 前台命令带截止时间：renderer 的无输出巡检据此不误杀静默长命令
+    // 前台命令带截止时间 = 让位时刻（显式 timeout 900s 晚于 45s 让位，前台 45s 就回执）
     expect(bashStart).toMatchObject({
       toolCallId: 'bash-1',
       startedAt: 1_000_000,
-      deadlineAt: 1_900_000,
+      deadlineAt: 1_045_000,
       output: '',
     });
 

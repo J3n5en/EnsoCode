@@ -6,6 +6,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type BackgroundTaskManager, withBackground } from '../backgroundTasks';
 import { ForegroundDetachedError } from '../foregroundCommand';
+import { SHELL_LIMITS } from '../shell/limits';
 import { toBashRuntimePath, withRtkOptimization } from './index';
 import { bindPowerShellRtk } from './powershell';
 
@@ -925,6 +926,7 @@ if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: {
       | { command: string; finalize?: () => Promise<unknown>; details?: unknown }
       | undefined;
     const manager = {
+      limits: SHELL_LIMITS,
       start(_sessionId: string, command: string, _cwd: string, options?: typeof launch) {
         launch = { command, ...options };
         return 'task-1';
@@ -976,6 +978,7 @@ if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: {
       | { command: string; finalize?: () => Promise<unknown>; details?: unknown }
       | undefined;
     const manager = {
+      limits: SHELL_LIMITS,
       start(_sessionId: string, command: string, _cwd: string, options?: typeof launch) {
         launch = { command, ...options };
         return 'task-1';

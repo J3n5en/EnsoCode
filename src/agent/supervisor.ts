@@ -4226,7 +4226,12 @@ export class SessionSupervisor {
         if (!managed.toolStartAt.has(event.toolCallId)) {
           const startedAt = Date.now();
           managed.toolStartAt.set(event.toolCallId, startedAt);
-          const timeoutMs = foregroundCommandTimeoutMs(event.toolName, event.args);
+          // deadlineAt = 让位时刻（与显式 timeout 取小）：倒计时与卡死检测都以前台真实返回点为准
+          const timeoutMs = foregroundCommandTimeoutMs(
+            event.toolName,
+            event.args,
+            this.bgTasks.limits
+          );
           this.options.emit({
             type: 'tool-output',
             identity: managed.identity,
