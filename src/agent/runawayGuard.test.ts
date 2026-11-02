@@ -75,16 +75,16 @@ describe('RunawayGuard', () => {
     expect(verdicts[5]?.stop).toBe(true);
   });
 
-  it('阻塞式 task_output 等待放宽终止阈值，快照轮询六次即终止', () => {
+  it('阻塞式 task_output 等待与快照轮询同一阈值：三次提醒、六次终止', () => {
     const guard = new RunawayGuard();
     const snap = { text: '[running] (no output yet)' };
-    const blocking = Array.from({ length: 23 }, () =>
-      guard.observe('task_output', { taskId: 't', timeout_ms: 600000 }, snap)
+    const blocking = Array.from({ length: 6 }, () =>
+      guard.observe('task_output', { taskId: 't', timeout_ms: 30000 }, snap)
     );
-    expect(blocking.some((verdict) => verdict?.stop)).toBe(false);
-    expect(guard.observe('task_output', { taskId: 't', timeout_ms: 600000 }, snap)?.stop).toBe(
-      true
-    );
+    expect(blocking[2]?.stop).toBe(false);
+    expect(blocking[2]?.text).toMatch(/notified automatically/);
+    expect(blocking.slice(0, 5).some((verdict) => verdict?.stop)).toBe(false);
+    expect(blocking[5]?.stop).toBe(true);
 
     const quick = new RunawayGuard();
     const polls = Array.from({ length: 6 }, () =>

@@ -10,8 +10,6 @@ export type RunawaySignal =
 const THRESHOLD = 3;
 /** 提醒之后同一信号继续累积到此即终止本轮 */
 const STOP_THRESHOLD = 6;
-/** 阻塞式 task_output 等待（每次最多 10 分钟）放宽到约 2 小时 */
-const BLOCKING_POLL_STOP_THRESHOLD = 24;
 
 export interface RunawayVerdict {
   text: string;
@@ -142,9 +140,8 @@ export class RunawayGuard {
     const hit = signals.find(([, count]) => count >= THRESHOLD);
     if (!hit) return undefined;
     const [kind, count] = hit;
-    const blockingPoll =
-      kind === 'polling_repeat' && typeof record.timeout_ms === 'number' && record.timeout_ms > 0;
-    if (count >= (blockingPoll ? BLOCKING_POLL_STOP_THRESHOLD : STOP_THRESHOLD)) {
+    // task_output 阻塞等待每次最多 30s，不再单独放宽：完成会自动唤醒，反复等待就是轮询
+    if (count >= STOP_THRESHOLD) {
       return { text: runawayStopText(kind, count), stop: true };
     }
     if (this.reminded) return undefined;
