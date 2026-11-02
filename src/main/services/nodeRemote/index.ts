@@ -20,6 +20,9 @@ const windows = new Map<string, BrowserWindow>();
 const senders = new Map<number, { nodeId: string; cids: Set<string> }>();
 
 const ASSET_TIMEOUT_MS = 60_000;
+/** 带内容 hash 的构建产物不会变，按节点缓存在内存，再次打开窗口免下载 */
+const IMMUTABLE_ASSET = /^r\/assets\/[^/]+-[\w-]{8}\.\w+$/;
+const assetCache = new Map<string, Map<string, NodeAsset>>();
 
 function tunnelFor(nodeId: string): NodeRemoteTunnel {
   let tunnel = tunnels.get(nodeId);
@@ -34,6 +37,22 @@ function tunnelFor(nodeId: string): NodeRemoteTunnel {
 function dropTunnel(nodeId: string): void {
   tunnels.get(nodeId)?.close();
   tunnels.delete(nodeId);
+  assetCache.delete(nodeId);
+}
+
+async function fetchCachedAsset(nodeId: string, path: string): Promise<NodeAsset> {
+  const cached = assetCache.get(nodeId)?.get(path);
+  if (cached) return cached;
+  const asset = await fetchAsset(nodeId, path);
+  if (asset.status === 200 && IMMUTABLE_ASSET.test(path)) {
+    let cache = assetCache.get(nodeId);
+    if (!cache) {
+      cache = new Map();
+      assetCache.set(nodeId, cache);
+    }
+    cache.set(path, asset);
+  }
+  return asset;
 }
 
 function fetchAsset(nodeId: string, path: string): Promise<NodeAsset> {
@@ -70,7 +89,7 @@ export function registerNodeSettingsProtocolHandler(): void {
         ? `li/${path.slice('desk/li/_/'.length)}`
         : null;
     if (!remotePath) return new Response(null, { status: 404 });
-    const asset = await fetchAsset(nodeId, remotePath);
+    const asset = await fetchCachedAsset(nodeId, remotePath);
     return new Response(asset.status === 204 ? null : (asset.body as Uint8Array<ArrayBuffer>), {
       status: asset.status,
       headers: { 'content-type': asset.mime },

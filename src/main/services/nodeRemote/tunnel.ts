@@ -3,6 +3,7 @@ import {
   createRemoteOrderedStream,
   createRemotePartAssembler,
   decodeBase64,
+  gunzipRemoteFrame,
   type HostToRemote,
   isHostRemoteFrame,
   isRemotePart,
@@ -43,14 +44,18 @@ interface Slot {
 
 /** 缺口持续这么久视为丢帧，重新 hello 让宿主补发 */
 const GAP_RESYNC_MS = 8_000;
+/** 每收这么多分片字节回报一次进度（宿主据此放行后续大帧） */
+const ACK_STEP = 128 * 1024;
 
 /**
  * guest 桌面经配对通道驱动宿主 renderer 的 rpc 隧道（对应浏览器端 DeskTunnel）。
- * 不发 remote-ack：宿主不限流、不压缩，桌面链路足够。
+ * 上线即发 remote-ack(gzip)：宿主才会压缩大帧，并按回报的字节数限流。
  */
 export class NodeRemoteTunnel {
   private online = false;
   private seq = 0;
+  private receivedBytes = 0;
+  private ackedBytes = 0;
   private slots = new Map<string, Slot>();
   private assets = new Map<number, { message: RemoteToHost; resolve: (a: NodeAsset) => void }>();
   private parts = createRemotePartAssembler();
@@ -65,14 +70,22 @@ export class NodeRemoteTunnel {
     this.post({ type: 'rpc-hello', cid: slot.cid, kind: slot.kind, seq: slot.stream.applied });
   }
 
+  private ack(): void {
+    this.ackedBytes = this.receivedBytes;
+    this.post({ type: 'remote-ack', bytes: this.receivedBytes, gzip: true });
+  }
+
   /** 宿主在线（含中继重建后再次 host-online）：逐个 hello 续上，补发在途资源请求 */
   setOnline(online: boolean): void {
     this.online = online;
     for (const slot of this.slots.values()) {
       slot.ready = false;
-      if (online) this.hello(slot);
     }
-    if (online) for (const { message } of this.assets.values()) this.post(message);
+    if (!online) return;
+    // 宿主换连接会重置限流窗口与压缩开关，每次上线都重新声明
+    this.ack();
+    for (const slot of this.slots.values()) this.hello(slot);
+    for (const { message } of this.assets.values()) this.post(message);
   }
 
   attach(kind: RemoteKind, handlers: NodeFrameHandlers): string {
@@ -149,8 +162,12 @@ export class NodeRemoteTunnel {
     this.assets.clear();
   }
 
-  receive(frame: HostToRemote): void {
+  receive(frame: HostToRemote, nested = false): void {
     if (isRemotePart(frame)) {
+      if (!nested) {
+        this.receivedBytes += frame.data.length;
+        if (this.online && this.receivedBytes - this.ackedBytes >= ACK_STEP) this.ack();
+      }
       const whole = this.parts.push(frame) as { type?: unknown } | null;
       if (
         whole &&
@@ -158,11 +175,18 @@ export class NodeRemoteTunnel {
         whole.type !== 'part' &&
         isHostRemoteFrame(whole as { type: string })
       ) {
-        this.receive(whole as HostToRemote);
+        this.receive(whole as HostToRemote, true);
       }
       return;
     }
     switch (frame.type) {
+      case 'gzip':
+        void gunzipRemoteFrame(frame).then((inner) => {
+          const type = (inner as { type?: unknown } | null)?.type;
+          if (typeof type !== 'string' || type === 'gzip' || type === 'part') return;
+          if (isHostRemoteFrame({ type })) this.receive(inner as HostToRemote, true);
+        });
+        return;
       case 'asset': {
         const pending = this.assets.get(frame.id);
         if (!pending) return;

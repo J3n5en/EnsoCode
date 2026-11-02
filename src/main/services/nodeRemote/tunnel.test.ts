@@ -27,9 +27,12 @@ describe('NodeRemoteTunnel', () => {
     const result = tunnel.invoke(cid, 'settings:read', '[]');
     expect(sent).toEqual([]);
     tunnel.setOnline(true);
-    expect(sent).toEqual([{ type: 'rpc-hello', cid, kind: 'settings', seq: 0 }]);
+    expect(sent).toEqual([
+      { type: 'remote-ack', bytes: 0, gzip: true },
+      { type: 'rpc-hello', cid, kind: 'settings', seq: 0 },
+    ]);
     tunnel.receive(ready(cid));
-    const invoke = sent[1] as Extract<RemoteToHost, { type: 'rpc-invoke' }>;
+    const invoke = sent[2] as Extract<RemoteToHost, { type: 'rpc-invoke' }>;
     expect(invoke).toMatchObject({ type: 'rpc-invoke', cid, ch: 'settings:read', args: [] });
     tunnel.receive({ type: 'rpc-result', cid, id: invoke.id, ok: true, data: { a: 1 }, seq: 1 });
     await expect(result).resolves.toBe('{"a":1}');
@@ -74,7 +77,11 @@ describe('NodeRemoteTunnel', () => {
     const before = sent.length;
     tunnel.setOnline(true);
     tunnel.receive(ready(cid, true));
-    expect(sent.slice(before).map((f) => f.type)).toEqual(['rpc-hello', 'rpc-invoke']);
+    expect(sent.slice(before).map((f) => f.type)).toEqual([
+      'remote-ack',
+      'rpc-hello',
+      'rpc-invoke',
+    ]);
   });
 
   it('资源：分片重组后按 id 返回，上线时补发在途请求', async () => {
@@ -82,7 +89,7 @@ describe('NodeRemoteTunnel', () => {
     const asset = tunnel.fetchAsset('r/settings.html');
     expect(sent).toEqual([]);
     tunnel.setOnline(true);
-    const req = sent[0] as Extract<RemoteToHost, { type: 'asset-get' }>;
+    const req = sent[1] as Extract<RemoteToHost, { type: 'asset-get' }>;
     expect(req).toMatchObject({ type: 'asset-get', path: 'r/settings.html' });
     const frame: HostToRemote = {
       type: 'asset',
@@ -96,6 +103,28 @@ describe('NodeRemoteTunnel', () => {
     const got = await asset;
     expect(got.status).toBe(200);
     expect(new TextDecoder().decode(got.body)).toBe('x'.repeat(300));
+    // 分片字节已回报（每 128KB 一次，这里不足，只有上线那次）
+    expect(sent.filter((f) => f.type === 'remote-ack')).toHaveLength(1);
+  });
+
+  it('宿主压缩的帧解开后照常派发', async () => {
+    const { sent, tunnel } = setup();
+    const asset = tunnel.fetchAsset('r/a.js');
+    tunnel.setOnline(true);
+    const req = sent[1] as Extract<RemoteToHost, { type: 'asset-get' }>;
+    const body = encodeBase64(new TextEncoder().encode('hello'));
+    const inner = JSON.stringify({
+      type: 'asset',
+      id: req.id,
+      status: 200,
+      mime: 'text/javascript',
+      data: body,
+    });
+    const packed = await new Response(
+      new Blob([inner]).stream().pipeThrough(new CompressionStream('gzip'))
+    ).arrayBuffer();
+    tunnel.receive({ type: 'gzip', data: encodeBase64(new Uint8Array(packed)) } as HostToRemote);
+    expect(new TextDecoder().decode((await asset).body)).toBe('hello');
   });
 
   it('close 拒绝所有在途请求', async () => {
