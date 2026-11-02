@@ -8,6 +8,7 @@ import {
 import { childProfileShell } from '@shared/childProfileTools';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { withDetachableExec } from './foregroundCommand';
+import { withHardenedEnv } from './shell/hardenedEnv';
 
 export type SessionShellKind = 'bash' | 'powershell';
 
@@ -32,7 +33,9 @@ export function createSessionCommandTool(input: {
     preference: input.preference,
   });
   const local = kind === 'powershell' ? createLocalPowerShellOperations : createLocalBashOperations;
-  const options = { operations: withDetachableExec(input.operations ?? local()) };
+  // 远程 operations 由 ssh 执行器负责环境，不套本地硬化
+  const operations = input.operations ?? withHardenedEnv(local(), kind);
+  const options = { operations: withDetachableExec(operations) };
   return kind === 'powershell'
     ? createPowerShellToolDefinition(input.cwd, options)
     : createBashToolDefinition(input.cwd, options);

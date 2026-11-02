@@ -12,6 +12,7 @@ import {
   ForegroundDetachedError,
 } from './foregroundCommand';
 import { killProcessTree } from './killTree';
+import { hardenedEnv } from './shell/hardenedEnv';
 
 /** 内存缓冲上限（超出截头保尾；磁盘 log 始终全量） */
 const MAX_BUFFER = 200_000;
@@ -155,6 +156,8 @@ export class BackgroundTaskManager {
       displayCommand?: string;
       details?: unknown;
       finalize?: () => Promise<unknown>;
+      /** 子进程环境；缺省继承 process.env（远程 ssh 包装命令需要原样的本地环境） */
+      env?: NodeJS.ProcessEnv;
     }
   ): string {
     const taskId = this.reserveId();
@@ -598,16 +601,17 @@ export const DEFAULT_FOREGROUND_BASH_TIMEOUT_SEC = 120;
 function spawnBackground(
   command: string,
   cwd: string,
-  spawnOpts?: { file?: string; argsPrefix?: string[] }
+  spawnOpts?: { file?: string; argsPrefix?: string[]; env?: NodeJS.ProcessEnv }
 ) {
+  const env = spawnOpts?.env ?? process.env;
   if (spawnOpts?.file) {
     return spawn(spawnOpts.file, [...(spawnOpts.argsPrefix ?? []), command], {
       cwd,
-      env: process.env,
+      env,
       detached: true,
     });
   }
-  return spawn(command, { shell: true, cwd, env: process.env, detached: true });
+  return spawn(command, { shell: true, cwd, env, detached: true });
 }
 
 export type BackgroundLaunch = {
@@ -791,6 +795,14 @@ export function withBackground(
             displayCommand: hooks ? record.command : undefined,
             details: prepared.details,
             finalize: prepared.finalize,
+            // 本地后台命令与前台同样跑在非交互硬化 env 里；远程 ssh 包装命令保持原环境
+            ...(transform
+              ? {}
+              : {
+                  env: hardenedEnv(process.env, {
+                    shell: definition.name === 'powershell' ? 'powershell' : 'bash',
+                  }),
+                }),
           });
         } catch (error) {
           try {

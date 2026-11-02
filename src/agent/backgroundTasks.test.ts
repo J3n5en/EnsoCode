@@ -802,6 +802,22 @@ describe('withBackground 前台预算与回执', () => {
     const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
     expect(text).toMatch(/read/);
   });
+
+  it.skipIf(process.platform === 'win32')('本地后台命令跑在非交互硬化 env 里', async () => {
+    const { manager, ended } = makeManager();
+    const { base } = makeTool();
+    const wrapped = withBackground(base, manager, 's1', process.cwd());
+    await wrapped.execute(
+      't1',
+      { command: 'printf "%s|%s" "$GIT_TERMINAL_PROMPT" "$PAGER"', background: true },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const taskId = manager.knownIds()[0];
+    await until(() => ended.includes(taskId));
+    expect((await manager.read(taskId))?.output).toBe('0|cat');
+  });
 });
 
 describe('后台截止时间', () => {
