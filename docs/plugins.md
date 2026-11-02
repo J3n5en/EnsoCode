@@ -116,6 +116,16 @@
 
 安装时展示的是这些权限，但插件的 `main` 本身是完整的 Node 进程，权限只约束它能向 Enso 申请的能力，不约束它自己的代码。只安装你信任的插件。
 
+## 依赖
+
+Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在用户机器上编译任何东西。插件需要的依赖必须由作者打包进插件里。
+
+推荐的做法是把 `main.mjs` 和依赖用 esbuild 或 webpack 打成单个文件再发布，仓库里不提交 `node_modules`。这样更新时 diff 干净，也不用担心依赖的体积和文件数。
+
+依赖不适合打包、只能原样带上时（例如要在运行时按相对路径读取的 wasm），可以把 `node_modules` 放进插件目录一起发布。发布前确认里面没有 `.node` 原生模块：原生模块绑定了操作系统、CPU 架构和编译时的 Node ABI，在开发者机器上装出来的，换个平台或架构就加载不了，Enso 也不会重新编译。纯 JS 和 wasm 没有这个问题。
+
+无论哪种方式，插件包都受 5000 个文件、合计 200MB 的限制。依赖多的时候，文件数通常比体积先到上限。
+
 ### 贡献
 
 - `agentTools`：`{ name, description, parameters, timeoutMs? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
@@ -333,7 +343,9 @@ export function onLoad(enso) {
 
 - `enso.theme`：`'light'` 或 `'dark'`，打开页面时确定，不会随主题切换更新。`<html>` 上同时有 `data-theme`。
 - `enso.call(method, args)`：调用本插件 `renderer.handle` 注册的方法，返回 Promise。
-- `enso.storage.getItem / setItem / removeItem`：页面状态，关闭重开后仍在。页面里的 `localStorage` 也指向同一份数据。读取是同步的（打开页面时的快照加本页写入），写入异步保存。每个插件合计不超过 1MB，卸载时删除。
+- `enso.storage.get(key)` / `set(key, value)` / `remove(key)`：页面状态，关闭重开后仍在。值按字符串保存。页面里的 `localStorage` 是另一份包装，方法名是标准的 `getItem` / `setItem` / `removeItem` / `clear`，读写同一份数据。读取是同步的（打开页面时的快照加本页写入），写入异步保存。每个插件合计不超过 1MB，卸载时删除。
+
+iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`prompt` 都不可用。
 
 ```html
 <button id="add">添加</button>
