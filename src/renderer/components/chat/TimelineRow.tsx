@@ -117,6 +117,7 @@ import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './me
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
 import { ReadFileView } from './ReadFileView';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
+import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { StepNode, type StepNodeState } from './StepNode';
 import { SubagentResult } from './SubagentResult';
@@ -211,7 +212,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.subagentOp === b.subagentOp &&
         JSON.stringify(a.subagentTitles) === JSON.stringify(b.subagentTitles) &&
         a.waiting === b.waiting &&
-        a.pluginArtifacts === b.pluginArtifacts
+        a.pluginArtifacts === b.pluginArtifacts &&
+        a.shellFailure === b.shellFailure
       );
     case 'tool-group':
       return (
@@ -1964,12 +1966,24 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
               {t('Moved to background')}
             </span>
           )}
+          {item.shellFailure && item.state !== 'running' && (
+            <ShellFailureBadge failure={item.shellFailure} />
+          )}
           {item.state === 'reviewing' ? (
             <span className="t-shimmer shrink-0 text-[11px]" data-text={t('Assistant reviewing…')}>
               {t('Assistant reviewing…')}
             </span>
           ) : item.state === 'running' && item.startedAt !== null ? (
-            <RunningElapsed itemKey={item.key} since={item.startedAt ?? undefined} />
+            <>
+              {item.callId && (item.name === 'bash' || item.name === 'powershell') && (
+                <ShellRunStatusLive
+                  callId={item.callId}
+                  startedAt={item.startedAt}
+                  output={item.output ?? ''}
+                />
+              )}
+              <RunningElapsed itemKey={item.key} since={item.startedAt ?? undefined} />
+            </>
           ) : (
             (item.agentMeta || item.durationMs !== null) && (
               <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">
@@ -2069,8 +2083,12 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             <ToolContentScroller follow={item.state === 'running'}>
               {isSandboxTool(item.name) ? (
                 <SandboxOutput source={item.source} output={item.output} view={sandbox} />
-              ) : item.name === 'bash' ? (
-                <TerminalOutput command={item.summary} output={item.output ?? ''} />
+              ) : item.name === 'bash' || item.name === 'powershell' ? (
+                <TerminalOutput
+                  command={item.summary}
+                  output={item.output ?? ''}
+                  failure={item.shellFailure}
+                />
               ) : item.name === 'read' && hasImage && item.imagePath ? (
                 <ReadImagePreview
                   key={item.imagePath}
@@ -2344,6 +2362,23 @@ function RunningElapsed({ itemKey, since }: { itemKey: string; since?: number })
       {formatDuration(Date.now() - origin)}
     </span>
   );
+}
+
+/** 运行中命令的让位倒计时与静默徽章；远程节点视图没有本机 deadline，只显示静默 */
+function ShellRunStatusLive({
+  callId,
+  startedAt,
+  output,
+}: {
+  callId: string;
+  startedAt: number | null | undefined;
+  output: string;
+}) {
+  const host = useChatHost();
+  const deadlineAt = useSessionsStore((state) =>
+    host ? undefined : displayedConversation(state)?.toolDeadlineAt?.[callId]
+  );
+  return <ShellRunStatus startedAt={startedAt} deadlineAt={deadlineAt} output={output} />;
 }
 
 function toolIcon(name: string): LucideIcon {
