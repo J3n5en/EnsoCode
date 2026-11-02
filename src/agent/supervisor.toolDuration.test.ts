@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { resolveShellLimits } from '@shared/shellLimits';
 import type { AgentWorkerEvent, ProjectedMessage } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -286,6 +287,41 @@ describe('SessionSupervisor tool duration', () => {
 
     expect((lastUpsert(events, 'bash-1').message as ProjectedMessage).toolDurationMs).toBe(5_000);
     expect((lastUpsert(events, 'write-1').message as ProjectedMessage).toolDurationMs).toBe(200);
+    await supervisor.shutdown();
+  });
+
+  it('set-shell-limits 作用于 worker 级后台任务管理器：task_output 上限与前台让位都跟随设置', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-shell-limits-')),
+    });
+    supervisor.handleCommand({
+      type: 'set-shell-limits',
+      limits: resolveShellLimits({ taskWaitMaxMs: 5000, yieldDefaultMs: 20_000 }),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await vi.runAllTimersAsync();
+    await waitFor(events, 'parent-ready');
+    const options = mocks.createAgentSession.mock.calls[0]?.[0] as {
+      customTools?: Array<{ name: string; description?: string }>;
+    };
+    const taskOutput = options.customTools?.find((tool) => tool.name === 'task_output');
+    expect(taskOutput?.description).toContain('capped at 5 seconds per call');
+
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+    parentSession.emit({
+      type: 'tool_execution_start',
+      toolCallId: 'bash-9',
+      toolName: 'bash',
+      args: { command: 'sleep 400' },
+    });
+    const start = events.find(
+      (event): event is Extract<AgentWorkerEvent, { type: 'tool-output' }> =>
+        event.type === 'tool-output' && event.toolCallId === 'bash-9'
+    );
+    expect(start).toMatchObject({ startedAt: 1_000_000, deadlineAt: 1_020_000 });
     await supervisor.shutdown();
   });
 

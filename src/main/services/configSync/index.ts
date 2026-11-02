@@ -132,6 +132,10 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     mode: 'excluded',
     reason: 'custom words and allow list may themselves be sensitive',
   },
+  shell: {
+    mode: 'excluded',
+    reason: 'device-local command time limits and rollback switch',
+  },
   generationStallTimeoutMin: { mode: 'portable' },
   autoArchiveIdleDays: { mode: 'portable' },
   autoArchiveMergedWorktrees: { mode: 'portable' },

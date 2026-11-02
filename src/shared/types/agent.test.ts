@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveShellLimits } from '../shellLimits';
 import {
   parseAgentCommand,
   parseAgentControlToolRequest,
@@ -745,6 +746,22 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ type: 'set-max-active-coworkers', limit: 21 })).toBeNull();
     expect(parseAgentCommand({ type: 'set-max-active-coworkers', limit: 5.5 })).toBeNull();
     expect(parseAgentCommand({ type: 'set-max-active-coworkers' })).toBeNull();
+  });
+
+  it('set-shell-limits 只接受 resolveShellLimits 规范化后的完整值', () => {
+    const limits = resolveShellLimits({ taskWaitMaxMs: 5000 });
+    expect(parseAgentCommand({ type: 'set-shell-limits', limits })).toEqual({
+      type: 'set-shell-limits',
+      limits,
+    });
+    expect(
+      parseAgentCommand({ type: 'set-shell-limits', limits: { ...limits, taskWaitMaxMs: -1 } })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'set-shell-limits', limits: { taskWaitMaxMs: 5000 } })
+    ).toBeNull();
+    expect(parseAgentCommand({ type: 'set-shell-limits', limits: null })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-shell-limits', limits, extra: 1 })).toBeNull();
   });
 
   it('set-auto-retry-limit 接受 -1（无限）到 100 的整数', () => {

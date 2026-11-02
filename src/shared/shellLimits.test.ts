@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveShellLimits, SHELL_LIMITS } from './limits';
+import { resolveShellLimits, SHELL_LIMITS } from './shellLimits';
 
 describe('resolveShellLimits', () => {
   it('缺省 / 脏输入回落到默认常量', () => {

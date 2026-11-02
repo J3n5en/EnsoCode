@@ -44,6 +44,7 @@ import { parsePrivacyMaskSettings } from '@shared/privacyMask/settings';
 import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
+import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
   projectDisabledBuiltinTools,
@@ -333,6 +334,8 @@ export function startAgentWorker(): void {
       type: 'set-proxy-env',
       env: proxyEnvPatchFromEnv(process.env),
     } satisfies AgentCommand);
+    // 先于积压的 spawn 命令送达：新会话的工具描述按设置生成
+    pushShellLimits();
     pushMcpWarmup();
     pushPinnedSessions(true);
     if (snapshotPending !== false) {
@@ -2261,6 +2264,19 @@ export function pushDisabledWorkflowPresets(): void {
   worker.postMessage({
     type: 'set-disabled-workflow-presets',
     ids: parseDisabledWorkflowPresets(readSettingsState()?.disabledWorkflowPresets),
+  } satisfies AgentCommand);
+}
+
+/** 全局 settings.shell（命令时限回退开关），与 worker 侧同一个 resolveShellLimits 解析 */
+export function resolveShellLimitsSetting(): ShellLimits {
+  return resolveShellLimits(readSettingsState()?.shell);
+}
+
+export function pushShellLimits(): void {
+  if (!worker || !workerReady) return;
+  worker.postMessage({
+    type: 'set-shell-limits',
+    limits: resolveShellLimitsSetting(),
   } satisfies AgentCommand);
 }
 

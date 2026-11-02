@@ -1,4 +1,5 @@
-import { SHELL_QUIET_MS } from '@shared/types/agent';
+/** 前台命令连续无新输出达到此时长即在时间线标「静默」（agent 与渲染层徽章同源） */
+export const SHELL_QUIET_MS = 15_000;
 
 /** 命令执行的全部时限 / 配额，单点定义；测试与覆盖都从这里取 */
 export interface ShellLimits {

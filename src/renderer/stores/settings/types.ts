@@ -8,6 +8,7 @@ import type { ContextMenuOpen, FileOpenRule } from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import type { PrivacyMaskSettings } from '@shared/privacyMask/settings';
 import type { ProxyMode } from '@shared/proxy';
+import type { ShellLimits } from '@shared/shellLimits';
 import type { StatusLineSegmentId } from '@shared/statusLine';
 import type { TerminalShell } from '@shared/terminalShell';
 import type {
@@ -226,6 +227,8 @@ export interface SettingsState {
   autoRetryLimit: number;
   /** 发往模型前的隐私脱敏；缺省关闭，不参与配置同步 */
   privacyMasking: PrivacyMaskSettings;
+  /** 命令时限覆盖（让位 / task_output 上限 / 配额等）；只在 settings.json 手改，Main 与 worker 用 resolveShellLimits 解析，坏值回落默认 */
+  shell: Partial<ShellLimits>;
   /** SSH 远端单次命令超时（秒）；缺省 30，范围 5–300 */
   sshTimeoutSeconds: number;
   /** 无 token/工具结果超过此时长则中止；0 = 永不；单位分钟 */

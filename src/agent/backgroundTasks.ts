@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 import {
   bindForegroundCommand,
@@ -14,7 +15,6 @@ import {
 } from './foregroundCommand';
 import { killProcessTree } from './killTree';
 import { hardenedEnv } from './shell/hardenedEnv';
-import { SHELL_LIMITS, type ShellLimits } from './shell/limits';
 import { type CommandClass, classifyCommand } from './shell/policy';
 import {
   completionReceiptText,
@@ -164,8 +164,17 @@ export class BackgroundTaskManager {
   constructor(
     private readonly events: TaskEvents,
     private readonly logDir: string,
-    readonly limits: ShellLimits = SHELL_LIMITS
+    private currentLimits: ShellLimits = SHELL_LIMITS
   ) {}
+
+  /** 当前生效的命令时限；全局 settings.shell 变更时由 setLimits 整体替换，执行路径每次现读 */
+  get limits(): ShellLimits {
+    return this.currentLimits;
+  }
+
+  setLimits(limits: ShellLimits): void {
+    this.currentLimits = limits;
+  }
 
   start(
     sessionId: string,
@@ -787,6 +796,7 @@ export function withBackground(
   /** 前台命令按哪个会话登记「转后台」：子代理的命令记在子会话，父会话插话不牵连它 */
   foregroundSessionId = sessionId
 ): ToolDefinition {
+  // 描述文案按建工具时的时限生成（新会话随设置更新）；执行路径每次现读 manager.limits
   const limits = manager.limits;
   const baseParams = definition.parameters as unknown as {
     properties?: Record<string, unknown>;
@@ -900,7 +910,7 @@ export function withBackground(
       const callSignal = signal ? AbortSignal.any([signal]) : new AbortController().signal;
       const startedAt = Date.now();
       // 分类基于模型给的原命令：rtk 改写发生在下层 definition.execute 里
-      const policy = classifyCommand(command, limits);
+      const policy = classifyCommand(command, manager.limits);
       const deadlineSec = explicitTimeoutSec(asRecord(params));
       const foreground = new ForegroundCommand(
         {
@@ -929,7 +939,7 @@ export function withBackground(
             commandClass: policy.class,
             startedAt,
             logPath: manager.logPathOf(error.taskId) ?? '',
-            waitCapSec: yieldSec(limits.taskWaitMaxMs),
+            waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
           });
         }
         if (error instanceof ForegroundYieldError) {

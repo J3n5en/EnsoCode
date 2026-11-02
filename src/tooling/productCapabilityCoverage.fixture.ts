@@ -105,6 +105,7 @@ export const SETTINGS_DATA_COVERAGE = {
   maxActiveCoworkers: excluded('Desktop coworker capacity preference; not an Enso capability.'),
   autoRetryLimit: excluded('Desktop transient-error retry preference; not an Enso capability.'),
   privacyMasking: excluded('Device-local privacy masking rules; must not be agent-editable.'),
+  shell: excluded('Device-local command time limits and rollback switch; edited in settings.json.'),
   sshTimeoutSeconds: excluded('Device SSH network preference; not an Enso capability.'),
   generationStallTimeoutMin: excluded('Renderer stall-abort preference; not an Enso capability.'),
   autoArchiveIdleDays: excluded('Renderer sidebar archive preference; not an Enso capability.'),

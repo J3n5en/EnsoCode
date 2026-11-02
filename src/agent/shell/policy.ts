@@ -1,4 +1,4 @@
-import { SHELL_LIMITS, type ShellLimits } from './limits';
+import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
 
 /**
  * 命令分类：决定前台让位时长。只用于「等多久」，不决定杀不杀（杀只看模型显式 timeout）。

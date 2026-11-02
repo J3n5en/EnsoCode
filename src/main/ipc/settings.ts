@@ -98,6 +98,7 @@ export const SETTINGS_STATE_FIELDS = [
   'maxActiveCoworkers',
   'autoRetryLimit',
   'privacyMasking',
+  'shell',
   'sshTimeoutSeconds',
   'generationStallTimeoutMin',
   'autoArchiveIdleDays',
@@ -184,6 +185,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'approvalAutoManage',
   'approvalAllowThreshold',
   'privacyMasking',
+  'shell',
   'virtualModels',
   'windowsLocalShell',
   'computerPreview',
@@ -483,6 +485,7 @@ function scheduleWrite(
           pushMaxActiveCoworkers,
           pushAutoRetryLimit,
           pushPrivacyMasking,
+          pushShellLimits,
           pushDisabledWorkflowPresets,
           pushBuiltinTools,
           pushModelDirectory,
@@ -493,6 +496,7 @@ function scheduleWrite(
           pushMaxActiveCoworkers();
           pushAutoRetryLimit();
           pushPrivacyMasking();
+          pushShellLimits();
           pushDisabledWorkflowPresets();
           pushBuiltinTools();
           pushModelDirectory();
@@ -611,6 +615,7 @@ export function commitSettingsTransaction(
         pushMaxActiveCoworkers,
         pushAutoRetryLimit,
         pushPrivacyMasking,
+        pushShellLimits,
         pushDisabledWorkflowPresets,
         pushBuiltinTools,
         pushModelDirectory,
@@ -621,6 +626,7 @@ export function commitSettingsTransaction(
         pushMaxActiveCoworkers();
         pushAutoRetryLimit();
         pushPrivacyMasking();
+        pushShellLimits();
         pushDisabledWorkflowPresets();
         pushBuiltinTools();
         pushModelDirectory();

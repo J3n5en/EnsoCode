@@ -44,6 +44,7 @@ import {
   resolveApprovalReviewer,
   resolveModelSelection,
   resolvePresetSystemPrompt,
+  resolveShellLimitsSetting,
   resolveSubagentModelSelection,
   resolveWebSearchConfig,
   setMemberAgentTypeSource,
@@ -272,6 +273,17 @@ describe('agentHost preset system prompt authority', () => {
 });
 
 describe('readSettingsState', () => {
+  it('settings.json 的 shell 段经 resolveShellLimits 解析，坏值逐项回落默认', () => {
+    settingsMock.value = {
+      'enso-settings': { version: 14, state: { shell: { taskWaitMaxMs: 5000, maxTasks: 'x' } } },
+    };
+    expect(resolveShellLimitsSetting()).toMatchObject({ taskWaitMaxMs: 5000, maxTasks: 20 });
+    settingsMock.value = { 'enso-settings': { version: 14, state: { shell: 'broken' } } };
+    expect(resolveShellLimitsSetting()).toMatchObject({ taskWaitMaxMs: 30_000, maxTasks: 20 });
+    settingsMock.value = undefined;
+    expect(resolveShellLimitsSetting().taskWaitMaxMs).toBe(30_000);
+  });
+
   it('磁盘仍是迁移前版本时 computer 按默认关闭读出', () => {
     settingsMock.value = {
       'enso-settings': {

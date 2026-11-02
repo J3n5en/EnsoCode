@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { resolveShellLimits, SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -17,7 +18,6 @@ import {
 } from './backgroundTasks';
 import { ForegroundDetachedError } from './foregroundCommand';
 import { createSessionCommandTool } from './sessionShell';
-import { SHELL_LIMITS, type ShellLimits } from './shell/limits';
 
 const makeManager = (limits?: Partial<ShellLimits>) => {
   const notified: string[] = [];
@@ -379,6 +379,46 @@ describe('BackgroundTaskManager', () => {
     manager.stopAll();
     const tool = createTaskTools(manager).find((item) => item.name === 'task_output');
     expect(tool?.description).toContain('0.1 seconds');
+  });
+
+  it('settings.shell 下发 taskWaitMaxMs=5000 后：task_output 阻塞上限变成 5s（已建好的工具也按新值）', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager } = makeManager();
+      const before = createTaskTools(manager, 's1').find((item) => item.name === 'task_output');
+      manager.setLimits(resolveShellLimits({ taskWaitMaxMs: 5000 }));
+      expect(manager.limits.taskWaitMaxMs).toBe(5000);
+      const after = createTaskTools(manager, 's1').find((item) => item.name === 'task_output');
+      expect(after?.description).toContain('5 seconds');
+      const taskId = manager.adopt(
+        's1',
+        { output: () => '', pipe: () => {}, done: new Promise(() => {}), kill: () => {} },
+        { command: 'sleep 999', startedAt: Date.now() }
+      );
+      let settled = false;
+      const reading = before
+        ?.execute('r1', { taskId, timeout_ms: 600_000 }, undefined, undefined, undefined as never)
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(JSON.stringify((await reading)?.content)).toContain('[running]');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settings.shell 坏值回落默认，不抛错', () => {
+    const { manager } = makeManager();
+    expect(() =>
+      manager.setLimits(resolveShellLimits({ taskWaitMaxMs: 'fast', maxTasks: -3 }))
+    ).not.toThrow();
+    expect(manager.limits.taskWaitMaxMs).toBe(SHELL_LIMITS.taskWaitMaxMs);
+    expect(manager.limits.maxTasks).toBe(SHELL_LIMITS.maxTasks);
   });
 
   it('完成通知：无输出时明确说明，ANSI 控制序列被剥离', async () => {

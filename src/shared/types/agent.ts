@@ -71,6 +71,7 @@ import { type PrivacyMaskSettings, parsePrivacyMaskSettings } from '../privacyMa
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
+import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
 import { parseSshTimeoutSeconds } from '../sshTimeout';
 import {
@@ -306,8 +307,7 @@ export interface BackgroundTaskInfo {
   exitCode?: number;
 }
 
-/** 前台命令连续无新输出达到此时长即在时间线标「静默」（agent 让位与渲染层徽章同源） */
-export const SHELL_QUIET_MS = 15_000;
+export { SHELL_QUIET_MS } from '../shellLimits';
 
 /** 命令结果的结构化失败分类（工具结果 details.shellFailure；渲染层徽章与模型提示同源） */
 export const SHELL_FAILURE_KINDS = [
@@ -1378,6 +1378,8 @@ export type AgentCommand =
   | { type: 'set-web-search-config'; chain: WebSearchChainEntry[]; configured?: boolean }
   /** 隐私脱敏配置：worker 全局生效，不重启会话 */
   | { type: 'set-privacy-masking'; settings: PrivacyMaskSettings }
+  /** 全局 settings.shell 经 resolveShellLimits 规范化后的命令时限；worker 级后台任务管理器共用 */
+  | { type: 'set-shell-limits'; limits: ShellLimits }
   /** 统一模型目录 + 自定义 provider 全量注册信息。载荷在 worker 内再收窄。 */
   | { type: 'set-model-directory'; snapshot: unknown; customProviders: unknown }
   | { type: 'compact'; identity: SessionIdentity; instructions?: string }
@@ -3728,6 +3730,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     case 'set-auto-retry-limit':
       return hasExactKeys(value, ['type', 'limit']) && parseAutoRetryLimit(value.limit) !== null
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-shell-limits':
+      return hasExactKeys(value, ['type', 'limits']) &&
+        isRecord(value.limits) &&
+        JSON.stringify(resolveShellLimits(value.limits)) === JSON.stringify(value.limits)
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-privacy-masking':

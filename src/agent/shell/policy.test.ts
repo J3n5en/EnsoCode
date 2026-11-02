@@ -1,5 +1,5 @@
+import { SHELL_LIMITS } from '@shared/shellLimits';
 import { describe, expect, it } from 'vitest';
-import { SHELL_LIMITS } from './limits';
 import { classifyCommand } from './policy';
 
 describe('classifyCommand', () => {

@@ -1432,6 +1432,10 @@ export class SessionSupervisor {
       configurePrivacyMasking(this.options.agentDir, command.settings);
       return;
     }
+    if (command.type === 'set-shell-limits') {
+      this.bgTasks.setLimits(command.limits);
+      return;
+    }
     if (command.type === 'set-disabled-workflow-presets') {
       this.disabledWorkflowPresets = command.ids;
       return;

@@ -210,6 +210,7 @@ const initialState = {
   maxActiveCoworkers: DEFAULT_MAX_ACTIVE_COWORKERS,
   autoRetryLimit: DEFAULT_AUTO_RETRY_LIMIT,
   privacyMasking: DEFAULT_PRIVACY_MASK_SETTINGS,
+  shell: {},
   sshTimeoutSeconds: DEFAULT_SSH_TIMEOUT_SECONDS,
   generationStallTimeoutMin: 0,
   autoArchiveIdleDays: DEFAULT_AUTO_ARCHIVE_IDLE_DAYS,
