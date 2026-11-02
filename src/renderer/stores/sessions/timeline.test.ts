@@ -974,6 +974,27 @@ describe('buildTimeline', () => {
     );
     expect(moved[1]).toMatchObject({ kind: 'tool', state: 'ok', backgroundTaskId: 'task-1-abc' });
     expect(moved[1]).not.toHaveProperty('callId');
+
+    const failed = buildTimeline(
+      [
+        user('跑'),
+        call('t2', 'bash'),
+        {
+          role: 'toolResult',
+          toolCallId: 't2',
+          toolName: 'bash',
+          isError: true,
+          content: [{ type: 'text', text: 'sudo: a terminal is required' }],
+          shellFailure: { kind: 'tty_required', retryable: false, exitCode: 1 },
+        },
+      ],
+      false
+    );
+    expect(failed[1]).toMatchObject({
+      kind: 'tool',
+      state: 'error',
+      shellFailure: { kind: 'tty_required', retryable: false, exitCode: 1 },
+    });
   });
 
   it('运行中的阻塞等待带调用 id 与等待类型，供「不等了」', () => {

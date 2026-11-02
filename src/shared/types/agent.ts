@@ -309,6 +309,53 @@ export interface BackgroundTaskInfo {
 /** 前台命令连续无新输出达到此时长即在时间线标「静默」（agent 让位与渲染层徽章同源） */
 export const SHELL_QUIET_MS = 15_000;
 
+/** 命令结果的结构化失败分类（工具结果 details.shellFailure；渲染层徽章与模型提示同源） */
+export const SHELL_FAILURE_KINDS = [
+  'exit_nonzero',
+  'deadline',
+  'stopped_by_user',
+  'tty_required',
+  'auth_required',
+  'not_found',
+  'not_executable',
+  'binary_output',
+  'leftover_processes',
+  'output_truncated',
+] as const;
+
+export type ShellFailureKind = (typeof SHELL_FAILURE_KINDS)[number];
+
+export interface ShellFailure {
+  kind: ShellFailureKind;
+  /** false：原样重跑不会有不同结果（需要终端 / 认证 / 用户已停止） */
+  retryable: boolean;
+  exitCode?: number;
+}
+
+/** bash / powershell 工具结果 details 中由本应用写入的可选字段 */
+export interface ShellDetails {
+  backgroundTaskId?: string;
+  shellFailure?: ShellFailure;
+}
+
+export function parseShellFailure(value: unknown): ShellFailure | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (!(SHELL_FAILURE_KINDS as readonly unknown[]).includes(record.kind)) return null;
+  if (typeof record.retryable !== 'boolean') return null;
+  if (
+    record.exitCode !== undefined &&
+    !(typeof record.exitCode === 'number' && Number.isInteger(record.exitCode))
+  ) {
+    return null;
+  }
+  return {
+    kind: record.kind as ShellFailureKind,
+    retryable: record.retryable,
+    ...(record.exitCode === undefined ? {} : { exitCode: record.exitCode as number }),
+  };
+}
+
 /** 下发 worker 的 subagent 类型配置（model 由 main 补全 apiKey） */
 export interface AgentTypeSpawnConfig {
   name: string;
@@ -1557,6 +1604,8 @@ export interface ProjectedMessage {
   rtk?: RtkToolStats;
   /** 前台命令被移交为后台任务时的任务 id */
   backgroundTaskId?: string;
+  /** bash / powershell 结果的结构化失败分类 */
+  shellFailure?: ShellFailure;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
   /** 插件注入的消息（role=custom）的来源 */
@@ -2383,6 +2432,7 @@ function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
   if (value.backgroundTaskId !== undefined && !isBackgroundTaskId(value.backgroundTaskId)) {
     return false;
   }
+  if (value.shellFailure !== undefined && !parseShellFailure(value.shellFailure)) return false;
   if (value.pluginSource !== undefined && !parsePluginMessageSource(value.pluginSource))
     return false;
   if (

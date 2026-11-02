@@ -9,6 +9,7 @@ import {
   type ProjectedCodemodeCall,
   type ProjectedMessage,
   type ProjectedPart,
+  parseShellFailure,
   type TodoItem,
 } from '@shared/types/agent';
 import {
@@ -205,6 +206,14 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
     isBackgroundTaskId(value.details.backgroundTaskId)
   ) {
     projected.backgroundTaskId = value.details.backgroundTaskId;
+  }
+  if (
+    value.role === 'toolResult' &&
+    (value.toolName === 'bash' || value.toolName === 'powershell') &&
+    isRecord(value.details)
+  ) {
+    const shellFailure = parseShellFailure(value.details.shellFailure);
+    if (shellFailure) projected.shellFailure = shellFailure;
   }
   if (
     value.role === 'toolResult' &&

@@ -67,6 +67,29 @@ describe('projectMessage', () => {
     }
   });
 
+  it('命令结果投影结构化失败分类，非命令工具与脏值不投影', () => {
+    const shellFailure = { kind: 'tty_required', retryable: false, exitCode: 1 };
+    for (const toolName of ['bash', 'powershell']) {
+      expect(
+        projectMessage({ role: 'toolResult', toolName, content: [], details: { shellFailure } })
+      ).toEqual({ role: 'toolResult', toolName, content: [], shellFailure });
+    }
+    for (const [toolName, value] of [
+      ['read', shellFailure],
+      ['bash', { kind: 'boom', retryable: true }],
+      ['bash', { kind: 'deadline' }],
+    ] as const) {
+      expect(
+        projectMessage({
+          role: 'toolResult',
+          toolName,
+          content: [],
+          details: { shellFailure: value },
+        })
+      ).not.toHaveProperty('shellFailure');
+    }
+  });
+
   it('插件注入的消息带来源投影，其它 custom 消息与脏来源不带', () => {
     expect(
       projectMessage({

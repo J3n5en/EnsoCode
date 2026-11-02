@@ -1076,6 +1076,17 @@ describe('parent/child commands', () => {
     ).toBeNull();
     const moved = { ...event, message: { ...event.message, backgroundTaskId: 'task-1-abc' } };
     expect(parseAgentWorkerEvent(moved)).toEqual(moved);
+    const failed = {
+      ...event,
+      message: { ...event.message, shellFailure: { kind: 'auth_required', retryable: false } },
+    };
+    expect(parseAgentWorkerEvent(failed)).toEqual(failed);
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        message: { ...event.message, shellFailure: { kind: 'nope', retryable: false } },
+      })
+    ).toBeNull();
     const reviewed = {
       ...event,
       message: {
