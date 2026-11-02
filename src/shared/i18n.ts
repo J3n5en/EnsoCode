@@ -2271,6 +2271,7 @@ export const zhTranslations: Record<string, string> = {
   'The remote desktop has no projects yet': '对方桌面还没有项目',
   'Select a conversation on the left, or create one': '从左侧选择会话，或新建一个',
   'New remote conversation': '新建远程会话',
+  'Node settings': '节点设置',
   'The conversation runs on the remote computer with its projects, models and keys.':
     '会话在对方电脑上运行，用的是对方的项目、模型与密钥。',
   'On the other computer open Settings → Devices, generate a pairing code and copy the link. Paste it here.':

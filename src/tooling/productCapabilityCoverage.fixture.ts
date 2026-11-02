@@ -692,6 +692,14 @@ export const IPC_PRODUCT_COVERAGE = {
   NODES_REMOVE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_RENAME: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_SEND: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_OPEN_SETTINGS: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_INIT: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_ATTACH: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_INVOKE: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_SEND: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_DETACH: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_CLOSE: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_EVENT: excluded('Remote node settings window transport; not an Enso capability.'),
   NODES_STATUS_CHANGED: excluded(
     'Remote node (desktop guest) pairing transport; not an Enso capability.'
   ),

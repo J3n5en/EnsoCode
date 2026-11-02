@@ -35,6 +35,7 @@ import {
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
 } from './services/memoryHost';
+import { registerNodeSettingsProtocolHandler } from './services/nodeRemote';
 import {
   maybeNotify,
   maybeNotifyBot,
@@ -164,6 +165,7 @@ if (!gotTheLock) {
     });
     // 协议处理器要赶在窗口加载内容之前注册（local-image:// 资源依赖它）。
     registerLocalImageProtocolHandler();
+    registerNodeSettingsProtocolHandler();
     const persisted = readSettings()?.['enso-settings'] as
       | { state?: { proxyMode?: unknown; customProxyUrl?: unknown; autoUpdate?: boolean } }
       | undefined;

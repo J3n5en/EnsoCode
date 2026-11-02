@@ -413,6 +413,16 @@ export const IPC_CHANNELS = {
   NODES_STATUS_CHANGED: 'nodes:status-changed',
   /** main → renderer：解密后的 host 下行帧 */
   NODES_MESSAGE: 'nodes:message',
+  /** 主窗口打开某节点的设置窗口（宿主 renderer 经 rpc 隧道） */
+  NODES_OPEN_SETTINGS: 'nodes:open-settings',
+  /** 节点设置窗口专用 preload ↔ main（只认该窗口的 sender） */
+  NODE_REMOTE_INIT: 'node-remote:init',
+  NODE_REMOTE_ATTACH: 'node-remote:attach',
+  NODE_REMOTE_INVOKE: 'node-remote:invoke',
+  NODE_REMOTE_SEND: 'node-remote:send',
+  NODE_REMOTE_DETACH: 'node-remote:detach',
+  NODE_REMOTE_CLOSE: 'node-remote:close',
+  NODE_REMOTE_EVENT: 'node-remote:event',
 
   WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
 

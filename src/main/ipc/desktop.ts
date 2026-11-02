@@ -1,4 +1,5 @@
 import { app, type BrowserWindow } from 'electron';
+import { registerNodeRemoteHandlers } from '../services/nodeRemote';
 import { registerBrowserHandlers } from './browser';
 import { registerComputerHandlers } from './computer';
 import { registerConfigSyncHandlers } from './configSync';
@@ -14,6 +15,7 @@ export function registerDesktopIpcHandlers(): void {
   registerBrowserHandlers();
   registerExtensionPluginDesktopHandlers();
   registerComputerHandlers();
+  registerNodeRemoteHandlers();
   app.on('browser-window-created', (_event, win: BrowserWindow) => {
     attachWindowStateEvents(win);
   });

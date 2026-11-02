@@ -35,6 +35,13 @@ export default defineConfig({
   preload: {
     build: {
       externalizeDeps: true,
+      rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, 'src/preload/index.ts'),
+          // 节点设置窗口壳页：只暴露 __ensoRemote
+          nodeSettings: path.resolve(__dirname, 'src/preload/nodeSettings.ts'),
+        },
+      },
     },
     resolve: {
       alias: {

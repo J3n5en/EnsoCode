@@ -12,7 +12,7 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import type { RemoteNodeStatus } from '@shared/types/nodes';
-import { Archive, ChevronDown, ChevronRight, Pin, Search, SquarePen } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, Pin, Search, Settings, SquarePen } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import {
@@ -138,15 +138,26 @@ export function RemoteNodeSidebar({
     >
       <div className="flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5">
         <NodeSwitcher />
-        <button
-          type="button"
-          onClick={onNewConversation}
-          disabled={!canCreate}
-          className={cn(ICON_BUTTON_CLASS, !canCreate && 'opacity-40')}
-          title={t('New remote conversation')}
-        >
-          <SquarePen className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void window.electronAPI.nodes.openSettings(node.nodeId)}
+            disabled={!node.hostOnline}
+            className={cn(ICON_BUTTON_CLASS, !node.hostOnline && 'opacity-40')}
+            title={t('Node settings')}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onNewConversation}
+            disabled={!canCreate}
+            className={cn(ICON_BUTTON_CLASS, !canCreate && 'opacity-40')}
+            title={t('New remote conversation')}
+          >
+            <SquarePen className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       {/* 顶部只在列表上方留一条分隔线 */}
       <div className={cn('shrink-0 px-2 py-2', groups.length === 0 && 'border-b')}>

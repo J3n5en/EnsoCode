@@ -110,6 +110,7 @@
         "src/main/services/updater/**",
         "src/main/services/notifications.ts",
         "src/main/services/browserHost.ts",
+        "src/main/services/nodeRemote/index.ts",
         "src/main/services/appServerMode.ts",
         "src/main/services/appMenu.ts",
         "src/main/services/trayToggleShortcut.ts",

@@ -9,12 +9,15 @@ import {
   fromBase64Url,
   type Heartbeat,
   type HostToPhone,
+  type HostToRemote,
   isConnectStuck,
+  isHostRemoteFrame,
   isReplayHello,
   type PairedDevice,
   type PhoneToHost,
   parsePairUri,
   RELAY_CONNECT_TIMEOUT_MS,
+  type RemoteToHost,
   revokePairing,
   shouldReplaceOnNudge,
   toBase64Url,
@@ -79,6 +82,28 @@ interface Connection {
 const connections = new Map<string, Connection>();
 let onStatusChange: ((status: NodesStatus) => void) | null = null;
 let onMessage: ((message: NodeMessage) => void) | null = null;
+
+/** 节点设置窗口的 rpc 隧道（nodeRemote）：远程 renderer 帧与宿主在线变化 */
+export interface NodeRemoteHooks {
+  frame(nodeId: string, frame: HostToRemote): void;
+  /** online=true 也会在已在线时重复触发（中继重建），隧道据此重新 hello */
+  online(nodeId: string, online: boolean): void;
+  removed(nodeId: string): void;
+}
+let remoteHooks: NodeRemoteHooks | null = null;
+
+export function setNodeRemoteHooks(hooks: NodeRemoteHooks): void {
+  remoteHooks = hooks;
+}
+
+export function isNodeHostOnline(nodeId: string): boolean {
+  return connections.get(nodeId)?.hostOnline ?? false;
+}
+
+export function sendRemoteToNode(nodeId: string, frame: RemoteToHost): void {
+  const conn = connections.get(nodeId);
+  if (conn) void sendFrame(conn, frame as PhoneToHost);
+}
 
 export function setNodesStatusListener(listener: (status: NodesStatus) => void): void {
   onStatusChange = listener;
@@ -255,6 +280,7 @@ function forgetNode(nodeId: string): void {
     connections.delete(nodeId);
   }
   saveNodes(removeFromList(loadNodes(), nodeId));
+  remoteHooks?.removed(nodeId);
 }
 
 // ── 连接 ──────────────────────────────────────────────────────────────
@@ -350,6 +376,7 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
     conn.ws = null;
     conn.dropRelay = null;
     conn.hostOnline = false;
+    remoteHooks?.online(conn.node.nodeId, false);
     // 1008 = 中继明确告知凭据已失效（对方解绑）。网络波动不是 1008，仍需重连。
     if (code === 1008) {
       dropRevoked(conn);
@@ -392,12 +419,14 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
           conn.hostOnline = true;
           conn.direct.peerOnline(true);
           notifyStatus();
+          remoteHooks?.online(conn.node.nodeId, true);
           // 进房即要目录（host 收 peer-joined 也会推，双保险防时序丢帧）
           void sendFrame(conn, { type: 'snapshot' });
         } else if (control.type === 'host-offline') {
           conn.hostOnline = false;
           conn.direct.peerOnline(false);
           notifyStatus();
+          remoteHooks?.online(conn.node.nodeId, false);
         } else if (control.type === 'revoked') {
           dropRevoked(conn);
         }
@@ -436,6 +465,7 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   if (!conn.hostOnline) {
     conn.hostOnline = true;
     notifyStatus();
+    remoteHooks?.online(conn.node.nodeId, true);
   }
   let payload: HostToPhone;
   try {
@@ -449,6 +479,10 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   if (conn.replay.takeHello()) void sendFrame(conn, { type: 'replay-hello' } as PhoneToHost);
   if (isReplayHello(payload)) return;
   if (typeof payload !== 'object' || payload === null || typeof payload.type !== 'string') return;
+  if (isHostRemoteFrame(payload)) {
+    remoteHooks?.frame(conn.node.nodeId, payload as HostToRemote);
+    return;
+  }
   switch (payload.type) {
     case 'host-info': {
       conn.hostname = payload.hostname;

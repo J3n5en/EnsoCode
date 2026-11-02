@@ -8,6 +8,7 @@ const DENIED_PREFIXES = [
   'computer:',
   'browser:',
   'nodes:',
+  'node-remote:',
   'config-sync:',
   'app:',
   'notification:',

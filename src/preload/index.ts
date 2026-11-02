@@ -1228,6 +1228,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.NODES_REMOVE, nodeId),
     rename: (nodeId: string, label: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_RENAME, nodeId, label),
+    /** 在本机新窗口打开该节点的设置（宿主设置页经隧道运行） */
+    openSettings: (nodeId: string): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_OPEN_SETTINGS, nodeId),
     /** 发 @enso/pair 的 PhoneToHost 命令（main 按白名单校验后加密上行） */
     send: (nodeId: string, command: unknown): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_SEND, nodeId, command),
