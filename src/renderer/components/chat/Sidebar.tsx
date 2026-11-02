@@ -44,6 +44,7 @@ import {
   PinOff,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Settings,
   Smartphone,
@@ -75,7 +76,10 @@ import { GroupEditorDialog } from '@/components/chat/GroupEditorDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
-import { reloadConversationFromMenu } from '@/components/chat/reloadConversationAction';
+import {
+  reloadConversationFromMenu,
+  restartConversationFromMenu,
+} from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import {
   ContextMenu,
@@ -2563,6 +2567,13 @@ function ConversationRow({
           >
             <RefreshCw className={conversation.reloading ? 'animate-spin' : undefined} />
             {t('Reload conversation')}
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={worktreeDisabled}
+            onClick={() => void restartConversationFromMenu(id, t)}
+          >
+            <RotateCcw />
+            {t('Restart conversation (reload settings)')}
           </ContextMenuItem>
           {localProject && (
             <ContextMenuItem

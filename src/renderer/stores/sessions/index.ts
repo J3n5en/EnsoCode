@@ -174,6 +174,7 @@ const reloadInFlight = new Map<
   string,
   { promise: Promise<string | null>; buffered: RendererAgentEvent[] }
 >();
+const restartInFlight = new Set<string>();
 let evictTimer: ReturnType<typeof setTimeout> | null = null;
 /** 正文脱节时向 worker 补要 snapshot 的去抖：同一会话一轮重叠的 upsert 不重复要 */
 const snapshotResyncAt: Record<string, number> = {};
@@ -448,6 +449,8 @@ interface SessionsState {
    * 不动草稿 / 排队 / started。同会话在途合并；失败保留旧正文并返回原因，成功返 null。
    */
   reloadConversation(id: string): Promise<string | null>;
+  /** 重启根会话：释放 worker 侧会话后按当前设置从 jsonl 重新 spawn。运行中拒绝；成功返 null */
+  restartConversation(id: string): Promise<string | null>;
   /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
   adoptPairSession(session: PairCreatedSession): void;
   /** 登记一条从外部应用导入的对话（选中后自动 resume 回放） */
@@ -3479,6 +3482,37 @@ export const useSessionsStore = create<SessionsState>()(
           })();
           reloadInFlight.set(id, entry);
           return entry.promise;
+        },
+
+        async restartConversation(id) {
+          const conversation = get().conversations[id];
+          if (!conversation) return 'Conversation not found.';
+          if (conversation.parentId || conversation.btwParentId) {
+            return 'Only root conversations can be restarted.';
+          }
+          if (
+            restartInFlight.has(id) ||
+            conversation.status === 'running' ||
+            conversation.spawning ||
+            conversation.workspaceMigrating
+          ) {
+            return 'Wait for the conversation to finish before restarting.';
+          }
+          restartInFlight.add(id);
+          try {
+            if (conversation.started) {
+              const released = await window.electronAPI.agent.release(id);
+              if (!released.ok) return released.error ?? 'Failed to release session.';
+              if (!get().conversations[id]) return null;
+              set((state) => patch(state, id, { started: false, status: 'idle' }));
+            }
+            await get().resumeConversation(id);
+            const resumed = get().conversations[id];
+            if (!resumed || resumed.started || !resumed.sessionFile) return null;
+            return resumed.error ?? 'The conversation model is unavailable with current settings.';
+          } finally {
+            restartInFlight.delete(id);
+          }
         },
 
         async addImportedConversation(projectId, imported) {

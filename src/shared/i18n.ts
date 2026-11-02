@@ -1217,6 +1217,8 @@ export const zhTranslations: Record<string, string> = {
   'Failed to clean up worktree': '清理 worktree 失败',
   'Reload conversation': '重新读取会话',
   'Failed to reload conversation': '重新读取会话失败',
+  'Restart conversation (reload settings)': '重启会话（重新加载配置）',
+  'Failed to restart conversation': '重启会话失败',
   'Clean up': '清理',
   'Archive session and clean up worktree?': '归档会话并清理 worktree？',
   'Pending work: {{warning}}. This session returns to the main working tree. The worktree directory and uncommitted changes are removed only when no other sessions use it. The branch is kept.':
