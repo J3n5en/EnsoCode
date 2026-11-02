@@ -39,7 +39,6 @@ import {
   MessagesSquare,
   PackageMinus,
   Pencil,
-  Puzzle,
   RefreshCw,
   Search,
   SkipForward,
@@ -100,6 +99,7 @@ import {
 import { useSettingsStore } from '@/stores/settings';
 import { useSubagentRunsStore } from '@/stores/subagentRuns';
 import { PluginArtifactsCard } from '../../plugins/artifactViews';
+import { PluginIcon } from '../../plugins/PluginIcon';
 import { PluginMessageActions, PluginToolCardSlot } from '../../plugins/slots';
 import { ApprovalReviewBar } from './ApprovalReviewBar';
 import { AskUserResult } from './AskUserResult';
@@ -875,7 +875,7 @@ function PluginMessageRow({ item }: { item: Extract<TimelineItem, { kind: 'plugi
       className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs"
     >
       <p className="mb-1 flex items-center gap-1.5 text-muted-foreground">
-        <Puzzle className="h-3.5 w-3.5 shrink-0" />
+        <PluginIcon pluginId={item.pluginId} className="h-3.5 w-3.5 shrink-0" />
         <span>{t('From plugin {{name}}', { name: item.pluginName })}</span>
         <span className="font-mono opacity-70">{item.pluginId}</span>
       </p>

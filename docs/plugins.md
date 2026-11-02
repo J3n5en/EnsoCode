@@ -31,6 +31,7 @@
   "name": "Notes",
   "version": "1.0.0",
   "description": "侧栏便签",
+  "icon": "icon.svg",
   "engines": { "enso": ">=0.2.0" },
   "main": "main.mjs",
   "renderer": "ui.js",
@@ -76,6 +77,7 @@
 | `name` | 非空，最长 60 字符 |
 | `version` | 非空，最长 40 字符 |
 | `description` | 可选 |
+| `icon` | 可选，插件目录内的图片相对路径（svg / png / jpg / webp），用于设置页、侧栏标签和插件消息；缺省显示拼图图标 |
 | `engines.enso` | 可选，只支持 `>=x.y.z`；宿主机版本不够则拒绝安装 |
 | `main` | 可选，插件目录内的相对路径。声明了工具、命令、补全来源、方法或配置项时必填 |
 | `renderer` | 可选，渲染模块的相对路径 |

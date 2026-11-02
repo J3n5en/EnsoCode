@@ -289,6 +289,7 @@ export class ExtensionPluginService {
           name: manifest.name,
           version: record.version,
           description: manifest.description,
+          ...(manifest.icon ? { icon: manifest.icon } : {}),
           state: record.state,
           permissions: manifest.permissions,
           tools: manifest.contributes.agentTools.map(({ name, description }) => ({

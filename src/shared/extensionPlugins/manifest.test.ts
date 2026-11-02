@@ -37,6 +37,13 @@ describe('parseExtensionPluginManifest', () => {
     expect(result.manifest.net.domains).toEqual([]);
   });
 
+  it('接受图片 icon，拒绝越界路径和非图片', () => {
+    const result = parseExtensionPluginManifest({ ...base(), icon: 'assets/icon.svg' }, '0.2.12');
+    expect(result.ok && result.manifest.icon).toBe('assets/icon.svg');
+    expect(errorsOf({ ...base(), icon: '../icon.png' })).toContain('icon 路径不合法');
+    expect(errorsOf({ ...base(), icon: 'main.js' })).toContain('icon 路径不合法');
+  });
+
   it.each([null, 'x', 1, []])('拒绝非对象 %j', (raw) => {
     expect(errorsOf(raw).length).toBeGreaterThan(0);
   });

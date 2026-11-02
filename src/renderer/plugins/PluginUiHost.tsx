@@ -6,6 +6,7 @@ import { newInterceptBreakers } from './breakers';
 import { mergePluginCommands, setPluginCommands } from './commands';
 import { handleDraftRequest, prefillDraft } from './draftBridge';
 import { createRendererDeps, loadPluginRenderer } from './loader';
+import { setPluginIcons } from './PluginIcon';
 import { handleSessionRequest, type SessionRequest } from './sessionBridge';
 import { setPluginTriggers } from './triggers';
 import { setPluginViews } from './viewBridge';
@@ -43,6 +44,9 @@ export function PluginUiHost() {
           });
         }
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
+        setPluginIcons(
+          Object.fromEntries(enabled.flatMap((p) => (p.icon ? [[p.id, p.icon]] : [])))
+        );
         setPluginCommands(
           enabled.flatMap((plugin) =>
             mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({

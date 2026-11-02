@@ -17,7 +17,6 @@ import {
   MessageCircle,
   Minimize2,
   Plus,
-  Puzzle,
   SquareTerminal,
   Workflow,
   X,
@@ -52,6 +51,7 @@ import {
   SIDE_PANEL_HANDLE_WIDTH,
 } from '@/stores/sidePanel/width';
 import { useWorkflowRunsStore } from '@/stores/workflowRuns';
+import { PluginIcon } from '../../plugins/PluginIcon';
 import { PluginView } from '../../plugins/PluginView';
 import { type PluginViewRef, usePluginViews } from '../../plugins/viewBridge';
 import { BrowserView } from './BrowserView';
@@ -316,7 +316,7 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
       ) : props.api.id === 'workflow' ? (
         <Workflow className="h-3 w-3 shrink-0" />
       ) : props.api.id.startsWith('plugin:') ? (
-        <Puzzle className="h-3 w-3 shrink-0" />
+        <PluginIcon pluginId={props.api.id.split(':')[1] ?? ''} className="h-3 w-3 shrink-0" />
       ) : isBrowser && favicon && !faviconBroken ? (
         <img
           src={favicon}
@@ -430,7 +430,7 @@ function NewTabMenu({
         {onNewPluginView
           ? pluginViews.map((view) => (
               <MenuItem key={`${view.pluginId}:${view.id}`} onClick={() => onNewPluginView(view)}>
-                <Puzzle className="h-4 w-4" />
+                <PluginIcon pluginId={view.pluginId} className="h-4 w-4" />
                 {view.title}
               </MenuItem>
             ))

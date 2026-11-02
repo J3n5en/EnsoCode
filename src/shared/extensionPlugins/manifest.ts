@@ -125,6 +125,8 @@ export interface ExtensionPluginManifest {
   name: string;
   version: string;
   description: string;
+  /** 插件内图片相对路径（svg/png/jpg/webp） */
+  icon?: string;
   ensoRange?: string;
   main?: string;
   renderer?: string;
@@ -194,6 +196,7 @@ const TOP_LEVEL = new Set([
   'name',
   'version',
   'description',
+  'icon',
   'engines',
   'main',
   'renderer',
@@ -311,6 +314,12 @@ export function parseExtensionPluginManifest(
   };
   const main = optionalPath('main');
   const renderer = optionalPath('renderer');
+  let icon: string | undefined;
+  if (raw.icon !== undefined) {
+    if (isPluginRelativePath(raw.icon) && /\.(svg|png|jpe?g|webp)$/i.test(raw.icon))
+      icon = raw.icon;
+    else errors.push('icon 路径不合法');
+  }
 
   const permissions: ExtensionPluginPermission[] = [];
   if (!Array.isArray(raw.permissions)) errors.push('permissions 必须是数组');
@@ -786,6 +795,7 @@ export function parseExtensionPluginManifest(
       name: (raw.name as string).trim(),
       version: raw.version as string,
       description: typeof raw.description === 'string' ? raw.description : '',
+      ...(icon ? { icon } : {}),
       ...(ensoRange ? { ensoRange } : {}),
       ...(main ? { main } : {}),
       ...(renderer ? { renderer } : {}),

@@ -191,6 +191,7 @@ async function verifyReferences(
   const files = [
     manifest.main,
     manifest.renderer,
+    manifest.icon,
     ...manifest.contributes.views.map((v) => v.entry),
   ].filter((p): p is string => typeof p === 'string');
   for (const rel of files) {
