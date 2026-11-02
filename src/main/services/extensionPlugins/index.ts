@@ -12,8 +12,10 @@ import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { rendererById } from '../renderers';
+import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
+import { envMarketSources, marketPublicKeys, PluginMarket } from './market';
 import { pluginError } from './process';
 import { ExtensionPluginService, type PluginSessionBridge } from './service';
 
@@ -114,6 +116,16 @@ export function getExtensionPlugins(): ExtensionPluginService {
     capabilities,
     sessionBridge: () => sessionBridge,
     fork: (modulePath, args, options) => utilityProcess.fork(modulePath, args, options),
+    market: new PluginMarket({
+      root: join(app.getPath('userData'), 'extension-plugins'),
+      fetch: (url, init) => fetch(url, init),
+      hostVersion: app.getVersion(),
+      publicKeys: marketPublicKeys(process.env),
+      builtin: BUILTIN_MARKET,
+      ...(envMarketSources(process.env)
+        ? { sources: () => envMarketSources(process.env) ?? [] }
+        : {}),
+    }),
     gate: {
       fetch: (url, init) => fetch(url, init),
       notify: (title, body) => {

@@ -1648,6 +1648,16 @@ const electronAPI = {
     > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, id),
     checkUpdates: (): Promise<{ checked: number; available: number; failed: number }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_CHECK_UPDATES),
+    marketList: (refresh = false): Promise<ExtensionPluginMarketList> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_LIST, refresh),
+    marketStage: (
+      id: string,
+      version?: string
+    ): Promise<
+      { ok: true; preview: ExtensionPluginInstallPreview } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_STAGE, id, version),
+    setMarketChinaMirror: (on: boolean): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_SET_MIRROR, on),
     commit: (token: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT, token),
     discard: (token: string): Promise<{ ok: boolean }> =>
@@ -1752,6 +1762,7 @@ import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
+  ExtensionPluginMarketList,
   ExtensionPluginSummary,
   RegistryNotice,
 } from '@shared/extensionPlugins/types';

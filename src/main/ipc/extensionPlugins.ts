@@ -233,6 +233,26 @@ export function registerExtensionPluginHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_CHECK_UPDATES, () => plugins().checkUpdates());
 
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_LIST, (_e, refresh: unknown) =>
+    plugins().marketList(refresh === true)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_STAGE,
+    (_e, id: unknown, version: unknown) => {
+      if (!isId(id)) return { ok: false, error: '参数不合法' };
+      if (version !== undefined && (typeof version !== 'string' || version.length > 40))
+        return { ok: false, error: '参数不合法' };
+      return plugins().stage({ kind: 'market', id }, version);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_SET_MIRROR, (_e, on: unknown) => {
+    if (typeof on !== 'boolean') return { ok: false, error: '参数不合法' };
+    plugins().setMarketChinaMirror(on);
+    return { ok: true };
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, (_e, id: unknown) => {
     if (!isId(id)) return { ok: false, error: '参数不合法' };
     return plugins().restage(id);

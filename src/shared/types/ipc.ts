@@ -525,6 +525,12 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_RESTAGE: 'extension-plugins:restage',
   /** 立即检查 GitHub 来源的插件更新；结果随列表下发 */
   EXTENSION_PLUGINS_CHECK_UPDATES: 'extension-plugins:check-updates',
+  /** 插件市场列表（签名索引 + 本机安装状态）；入参 refresh 布尔 */
+  EXTENSION_PLUGINS_MARKET_LIST: 'extension-plugins:market-list',
+  /** 从插件市场暂存；渲染层只传插件 id 与可选版本 */
+  EXTENSION_PLUGINS_MARKET_STAGE: 'extension-plugins:market-stage',
+  /** 插件市场「国内镜像」开关 */
+  EXTENSION_PLUGINS_MARKET_SET_MIRROR: 'extension-plugins:market-set-mirror',
   /** 运行期：界面发起的插件调用（命令、挂件、侧栏页面、补全），算用户手势 */
   EXTENSION_PLUGINS_CALL: 'extension-plugins:call',
   /** 运行期：按插件 id + 相对路径取渲染资源，渲染层不传磁盘路径 */

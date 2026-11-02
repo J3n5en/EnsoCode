@@ -46,7 +46,7 @@ const optStr = (v: unknown, max: number) => (str(v, max) ? v : undefined);
 
 function parseVersion(raw: unknown, hostVersion: string): MarketVersion | null {
   if (!isRecord(raw) || !str(raw.version, 40)) return null;
-  if (!isPluginRelativePath(raw.path) || raw.path.includes(':')) return null;
+  if (!isPluginRelativePath(raw.path) || !/^[A-Za-z0-9._/-]+$/.test(raw.path)) return null;
   if (typeof raw.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(raw.sha256)) return null;
   if (!Number.isSafeInteger(raw.size) || (raw.size as number) <= 0) return null;
   if (raw.engines !== undefined) {

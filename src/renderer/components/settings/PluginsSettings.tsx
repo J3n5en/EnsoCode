@@ -45,6 +45,7 @@ import { coerceConfigValue } from '@/plugins/configValue';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
+import { PluginMarket } from './PluginMarket';
 import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
 /** 插件配置表单：密钥不回显，留空保持不变 */
@@ -373,6 +374,7 @@ function ExtensionPluginsSection() {
   const [checking, setChecking] = React.useState(false);
   const [checkResult, setCheckResult] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<RegistryNotice | null>(null);
+  const [marketOpen, setMarketOpen] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -414,12 +416,13 @@ function ExtensionPluginsSection() {
     else setPreview(result.preview);
   };
 
-  const restage = async (id: string) => {
+  const restage = async (id: string, fromMarket = false) => {
     setError(null);
     if (preview) void window.electronAPI.extensionPlugins.discard(preview.token);
     setPreview(null);
     setDownloading(true);
-    const result = await window.electronAPI.extensionPlugins.restage(id).finally(() => {
+    const api = window.electronAPI.extensionPlugins;
+    const result = await (fromMarket ? api.marketStage(id) : api.restage(id)).finally(() => {
       setDownloading(false);
     });
     if (!result.ok) setError(result.error);
@@ -481,7 +484,9 @@ function ExtensionPluginsSection() {
           </p>
         </div>
         <div className="flex gap-2">
-          {plugins.some((plugin) => plugin.source?.kind === 'url') && (
+          {plugins.some(
+            (plugin) => plugin.source?.kind === 'url' || plugin.source?.kind === 'market'
+          ) && (
             <Button
               size="sm"
               variant="ghost"
@@ -491,6 +496,13 @@ function ExtensionPluginsSection() {
               {checking ? <Spinner /> : t('Check for updates')}
             </Button>
           )}
+          <Button
+            size="sm"
+            variant={marketOpen ? 'secondary' : 'outline'}
+            onClick={() => setMarketOpen((open) => !open)}
+          >
+            {t('Marketplace')}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -528,6 +540,13 @@ function ExtensionPluginsSection() {
         </Button>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
+      {marketOpen && (
+        <PluginMarket
+          disabled={busy || downloading}
+          installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
+          onInstall={(id) => void restage(id, true)}
+        />
+      )}
       {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
       {notice && (
         <RegistryNoticeBanner

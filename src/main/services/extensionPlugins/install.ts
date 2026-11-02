@@ -41,7 +41,8 @@ export type StageResult = { ok: true; staged: StagedPlugin } | { ok: false; erro
 export type PluginInstallSource =
   | { kind: 'dir'; path: string }
   | { kind: 'zip'; path: string }
-  | { kind: 'url'; url: string };
+  | { kind: 'url'; url: string }
+  | { kind: 'market'; id: string };
 
 export interface StageDeps {
   fetch?: ArchiveFetch;
@@ -239,7 +240,7 @@ export async function stagePlugin(
       await extractZip(source.path, staging, ZIP_LIMITS);
       await assertContainedSymlinks(staging);
       unpacked = staging;
-    } else {
+    } else if (source.kind === 'url') {
       const parsed = parsePluginInstallUrl(source.url);
       if (!parsed.ok) throw new Error(parsed.error);
       const resolved = resolvePluginArchive(parsed.url);
@@ -257,7 +258,7 @@ export async function stagePlugin(
       await assertContainedSymlinks(tree);
       unpacked = tree;
       scanRoot = await pluginTreeRoot(tree, resolved.subdir);
-    }
+    } else throw new Error('市场来源需先下载');
     const pluginRoot = await locatePluginRoot(scanRoot);
     if (unpacked === null || pluginRoot !== unpacked) await assertContainedSymlinks(pluginRoot);
     const manifestPath = join(pluginRoot, MANIFEST_FILE);

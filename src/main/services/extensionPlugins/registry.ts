@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { isPluginId } from '@shared/extensionPlugins/manifest';
 import { PLUGIN_STATES, type PluginRecord } from './lifecycle';
 
 /** 插件系统上线前不做兼容：版本不符或字段不全的记录直接丢弃 */
@@ -129,10 +130,11 @@ export function readRegistry(root: string): RegistryRead {
 const isLastError = (v: unknown) =>
   v === undefined || (isRecord(v) && typeof v.at === 'number' && typeof v.message === 'string');
 
-/** 只认绝对路径与 http(s) 链接；其它一律当作没有记录来源 */
+/** 只认绝对路径、http(s) 链接与市场插件 id；其它一律当作没有记录来源 */
 function isSource(v: unknown): v is NonNullable<PluginRecord['source']> {
   if (!isRecord(v)) return false;
   if (v.kind === 'dir' || v.kind === 'zip') return typeof v.path === 'string' && isAbsolute(v.path);
+  if (v.kind === 'market') return isPluginId(v.id);
   return v.kind === 'url' && typeof v.url === 'string' && /^https?:\/\//i.test(v.url);
 }
 

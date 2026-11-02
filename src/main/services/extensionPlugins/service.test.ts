@@ -844,3 +844,145 @@ describe('丢弃的登记记录', () => {
     expect(readFileSync(join(root, 'registry.json.bak'), 'utf8')).toBe(first);
   });
 });
+
+describe('插件市场', () => {
+  function storedZip(files: Record<string, string>): Buffer {
+    const locals: Buffer[] = [];
+    const centrals: Buffer[] = [];
+    let offset = 0;
+    for (const [name, data] of Object.entries(files)) {
+      const nameBuf = Buffer.from(name);
+      const raw = Buffer.from(data);
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt32LE(raw.length, 18);
+      local.writeUInt32LE(raw.length, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      const record = Buffer.concat([local, nameBuf, raw]);
+      const central = Buffer.alloc(46);
+      central.writeUInt32LE(0x02014b50, 0);
+      central.writeUInt16LE(20, 4);
+      central.writeUInt16LE(20, 6);
+      central.writeUInt32LE(raw.length, 20);
+      central.writeUInt32LE(raw.length, 24);
+      central.writeUInt16LE(nameBuf.length, 28);
+      central.writeUInt32LE(offset, 42);
+      locals.push(record);
+      centrals.push(Buffer.concat([central, nameBuf]));
+      offset += record.length;
+    }
+    const dir = Buffer.concat(centrals);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(locals.length, 8);
+    eocd.writeUInt16LE(locals.length, 10);
+    eocd.writeUInt32LE(dir.length, 12);
+    eocd.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, dir, eocd]);
+  }
+
+  /** 市场替身：latest 为当前可下载版本，download 写出对应 zip */
+  function fakeMarket(state: { latest: string; zipId?: string }) {
+    let mirror = false;
+    return {
+      chinaMirror: () => mirror,
+      setChinaMirror: (on: boolean) => {
+        mirror = on;
+      },
+      index: async () => ({
+        ok: true as const,
+        stale: false,
+        index: {
+          sequence: 1,
+          generatedAt: '',
+          plugins: [
+            {
+              id: 'example.demo',
+              name: 'Demo',
+              description: '',
+              tier: 'official' as const,
+              tags: [],
+              latest: state.latest,
+              versions: [
+                {
+                  version: state.latest,
+                  permissions: ['agent.tool'],
+                  path: 'p.zip',
+                  sha256: '',
+                  size: 1,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      download: async (_id: string, _v: string | undefined, dest: string) => {
+        writeFileSync(
+          dest,
+          storedZip({
+            'enso-plugin.json': manifest({
+              id: state.zipId ?? 'example.demo',
+              version: state.latest,
+            }),
+            'main.mjs': mainJs,
+          })
+        );
+        return { ok: true as const, version: state.latest };
+      },
+    };
+  }
+
+  const open = (market: unknown) =>
+    new ExtensionPluginService({
+      root,
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: () => new InProcessChild() as never,
+      market: market as never,
+      gate: {
+        fetch: vi.fn(),
+        notify: () => true,
+        composer: async () => null,
+        mcpTools: async () => [],
+        mcpCall: async () => ({ content: '', isError: false }),
+        now: () => Date.now(),
+      },
+    });
+
+  it('从市场安装记录 market 来源；列表带安装状态；新版本出现时检查更新提示', async () => {
+    const state = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state));
+    const staged = await svc.stage({ kind: 'market', id: 'example.demo' });
+    if (!staged.ok) throw new Error(staged.error);
+    await svc.commit(staged.preview.token);
+    expect(svc.list()[0]?.source).toEqual({ kind: 'market' });
+    expect(readRegistry(root).plugins[0]?.source).toEqual({ kind: 'market', id: 'example.demo' });
+    const list = await svc.marketList(false);
+    expect(list.ok && list.plugins[0]).toMatchObject({
+      installedVersion: '1.0.0',
+      updateAvailable: false,
+    });
+
+    state.latest = '1.1.0';
+    expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 1, failed: 0 });
+    expect(svc.list()[0]?.availableVersion).toBe('1.1.0');
+    const again = await svc.restage('example.demo');
+    if (!again.ok) throw new Error(again.error);
+    await svc.commit(again.preview.token);
+    expect(svc.list()[0]?.version).toBe('1.1.0');
+  });
+
+  it('市场包里的插件 id 与条目不符时拒绝', async () => {
+    const svc = open(fakeMarket({ latest: '1.0.0', zipId: 'other.plugin' }));
+    expect(await svc.stage({ kind: 'market', id: 'example.demo' })).toMatchObject({ ok: false });
+  });
+
+  it('没有市场时明确报错', async () => {
+    expect(await service.stage({ kind: 'market', id: 'example.demo' })).toMatchObject({
+      ok: false,
+    });
+    expect(await service.marketList(false)).toMatchObject({ ok: false });
+  });
+});

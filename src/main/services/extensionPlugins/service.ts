@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   closeSync,
@@ -52,6 +53,7 @@ import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/to
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
+  ExtensionPluginMarketList,
   ExtensionPluginSummary,
   PluginEventPlan,
   PluginToolDescriptor,
@@ -79,6 +81,7 @@ import {
   stagePlugin,
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
+import type { PluginMarket } from './market';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
 import {
   preserveUnreadableRegistry,
@@ -164,6 +167,7 @@ export interface ExtensionPluginServiceOptions {
   sessionBridge?: () => PluginSessionBridge | null;
   fork(modulePath: string, args: string[], options: WorkerForkOptions): WorkerProcess;
   gate: Omit<GateDeps, 'manifest' | 'config'>;
+  market?: PluginMarket;
 }
 
 export type UiCallMethod = Exclude<PluginCallMethod, 'tool.execute'>;
@@ -347,9 +351,12 @@ export class ExtensionPluginService {
     return record?.state === 'enabled' ? this.load(record.id, record.dir) : null;
   }
 
-  async stage(source: PluginInstallSource) {
+  async stage(source: PluginInstallSource, version?: string) {
     this.sweepStaged();
-    const result = await stagePlugin(this.options.root, source, this.options.hostVersion);
+    const result =
+      source.kind === 'market'
+        ? await this.stageFromMarket(source.id, version)
+        : await stagePlugin(this.options.root, source, this.options.hostVersion);
     if (!result.ok) return result;
     const { staged } = result;
     this.staged.set(staged.token, { staged, at: Date.now(), source });
@@ -387,6 +394,63 @@ export class ExtensionPluginService {
       expands: existing ? grantExpands(existing.grant, grant) : true,
     };
     return { ok: true as const, preview };
+  }
+
+  /** 下载并校验市场包后按 zip 暂存；包里的插件 id 必须与市场条目一致 */
+  private async stageFromMarket(id: string, version?: string) {
+    const market = this.options.market;
+    if (!market) return { ok: false as const, error: '当前环境不支持插件市场' };
+    const tmpDir = join(this.options.root, 'market', 'tmp');
+    mkdirSync(tmpDir, { recursive: true });
+    const zip = join(tmpDir, `${randomUUID()}.zip`);
+    try {
+      const got = await market.download(id, version, zip);
+      if (!got.ok) return got;
+      const result = await stagePlugin(
+        this.options.root,
+        { kind: 'zip', path: zip },
+        this.options.hostVersion
+      );
+      if (result.ok && result.staged.manifest.id !== id) {
+        discardStaged(this.options.root, result.staged);
+        return { ok: false as const, error: `市场包里的插件不是 ${id}` };
+      }
+      return result;
+    } finally {
+      rmSync(zip, { force: true });
+    }
+  }
+
+  async marketList(refresh: boolean): Promise<ExtensionPluginMarketList> {
+    const market = this.options.market;
+    if (!market) return { ok: false, error: '当前环境不支持插件市场', chinaMirror: false };
+    const chinaMirror = market.chinaMirror();
+    const r = await market.index({ refresh });
+    if (!r.ok) return { ok: false, error: r.error, chinaMirror };
+    return {
+      ok: true,
+      stale: r.stale,
+      chinaMirror,
+      plugins: r.index.plugins.map((p) => {
+        const installed = this.records.find((rec) => rec.id === p.id)?.version;
+        return {
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          tier: p.tier,
+          tags: p.tags,
+          ...(p.homepage ? { homepage: p.homepage } : {}),
+          latest: p.latest,
+          permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
+          ...(installed ? { installedVersion: installed } : {}),
+          updateAvailable: installed !== undefined && isNewerPluginVersion(p.latest, installed),
+        };
+      }),
+    };
+  }
+
+  setMarketChinaMirror(on: boolean): void {
+    this.options.market?.setChinaMirror(on);
   }
 
   /** 从记录的安装来源重新暂存；之后和普通更新一样确认、按授权是否扩大分流 */
@@ -1313,8 +1377,12 @@ export class ExtensionPluginService {
     run(UPDATE_CHECK_FIRST_DELAY_MS);
   }
 
-  /** 只拉 GitHub 来源里的清单比较版本，不下载整包、不自动安装 */
+  /** GitHub 来源只拉清单比较版本；市场来源对比签名索引。不下载整包、不自动安装 */
   async checkUpdates(options: { enabledOnly?: boolean } = {}) {
+    const marketRecords = this.records.filter(
+      (r) => r.source?.kind === 'market' && (!options.enabledOnly || r.state === 'enabled')
+    );
+    const marketResults = await this.checkMarketUpdates(marketRecords);
     const targets = this.records.flatMap((record) => {
       if (options.enabledOnly && record.state !== 'enabled') return [];
       if (record.source?.kind !== 'url') return [];
@@ -1336,12 +1404,29 @@ export class ExtensionPluginService {
         }
       })
     );
-    if (targets.length > 0) for (const listener of this.listeners) listener();
+    results.push(...marketResults);
+    if (results.length > 0) for (const listener of this.listeners) listener();
     return {
-      checked: targets.length,
+      checked: results.length,
       available: results.filter((r) => r === 'available').length,
       failed: results.filter((r) => r === 'failed').length,
     };
+  }
+
+  private async checkMarketUpdates(records: PluginRecord[]) {
+    if (records.length === 0 || !this.options.market) return [];
+    const r = await this.options.market.index({ refresh: true });
+    return records.map((record) => {
+      if (!r.ok) {
+        this.updates.set(record.id, { error: r.error });
+        return 'failed' as const;
+      }
+      const latest = r.index.plugins.find((p) => p.id === record.id)?.latest;
+      const update =
+        latest && isNewerPluginVersion(latest, record.version) ? { version: latest } : {};
+      this.updates.set(record.id, update);
+      return update.version ? ('available' as const) : ('current' as const);
+    });
   }
 
   private async probeVersion(id: string, probe: URL): Promise<string> {
