@@ -131,7 +131,12 @@ import { getModelDirectorySnapshot, onModelDirectoryChanged } from './modelDirec
 import { OAUTH_POOL_EXHAUSTED } from './oauthAccountPool';
 import { getOauthQuotaCoordinator, getRuntime as getOauthRuntime } from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
-import { enabledPlugins, type RuntimeAgentType, withPluginAgentTypes } from './pluginRuntime';
+import {
+  enabledPlugins,
+  type NativePluginAgentDef,
+  type RuntimeAgentType,
+  withPluginAgentTypes,
+} from './pluginRuntime';
 import { recordPrivacyMaskLedger } from './privacyMask';
 import { killAndWaitExit } from './processExit';
 import { bundledRtkPath } from './rtkBinary';
@@ -988,7 +993,13 @@ export function spawnSession(
     : configuredSubagentModels(authenticatedAccountKeys);
   const agentTypes = options?.omitDispatchTools
     ? []
-    : configuredAgentTypes(authenticatedAccountKeys, subagentModels.length > 0, plugins);
+    : configuredAgentTypes(
+        authenticatedAccountKeys,
+        subagentModels.length > 0,
+        plugins,
+        // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
+        bot ? [] : undefined
+      );
   // 当前平台不能操作桌面时禁用 computer，避免模型反复调用必失败的工具
   const extraDisabledTools = options?.extraDisabledTools ?? [];
   const disabledTools = sessionDisabledTools(
@@ -1866,7 +1877,8 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
 export function configuredAgentTypes(
   authenticatedAccountKeys: ReadonlySet<string>,
   hasSubagentModels = false,
-  plugins?: ResolvedPlugins
+  plugins?: ResolvedPlugins,
+  nativePluginAgents?: readonly NativePluginAgentDef[]
 ): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
   const disabled = new Set(
@@ -1877,7 +1889,8 @@ export function configuredAgentTypes(
   const custom = withPluginAgentTypes(
     Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
     state,
-    plugins
+    plugins,
+    nativePluginAgents
   );
   // 与 registry 同口径（trim + 小写）：同名 custom 覆盖 builtin
   const customNames = new Set(custom.map((entry) => entry.name.trim().toLowerCase()));

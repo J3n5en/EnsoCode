@@ -55,6 +55,15 @@
         "systemPrompt": "prompts/role.md"
       }
     ],
+    "agentTypes": [
+      {
+        "name": "notes:reviewer",
+        "description": "只读审查便签相关改动",
+        "systemPrompt": "agents/reviewer.md",
+        "tools": "readonly",
+        "skills": ["skills/bar-chart"]
+      }
+    ],
     "methods": [{ "name": "enhance", "timeoutMs": 120000 }],
     "configuration": [{ "key": "token", "title": "Token", "secret": true }]
   }
@@ -116,6 +125,7 @@
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
 - `presets`：`{ id, name, skills, mcpServers, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills` 和 `mcpServers` 只能引用本插件已经声明的 skill 目录和 MCP 服务名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
+- `agentTypes`：`{ name, description, systemPrompt, tools?, skills? }`，最多 20 个，见下文「子代理类型」。
 - `methods`：`{ name, timeoutMs }`，给 `renderer.handle` 注册的方法声明更长的超时，1000 到 120000 毫秒的整数。没声明的方法 2 秒超时。
 - `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）或 `path`（可带 `pathKind: 'file' | 'directory'`）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
 - `events`：`{ event, mode?, failClosed?, tools? }`，订阅会话事件，见下文「会话事件」。
@@ -344,6 +354,22 @@ export function onLoad(enso) {
 
 选中插件预设时，用它的指令文件代替当前启用的全局指令；没写 `instruction` 就不注入指令。角色描述、真尾、boost 和推脱补发按文件内容下发，缺的字段沿用默认。用户自己启用的 skill 和 MCP 仍然保留。插件停用或预设被删掉之后，已经选中的会话在启动时会失败，需要改回别的预设。
 
+## 子代理类型
+
+`contributes.agentTypes` 给子代理提供固定角色，和 Claude 格式插件的 `agents/*.md` 等价。不需要额外权限，也不需要 `main`。
+
+| 字段 | 要求 |
+| --- | --- |
+| `name` | 给模型看的类型名。小写 slug `^[a-z][a-z0-9_-]*$`，可带一个命名空间前缀如 `notes:reviewer`，总长不超过 64。不能是内置类型名（`scout`、`worker` 等）或保留名（`enso`，`agent:` / `builtin:` / `custom:` / `builtin-agent:` / `bot:` 开头）。同插件内不能重复 |
+| `description` | 必填，最长 1024 字符，模型据此选择类型 |
+| `systemPrompt` | 必填，插件目录里的 Markdown 文件，作为子代理的系统提示。安装时必须存在；运行时读不出（缺失、为空或超过 256KB）的类型会被跳过并写进插件日志 |
+| `tools` | `all`（缺省）或 `readonly`，按声明原样生效，不从工具名推断 |
+| `skills` | 可选，只能引用本插件 `skills` 里已声明的目录，派生这个类型的子代理时附加。不受预设范围影响 |
+
+类型跟随会话模型（`follow`）。插件启用后立即出现在子代理类型列表里，停用或卸载后立即消失；Bot 会话不下发 Enso 插件的子代理类型。
+
+同名时的优先级（名字去首尾空白、忽略大小写比较）：用户自定义类型 > Claude 插件的子代理 > Enso 插件。Enso 插件之间按插件 id 排序，排在前面的先占名字。被挤掉的类型写进对应插件的日志（每个类型只记一次）。
+
 ## 限制汇总
 
 | 项 | 限制 |
@@ -368,6 +394,7 @@ export function onLoad(enso) {
 | 界面调用 | 参数与返回值各 64KB；命令 60 秒，声明过的渲染方法按声明（最长 120 秒），其余 2 秒 |
 | 宿主 MCP | 参数 64KB；单次最长 120 秒 |
 | 配置项 | 最多 20 项，每个值 4096 字符 |
+| 子代理类型 | 每插件 20 个，类型名 64 字符，提示词文件 256KB |
 | 草稿写入 | 32KB |
 | 系统通知 | 标题 200 字符，正文 1000 字符 |
 | 补全 | 50 条，label 64 字符，detail 120 字符，插入文本 32KB |

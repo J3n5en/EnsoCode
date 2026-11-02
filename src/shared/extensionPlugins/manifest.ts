@@ -1,4 +1,6 @@
+import { isReservedAgentTypeName } from '../builtinAgents';
 import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
+import { BUILTIN_AGENT_TYPES } from '../types/assets';
 import {
   isInterceptEvent,
   PLUGIN_EVENTS,
@@ -105,6 +107,14 @@ export interface PluginPresetContrib {
   approvalMode?: Extract<ApprovalMode, 'supervised' | 'auto-edits'>;
   disabledTools?: string[];
 }
+/** 插件自带的子代理类型。systemPrompt 是插件内 Markdown；skills 只能引用本插件已声明的 skill 目录 */
+export interface PluginAgentTypeContrib {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: 'all' | 'readonly';
+  skills: string[];
+}
 
 export interface ExtensionPluginManifest {
   schemaVersion: 1;
@@ -136,6 +146,7 @@ export interface ExtensionPluginManifest {
     methods: PluginMethodContrib[];
     configuration: PluginConfigContrib[];
     presets: PluginPresetContrib[];
+    agentTypes: PluginAgentTypeContrib[];
     events: PluginEventSubscription[];
     schedules: PluginScheduleContrib[];
     exports: PluginExportContrib[];
@@ -158,6 +169,9 @@ const MCP_TOOL = /^[A-Za-z0-9_.-]{1,64}$/;
 const CONFIG_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const TOOL_NAME_REF = /^[A-Za-z0-9_.-]{1,64}$/;
+/** 子代理类型名：小写 slug，可带一个 `前缀:` 命名空间，总长 ≤ 64 */
+const AGENT_TYPE_NAME = /^[a-z][a-z0-9_-]*(:[a-z][a-z0-9_-]*)?$/;
+const MAX_AGENT_TYPE_NAME = 64;
 /** 会改变 Node / Electron 行为或冒充宿主注入值的变量不能声明 */
 const RESERVED_ENV = /^(ENSO_|ELECTRON_|NODE_OPTIONS$|NODE_PATH$|NODE_EXTRA_CA_CERTS$|LD_|DYLD_)/;
 export const MAX_METHOD_TIMEOUT_MS = 120_000;
@@ -168,6 +182,7 @@ export const MAX_DYNAMIC_TOOLS = 50;
 export const MAX_DYNAMIC_COMMANDS = 20;
 const MAX_CONFIG_ITEMS = 20;
 const MAX_PRESETS = 20;
+export const MAX_PLUGIN_AGENT_TYPES = 20;
 const MAX_SCHEDULES = 10;
 const MAX_ENV = 20;
 const TOP_LEVEL = new Set([
@@ -559,6 +574,47 @@ export function parseExtensionPluginManifest(
   }
   uniqueIds(presets, '预设');
 
+  const agentTypes: PluginAgentTypeContrib[] = [];
+  const agentTypeRaw = list('agentTypes');
+  if (agentTypeRaw.length > MAX_PLUGIN_AGENT_TYPES)
+    errors.push(`子代理类型最多 ${MAX_PLUGIN_AGENT_TYPES} 个`);
+  for (const item of agentTypeRaw) {
+    const name = isRecord(item) ? item.name : undefined;
+    if (
+      !isRecord(item) ||
+      typeof name !== 'string' ||
+      name.length > MAX_AGENT_TYPE_NAME ||
+      !AGENT_TYPE_NAME.test(name) ||
+      isReservedAgentTypeName(name) ||
+      BUILTIN_AGENT_TYPES.some((builtin) => builtin.name === name)
+    ) {
+      errors.push(`子代理类型名不合法：${String(name)}`);
+      continue;
+    }
+    if (!isNonEmptyString(item.description, 1024))
+      errors.push(`子代理类型 ${name} 缺少 description`);
+    const systemPrompt = promptPath(item.systemPrompt, `子代理类型 ${name} 的 systemPrompt`);
+    if (item.systemPrompt === undefined) errors.push(`子代理类型 ${name} 缺少 systemPrompt`);
+    const tools = item.tools ?? 'all';
+    if (tools !== 'all' && tools !== 'readonly')
+      errors.push(`子代理类型 ${name} 的 tools 只能是 all 或 readonly`);
+    const typeSkills = stringList(
+      item.skills,
+      `子代理类型 ${name} 的 skills`,
+      (p) => typeof p === 'string' && skills.includes(p)
+    );
+    if (Array.isArray(item.skills) && item.skills.some((p) => !skills.includes(p)))
+      errors.push(`子代理类型 ${name} 引用了未声明的 skill`);
+    agentTypes.push({
+      name,
+      description: typeof item.description === 'string' ? item.description.trim() : '',
+      systemPrompt: systemPrompt ?? '',
+      tools: tools === 'readonly' ? 'readonly' : 'all',
+      skills: typeSkills,
+    });
+  }
+  uniqueIds(agentTypes, '子代理类型');
+
   const methods: PluginMethodContrib[] = [];
   for (const m of list('methods')) {
     if (
@@ -736,6 +792,7 @@ export function parseExtensionPluginManifest(
         methods,
         configuration,
         presets,
+        agentTypes,
         events,
         schedules,
         exports: exportsList,

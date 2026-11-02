@@ -59,6 +59,11 @@ import type {
 } from '@shared/extensionPlugins/types';
 import type { McpServerSpawnConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
+import type {
+  NativeAgentTypeSource,
+  NativePluginAgentDef,
+  PluginAgentTypeDrop,
+} from '../pluginRuntime';
 import { ArtifactStore } from './artifacts';
 import { DynamicContribs } from './dynamic';
 import { type GateDeps, PluginHostGate } from './gate';
@@ -214,6 +219,8 @@ export class ExtensionPluginService {
   private readonly progressTaps = new Map<string, (text: string) => void>();
   private readonly gateManifests = new Map<string, ExtensionPluginManifest>();
   private readonly trialing = new Set<string>();
+  /** 子代理类型的告警只记一次，避免每次取类型列表都写日志 */
+  private readonly agentTypeWarned = new Set<string>();
   private readonly trialCounts = new Map<string, { tools: number; commands: number }>();
   private background = false;
   private disposed: Promise<void> | null = null;
@@ -731,6 +738,61 @@ export class ExtensionPluginService {
       const root = pluginPackagePath(this.options.root, id, dir);
       return this.contributedSkills(id, manifest, activePresetId).map((rel) => resolve(root, rel));
     });
+  }
+
+  /** 已启用插件声明的子代理类型；正文读不出的跳过并记日志。技能目录不受预设范围影响 */
+  agentTypesForSpawn(): NativePluginAgentDef[] {
+    return this.enabled().flatMap(({ id, dir, manifest }) => {
+      const root = pluginPackagePath(this.options.root, id, dir);
+      return manifest.contributes.agentTypes.flatMap((type) => {
+        const prompt = readPluginText(root, type.systemPrompt);
+        if (!prompt.ok) {
+          this.warnAgentTypeOnce(
+            id,
+            `子代理类型 ${type.name} 的 systemPrompt（${type.systemPrompt}）读取失败，已跳过`
+          );
+          return [];
+        }
+        return [
+          {
+            pluginId: id,
+            name: type.name,
+            description: type.description,
+            systemPrompt: prompt.content,
+            tools: type.tools,
+            skillPaths: type.skills.map((rel) => resolve(root, rel)),
+          },
+        ];
+      });
+    });
+  }
+
+  /** 供 pluginRuntime 合并子代理类型；被重名丢弃的写进对应插件日志 */
+  agentTypeSource(): NativeAgentTypeSource {
+    return {
+      list: () => this.agentTypesForSpawn(),
+      reportDropped: (dropped: PluginAgentTypeDrop[]) => {
+        for (const drop of dropped) {
+          if (!drop.pluginId) continue;
+          const by =
+            drop.shadowedBy === 'custom'
+              ? '用户自定义类型'
+              : drop.shadowedBy === 'claude'
+                ? 'Claude 插件'
+                : drop.shadowedBy === 'native'
+                  ? '排序更前的 Enso 插件'
+                  : '内置类型或保留名';
+          this.warnAgentTypeOnce(drop.pluginId, `子代理类型 ${drop.name} 与${by}同名，已被忽略`);
+        }
+      },
+    };
+  }
+
+  private warnAgentTypeOnce(id: string, message: string): void {
+    const key = `${id}\0${message}`;
+    if (this.agentTypeWarned.has(key)) return;
+    this.agentTypeWarned.add(key);
+    this.appendLog(id, 'warn', message);
   }
 
   /** 服务名加 `plugin-<id>-` 前缀；`${ENSO_PLUGIN_ROOT}` 展开为安装目录，env 只含清单字面量 */

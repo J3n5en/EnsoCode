@@ -49,6 +49,7 @@ import {
   setMemberAgentTypeSource,
   toSessionMcpConfig,
 } from './agentHost';
+import { setNativeAgentTypeSource } from './pluginRuntime';
 
 describe('resolveWebSearchConfig', () => {
   const custom: ModelProvider = {
@@ -610,6 +611,45 @@ describe('agentHost 成员 agent type', () => {
       expect(bots[0]?.systemPrompt).toContain('Be strict.');
     } finally {
       setMemberAgentTypeSource(() => []);
+    }
+  });
+
+  it('原生插件的子代理类型进入 registry 与 worker 列表；显式传空（Bot 会话）时不下发', () => {
+    setSettings();
+    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
+    setNativeAgentTypeSource({
+      list: () => [
+        {
+          pluginId: 'example.demo',
+          name: 'demo:reviewer',
+          description: '只读审查',
+          systemPrompt: 'you review',
+          tools: 'readonly',
+          skillPaths: ['/plugins/example.demo/skills/review'],
+        },
+      ],
+    });
+    try {
+      expect(
+        agentTypeRegistrySnapshot().candidates.some((c) => c.displayName === 'demo:reviewer')
+      ).toBe(true);
+      const native = configuredAgentTypes(new Set(), false, noClaude).find(
+        (entry) => entry.name === 'demo:reviewer'
+      );
+      expect(native).toMatchObject({
+        description: '只读审查',
+        systemPrompt: 'you review',
+        tools: 'readonly',
+        allowModelOverride: false,
+        skillPaths: ['/plugins/example.demo/skills/review'],
+      });
+      expect(
+        configuredAgentTypes(new Set(), false, noClaude, []).some(
+          (entry) => entry.name === 'demo:reviewer'
+        )
+      ).toBe(false);
+    } finally {
+      setNativeAgentTypeSource(null);
     }
   });
 });

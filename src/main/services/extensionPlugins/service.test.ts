@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPluginHost } from '../../../pluginHost/host';
+import { setNativeAgentTypeSource, withPluginAgentTypes } from '../pluginRuntime';
 import { readRegistry } from './registry';
 import { ExtensionPluginService, uiCallTimeout } from './service';
 
@@ -521,6 +522,91 @@ describe('ExtensionPluginService', () => {
     expect(service.list()[0]?.presets).toEqual([
       { id, name: 'Review', skills: 1, mcpServers: 1, instruction: true },
     ]);
+  });
+
+  describe('子代理类型', () => {
+    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
+    const files = () => ({
+      'enso-plugin.json': manifest({
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          skills: ['skills/review'],
+          agentTypes: [
+            {
+              name: 'demo:reviewer',
+              description: '只读审查',
+              systemPrompt: 'agents/reviewer.md',
+              tools: 'readonly',
+              skills: ['skills/review'],
+            },
+            { name: 'worker-x', description: '全权', systemPrompt: 'agents/worker.md' },
+          ],
+        },
+      }),
+      'main.mjs': mainJs,
+      'skills/review/SKILL.md': '# review',
+      'agents/reviewer.md': 'you review',
+      'agents/worker.md': 'you work',
+    });
+    afterEach(() => setNativeAgentTypeSource(null));
+
+    it('启用后读出正文与技能目录，停用或卸载后立刻从 agentTypes 消失', async () => {
+      await install(files());
+      setNativeAgentTypeSource(service.agentTypeSource());
+      const names = () => withPluginAgentTypes([], undefined, noClaude).map((t) => t.name);
+      expect(service.agentTypesForSpawn()).toEqual([]);
+      expect(names()).toEqual([]);
+
+      service.setEnabled('example.demo', true);
+      const [reviewer, worker] = service.agentTypesForSpawn();
+      expect(reviewer).toMatchObject({
+        pluginId: 'example.demo',
+        name: 'demo:reviewer',
+        description: '只读审查',
+        systemPrompt: 'you review',
+        tools: 'readonly',
+      });
+      expect(reviewer?.skillPaths).toHaveLength(1);
+      expect(reviewer?.skillPaths[0]).toMatch(/packages\/example\.demo\/[^/]+\/skills\/review$/);
+      expect(worker).toMatchObject({ name: 'worker-x', tools: 'all', skillPaths: [] });
+      const merged = withPluginAgentTypes([], undefined, noClaude);
+      expect(merged.map((t) => t.name)).toEqual(['demo:reviewer', 'worker-x']);
+      expect(merged[0]?.pluginSkillPaths).toEqual(reviewer?.skillPaths);
+
+      service.setEnabled('example.demo', false);
+      expect(names()).toEqual([]);
+
+      service.setEnabled('example.demo', true);
+      expect(names()).toEqual(['demo:reviewer', 'worker-x']);
+      await service.uninstall('example.demo');
+      expect(names()).toEqual([]);
+    });
+
+    it('正文读不出的类型跳过并记日志；被重名丢弃的类型记一次日志', async () => {
+      await install(files());
+      service.setEnabled('example.demo', true);
+      const pkg = service.agentTypesForSpawn()[0]?.skillPaths[0]?.replace(/skills\/review$/, '');
+      rmSync(join(pkg as string, 'agents', 'worker.md'));
+      expect(service.agentTypesForSpawn().map((t) => t.name)).toEqual(['demo:reviewer']);
+      expect(service.logs('example.demo')).toContain('worker-x');
+
+      setNativeAgentTypeSource(service.agentTypeSource());
+      const user = {
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'demo:reviewer',
+        description: 'mine',
+        systemPrompt: 'mine',
+        tools: 'all' as const,
+      };
+      withPluginAgentTypes([user], undefined, noClaude);
+      withPluginAgentTypes([user], undefined, noClaude);
+      const hits = service
+        .logs('example.demo')
+        .split('\n')
+        .filter((l) => l.includes('同名'));
+      expect(hits).toHaveLength(1);
+      expect(hits[0]).toContain('demo:reviewer');
+    });
   });
 
   it('处理器上下文带上 Main 推导的项目根', async () => {

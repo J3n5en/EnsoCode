@@ -212,6 +212,10 @@ async function verifyReferences(
         throw new Error(`清单引用的文件不存在：${rel}`);
     }
   }
+  for (const agentType of manifest.contributes.agentTypes) {
+    if (!(await exists(resolve(pluginRoot, agentType.systemPrompt), 'file')))
+      throw new Error(`清单引用的文件不存在：${agentType.systemPrompt}`);
+  }
 }
 
 export async function stagePlugin(

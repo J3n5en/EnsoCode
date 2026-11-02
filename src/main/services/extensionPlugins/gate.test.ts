@@ -29,6 +29,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     methods: [],
     configuration: [],
     presets: [],
+    agentTypes: [],
     events: [],
     schedules: [],
     exports: [],

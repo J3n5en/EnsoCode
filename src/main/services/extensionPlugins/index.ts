@@ -10,6 +10,7 @@ import {
 } from '@platform';
 import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
+import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { rendererById } from '../renderers';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
@@ -134,6 +135,7 @@ export function getExtensionPlugins(): ExtensionPluginService {
   });
   service.startUpdateChecks();
   service.startBackground();
+  setNativeAgentTypeSource(service.agentTypeSource());
   app.on('before-quit', () => service?.dispose());
   return service;
 }

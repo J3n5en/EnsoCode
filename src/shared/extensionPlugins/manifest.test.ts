@@ -32,6 +32,7 @@ describe('parseExtensionPluginManifest', () => {
     expect(result.manifest.id).toBe('example.demo');
     expect(result.manifest.contributes.views).toEqual([]);
     expect(result.manifest.contributes.presets).toEqual([]);
+    expect(result.manifest.contributes.agentTypes).toEqual([]);
     expect(result.manifest.fs).toEqual({ read: [], write: [] });
     expect(result.manifest.net.domains).toEqual([]);
   });
@@ -330,6 +331,86 @@ describe('parseExtensionPluginManifest', () => {
         },
       })
     ).not.toEqual([]);
+  });
+
+  describe('子代理类型 agentTypes', () => {
+    const agentType = {
+      name: 'demo:reviewer',
+      description: '只读审查',
+      systemPrompt: 'agents/reviewer.md',
+      tools: 'readonly',
+      skills: ['skills/review'],
+    };
+    const withTypes = (agentTypes: unknown, skills: string[] = ['skills/review']) => ({
+      ...base(),
+      contributes: { ...base().contributes, skills, agentTypes },
+    });
+
+    it('接受合法声明，tools 缺省为 all、skills 缺省为空，不需要 main 和额外权限', () => {
+      const ok = parseExtensionPluginManifest(withTypes([agentType]), '0.2.12');
+      expect(ok.ok).toBe(true);
+      if (!ok.ok) return;
+      expect(ok.manifest.contributes.agentTypes).toEqual([agentType]);
+
+      const minimal = parseExtensionPluginManifest(
+        {
+          schemaVersion: 1,
+          id: 'example.demo',
+          name: 'Demo',
+          version: '1.0.0',
+          permissions: [],
+          contributes: {
+            agentTypes: [{ name: 'helper', description: 'd', systemPrompt: 'a.md' }],
+          },
+        },
+        '0.2.12'
+      );
+      expect(minimal.ok).toBe(true);
+      if (!minimal.ok) return;
+      expect(minimal.manifest.contributes.agentTypes).toEqual([
+        { name: 'helper', description: 'd', systemPrompt: 'a.md', tools: 'all', skills: [] },
+      ]);
+    });
+
+    it('拒绝缺少或越界的 systemPrompt', () => {
+      expect(errorsOf(withTypes([{ ...agentType, systemPrompt: undefined }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, systemPrompt: '../x.md' }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, systemPrompt: '/abs.md' }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, systemPrompt: '.' }]))).not.toEqual([]);
+    });
+
+    it('拒绝非法 name：字符集、长度、保留名与内置类型名', () => {
+      for (const name of [
+        '',
+        'Reviewer',
+        'has space',
+        '1abc',
+        'a:b:c',
+        'x'.repeat(65),
+        'enso',
+        'custom:foo',
+        'builtin:foo',
+        'worker',
+        'scout',
+      ])
+        expect(errorsOf(withTypes([{ ...agentType, name }])), name).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, name: `a${'b'.repeat(63)}` }]))).toEqual([]);
+    });
+
+    it('拒绝缺少 description、非法 tools 与引用未声明的 skill', () => {
+      expect(errorsOf(withTypes([{ ...agentType, description: '' }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, tools: 'write' }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, skills: ['skills/other'] }]))).not.toEqual([]);
+      expect(errorsOf(withTypes([agentType], []))).not.toEqual([]);
+    });
+
+    it('同插件内 name 不能重复（忽略大小写），且最多 20 个', () => {
+      expect(errorsOf(withTypes([agentType, { ...agentType }]))).not.toEqual([]);
+      const many = Array.from({ length: 21 }, (_, i) => ({ ...agentType, name: `t${i}` }));
+      expect(errorsOf(withTypes(many))).not.toEqual([]);
+      expect(errorsOf(withTypes(many.slice(0, 20)))).toEqual([]);
+      expect(errorsOf(withTypes({}))).not.toEqual([]);
+    });
   });
 });
 

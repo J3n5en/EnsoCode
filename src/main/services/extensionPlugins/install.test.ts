@@ -185,6 +185,22 @@ describe('stagePlugin（目录来源）', () => {
     });
     expect((await stagePlugin(root, { kind: 'dir', path: src }, '0.2.12')).ok).toBe(false);
   });
+
+  it('子代理类型的 systemPrompt 必须是插件内存在的文件', async () => {
+    const src = temp('src-');
+    const root = temp('root-');
+    const agentTypes = [{ name: 'helper', description: 'd', systemPrompt: 'agents/helper.md' }];
+    writePlugin(src, {
+      'enso-plugin.json': JSON.stringify({
+        ...manifest,
+        contributes: { ...manifest.contributes, agentTypes },
+      }),
+      'main.js': '',
+    });
+    expect((await stagePlugin(root, { kind: 'dir', path: src }, '0.2.12')).ok).toBe(false);
+    writePlugin(src, { 'agents/helper.md': 'you help' });
+    expect((await stagePlugin(root, { kind: 'dir', path: src }, '0.2.12')).ok).toBe(true);
+  });
 });
 
 function storedZip(files: Record<string, string>): Buffer {
