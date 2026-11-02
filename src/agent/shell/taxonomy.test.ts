@@ -29,37 +29,73 @@ describe('classifyFailure', () => {
     expect(result.hint).toContain('300s');
   });
 
+  // Factory 逆向列表：大小写不敏感子串
   const tty = [
-    'sudo: a terminal is required to read the password',
-    'the input device is not a TTY',
+    'not a terminal',
+    'no tty present',
+    'not a tty',
+    'inappropriate ioctl for device',
+    'must be run from a terminal',
+    'requires a terminal',
+    'terminal is not interactive',
     'stdin is not a terminal',
-    'Inappropriate ioctl for device',
-    'open /dev/tty: No such device or address',
-    'Error: This command must be run in a terminal',
-    'Vim: Warning: Input is not from a terminal',
-    'Prompts can not be meaningfully rendered in non-TTY environments',
-    'Pseudo-terminal will not be allocated because stdin is not a terminal.',
+    'stdout is not a terminal',
+    'the input device is not a tty',
+    'cannot open terminal',
+    'terminal not fully functional',
   ];
-  it.each(tty)('需要终端：%s', (tail) => {
-    const result = classifyFailure({ exitCode: 1, tail });
+  it.each(tty)('需要终端（原文）：%s', (pattern) => {
+    const result = classifyFailure({
+      exitCode: 1,
+      tail: `prefix: ${pattern.toUpperCase()} :suffix`,
+    });
     expect(result.kind).toBe('tty_required');
     expect(result.retryable).toBe(false);
+  });
+
+  it('需要终端的真实报错与下一步', () => {
+    const result = classifyFailure({
+      exitCode: 1,
+      tail: 'sudo: no tty present and no askpass program specified',
+    });
+    expect(result.kind).toBe('tty_required');
     expect(result.hint).toMatch(/non-interactive/i);
   });
 
   const auth = [
-    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
-    'git@github.com: Permission denied (publickey).',
-    'Host key verification failed.',
-    'sudo: a password is required',
-    'npm ERR! code ENEEDAUTH',
-    'To get started with GitHub CLI, please run:  gh auth login',
+    'permission denied (publickey)',
+    'could not read username',
+    'could not read password',
+    'host key verification failed',
+    'authentication failed',
+    'invalid username or password',
+    'terminal prompts disabled',
+    'no more authentication methods to try',
   ];
-  it.each(auth)('需要认证：%s', (tail) => {
-    const result = classifyFailure({ exitCode: 128, tail });
+  it.each(auth)('需要认证（原文）：%s', (pattern) => {
+    const result = classifyFailure({ exitCode: 128, tail: `fatal: ${pattern.toUpperCase()}.` });
     expect(result.kind).toBe('auth_required');
     expect(result.retryable).toBe(false);
+  });
+
+  it('需要认证的真实报错与下一步', () => {
+    const result = classifyFailure({
+      exitCode: 128,
+      tail: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    });
+    expect(result.kind).toBe('auth_required');
     expect(result.hint).toMatch(/user/i);
+  });
+
+  it('不在列表里的相似文本不判 tty/auth', () => {
+    expect(classifyFailure({ exitCode: 1, tail: 'sudo: a password is required' }).kind).toBe(
+      'exit_nonzero'
+    );
+  });
+
+  it('只判输出尾部：tty 文本在长输出开头不命中', () => {
+    const tail = `not a terminal\n${'x'.repeat(5000)}`;
+    expect(classifyFailure({ exitCode: 1, tail }).kind).toBe('exit_nonzero');
   });
 
   it('退出码 127 / command not found → not_found', () => {

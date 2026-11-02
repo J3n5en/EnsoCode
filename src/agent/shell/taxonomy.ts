@@ -23,27 +23,35 @@ export interface FailureVerdict {
   hint: string;
 }
 
-/** 需要终端：没有 TTY 的环境里注定失败 */
-const TTY_PATTERNS: RegExp[] = [
-  /sudo: a terminal is required/i,
-  /the input device is not a TTY/i,
-  /\bnot a (?:tty|terminal)\b/i,
-  /Inappropriate ioctl for device/i,
-  /(?:\/dev\/tty: (?:No such device|Device not configured))|(?:(?:could not|cannot|unable to|failed to) open \/dev\/tty)/i,
-  /must be run (?:from|in) an? (?:interactive )?(?:terminal|tty)|requires? an? (?:interactive )?(?:terminal|tty)/i,
-  /Input is not from a terminal/i,
-  /prompts? (?:can ?not|cannot) be (?:meaningfully )?rendered|(?:cannot|unable to) prompt\b/i,
-  /Pseudo-terminal will not be allocated/i,
+/** 判定只看输出尾部：开头的命令回显 / 日志不应左右分类 */
+const TAIL_CHARS = 4_000;
+
+/** 需要终端：没有 TTY 的环境里注定失败（Factory 逆向列表，大小写不敏感子串） */
+const TTY_PATTERNS: readonly string[] = [
+  'not a terminal',
+  'no tty present',
+  'not a tty',
+  'inappropriate ioctl for device',
+  'must be run from a terminal',
+  'requires a terminal',
+  'terminal is not interactive',
+  'stdin is not a terminal',
+  'stdout is not a terminal',
+  'the input device is not a tty',
+  'cannot open terminal',
+  'terminal not fully functional',
 ];
 
-/** 需要认证：凭证 / 登录无法在这里输入 */
-const AUTH_PATTERNS: RegExp[] = [
-  /terminal prompts disabled|could not read (?:Username|Password) for/i,
-  /Permission denied \((?:publickey|password|keyboard-interactive)/i,
-  /Host key verification failed/i,
-  /sudo: (?:a password is required|\d+ incorrect password)/i,
-  /\bENEEDAUTH\b|\b401 Unauthorized\b|Authentication failed|authentication required/i,
-  /\bnot logged in\b|please (?:log ?in|login|run:?\s+\S+(?:\s+\S+)?\s+(?:auth\s+)?login)|\bauth login\b/i,
+/** 需要认证：凭证 / 登录无法在这里输入（Factory 逆向列表，大小写不敏感子串） */
+const AUTH_PATTERNS: readonly string[] = [
+  'permission denied (publickey)',
+  'could not read username',
+  'could not read password',
+  'host key verification failed',
+  'authentication failed',
+  'invalid username or password',
+  'terminal prompts disabled',
+  'no more authentication methods to try',
 ];
 
 const NOT_FOUND_PATTERNS: RegExp[] = [
@@ -84,17 +92,18 @@ export function classifyFailure(input: FailureInput): FailureVerdict {
       `It was killed${at} — that is not a failure of the command itself. If it legitimately needs longer, run it once more with a larger timeout or with background: true; if it should have finished, find out why it hangs instead of rerunning it.`
     );
   }
-  const tail = input.tail ?? '';
+  const tail = (input.tail ?? '').slice(-TAIL_CHARS);
+  const lower = tail.toLowerCase();
   const failed = input.exitCode !== 0;
   if (failed) {
-    if (TTY_PATTERNS.some((pattern) => pattern.test(tail))) {
+    if (TTY_PATTERNS.some((pattern) => lower.includes(pattern))) {
       return verdict(
         'tty_required',
         false,
         'This command needs an interactive terminal, which this shell does not have. Use a non-interactive form (flags such as --yes / -y / --no-input / --non-interactive, or input supplied via a pipe or file), or ask the user to run it themselves. Do not retry it unchanged.'
       );
     }
-    if (AUTH_PATTERNS.some((pattern) => pattern.test(tail))) {
+    if (AUTH_PATTERNS.some((pattern) => lower.includes(pattern))) {
       return verdict(
         'auth_required',
         false,

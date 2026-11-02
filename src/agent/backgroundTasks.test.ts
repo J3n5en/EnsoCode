@@ -345,7 +345,11 @@ describe('BackgroundTaskManager', () => {
 
   it('失败的后台任务：完成通知带结构化分类与下一步', async () => {
     const { manager, notified, ended } = makeManager();
-    manager.start('s1', 'echo "sudo: a terminal is required" >&2; exit 1', '/tmp');
+    manager.start(
+      's1',
+      'echo "sudo: no tty present and no askpass program specified" >&2; exit 1',
+      '/tmp'
+    );
     await until(() => ended.length === 1);
     expect(notified[0]).toContain('[tty_required]');
     expect(notified[0]).toMatch(/non-interactive/);
@@ -796,7 +800,7 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
     const { manager } = makeManager();
     const result = await shell(manager).execute(
       't1',
-      { command: 'echo "sudo: a terminal is required to read the password" >&2; exit 1' },
+      { command: 'echo "sudo: no tty present and no askpass program specified" >&2; exit 1' },
       undefined,
       undefined,
       undefined as never

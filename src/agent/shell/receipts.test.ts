@@ -85,7 +85,7 @@ describe('excerpt', () => {
 
 describe('failureLine / deadlineKillText', () => {
   it('失败行带分类与下一步', () => {
-    const verdict = classifyFailure({ exitCode: 1, tail: 'sudo: a terminal is required' });
+    const verdict = classifyFailure({ exitCode: 1, tail: 'the input device is not a TTY' });
     expect(failureLine(verdict)).toMatch(/^\[tty_required\] .*non-interactive/);
   });
 
