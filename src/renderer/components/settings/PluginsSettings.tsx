@@ -460,10 +460,13 @@ export function EnsoPluginsSettings() {
       setError(result.error ?? t('Install failed'));
     } else {
       setUrl('');
+      const enabled = preview.existingVersion
+        ? { ok: true }
+        : await window.electronAPI.extensionPlugins.setEnabled(preview.id, true);
       addToast({
-        type: 'success',
+        type: enabled.ok ? 'success' : 'warning',
         title: t('{{name}} installed', { name: preview.name }),
-        description: t('Turn it on in the list below to use it.'),
+        description: enabled.ok ? undefined : enabled.error,
       });
     }
     setPreview(null);
@@ -667,6 +670,14 @@ export function EnsoPluginsSettings() {
                         {t('Stopped after crashes')}
                       </Badge>
                     )}
+                    {plugin.availableVersion && (
+                      <Badge className="text-[11px]">{t('Update')}</Badge>
+                    )}
+                    {plugin.pendingVersion && (
+                      <Badge variant="warning" className="text-[11px]">
+                        待授权
+                      </Badge>
+                    )}
                     {plugin.resident && (
                       <Badge
                         variant={plugin.running ? 'secondary' : 'outline'}
@@ -678,16 +689,15 @@ export function EnsoPluginsSettings() {
                   </p>
                   <p className="truncate font-mono text-muted-foreground text-xs">{plugin.id}</p>
                   {plugin.availableVersion && (
-                    <p className="text-primary text-xs">
+                    <p className="mt-1 flex items-center gap-2 text-primary text-xs">
                       {t('Version {{version}} is available', { version: plugin.availableVersion })}
-                      <button
-                        type="button"
-                        className="ml-2 underline"
+                      <Button
+                        size="xs"
                         disabled={busy || downloading}
                         onClick={() => void restage(plugin.id)}
                       >
                         {t('Update')}
-                      </button>
+                      </Button>
                     </p>
                   )}
                   {plugin.updateCheckError && (
@@ -701,29 +711,28 @@ export function EnsoPluginsSettings() {
                     </p>
                   )}
                   {plugin.pendingVersion && (
-                    <p className="text-muted-foreground text-xs">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
                       {t('{{version}} asks for more and is waiting for approval', {
                         version: plugin.pendingVersion,
                       })}
-                      <button
-                        type="button"
-                        className="ml-2 underline"
+                      <Button
+                        size="xs"
                         onClick={() =>
                           void window.electronAPI.extensionPlugins.approvePending(plugin.id)
                         }
                       >
                         {t('Allow')}
-                      </button>
-                      <button
-                        type="button"
-                        className="ml-2 underline"
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="ghost"
                         onClick={() =>
                           void window.electronAPI.extensionPlugins.rejectPending(plugin.id)
                         }
                       >
                         {t('Keep current')}
-                      </button>
-                    </p>
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
