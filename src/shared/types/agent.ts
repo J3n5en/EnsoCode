@@ -36,6 +36,8 @@ import type {
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
 import {
+  CONTEXT_PART_ITEMS,
+  CONTEXT_PART_KINDS,
   CONTEXT_USAGE_BUCKETS,
   isChildInterceptEvent,
   isInterceptEvent,
@@ -2283,14 +2285,47 @@ const isTokenRecord = (value: unknown, keys: readonly string[]): boolean =>
   isRecord(value) && hasExactKeys(value, keys) && keys.every((key) => isTokenCount(value[key]));
 
 const isContextUsagePayload = (data: Record<string, unknown>): boolean =>
-  hasOnlyKeys(data, ['used', 'estimated', 'contextWindow', 'percent', 'buckets', 'usage']) &&
+  hasOnlyKeys(data, [
+    'used',
+    'estimated',
+    'contextWindow',
+    'percent',
+    'buckets',
+    'usage',
+    'parts',
+    'turns',
+  ]) &&
   isTokenCount(data.used) &&
   typeof data.estimated === 'boolean' &&
   (data.contextWindow === undefined || isTokenCount(data.contextWindow)) &&
   (data.percent === undefined || isTokenCount(data.percent)) &&
   isTokenRecord(data.buckets, CONTEXT_USAGE_BUCKETS) &&
   (data.usage === undefined ||
-    isTokenRecord(data.usage, ['input', 'output', 'cacheRead', 'cacheWrite']));
+    isTokenRecord(data.usage, ['input', 'output', 'cacheRead', 'cacheWrite'])) &&
+  (data.turns === undefined || isSequence(data.turns)) &&
+  (data.parts === undefined ||
+    (Array.isArray(data.parts) &&
+      data.parts.length <= CONTEXT_PART_KINDS.length &&
+      data.parts.every(isContextPart)));
+
+const isContextPartItem = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasOnlyKeys(value, ['name', 'tag', 'n', 'tokens']) &&
+  typeof value.name === 'string' &&
+  value.name.length <= 1024 &&
+  typeof value.tag === 'string' &&
+  value.tag.length <= 32 &&
+  (value.n === undefined || isSequence(value.n)) &&
+  isTokenCount(value.tokens);
+
+const isContextPart = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, ['kind', 'tokens', 'items']) &&
+  (CONTEXT_PART_KINDS as readonly unknown[]).includes(value.kind) &&
+  isTokenCount(value.tokens) &&
+  Array.isArray(value.items) &&
+  value.items.length <= CONTEXT_PART_ITEMS &&
+  value.items.every(isContextPartItem);
 
 const isPluginInterceptPayload = (event: string, payload: unknown): boolean => {
   if (!isRecord(payload)) return false;

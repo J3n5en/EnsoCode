@@ -35,6 +35,38 @@ export interface ContextUsagePayload {
   buckets: Record<ContextUsageBucket, number>;
   /** 最近一次带用量的回复的实报 token */
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** 与 magpie 同形的七类拆分，各类条目按大小排列（会话按轮次） */
+  parts?: ContextPart[];
+  /** 当前上下文里用户发言的轮数 */
+  turns?: number;
+}
+
+export const CONTEXT_PART_KINDS = [
+  'system',
+  'tools',
+  'skills',
+  'memory',
+  'files',
+  'results',
+  'chat',
+] as const;
+export type ContextPartKind = (typeof CONTEXT_PART_KINDS)[number];
+/** 每类最多的条目数 */
+export const CONTEXT_PART_ITEMS = 24;
+
+export interface ContextPartItem {
+  name: string;
+  /** mcp / project / reminder / skills / read / shell / image / result / turn / turns / compacted / more */
+  tag: string;
+  /** 合并了多少项：MCP server 的工具数、工具的结果次数、合并的轮次或条目 */
+  n?: number;
+  tokens: number;
+}
+
+export interface ContextPart {
+  kind: ContextPartKind;
+  tokens: number;
+  items: ContextPartItem[];
 }
 
 /** 可以拦截或改写的事件；其余只通知 */

@@ -149,6 +149,7 @@ import {
   type OccupancyBranchEntry,
   type OccupancySkill,
 } from './contextOccupancy';
+import { buildContextParts } from './contextParts';
 import {
   type ContextUsageTracker,
   contextBreakdownMessages,
@@ -5089,10 +5090,25 @@ export class SessionSupervisor {
       usageTotals: toUsageTotals(computeStats(managed.messages)),
     });
     if (occupancy && managed.pluginEvents?.plan.observe.includes('context_usage')) {
-      managed.pluginEvents.notify(
-        'context_usage',
-        contextUsagePayload(occupancy, managed.messages)
-      );
+      const payload = contextUsagePayload(occupancy, managed.messages);
+      try {
+        const inputs = this.occupancyInputs(managed);
+        Object.assign(
+          payload,
+          buildContextParts({
+            buckets: payload.buckets,
+            agentsFiles: inputs.agentsFiles,
+            skills: inputs.skills,
+            tools: inputs.tools,
+            reminders: inputs.pendingTaskReminders ?? [],
+            messages: inputs.contextMessages,
+            estimate: (message) => this.estimateSessionMessage(message),
+          })
+        );
+      } catch {
+        // 拆分失败只少了条目，分类合计照发
+      }
+      managed.pluginEvents.notify('context_usage', payload);
     }
   }
 

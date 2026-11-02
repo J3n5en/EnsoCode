@@ -211,11 +211,21 @@ export async function activate(enso) {
 | `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
 | `tool_result` | 工具执行后 | `{ toolCallId, toolName, input, content, isError }` | 返回 `{ content?, isError? }` 改写结果 |
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
-| `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage? }` | 否 |
+| `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。
 
 `context_usage` 与输入框旁的上下文占用同源：`buckets` 是 `system` / `instructions` / `skills` / `tools` / `conversation` / `compaction` / `reminders` 各自的 token 数（文件、工具结果都算在 `conversation` 里），`used` 是总占用，`estimated` 为 `true` 表示还没有模型实报用量可校准、全部是估算。`usage` 是最近一次带用量的回复的实报 `{ input, output, cacheRead, cacheWrite }`，可据此算缓存命中率；还没有回复时不带。同一轮里会发多次，按最后一次为准。
+
+`parts` 是更细的拆分，形状与 magpie 的 prompt parts 相同：按 `system` / `tools` / `skills` / `memory` / `files` / `results` / `chat` 顺序，每类 `{ kind, tokens, items }`，空的类不出现。`items` 每项 `{ name, tag, n?, tokens }`，每类最多 24 项：
+
+- `tools`：每个工具一项；同一 MCP server 的工具合成一项（`tag: 'mcp'`，`name` 为 `mcp__<server>`，`n` 为工具数）。
+- `skills`：每个 skill 一项。`memory`：每个指令文件一项（`tag: 'project'`，`name` 为路径），待办提醒一项（`tag: 'reminder'`）。
+- `files`：读文件工具读入的文件（`tag: 'read'`）、只读 shell 命令（`cat` / `head` / `sed -n` 等）读入的文件（`tag: 'shell'`）、图片（`tag: 'image'`）。
+- `results`：其余工具输出，按工具名合并（`tag: 'result'`，`n` 为次数）。
+- `chat`：按用户轮次，`name` 为轮次序号（`tag: 'turn'`），从旧到新；超出时最早的合成一项（`tag: 'turns'`）；压缩摘要排最前（`tag: 'compacted'`）。
+
+其余类超出 24 项时，最小的合成一项（`tag: 'more'`）。`memory` 合计 = `instructions + reminders`，`files + results + chat` 合计 = `conversation + compaction`，其余类与同名 `buckets` 相等。`turns` 是当前上下文里用户发言的轮数。
 
 多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。合计时长用尽时，还没轮到的插件也按各自的 `failClosed` 处理。只有 Enso 自身出错（与任何插件无关）时才无条件放行。
 

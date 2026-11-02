@@ -104,6 +104,24 @@ describe('插件工具协议', () => {
     expect(contextUsage({ used: 15, estimated: true, buckets })).not.toBeNull();
     expect(contextUsage({ used: 15, estimated: true, buckets: { system: 1 } })).toBeNull();
     expect(contextUsage({ used: -1, estimated: true, buckets })).toBeNull();
+    const parts = [
+      { kind: 'tools', tokens: 4, items: [{ name: 'mcp__gh', tag: 'mcp', n: 2, tokens: 4 }] },
+      { kind: 'chat', tokens: 5, items: [{ name: '1', tag: 'turn', tokens: 5 }] },
+    ];
+    expect(contextUsage({ used: 15, estimated: true, buckets, parts, turns: 1 })).not.toBeNull();
+    expect(
+      contextUsage({ used: 15, estimated: true, buckets, parts: [{ ...parts[0], kind: 'x' }] })
+    ).toBeNull();
+    expect(
+      contextUsage({
+        used: 15,
+        estimated: true,
+        buckets,
+        parts: [
+          { kind: 'chat', tokens: 1, items: Array(25).fill({ name: '1', tag: 'turn', tokens: 0 }) },
+        ],
+      })
+    ).toBeNull();
     expect(contextUsage({ used: 15, estimated: true, buckets, usage: { input: 1 } })).toBeNull();
     expect(
       parseAgentWorkerEvent({
