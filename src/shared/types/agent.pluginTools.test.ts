@@ -80,6 +80,31 @@ describe('插件工具协议', () => {
   });
 
   it('plugin-event / plugin-intercept 事件', () => {
+    const buckets = {
+      system: 1,
+      instructions: 2,
+      skills: 3,
+      tools: 4,
+      conversation: 5,
+      compaction: 0,
+      reminders: 0,
+    };
+    const usage = { input: 10, output: 2, cacheRead: 90, cacheWrite: 0 };
+    const contextUsage = (data: unknown) =>
+      parseAgentWorkerEvent({
+        type: 'plugin-event',
+        identity: parent,
+        seq: 1,
+        event: 'context_usage',
+        data,
+      });
+    expect(
+      contextUsage({ used: 15, estimated: false, contextWindow: 100, percent: 15, buckets, usage })
+    ).not.toBeNull();
+    expect(contextUsage({ used: 15, estimated: true, buckets })).not.toBeNull();
+    expect(contextUsage({ used: 15, estimated: true, buckets: { system: 1 } })).toBeNull();
+    expect(contextUsage({ used: -1, estimated: true, buckets })).toBeNull();
+    expect(contextUsage({ used: 15, estimated: true, buckets, usage: { input: 1 } })).toBeNull();
     expect(
       parseAgentWorkerEvent({
         type: 'plugin-event',

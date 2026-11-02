@@ -10,8 +10,32 @@ export const PLUGIN_EVENTS = [
   'tool_call',
   'tool_result',
   'input',
+  'context_usage',
 ] as const;
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
+
+/** context_usage 的分桶：与宿主上下文占用一致，不含已废弃的 projectMemory */
+export const CONTEXT_USAGE_BUCKETS = [
+  'system',
+  'instructions',
+  'skills',
+  'tools',
+  'conversation',
+  'compaction',
+  'reminders',
+] as const;
+export type ContextUsageBucket = (typeof CONTEXT_USAGE_BUCKETS)[number];
+
+export interface ContextUsagePayload {
+  used: number;
+  /** 没有模型实报用量可锚定时为 true */
+  estimated: boolean;
+  contextWindow?: number;
+  percent?: number;
+  buckets: Record<ContextUsageBucket, number>;
+  /** 最近一次带用量的回复的实报 token */
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+}
 
 /** 可以拦截或改写的事件；其余只通知 */
 export const PLUGIN_INTERCEPT_EVENTS = ['tool_call', 'tool_result', 'input'] as const;

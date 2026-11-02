@@ -35,7 +35,12 @@ import type {
   PluginEventName,
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
-import { isChildInterceptEvent, isInterceptEvent, PLUGIN_EVENTS } from '../extensionPlugins/events';
+import {
+  CONTEXT_USAGE_BUCKETS,
+  isChildInterceptEvent,
+  isInterceptEvent,
+  PLUGIN_EVENTS,
+} from '../extensionPlugins/events';
 import {
   PLUGIN_INJECT_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
@@ -2262,6 +2267,7 @@ const isPluginObserveData = (event: string, data: unknown): boolean => {
   if (!isRecord(data)) return false;
   if (isInterceptEvent(event)) return isPluginInterceptPayload(event, data);
   if (event === 'agent_start' || event === 'agent_end') return hasExactKeys(data, []);
+  if (event === 'context_usage') return isContextUsagePayload(data);
   return (
     (event === 'session_start' || event === 'session_end' || event === 'after_compact') &&
     hasExactKeys(data, ['reason']) &&
@@ -2269,6 +2275,22 @@ const isPluginObserveData = (event: string, data: unknown): boolean => {
     data.reason.length <= 64
   );
 };
+
+const isTokenCount = (value: unknown): boolean =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const isTokenRecord = (value: unknown, keys: readonly string[]): boolean =>
+  isRecord(value) && hasExactKeys(value, keys) && keys.every((key) => isTokenCount(value[key]));
+
+const isContextUsagePayload = (data: Record<string, unknown>): boolean =>
+  hasOnlyKeys(data, ['used', 'estimated', 'contextWindow', 'percent', 'buckets', 'usage']) &&
+  isTokenCount(data.used) &&
+  typeof data.estimated === 'boolean' &&
+  (data.contextWindow === undefined || isTokenCount(data.contextWindow)) &&
+  (data.percent === undefined || isTokenCount(data.percent)) &&
+  isTokenRecord(data.buckets, CONTEXT_USAGE_BUCKETS) &&
+  (data.usage === undefined ||
+    isTokenRecord(data.usage, ['input', 'output', 'cacheRead', 'cacheWrite']));
 
 const isPluginInterceptPayload = (event: string, payload: unknown): boolean => {
   if (!isRecord(payload)) return false;

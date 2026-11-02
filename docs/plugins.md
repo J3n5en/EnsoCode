@@ -211,8 +211,11 @@ export async function activate(enso) {
 | `tool_call` | 工具执行前 | `{ toolCallId, toolName, input }` | 返回 `{ block: true, reason? }` 拦下，或 `{ input }` 改写参数 |
 | `tool_result` | 工具执行后 | `{ toolCallId, toolName, input, content, isError }` | 返回 `{ content?, isError? }` 改写结果 |
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
+| `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage? }` | 否 |
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。
+
+`context_usage` 与输入框旁的上下文占用同源：`buckets` 是 `system` / `instructions` / `skills` / `tools` / `conversation` / `compaction` / `reminders` 各自的 token 数（文件、工具结果都算在 `conversation` 里），`used` 是总占用，`estimated` 为 `true` 表示还没有模型实报用量可校准、全部是估算。`usage` 是最近一次带用量的回复的实报 `{ input, output, cacheRead, cacheWrite }`，可据此算缓存命中率；还没有回复时不带。同一轮里会发多次，按最后一次为准。
 
 多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。合计时长用尽时，还没轮到的插件也按各自的 `failClosed` 处理。只有 Enso 自身出错（与任何插件无关）时才无条件放行。
 

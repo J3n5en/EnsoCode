@@ -203,6 +203,7 @@ import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
 import {
   childPluginEventPlan,
+  contextUsagePayload,
   createPluginEventsExtension,
   PluginEventInvoker,
 } from './pluginEvents';
@@ -5087,6 +5088,12 @@ export class SessionSupervisor {
       // 渲染层冷会话不留正文、手机只持尾窗：按 worker 的完整记录算好随占用下发
       usageTotals: toUsageTotals(computeStats(managed.messages)),
     });
+    if (occupancy && managed.pluginEvents?.plan.observe.includes('context_usage')) {
+      managed.pluginEvents.notify(
+        'context_usage',
+        contextUsagePayload(occupancy, managed.messages)
+      );
+    }
   }
 
   private snapshotSessions(): SessionSnapshot[] {

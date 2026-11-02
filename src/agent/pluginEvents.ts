@@ -7,13 +7,15 @@ import type {
   ToolResultEventResult,
 } from '@earendil-works/pi-coding-agent';
 import {
+  CONTEXT_USAGE_BUCKETS,
+  type ContextUsagePayload,
   isChildInterceptEvent,
   type PluginEventName,
   type PluginInterceptEvent,
 } from '@shared/extensionPlugins/events';
 import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
-import type { PluginInterceptRequest } from '@shared/types/agent';
+import type { ContextOccupancy, PluginInterceptRequest, TokenUsage } from '@shared/types/agent';
 
 /** Main 等待 before_compact 最多 10 秒，本地再留余量后照常压缩 */
 export const PLUGIN_COMPACT_TIMEOUT_MS = 12_000;
@@ -39,6 +41,34 @@ export interface PluginInjectMessage {
 }
 
 type SendPluginMessage = ExtensionAPI['sendMessage'];
+
+/** 插件看到的上下文占用：宿主分桶 + 最近一次带用量回复的实报 token */
+export function contextUsagePayload(
+  occupancy: ContextOccupancy,
+  messages: ReadonlyArray<{ role?: string; usage?: TokenUsage }>
+): ContextUsagePayload {
+  const buckets = {} as ContextUsagePayload['buckets'];
+  for (const id of CONTEXT_USAGE_BUCKETS) buckets[id] = occupancy.buckets[id];
+  const last = messages.findLast((message) => message.role === 'assistant' && message.usage);
+  const usage = last?.usage;
+  return {
+    used: occupancy.used,
+    estimated: occupancy.estimated,
+    ...(occupancy.contextWindow !== undefined ? { contextWindow: occupancy.contextWindow } : {}),
+    ...(occupancy.percent !== undefined ? { percent: occupancy.percent } : {}),
+    buckets,
+    ...(usage
+      ? {
+          usage: {
+            input: usage.input,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+          },
+        }
+      : {}),
+  };
+}
 
 /**
  * 子会话（子代理、coworker）的事件计划：通知型订阅全保留，拦截只保留 tool_call

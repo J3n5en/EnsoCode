@@ -2,6 +2,7 @@ import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
   childPluginEventPlan,
+  contextUsagePayload,
   createPluginEventsExtension,
   PluginEventInvoker,
   type PluginSessionEmit,
@@ -421,5 +422,59 @@ describe('子会话的插件事件', () => {
     } as never);
     parent.invoker.cancelAll();
     await expect(released).resolves.toBeUndefined();
+  });
+});
+
+describe('contextUsagePayload', () => {
+  const occupancy = {
+    buckets: {
+      system: 1,
+      instructions: 2,
+      skills: 3,
+      tools: 4,
+      conversation: 5,
+      compaction: 6,
+      projectMemory: 7,
+      reminders: 8,
+    },
+    used: 36,
+    estimated: false,
+    compactedMessageCount: 0,
+    compactionModelMismatch: false,
+    contextWindow: 100,
+    percent: 36,
+  };
+
+  it('带分桶与最近一次请求的用量，去掉已废弃的 projectMemory', () => {
+    const payload = contextUsagePayload(occupancy, [
+      { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } },
+      { role: 'user' },
+      { role: 'assistant', usage: { input: 10, output: 2, cacheRead: 90, cacheWrite: 3 } },
+      { role: 'user' },
+    ]);
+    expect(payload).toEqual({
+      used: 36,
+      estimated: false,
+      contextWindow: 100,
+      percent: 36,
+      buckets: {
+        system: 1,
+        instructions: 2,
+        skills: 3,
+        tools: 4,
+        conversation: 5,
+        compaction: 6,
+        reminders: 8,
+      },
+      usage: { input: 10, output: 2, cacheRead: 90, cacheWrite: 3 },
+    });
+  });
+
+  it('还没有带用量的回复时不带 usage', () => {
+    const { contextWindow: _w, percent: _p, ...noWindow } = occupancy;
+    const payload = contextUsagePayload({ ...noWindow, estimated: true }, [{ role: 'user' }]);
+    expect(payload).not.toHaveProperty('usage');
+    expect(payload).not.toHaveProperty('contextWindow');
+    expect(payload.estimated).toBe(true);
   });
 });
