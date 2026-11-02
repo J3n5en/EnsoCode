@@ -654,7 +654,7 @@ export function EnsoPluginsSettings() {
                     plugin.state === 'enabled' ? 'text-foreground' : 'text-muted-foreground'
                   )}
                 >
-                  <PluginIcon pluginId={plugin.id} className="size-4" />
+                  <PluginIcon pluginId={plugin.id} icon={plugin.icon} className="size-4" />
                 </div>
                 <div className="min-w-0 space-y-0.5">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm">

@@ -31,9 +31,18 @@ function loadIcon(pluginId: string, rel: string): Promise<string | null> {
   return url;
 }
 
-/** 插件清单声明了 icon 用之，否则回落到拼图图标 */
-export function PluginIcon({ pluginId, className }: { pluginId: string; className?: string }) {
-  const rel = useSyncExternalStore(subscribe, () => icons[pluginId]);
+/** 插件清单声明了 icon 用之，否则回落到拼图图标；没挂 PluginUiHost 的窗口（设置）直接传 icon */
+export function PluginIcon({
+  pluginId,
+  icon,
+  className,
+}: {
+  pluginId: string;
+  icon?: string;
+  className?: string;
+}) {
+  const registered = useSyncExternalStore(subscribe, () => icons[pluginId]);
+  const rel = icon ?? registered;
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     setSrc(null);
