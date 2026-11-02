@@ -31,18 +31,29 @@ describe('isRemoteChannelAllowed', () => {
     ]) {
       expect(isRemoteChannelAllowed(ch, true)).toBe(false);
     }
-    expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL, true)).toBe(false);
+    expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_PICK_AND_STAGE, true)).toBe(false);
     expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_SAVE, true)).toBe(false);
     expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_PICK_PATH, true)).toBe(false);
-    expect(isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_DELETE, true)).toBe(
-      false
-    );
-    expect(
-      isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT, true)
-    ).toBe(false);
-    expect(
-      isRemoteChannelAllowed(IPC_CHANNELS.EXTENSION_PLUGINS_DISMISS_REGISTRY_NOTICE, true)
-    ).toBe(false);
+  });
+
+  it('gives remote the same plugin management as local', () => {
+    for (const ch of [
+      IPC_CHANNELS.EXTENSION_PLUGINS_STAGE_URL,
+      IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE,
+      IPC_CHANNELS.EXTENSION_PLUGINS_CHECK_UPDATES,
+      IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_LIST,
+      IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_STAGE,
+      IPC_CHANNELS.EXTENSION_PLUGINS_MARKET_SET_MIRROR,
+      IPC_CHANNELS.EXTENSION_PLUGINS_COMMIT,
+      IPC_CHANNELS.EXTENSION_PLUGINS_SET_ENABLED,
+      IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING,
+      IPC_CHANNELS.EXTENSION_PLUGINS_UNINSTALL,
+      IPC_CHANNELS.EXTENSION_PLUGINS_CONFIG_SET,
+      IPC_CHANNELS.EXTENSION_PLUGINS_LOGS,
+      IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACT_DELETE,
+    ]) {
+      expect(isRemoteChannelAllowed(ch, false)).toBe(true);
+    }
   });
 
   it('lets only the leader push the pair catalog', () => {
