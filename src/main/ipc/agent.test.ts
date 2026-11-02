@@ -298,6 +298,41 @@ describe('agent IPC Main identity boundary', () => {
     }
   );
 
+  it('AGENT_SPAWN 接受无人值守开关，原样交给 spawn（白名单漏登记会变成 invalid spawn request）', async () => {
+    vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockReturnValue({
+      conversationId: 'unattended-target',
+      projectId: 'p',
+      kind: 'root',
+      lifecycle: 'draft',
+      version: 1,
+    });
+    vi.spyOn(getSourceAuthorityRegistry()!, 'project').mockReturnValue({
+      projectId: 'p',
+      canonicalPath: '/repo',
+      state: 'active',
+      version: 1,
+    });
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SPAWN)!;
+    const spawn = (extra: Record<string, unknown>) =>
+      handler(event, {
+        sessionId: 'unattended-target',
+        providerId: 'provider',
+        modelId: 'model',
+        cwd: '/repo',
+        ...extra,
+      });
+    await spawn({ autoRejectApprovals: true });
+    expect(mocks.spawnSession).toHaveBeenCalledTimes(1);
+    expect(mocks.spawnSession.mock.calls[0][1]).toMatchObject({ autoRejectApprovals: true });
+    // 非布尔一律按非法请求拒掉，不留给下游静默丢弃
+    mocks.spawnSession.mockClear();
+    await expect(spawn({ autoRejectApprovals: 'yes' })).resolves.toEqual({
+      ok: false,
+      error: 'invalid spawn request',
+    });
+    expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
   it('通用 AGENT_SPAWN 拒绝 bot 会话（人设与工作区只能由 BotSessionHost 组装）', async () => {
     const authority = getSourceAuthorityRegistry()!;
     vi.spyOn(authority, 'conversation').mockReturnValue({

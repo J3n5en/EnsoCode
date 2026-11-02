@@ -429,10 +429,13 @@ function spawnBoundSession(
   );
 }
 
-function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
-  const request = asRecord(value);
-  if (!request) return null;
-  const allowed = new Set([
+/**
+ * 渲染层 → Main 的 spawn 请求白名单。键集必须与 AgentSpawnRequest 完全一致：漏登记一个字段
+ * 的后果是「类型里有、校验里没有」→ 整条请求被拒成 invalid spawn request（手机新会话踩过：
+ * autoRejectApprovals 已进类型与 worker 校验，唯独漏在这张表里）。
+ */
+function spawnRequestKeys(): readonly (keyof AgentSpawnRequest)[] {
+  const keys = [
     'sessionId',
     'providerId',
     'modelId',
@@ -444,8 +447,23 @@ function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
     'disabledTools',
     'presetId',
     'approvalMode',
+    'autoRejectApprovals',
     'planMode',
-  ]);
+  ] as const;
+  // 少登记字段时这里编译失败，而不是等到真机上整条请求被拒
+  const missing: Exclude<keyof AgentSpawnRequest, (typeof keys)[number]> extends never
+    ? []
+    : [Exclude<keyof AgentSpawnRequest, (typeof keys)[number]>] = [];
+  void missing;
+  return keys;
+}
+
+const SPAWN_REQUEST_KEYS = new Set<string>(spawnRequestKeys());
+
+function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
+  const request = asRecord(value);
+  if (!request) return null;
+  const allowed = SPAWN_REQUEST_KEYS;
   if (
     Object.keys(request).some((key) => !allowed.has(key)) ||
     !isNonEmptyString(request.sessionId) ||
@@ -464,6 +482,8 @@ function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
     (request.presetId !== undefined && typeof request.presetId !== 'string') ||
     (request.approvalMode !== undefined &&
       !APPROVAL_MODES.includes(request.approvalMode as ApprovalMode)) ||
+    (request.autoRejectApprovals !== undefined &&
+      typeof request.autoRejectApprovals !== 'boolean') ||
     (request.planMode !== undefined && typeof request.planMode !== 'boolean')
   ) {
     return null;
