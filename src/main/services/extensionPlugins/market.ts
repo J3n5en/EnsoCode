@@ -12,11 +12,14 @@ import { join } from 'node:path';
 import { type ArchiveFetch, downloadPluginArchive } from './download';
 import { loadMarketIndex, type MarketIndex } from './marketIndex';
 
-/** 插件仓库与 Worker 地址；发布前替换为正式值 */
 const MARKET_REPO = 'J3n5en/enso-plugins';
-const MARKET_WORKER = 'https://plugins.ensocode.app/v1/';
+const MARKET_WORKER = 'https://enso-plugins.j3.do/v1/';
 /** 官方索引签名公钥（SPKI PEM），可放多把用于轮换 */
-const MARKET_PUBLIC_KEYS: string[] = [];
+const MARKET_PUBLIC_KEYS: string[] = [
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAQSeCYY0a9xjVf7jexky3WYRdSHbUQNhPqtCuX8LmknA=
+-----END PUBLIC KEY-----`,
+];
 
 const INDEX_MAX_BYTES = 8 * 1024 * 1024;
 const PACKAGE_MAX_BYTES = 200 * 1024 * 1024;
