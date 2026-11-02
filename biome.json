@@ -65,6 +65,7 @@
       "!!.claude/worktrees",
       "!!.zvec-grep",
       "!.hce",
+      "!local-plugins",
       "!temp",
       "!docs/project-history/**/*.html",
       "!packages/relay-go/frontend/assets",
