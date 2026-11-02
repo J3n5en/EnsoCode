@@ -259,6 +259,17 @@ export function isNewerPluginVersion(candidate: string, current: string): boolea
   return core !== 0 ? core > 0 : comparePrerelease(a[4], b[4]) > 0;
 }
 
+export const isPluginId = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= 40 && ID.test(v);
+
+/** `>=x.y.z` 是否被宿主版本满足；格式不对返回 false */
+export function enginesAllow(range: unknown, hostVersion: string): boolean {
+  const match = typeof range === 'string' ? ENGINE.exec(range) : null;
+  if (!match) return false;
+  const host = hostVersion.split(/[.-]/).slice(0, 3).map(Number);
+  return compareVersion(host, match.slice(1, 4).map(Number)) >= 0;
+}
+
 export function parseExtensionPluginManifest(
   raw: unknown,
   hostVersion: string
