@@ -496,11 +496,7 @@ function ExtensionPluginsSection() {
               {checking ? <Spinner /> : t('Check for updates')}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant={marketOpen ? 'secondary' : 'outline'}
-            onClick={() => setMarketOpen((open) => !open)}
-          >
+          <Button size="sm" variant="outline" onClick={() => setMarketOpen(true)}>
             {t('Marketplace')}
           </Button>
           <Button
@@ -540,13 +536,23 @@ function ExtensionPluginsSection() {
         </Button>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
-      {marketOpen && (
-        <PluginMarket
-          disabled={busy || downloading}
-          installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
-          onInstall={(id) => void restage(id, true)}
-        />
-      )}
+      <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t('Marketplace')}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            <PluginMarket
+              disabled={busy || downloading}
+              installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
+              onInstall={(id) => {
+                setMarketOpen(false);
+                void restage(id, true);
+              }}
+            />
+          </DialogPanel>
+        </DialogContent>
+      </Dialog>
       {checkResult && <p className="text-muted-foreground text-sm">{checkResult}</p>}
       {notice && (
         <RegistryNoticeBanner
