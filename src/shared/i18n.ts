@@ -1676,6 +1676,11 @@ export const zhTranslations: Record<string, string> = {
   'Trust and load': '信任并加载',
   Plugins: '插件',
   'Enso plugins': 'Enso 插件',
+  'Claude Code plugins': 'Claude Code 插件',
+  'No Enso plugins installed': '还没有安装 Enso 插件',
+  'Browse the marketplace or install from a GitHub URL, folder or zip.':
+    '可以从插件市场浏览，或通过 GitHub 地址、文件夹、zip 安装。',
+  'Or install from': '或从本地安装',
   'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.':
     '安装插件会让它在这台电脑上运行代码。确认前请先查看它申请的权限。',
   'Install from folder': '从文件夹安装',

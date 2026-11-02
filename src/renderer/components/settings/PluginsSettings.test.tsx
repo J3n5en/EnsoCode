@@ -2,7 +2,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PluginsSettings } from './PluginsSettings';
+import { EnsoPluginsSettings as PluginsSettings } from './PluginsSettings';
 
 const harness = vi.hoisted(() => ({
   logs: vi.fn(),

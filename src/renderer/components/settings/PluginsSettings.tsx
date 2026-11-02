@@ -11,10 +11,14 @@ import {
   ChevronRight,
   Files,
   FileText,
+  FolderOpen,
+  Link2,
+  Package,
   Puzzle,
   RefreshCw,
   RotateCw,
   Settings2,
+  Store,
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
@@ -42,6 +46,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { PluginArtifactList } from '@/plugins/artifactViews';
 import { coerceConfigValue } from '@/plugins/configValue';
+import { PluginIcon } from '@/plugins/PluginIcon';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
@@ -357,7 +362,7 @@ function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain
 }
 
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
-function ExtensionPluginsSection() {
+export function EnsoPluginsSettings() {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
@@ -470,70 +475,83 @@ function ExtensionPluginsSection() {
   };
 
   return (
-    <div className="space-y-3" data-settings-row="plugins.enso">
-      <div className="flex items-end justify-between gap-4">
+    <div className="space-y-5" data-settings-row="plugins.enso">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="font-medium text-lg">
             {t('Enso plugins')}
             <NewSessionBadge />
           </h3>
-          <p className="text-muted-foreground text-sm">
+          <p className="mt-1 text-muted-foreground text-sm">
             {t(
               'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.'
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           {plugins.some(
             (plugin) => plugin.source?.kind === 'url' || plugin.source?.kind === 'market'
           ) && (
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={checking}
               onClick={() => void checkUpdates()}
             >
-              {checking ? <Spinner /> : t('Check for updates')}
+              {checking ? <Spinner /> : <RefreshCw className="size-4" />}
+              {t('Check for updates')}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => setMarketOpen(true)}>
+          <Button size="sm" onClick={() => setMarketOpen(true)}>
+            <Store className="size-4" />
             {t('Marketplace')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || downloading}
-            onClick={() => void stage('dir')}
-          >
-            {t('Install from folder')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || downloading}
-            onClick={() => void stage('zip')}
-          >
-            {t('Install from zip')}
           </Button>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Input
-          value={url}
-          placeholder={t('https://github.com/owner/repo')}
-          onChange={(event) => setUrl(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void stageUrl();
-          }}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || downloading || url.trim() === ''}
-          onClick={() => void stageUrl()}
-        >
-          {downloading ? <Spinner /> : t('Install from URL')}
-        </Button>
+      <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Link2 className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              value={url}
+              placeholder={t('https://github.com/owner/repo')}
+              onChange={(event) => setUrl(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void stageUrl();
+              }}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || downloading || url.trim() === ''}
+            onClick={() => void stageUrl()}
+          >
+            {downloading ? <Spinner /> : t('Install from URL')}
+          </Button>
+        </div>
+        <div className="flex items-center gap-1 text-muted-foreground text-xs">
+          <span className="mr-1">{t('Or install from')}</span>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={busy || downloading}
+            onClick={() => void stage('dir')}
+          >
+            <FolderOpen className="size-3.5" />
+            {t('Install from folder')}
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={busy || downloading}
+            onClick={() => void stage('zip')}
+          >
+            <Package className="size-3.5" />
+            {t('Install from zip')}
+          </Button>
+        </div>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
@@ -567,7 +585,7 @@ function ExtensionPluginsSection() {
         />
       )}
       {preview && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-4">
           <p className="font-medium text-sm">
             {preview.name} {preview.version}
             {preview.existingVersion && (
@@ -610,210 +628,247 @@ function ExtensionPluginsSection() {
           </div>
         </div>
       )}
-      {plugins.map((plugin) => (
-        <div key={plugin.id} className="space-y-2 py-1">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm">
-                {plugin.name}
-                <span className="ml-2 text-muted-foreground text-xs">{plugin.version}</span>
-                {plugin.state === 'crashed' && (
-                  <Badge variant="destructive" className="ml-2">
-                    {t('Stopped after crashes')}
-                  </Badge>
-                )}
-                {plugin.resident && (
-                  <Badge variant={plugin.running ? 'secondary' : 'outline'} className="ml-2">
-                    {plugin.running ? '常驻运行中' : '常驻未运行'}
-                  </Badge>
-                )}
-              </p>
-              {plugin.availableVersion && (
-                <p className="text-xs">
-                  {t('Version {{version}} is available', { version: plugin.availableVersion })}
-                  <button
-                    type="button"
-                    className="ml-2 underline"
+      {plugins.length === 0 && !preview && (
+        <div className="rounded-lg border border-dashed px-3 py-10 text-center">
+          <Puzzle className="mx-auto size-5 text-muted-foreground" />
+          <p className="mt-3 font-medium text-sm">{t('No Enso plugins installed')}</p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            {t('Browse the marketplace or install from a GitHub URL, folder or zip.')}
+          </p>
+        </div>
+      )}
+      <div className="space-y-2">
+        {plugins.map((plugin) => (
+          <div
+            key={plugin.id}
+            className={cn(
+              'overflow-hidden rounded-lg border bg-card transition-colors',
+              plugin.state === 'crashed' && 'border-destructive/50'
+            )}
+          >
+            <div className="flex items-center justify-between gap-3 p-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <div
+                  className={cn(
+                    'flex size-9 shrink-0 items-center justify-center rounded-md bg-muted',
+                    plugin.state === 'enabled' ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                >
+                  <PluginIcon pluginId={plugin.id} className="size-4" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <p className="flex flex-wrap items-center gap-1.5 text-sm">
+                    <span className="truncate font-medium">{plugin.name}</span>
+                    <Badge variant="outline" className="text-[11px]">
+                      {plugin.version}
+                    </Badge>
+                    {plugin.state === 'crashed' && (
+                      <Badge variant="destructive" className="text-[11px]">
+                        {t('Stopped after crashes')}
+                      </Badge>
+                    )}
+                    {plugin.resident && (
+                      <Badge
+                        variant={plugin.running ? 'secondary' : 'outline'}
+                        className="text-[11px]"
+                      >
+                        {plugin.running ? '常驻运行中' : '常驻未运行'}
+                      </Badge>
+                    )}
+                  </p>
+                  <p className="truncate font-mono text-muted-foreground text-xs">{plugin.id}</p>
+                  {plugin.availableVersion && (
+                    <p className="text-primary text-xs">
+                      {t('Version {{version}} is available', { version: plugin.availableVersion })}
+                      <button
+                        type="button"
+                        className="ml-2 underline"
+                        disabled={busy || downloading}
+                        onClick={() => void restage(plugin.id)}
+                      >
+                        {t('Update')}
+                      </button>
+                    </p>
+                  )}
+                  {plugin.updateCheckError && (
+                    <p className="text-muted-foreground text-xs">
+                      {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
+                    </p>
+                  )}
+                  {plugin.lastError && (
+                    <p className="line-clamp-2 break-all font-mono text-destructive text-xs">
+                      {plugin.lastError.message}
+                    </p>
+                  )}
+                  {plugin.pendingVersion && (
+                    <p className="text-muted-foreground text-xs">
+                      {t('{{version}} asks for more and is waiting for approval', {
+                        version: plugin.pendingVersion,
+                      })}
+                      <button
+                        type="button"
+                        className="ml-2 underline"
+                        onClick={() =>
+                          void window.electronAPI.extensionPlugins.approvePending(plugin.id)
+                        }
+                      >
+                        {t('Allow')}
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-2 underline"
+                        onClick={() =>
+                          void window.electronAPI.extensionPlugins.rejectPending(plugin.id)
+                        }
+                      >
+                        {t('Keep current')}
+                      </button>
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-0.5">
+                {plugin.source && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
                     disabled={busy || downloading}
+                    aria-label={t('Reinstall from source')}
+                    title={
+                      plugin.source.kind === 'url'
+                        ? `${t('Reinstall from source')}: ${plugin.source.url}`
+                        : t('Reinstall from source')
+                    }
                     onClick={() => void restage(plugin.id)}
                   >
-                    {t('Update')}
-                  </button>
-                </p>
-              )}
-              {plugin.updateCheckError && (
-                <p className="text-muted-foreground text-xs">
-                  {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
-                </p>
-              )}
-              {plugin.lastError && (
-                <p className="line-clamp-2 break-all font-mono text-destructive text-xs">
-                  {plugin.lastError.message}
-                </p>
-              )}
-              {plugin.pendingVersion && (
-                <p className="text-muted-foreground text-xs">
-                  {t('{{version}} asks for more and is waiting for approval', {
-                    version: plugin.pendingVersion,
-                  })}
-                  <button
-                    type="button"
-                    className="ml-2 underline"
-                    onClick={() =>
-                      void window.electronAPI.extensionPlugins.approvePending(plugin.id)
-                    }
-                  >
-                    {t('Allow')}
-                  </button>
-                  <button
-                    type="button"
-                    className="ml-2 underline"
-                    onClick={() =>
-                      void window.electronAPI.extensionPlugins.rejectPending(plugin.id)
-                    }
-                  >
-                    {t('Keep current')}
-                  </button>
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {plugin.source && (
+                    <RotateCw className="size-4" />
+                  </Button>
+                )}
                 <Button
                   size="icon"
                   variant="ghost"
-                  disabled={busy || downloading}
-                  aria-label={t('Reinstall from source')}
-                  title={
-                    plugin.source.kind === 'url'
-                      ? `${t('Reinstall from source')}: ${plugin.source.url}`
-                      : t('Reinstall from source')
-                  }
-                  onClick={() => void restage(plugin.id)}
-                >
-                  <RotateCw className="size-4" />
-                </Button>
-              )}
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label="产出文件"
-                title="产出文件"
-                onClick={() =>
-                  setPanel({ kind: 'artifacts', pluginId: plugin.id, pluginName: plugin.name })
-                }
-              >
-                <Files className="size-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label={t('Plugin logs')}
-                title={t('Plugin logs')}
-                onClick={() =>
-                  setPanel({ kind: 'logs', pluginId: plugin.id, pluginName: plugin.name })
-                }
-              >
-                <FileText className="size-4" />
-              </Button>
-              {plugin.configurable && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t('Configure')}
-                  title={t('Configure')}
+                  aria-label="产出文件"
+                  title="产出文件"
                   onClick={() =>
-                    setPanel({ kind: 'config', pluginId: plugin.id, pluginName: plugin.name })
+                    setPanel({ kind: 'artifacts', pluginId: plugin.id, pluginName: plugin.name })
                   }
                 >
-                  <Settings2 className="size-4" />
+                  <Files className="size-4" />
                 </Button>
-              )}
-              <Switch
-                checked={plugin.state === 'enabled'}
-                onCheckedChange={(enabled) =>
-                  void window.electronAPI.extensionPlugins.setEnabled(plugin.id, enabled)
-                }
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => void window.electronAPI.extensionPlugins.uninstall(plugin.id)}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-          </div>
-          <button
-            type="button"
-            aria-expanded={expanded.includes(plugin.id)}
-            className={cn(
-              'flex items-center gap-1 self-start text-xs',
-              'text-muted-foreground hover:text-foreground'
-            )}
-            onClick={() =>
-              setExpanded((prev) =>
-                prev.includes(plugin.id)
-                  ? prev.filter((id) => id !== plugin.id)
-                  : [...prev, plugin.id]
-              )
-            }
-          >
-            {expanded.includes(plugin.id) ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
-            {expanded.includes(plugin.id) ? '收起详情' : '详情'}
-            {!expanded.includes(plugin.id) && capabilitySummary(plugin) && (
-              <span className="ml-1 opacity-70">{capabilitySummary(plugin)}</span>
-            )}
-          </button>
-          {expanded.includes(plugin.id) && (
-            <div className="space-y-2">
-              {plugin.interceptBreakers?.map((breaker) => (
-                <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
-                  {breaker.event} 检查连续失败，临时放行到{' '}
-                  {new Date(breaker.until).toLocaleTimeString()}
-                </p>
-              ))}
-              <PluginCapabilityBlock
-                permissions={plugin.permissions}
-                resident={plugin.resident}
-                running={plugin.running}
-                events={plugin.events}
-                schedules={plugin.schedules}
-              />
-              {plugin.crossSessionInject !== undefined && (
-                <div className="flex items-center justify-between gap-3 text-xs">
-                  <span>
-                    <span className="block">允许向任意运行中的会话发送消息</span>
-                    <span className="block text-muted-foreground">
-                      关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
-                    </span>
-                  </span>
-                  <Switch
-                    aria-label="允许向任意运行中的会话发送消息"
-                    checked={plugin.crossSessionInject}
-                    onCheckedChange={(allowed) =>
-                      void window.electronAPI.extensionPlugins.setCrossSessionInject(
-                        plugin.id,
-                        allowed
-                      )
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={t('Plugin logs')}
+                  title={t('Plugin logs')}
+                  onClick={() =>
+                    setPanel({ kind: 'logs', pluginId: plugin.id, pluginName: plugin.name })
+                  }
+                >
+                  <FileText className="size-4" />
+                </Button>
+                {plugin.configurable && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={t('Configure')}
+                    title={t('Configure')}
+                    onClick={() =>
+                      setPanel({ kind: 'config', pluginId: plugin.id, pluginName: plugin.name })
                     }
-                  />
-                </div>
-              )}
-              {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-xs">待同意的权限</p>
-                  <PermissionLines permissions={plugin.pendingPermissions} />
-                </div>
-              )}
+                  >
+                    <Settings2 className="size-4" />
+                  </Button>
+                )}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={t('Uninstall')}
+                  title={t('Uninstall')}
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => void window.electronAPI.extensionPlugins.uninstall(plugin.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+                <div className="mx-1.5 h-5 w-px bg-border" />
+                <Switch
+                  checked={plugin.state === 'enabled'}
+                  onCheckedChange={(enabled) =>
+                    void window.electronAPI.extensionPlugins.setEnabled(plugin.id, enabled)
+                  }
+                />
+              </div>
             </div>
-          )}
-        </div>
-      ))}
+            <button
+              type="button"
+              aria-expanded={expanded.includes(plugin.id)}
+              className={cn(
+                'flex w-full items-center gap-1 border-t bg-muted/20 px-3 py-1.5 text-left text-xs',
+                'text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground'
+              )}
+              onClick={() =>
+                setExpanded((prev) =>
+                  prev.includes(plugin.id)
+                    ? prev.filter((id) => id !== plugin.id)
+                    : [...prev, plugin.id]
+                )
+              }
+            >
+              {expanded.includes(plugin.id) ? (
+                <ChevronDown className="size-3" />
+              ) : (
+                <ChevronRight className="size-3" />
+              )}
+              {expanded.includes(plugin.id) ? '收起详情' : '详情'}
+              {!expanded.includes(plugin.id) && capabilitySummary(plugin) && (
+                <span className="ml-1 opacity-70">{capabilitySummary(plugin)}</span>
+              )}
+            </button>
+            {expanded.includes(plugin.id) && (
+              <div className="space-y-3 border-t px-3 py-3">
+                {plugin.interceptBreakers?.map((breaker) => (
+                  <p key={breaker.event} className="text-amber-600 text-xs dark:text-amber-400">
+                    {breaker.event} 检查连续失败，临时放行到{' '}
+                    {new Date(breaker.until).toLocaleTimeString()}
+                  </p>
+                ))}
+                <PluginCapabilityBlock
+                  permissions={plugin.permissions}
+                  resident={plugin.resident}
+                  running={plugin.running}
+                  events={plugin.events}
+                  schedules={plugin.schedules}
+                />
+                {plugin.crossSessionInject !== undefined && (
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span>
+                      <span className="block">允许向任意运行中的会话发送消息</span>
+                      <span className="block text-muted-foreground">
+                        关闭时只能发到发起调用的会话；开启后定时任务、常驻进程也能向其他项目和窗口的会话发消息并触发执行
+                      </span>
+                    </span>
+                    <Switch
+                      aria-label="允许向任意运行中的会话发送消息"
+                      checked={plugin.crossSessionInject}
+                      onCheckedChange={(allowed) =>
+                        void window.electronAPI.extensionPlugins.setCrossSessionInject(
+                          plugin.id,
+                          allowed
+                        )
+                      }
+                    />
+                  </div>
+                )}
+                {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-xs">待同意的权限</p>
+                    <PermissionLines permissions={plugin.pendingPermissions} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
       <Dialog open={panel !== null} onOpenChange={(open) => !open && setPanel(null)}>
         <DialogContent>
           <DialogHeader>
@@ -941,7 +996,7 @@ function PluginRow({
   );
 }
 
-export function PluginsSettings() {
+export function ClaudePluginsSettings() {
   const { t } = useI18n();
   const entries = useSettingsStore((state) => state.plugins);
   const addPlugins = useSettingsStore((state) => state.addPlugins);
@@ -988,11 +1043,10 @@ export function PluginsSettings() {
 
   return (
     <div className="space-y-4">
-      <ExtensionPluginsSection />
       <div className="flex items-end justify-between gap-4" data-settings-row="plugins.root">
         <div>
           <h3 className="font-medium text-lg">
-            {t('Plugins')}
+            {t('Claude Code plugins')}
             <NewSessionBadge />
             {enabledCount > 0 && (
               <span className="ml-2 font-normal text-muted-foreground text-xs">

@@ -9,6 +9,7 @@ export type SettingsCategory =
   | 'providers'
   | 'skills'
   | 'plugins'
+  | 'claudePlugins'
   | 'mcp'
   | 'instructions'
   | 'presets'
