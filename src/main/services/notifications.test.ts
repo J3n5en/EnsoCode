@@ -190,6 +190,35 @@ describe('maybeNotify', () => {
     } as unknown as RendererAgentEvent);
     expect(notifications).toHaveLength(0);
   });
+
+  it('通知标题带上会话名，没有标题时保持原样', () => {
+    settingsState.current = {
+      'enso-conversations': {
+        state: { conversations: { 'conversation-1': { title: '修登录' } } },
+      },
+    };
+    maybeNotify(askEvent('在吗'));
+    expect(notifications[0]?.title).toBe('修登录 · 等你回答');
+
+    notifications.length = 0;
+    settingsState.current = {
+      'enso-conversations': {
+        state: { conversations: { 'conversation-1': { title: '修登录' } } },
+      },
+    };
+    maybeNotify({
+      type: 'ask-request',
+      identity: { sessionId: 'conversation-1::cw-bob', generation: 'g' },
+      seq: 1,
+      ask: { requestId: 'r1', question: '在吗' },
+    } as unknown as RendererAgentEvent);
+    expect(notifications[0]?.title).toBe('修登录 · 等你回答');
+
+    notifications.length = 0;
+    settingsState.current = undefined;
+    maybeNotify(askEvent('在吗'));
+    expect(notifications[0]?.title).toBe('等你回答');
+  });
 });
 
 describe.each(['session', 'bot'] as const)('%s approval notifications', (surface) => {

@@ -44,6 +44,25 @@ const settingsState = (): { language?: string; notifyMainAgentOnly?: boolean } =
 const texts = (): Record<keyof (typeof TEXTS)['zh'], string> =>
   (settingsState().language ?? 'zh').toLowerCase().startsWith('zh') ? TEXTS.zh : TEXTS.en;
 
+/** 通知标题带上会话名，多会话时能分辨是哪条对话 */
+function conversationLabel(sessionId: string): string {
+  const store = readSettings()?.['enso-conversations'] as
+    | { state?: { conversations?: Record<string, { title?: unknown }> } }
+    | undefined;
+  const conversations = store?.state?.conversations;
+  const own = conversations?.[sessionId]?.title;
+  if (typeof own === 'string' && own.trim()) return own.trim();
+  const parentId = sessionId.split('::')[0];
+  if (parentId === sessionId) return '';
+  const parent = conversations?.[parentId]?.title;
+  return typeof parent === 'string' ? parent.trim() : '';
+}
+
+function eventTitle(sessionId: string, kind: string): string {
+  const name = conversationLabel(sessionId);
+  return name ? `${name} · ${kind}` : kind;
+}
+
 import { readNotifyMainAgentOnly } from './notifyPolicy';
 
 export { readNotifyMainAgentOnly };
@@ -151,21 +170,33 @@ export function maybeNotify(event: RendererAgentEvent): void {
   switch (event.type) {
     case 'ask-request':
       // agent 在等答复才能继续,不提醒会静默卡住整个会话
-      notify(event.identity.sessionId, t.ask, event.ask.question.slice(0, 100));
+      notify(
+        event.identity.sessionId,
+        eventTitle(event.identity.sessionId, t.ask),
+        event.ask.question.slice(0, 100)
+      );
       return;
     case 'approval-request':
       notify(
         event.identity.sessionId,
-        t.approval,
+        eventTitle(event.identity.sessionId, t.approval),
         `${event.request.tool} · ${event.request.summary.slice(0, 80)}`
       );
       return;
     case 'turn-completed':
-      notify(event.identity.sessionId, t.turnDone, t.turnDoneBody);
+      notify(
+        event.identity.sessionId,
+        eventTitle(event.identity.sessionId, t.turnDone),
+        t.turnDoneBody
+      );
       return;
     case 'status':
       if (event.status === 'failed' && event.error) {
-        notify(event.identity.sessionId, t.failed, event.error.slice(0, 100));
+        notify(
+          event.identity.sessionId,
+          eventTitle(event.identity.sessionId, t.failed),
+          event.error.slice(0, 100)
+        );
       }
       return;
     default:
