@@ -1576,8 +1576,12 @@ export class SessionSupervisor {
           });
           return;
         }
-        if (command.type === 'dismiss-child' || command.type === 'dismiss-coworker') {
-          // 清理失败不影响父会话本身，不能把它标成 failed（之后所有委派都会被拒）
+        if (
+          command.type === 'dismiss-child' ||
+          command.type === 'dismiss-coworker' ||
+          command.type === 'resume-coworker'
+        ) {
+          // 清理/恢复类命令按 parent 归因只为排队，失败不影响父会话本身，不能把它标成 failed（之后所有委派都会被拒）
           console.error(`[${command.type}] failed:`, message);
           return;
         }

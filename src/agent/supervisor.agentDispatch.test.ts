@@ -2083,4 +2083,34 @@ describe('SessionSupervisor custom parent system prompt', () => {
     ).toEqual([]);
     await supervisor.shutdown();
   });
+
+  it('resume-coworker 失败只记日志，不把父会话标成 failed', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-resume-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const resume = {
+      type: 'resume-coworker' as const,
+      parent,
+      coworkerId: 'parent::cw-a',
+      name: 'a',
+      resumeFile: '/tmp/coworker-a.jsonl',
+    };
+    supervisor.handleCommand(resume);
+    supervisor.handleCommand(resume);
+    for (let i = 0; i < 10; i++) await settle();
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'status' &&
+          event.identity.sessionId === parent.sessionId &&
+          event.status === 'failed'
+      )
+    ).toEqual([]);
+    await supervisor.shutdown();
+  });
 });
