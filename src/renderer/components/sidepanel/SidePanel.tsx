@@ -239,6 +239,7 @@ function addPluginViewPanel(
     component: 'plugin',
     title: view.title,
     params: { conversationId, projectId, pluginId: view.pluginId, viewId: view.id },
+    renderer: 'always',
     ...(group ? { position: { referenceGroup: group } } : {}),
   });
 }
@@ -247,6 +248,10 @@ function PluginViewPanel(
   props: IDockviewPanelProps<{ conversationId?: string; pluginId?: string; viewId?: string }>
 ) {
   const { conversationId, pluginId, viewId } = props.params;
+  // 插件页面是 iframe，onlyWhenVisible 会在切走时把它移出文档，页面状态和播放都会丢
+  useEffect(() => {
+    if (props.api.renderer !== 'always') props.api.setRenderer('always');
+  }, [props.api]);
   if (!pluginId || !viewId) return null;
   return <PluginView pluginId={pluginId} viewId={viewId} sessionId={conversationId ?? null} />;
 }

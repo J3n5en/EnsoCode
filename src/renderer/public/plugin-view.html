@@ -4,10 +4,25 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; frame-src about:"
     />
-    <script>
-      // Enso 插件侧栏页面壳：sandbox iframe（不同源）里运行，只认父窗口第一条初始化消息。
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="text/plain" id="enso-view-bridge">
+      // 跑在内层 sandbox srcdoc 里：和主界面不同源，只认外层壳转发的第一条初始化消息。
       // enso.storage 与 localStorage 读初始快照，写入经 MessagePort 交给宿主持久化。
       (() => {
         let port = null;
@@ -115,8 +130,47 @@
           document.documentElement.dataset.theme = theme;
         };
         window.addEventListener('message', onInit);
+        // 每次内层重新加载都请求一次初始化
+        window.parent.postMessage({ type: 'enso-view-ready' }, '*');
       })();
     </script>
-  </head>
-  <body></body>
+    <script>
+      // 外层不加 sandbox，PWA 的 Service Worker 才能把本文件送到 iframe。
+      // 插件页面跑在内层：srcdoc 继承本页 CSP，不继承主界面那条禁止内联脚本的策略。
+      const code = document.getElementById('enso-view-bridge').textContent;
+      const inner = document.createElement('iframe');
+      inner.setAttribute('sandbox', 'allow-scripts');
+      const csp =
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
+      let ready = false;
+      window.addEventListener('message', (event) => {
+        // 插件页面和桥在同一个窗口，能再发 ready；只转发第一次，避免冲掉已经接上的端口
+        if (event.source === inner.contentWindow && event.data?.type === 'enso-view-ready') {
+          if (ready) return;
+          ready = true;
+          window.parent.postMessage({ type: 'enso-view-ready' }, '*');
+          return;
+        }
+        const port = event.ports?.[0];
+        if (
+          event.source !== window.parent ||
+          event.data?.type !== 'enso-view-init' ||
+          !port ||
+          !inner.contentWindow
+        )
+          return;
+        inner.contentWindow.postMessage(event.data, '*', [port]);
+      });
+      document.body.append(inner);
+      inner.srcdoc =
+        '<!doctype html><html><head><meta charset="utf-8">' +
+        '<meta http-equiv="Content-Security-Policy" content="' +
+        csp +
+        '"><' +
+        'script>' +
+        code.split('</' + 'script').join('<\\/' + 'script') +
+        '</' +
+        'script></head><body></body></html>';
+    </script>
+  </body>
 </html>

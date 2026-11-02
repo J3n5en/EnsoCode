@@ -337,7 +337,7 @@ export function onLoad(enso) {
 
 ## 侧栏页面
 
-`views` 里声明的 HTML 跑在 `sandbox="allow-scripts"` 的 iframe 里，和主界面不同源，拿不到主界面的任何接口，也不能加载外部资源。页面里用相对路径引用的插件内文件——`<script src>`、`<link rel="stylesheet" href>`、`<img src>`——会在打开时内联进页面（脚本和样式转成内联，图片转成 `data:`），路径相对页面所在目录；绝对路径、带协议的 URL 和超出插件目录的引用保持原样，不会加载。脚本里的 `import` 不会被解析，需要先打包成单文件。
+`views` 里声明的 HTML 跑在 `sandbox="allow-scripts"` 的 iframe 里，和主界面不同源，拿不到主界面的任何接口，也不能加载外部资源。承载它的外层框架不能再加 sandbox：PWA 完整模式靠 Service Worker 取界面文件，没有 `allow-same-origin` 的沙箱 iframe 不会走 Service Worker，壳页面会是空的。页面里用相对路径引用的插件内文件——`<script src>`、`<link rel="stylesheet" href>`、`<img src>`——会在打开时内联进页面（脚本和样式转成内联，图片转成 `data:`），路径相对页面所在目录；绝对路径、带协议的 URL 和超出插件目录的引用保持原样，不会加载。脚本里的 `import` 不会被解析，需要先打包成单文件。
 
 页面里用 `window.enso`：
 

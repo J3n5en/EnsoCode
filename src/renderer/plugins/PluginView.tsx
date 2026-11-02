@@ -6,8 +6,10 @@ import { createViewBridge, decodeUtf8Base64, usePluginViews, viewStoragePatch } 
 const SHELL = 'plugin-view.html';
 
 /**
- * 插件侧栏页面：sandbox="allow-scripts" 的 iframe（不同源、无 preload），
- * 壳页面收到 HTML 后写入文档，页面只能经 MessagePort 调本插件的 renderer.call。
+ * 插件侧栏页面。外层 iframe 不加 sandbox：没有 allow-same-origin 的沙箱导航
+ * 不经过 Service Worker，PWA 完整模式会向中继要壳页面并得到空文档。
+ * 壳页面内部再用 sandbox="allow-scripts" 的 srcdoc iframe 跑插件页面（不同源、无 preload），
+ * 页面只能经 MessagePort 调本插件的 renderer.call。
  */
 export function PluginView({
   pluginId,
@@ -31,7 +33,7 @@ export function PluginView({
     if (!frame || !entry) return;
     setError(null);
     let disposed = false;
-    const channel = new MessageChannel();
+    let channel: MessageChannel | null = null;
     const handle = createViewBridge(async (method, args) => {
       const res = await window.electronAPI.extensionPlugins.call({
         pluginId,
@@ -42,22 +44,28 @@ export function PluginView({
       if (!res.ok) throw new Error(res.error);
       return res.value;
     });
-    channel.port1.onmessage = (event) => {
-      const patch = viewStoragePatch(event.data);
-      if (patch) {
-        void window.electronAPI.extensionPlugins.viewStateSet(pluginId, patch);
-        return;
-      }
-      void handle(event.data).then((reply) => {
-        if (reply && !disposed) channel.port1.postMessage(reply);
-      });
-    };
-    const onLoad = async () => {
+    // iframe 被移出文档（拖到别的分组等）后会重新加载壳页面；壳页面每次加载发 ready，按 ready 重新握手。
+    // 不能按 load 事件握手：壳页面 document.write 插件 HTML 后也会触发 load。
+    const onReady = async (event: MessageEvent) => {
+      if (event.source !== frame.contentWindow || event.data?.type !== 'enso-view-ready') return;
+      channel?.port1.close();
+      const current = new MessageChannel();
+      channel = current;
+      current.port1.onmessage = (event) => {
+        const patch = viewStoragePatch(event.data);
+        if (patch) {
+          void window.electronAPI.extensionPlugins.viewStateSet(pluginId, patch);
+          return;
+        }
+        void handle(event.data).then((reply) => {
+          if (reply && !disposed && channel === current) current.port1.postMessage(reply);
+        });
+      };
       const [res, state] = await Promise.all([
         window.electronAPI.extensionPlugins.asset(pluginId, entry),
         window.electronAPI.extensionPlugins.viewStateGet(pluginId),
       ]);
-      if (disposed) return;
+      if (disposed || channel !== current) return;
       if (!res.ok) {
         setError(res.error);
         return;
@@ -66,7 +74,7 @@ export function PluginView({
         const asset = await window.electronAPI.extensionPlugins.asset(pluginId, rel);
         return asset.ok ? { mime: asset.mime, base64: asset.base64 } : null;
       });
-      if (disposed) return;
+      if (disposed || channel !== current) return;
       frame.contentWindow?.postMessage(
         {
           type: 'enso-view-init',
@@ -75,15 +83,15 @@ export function PluginView({
           storage: state.ok ? state.state : {},
         },
         '*',
-        [channel.port2]
+        [current.port2]
       );
     };
-    frame.addEventListener('load', onLoad, { once: true });
+    window.addEventListener('message', onReady);
     frame.src = new URL(SHELL, document.baseURI).href;
     return () => {
       disposed = true;
-      frame.removeEventListener('load', onLoad);
-      channel.port1.close();
+      window.removeEventListener('message', onReady);
+      channel?.port1.close();
       frame.removeAttribute('src');
     };
   }, [pluginId, entry]);
@@ -100,7 +108,6 @@ export function PluginView({
       <iframe
         ref={frameRef}
         title={view.title}
-        sandbox="allow-scripts"
         className="min-h-0 w-full flex-1 border-0 bg-background"
       />
     </div>
