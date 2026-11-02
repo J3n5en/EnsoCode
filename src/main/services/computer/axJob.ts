@@ -3,6 +3,8 @@ import type { AxWorkerRequest } from './axWorkerClient';
 
 export type AxJobBridge = {
   snapshot(pid: number, maxDepth: number): Promise<AxTreeNode[]>;
+  /** 从已登记句柄起按快照同样的预算展开子树 */
+  subtree?(handle: string, maxDepth: number): Promise<AxTreeNode[]>;
   query(
     pid: number,
     query: { role?: string; title?: string; value?: string; description?: string; limit?: number }
@@ -30,6 +32,8 @@ export async function dispatchAxJob(ax: AxJobBridge, request: AxWorkerRequest): 
   switch (request.op) {
     case 'snapshot':
       return ax.snapshot(request.pid, request.maxDepth);
+    case 'subtree':
+      return ax.subtree ? ax.subtree(request.handle, request.maxDepth) : unsupported(request.op);
     case 'query':
       return ax.query(request.pid, request);
     case 'elementAt':

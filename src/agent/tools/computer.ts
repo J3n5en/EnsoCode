@@ -165,6 +165,8 @@ export function createComputerTool(invoker: ComputerInvoker): ToolDefinition {
       'Prefer await win.getState() after actions; then const el = await win.ref("eN"); await el.click(). Empty AXRow labels mean use pixels.',
       'Each code runs in an async function: var/let/const do not survive calls. Explicit globalThis state survives writable calls only; read_only uses a fresh isolated VM and cannot read or modify that state. Reacquire windows in inspection calls.',
       'win.ax()/getState() return the full tree; refs of unchanged elements stay the same across calls, so { diff: true } (only changed rows) is safe and earlier refs still work.',
+      'Dense apps: win.ax() is a shallow skeleton; drill into one region with await (await win.ref("eN")).ax({ maxDepth: 3 }) (or win.ax({ root: "eN" })) instead of a full-tree ax({ all: true }).',
+      'Host errors carry e.code and e.retry: "safe" = repeat as is, "later" = wait() then repeat, "reobserve" = re-run ax()/find()/screenshot() and use fresh refs/coordinates, "never" = do not retry; change approach or ask the user. A ref whose element now shows a different role/title fails with stale-ref instead of acting on the wrong control.',
       'click(x,y) is in the last full window/desktop screenshot of that target. The 96px crop is a receipt, not a new clickSpace.',
       'await desktop.windows() / focused(); desktop.app("系统设置", { pane: "外观" }) opens that Settings pane.',
       'find() returns Element[]: const hits = await win.find({ description: "深色" }); assert(hits.length === 1, "Expected one match"); await hits[0].click(). Do not full-tree ax() on Settings content after Appearance opens.',

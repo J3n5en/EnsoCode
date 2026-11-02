@@ -25,6 +25,12 @@ export interface InputOutcome {
 
 export type TargetApp = ComputerAppIdentity & { pid: number };
 
+export interface AxSnapshotOptions {
+  maxDepth?: number;
+  all?: boolean;
+  root?: string;
+}
+
 export interface CaptureBytes {
   png: Buffer;
   width: number;
@@ -79,7 +85,8 @@ export interface DesktopBackend {
   keyChord(target: string, keys: string[], opts?: PointerOptions): Promise<InputOutcome | void>;
   raise(windowId: string): Promise<void>;
   launchApp(name: string, opts?: { pane?: string }): Promise<void>;
-  axSnapshot(target: string, opts?: { maxDepth?: number; all?: boolean }): Promise<AxTreeNode[]>;
+  /** root 给定时只展开该 ref 的子树（target 取 root 登记的窗口） */
+  axSnapshot(target: string, opts?: AxSnapshotOptions): Promise<AxTreeNode[]>;
   axQuery(
     target: string,
     query: {

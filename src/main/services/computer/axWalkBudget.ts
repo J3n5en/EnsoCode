@@ -3,6 +3,8 @@ export const AX_SNAPSHOT_BUDGET_MS = 1800;
 export const AX_WORKER_TIMEOUT_MS = 2800;
 export const AX_SNAPSHOT_MAX_NODES = 80;
 export const AX_SNAPSHOT_DEFAULT_DEPTH = 1;
+/** ax({ root }) 子树缺省深度：比整窗快照深，节点预算不变 */
+export const AX_SUBTREE_DEFAULT_DEPTH = 3;
 export const AX_SNAPSHOT_MAX_CHILDREN = 24;
 export const AX_MESSAGING_TIMEOUT_SEC = 0.4;
 

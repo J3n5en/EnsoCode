@@ -16,7 +16,7 @@ import {
 import { withAxErrors } from './axErrors';
 import { axPressFallbackMessage, isAxPressUnsupported } from './axJob';
 import { AX_SNAPSHOT_DEFAULT_DEPTH } from './axWalkBudget';
-import type { CaptureBytes, DesktopBackend, PointerOptions } from './backend';
+import type { AxSnapshotOptions, CaptureBytes, DesktopBackend, PointerOptions } from './backend';
 import { loadWin32Native, type Win32Native } from './win32Native';
 import { findCapturerWindowSource, thumbnailCropForWindow } from './windowSource';
 import { resolveWinLaunch, resolveWinSettingsPane } from './winLaunch';
@@ -258,7 +258,10 @@ export class WindowsDesktopBackend implements DesktopBackend {
     await execFileAsync('cmd.exe', ['/c', 'start', '', launch.target], { windowsHide: true });
   }
 
-  async axSnapshot(target: string, opts?: { maxDepth?: number; all?: boolean }) {
+  async axSnapshot(target: string, opts?: AxSnapshotOptions) {
+    if (opts?.root) {
+      throw new ComputerError('unsupported', 'ax({ root }) is not supported on Windows yet');
+    }
     const native = await this.requireNative();
     const generation = this.registry.beginSnapshot(target);
     const nodes = await withAxErrors(() =>

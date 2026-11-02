@@ -1,7 +1,13 @@
 import { AxRegistry } from '@shared/computer/axRegistry';
 import type { AxTreeNode } from '@shared/computer/axTree';
 import type { ComputerCapabilities, ComputerWindowInfo } from '@shared/computer/types';
-import type { CaptureBytes, DesktopBackend, PointerOptions, TargetApp } from './backend';
+import type {
+  AxSnapshotOptions,
+  CaptureBytes,
+  DesktopBackend,
+  PointerOptions,
+  TargetApp,
+} from './backend';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -26,6 +32,8 @@ export class FakeDesktopBackend implements DesktopBackend {
   /** desktop 级前台输入会落到的 app；null 表示无法判断 */
   desktopInputApp: TargetApp | null | undefined;
   private readonly registry = new AxRegistry<AxTreeNode>();
+  /** ax({ root }) 的调用记录 */
+  readonly axRoots: AxSnapshotOptions[] = [];
   windowsList: ComputerWindowInfo[] = [
     {
       id: 'w1',
@@ -204,8 +212,17 @@ export class FakeDesktopBackend implements DesktopBackend {
     return [windowNode];
   }
 
-  async axSnapshot(target: string) {
+  async axSnapshot(target: string, opts?: AxSnapshotOptions) {
+    if (opts?.root) {
+      this.axRoots.push(opts);
+      return [this.registry.resolve(opts.root)];
+    }
     return this.snapshot(target);
+  }
+
+  /** 模拟原生元素被复用成另一个控件（同一句柄、内容已变） */
+  mutate(ref: string, patch: Partial<AxTreeNode>) {
+    Object.assign(this.registry.resolve(ref), patch);
   }
 
   async axQuery(

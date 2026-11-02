@@ -802,6 +802,88 @@ describe('投递方式与桌面接管', () => {
   });
 });
 
+describe('错误处置与 ref 防误点', () => {
+  const runIn = (
+    code: string,
+    backend: FakeDesktopBackend,
+    session = createComputerGuestSession()
+  ) =>
+    runComputerGuest({ code, readOnly: false, timeoutMs: 10_000, backend, session, settleMs: 0 });
+
+  it('脚本内可读 e.code / e.retry', async () => {
+    const result = await runIn(
+      `const w = await desktop.window('w1');
+       try { await w.ref('e999'); } catch (e) { return [e.code, e.retry]; }`,
+      new FakeDesktopBackend()
+    );
+    expect(result.returnValue).toEqual(['stale-ref', 'reobserve']);
+  });
+
+  it('未捕获的 ComputerError 在结果里带 code 与 retry', async () => {
+    await expect(
+      runIn(`const w = await desktop.window('w1'); await w.ref('e999');`, new FakeDesktopBackend())
+    ).rejects.toThrow(/code=stale-ref.*retry=reobserve/);
+  });
+
+  it('元素被复用成另一个控件时拒绝操作旧 ref', async () => {
+    const backend = new FakeDesktopBackend();
+    const session = createComputerGuestSession();
+    const seen = await runIn(
+      `const w = await desktop.window('w1'); const [b] = await w.find({ title: 'Save' }); return b.ref;`,
+      backend,
+      session
+    );
+    const ref = String(seen.returnValue);
+    backend.mutate(ref, { title: 'Delete' });
+    await expect(
+      runIn(
+        `const w = await desktop.window('w1'); await (await w.ref('${ref}')).press();`,
+        backend,
+        session
+      )
+    ).rejects.toThrow(/stale-ref/);
+    await expect(
+      runIn(
+        `const w = await desktop.window('w1'); const el = await w.find({ title: 'Save' }); await el[0].press(); return 1;`,
+        backend,
+        session
+      )
+    ).resolves.toMatchObject({ returnValue: 1 });
+  });
+
+  it('value 变化不算换了元素', async () => {
+    const backend = new FakeDesktopBackend();
+    const session = createComputerGuestSession();
+    const seen = await runIn(
+      `const w = await desktop.window('w1'); const [b] = await w.find({ title: 'Save' }); return b.ref;`,
+      backend,
+      session
+    );
+    backend.mutate(String(seen.returnValue), { value: 'typed' });
+    await expect(
+      runIn(
+        `const w = await desktop.window('w1'); await (await w.ref('${seen.returnValue}')).press(); return 1;`,
+        backend,
+        session
+      )
+    ).resolves.toMatchObject({ returnValue: 1 });
+  });
+
+  it('el.ax() 只展开该元素子树', async () => {
+    const backend = new FakeDesktopBackend();
+    const result = await runIn(
+      `const w = await desktop.window('w1');
+       const [root] = await w.find({ role: 'window' });
+       return await root.ax({ maxDepth: 2 });`,
+      backend
+    );
+    const text = String(result.returnValue);
+    expect(text.split('\n')[0]).toMatch(/^window \[ref=e\d+\] title="Settings"/);
+    expect(text).toMatch(/title="Save"/);
+    expect(backend.axRoots.at(-1)).toMatchObject({ maxDepth: 2 });
+  });
+});
+
 describe('被遮挡窗口的截图', () => {
   it('窗口整体被前面的窗口盖住时提示截图可能过期', async () => {
     const backend = new FakeDesktopBackend();

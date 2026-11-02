@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { formatAxTree, formatAxTreeDiff } from '@shared/computer/axTree';
-import { ReadOnlyError } from '@shared/computer/errors';
+import {
+  type AxFingerprint,
+  type AxTreeNode,
+  axFingerprint,
+  axFingerprintMismatch,
+  formatAxTree,
+  formatAxTreeDiff,
+} from '@shared/computer/axTree';
+import { ComputerError, ReadOnlyError, StaleRefError } from '@shared/computer/errors';
 import { type CaptureFrame, mapScreenshotPoint, pixelFingerprint } from '@shared/computer/frame';
 import { COORDINATE_SAFE_MAX_HEIGHT, COORDINATE_SAFE_MAX_WIDTH } from '@shared/computer/params';
 import { isReadOnlyAllowed } from '@shared/computer/readOnly';
@@ -42,6 +49,8 @@ export interface ComputerGuestSession {
   host?: GuestHostBridge;
   clock?: GuestClock;
   lastAx?: Map<string, string>;
+  /** ref → 模型最近一次在 ax/find/children 里见到的元素身份；动作前核对，防止复用元素点错 */
+  axSeen?: Map<string, AxFingerprint>;
   /** 被中止的 run 可能留下仍在执行的宿主调用；下一次 run 先等它落地 */
   inflight?: Promise<unknown>;
 }
@@ -226,6 +235,7 @@ function el(node) {
     click(opts) { return host('axClick', { ref: node.ref, ...(opts || {}) }); },
     focus() { return host('axFocus', { ref: node.ref }); },
     setValue(value) { return host('axSetValue', { ref: node.ref, value: String(value) }); },
+    ax(opts) { return host('ax', { ...(opts || {}), root: node.ref }); },
   };
 }
 function win(info) {
@@ -502,6 +512,30 @@ export async function runComputerGuest(input: {
   /** AX 写操作也要先过 app 授权与租约，但不接管桌面 */
   const accessRef = async (ref: string, delivery: Delivery = 'background') => {
     await withAccess({ ref, delivery });
+  };
+  const AX_SEEN_LIMIT = 4000;
+  const rememberAx = (nodes: Array<AxTreeNode | null | undefined>) => {
+    session.axSeen ??= new Map();
+    const seen = session.axSeen;
+    const visit = (node: AxTreeNode | null | undefined) => {
+      if (!node?.ref) return;
+      seen.delete(node.ref);
+      seen.set(node.ref, axFingerprint(node));
+      node.children?.forEach(visit);
+    };
+    nodes.forEach(visit);
+    for (const key of seen.keys()) {
+      if (seen.size <= AX_SEEN_LIMIT) break;
+      seen.delete(key);
+    }
+  };
+  /** 原生元素仍有效但已被复用成另一个控件（如表格行回收）时拒绝，要求重新观察 */
+  const verifyRef = async (ref: string): Promise<AxTreeNode> => {
+    const node = await input.backend.axNode(ref);
+    const was = session.axSeen?.get(ref);
+    const mismatch = was ? axFingerprintMismatch(was, axFingerprint(node)) : null;
+    if (mismatch) throw new StaleRefError(ref, mismatch);
+    return node;
   };
   const throwIfProtected = async (axText?: string) => {
     const listed = await input.backend.windows();
@@ -892,20 +926,26 @@ export async function runComputerGuest(input: {
         }
         case 'ax': {
           try {
-            const nodes = await input.backend.axSnapshot(String(args.target ?? ''), {
+            const root = typeof args.root === 'string' && args.root ? args.root : undefined;
+            const target = root
+              ? (input.backend.targetForRef?.(root) ?? String(args.target ?? ''))
+              : String(args.target ?? '');
+            const nodes = await input.backend.axSnapshot(target, {
               maxDepth: typeof args.maxDepth === 'number' ? args.maxDepth : undefined,
               all: args.all === true,
+              ...(root ? { root } : {}),
             });
+            rememberAx(nodes);
             const text =
               formatAxTree(nodes) ||
               (describeAxOutcome({ trusted: true, status: 0, nodeCount: 0 }) ?? '');
             await throwIfProtected(text);
-            const target = String(args.target ?? '');
             // 同一元素跨快照保持同一 ref，diff 省略的未变行仍可用旧 ref；仍只在显式要求时给 diff
             const disableDiff = args.diff !== true;
             session.lastAx ??= new Map();
-            const prev = session.lastAx.get(target);
-            session.lastAx.set(target, text);
+            const diffKey = root ? `${target}#${root}` : target;
+            const prev = session.lastAx.get(diffKey);
+            session.lastAx.set(diffKey, text);
             return !disableDiff && prev ? formatAxTreeDiff(prev, text) : text;
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -933,20 +973,29 @@ export async function runComputerGuest(input: {
             throw error;
           }
         }
-        case 'find':
-          return input.backend.axQuery(String(args.target ?? ''), {
+        case 'find': {
+          const found = await input.backend.axQuery(String(args.target ?? ''), {
             role: typeof args.role === 'string' ? args.role : undefined,
             title: typeof args.title === 'string' ? args.title : undefined,
             value: typeof args.value === 'string' ? args.value : undefined,
             description: typeof args.description === 'string' ? args.description : undefined,
             limit: typeof args.limit === 'number' ? args.limit : undefined,
           });
+          rememberAx(found);
+          return found;
+        }
         case 'ref':
-          return input.backend.axNode(String(args.ref ?? ''));
-        case 'elementAt':
-          return input.backend.axElementAt(Number(args.x), Number(args.y));
-        case 'focusedElement':
-          return input.backend.axFocused();
+          return verifyRef(String(args.ref ?? ''));
+        case 'elementAt': {
+          const hit = await input.backend.axElementAt(Number(args.x), Number(args.y));
+          rememberAx([hit]);
+          return hit;
+        }
+        case 'focusedElement': {
+          const focused = await input.backend.axFocused();
+          rememberAx([focused]);
+          return focused;
+        }
         case 'axBounds':
           return (await input.backend.axNode(String(args.ref ?? ''))).bounds ?? null;
         case 'axAttributes':
@@ -955,22 +1004,28 @@ export async function runComputerGuest(input: {
           const node = await input.backend.axNode(String(args.ref ?? ''));
           return node.actions ?? [];
         }
-        case 'axChildren':
-          return input.backend.axChildren(String(args.ref ?? ''));
+        case 'axChildren': {
+          const children = await input.backend.axChildren(String(args.ref ?? ''));
+          rememberAx(children);
+          return children;
+        }
         case 'axParent':
           return input.backend.axParent(String(args.ref ?? ''));
         case 'axPerform':
           await accessRef(String(args.ref ?? ''));
+          await verifyRef(String(args.ref ?? ''));
           await input.backend.axPerform(String(args.ref ?? ''), String(args.action ?? 'press'));
           await settle();
           return { ok: true };
         case 'axSetValue':
           await accessRef(String(args.ref ?? ''));
+          await verifyRef(String(args.ref ?? ''));
           await input.backend.axSetValue(String(args.ref ?? ''), String(args.value ?? ''));
           await settle();
           return { ok: true };
         case 'axFocus':
           await accessRef(String(args.ref ?? ''));
+          await verifyRef(String(args.ref ?? ''));
           await input.backend.axFocus(String(args.ref ?? ''));
           await settle();
           return { ok: true };
@@ -978,6 +1033,7 @@ export async function runComputerGuest(input: {
           const opts = pointerOpts(args, defaultDelivery);
           const ref = String(args.ref ?? '');
           await accessRef(ref, opts.delivery);
+          await verifyRef(ref);
           if (opts.delivery === 'foreground') {
             await withSynthetic(() => input.backend.axClick(ref, opts));
           } else {
@@ -1003,6 +1059,16 @@ export async function runComputerGuest(input: {
     };
 
     let idleRounds = 0;
+    /** 未捕获时按文案找回宿主错误的 code/retry，附在 run 失败信息上 */
+    const hostErrors = new Map<string, { code: string; retry?: string }>();
+    const withDisposition = (text: string): string => {
+      for (const [message, d] of hostErrors) {
+        if (text.endsWith(message)) {
+          return `${text} [code=${d.code}${d.retry ? ` retry=${d.retry}` : ''}]`;
+        }
+      }
+      return text;
+    };
     while (settled === undefined) {
       if (signal.aborted) throw abortError(signal);
       vm.executePendingJobs();
@@ -1033,7 +1099,13 @@ export async function runComputerGuest(input: {
         session.inflight = undefined;
         const message = error instanceof Error ? error.message : String(error);
         const name = error instanceof Error ? error.name : 'Error';
-        settleJob(job.id, false, { message, name });
+        let disposition = {};
+        if (error instanceof ComputerError) {
+          const d = { code: error.code, ...(error.retry ? { retry: error.retry } : {}) };
+          hostErrors.set(message, d);
+          disposition = d;
+        }
+        settleJob(job.id, false, { message, name, ...disposition });
       } finally {
         resume();
       }
@@ -1042,7 +1114,7 @@ export async function runComputerGuest(input: {
     clean = true;
 
     if (settled instanceof JSException) {
-      throw new Error(settled.message);
+      throw new Error(withDisposition(settled.message));
     }
     if (!settled) throw new Error('computer guest did not settle');
     if ('error' in settled) {
@@ -1051,7 +1123,7 @@ export async function runComputerGuest(input: {
           ? `${settled.error.name}: ${settled.error.message}`
           : String(vm.dump(settled.error));
       settled.error.dispose();
-      throw new Error(message);
+      throw new Error(withDisposition(message));
     }
     const returnValue = jsonClone(vm.dump(settled.value));
     settled.value.dispose();

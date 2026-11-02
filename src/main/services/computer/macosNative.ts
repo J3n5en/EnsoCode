@@ -83,6 +83,7 @@ export interface MacosNative {
   endInput(): Promise<void>;
   raise(windowId: string): Promise<void>;
   axSnapshot(target: string, maxDepth: number): Promise<AxTreeNode[]>;
+  axSubtree?(handle: string, maxDepth: number): Promise<AxTreeNode[]>;
   axQuery(
     target: string,
     query: { role?: string; title?: string; value?: string; description?: string; limit?: number }
@@ -1037,6 +1038,9 @@ async function load(): Promise<MacosNative | null> {
     },
     async axChildren(handle) {
       return (await axCall({ op: 'children', handle })) as AxTreeNode[];
+    },
+    async axSubtree(handle, maxDepth) {
+      return (await axCall({ op: 'subtree', handle, maxDepth })) as AxTreeNode[];
     },
     async axParent() {
       return null;

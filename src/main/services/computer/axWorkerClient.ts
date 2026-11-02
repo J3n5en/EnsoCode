@@ -8,6 +8,7 @@ export const AX_WORKER_EXITED = 'AX_WORKER_EXITED';
 
 export type AxWorkerRequest =
   | { op: 'snapshot'; pid: number; maxDepth: number }
+  | { op: 'subtree'; handle: string; maxDepth: number }
   | {
       op: 'query';
       pid: number;

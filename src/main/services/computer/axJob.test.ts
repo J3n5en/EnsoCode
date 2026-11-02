@@ -38,6 +38,24 @@ describe('dispatchAxJob', () => {
       dispatchAxJob(fakeBridge(), { op: 'perform', handle: 'ax9', action: 'press' })
     ).rejects.toThrow(/expired/);
   });
+
+  it('subtree 交给桥；桥不支持时报不支持', async () => {
+    const ax = fakeBridge({
+      subtree: async (handle, depth) => [{ ref: handle, role: `d${depth}` }],
+    });
+    await expect(dispatchAxJob(ax, { op: 'subtree', handle: 'ax1', maxDepth: 3 })).resolves.toEqual(
+      [{ ref: 'ax1', role: 'd3' }]
+    );
+    await expect(
+      dispatchAxJob(fakeBridge(), { op: 'subtree', handle: 'ax1', maxDepth: 3 })
+    ).rejects.toThrow(/not supported/);
+  });
+
+  it('未知 handle 的 expired 原样抛出（perform）', async () => {
+    await expect(
+      dispatchAxJob(fakeBridge(), { op: 'perform', handle: 'ax9', action: 'press' })
+    ).rejects.toThrow(/expired/);
+  });
 });
 
 describe('isAxPressUnsupported', () => {

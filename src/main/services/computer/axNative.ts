@@ -579,6 +579,11 @@ async function load(): Promise<AxJobBridge> {
         }
       });
     },
+    async subtree(handle, maxDepth) {
+      const element = handles.get(handle);
+      const at = handles.scopeOf(handle);
+      return [await walk(element, 0, maxDepth, Date.now(), { nodes: 0 }, at)];
+    },
     async query(pid, query) {
       const at = handles.begin(`pid:${pid}`);
       return withApp(pid, async (app) => {

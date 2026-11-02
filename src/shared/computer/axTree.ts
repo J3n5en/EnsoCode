@@ -61,6 +61,38 @@ export function axLineKey(line: string): string {
   return line.replace(/ \[ref=e\d+\]/g, '');
 }
 
+/** 模型见过的元素身份：value 会合法变化，不计入 */
+export interface AxFingerprint {
+  role: string;
+  title?: string;
+  description?: string;
+}
+
+export function axFingerprint(node: AxTreeNode): AxFingerprint {
+  return {
+    role: node.role,
+    title: node.title || undefined,
+    description: node.description || undefined,
+  };
+}
+
+function describeFingerprint(fp: AxFingerprint): string {
+  return `${fp.role}${fp.title ? ` "${fp.title}"` : ''}${fp.description ? ` (${fp.description})` : ''}`;
+}
+
+/** 同一原生元素被复用成另一个控件时返回说明；两侧都有的字段才比较（行标题可能只在快照里补出） */
+export function axFingerprintMismatch(was: AxFingerprint, now: AxFingerprint): string | null {
+  const differs = (a?: string, b?: string) => Boolean(a && b && a !== b);
+  if (
+    was.role !== now.role ||
+    differs(was.title, now.title) ||
+    differs(was.description, now.description)
+  ) {
+    return `now points to ${describeFingerprint(now)}, not ${describeFingerprint(was)} seen earlier`;
+  }
+  return null;
+}
+
 export function formatAxTreeDiff(previous: string, current: string): string {
   const prev = previous.split('\n').filter((line) => line.length > 0);
   const curr = current.split('\n').filter((line) => line.length > 0);

@@ -18,8 +18,9 @@ import { backgroundOpenArgs } from './appLaunch';
 import { AxEnablementRegistry } from './axEnablement';
 import { withAxErrors } from './axErrors';
 import { axPressFallbackMessage, isAxPressUnsupported } from './axJob';
-import { AX_SNAPSHOT_DEFAULT_DEPTH } from './axWalkBudget';
+import { AX_SNAPSHOT_DEFAULT_DEPTH, AX_SUBTREE_DEFAULT_DEPTH } from './axWalkBudget';
 import type {
+  AxSnapshotOptions,
   CaptureBytes,
   ClickOutcome,
   DesktopBackend,
@@ -584,8 +585,24 @@ export class MacosDesktopBackend implements DesktopBackend {
     if (pid) await this.ensureAx(native, pid).catch(() => undefined);
   }
 
-  async axSnapshot(target: string, opts?: { maxDepth?: number; all?: boolean }) {
+  async axSnapshot(target: string, opts?: AxSnapshotOptions) {
     const native = await this.requireNative('ax');
+    if (opts?.root) {
+      const root = opts.root;
+      const handle = this.registry.resolve(root);
+      const subtree = native.axSubtree?.bind(native);
+      if (!subtree) throw new ComputerError('unsupported', 'ax({ root }) is unavailable');
+      const nodes = await withAxErrors(
+        () => subtree(handle, opts.maxDepth ?? AX_SUBTREE_DEFAULT_DEPTH),
+        root
+      );
+      const adopt = (node: AxTreeNode): AxTreeNode => ({
+        ...node,
+        ref: this.registry.adopt(root, node.ref),
+        children: node.children?.map(adopt),
+      });
+      return nodes.map(adopt);
+    }
     await this.ensureAxForTarget(native, target);
     const generation = this.registry.beginSnapshot(target);
     // 超时由 axWorkerClient 负责（到点会终止 worker），这里不再叠一层 race
