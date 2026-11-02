@@ -46,4 +46,28 @@ describe('ShellFailureBar', () => {
       renderToStaticMarkup(createElement(ShellFailureBar, { failure: undefined, command: 'ls' }))
     ).toBe('');
   });
+
+  it('截止被杀：带「转后台重跑」「提高 timeout 重跑」两个动作', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShellFailureBar, {
+        failure: { kind: 'deadline', retryable: true },
+        command: 'pnpm test',
+      })
+    );
+    expect(html).toContain('data-shell-rerun="background"');
+    expect(html).toContain('data-shell-rerun="timeout"');
+    expect(html).toContain('Rerun in background');
+    expect(html).toContain('Rerun with 600s timeout');
+  });
+
+  it('需要终端：不给重跑动作，只有复制命令', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShellFailureBar, {
+        failure: { kind: 'tty_required', retryable: false },
+        command: 'sudo apt install x',
+      })
+    );
+    expect(html).not.toContain('data-shell-rerun');
+    expect(html).toContain('Copy command');
+  });
 });

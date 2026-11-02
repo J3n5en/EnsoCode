@@ -4,11 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import {
   quietDuration,
+  RERUN_TIMEOUT_SEC,
+  rerunActions,
+  rerunPrompt,
+  rerunViaComposer,
   SHELL_FAILURE_HINT_KEYS,
   SHELL_FAILURE_LABEL_KEYS,
   yieldCountdown,
 } from '@/lib/shellStatus';
 import { cn } from '@/lib/utils';
+import { insertComposerText, requestFocusComposer } from './composerMentionBridge';
 
 function useSecondTick(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -100,7 +105,10 @@ export function ShellFailureBadge({ failure }: { failure: ShellFailure }) {
   );
 }
 
-/** 终端输出底部的失败状态条：分类 + 用户下一步 + 复制命令（无重发机制，只给复制） */
+/**
+ * 终端输出底部的失败状态条：分类 + 用户下一步 + 动作。
+ * 截止被杀的命令给「转后台重跑」「提高 timeout 重跑」：把请求填进输入框由用户确认发送；其余只给复制命令。
+ */
 export function ShellFailureBar({
   failure,
   command,
@@ -112,6 +120,7 @@ export function ShellFailureBar({
   const [copied, setCopied] = useState(false);
   if (!failure) return null;
   const hint = SHELL_FAILURE_HINT_KEYS[failure.kind];
+  const actions = rerunActions(failure);
   return (
     <div
       data-shell-status={failure.kind}
@@ -119,6 +128,25 @@ export function ShellFailureBar({
     >
       <span className="shrink-0 font-medium">{failureLabel(failure, t)}</span>
       {hint && <span className="min-w-0 flex-1">{t(hint)}</span>}
+      {actions.map((action) => (
+        <button
+          key={action}
+          type="button"
+          data-shell-rerun={action}
+          onClick={() => {
+            rerunViaComposer(
+              rerunPrompt(action, command, t),
+              insertComposerText,
+              requestFocusComposer
+            );
+          }}
+          className="flex shrink-0 items-center gap-1 underline-offset-2 hover:underline hover:opacity-100"
+        >
+          {action === 'background'
+            ? t('Rerun in background')
+            : t('Rerun with {{seconds}}s timeout', { seconds: RERUN_TIMEOUT_SEC })}
+        </button>
+      ))}
       <button
         type="button"
         onClick={() => {

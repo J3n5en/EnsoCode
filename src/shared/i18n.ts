@@ -1868,6 +1868,12 @@ export const zhTranslations: Record<string, string> = {
     '需要凭证。请先在你自己的终端里登录，再重试。',
   'The program is not installed or not on PATH.': '程序未安装或不在 PATH 中。',
   'Copy command': '复制命令',
+  'Rerun in background': '转后台重跑',
+  'Rerun with {{seconds}}s timeout': '以 {{seconds}}s timeout 重跑',
+  'Rerun this command with background: true:\n\n{{command}}':
+    '用 background: true 重新运行这条命令：\n\n{{command}}',
+  'Rerun this command with timeout: {{seconds}}:\n\n{{command}}':
+    '用 timeout: {{seconds}} 重新运行这条命令：\n\n{{command}}',
   'Stop waiting': '不等了',
   'Stopping wait…': '正在结束等待…',
   'Writing reply…': '正在写回复…',
