@@ -105,6 +105,24 @@ describe('classifyFailure', () => {
     expect(result.retryable).toBe(false);
   });
 
+  it('程序缺失判 not_found；但 source 配置文件里的 command not found 不算', () => {
+    expect(classifyFailure({ exitCode: 127, tail: 'bash: pnpmx: command not found' }).kind).toBe(
+      'not_found'
+    );
+    expect(classifyFailure({ exitCode: 1, tail: 'bash: pnpmx: command not found' }).kind).toBe(
+      'not_found'
+    );
+    // 真实样本：source ~/.zshrc 在 bash 里加载失败，报的是配置文件里的命令不存在
+    const sourced = [
+      '/Users/john.doe/.zshrc: line 6: autoload: command not found',
+      '/Users/john.doe/.zshrc: line 10: compinit: command not found',
+      "Error: Oh My Zsh can't be loaded from: . You need to run zsh instead.",
+    ].join('\n');
+    expect(classifyFailure({ exitCode: 1, tail: sourced }).kind).toBe('exit_nonzero');
+    // 即便整体退出码是 127，只要全是配置文件噪音也不判程序缺失
+    expect(classifyFailure({ exitCode: 127, tail: sourced }).kind).toBe('exit_nonzero');
+  });
+
   it('只判输出尾部：tty 文本在长输出开头不命中', () => {
     const tail = `not a terminal\n${'x'.repeat(5000)}`;
     expect(classifyFailure({ exitCode: 1, tail }).kind).toBe('exit_nonzero');

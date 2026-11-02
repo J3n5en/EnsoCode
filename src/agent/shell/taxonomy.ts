@@ -61,6 +61,24 @@ const NOT_FOUND_PATTERNS: RegExp[] = [
   /is not recognized as (?:an internal or external command|the name of a cmdlet)/i,
 ];
 
+/**
+ * `source ~/.zshrc` 这类命令失败时，bash 会替被 source 的文件报
+ * `~/.zshrc: line 6: autoload: command not found` —— 那是配置文件里的命令在当前 shell 不存在，
+ * 不是我们调用的程序缺失。命中这些行不能判 not_found，否则会给模型错误的下一步（去查 PATH / 装包）。
+ */
+const SOURCED_CONFIG_LINE =
+  /\bline \d+:|(?:^|[\s/])\.(?:zshrc|zprofile|zlogin|bashrc|bash_profile|profile|kshrc)\b/i;
+
+/** 尾部存在「不是配置文件加载噪音」的 command-not-found 才算程序缺失 */
+function notFoundInTail(tail: string, exitCode: number | null | undefined): boolean {
+  const hit = tail
+    .split('\n')
+    .filter((line) => NOT_FOUND_PATTERNS.some((pattern) => pattern.test(line)))
+    .some((line) => !SOURCED_CONFIG_LINE.test(line));
+  if (hit) return true;
+  return exitCode === 127 && !SOURCED_CONFIG_LINE.test(tail);
+}
+
 /** 除 \t\n\r 与 ESC（ANSI 序列）外的控制字符，及解码失败的替换字符 */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: 判定二进制输出需要匹配控制字符
 const BINARY_CHAR = /[\u0000-\u0008\u000b\u000c\u000e-\u001a\u001c-\u001f\ufffd]/g;
@@ -112,7 +130,7 @@ export function classifyFailure(input: FailureInput): FailureVerdict {
         'This command needs credentials or a login that cannot be entered here. Ask the user to authenticate (or to provide a token through their existing config), then retry. Do not retry it unchanged.'
       );
     }
-    if (input.exitCode === 127 || NOT_FOUND_PATTERNS.some((pattern) => pattern.test(tail))) {
+    if (notFoundInTail(tail, input.exitCode)) {
       return verdict(
         'not_found',
         true,
