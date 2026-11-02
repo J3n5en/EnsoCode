@@ -11,8 +11,6 @@ export interface FailureInput {
   stoppedByUser?: boolean;
   /** 日志超限后未写入的字节数 */
   droppedBytes?: number;
-  /** 主进程退出后仍存活的子进程 */
-  leftoverPids?: readonly number[];
 }
 
 export interface FailureVerdict {
@@ -150,13 +148,6 @@ export function classifyFailure(input: FailureInput): FailureVerdict {
       'output_truncated',
       true,
       'The log stopped recording after reaching its size limit, so the end of the output is missing. Rerun with the output filtered (grep / tail) or redirected to a file if you need it.'
-    );
-  }
-  if (input.leftoverPids && input.leftoverPids.length > 0) {
-    return verdict(
-      'leftover_processes',
-      true,
-      `The command exited but left processes running (pids ${input.leftoverPids.join(', ')}). Stop them if they are not intended, or start long-lived processes with background: true.`
     );
   }
   return verdict('none', true, '');

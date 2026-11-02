@@ -319,7 +319,6 @@ export const SHELL_FAILURE_KINDS = [
   'not_found',
   'not_executable',
   'binary_output',
-  'leftover_processes',
   'output_truncated',
 ] as const;
 

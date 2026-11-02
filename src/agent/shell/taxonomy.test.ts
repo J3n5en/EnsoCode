@@ -1,3 +1,4 @@
+import { SHELL_FAILURE_KINDS } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import { classifyFailure } from './taxonomy';
 
@@ -122,13 +123,19 @@ describe('classifyFailure', () => {
     expect(classifyFailure({ exitCode: 0, tail: '\u001b[31mred\u001b[0m' }).kind).toBe('none');
   });
 
-  it('日志截断与残留进程是成功时的附加告警', () => {
+  it('日志截断是成功时的附加告警', () => {
     expect(classifyFailure({ exitCode: 0, tail: 'ok', droppedBytes: 10 }).kind).toBe(
       'output_truncated'
     );
-    expect(classifyFailure({ exitCode: 0, tail: 'ok', leftoverPids: [42] }).kind).toBe(
-      'leftover_processes'
-    );
+  });
+
+  it('不提供无法可靠探测的 leftover_processes 分类', () => {
+    expect(SHELL_FAILURE_KINDS).not.toContain('leftover_processes');
+    expect(
+      classifyFailure({ exitCode: 0, tail: 'ok', leftoverPids: [42] } as Parameters<
+        typeof classifyFailure
+      >[0]).kind
+    ).toBe('none');
   });
 
   it('普通非零退出 → exit_nonzero，可重试但提示别原样重跑', () => {

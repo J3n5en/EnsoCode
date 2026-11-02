@@ -31,7 +31,6 @@ export const SHELL_FAILURE_LABEL_KEYS: Record<ShellFailureKind, string> = {
   not_found: 'Command not found',
   not_executable: 'Not executable',
   binary_output: 'Binary output',
-  leftover_processes: 'Leftover processes',
   output_truncated: 'Log truncated',
 };
 

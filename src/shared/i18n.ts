@@ -1859,7 +1859,6 @@ export const zhTranslations: Record<string, string> = {
   'Command not found': '找不到命令',
   'Not executable': '不可执行',
   'Binary output': '二进制输出',
-  'Leftover processes': '残留进程',
   'Log truncated': '日志已截断',
   'Killed when its timeout was reached. Raise the timeout or run it in the background.':
     '到达 timeout 被终止。可提高 timeout 或改为后台运行。',
