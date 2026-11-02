@@ -38,6 +38,10 @@ const TTY_PATTERNS: readonly string[] = [
   'the input device is not a tty',
   'cannot open terminal',
   'terminal not fully functional',
+  // Factory 列表之外的补充：这些真实报错的措辞不含上面的子串，删掉就退化成普通非零退出
+  'a terminal is required',
+  'pseudo-terminal will not be allocated',
+  'input is not from a terminal',
 ];
 
 /** 需要认证：凭证 / 登录无法在这里输入（Factory 逆向列表，大小写不敏感子串） */

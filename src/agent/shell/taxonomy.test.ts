@@ -94,6 +94,17 @@ describe('classifyFailure', () => {
     );
   });
 
+  const ttyExtras = [
+    'sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper',
+    'Pseudo-terminal will not be allocated because stdin is not a terminal.',
+    'Input is not from a terminal, can not continue',
+  ];
+  it.each(ttyExtras)('需要终端（补充措辞）：%s', (tail) => {
+    const result = classifyFailure({ exitCode: 1, tail });
+    expect(result.kind).toBe('tty_required');
+    expect(result.retryable).toBe(false);
+  });
+
   it('只判输出尾部：tty 文本在长输出开头不命中', () => {
     const tail = `not a terminal\n${'x'.repeat(5000)}`;
     expect(classifyFailure({ exitCode: 1, tail }).kind).toBe('exit_nonzero');
