@@ -57,22 +57,30 @@ function attach(): RemoteBridgeFrame {
   };
 }
 
-function showStatus(text: string): void {
+const zh = navigator.language.toLowerCase().startsWith('zh');
+const TEXT = {
+  connecting: zh ? '正在连接节点…' : 'Connecting to node…',
+  loading: zh
+    ? '正在从节点加载设置，首次打开可能需要一些时间…'
+    : 'Loading settings from node. The first time may take a while…',
+  offline: zh ? '节点离线' : 'Node is offline',
+  outdated: zh ? '节点版本过旧，不支持远程设置' : 'Node does not support remote settings',
+};
+
+function showStatus(text: string, error = false): void {
   const el = document.getElementById('s');
-  if (el) el.textContent = text;
+  el?.classList.toggle('err', error);
+  const label = el?.querySelector('span');
+  if (label) label.textContent = text;
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  showStatus('Connecting…');
+  showStatus(TEXT.connecting);
   const init = (await ipcRenderer.invoke(IPC_CHANNELS.NODE_REMOTE_INIT)) as
     | { ok: true; platform: string }
     | { ok: false; error: string };
   if (!init.ok) {
-    showStatus(
-      init.error === 'offline'
-        ? '节点离线 / Node is offline'
-        : '节点版本过旧或不支持远程设置 / Node does not support remote settings'
-    );
+    showStatus(init.error === 'offline' ? TEXT.offline : TEXT.outdated, true);
     return;
   }
   const bridge: RemoteBridge = {
@@ -85,8 +93,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     exitDesk: () => {},
   };
   contextBridge.exposeInMainWorld('__ensoRemote', bridge);
-  document.getElementById('s')?.remove();
+  showStatus(TEXT.loading);
   const frame = document.createElement('iframe');
+  // 资源下完、页面跑起来后再露出，期间保留 loading
+  frame.addEventListener(
+    'load',
+    () => {
+      frame.classList.add('on');
+      setTimeout(() => document.getElementById('s')?.remove(), 200);
+    },
+    { once: true }
+  );
   frame.src = 'r/settings.html';
   document.body.append(frame);
 });

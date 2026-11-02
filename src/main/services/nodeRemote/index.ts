@@ -68,9 +68,15 @@ function fetchAsset(nodeId: string, path: string): Promise<NodeAsset> {
 }
 
 const SHELL_HTML = `<!doctype html><html><head><meta charset="utf-8">
-<style>html,body{margin:0;height:100%;overflow:hidden;font:13px system-ui;color:#888}
-iframe{border:0;width:100%;height:100%;display:block}#s{padding:24px}</style></head>
-<body><div id="s"></div></body></html>`;
+<meta name="color-scheme" content="light dark">
+<style>html,body{margin:0;height:100%;overflow:hidden;font:13px system-ui;color:#888;background:Canvas}
+iframe{position:absolute;inset:0;border:0;width:100%;height:100%;opacity:0;transition:opacity .2s}
+iframe.on{opacity:1}
+#s{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+#s i{width:20px;height:20px;border:2px solid #8884;border-top-color:#888;border-radius:50%;animation:r .8s linear infinite}
+#s.err i{display:none}
+@keyframes r{to{transform:rotate(360deg)}}</style></head>
+<body><div id="s"><i></i><span></span></div></body></html>`;
 
 /** scheme 特权与 local-image 在 localImageScheme.ts 一次登记（registerSchemesAsPrivileged 后调用会覆盖前者） */
 export function registerNodeSettingsProtocolHandler(): void {
