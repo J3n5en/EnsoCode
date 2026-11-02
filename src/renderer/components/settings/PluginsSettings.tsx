@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
+import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { PluginArtifactList } from '@/plugins/artifactViews';
@@ -447,7 +448,16 @@ function ExtensionPluginsSection() {
     setBusy(true);
     const result = await window.electronAPI.extensionPlugins.commit(preview.token);
     setBusy(false);
-    if (!result.ok) setError(result.error ?? t('Install failed'));
+    if (!result.ok) {
+      setError(result.error ?? t('Install failed'));
+    } else {
+      setUrl('');
+      addToast({
+        type: 'success',
+        title: t('{{name}} installed', { name: preview.name }),
+        description: t('Turn it on in the list below to use it.'),
+      });
+    }
     setPreview(null);
   };
 
