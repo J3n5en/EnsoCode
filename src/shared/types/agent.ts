@@ -535,9 +535,9 @@ export interface AgentControlWaitRequest {
   timeoutMs?: number;
 }
 
-/** 子代理阻塞等待：不写时限按默认，写了也不超过上限（与 task_output 阻塞上限一致） */
-export const AGENT_WAIT_DEFAULT_MS = 5 * 60 * 1000;
-export const AGENT_WAIT_MAX_MS = 10 * 60 * 1000;
+/** 子代理阻塞等待：不写时限按默认，写了也不超过上限。完成会自动通知，等待只用于下一步离不开结果时 */
+export const AGENT_WAIT_DEFAULT_MS = 30 * 1000;
+export const AGENT_WAIT_MAX_MS = 5 * 60 * 1000;
 
 export interface AgentControlListRequest {
   context: AgentControlContext;

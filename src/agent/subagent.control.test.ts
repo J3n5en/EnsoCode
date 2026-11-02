@@ -382,11 +382,11 @@ describe('unified subagent tool', () => {
     expect(properties).not.toHaveProperty('model');
   });
 
-  it('wait 超过上限的 timeoutMs 在 schema 校验前截到 10 分钟，不报错', async () => {
+  it('wait 超过上限的 timeoutMs 在 schema 校验前截到 5 分钟，不报错', async () => {
     const { tool, deps } = setup();
     expect(
       tool.prepareArguments?.({ operation: 'wait', runId: 'r', timeoutMs: 86_400_000 })
-    ).toEqual({ operation: 'wait', runId: 'r', timeoutMs: 600_000 });
+    ).toEqual({ operation: 'wait', runId: 'r', timeoutMs: 300_000 });
     await tool.execute(
       'call-clamp',
       { operation: 'wait', runId: 'r', timeoutMs: 3_600_000 },
@@ -395,8 +395,20 @@ describe('unified subagent tool', () => {
       {} as never
     );
     expect(deps.invoke).toHaveBeenCalledWith(
-      { operation: 'wait', runIds: ['r'], until: 'all', timeoutMs: 600_000 },
+      { operation: 'wait', runIds: ['r'], until: 'all', timeoutMs: 300_000 },
       undefined
+    );
+  });
+
+  it('wait 默认 30 秒、上限 5 分钟，描述与 schema 同源', () => {
+    const { tool } = setup();
+    const timeoutMs = (
+      tool.parameters as { properties: Record<string, { maximum?: number; description?: string }> }
+    ).properties.timeoutMs;
+    expect(timeoutMs.maximum).toBe(300_000);
+    expect(timeoutMs.description).toContain('Default 30000');
+    expect(tool.promptGuidelines?.join('\n')).toContain(
+      'wait defaults to 30 seconds and is capped at 5 minutes'
     );
   });
 

@@ -557,7 +557,7 @@ describe('AgentService wait bounds and completion notify', () => {
     vi.useRealTimers();
   });
 
-  it('不写时限的 wait 5 分钟后超时返回进度，Run 继续跑', async () => {
+  it('不写时限的 wait 30 秒后超时返回进度，Run 继续跑', async () => {
     vi.useFakeTimers();
     const { service, runtime, children } = setup({ now: () => Date.now() });
     const spawned = await service.spawn(spawnRequest({ name: '数据核对' }));
@@ -579,7 +579,7 @@ describe('AgentService wait bounds and completion notify', () => {
     void waiting.then(() => {
       settled = true;
     });
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 1);
+    await vi.advanceTimersByTimeAsync(30 * 1000 - 1);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await waiting).toMatchObject({
@@ -593,7 +593,7 @@ describe('AgentService wait bounds and completion notify', () => {
             runId: spawned.value.runId,
             title: '数据核对',
             status: 'running',
-            elapsedMs: 5 * 60 * 1000,
+            elapsedMs: 30 * 1000,
             activity: { phase: 'tool', tool: 'bash', detail: 'pnpm test' },
           },
         ],
@@ -602,7 +602,7 @@ describe('AgentService wait bounds and completion notify', () => {
     expect(runtime.stop).not.toHaveBeenCalled();
   });
 
-  it('超过上限的时限截到 10 分钟', async () => {
+  it('超过上限的时限截到 5 分钟', async () => {
     vi.useFakeTimers();
     const { service } = setup();
     const spawned = await service.spawn(spawnRequest());
@@ -617,7 +617,7 @@ describe('AgentService wait bounds and completion notify', () => {
     void waiting.then(() => {
       settled = true;
     });
-    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 - 1);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 1);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await waiting).toMatchObject({ ok: true, value: { timedOut: true } });
