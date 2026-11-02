@@ -212,8 +212,22 @@ describe('插件事件扩展', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('未声明 inject 的会话拒绝注入', () => {
+  it('主会话即使启动时没有声明 inject 也接收注入', () => {
     const { invoker, sendMessage } = harness(plan({ inject: false }));
+    expect(
+      invoker.deliver({
+        pluginId: 'example.demo',
+        pluginName: 'Demo',
+        text: 'hi',
+        deliverAs: 'nextTurn',
+        triggerTurn: false,
+      })
+    ).toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalled();
+  });
+
+  it('子会话不接收注入', () => {
+    const { invoker, sendMessage } = harness(plan({ inject: true }), { childSession: true });
     expect(
       invoker.deliver({
         pluginId: 'example.demo',

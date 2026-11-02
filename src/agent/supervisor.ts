@@ -2312,7 +2312,10 @@ export class SessionSupervisor {
       codemode: toolEnabled('isolated_sandbox'),
       deferredServers: deferredMcp,
     });
-    const pluginEventPlan = botMode ? undefined : pluginEvents;
+    // 非 Bot 会话即使启动时没有任何插件也挂上注入入口：插件可能在会话之后才启用
+    const pluginEventPlan = botMode
+      ? undefined
+      : (pluginEvents ?? { observe: [], intercept: [], inject: false });
     const pluginEventInvoker = pluginEventPlan
       ? new PluginEventInvoker(pluginEventPlan, (event) => {
           const managed = this.sessions.get(sessionId);

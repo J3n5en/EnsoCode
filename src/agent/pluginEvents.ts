@@ -145,7 +145,9 @@ export class PluginEventInvoker {
   }
 
   deliver(message: PluginInjectMessage): { ok: true } | { ok: false; error: string } {
-    if (!this.plan.inject) return { ok: false, error: '会话未声明注入' };
+    // 主会话一律接收：事件计划在会话启动时拍下，之后启用的插件也要能发进来。
+    // 能不能发由 Main 的权限门决定；子会话的注入仍不对它开放。
+    if (this.childSession) return { ok: false, error: '会话未声明注入' };
     if (!this.sender) return { ok: false, error: '会话未就绪' };
     try {
       this.sender(
