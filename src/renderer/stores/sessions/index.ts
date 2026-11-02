@@ -16,6 +16,7 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
   ApprovalMode,
@@ -534,11 +535,13 @@ function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
 function userMessageRawText(message: ProjectedMessage): string {
   if (message.role !== 'user') return '';
   return splitPlanPrefix(
+    splitUnattendedPrefix(
     message.content
       .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
       .map((part) => part.text)
       .join(' ')
       .trim()
+    ).rest
   ).rest;
 }
 

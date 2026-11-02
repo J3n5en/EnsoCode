@@ -15,6 +15,7 @@ import {
 } from '@shared/pair/headlessQueue';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { splitPlanPrefix } from '@shared/planMode';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import {
   hasLiveGenerationWork,
   nextStallWatchAction,
@@ -508,6 +509,7 @@ function titleFromFirstMessage(sessionId: string, content: ReadonlyArray<unknown
     return;
   }
   const raw = splitPlanPrefix(
+    splitUnattendedPrefix(
     content
       .flatMap((part) =>
         part && typeof part === 'object' && (part as { type?: unknown }).type === 'text'
@@ -516,6 +518,7 @@ function titleFromFirstMessage(sessionId: string, content: ReadonlyArray<unknown
       )
       .join(' ')
       .trim()
+    ).rest
   ).rest;
   if (!raw) return;
   const title = extractRepresentativeTitle(raw);

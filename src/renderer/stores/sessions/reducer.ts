@@ -1,4 +1,5 @@
 import { type PlanState, splitPlanPrefix } from '@shared/planMode';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { truncatedProjectionHead } from '@shared/projectedText';
 import {
   type AgentSessionCustomEntry,
@@ -57,7 +58,7 @@ const SKILL_BLOCK =
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 
 function stripRolePrefix(text: string): string {
-  const plain = splitPlanPrefix(text).rest;
+  const plain = splitPlanPrefix(splitUnattendedPrefix(text).rest).rest;
   const match = ROLE_PREFIX.exec(plain);
   return match ? plain.slice(match[0].length).trim() : plain;
 }

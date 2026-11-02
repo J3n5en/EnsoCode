@@ -4,6 +4,7 @@ import { stripBotNotesUpdate } from '@shared/bots/notes';
 import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
+import { type UnattendedNoteKind, splitUnattendedPrefix } from '@shared/unattendedNote';
 import type { MaskReport } from '@shared/privacyMask/report';
 import type {
   AgentRunProgress,
@@ -24,6 +25,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   Copy,
+  EyeOff,
   FilePlus,
   FileText,
   FolderOpen,
@@ -46,6 +48,7 @@ import {
   Target,
   TerminalSquare,
   Undo2,
+  UserRound,
   Workflow,
   Wrench,
 } from 'lucide-react';
@@ -295,6 +298,26 @@ function PlanNoteBanner({ note }: { note: PlanNoteKind }) {
           : note === 'off'
             ? t('Plan mode off')
             : t('Context compacted: the approved plan was attached again')}
+      </span>
+    </div>
+  );
+}
+
+/** 无人值守开关提示：worker 前置在用户消息之前，渲染成系统事件行 */
+function UnattendedNoteBanner({ note }: { note: UnattendedNoteKind }) {
+  const { t } = useI18n();
+  const on = note === 'on';
+  return (
+    <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+      {on ? (
+        <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      )}
+      <span className="min-w-0">
+        {on
+          ? t('Unattended mode on: no one is watching, so it decides and keeps going')
+          : t('Unattended mode off: a person is available again')}
       </span>
     </div>
   );
@@ -553,6 +576,18 @@ function UserText({
       <div className="flex w-full flex-col items-end gap-1.5">
         <PlanNoteBanner note={planPrefix.note} />
         {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
+      </div>
+    );
+  }
+  const unattended = splitUnattendedPrefix(text);
+  if (unattended.note) {
+    const remainder = unattended.rest.trim();
+    return (
+      <div className="flex w-full flex-col items-end gap-1.5">
+        <UnattendedNoteBanner note={unattended.note} />
+        {remainder && (
+          <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />
+        )}
       </div>
     );
   }

@@ -46,6 +46,7 @@ import {
   splitPlanPrefix,
   withPlanNote,
 } from '@shared/planMode';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import {
   type MaskReport,
   mergeMaskReports,
@@ -5669,7 +5670,7 @@ export function runGateCommand(cwd: string, gate: string, executor?: SshExecutor
 
 /** 回退回填输入框：去掉 Plan 提示前缀；批准消息不回填，修改意见只回填意见原文 */
 function planFreeEditorText(text: string): string {
-  const rest = splitPlanPrefix(text).rest;
+  const rest = splitPlanPrefix(splitUnattendedPrefix(text).rest).rest;
   const message = parsePlanMessage(rest);
   return message ? (message.kind === 'feedback' ? message.feedback : '') : rest;
 }

@@ -1936,6 +1936,9 @@ export const zhTranslations: Record<string, string> = {
   'Plan mode on: read-only research, then a plan for your approval':
     '已进入 Plan 模式：只读调研，产出计划交你审批',
   'Plan mode off': '已退出 Plan 模式',
+  'Unattended mode on: no one is watching, so it decides and keeps going':
+    '已开启无人值守：没人在看，它会自己决定并继续',
+  'Unattended mode off: a person is available again': '已关闭无人值守：可以再问你了',
   'Context compacted: the approved plan was attached again': '上下文已压缩，已重新附上执行中的计划',
   'Plan approved, executing': '已批准计划，开始执行',
   'Plan feedback': '计划修改意见',

@@ -1,4 +1,5 @@
 import { PASTED_TEXT_FILE_NAME, stripPastedTextRefs } from './pastedText';
+import { splitUnattendedPrefix } from './unattendedNote';
 import { parseWorkflowPresetMessage } from './workflowPresetMessage';
 
 export const INLINE_CHAT_REF =
@@ -16,7 +17,7 @@ const CONTINUATION_LINE = /^(?:从这里继续|继续|continue(?:\s+here)?)\s*[:
 
 /** 清洗送给标题总结模型的输入文本：剥离内部引用块与跳转引导词，返回纯净的用户自然语言或被引标题 */
 export function cleanTitleSummarySource(text: string): string {
-  const trimmed = stripPastedTextRefs(text).trim();
+  const trimmed = stripPastedTextRefs(splitUnattendedPrefix(text).rest).trim();
   if (!trimmed) return '';
 
   const chatLabels: string[] = [];
@@ -52,9 +53,10 @@ export function cleanTitleSummarySource(text: string): string {
  * 引用块折叠成 @标题；空则兜底 '[image]'。
  */
 export function extractRepresentativeTitle(text: string): string {
-  const workflow = parseWorkflowPresetMessage(text);
+  const visible = splitUnattendedPrefix(text).rest;
+  const workflow = parseWorkflowPresetMessage(visible);
   if (workflow) return workflow.name.slice(0, 40);
-  const withoutPasted = stripPastedTextRefs(text);
+  const withoutPasted = stripPastedTextRefs(visible);
   const displayed = mentionDisplayText(withoutPasted);
   const lines = displayed
     .split('\n')
