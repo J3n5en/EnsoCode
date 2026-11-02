@@ -306,6 +306,9 @@ export interface BackgroundTaskInfo {
   exitCode?: number;
 }
 
+/** 前台命令连续无新输出达到此时长即在时间线标「静默」（agent 让位与渲染层徽章同源） */
+export const SHELL_QUIET_MS = 15_000;
+
 /** 下发 worker 的 subagent 类型配置（model 由 main 补全 apiKey） */
 export interface AgentTypeSpawnConfig {
   name: string;
