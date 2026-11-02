@@ -432,9 +432,10 @@ function InlineMentionText({
   activeNth?: number;
 }) {
   const segments = splitInlineMentions(text);
+  const mentions = segments.filter((segment) => segment.type !== 'text').length;
   const counter = { n: 0 };
   return (
-    <span className="whitespace-pre-wrap">
+    <span className="flex flex-col items-start gap-1.5">
       {segments.map((segment, index) =>
         segment.type === 'file' ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: 同一文件可重复提及，分段随文本快照整体替换
@@ -462,12 +463,13 @@ function InlineMentionText({
             title={`${segment.path}${segment.text ? ` · ${segment.text}` : ''}`}
           />
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
-          <span key={index}>
-            {searchQuery.trim()
-              ? renderHighlighted(segment.text, searchQuery, activeNth, counter)
-              : segment.text}
-          </span>
+          <Markdown
+            // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
+            key={index}
+            text={segment.text}
+            searchQuery={searchQuery}
+            activeNth={activeNth - (mentions > 0 ? counter.n : 0)}
+          />
         )
       )}
     </span>
