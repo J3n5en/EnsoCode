@@ -79,8 +79,8 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => {
-  service.dispose();
+afterEach(async () => {
+  await service.dispose();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -90,7 +90,7 @@ async function installExample(name: string): Promise<string> {
   expect(staged.preview.warnings).toEqual([]);
   const committed = await service.commit(staged.preview.token);
   if (!committed.ok) throw new Error(committed.error);
-  expect(service.setEnabled(staged.preview.id, true).ok).toBe(true);
+  expect((await service.setEnabled(staged.preview.id, true)).ok).toBe(true);
   return staged.preview.id;
 }
 
@@ -299,7 +299,7 @@ describe('示例插件', () => {
         ],
       ]);
 
-      service.setConfig(id, { server: 'other' });
+      await service.setConfig(id, { server: 'other' });
       mcpCall.mockClear();
       await expect(enhance(id, 'x')).resolves.toEqual({
         ok: true,

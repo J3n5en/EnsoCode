@@ -5,6 +5,7 @@ import {
   parseConfigPatch,
   parsePickPathKind,
   readPluginArtifact,
+  readPluginAsset,
   savePluginArtifact,
   setPluginConfig,
   setPluginViewState,
@@ -60,6 +61,26 @@ describe('插件 IPC 入参', () => {
     ).toMatchObject({ ok: false });
     expect(readPath).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('资源先看大小，超限不读取', async () => {
+    const readFile = vi.fn(async () => Buffer.from('hi'));
+    await expect(
+      readPluginAsset('/plugin/ui.js', async () => ({ size: 9 * 1024 * 1024 }), readFile)
+    ).resolves.toEqual({ ok: false, error: '资源过大' });
+    expect(readFile).not.toHaveBeenCalled();
+
+    await expect(
+      readPluginAsset(
+        '/plugin/ui.js',
+        async () => ({ size: 2 }),
+        async () => Buffer.from('hi')
+      )
+    ).resolves.toEqual({
+      ok: true,
+      mime: 'text/javascript',
+      base64: Buffer.from('hi').toString('base64'),
+    });
   });
 
   it('产出读取只跟服务返回的路径走，超限不回 base64', () => {
@@ -136,14 +157,16 @@ describe('插件 IPC 入参', () => {
     expect(parsePickPathKind('/tmp')).toBeNull();
   });
 
-  it('配置写入把收窄后的补丁交给服务', () => {
-    const set = vi.fn(() => ({ ok: true }));
-    expect(setPluginConfig({ setConfig: set }, 'enso.example.notes', { n: 1, on: true })).toEqual({
+  it('配置写入把收窄后的补丁交给服务', async () => {
+    const set = vi.fn(async () => ({ ok: true }));
+    expect(
+      await setPluginConfig({ setConfig: set }, 'enso.example.notes', { n: 1, on: true })
+    ).toEqual({
       ok: true,
     });
     expect(set).toHaveBeenCalledWith('enso.example.notes', { n: 1, on: true });
-    expect(setPluginConfig({ setConfig: set }, 'enso.example.notes', { n: { bad: true } }).ok).toBe(
-      false
-    );
+    expect(
+      (await setPluginConfig({ setConfig: set }, 'enso.example.notes', { n: { bad: true } })).ok
+    ).toBe(false);
   });
 });

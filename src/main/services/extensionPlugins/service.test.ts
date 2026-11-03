@@ -111,7 +111,7 @@ describe('ExtensionPluginService', () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     expect(service.list()[0]).toMatchObject({ id: 'example.demo', state: 'disabled' });
     expect(service.toolsForSpawn()).toEqual([]);
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     expect(service.toolsForSpawn()).toEqual([
       {
         name: 'plugin_example-demo__lookup',
@@ -125,7 +125,7 @@ describe('ExtensionPluginService', () => {
 
   it('调用插件工具：会话 id 由 Main 传入', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const result = await service.callTool({
       toolName: 'plugin_example-demo__lookup',
       args: { q: 'x' },
@@ -164,7 +164,7 @@ describe('ExtensionPluginService', () => {
 
   it('更新扩大授权时挂起，旧版本继续可用；同意后切换', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const preview = await service.stage({
       kind: 'dir',
       path: writePlugin({
@@ -184,7 +184,7 @@ describe('ExtensionPluginService', () => {
       pendingVersion: '2.0.0',
       state: 'enabled',
     });
-    service.approvePending('example.demo');
+    await service.approvePending('example.demo');
     expect(service.list()[0]).toMatchObject({ version: '2.0.0', state: 'enabled' });
     expect(service.list()[0]?.pendingVersion).toBeUndefined();
   });
@@ -200,7 +200,7 @@ describe('ExtensionPluginService', () => {
 
   it('10 分钟内非预期退出 3 次即标记崩溃停用', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     for (let i = 0; i < 3; i++) service.recordCrash('example.demo');
     expect(service.list()[0]?.state).toBe('crashed');
     expect(service.toolsForSpawn()).toEqual([]);
@@ -294,7 +294,7 @@ describe('ExtensionPluginService', () => {
       expect(fetch).toHaveBeenCalledWith(probe, expect.anything());
       expect(svc.list()[0]).toMatchObject({ availableVersion: '1.2.0' });
       expect(svc.list()[0]?.updateCheckError).toBeUndefined();
-      expect(changed).toHaveBeenCalled();
+      await vi.waitFor(() => expect(changed).toHaveBeenCalled());
     });
 
     it('远端版本不更高、本地目录来源都不提示', async () => {
@@ -328,7 +328,7 @@ describe('ExtensionPluginService', () => {
         available: 0,
         failed: 0,
       });
-      svc.setEnabled('example.demo', true);
+      await svc.setEnabled('example.demo', true);
       expect(await svc.checkUpdates({ enabledOnly: true })).toMatchObject({ available: 1 });
       svc.dispose();
     });
@@ -374,36 +374,38 @@ describe('ExtensionPluginService', () => {
 
     it('处理器异常进日志，最近错误出现在列表里', async () => {
       await install({ 'enso-plugin.json': withCommand(), 'main.mjs': noisy });
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       const call = { pluginId: 'example.demo', sessionId: null, projectRoot: null } as const;
       await expect(
         service.callUi({ ...call, method: 'command.run', payload: { id: 'bad' } })
       ).rejects.toThrow('kaput');
-      await vi.waitFor(() => expect(service.logs('example.demo')).toContain('kaput'));
+      await vi.waitFor(async () => {
+        expect(await service.logs('example.demo')).toContain('kaput');
+      });
       expect(service.list()[0]?.lastError?.message).toContain('kaput');
     });
 
     it('崩溃停用时把原因写进登记，重启后仍可见；重新启用清掉', async () => {
       await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       service.recordError('example.demo', 'segfault');
       for (let i = 0; i < 3; i++) service.recordCrash('example.demo');
       expect(readRegistry(root).plugins[0]?.lastError?.message).toBe('segfault');
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       expect(service.list()[0]?.lastError).toBeUndefined();
       expect(readRegistry(root).plugins[0]?.lastError).toBeUndefined();
     });
 
     it('日志只返回末尾，卸载时删除', async () => {
       await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
-      for (let i = 0; i < 2000; i++)
-        service.appendLog('example.demo', 'info', `line-${i}-${'x'.repeat(40)}`);
-      const tail = service.logs('example.demo', 4096);
+      for (let i = 0; i < 80; i++)
+        service.appendLog('example.demo', 'info', `line-${i}-${'x'.repeat(80)}`);
+      const tail = await service.logs('example.demo', 4096);
       expect(tail.length).toBeLessThanOrEqual(4096);
-      expect(tail).toContain('line-1999');
+      expect(tail).toContain('line-79');
       expect(tail).not.toContain('line-0-');
       await service.uninstall('example.demo');
-      expect(service.logs('example.demo')).toBe('');
+      expect(await service.logs('example.demo')).toBe('');
     });
   });
 
@@ -441,7 +443,7 @@ describe('ExtensionPluginService', () => {
     });
     expect(service.skillPathsForSpawn()).toEqual([]);
     expect(service.mcpServersForSpawn()).toEqual([]);
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const [skill] = service.skillPathsForSpawn();
     expect(skill?.endsWith('skills/demo')).toBe(true);
     const [server] = service.mcpServersForSpawn();
@@ -495,7 +497,7 @@ describe('ExtensionPluginService', () => {
       'prompts/boost.md': 'boost',
       'prompts/retry.md': 'retry',
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const ends = (paths: string[], name: string) => paths.some((path) => path.endsWith(name));
     expect(ends(service.skillPathsForSpawn(), 'skills/always')).toBe(true);
     expect(ends(service.skillPathsForSpawn(), 'skills/review')).toBe(false);
@@ -557,7 +559,7 @@ describe('ExtensionPluginService', () => {
       expect(service.agentTypesForSpawn()).toEqual([]);
       expect(names()).toEqual([]);
 
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       const [reviewer, worker] = service.agentTypesForSpawn();
       expect(reviewer).toMatchObject({
         pluginId: 'example.demo',
@@ -573,10 +575,10 @@ describe('ExtensionPluginService', () => {
       expect(merged.map((t) => t.name)).toEqual(['demo:reviewer', 'worker-x']);
       expect(merged[0]?.pluginSkillPaths).toEqual(reviewer?.skillPaths);
 
-      service.setEnabled('example.demo', false);
+      await service.setEnabled('example.demo', false);
       expect(names()).toEqual([]);
 
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       expect(names()).toEqual(['demo:reviewer', 'worker-x']);
       await service.uninstall('example.demo');
       expect(names()).toEqual([]);
@@ -584,11 +586,17 @@ describe('ExtensionPluginService', () => {
 
     it('正文读不出的类型跳过并记日志；被重名丢弃的类型记一次日志', async () => {
       await install(files());
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       const pkg = service.agentTypesForSpawn()[0]?.skillPaths[0]?.replace(/skills\/review$/, '');
       rmSync(join(pkg as string, 'agents', 'worker.md'));
+      expect(service.agentTypesForSpawn().map((t) => t.name)).toEqual([
+        'demo:reviewer',
+        'worker-x',
+      ]);
+      const refreshed = await service.restage('example.demo');
+      if (!refreshed.ok) throw new Error(refreshed.error);
       expect(service.agentTypesForSpawn().map((t) => t.name)).toEqual(['demo:reviewer']);
-      expect(service.logs('example.demo')).toContain('worker-x');
+      expect(await service.logs('example.demo')).toContain('worker-x');
 
       setNativeAgentTypeSource(service.agentTypeSource());
       const user = {
@@ -600,8 +608,7 @@ describe('ExtensionPluginService', () => {
       };
       withPluginAgentTypes([user], undefined, noClaude);
       withPluginAgentTypes([user], undefined, noClaude);
-      const hits = service
-        .logs('example.demo')
+      const hits = (await service.logs('example.demo'))
         .split('\n')
         .filter((l) => l.includes('同名'));
       expect(hits).toHaveLength(1);
@@ -614,7 +621,7 @@ describe('ExtensionPluginService', () => {
       'enso-plugin.json': manifest(),
       'main.mjs': `export function activate(enso) { enso.tools.register('lookup', async (args, ctx) => String(ctx.projectRoot)); }`,
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     await expect(
       service.callTool({
         toolName: 'plugin_example-demo__lookup',
@@ -640,7 +647,9 @@ describe('ExtensionPluginService', () => {
 
     it('停用状态也能配置；密钥不回显，只告诉界面是否已设置', async () => {
       await install({ 'enso-plugin.json': configManifest(), 'main.mjs': readsConfig });
-      expect(service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' })).toEqual({
+      expect(
+        await service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' })
+      ).toEqual({
         ok: true,
       });
       expect(service.configView('example.demo')).toEqual({
@@ -671,8 +680,8 @@ describe('ExtensionPluginService', () => {
 
     it('插件进程经 config.get 读到完整配置', async () => {
       await install({ 'enso-plugin.json': configManifest(), 'main.mjs': readsConfig });
-      service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' });
-      service.setEnabled('example.demo', true);
+      await service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' });
+      await service.setEnabled('example.demo', true);
       const result = await service.callTool({
         toolName: 'plugin_example-demo__lookup',
         args: {},
@@ -684,22 +693,855 @@ describe('ExtensionPluginService', () => {
 
     it('省略的键保持不变，null 清除；未知键与过长值拒绝', async () => {
       await install({ 'enso-plugin.json': configManifest(), 'main.mjs': readsConfig });
-      service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' });
-      service.setConfig('example.demo', { baseUrl: 'https://y' });
+      await service.setConfig('example.demo', { baseUrl: 'https://x', token: 'sk-1' });
+      await service.setConfig('example.demo', { baseUrl: 'https://y' });
       expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://y', token: 'sk-1' });
-      service.setConfig('example.demo', { token: null });
+      await service.setConfig('example.demo', { token: null });
       expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://y' });
-      expect(service.setConfig('example.demo', { other: 'x' }).ok).toBe(false);
-      expect(service.setConfig('example.demo', { baseUrl: 'x'.repeat(5000) }).ok).toBe(false);
-      expect(service.setConfig('missing.plugin', { baseUrl: 'x' }).ok).toBe(false);
+      expect((await service.setConfig('example.demo', { other: 'x' })).ok).toBe(false);
+      expect((await service.setConfig('example.demo', { baseUrl: 'x'.repeat(5000) })).ok).toBe(
+        false
+      );
+      expect((await service.setConfig('missing.plugin', { baseUrl: 'x' })).ok).toBe(false);
     });
 
     it('卸载时删除配置文件', async () => {
       await install({ 'enso-plugin.json': configManifest(), 'main.mjs': readsConfig });
-      service.setConfig('example.demo', { token: 'sk-1' });
+      await service.setConfig('example.demo', { token: 'sk-1' });
       await service.uninstall('example.demo');
       expect(existsSync(join(root, 'config', 'example.demo.json'))).toBe(false);
     });
+  });
+});
+
+class HoldChild extends EventEmitter {
+  pid = 1;
+  private handler: (m: unknown) => void = () => {};
+  postMessage(m: unknown) {
+    queueMicrotask(() => {
+      this.handler(m);
+      if (typeof m === 'object' && m !== null && (m as { t?: string }).t === 'shutdown')
+        this.emit('exit', 0);
+    });
+  }
+  kill() {
+    queueMicrotask(() => this.emit('exit', 0));
+    return true;
+  }
+  start() {
+    runPluginHost({
+      send: (m) => queueMicrotask(() => this.emit('message', m)),
+      onMessage: (h) => {
+        this.handler = h;
+      },
+    });
+    queueMicrotask(() => this.emit('spawn'));
+  }
+}
+
+class ExitOnSpawn extends EventEmitter {
+  pid = 1;
+  postMessage(): void {}
+  kill(): boolean {
+    return true;
+  }
+  constructor() {
+    super();
+    queueMicrotask(() => {
+      this.emit('spawn');
+      this.emit('exit', 1);
+    });
+  }
+}
+
+const gate = {
+  fetch: vi.fn(),
+  notify: () => true,
+  composer: async () => null,
+  mcpTools: async () => [],
+  mcpCall: async () => ({ content: '', isError: false }),
+  now: () => Date.now(),
+};
+
+function bootService(dir: string, fork: () => unknown) {
+  return new ExtensionPluginService({
+    root: dir,
+    hostVersion: '0.2.12',
+    hostPath: '/unused',
+    env: {},
+    fork: fork as never,
+    gate,
+  });
+}
+
+async function stageCommit(svc: ExtensionPluginService, files: Record<string, string>) {
+  const preview = await svc.stage({ kind: 'dir', path: writePlugin(files) });
+  if (!preview.ok) throw new Error(preview.error);
+  const committed = await svc.commit(preview.preview.token);
+  if (!committed.ok) throw new Error(committed.error);
+  return preview.preview;
+}
+
+describe('插件运行期收敛', () => {
+  const obs = () =>
+    ((globalThis as { __ensoObs?: { hits: unknown[]; wait: Promise<void> | null } }).__ensoObs ??= {
+      hits: [],
+      wait: null,
+    });
+
+  afterEach(() => {
+    delete (globalThis as { __ensoObs?: unknown }).__ensoObs;
+  });
+
+  it('变更通知合并为一次，安静约 150ms 后才推给界面', async () => {
+    await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    const changed = vi.fn();
+    service.onChange(changed);
+    await service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', false);
+    await service.setEnabled('example.demo', true);
+    expect(changed).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+  });
+
+  it('非常驻且进程没在跑时不投递通知；在跑或常驻则投递', async () => {
+    const dir = temp('observe-');
+    let forks = 0;
+    const svc = bootService(dir, () => {
+      forks += 1;
+      return new InProcessChild();
+    });
+    const observeMain = `export function activate(enso) {
+      enso.tools.register('lookup', async () => 'ok');
+      enso.events.on('session_start', (data) => { globalThis.__ensoObs.hits.push(data.reason); });
+    }`;
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'session_start', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': observeMain,
+    });
+    await svc.setEnabled('example.demo', true);
+    const parked = forks;
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(forks).toBe(parked);
+    expect(obs().hits).toEqual([]);
+    await svc.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    await svc.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await vi.waitFor(() => expect(obs().hits).toEqual(['startup']));
+    expect(forks).toBe(parked + 1);
+
+    const residentDir = temp('resident-');
+    let residentForks = 0;
+    const resident = bootService(residentDir, () => {
+      residentForks += 1;
+      return new InProcessChild();
+    });
+    obs().hits = [];
+    await stageCommit(resident, {
+      'enso-plugin.json': manifest({
+        id: 'example.resident',
+        name: 'Resident',
+        resident: true,
+        permissions: ['agent.observe', 'process.background'],
+        contributes: { events: [{ event: 'session_start', mode: 'observe' }] },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.events.on('session_start', (data) => { globalThis.__ensoObs.hits.push(data.reason); });
+      }`,
+    });
+    await resident.setEnabled('example.resident', true);
+    const before = residentForks;
+    await resident.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await vi.waitFor(() => expect(obs().hits).toEqual(['startup']));
+    expect(residentForks).toBe(before + 1);
+  });
+
+  it('同一插件同一通知事件同时只投递一次，后来的只保留最新一条', async () => {
+    const dir = temp('coalesce-');
+    const svc = bootService(dir, () => new InProcessChild());
+    let release: (() => void) | undefined;
+    obs().wait = new Promise((resolve) => {
+      release = resolve;
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'tool_result', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async () => 'ok');
+        enso.events.on('tool_result', async (data) => {
+          const gate = globalThis.__ensoObs.wait;
+          globalThis.__ensoObs.hits.push(data.seq);
+          if (gate) await gate;
+        });
+      }`,
+    });
+    await svc.setEnabled('example.demo', true);
+    await svc.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    const send = (seq: number) =>
+      svc.dispatchEvent({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_result',
+        data: { seq },
+      });
+    void send(1);
+    await vi.waitFor(() => expect(obs().hits).toEqual([1]));
+    void send(2);
+    void send(3);
+    obs().wait = null;
+    release?.();
+    await vi.waitFor(() => expect(obs().hits).toEqual([1, 3]));
+  });
+
+  it('生命周期通知按会话顺序进入有界队列，不同会话和子代理互不覆盖', async () => {
+    const dir = temp('lane-');
+    const svc = bootService(dir, () => new InProcessChild());
+    let release: (() => void) | undefined;
+    obs().wait = new Promise((resolve) => {
+      release = resolve;
+    });
+    const agent = (name: string) => ({
+      kind: 'subagent' as const,
+      sessionId: `s::${name}`,
+      name,
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'session_end', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async () => 'ok');
+        enso.events.on('session_end', async (data, ctx) => {
+          globalThis.__ensoObs.hits.push('end:' + data.reason + ':' + (ctx.agent?.name ?? data.sessionId));
+          const gate = globalThis.__ensoObs.wait;
+          if (gate) await gate;
+        });
+      }`,
+    });
+    await svc.setEnabled('example.demo', true);
+    await svc.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    const end = (sessionId: string, reason: string, child?: ReturnType<typeof agent>) =>
+      svc.dispatchEvent({
+        sessionId,
+        projectRoot: null,
+        event: 'session_end',
+        data: { reason, sessionId },
+        ...(child ? { agent: child } : {}),
+      });
+    void end('s', '1');
+    await vi.waitFor(() => expect(obs().hits).toEqual(['end:1:s']));
+    void end('s', '2');
+    void end('s', '3');
+    void end('other', '9');
+    void end('s', 'child-a', agent('alpha'));
+    void end('s', 'child-b', agent('beta'));
+    for (let n = 4; n <= 36; n++) void end('s', String(n));
+    obs().wait = null;
+    release?.();
+    await vi.waitFor(() => expect(obs().hits).toContain('end:36:s'));
+    const ends = obs().hits.filter(
+      (hit): hit is string => typeof hit === 'string' && hit.startsWith('end:')
+    );
+    expect(ends).toContain('end:1:s');
+    expect(ends).toContain('end:10:s');
+    expect(ends).toContain('end:9:other');
+    expect(ends).toContain('end:child-a:alpha');
+    expect(ends).toContain('end:child-b:beta');
+    expect(ends).not.toContain('end:2:s');
+    const sameSession = ends.filter((hit) => /^end:\d+:s$/.test(hit));
+    expect(sameSession).toEqual(
+      [...sameSession].sort((a, b) => Number(a.split(':')[1]) - Number(b.split(':')[1]))
+    );
+  });
+
+  it('tool_result 只在同一会话内合并，别的会话仍会送达', async () => {
+    const dir = temp('coalesce-session-');
+    const svc = bootService(dir, () => new InProcessChild());
+    let release: (() => void) | undefined;
+    obs().wait = new Promise((resolve) => {
+      release = resolve;
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'tool_result', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) {
+        enso.tools.register('lookup', async () => 'ok');
+        enso.events.on('tool_result', async (data) => {
+          globalThis.__ensoObs.hits.push(data.seq + ':' + data.sessionId);
+          const gate = globalThis.__ensoObs.wait;
+          if (gate) await gate;
+        });
+      }`,
+    });
+    await svc.setEnabled('example.demo', true);
+    await svc.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's',
+      projectRoot: null,
+    });
+    const send = (sessionId: string, seq: number) =>
+      svc.dispatchEvent({
+        sessionId,
+        projectRoot: null,
+        event: 'tool_result',
+        data: { seq, sessionId },
+      });
+    void send('s', 1);
+    await vi.waitFor(() => expect(obs().hits).toEqual(['1:s']));
+    void send('s', 2);
+    void send('s', 3);
+    void send('other', 7);
+    obs().wait = null;
+    release?.();
+    await vi.waitFor(() => expect(obs().hits).toContain('7:other'));
+    expect(obs().hits).toContain('3:s');
+    expect(obs().hits).not.toContain('2:s');
+  });
+
+  it('dispose 后不再通知监听方，常驻插件的排队通知也不会再拉起进程', async () => {
+    const dir = temp('dispose-obs-');
+    let forks = 0;
+    const svc = bootService(dir, () => {
+      forks += 1;
+      return new InProcessChild();
+    });
+    let release: (() => void) | undefined;
+    obs().wait = new Promise((resolve) => {
+      release = resolve;
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        id: 'example.resident',
+        name: 'Resident',
+        resident: true,
+        permissions: ['agent.tool', 'agent.observe', 'process.background'],
+        contributes: {
+          dynamic: { tools: 1 },
+          events: [{ event: 'session_end', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export async function activate(enso) {
+        await enso.tools.register('extra', async () => 'x', {
+          description: 'extra',
+          parameters: { type: 'object' },
+        });
+        enso.events.on('session_end', async (data) => {
+          globalThis.__ensoObs.hits.push(data.reason);
+          const gate = globalThis.__ensoObs.wait;
+          if (gate) await gate;
+        });
+      }`,
+    });
+    const changed = vi.fn();
+    svc.onChange(changed);
+    await svc.setEnabled('example.resident', true);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    changed.mockClear();
+    const send = (reason: string) =>
+      svc.dispatchEvent({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'session_end',
+        data: { reason },
+      });
+    void send('first');
+    await vi.waitFor(() => expect(obs().hits).toEqual(['first']));
+    const forksAfterStart = forks;
+    changed.mockClear();
+    void send('second');
+    await svc.dispose();
+    obs().wait = null;
+    release?.();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(changed).not.toHaveBeenCalled();
+    expect(forks).toBe(forksAfterStart);
+    expect(obs().hits).not.toContain('second');
+  });
+
+  it('进程退出后动态工具会重新拉起再查找，没注册才是 NOT_FOUND', async () => {
+    const dir = temp('dyn-');
+    const kids: InProcessChild[] = [];
+    const svc = bootService(dir, () => {
+      const child = new InProcessChild();
+      kids.push(child);
+      return child;
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          dynamic: { tools: 2 },
+        },
+      }),
+      'main.mjs': `export async function activate(enso) {
+        enso.tools.register('lookup', async () => 'static');
+        await enso.tools.register('extra', async () => 'dyn', {
+          description: 'extra',
+          parameters: { type: 'object' },
+        });
+      }`,
+    });
+    await svc.setEnabled('example.demo', true);
+    const call = (name: string) =>
+      svc.callTool({
+        toolName: name,
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      });
+    await expect(call('plugin_example-demo__extra')).resolves.toMatchObject({ content: 'dyn' });
+    const forks = kids.length;
+    kids.at(-1)?.emit('exit', 1);
+    await expect(call('plugin_example-demo__extra')).resolves.toMatchObject({ content: 'dyn' });
+    expect(kids.length).toBe(forks + 1);
+    await expect(call('plugin_example-demo__missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    const plainDir = temp('plain-');
+    let plainForks = 0;
+    const plain = bootService(plainDir, () => {
+      plainForks += 1;
+      return new InProcessChild();
+    });
+    await stageCommit(plain, { 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    await plain.setEnabled('example.demo', true);
+    const afterInstall = plainForks;
+    await expect(
+      plain.callTool({
+        toolName: 'plugin_example-demo__missing',
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      })
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(plainForks).toBe(afterInstall);
+  });
+
+  it('同一次初始化失败只记一次崩溃，两次失败不会熔断', async () => {
+    const dir = temp('crash-');
+    let spawned = 0;
+    const svc = bootService(dir, () => {
+      spawned += 1;
+      return (spawned === 1 ? new InProcessChild() : new ExitOnSpawn()) as never;
+    });
+    await stageCommit(svc, { 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    await svc.setEnabled('example.demo', true);
+    const call = () =>
+      svc.callTool({
+        toolName: 'plugin_example-demo__lookup',
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      });
+    await expect(call()).rejects.toBeTruthy();
+    await expect(call()).rejects.toBeTruthy();
+    expect(svc.list()[0]?.state).toBe('enabled');
+    await expect(call()).rejects.toBeTruthy();
+    expect(svc.list()[0]?.state).toBe('crashed');
+  });
+
+  it('拉起动态工具失败会被记住并计入崩溃，重新启用或 restage 后才再试', async () => {
+    const dir = temp('prepare-');
+    const src = writePlugin({
+      'enso-plugin.json': manifest({
+        contributes: {
+          dynamic: { tools: 1 },
+        },
+      }),
+      'main.mjs': 'export function activate() {}',
+    });
+    let spawned = 0;
+    const svc = bootService(dir, () => {
+      spawned += 1;
+      return (spawned === 1 ? new InProcessChild() : new ExitOnSpawn()) as never;
+    });
+    const staged = await svc.stage({ kind: 'dir', path: src });
+    if (!staged.ok) throw new Error(staged.error);
+    const committed = await svc.commit(staged.preview.token);
+    if (!committed.ok) throw new Error(committed.error);
+    await svc.setEnabled('example.demo', true);
+    const afterInstall = spawned;
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(afterInstall + 1);
+    expect(svc.list()[0]?.state).toBe('enabled');
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(afterInstall + 1);
+    await svc.setEnabled('example.demo', false);
+    await svc.setEnabled('example.demo', true);
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(afterInstall + 2);
+    await svc.restage('example.demo');
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(afterInstall + 3);
+    expect(svc.list()[0]?.state).toBe('crashed');
+  });
+
+  it('动态工具冷启动超时不计崩溃，就绪后清掉失败缓存', async () => {
+    const dir = temp('prepare-slow-');
+    const children: HoldChild[] = [];
+    let spawned = 0;
+    let fast = false;
+    const svc = new ExtensionPluginService({
+      root: dir,
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      prepareTimeoutMs: 30,
+      fork: (() => {
+        spawned += 1;
+        if (spawned === 1 || fast) return new InProcessChild();
+        const child = new HoldChild();
+        children.push(child);
+        return child;
+      }) as never,
+      gate,
+    });
+    await stageCommit(svc, {
+      'enso-plugin.json': manifest({
+        contributes: { dynamic: { tools: 1 } },
+      }),
+      'main.mjs': `export async function activate(enso) {
+        await enso.tools.register('extra', async () => 'dyn', {
+          description: 'extra',
+          parameters: { type: 'object' },
+        });
+      }`,
+    });
+    await svc.setEnabled('example.demo', true);
+    const hasExtra = () => svc.toolsForSpawn().some((tool) => tool.name.endsWith('extra'));
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) {
+        await svc.setEnabled('example.demo', false);
+        await svc.setEnabled('example.demo', true);
+      }
+      await svc.prepareForSpawn();
+      expect(svc.list()[0]?.state).toBe('enabled');
+      children[i]?.start();
+      await vi.waitFor(() => expect(hasExtra()).toBe(true));
+    }
+    const running = children[2];
+    if (!running) throw new Error('no child');
+    const before = spawned;
+    running.emit('exit', 1);
+    await vi.waitFor(() => expect(hasExtra()).toBe(false));
+    fast = true;
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(before + 1);
+    await vi.waitFor(() => expect(hasExtra()).toBe(true));
+    expect(svc.list()[0]?.state).toBe('enabled');
+  });
+
+  it('提交试加载未完成时卸载会等待，登记不会指向已删除的目录', async () => {
+    const dir = temp('lock-');
+    const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    let holdNext = false;
+    let hold: HoldChild | null = null;
+    const svc = bootService(dir, () => {
+      if (!holdNext) return new InProcessChild();
+      hold = new HoldChild();
+      return hold;
+    });
+    const first = await svc.stage({ kind: 'dir', path: src });
+    if (!first.ok) throw new Error(first.error);
+    const committed = await svc.commit(first.preview.token);
+    if (!committed.ok) throw new Error(committed.error);
+    writeFileSync(join(src, 'enso-plugin.json'), manifest({ version: '1.1.0' }));
+    const again = await svc.stage({ kind: 'dir', path: src });
+    if (!again.ok) throw new Error(again.error);
+    holdNext = true;
+    const committing = svc.commit(again.preview.token);
+    await vi.waitFor(() => expect(hold).not.toBeNull());
+    let uninstallDone = false;
+    const uninstalling = svc.uninstall('example.demo').then((result) => {
+      uninstallDone = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(uninstallDone).toBe(false);
+    expect(readRegistry(dir).plugins).toHaveLength(1);
+    (hold as HoldChild | null)?.start();
+    await expect(committing).resolves.toMatchObject({ ok: true });
+    await expect(uninstalling).resolves.toMatchObject({ ok: true });
+    expect(readRegistry(dir).plugins).toEqual([]);
+    expect(existsSync(join(dir, 'packages', 'example.demo'))).toBe(false);
+  });
+
+  it('启用、改配置和拒绝更新会等到同一插件的提交结束', async () => {
+    const dir = temp('lock-admin-');
+    const withConfig = (patch: Record<string, unknown> = {}) =>
+      manifest({
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          configuration: [{ key: 'baseUrl', title: '地址' }],
+        },
+        ...patch,
+      });
+    const src = writePlugin({ 'enso-plugin.json': withConfig(), 'main.mjs': mainJs });
+    let holdNext = false;
+    let hold: HoldChild | null = null;
+    const svc = bootService(dir, () => {
+      if (!holdNext) return new InProcessChild();
+      hold = new HoldChild();
+      return hold;
+    });
+    const first = await svc.stage({ kind: 'dir', path: src });
+    if (!first.ok) throw new Error(first.error);
+    const committed = await svc.commit(first.preview.token);
+    if (!committed.ok) throw new Error(committed.error);
+    await Promise.resolve(svc.setEnabled('example.demo', true));
+    writeFileSync(
+      join(src, 'enso-plugin.json'),
+      withConfig({
+        version: '2.0.0',
+        permissions: ['agent.tool', 'net.fetch'],
+        net: { domains: ['api.example.com'] },
+      })
+    );
+    const again = await svc.stage({ kind: 'dir', path: src });
+    if (!again.ok) throw new Error(again.error);
+    holdNext = true;
+    const committing = svc.commit(again.preview.token);
+    await vi.waitFor(() => expect(hold).not.toBeNull());
+    let enabledDone = false;
+    const enabling = Promise.resolve(svc.setEnabled('example.demo', false)).then((result) => {
+      enabledDone = true;
+      return result;
+    });
+    let configDone = false;
+    const configuring = svc
+      .setConfig('example.demo', { baseUrl: 'https://locked.example' })
+      .then((result) => {
+        configDone = true;
+        return result;
+      });
+    let rejectDone = false;
+    const rejecting = Promise.resolve(svc.rejectPending('example.demo')).then((result) => {
+      rejectDone = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(enabledDone).toBe(false);
+    expect(configDone).toBe(false);
+    expect(rejectDone).toBe(false);
+    expect(readRegistry(dir).plugins[0]?.state).toBe('enabled');
+    expect(existsSync(join(dir, 'config', 'example.demo.json'))).toBe(false);
+    (hold as HoldChild | null)?.start();
+    await expect(committing).resolves.toMatchObject({ ok: true });
+    await expect(enabling).resolves.toMatchObject({ ok: true });
+    await expect(configuring).resolves.toMatchObject({ ok: true });
+    await expect(rejecting).resolves.toMatchObject({ ok: true });
+    expect(readRegistry(dir).plugins[0]).toMatchObject({ version: '1.0.0', state: 'disabled' });
+    expect(readRegistry(dir).plugins[0]?.pending).toBeUndefined();
+    expect(svc.configValues('example.demo')).toEqual({ baseUrl: 'https://locked.example' });
+  });
+
+  it('同意待授权更新也会等到提交结束', async () => {
+    const dir = temp('lock-approve-');
+    const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    let holdNext = false;
+    let hold: HoldChild | null = null;
+    const svc = bootService(dir, () => {
+      if (!holdNext) return new InProcessChild();
+      hold = new HoldChild();
+      return hold;
+    });
+    const first = await svc.stage({ kind: 'dir', path: src });
+    if (!first.ok) throw new Error(first.error);
+    if (!(await svc.commit(first.preview.token)).ok) throw new Error('commit');
+    writeFileSync(
+      join(src, 'enso-plugin.json'),
+      manifest({
+        version: '2.0.0',
+        permissions: ['agent.tool', 'net.fetch'],
+        net: { domains: ['api.example.com'] },
+      })
+    );
+    const again = await svc.stage({ kind: 'dir', path: src });
+    if (!again.ok) throw new Error(again.error);
+    holdNext = true;
+    const committing = svc.commit(again.preview.token);
+    await vi.waitFor(() => expect(hold).not.toBeNull());
+    let approved = false;
+    const approving = Promise.resolve(svc.approvePending('example.demo')).then((result) => {
+      approved = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(approved).toBe(false);
+    expect(readRegistry(dir).plugins[0]?.version).toBe('1.0.0');
+    (hold as HoldChild | null)?.start();
+    await expect(committing).resolves.toMatchObject({ ok: true });
+    await expect(approving).resolves.toMatchObject({ ok: true });
+    expect(readRegistry(dir).plugins[0]?.version).toBe('2.0.0');
+    expect(readRegistry(dir).plugins[0]?.pending).toBeUndefined();
+  });
+
+  it('拒绝待授权更新时清掉清单、正文和失败缓存', async () => {
+    const dir = temp('reject-cache-');
+    let failPrepare = false;
+    let spawned = 0;
+    const svc = bootService(dir, () => {
+      spawned += 1;
+      return (failPrepare ? new ExitOnSpawn() : new InProcessChild()) as never;
+    });
+    const body = (version: string, expands: boolean) =>
+      manifest({
+        version,
+        ...(expands
+          ? { permissions: ['agent.tool', 'net.fetch'], net: { domains: ['api.example.com'] } }
+          : {}),
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          dynamic: { tools: 1 },
+          agentTypes: [
+            { name: 'demo:reviewer', description: '审查', systemPrompt: 'agents/reviewer.md' },
+          ],
+        },
+      });
+    const src = writePlugin({
+      'enso-plugin.json': body('1.0.0', false),
+      'main.mjs': `export async function activate(enso) {
+        enso.tools.register('lookup', async () => 'ok');
+        await enso.tools.register('extra', async () => 'dyn', {
+          description: 'extra',
+          parameters: { type: 'object' },
+        });
+      }`,
+      'agents/reviewer.md': 'version-one',
+    });
+    const staged = await svc.stage({ kind: 'dir', path: src });
+    if (!staged.ok) throw new Error(staged.error);
+    if (!(await svc.commit(staged.preview.token)).ok) throw new Error('commit');
+    await svc.setEnabled('example.demo', true);
+    expect(svc.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-one');
+    writeFileSync(join(src, 'agents/reviewer.md'), 'version-pending');
+    writeFileSync(join(src, 'enso-plugin.json'), body('2.0.0', true));
+    const again = await svc.stage({ kind: 'dir', path: src });
+    if (!again.ok) throw new Error(again.error);
+    if (!(await svc.commit(again.preview.token)).ok) throw new Error('update');
+    const record = readRegistry(dir).plugins[0];
+    const pendingDir = record?.pending?.dir;
+    if (!record || !pendingDir) throw new Error('no pending');
+    expect(svc.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-one');
+    writeFileSync(
+      join(dir, 'packages', 'example.demo', record.dir, 'agents', 'reviewer.md'),
+      'version-two'
+    );
+    expect(svc.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-one');
+    failPrepare = true;
+    const before = spawned;
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(before + 1);
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(before + 1);
+    await svc.rejectPending('example.demo');
+    expect(existsSync(join(dir, 'packages', 'example.demo', pendingDir))).toBe(false);
+    expect(svc.list()[0]?.pendingVersion).toBeUndefined();
+    expect(svc.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-two');
+    failPrepare = false;
+    await svc.prepareForSpawn();
+    expect(spawned).toBe(before + 2);
+  });
+
+  it('清单、正文和配置按 id 与目录缓存，写配置或 restage 后失效', async () => {
+    await install({
+      'enso-plugin.json': manifest({
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          agentTypes: [
+            {
+              name: 'demo:reviewer',
+              description: '审查',
+              systemPrompt: 'agents/reviewer.md',
+            },
+          ],
+          configuration: [{ key: 'baseUrl', title: '地址' }],
+        },
+      }),
+      'main.mjs': mainJs,
+      'agents/reviewer.md': 'version-one',
+    });
+    await service.setEnabled('example.demo', true);
+    expect(service.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-one');
+    const record = readRegistry(root).plugins[0];
+    if (!record) throw new Error('no record');
+    const prompt = join(root, 'packages', 'example.demo', record.dir, 'agents', 'reviewer.md');
+    writeFileSync(prompt, 'version-two');
+    expect(service.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-one');
+    expect((await service.setConfig('example.demo', { baseUrl: 'https://old' })).ok).toBe(true);
+    expect(service.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-two');
+    expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://old' });
+    writeFileSync(
+      join(root, 'config', 'example.demo.json'),
+      JSON.stringify({ baseUrl: 'https://new' })
+    );
+    expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://old' });
+    const again = await service.restage('example.demo');
+    if (!again.ok) throw new Error(again.error);
+    expect(service.configValues('example.demo')).toEqual({ baseUrl: 'https://new' });
+    expect(service.agentTypesForSpawn()[0]?.systemPrompt).toBe('version-two');
+
+    const dropped = await service.restage('example.demo');
+    if (!dropped.ok) throw new Error(dropped.error);
+    const manifestPath = join(root, 'packages', 'example.demo', record.dir, 'enso-plugin.json');
+    const raw = readFileSync(manifestPath, 'utf8');
+    rmSync(manifestPath);
+    expect(service.list().map((item) => item.id)).toEqual([]);
+    writeFileSync(manifestPath, raw);
+    expect(service.list().map((item) => item.id)).toEqual([]);
+    const revived = await service.restage('example.demo');
+    if (!revived.ok) throw new Error(revived.error);
+    expect(service.list().map((item) => item.id)).toEqual(['example.demo']);
   });
 });
 
@@ -752,7 +1594,7 @@ describe('丢弃的登记记录', () => {
   const all = { pkg: true, data: true, config: true, log: true };
   const none = { pkg: false, data: false, config: false, log: false };
 
-  it('只清理读到并决定丢弃的 id（含日志），没登记的目录只记日志不删', () => {
+  it('只清理读到并决定丢弃的 id（含日志），没登记的目录只记日志不删', async () => {
     const root = temp('plugins-root-');
     seed(root, ['old.one', 'stray.dir']);
     writeFileSync(
@@ -763,7 +1605,7 @@ describe('丢弃的登记记录', () => {
     expect(service.registryNotice()).toEqual({ discarded: ['old.one'] });
     expect(has(root, 'old.one')).toEqual(none);
     expect(has(root, 'stray.dir')).toEqual(all);
-    expect(service.logs('extension-plugins')).toContain('stray.dir');
+    expect(await service.logs('extension-plugins')).toContain('stray.dir');
     expect(readRegistry(root)).toMatchObject({ version: 2, plugins: [], discarded: [] });
   });
 
@@ -791,7 +1633,7 @@ describe('丢弃的登记记录', () => {
     ['不是 JSON', '{ not json'],
     ['plugins 不是数组', JSON.stringify({ version: 2, plugins: null })],
     ['不是对象', '[]'],
-  ])('登记表读不出（%s）时不删任何文件、不覆盖原文件，另存原文并提示', (_label, raw) => {
+  ])('登记表读不出（%s）时不删任何文件、不覆盖原文件，另存原文并提示', async (_label, raw) => {
     const root = temp('plugins-root-');
     seed(root, ['a.demo']);
     writeFileSync(join(root, 'registry.json'), raw);
@@ -800,7 +1642,7 @@ describe('丢弃的登记记录', () => {
     expect(readFileSync(join(root, 'registry.json'), 'utf8')).toBe(raw);
     expect(readFileSync(join(root, 'registry.json.unreadable'), 'utf8')).toBe(raw);
     expect(service.registryNotice()).toEqual({ discarded: [], unreadable: true });
-    expect(service.logs('extension-plugins')).toContain('登记表读取失败');
+    expect(await service.logs('extension-plugins')).toContain('登记表读取失败');
   });
 
   it('登记表读不出后又安装了插件，下次启动也不会把原来的包当成孤儿删掉', async () => {
@@ -840,7 +1682,7 @@ describe('丢弃的登记记录', () => {
     if (!staged.ok) throw new Error(staged.error);
     await service.commit(staged.preview.token);
     const first = readFileSync(join(root, 'registry.json'), 'utf8');
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     expect(readFileSync(join(root, 'registry.json.bak'), 'utf8')).toBe(first);
   });
 });

@@ -5,6 +5,8 @@ export interface ExtensionPluginSummary {
   id: string;
   name: string;
   version: string;
+  /** 安装代号：每次安装、重装、restage 都会变，界面据此判断要不要重载 ui.js */
+  build: string;
   description: string;
   /** 图片相对路径，渲染层经 asset 通道取 */
   icon?: string;

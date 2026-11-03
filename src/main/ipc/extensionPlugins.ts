@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { ipcMain } from '@platform';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
@@ -127,6 +128,26 @@ export function readPluginArtifact(
   }
 }
 
+export async function readPluginAsset(
+  path: string,
+  statFile: (path: string) => Promise<{ size: number }>,
+  read: (path: string) => Promise<Buffer>
+): Promise<{ ok: true; mime: string; base64: string } | { ok: false; error: string }> {
+  try {
+    const info = await statFile(path);
+    if (info.size > MAX_ASSET_BYTES) return { ok: false, error: '资源过大' };
+    const bytes = await read(path);
+    if (bytes.byteLength > MAX_ASSET_BYTES) return { ok: false, error: '资源过大' };
+    return {
+      ok: true,
+      mime: MIME[extname(path).toLowerCase()] ?? 'application/octet-stream',
+      base64: bytes.toString('base64'),
+    };
+  } catch {
+    return { ok: false, error: '资源读取失败' };
+  }
+}
+
 export function deletePluginArtifact(
   plugins: { deleteArtifact(id: string): boolean },
   id: unknown
@@ -161,16 +182,16 @@ export function setPluginViewState(
   return plugins.viewStateSet(id, parsed);
 }
 
-export function setPluginConfig(
+export async function setPluginConfig(
   plugins: {
     setConfig(
       id: string,
       patch: Record<string, string | number | boolean | null>
-    ): { ok: boolean; error?: string };
+    ): Promise<{ ok: boolean; error?: string }>;
   },
   id: unknown,
   patch: unknown
-): { ok: boolean; error?: string } {
+): Promise<{ ok: boolean; error?: string }> {
   if (!isId(id)) return { ok: false, error: '参数不合法' };
   const parsed = parseConfigPatch(patch);
   if (!parsed) return { ok: false, error: '参数不合法' };
@@ -311,7 +332,9 @@ export function registerExtensionPluginHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LOGS, (_e, id: unknown) => {
     if (!isId(id)) return { ok: false, error: '参数不合法' };
-    return { ok: true, text: plugins().logs(id) };
+    return plugins()
+      .logs(id)
+      .then((text) => ({ ok: true as const, text }));
   });
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_CALL, async (e, raw: unknown) => {
@@ -344,22 +367,19 @@ export function registerExtensionPluginHandlers(): void {
     return { ok: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_ASSET, (_e, pluginId: unknown, rel: unknown) => {
-    if (!isId(pluginId) || typeof rel !== 'string') return { ok: false, error: '参数不合法' };
-    const path = plugins().assetPath(pluginId, rel);
-    if (!path) return { ok: false, error: '资源不存在' };
-    try {
-      const bytes = readFileSync(path);
-      if (bytes.byteLength > MAX_ASSET_BYTES) return { ok: false, error: '资源过大' };
-      return {
-        ok: true,
-        mime: MIME[extname(path).toLowerCase()] ?? 'application/octet-stream',
-        base64: bytes.toString('base64'),
-      };
-    } catch {
-      return { ok: false, error: '资源读取失败' };
+  ipcMain.handle(
+    IPC_CHANNELS.EXTENSION_PLUGINS_ASSET,
+    async (_e, pluginId: unknown, rel: unknown) => {
+      if (!isId(pluginId) || typeof rel !== 'string') return { ok: false, error: '参数不合法' };
+      const path = plugins().assetPath(pluginId, rel);
+      if (!path) return { ok: false, error: '资源不存在' };
+      return readPluginAsset(
+        path,
+        (file) => stat(file),
+        (file) => readFile(file)
+      );
     }
-  });
+  );
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_ARTIFACTS_LIST, (_e, pluginId: unknown) =>
     listPluginArtifacts(plugins(), pluginId)

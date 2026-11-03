@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
-  appendFileSync,
-  closeSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
-  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -82,6 +78,7 @@ import {
   stagePlugin,
 } from './install';
 import { applyPluginAction, type PluginAction, type PluginRecord } from './lifecycle';
+import { DEFAULT_LOG_TAIL_BYTES, PluginLogger } from './log';
 import { marketIconUrl, type PluginMarket } from './market';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
 import {
@@ -102,6 +99,7 @@ const UI_TIMEOUT_MS = 2_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const SCHEDULE_TIMEOUT_MS = 60_000;
 const PREPARE_TIMEOUT_MS = 5_000;
+const CHANGE_DEBOUNCE_MS = 150;
 const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 
 const INTERCEPT_BREAKER_FAILURES = 3;
@@ -128,8 +126,6 @@ const BREAKER_FAILURES = 5;
 const BREAKER_COOLDOWN_MS = 30_000;
 const MAX_CONFIG_VALUE_CHARS = 4096;
 const MAX_PRESET_TEXT_BYTES = 256 * 1024;
-const MAX_LOG_BYTES = 1024 * 1024;
-const DEFAULT_LOG_TAIL_BYTES = 64 * 1024;
 const MAX_ERROR_CHARS = 2000;
 const UPDATE_CHECK_TIMEOUT_MS = 15_000;
 const UPDATE_CHECK_FIRST_DELAY_MS = 60_000;
@@ -171,6 +167,8 @@ export interface ExtensionPluginServiceOptions {
   fork(modulePath: string, args: string[], options: WorkerForkOptions): WorkerProcess;
   gate: Omit<GateDeps, 'manifest' | 'config'>;
   market?: PluginMarket;
+  /** 拉起动态工具时单个插件的等待上限，测试可缩短 */
+  prepareTimeoutMs?: number;
 }
 
 export type UiCallMethod = Exclude<PluginCallMethod, 'tool.execute'>;
@@ -194,6 +192,22 @@ interface Loaded {
   manifest: ExtensionPluginManifest;
 }
 
+interface ObserveJob {
+  sessionId: string;
+  projectRoot: string | null;
+  data: unknown;
+  agent?: PluginAgentSource;
+}
+
+interface ObserveLane {
+  running: boolean;
+  queue: ObserveJob[];
+}
+
+/** 高频且可丢：进行中只保留最新一条。其余通知按顺序排队 */
+const OBSERVE_COALESCE_EVENTS = new Set<PluginEventName>(['context_usage', 'tool_result']);
+const OBSERVE_QUEUE_LIMIT = 32;
+
 const within = (parent: string, child: string) => {
   const rel = relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -202,7 +216,14 @@ const within = (parent: string, child: string) => {
 export class ExtensionPluginService {
   readonly gate: PluginHostGate;
   private records: PluginRecord[];
-  private readonly loaded = new Map<string, Loaded>();
+  private readonly loaded = new Map<string, Loaded | null>();
+  private readonly textCache = new Map<string, { ok: true; content: string } | { ok: false }>();
+  private readonly configCache = new Map<string, Record<string, ConfigValue>>();
+  private readonly prepareFailed = new Set<string>();
+  private readonly countedSpawns = new WeakSet<Promise<unknown>>();
+  private readonly lastSpawn = new WeakMap<PluginProcess, Promise<unknown>>();
+  private readonly idTails = new Map<string, Promise<void>>();
+  private readonly observeLanes = new Map<string, ObserveLane>();
   private readonly processes = new Map<string, PluginProcess>();
   private readonly staged = new Map<
     string,
@@ -217,6 +238,8 @@ export class ExtensionPluginService {
     { stamps: number[]; failures: number; openUntil: number }
   >();
   private readonly listeners = new Set<() => void>();
+  private changeTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly logger: PluginLogger;
   /** 检查更新的结果，只在内存；装上不低于该版本的包后清掉 */
   private readonly updates = new Map<string, { version?: string; error?: string }>();
   private updateTimer: NodeJS.Timeout | null = null;
@@ -231,6 +254,7 @@ export class ExtensionPluginService {
   private readonly trialCounts = new Map<string, { tools: number; commands: number }>();
   private background = false;
   private disposed: Promise<void> | null = null;
+  private isDisposed = false;
   private readonly starting = new Set<string>();
   private readonly residentTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly restartGen = new Map<string, number>();
@@ -246,6 +270,7 @@ export class ExtensionPluginService {
 
   constructor(private readonly options: ExtensionPluginServiceOptions) {
     this.artifacts = new ArtifactStore(options.root);
+    this.logger = new PluginLogger(options.root);
     this.viewState = new ViewStateStore(options.root);
     const registry = readRegistry(options.root);
     this.records = registry.plugins;
@@ -295,6 +320,7 @@ export class ExtensionPluginService {
           id: record.id,
           name: manifest.name,
           version: record.version,
+          build: record.dir,
           description: manifest.description,
           ...(manifest.icon ? { icon: manifest.icon } : {}),
           state: record.state,
@@ -465,14 +491,18 @@ export class ExtensionPluginService {
 
   /** 从记录的安装来源重新暂存；之后和普通更新一样确认、按授权是否扩大分流 */
   async restage(id: string) {
-    const source = this.records.find((r) => r.id === id)?.source;
-    if (!source) return { ok: false as const, error: '没有记录安装来源，请重新选择插件' };
-    const result = await this.stage(source);
-    if (result.ok && result.preview.id !== id) {
-      this.discard(result.preview.token);
-      return { ok: false as const, error: `来源里的插件已经不是 ${id}` };
-    }
-    return result;
+    return this.withIdLock(id, async () => {
+      this.prepareFailed.delete(id);
+      this.invalidatePackageCache(id);
+      const source = this.records.find((r) => r.id === id)?.source;
+      if (!source) return { ok: false as const, error: '没有记录安装来源，请重新选择插件' };
+      const result = await this.stage(source);
+      if (result.ok && result.preview.id !== id) {
+        this.discard(result.preview.token);
+        return { ok: false as const, error: `来源里的插件已经不是 ${id}` };
+      }
+      return result;
+    });
   }
 
   discard(token: string): void {
@@ -486,57 +516,71 @@ export class ExtensionPluginService {
   async commit(token: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const entry = this.staged.get(token);
     if (!entry) return { ok: false, error: '安装已过期，请重新选择插件' };
-    this.staged.delete(token);
-    const { manifest } = entry.staged;
-    const { source } = entry;
-    const dir = commitStaged(this.options.root, entry.staged);
-    const trial = await this.trialLoad(manifest, dir);
-    if (!trial.ok) {
-      removePackage(this.options.root, manifest.id, dir);
-      if (!this.records.some((r) => r.id === manifest.id)) {
-        rmSync(join(this.options.root, 'packages', manifest.id), { recursive: true, force: true });
-        rmSync(pluginDataPath(this.options.root, manifest.id), { recursive: true, force: true });
+    return this.withIdLock(entry.staged.manifest.id, async () => {
+      if (this.staged.get(token) !== entry)
+        return { ok: false, error: '安装已过期，请重新选择插件' };
+      this.staged.delete(token);
+      const { manifest } = entry.staged;
+      const { source } = entry;
+      this.prepareFailed.delete(manifest.id);
+      this.invalidatePackageCache(manifest.id);
+      const dir = commitStaged(this.options.root, entry.staged);
+      const trial = await this.trialLoad(manifest, dir);
+      if (!trial.ok) {
+        removePackage(this.options.root, manifest.id, dir);
+        if (!this.records.some((r) => r.id === manifest.id)) {
+          rmSync(join(this.options.root, 'packages', manifest.id), {
+            recursive: true,
+            force: true,
+          });
+          rmSync(pluginDataPath(this.options.root, manifest.id), { recursive: true, force: true });
+        }
+        return trial;
       }
-      return trial;
-    }
-    const grant = grantOf(manifest);
-    const existing = this.records.find((r) => r.id === manifest.id);
-    if (!existing) {
-      this.records.push({
-        id: manifest.id,
-        version: manifest.version,
-        dir,
-        state: 'disabled',
-        grant,
-        installedAt: Date.now(),
-        crossSessionInject: false,
-        source,
-      });
-    } else {
-      const stalePending = existing.pending?.dir;
-      const expands = grantExpands(existing.grant, grant);
-      const oldDir = existing.dir;
-      this.apply(existing.id, { type: 'update', version: manifest.version, dir, grant, expands });
-      this.setSource(existing.id, source);
-      if (stalePending) removePackage(this.options.root, existing.id, stalePending);
-      const available = this.updates.get(existing.id)?.version;
-      if (available && !isNewerPluginVersion(available, manifest.version))
-        this.updates.delete(existing.id);
-      if (!expands) {
-        this.stopProcess(existing.id);
-        removePackage(this.options.root, existing.id, oldDir);
+      const grant = grantOf(manifest);
+      const existing = this.records.find((r) => r.id === manifest.id);
+      if (!existing) {
+        this.records.push({
+          id: manifest.id,
+          version: manifest.version,
+          dir,
+          state: 'disabled',
+          grant,
+          installedAt: Date.now(),
+          crossSessionInject: false,
+          source,
+        });
+      } else {
+        const stalePending = existing.pending?.dir;
+        const expands = grantExpands(existing.grant, grant);
+        const oldDir = existing.dir;
+        this.apply(existing.id, { type: 'update', version: manifest.version, dir, grant, expands });
+        this.setSource(existing.id, source);
+        if (stalePending) removePackage(this.options.root, existing.id, stalePending);
+        const available = this.updates.get(existing.id)?.version;
+        if (available && !isNewerPluginVersion(available, manifest.version))
+          this.updates.delete(existing.id);
+        if (!expands) {
+          this.stopProcess(existing.id);
+          removePackage(this.options.root, existing.id, oldDir);
+        }
       }
-    }
-    this.persist();
-    return { ok: true };
+      this.persist();
+      return { ok: true };
+    });
   }
 
-  setEnabled(id: string, enabled: boolean): { ok: boolean; error?: string } {
-    if (!enabled) this.stopProcess(id);
-    else this.recentErrors.delete(id);
-    const result = this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
-    if (result.ok) this.syncBackground();
-    return result;
+  async setEnabled(id: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    return this.withIdLock(id, async () => {
+      if (!enabled) this.stopProcess(id);
+      else {
+        this.recentErrors.delete(id);
+        this.prepareFailed.delete(id);
+      }
+      const result = this.applyAndPersist(id, { type: enabled ? 'enable' : 'disable' });
+      if (result.ok) this.syncBackground();
+      return result;
+    });
   }
 
   /** 允许或禁止插件向非发起会话注入消息；只对申请了 agent.inject 的插件有效 */
@@ -550,38 +594,52 @@ export class ExtensionPluginService {
     return { ok: true };
   }
 
-  approvePending(id: string) {
-    const oldDir = this.records.find((r) => r.id === id)?.dir;
-    const result = this.applyAndPersist(id, { type: 'approve-pending' });
-    if (result.ok && oldDir) {
-      this.stopProcess(id);
-      removePackage(this.options.root, id, oldDir);
-      this.syncBackground();
-    }
-    return result;
+  approvePending(id: string): Promise<{ ok: boolean; error?: string }> {
+    return this.withIdLock(id, async () => {
+      const oldDir = this.records.find((r) => r.id === id)?.dir;
+      const result = this.applyAndPersist(id, { type: 'approve-pending' });
+      if (result.ok && oldDir) {
+        this.prepareFailed.delete(id);
+        this.invalidatePackageCache(id);
+        this.stopProcess(id);
+        removePackage(this.options.root, id, oldDir);
+        this.syncBackground();
+      }
+      return result;
+    });
   }
 
-  rejectPending(id: string) {
-    const pendingDir = this.records.find((r) => r.id === id)?.pending?.dir;
-    const result = this.applyAndPersist(id, { type: 'reject-pending' });
-    if (result.ok && pendingDir) removePackage(this.options.root, id, pendingDir);
-    return result;
+  rejectPending(id: string): Promise<{ ok: boolean; error?: string }> {
+    return this.withIdLock(id, async () => {
+      const pendingDir = this.records.find((r) => r.id === id)?.pending?.dir;
+      const result = this.applyAndPersist(id, { type: 'reject-pending' });
+      if (result.ok && pendingDir) {
+        this.prepareFailed.delete(id);
+        this.invalidatePackageCache(id);
+        removePackage(this.options.root, id, pendingDir);
+      }
+      return result;
+    });
   }
 
   /** 拒绝新调用 → 取消挂起调用 → 停进程 → 删副本与数据目录 */
   async uninstall(id: string): Promise<{ ok: boolean; error?: string }> {
-    const record = this.records.find((r) => r.id === id);
-    if (!record) return { ok: false, error: '插件未安装' };
-    this.records = this.records.filter((r) => r.id !== id);
-    this.persist();
-    this.stopProcess(id);
-    this.removeLocalFiles(id);
-    rmSync(this.logPath(id), { force: true });
-    rmSync(`${this.logPath(id)}.1`, { force: true });
-    this.recentErrors.delete(id);
-    for (const key of this.loaded.keys()) if (key.startsWith(`${id}/`)) this.loaded.delete(key);
-    this.syncBackground();
-    return { ok: true };
+    return this.withIdLock(id, async () => {
+      const record = this.records.find((r) => r.id === id);
+      if (!record) return { ok: false, error: '插件未安装' };
+      this.records = this.records.filter((r) => r.id !== id);
+      this.persist();
+      this.stopProcess(id);
+      this.removeLocalFiles(id);
+      await this.logger.discard(id);
+      rmSync(this.logPath(id), { force: true });
+      rmSync(`${this.logPath(id)}.1`, { force: true });
+      this.recentErrors.delete(id);
+      this.prepareFailed.delete(id);
+      this.invalidatePackageCache(id);
+      this.syncBackground();
+      return { ok: true };
+    });
   }
 
   /** 登记表问题的待确认提示；落盘保存，重启不丢，用户确认或重装后消失 */
@@ -627,6 +685,7 @@ export class ExtensionPluginService {
       for (const id of discarded) {
         if (this.records.some((r) => r.id === id)) continue;
         this.removeLocalFiles(id);
+        this.logger.discard(id);
         rmSync(this.logPath(id), { force: true });
         rmSync(`${this.logPath(id)}.1`, { force: true });
       }
@@ -674,22 +733,32 @@ export class ExtensionPluginService {
 
   /** 已保存的配置值（含密钥），不含缺省 */
   configValues(id: string): Record<string, ConfigValue> {
-    const manifest = this.installedManifest(id);
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return {};
+    const manifest = this.load(record.id, record.dir);
     if (!manifest) return {};
+    const key = `${id}/${record.dir}`;
+    const cached = this.configCache.get(key);
+    if (cached) return { ...cached };
     let raw: unknown;
     try {
       raw = JSON.parse(readFileSync(this.configPath(id), 'utf8'));
     } catch {
+      this.configCache.set(key, {});
       return {};
     }
     const out: Record<string, ConfigValue> = {};
-    if (typeof raw !== 'object' || raw === null) return out;
+    if (typeof raw !== 'object' || raw === null) {
+      this.configCache.set(key, out);
+      return {};
+    }
     for (const field of manifest.contributes.configuration) {
       const value = (raw as Record<string, unknown>)[field.key];
       if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
         out[field.key] = value;
     }
-    return out;
+    this.configCache.set(key, out);
+    return { ...out };
   }
 
   /** 给插件进程：类型化的当前值，缺省补上 default */
@@ -730,28 +799,31 @@ export class ExtensionPluginService {
   setConfig(
     id: string,
     patch: Record<string, string | number | boolean | null>
-  ): { ok: boolean; error?: string } {
-    const manifest = this.installedManifest(id);
-    if (!manifest) return { ok: false, error: '插件未安装' };
-    const fields = new Map(manifest.contributes.configuration.map((field) => [field.key, field]));
-    const next = this.configValues(id);
-    for (const [key, value] of Object.entries(patch)) {
-      const field = fields.get(key);
-      if (!field) return { ok: false, error: `未知配置项 ${key}` };
-      if (value === null) delete next[key];
-      else {
-        const parsed = coerceConfig(field, value);
-        if (typeof parsed === 'object') return { ok: false, error: parsed.error };
-        next[key] = parsed;
+  ): Promise<{ ok: boolean; error?: string }> {
+    return this.withIdLock(id, async () => {
+      const manifest = this.installedManifest(id);
+      if (!manifest) return { ok: false, error: '插件未安装' };
+      const fields = new Map(manifest.contributes.configuration.map((field) => [field.key, field]));
+      const next = this.configValues(id);
+      for (const [key, value] of Object.entries(patch)) {
+        const field = fields.get(key);
+        if (!field) return { ok: false, error: `未知配置项 ${key}` };
+        if (value === null) delete next[key];
+        else {
+          const parsed = coerceConfig(field, value);
+          if (typeof parsed === 'object') return { ok: false, error: parsed.error };
+          next[key] = parsed;
+        }
       }
-    }
-    const target = this.configPath(id);
-    mkdirSync(join(this.options.root, 'config'), { recursive: true });
-    const tmp = `${target}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
-    renameSync(tmp, target);
-    for (const listener of this.listeners) listener();
-    return { ok: true };
+      const target = this.configPath(id);
+      mkdirSync(join(this.options.root, 'config'), { recursive: true });
+      const tmp = `${target}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
+      renameSync(tmp, target);
+      this.invalidatePackageCache(id);
+      this.touch();
+      return { ok: true };
+    });
   }
 
   toolsForSpawn(): PluginToolDescriptor[] {
@@ -788,20 +860,49 @@ export class ExtensionPluginService {
 
   /** 拉起声明了动态工具的插件，让 toolsForSpawn 能看到它们；单个最多等 5 秒 */
   async prepareForSpawn(): Promise<void> {
+    if (this.isDisposed) return;
     const targets = this.enabled().filter(
       (entry) => entry.manifest.contributes.dynamic.tools > 0 && entry.manifest.main
     );
+    const timeoutMs = this.options.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS;
     await Promise.all(
       targets.map(async ({ id }) => {
+        if (this.isDisposed || this.prepareFailed.has(id)) return;
+        let proc: PluginProcess;
+        try {
+          proc = this.processFor(id);
+        } catch {
+          return;
+        }
+        const spawn = proc.ready();
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
-            this.processFor(id).ready(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('timeout')), PREPARE_TIMEOUT_MS)
-            ),
+            spawn,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+              timer.unref?.();
+            }),
           ]);
-        } catch {
-          // 单个插件拉起失败不影响会话启动
+          this.prepareFailed.delete(id);
+        } catch (error) {
+          const failed = (error as { code?: string }).code === 'PLUGIN_INIT_FAILED';
+          this.prepareFailed.add(id);
+          if (failed) this.noteSpawnFailure(id, spawn);
+          else {
+            void spawn.then(
+              () => {
+                this.prepareFailed.delete(id);
+              },
+              (later: unknown) => {
+                if ((later as { code?: string }).code !== 'PLUGIN_INIT_FAILED') return;
+                this.prepareFailed.add(id);
+                this.noteSpawnFailure(id, spawn);
+              }
+            );
+          }
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       })
     );
@@ -819,7 +920,7 @@ export class ExtensionPluginService {
     return this.enabled().flatMap(({ id, dir, manifest }) => {
       const root = pluginPackagePath(this.options.root, id, dir);
       return manifest.contributes.agentTypes.flatMap((type) => {
-        const prompt = readPluginText(root, type.systemPrompt);
+        const prompt = this.readText(id, dir, type.systemPrompt);
         if (!prompt.ok) {
           this.warnAgentTypeOnce(
             id,
@@ -919,7 +1020,7 @@ export class ExtensionPluginService {
     const root = pluginPackagePath(this.options.root, loaded.id, loaded.dir);
     const read = (rel?: string): { ok: true; content: string } | { ok: false } | undefined => {
       if (!rel) return undefined;
-      return readPluginText(root, rel);
+      return this.readText(loaded.id, loaded.dir, rel);
     };
     const instruction = read(preset.instruction);
     const role = read(preset.systemPrompt);
@@ -999,7 +1100,19 @@ export class ExtensionPluginService {
     const declared =
       manifest.contributes.agentTools.find((tool) => tool.name === parsed.toolName) ??
       this.dynamic.toolsFor(parsed.pluginId).find((tool) => tool.name === parsed.toolName);
-    if (!declared) throw pluginError('NOT_FOUND', `插件没有声明工具 ${parsed.toolName}`);
+    let tool = declared;
+    if (!tool && manifest.contributes.dynamic.tools > 0 && manifest.main) {
+      const proc = this.processFor(parsed.pluginId);
+      try {
+        await proc.ready();
+      } catch (error) {
+        if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED')
+          this.noteSpawnFailure(parsed.pluginId, this.lastSpawn.get(proc));
+        throw error;
+      }
+      tool = this.dynamic.toolsFor(parsed.pluginId).find((item) => item.name === parsed.toolName);
+    }
+    if (!tool) throw pluginError('NOT_FOUND', `插件没有声明工具 ${parsed.toolName}`);
     const value = await this.invoke(
       parsed.pluginId,
       'tool.execute',
@@ -1008,7 +1121,7 @@ export class ExtensionPluginService {
         sessionId: input.sessionId,
         projectRoot: input.projectRoot,
         gesture: false,
-        timeoutMs: declared.timeoutMs ?? TOOL_TIMEOUT_MS,
+        timeoutMs: tool.timeoutMs ?? TOOL_TIMEOUT_MS,
         kind: 'tool',
         onProgress: input.onProgress,
         ...(input.agent ? { agent: input.agent } : {}),
@@ -1047,6 +1160,10 @@ export class ExtensionPluginService {
       )
     );
     const wait = input.event === 'before_compact' && !input.agent;
+    if (!wait) {
+      for (const entry of targets) this.enqueueObserve(entry.id, input);
+      return;
+    }
     const send = (id: string) =>
       this.invoke(
         id,
@@ -1056,7 +1173,7 @@ export class ExtensionPluginService {
           sessionId: input.sessionId,
           projectRoot: input.projectRoot,
           gesture: false,
-          timeoutMs: wait ? BEFORE_COMPACT_TIMEOUT_MS : OBSERVE_TIMEOUT_MS,
+          timeoutMs: BEFORE_COMPACT_TIMEOUT_MS,
           kind: 'event',
           ...(input.agent ? { agent: input.agent } : {}),
         }
@@ -1067,11 +1184,9 @@ export class ExtensionPluginService {
           `事件 ${input.event} 失败：${error instanceof Error ? error.message : String(error)}`
         );
       });
-    if (wait) {
-      await Promise.all(targets.map((entry) => send(entry.id)));
-      return;
-    }
-    for (const entry of targets) void send(entry.id);
+    await Promise.all(
+      targets.filter((entry) => this.canDeliverObserve(entry.id)).map((entry) => send(entry.id))
+    );
   }
 
   async intercept<E extends PluginInterceptEvent>(input: {
@@ -1342,14 +1457,7 @@ export class ExtensionPluginService {
 
   /** 插件进程的输出与异常，落在 Main 私有目录；超过 1MB 轮转一次 */
   appendLog(id: string, level: PluginLogLevel, message: string): void {
-    const path = this.logPath(id);
-    try {
-      mkdirSync(join(this.options.root, 'logs'), { recursive: true });
-      try {
-        if (statSync(path).size > MAX_LOG_BYTES) renameSync(path, `${path}.1`);
-      } catch {}
-      appendFileSync(path, `${new Date().toISOString()} [${level}] ${message}\n`, { mode: 0o600 });
-    } catch {}
+    this.logger.append(id, level, message);
     if (level === 'error') this.recordError(id, message);
   }
 
@@ -1358,30 +1466,19 @@ export class ExtensionPluginService {
   }
 
   /** 日志末尾；没有日志返回空串 */
-  logs(id: string, maxBytes = DEFAULT_LOG_TAIL_BYTES): string {
-    let fd: number | null = null;
-    try {
-      const size = statSync(this.logPath(id)).size;
-      const length = Math.min(size, maxBytes);
-      const buffer = Buffer.alloc(length);
-      fd = openSync(this.logPath(id), 'r');
-      readSync(fd, buffer, 0, length, size - length);
-      const text = buffer.toString('utf8');
-      return length < size ? text.slice(text.indexOf('\n') + 1) : text;
-    } catch {
-      return '';
-    } finally {
-      if (fd !== null) closeSync(fd);
-    }
+  logs(id: string, maxBytes = DEFAULT_LOG_TAIL_BYTES): Promise<string> {
+    return this.logger.read(id, maxBytes);
   }
 
   /** 启动后稍等检查一次，之后每天一次；只查已启用的插件 */
   startUpdateChecks(): void {
-    if (this.updateTimer) return;
+    if (this.isDisposed || this.updateTimer) return;
     const run = (delay: number) => {
+      if (this.isDisposed) return;
       this.updateTimer = setTimeout(() => {
         void this.checkUpdates({ enabledOnly: true }).finally(() => {
-          if (this.updateTimer) run(UPDATE_CHECK_INTERVAL_MS);
+          if (this.isDisposed || !this.updateTimer) return;
+          run(UPDATE_CHECK_INTERVAL_MS);
         });
       }, delay);
       this.updateTimer.unref?.();
@@ -1417,7 +1514,7 @@ export class ExtensionPluginService {
       })
     );
     results.push(...marketResults);
-    if (results.length > 0) for (const listener of this.listeners) listener();
+    if (results.length > 0) this.touch();
     return {
       checked: results.length,
       available: results.filter((r) => r === 'available').length,
@@ -1468,14 +1565,17 @@ export class ExtensionPluginService {
 
   dispose(): Promise<void> {
     if (this.disposed) return this.disposed;
+    this.isDisposed = true;
     this.background = false;
+    if (this.changeTimer) clearTimeout(this.changeTimer);
+    this.changeTimer = null;
     if (this.updateTimer) clearTimeout(this.updateTimer);
     this.updateTimer = null;
     this.armSchedules();
     for (const id of [...this.residentTimers.keys()]) this.cancelRestart(id);
     const waits = [...this.processes.values()].map((proc) => proc.whenStopped());
     for (const id of [...this.processes.keys()]) this.stopProcess(id);
-    this.disposed = Promise.all(waits).then(() => undefined);
+    this.disposed = Promise.all([...waits, this.logger.dispose()]).then(() => undefined);
     return this.disposed;
   }
 
@@ -1499,6 +1599,7 @@ export class ExtensionPluginService {
   ): Promise<unknown> {
     if (signal?.aborted) throw pluginError('ABORTED', '调用已取消');
     const proc = this.processFor(pluginId);
+    const spawn = proc.ready();
     const invocationId = this.gate.invocations.create({
       pluginId,
       sessionId: ctx.sessionId,
@@ -1526,7 +1627,8 @@ export class ExtensionPluginService {
     } catch (error) {
       // 超时或失败后中止这次调用里仍在进行的宿主请求（如 MCP 调用）
       this.gate.invocations.cancel(invocationId);
-      if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED') this.recordCrash(pluginId);
+      if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED')
+        this.noteSpawnFailure(pluginId, spawn);
       throw error;
     } finally {
       signal?.removeEventListener('abort', onAbort);
@@ -1536,6 +1638,7 @@ export class ExtensionPluginService {
   }
 
   private processFor(pluginId: string): PluginProcess {
+    if (this.isDisposed) throw pluginError('NOT_FOUND', '插件服务已关闭');
     const existing = this.processes.get(pluginId);
     if (existing) return existing;
     const record = this.records.find((r) => r.id === pluginId);
@@ -1543,7 +1646,7 @@ export class ExtensionPluginService {
     if (!record || !manifest?.main) throw pluginError('NOT_FOUND', '插件没有 main');
     const proc = this.createProcess(manifest, record.dir, (unexpected) => {
       if (!unexpected) return;
-      this.recordCrash(pluginId);
+      this.noteSpawnFailure(pluginId, this.lastSpawn.get(proc));
       this.scheduleResidentRestart(pluginId);
     });
     this.processes.set(pluginId, proc);
@@ -1558,30 +1661,41 @@ export class ExtensionPluginService {
     const dataDir = pluginDataPath(this.options.root, manifest.id);
     mkdirSync(dataDir, { recursive: true });
     let proc!: PluginProcess;
-    proc = new PluginProcess({
-      fork: this.options.fork,
-      hostPath: this.options.hostPath,
-      env: {
-        ...pluginProcessEnv(this.options.env, this.options.sourceEnv, manifest.env),
-        ENSO_PLUGIN_DATA: dataDir,
+    proc = new TrackedPluginProcess(
+      {
+        fork: this.options.fork,
+        hostPath: this.options.hostPath,
+        env: {
+          ...pluginProcessEnv(this.options.env, this.options.sourceEnv, manifest.env),
+          ENSO_PLUGIN_DATA: dataDir,
+        },
+        resident: manifest.resident,
+        init: {
+          pluginId: manifest.id,
+          pluginRoot: pluginPackagePath(this.options.root, manifest.id, dir),
+          main: manifest.main ?? '',
+          dataDir,
+        },
+        handleHostCall: (api, args, invocationId) =>
+          this.gate.handle(manifest.id, api, args, invocationId),
+        onExit: ({ unexpected }) => {
+          if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
+          if (this.processes.get(manifest.id) === proc && this.dynamic.clear(manifest.id))
+            this.touch();
+          onExit(unexpected);
+        },
+        onLog: (level, message) => this.appendLog(manifest.id, level, message),
       },
-      resident: manifest.resident,
-      init: {
-        pluginId: manifest.id,
-        pluginRoot: pluginPackagePath(this.options.root, manifest.id, dir),
-        main: manifest.main ?? '',
-        dataDir,
-      },
-      handleHostCall: (api, args, invocationId) =>
-        this.gate.handle(manifest.id, api, args, invocationId),
-      onExit: ({ unexpected }) => {
-        if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
-        if (this.processes.get(manifest.id) === proc && this.dynamic.clear(manifest.id))
-          this.touch();
-        onExit(unexpected);
-      },
-      onLog: (level, message) => this.appendLog(manifest.id, level, message),
-    });
+      (pending) => {
+        this.lastSpawn.set(proc, pending);
+        void pending.then(
+          () => {
+            this.countedSpawns.delete(pending);
+          },
+          () => undefined
+        );
+      }
+    );
     return proc;
   }
 
@@ -1620,7 +1734,14 @@ export class ExtensionPluginService {
   }
 
   private touch(): void {
-    for (const listener of this.listeners) listener();
+    if (this.isDisposed) return;
+    if (this.changeTimer) clearTimeout(this.changeTimer);
+    this.changeTimer = setTimeout(() => {
+      this.changeTimer = null;
+      if (this.isDisposed) return;
+      for (const listener of this.listeners) listener();
+    }, CHANGE_DEBOUNCE_MS);
+    this.changeTimer.unref?.();
   }
 
   private inject(
@@ -1705,6 +1826,7 @@ export class ExtensionPluginService {
   }
 
   private syncBackground(): void {
+    if (this.isDisposed) return;
     this.armSchedules();
     if (!this.background) return;
     const residents = this.enabled()
@@ -1730,6 +1852,7 @@ export class ExtensionPluginService {
   }
 
   private startResident(id: string): void {
+    if (this.isDisposed) return;
     if (this.residentCount() >= RESIDENT_LIMIT) {
       this.recordError(id, '常驻插件已达上限（5），未启动');
       this.touch();
@@ -1741,13 +1864,21 @@ export class ExtensionPluginService {
   }
 
   private async bootResident(id: string): Promise<void> {
+    if (this.isDisposed) {
+      this.starting.delete(id);
+      return;
+    }
+    let proc: PluginProcess | undefined;
     try {
-      await this.processFor(id).ready();
+      proc = this.processFor(id);
+      await proc.ready();
       this.touch();
     } catch (error) {
+      if (this.isDisposed) return;
       const message = error instanceof Error ? error.message : String(error);
       this.recordError(id, message);
-      if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED') this.recordCrash(id);
+      if ((error as { code?: string }).code === 'PLUGIN_INIT_FAILED')
+        this.noteSpawnFailure(id, proc ? this.lastSpawn.get(proc) : undefined);
       if (this.background && this.enabledManifest(id)?.resident) this.scheduleResidentRestart(id);
       this.touch();
     } finally {
@@ -1756,13 +1887,13 @@ export class ExtensionPluginService {
   }
 
   private scheduleResidentRestart(id: string): void {
-    if (!this.background || !this.enabledManifest(id)?.resident) return;
+    if (this.isDisposed || !this.background || !this.enabledManifest(id)?.resident) return;
     this.cancelRestart(id);
     const gen = this.restartGen.get(id) ?? 0;
     const timer = setTimeout(() => {
       this.residentTimers.delete(id);
       if (this.restartGen.get(id) !== gen) return;
-      if (!this.background || !this.enabledManifest(id)?.resident) return;
+      if (this.isDisposed || !this.background || !this.enabledManifest(id)?.resident) return;
       this.startResident(id);
     }, RESIDENT_RESTART_MS);
     this.residentTimers.set(id, timer);
@@ -1776,6 +1907,11 @@ export class ExtensionPluginService {
   }
 
   private armSchedules(): void {
+    if (this.isDisposed) {
+      for (const state of this.scheduleRuns.values()) clearInterval(state.timer);
+      this.scheduleRuns.clear();
+      return;
+    }
     const wanted = new Set<string>();
     if (this.background) {
       for (const { id, manifest } of this.enabled()) {
@@ -1812,7 +1948,7 @@ export class ExtensionPluginService {
   ): Promise<void> {
     const key = scheduleKey(pluginId, schedule.id);
     const state = this.scheduleRuns.get(key);
-    if (!state || state.running || !this.enabledManifest(pluginId)) return;
+    if (this.isDisposed || !state || state.running || !this.enabledManifest(pluginId)) return;
     state.running = true;
     try {
       await this.invoke(
@@ -1869,17 +2005,20 @@ export class ExtensionPluginService {
 
   private load(id: string, dir: string): ExtensionPluginManifest | null {
     const key = `${id}/${dir}`;
-    const cached = this.loaded.get(key);
-    if (cached) return cached.manifest;
+    if (this.loaded.has(key)) return this.loaded.get(key)?.manifest ?? null;
     try {
       const raw = JSON.parse(
         readFileSync(join(pluginPackagePath(this.options.root, id, dir), MANIFEST_FILE), 'utf8')
       );
       const parsed = parseExtensionPluginManifest(raw, this.options.hostVersion);
-      if (!parsed.ok || parsed.manifest.id !== id) return null;
+      if (!parsed.ok || parsed.manifest.id !== id) {
+        this.loaded.set(key, null);
+        return null;
+      }
       this.loaded.set(key, { dir, manifest: parsed.manifest });
       return parsed.manifest;
     } catch {
+      this.loaded.set(key, null);
       return null;
     }
   }
@@ -1902,7 +2041,7 @@ export class ExtensionPluginService {
 
   private persist(): void {
     writeRegistry(this.options.root, { version: REGISTRY_VERSION, plugins: this.records });
-    for (const listener of this.listeners) listener();
+    this.touch();
   }
 
   private sweepStaged(): void {
@@ -1931,6 +2070,144 @@ export class ExtensionPluginService {
       state.openUntil = Date.now() + BREAKER_COOLDOWN_MS;
     }
   }
+
+  private withIdLock<T>(id: string, run: () => Promise<T>): Promise<T> {
+    const prev = this.idTails.get(id) ?? Promise.resolve();
+    const next = prev.then(run, run);
+    const tail = next.then(
+      () => undefined,
+      () => undefined
+    );
+    this.idTails.set(id, tail);
+    void tail.finally(() => {
+      if (this.idTails.get(id) === tail) this.idTails.delete(id);
+    });
+    return next;
+  }
+
+  private noteSpawnFailure(id: string, spawn: Promise<unknown> | undefined): void {
+    if (this.records.find((r) => r.id === id)?.state !== 'enabled') return;
+    if (!spawn || this.countedSpawns.has(spawn)) return;
+    this.countedSpawns.add(spawn);
+    this.recordCrash(id);
+  }
+
+  private canDeliverObserve(id: string): boolean {
+    const manifest = this.enabledManifest(id);
+    if (!manifest?.main) return false;
+    if (manifest.resident) return true;
+    return this.processes.get(id)?.running === true;
+  }
+
+  private enqueueObserve(
+    id: string,
+    input: {
+      sessionId: string;
+      projectRoot: string | null;
+      event: PluginEventName;
+      data: unknown;
+      agent?: PluginAgentSource;
+    }
+  ): void {
+    if (!this.canDeliverObserve(id)) return;
+    if (this.isDisposed) return;
+    const key = observeLaneKey(id, input);
+    const job: ObserveJob = {
+      sessionId: input.sessionId,
+      projectRoot: input.projectRoot,
+      data: input.data,
+      ...(input.agent ? { agent: input.agent } : {}),
+    };
+    let lane = this.observeLanes.get(key);
+    if (!lane) {
+      lane = { running: false, queue: [] };
+      this.observeLanes.set(key, lane);
+    }
+    if (OBSERVE_COALESCE_EVENTS.has(input.event)) {
+      if (lane.queue.length > 0) lane.queue[lane.queue.length - 1] = job;
+      else lane.queue.push(job);
+    } else {
+      if (lane.queue.length >= OBSERVE_QUEUE_LIMIT) lane.queue.shift();
+      lane.queue.push(job);
+    }
+    if (lane.running) return;
+    lane.running = true;
+    void this.drainObserve(id, input.event, lane, key);
+  }
+
+  private async drainObserve(
+    id: string,
+    event: PluginEventName,
+    lane: ObserveLane,
+    key: string
+  ): Promise<void> {
+    while (true) {
+      const job = lane.queue.shift();
+      if (!job) {
+        lane.running = false;
+        if (this.observeLanes.get(key) === lane) this.observeLanes.delete(key);
+        return;
+      }
+      if (this.isDisposed || !this.canDeliverObserve(id)) continue;
+      try {
+        await this.invoke(
+          id,
+          'event.dispatch',
+          { event, data: job.data },
+          {
+            sessionId: job.sessionId,
+            projectRoot: job.projectRoot,
+            gesture: false,
+            timeoutMs: OBSERVE_TIMEOUT_MS,
+            kind: 'event',
+            ...(job.agent ? { agent: job.agent } : {}),
+          }
+        );
+      } catch (error) {
+        this.appendLog(
+          id,
+          'warn',
+          `事件 ${event} 失败：${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  }
+
+  private invalidatePackageCache(id: string): void {
+    const prefix = `${id}/`;
+    for (const key of this.loaded.keys()) if (key.startsWith(prefix)) this.loaded.delete(key);
+    for (const key of this.textCache.keys()) if (key.startsWith(prefix)) this.textCache.delete(key);
+    for (const key of this.configCache.keys())
+      if (key.startsWith(prefix)) this.configCache.delete(key);
+  }
+
+  private readText(
+    id: string,
+    dir: string,
+    rel: string
+  ): { ok: true; content: string } | { ok: false } {
+    const key = `${id}/${dir}/${rel}`;
+    const cached = this.textCache.get(key);
+    if (cached) return cached;
+    const result = readPluginText(pluginPackagePath(this.options.root, id, dir), rel);
+    this.textCache.set(key, result);
+    return result;
+  }
+}
+
+class TrackedPluginProcess extends PluginProcess {
+  constructor(
+    deps: ConstructorParameters<typeof PluginProcess>[0],
+    private readonly remember: (pending: Promise<unknown>) => void
+  ) {
+    super(deps);
+  }
+
+  override ready(): ReturnType<PluginProcess['ready']> {
+    const pending = super.ready();
+    this.remember(pending);
+    return pending;
+  }
 }
 
 /** 本地路径不下发给界面，只给类型；链接本来就是用户填的，可以显示 */
@@ -1952,6 +2229,16 @@ const lastErrorField = (lastError: { at: number; message: string } | undefined) 
   lastError ? { lastError: { at: lastError.at, message: lastError.message } } : {};
 
 const scheduleKey = (pluginId: string, id: string) => `${pluginId}\n${id}`;
+
+const observeLaneKey = (
+  id: string,
+  input: { sessionId: string; event: PluginEventName; agent?: PluginAgentSource }
+) => {
+  const agent = input.agent
+    ? `${input.agent.kind}\0${input.agent.sessionId}\0${input.agent.name}`
+    : '';
+  return `${id}\0${input.event}\0${input.sessionId}\0${agent}`;
+};
 
 /** 基础环境加上清单声明的变量；未声明的（包括密钥）不透传 */
 export function pluginProcessEnv(

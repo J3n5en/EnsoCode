@@ -24,6 +24,8 @@ export const PLUGIN_COMPACT_TIMEOUT_MS = 12_000;
 export const PLUGIN_INTERCEPT_TIMEOUT_MS = 30_000;
 /** 子会话拦截在 Main 合计不超过 5 秒，本地再留余量后放行 */
 export const PLUGIN_CHILD_INTERCEPT_TIMEOUT_MS = 8_000;
+/** 通知型 tool_result 只带截断后的文本，避免把整段工具输出灌进插件 */
+export const TOOL_RESULT_OBSERVE_MAX_CHARS = 64 * 1024;
 
 export type PluginSessionEmit =
   | { type: 'plugin-event'; event: PluginEventName; data: unknown }
@@ -219,6 +221,13 @@ const textContent = (content: readonly { type?: string; text?: string }[]): stri
     .map((part) => part.text as string)
     .join('');
 
+const observeToolContent = (content: readonly { type?: string; text?: string }[]): string => {
+  const text = textContent(content);
+  return text.length <= TOOL_RESULT_OBSERVE_MAX_CHARS
+    ? text
+    : text.slice(0, TOOL_RESULT_OBSERVE_MAX_CHARS);
+};
+
 /** 本轮最后一条助手消息的文字部分；agent_end.messages 只含本轮 */
 function lastAssistantText(messages: readonly unknown[] | undefined): string {
   const last = [...(messages ?? [])]
@@ -379,7 +388,7 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               input: event.input,
-              content: textContent(result?.content ?? event.content),
+              content: observeToolContent(result?.content ?? event.content),
               isError: result?.isError ?? event.isError,
             });
           }

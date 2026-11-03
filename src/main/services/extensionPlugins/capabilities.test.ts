@@ -126,7 +126,15 @@ describe('插件能力', () => {
           enso.tools.register('lookup', async () => String(n));
         }`,
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
+    const read = () =>
+      service.callTool({
+        toolName: 'plugin_example-demo__lookup',
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      });
+    expect((await read()).content).toBe('0');
     await service.dispatchEvent({
       sessionId: 's',
       projectRoot: null,
@@ -140,16 +148,9 @@ describe('插件能力', () => {
       data: { reason: 'startup' },
     });
     await flush();
-    const read = () =>
-      service.callTool({
-        toolName: 'plugin_example-demo__lookup',
-        args: {},
-        sessionId: 's',
-        projectRoot: null,
-      });
     expect((await read()).content).toBe('1');
     const forksAfter = forks;
-    service.setEnabled('example.demo', false);
+    await service.setEnabled('example.demo', false);
     await service.dispatchEvent({
       sessionId: 's',
       projectRoot: null,
@@ -167,6 +168,48 @@ describe('插件能力', () => {
         data: { reason: 'overflow' },
       })
     ).resolves.toBeUndefined();
+  });
+
+  it('非常驻插件未运行时，observe 事件不拉起它，也不投递', async () => {
+    let forks = 0;
+    const { service } = createService(() => {
+      forks += 1;
+      return new InProcessChild();
+    });
+    await install(service, {
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          events: [{ event: 'session_start', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `let n = 0;
+        export function activate(enso) {
+          enso.events.on('session_start', () => { n += 1; });
+          enso.tools.register('lookup', async () => String(n));
+        }`,
+    });
+    await service.setEnabled('example.demo', true);
+    const parked = forks;
+    await service.dispatchEvent({
+      sessionId: 's',
+      projectRoot: null,
+      event: 'session_start',
+      data: { reason: 'startup' },
+    });
+    await flush();
+    expect(forks).toBe(parked);
+    expect(
+      (
+        await service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: {},
+          sessionId: 's',
+          projectRoot: null,
+        })
+      ).content
+    ).toBe('0');
   });
 
   it('拦截按 id 合并，失败按 failClosed 决定拒绝或放行', async () => {
@@ -198,8 +241,8 @@ describe('插件能力', () => {
         `export function activate(enso) { enso.events.on('tool_call', (data) => ({ input: { ...data.input, b: 1 } })); }`
       )
     );
-    service.setEnabled('a.b', true);
-    service.setEnabled('a.a', true);
+    await service.setEnabled('a.b', true);
+    await service.setEnabled('a.a', true);
     await expect(
       service.intercept({
         sessionId: 's',
@@ -208,7 +251,7 @@ describe('插件能力', () => {
         payload: { toolCallId: '1', toolName: 'bash', input: {} },
       })
     ).resolves.toEqual({ input: { a: 1, b: 1 } });
-    service.setEnabled('a.a', false);
+    await service.setEnabled('a.a', false);
     await install(service, {
       'enso-plugin.json': manifest({
         id: 'a.c',
@@ -219,7 +262,7 @@ describe('插件能力', () => {
       }),
       'main.mjs': `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('down'); }); }`,
     });
-    service.setEnabled('a.c', true);
+    await service.setEnabled('a.c', true);
     const blocked = await service.intercept({
       sessionId: 's',
       projectRoot: null,
@@ -227,7 +270,7 @@ describe('插件能力', () => {
       payload: { toolCallId: '1', toolName: 'bash', input: {} },
     });
     expect(blocked).toMatchObject({ block: true });
-    service.setEnabled('a.c', false);
+    await service.setEnabled('a.c', false);
     await install(service, {
       'enso-plugin.json': manifest({
         id: 'a.d',
@@ -238,7 +281,7 @@ describe('插件能力', () => {
       }),
       'main.mjs': `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('skip'); }); }`,
     });
-    service.setEnabled('a.d', true);
+    await service.setEnabled('a.d', true);
     await expect(
       service.intercept({
         sessionId: 's',
@@ -275,12 +318,12 @@ describe('插件能力', () => {
       });
     for (const id of ['t.a', 't.b']) {
       await install(service, slow(id, false));
-      service.setEnabled(id, true);
+      await service.setEnabled(id, true);
     }
     await ask();
     expect(await ask()).toEqual({ input: { 't.a': 1 } });
     await install(service, slow('t.c', true));
-    service.setEnabled('t.c', true);
+    await service.setEnabled('t.c', true);
     await ask();
     expect(await ask()).toMatchObject({ block: true });
   });
@@ -307,7 +350,7 @@ describe('插件能力', () => {
             });
           }`,
       });
-      service.setEnabled('c.guard', true);
+      await service.setEnabled('c.guard', true);
       const calls = () => {
         try {
           return readFileSync(join(root, 'calls'), 'utf8').length;
@@ -329,7 +372,7 @@ describe('插件能力', () => {
       ]);
       expect(await ask()).toEqual({});
       expect(calls()).toBe(3);
-      expect(service.logs('c.guard')).toContain('已临时放行');
+      expect(await service.logs('c.guard')).toContain('已临时放行');
       now += 30_001;
       writeFileSync(flag, '');
       expect(await ask()).toEqual({});
@@ -353,7 +396,7 @@ describe('插件能力', () => {
       'main.mjs': `export function activate(enso) { enso.events.on('tool_call', ${body}); }`,
     });
     await install(service, guard('1.0.0', `() => { throw new Error('down'); }`));
-    service.setEnabled('c.guard', true);
+    await service.setEnabled('c.guard', true);
     const ask = () =>
       service.intercept({
         sessionId: 's',
@@ -366,8 +409,8 @@ describe('插件能力', () => {
       expect(service.list()[0]?.interceptBreakers).toHaveLength(1);
     };
     await trip();
-    service.setEnabled('c.guard', false);
-    service.setEnabled('c.guard', true);
+    await service.setEnabled('c.guard', false);
+    await service.setEnabled('c.guard', true);
     expect(service.list()[0]?.interceptBreakers).toBeUndefined();
     expect(await ask()).toMatchObject({ block: true });
     await trip();
@@ -390,7 +433,7 @@ describe('插件能力', () => {
         }),
         'main.mjs': `export function activate(enso) { enso.events.on('input', () => { throw new Error('down'); }); }`,
       });
-      service.setEnabled('c.guard', true);
+      await service.setEnabled('c.guard', true);
       const ask = () =>
         service.intercept({
           sessionId: 's',
@@ -439,7 +482,7 @@ describe('插件能力', () => {
         });
       }`,
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const progress: string[] = [];
     const result = await service.callTool({
       toolName: 'plugin_example-demo__lookup',
@@ -500,9 +543,9 @@ describe('插件能力', () => {
         enso.tools.register('lookup', async () => JSON.stringify(await enso.config.get()));
       }`,
     });
-    expect(service.setConfig('example.demo', { limit: 'nope' }).ok).toBe(false);
-    expect(service.setConfig('example.demo', { limit: 4 }).ok).toBe(true);
-    service.setEnabled('example.demo', true);
+    expect((await service.setConfig('example.demo', { limit: 'nope' })).ok).toBe(false);
+    expect((await service.setConfig('example.demo', { limit: 4 })).ok).toBe(true);
+    await service.setEnabled('example.demo', true);
     expect(service.toolsForSpawn().map((tool) => tool.name)).toEqual([
       'plugin_example-demo__lookup',
     ]);
@@ -524,7 +567,7 @@ describe('插件能力', () => {
         ).content
       )
     ).toEqual({ limit: 4 });
-    service.setConfig('example.demo', { limit: null });
+    await service.setConfig('example.demo', { limit: null });
     expect(
       JSON.parse(
         (
@@ -559,8 +602,8 @@ describe('插件能力', () => {
         projectRoot: null,
       })
     ).resolves.toBeNull();
-    service.setEnabled('example.demo', false);
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', false);
+    await service.setEnabled('example.demo', true);
     expect(service.toolsForSpawn().some((tool) => tool.name.endsWith('extra'))).toBe(false);
     expect(service.viewStateSet('example.demo', { a: '1' })).toEqual({ ok: true });
     expect(service.viewStateGet('example.demo')).toEqual({ a: '1' });
@@ -606,7 +649,7 @@ describe('插件能力', () => {
     await install(service, hop('a.b', 'a.c', ['plugin.call'], ['a.c']));
     await install(service, hop('a.c', 'a.d', ['plugin.call'], ['a.d']));
     await install(service, hop('a.d', null, ['plugin.call'], ['a.e']));
-    for (const id of ['a.a', 'a.b', 'a.c', 'a.d']) service.setEnabled(id, true);
+    for (const id of ['a.a', 'a.b', 'a.c', 'a.d']) await service.setEnabled(id, true);
     expect(
       (
         await service.callTool({
@@ -641,8 +684,8 @@ describe('插件能力', () => {
       }),
       'main.mjs': `export function activate(enso) { enso.tools.register('lookup', () => enso.plugins.call('b.callee', 'who')); }`,
     });
-    service.setEnabled('b.callee', true);
-    service.setEnabled('b.caller', true);
+    await service.setEnabled('b.callee', true);
+    await service.setEnabled('b.caller', true);
     const result = await service.callTool({
       toolName: 'plugin_b-caller__lookup',
       args: {},
@@ -665,7 +708,7 @@ describe('插件能力', () => {
         });
       }`,
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     const send = async (to?: string, sessionId = 's1') =>
       (
         await service.callTool({
@@ -719,7 +762,7 @@ describe('插件能力', () => {
           enso.tools.register('lookup', async () => 'ok');
         }`,
     });
-    service.setEnabled('example.demo', true);
+    await service.setEnabled('example.demo', true);
     await service.callTool({
       toolName: 'plugin_example-demo__lookup',
       args: {},
@@ -733,7 +776,7 @@ describe('插件能力', () => {
     expect(readFileSync(ticks, 'utf8')).toBe('x');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(readFileSync(ticks, 'utf8')).toBe('x');
-    service.setEnabled('example.demo', false);
+    await service.setEnabled('example.demo', false);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(readFileSync(ticks, 'utf8')).toBe('x');
     expect(service.list()[0]?.schedules?.[0]?.lastRunAt).toBeUndefined();
@@ -785,7 +828,7 @@ describe('插件能力', () => {
         }),
         'main.mjs': 'export function activate() {}',
       });
-      service.setEnabled(id, true);
+      await service.setEnabled(id, true);
     }
     const offset = children.length;
     service.startBackground();
@@ -820,7 +863,7 @@ describe('插件能力', () => {
             JSON.stringify({ sessionId: ctx.sessionId, agent: ctx.agent }));
         }`,
       });
-      service.setEnabled('example.demo', true);
+      await service.setEnabled('example.demo', true);
       const call = (extra: Record<string, unknown>) =>
         service.callTool({
           toolName: 'plugin_example-demo__lookup',
@@ -864,8 +907,8 @@ describe('插件能力', () => {
       });
       await install(service, recorder('o.o', 'observe'));
       await install(service, recorder('i.i', 'intercept'));
-      service.setEnabled('o.o', true);
-      service.setEnabled('i.i', true);
+      await service.setEnabled('o.o', true);
+      await service.setEnabled('i.i', true);
       const read = async (id: string) =>
         JSON.parse(
           (
@@ -939,7 +982,7 @@ describe('插件能力', () => {
           ['tool_call', 'tool_result', 'input']
         )
       );
-      service.setEnabled('g.g', true);
+      await service.setEnabled('g.g', true);
       const asked = () => {
         try {
           return readFileSync(log, 'utf8').trim().split('\n');
@@ -1000,7 +1043,7 @@ describe('插件能力', () => {
           }`
         )
       );
-      service.setEnabled('s.s', true);
+      await service.setEnabled('s.s', true);
       let started = Date.now();
       await expect(
         service.intercept({
@@ -1045,7 +1088,7 @@ describe('插件能力', () => {
             }`
           )
         );
-        service.setEnabled(id, true);
+        await service.setEnabled(id, true);
       }
       const started = Date.now();
       const result = await service.intercept({
@@ -1074,7 +1117,7 @@ describe('插件能力', () => {
             `export function activate(enso) { enso.events.on('tool_call', () => { throw new Error('down'); }); }`
           )
         );
-        service.setEnabled('c.guard', true);
+        await service.setEnabled('c.guard', true);
         const ask = (child: boolean) =>
           service.intercept({
             sessionId: 's',

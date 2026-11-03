@@ -93,6 +93,36 @@ describe('插件事件扩展', () => {
     expect(event?.data.text.length).toBe(64 * 1024);
   });
 
+  it('观察型 tool_result 的 content 超过 64K 字符时截断，拦截载荷不截断', async () => {
+    const text = 'a'.repeat(70_000);
+    const observed = harness(plan({ observe: ['tool_result'] }));
+    await observed.handlers.get('tool_result')?.({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input: {},
+      content: [{ type: 'text', text }],
+      isError: false,
+    } as never);
+    const notice = observed.emit.mock.calls[0]?.[0] as { data: { content: string } } | undefined;
+    expect(notice?.data.content.length).toBe(64 * 1024);
+    expect(notice?.data.content.startsWith('aaa')).toBe(true);
+
+    const both = harness(plan({ observe: ['tool_result'], intercept: [{ event: 'tool_result' }] }));
+    const pending = both.handlers.get('tool_result')?.({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input: {},
+      content: [{ type: 'text', text }],
+      isError: false,
+    } as never);
+    const intercept = both.emit.mock.calls[0]?.[0] as { payload: { content: string } } | undefined;
+    expect(intercept?.payload.content.length).toBe(70_000);
+    reply(both.emit, both.invoker, { content: 'b'.repeat(70_000) });
+    await pending;
+    const after = both.emit.mock.calls.at(-1)?.[0] as { data: { content: string } } | undefined;
+    expect(after?.data.content.length).toBe(64 * 1024);
+  });
+
   it('观察型订阅 tool_call / tool_result / input 也会通知，且不等回复', async () => {
     const { emit, handlers } = harness(plan({ observe: ['input', 'tool_call', 'tool_result'] }));
     await handlers.get('tool_call')?.({

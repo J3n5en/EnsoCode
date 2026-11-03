@@ -107,7 +107,7 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
     case 'restage':
       return plugins.restage(command.id);
     case 'logs':
-      return { ok: true, text: plugins.logs(command.id) };
+      return { ok: true, text: await plugins.logs(command.id) };
     case 'config-set':
       return plugins.setConfig(command.id, command.values);
   }
