@@ -24,6 +24,7 @@
 | [enso-compact-token-limit-fallback.md](enso-compact-token-limit-fallback.md) | Smart Compact 开着仍报 Auto-compaction failed: Summarization failed: Input token limit exceeded |
 | [responses-compaction-routing-key.md](responses-compaction-routing-key.md) | 普通对话可用，默认压缩却报 invalid codex request / invalid_responses_request |
 | [responses-sse-eof-terminal-event.md](responses-sse-eof-terminal-event.md) | 新开对话可用，旧会话反复报 OpenAI Responses stream ended before a terminal response event |
+| [vendor-context-padding.md](vendor-context-padding.md) | Kimi 工具续轮 400 text content is empty，JSONL 无空文本但通用 context hook 注入了 xAI 专用空文本 |
 | [tool-prepare-arguments-schema-drift.md](tool-prepare-arguments-schema-drift.md) | 工具单测全绿，真机上模型每次调用都被判参数不合法 |
 | [hashline-stale-recovery.md](hashline-stale-recovery.md) | 文件远处变动使旧 TAG 失效；恢复必须证明上下文唯一且不改变行号坐标系 |
 | [session-before-compact-return-and-eviction-range.md](session-before-compact-return-and-eviction-range.md) | 持续记忆压缩：overflow 轮直接失败 / 走了原生摘要；memory#2 起静默丢旧史、split-turn 前缀无覆盖 |
