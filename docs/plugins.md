@@ -411,6 +411,7 @@ export function onLoad(enso) {
 | `tool.card` | `toolName` | `{ toolName, output, state }` | 可用。`output` 是工具结果文本，可能为 `null` |
 | `block` | `language` | `{ language, source }` | 可用 |
 | `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |
+| `thinking.body` | 无 | `{ text, streaming, itemKey }` | 可用。接管展开后的思考正文；多个插件只渲染先注册的那个，组件抛错时回退显示原文 |
 
 其它 `slot` 注册时直接报错。
 

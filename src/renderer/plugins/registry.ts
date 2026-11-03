@@ -3,7 +3,8 @@ export type PluginSlotName =
   | 'tool.card'
   | 'block'
   | 'composer.left'
-  | 'composer.right';
+  | 'composer.right'
+  | 'thinking.body';
 
 export type PluginSlotComponent = (props: Record<string, unknown>) => unknown;
 
@@ -27,6 +28,7 @@ const SLOTS = new Set<PluginSlotName>([
   'block',
   'composer.left',
   'composer.right',
+  'thinking.body',
 ]);
 
 let entries: PluginSlotEntry[] = [];
@@ -108,6 +110,11 @@ export function pluginToolCard(pluginId: string, toolName: string): PluginSlotEn
   return entries.find(
     (item) => item.slot === 'tool.card' && item.pluginId === pluginId && item.toolName === toolName
   );
+}
+
+/** 多个插件注册时用先注册的那个 */
+export function pluginThinkingBody(): PluginSlotEntry | undefined {
+  return entries.find((item) => item.slot === 'thinking.body');
 }
 
 export function pluginBlock(pluginId: string, language: string): PluginSlotEntry | undefined {

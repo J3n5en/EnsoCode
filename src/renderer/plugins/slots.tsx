@@ -6,13 +6,14 @@ import {
   pluginBlock,
   pluginComposerSlots,
   pluginMessageActions,
+  pluginThinkingBody,
   pluginToolCard,
 } from './registry';
 import { usePluginSlotsVersion } from './usePluginSlots';
 
 /** 一个插件的一个挂点：出错只隐藏自己，不拖垮输入框或整行消息 */
 export class PluginSlotErrorBoundary extends Component<
-  { pluginId: string; slot: string; children: ReactNode },
+  { pluginId: string; slot: string; children: ReactNode; fallback?: ReactNode },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -26,7 +27,7 @@ export class PluginSlotErrorBoundary extends Component<
   }
 
   render(): ReactNode {
-    if (this.state.failed) return null;
+    if (this.state.failed) return this.props.fallback ?? null;
     return this.props.children;
   }
 }
@@ -34,12 +35,14 @@ export class PluginSlotErrorBoundary extends Component<
 function IsolatedSlot({
   entry,
   props,
+  fallback,
 }: {
   entry: PluginSlotEntry;
   props: Record<string, unknown>;
+  fallback?: ReactNode;
 }) {
   return (
-    <PluginSlotErrorBoundary pluginId={entry.pluginId} slot={entry.slot}>
+    <PluginSlotErrorBoundary pluginId={entry.pluginId} slot={entry.slot} fallback={fallback}>
       <PluginSlotView entry={entry} props={props} />
     </PluginSlotErrorBoundary>
   );
@@ -89,6 +92,36 @@ export function PluginToolCardSlot({
   const entry = pluginToolCard(parsed.pluginId, parsed.toolName);
   if (!entry) return null;
   return <IsolatedSlot entry={entry} props={{ toolName: parsed.toolName, output, state }} />;
+}
+
+const THINKING_BODY_CLASS = [
+  't-acc-reveal mt-1 ml-[10px] border-l-2 border-border py-0.5 pl-[19px]',
+  'text-[13px] leading-relaxed text-muted-foreground whitespace-pre-wrap',
+].join(' ');
+
+/** 无插件时保持原来的段落；有插件时换成 div，避免插件根节点不能放进 p */
+export function PluginThinkingBody({
+  text,
+  streaming,
+  itemKey,
+}: {
+  text: string;
+  streaming: boolean;
+  itemKey: string;
+}) {
+  usePluginSlotsVersion();
+  const entry = pluginThinkingBody();
+  if (!entry) return <p className={THINKING_BODY_CLASS}>{text}</p>;
+  return (
+    <div className={THINKING_BODY_CLASS}>
+      <IsolatedSlot
+        key={entry.uid}
+        entry={entry}
+        props={{ text, streaming, itemKey }}
+        fallback={text}
+      />
+    </div>
+  );
 }
 
 export function PluginBlock({

@@ -5,6 +5,7 @@ import {
   pluginBlock,
   pluginComposerSlots,
   pluginMessageActions,
+  pluginThinkingBody,
   pluginToolCard,
   registerPluginSlot,
   resetPluginSlots,
@@ -106,5 +107,30 @@ describe('插件挂点登记', () => {
     registerPluginSlot({ pluginId: 'a.b', slot: 'composer.right', component });
     expect(pluginComposerSlots('left')).toHaveLength(1);
     expect(pluginComposerSlots('right')).toHaveLength(1);
+  });
+
+  it('思考正文无需额外字段，多个注册只取第一个', () => {
+    const first = () => null;
+    const second = () => null;
+    registerPluginSlot({ pluginId: 'a.b', slot: 'composer.left', component });
+    const dispose = registerPluginSlot({
+      pluginId: 'a.b',
+      slot: 'thinking.body',
+      component: first,
+    });
+    registerPluginSlot({ pluginId: 'c.d', slot: 'thinking.body', component: second });
+    expect(pluginThinkingBody()?.component).toBe(first);
+    dispose();
+    expect(pluginThinkingBody()?.component).toBe(second);
+  });
+
+  it('思考正文组件不是函数时拒绝登记', () => {
+    expect(() =>
+      registerPluginSlot({
+        pluginId: 'a.b',
+        slot: 'thinking.body',
+        component: 'nope' as never,
+      })
+    ).toThrow('挂点需要组件函数');
   });
 });
