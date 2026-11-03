@@ -32,6 +32,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import {
   Select,
   SelectItem,
@@ -543,10 +544,11 @@ export function EnsoPluginsSettings({
       </div>
       <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">
         <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Link2 className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-8"
+          <InputGroup className="flex-1">
+            <InputGroupAddon>
+              <Link2 className="size-4 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
               value={url}
               placeholder={t('https://github.com/owner/repo')}
               onChange={(event) => setUrl(event.target.value)}
@@ -554,7 +556,7 @@ export function EnsoPluginsSettings({
                 if (event.key === 'Enter') void stageUrl();
               }}
             />
-          </div>
+          </InputGroup>
           <Button
             size="sm"
             variant="outline"
