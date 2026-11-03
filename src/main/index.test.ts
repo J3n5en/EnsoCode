@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
     getPath: (name: string) => (name === 'appData' ? '/system-app-data' : '/tmp'),
     setPath: mocks.setPath,
     requestSingleInstanceLock: () => true,
+    setAsDefaultProtocolClient: vi.fn(),
     quit: vi.fn(),
     whenReady: () => Promise.resolve(),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
@@ -47,6 +48,7 @@ vi.mock('./ipc/settings', () => ({
   consumeTrayReenterAfterUpdate: () => mocks.consumeTrayReenter(),
 }));
 vi.mock('./ipc/desktop', () => ({ registerDesktopIpcHandlers: vi.fn() }));
+vi.mock('./ipc/window', () => ({ openPluginInstallFromProtocol: vi.fn() }));
 vi.mock('./desktop/localUi', () => ({ installDesktopLocalUi: vi.fn() }));
 vi.mock('./desktop/localImageScheme', () => ({
   registerLocalImageProtocolHandler: vi.fn(),

@@ -1,3 +1,4 @@
+import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { parseTitleBarAppearance } from '@shared/windowControls';
@@ -11,6 +12,20 @@ import {
 import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
+
+let pendingDeepLink: ReturnType<typeof parseOpenSettingsRequest> = null;
+
+function openSettingsDeepLink(link: ReturnType<typeof parseOpenSettingsRequest>): void {
+  const win = openSettingsWindow();
+  if (!link) return;
+  pendingDeepLink = link;
+  sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
+}
+
+/** 系统用 enso://install-plugin 唤起后，打开插件设置并开始暂存 */
+export function openPluginInstallFromProtocol(httpsUrl: string): void {
+  openSettingsDeepLink(pluginInstallSettingsLink(httpsUrl));
+}
 
 /** 窗口控制：所有 handler 作用于发起 IPC 的窗口，天然支持多窗口 */
 export function registerWindowHandlers(): void {
@@ -98,14 +113,8 @@ export function registerWindowHandlers(): void {
     }
   });
 
-  let pendingDeepLink: ReturnType<typeof parseOpenSettingsRequest> = null;
-
   ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, (_event, raw: unknown) => {
-    const link = parseOpenSettingsRequest(raw);
-    const win = openSettingsWindow();
-    if (!link) return;
-    pendingDeepLink = link;
-    sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
+    openSettingsDeepLink(parseOpenSettingsRequest(raw));
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_DEEP_LINK_CONSUME, () => {

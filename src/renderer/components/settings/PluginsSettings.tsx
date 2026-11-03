@@ -362,7 +362,15 @@ function ExtensionPluginArtifacts({ pluginId, plain }: { pluginId: string; plain
 }
 
 /** Enso 自己的插件：安装时展示权限并征得同意，更新扩大授权要重新同意 */
-export function EnsoPluginsSettings() {
+const stagingInstallUrls = new Set<string>();
+
+export function EnsoPluginsSettings({
+  requestedInstallUrl = null,
+  onRequestedInstallUrlConsumed,
+}: {
+  requestedInstallUrl?: string | null;
+  onRequestedInstallUrlConsumed?: () => void;
+} = {}) {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
@@ -407,8 +415,8 @@ export function EnsoPluginsSettings() {
     else if (!('cancelled' in result)) setPreview(result.preview);
   };
 
-  const stageUrl = async () => {
-    const value = url.trim();
+  const stageUrl = async (raw?: string) => {
+    const value = (raw ?? url).trim();
     if (!value) return;
     setError(null);
     setDownloading(true);
@@ -420,6 +428,28 @@ export function EnsoPluginsSettings() {
     if (!result.ok) setError(result.error);
     else setPreview(result.preview);
   };
+  const stageUrlRef = React.useRef(stageUrl);
+  stageUrlRef.current = stageUrl;
+
+  React.useEffect(() => {
+    if (!requestedInstallUrl) return;
+    const installUrl = requestedInstallUrl;
+    let cancelled = false;
+    // StrictMode 会立刻卸掉第一次 effect；推迟到下一拍，避免对已卸载的实例发起暂存
+    const timer = window.setTimeout(() => {
+      if (cancelled || stagingInstallUrls.has(installUrl)) return;
+      stagingInstallUrls.add(installUrl);
+      setUrl(installUrl);
+      onRequestedInstallUrlConsumed?.();
+      void stageUrlRef.current(installUrl).finally(() => {
+        stagingInstallUrls.delete(installUrl);
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [requestedInstallUrl, onRequestedInstallUrlConsumed]);
 
   const restage = async (id: string, fromMarket = false) => {
     setError(null);

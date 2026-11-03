@@ -56,4 +56,25 @@ describe('parseSettingsDeepLink', () => {
     expect(parseSettingsDeepLink('general')).toBeNull();
     expect(parseSettingsDeepLink(42)).toBeNull();
   });
+
+  it('插件安装地址必须是 http(s)', () => {
+    expect(
+      parseSettingsDeepLink({
+        category: 'plugins',
+        rowId: 'plugins.enso',
+        pluginInstallUrl: 'https://github.com/acme/demo',
+      })
+    ).toEqual({
+      category: 'plugins',
+      rowId: 'plugins.enso',
+      pluginInstallUrl: 'https://github.com/acme/demo',
+    });
+    expect(
+      parseSettingsDeepLink({
+        category: 'plugins',
+        rowId: 'plugins.enso',
+        pluginInstallUrl: 'file:///tmp/x.zip',
+      })
+    ).toBeNull();
+  });
 });

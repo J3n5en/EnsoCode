@@ -1,5 +1,9 @@
 appId: com.j3n5en.enso-code
 productName: EnsoCode
+protocols:
+  - name: EnsoCode
+    schemes:
+      - enso
 directories:
   buildResources: build
 extraResources:
