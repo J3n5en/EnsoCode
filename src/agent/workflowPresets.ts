@@ -352,6 +352,160 @@ const notes = await parallel(angles.map(([label, focus]) => () => agent(
 )));
 return angles.map(([angle], i) => ({ angle, notes: notes[i] }));
 `,
+  arena: `/*---
+name: Arena
+description: Run N independent attempts at one task in separate worktrees, let a judge pick the base, then graft the best parts of the others into it.
+args:
+  - key: task
+    label: Task
+    required: true
+  - key: candidates
+    label: Number of candidates (1-6)
+    default: "2"
+  - key: models
+    label: Candidate models (comma separated, rotated)
+    default: ""
+  - key: rubric
+    label: Rubric for the judge (hidden from candidates)
+    default: ""
+---*/
+const list = (s) => String(s || '').split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+const json = (text) => { try { return JSON.parse(text); } catch (e) { return null; } };
+const models = list(args.models);
+const n = Math.min(6, Math.max(1, parseInt(args.candidates, 10) || models.length || 2));
+const seat = (i) => (models.length ? { model: models[i % models.length] } : {});
+const root = '/tmp/arena-' + Date.now().toString(36);
+const copy = (path) => 'Work only in your own copy at ' + path + '. In a git repo create it with ' +
+  '\\\`git worktree add --detach ' + path + ' HEAD\\\`, carry over uncommitted changes with ' +
+  '\\\`git diff HEAD --binary | git -C ' + path + ' apply\\\`, and copy any untracked files the task needs. ' +
+  'Never edit the main working tree.';
+const reportSchema = { type: 'object', required: ['path', 'summary', 'rationale'], properties: {
+  path: { type: 'string' }, summary: { type: 'string' }, rationale: { type: 'string' } } };
+await phase('fan out');
+const raw = await parallel(Array.from({ length: n }, (_, i) => () => agent(
+  'Task: ' + args.task + '\\n\\nYou are one of ' + n + ' candidates doing this task independently. ' +
+  copy(root + '/candidate-' + (i + 1)) + ' Produce the complete artifact there, then report its path, ' +
+  'a short summary, and a rationale naming the alternatives you considered and why you rejected them.',
+  { label: 'candidate ' + (i + 1), schema: reportSchema, ...seat(i) }
+)));
+const all = raw.map((text, i) => ({ candidate: i + 1, ...seat(i), ...(json(text) || {}) }));
+const ok = all.filter((c) => typeof c.path === 'string' && c.path);
+const dropped = all.filter((c) => !ok.includes(c)).map((c) => c.candidate);
+if (ok.length === 0) return { error: 'every candidate failed', dropped };
+const describe = (c) => 'Candidate ' + c.candidate + ' at ' + c.path + '\\nSummary: ' + c.summary +
+  '\\nRationale: ' + c.rationale;
+let base = ok[0];
+let judge = null;
+if (ok.length > 1) {
+  await phase('judge');
+  const rubric = String(args.rubric || '').trim();
+  judge = json(await agent(
+    'Task the candidates were given: ' + args.task + '\\n\\n' +
+    (rubric ? 'Rubric:\\n' + rubric : 'First derive 3-6 concrete, gradeable criteria for success on this task.') +
+    '\\n\\n' + ok.map(describe).join('\\n\\n') + '\\n\\nRead every candidate end to end ' +
+    '(git -C <path> diff HEAD, then the files). Score each criterion per candidate, not on overall feel. ' +
+    'Recommend as base the candidate a future maintainer can extend most easily without breaking invariants; ' +
+    'on a tie prefer the cleaner boundary or smaller API. Do not edit any file.',
+    { label: 'judge', schema: { type: 'object', required: ['base', 'reason'], properties: {
+      base: { type: 'integer' }, scores: { type: 'string' }, reason: { type: 'string' } } }, ...seat(n) }
+  ));
+  base = ok.find((c) => judge && c.candidate === judge.base) || base;
+}
+const others = ok.filter((c) => c !== base);
+let synthesis = null;
+if (others.length > 0) {
+  await phase('graft');
+  synthesis = await agent(
+    'Task: ' + args.task + '\\n\\nThe arena picked candidate ' + base.candidate + ' at ' + base.path +
+    ' as the base' + (judge && judge.reason ? ' because: ' + judge.reason : '') + '.\\n\\nOther candidates:\\n\\n' +
+    others.map(describe).join('\\n\\n') + '\\n\\nWork in the base copy only. Walk each other candidate once ' +
+    'for the one or two parts worth porting and fold each in by hand so the result stays coherent under one ' +
+    'design; do not paste mechanically. If the candidates converge on one shape, say so and graft nothing. ' +
+    'Then prove the result works with the checks that fit and include each command with its output. Report ' +
+    'the base path, each graft with its source candidate, what you rejected and why, and the verification ' +
+    'result. Never edit the main working tree.',
+    { label: 'graft', ...seat(base.candidate - 1) }
+  );
+}
+return { task: args.task, base: base.candidate, path: base.path, judge, candidates: ok, dropped, synthesis,
+  note: 'Candidate copies stay under ' + root + '; remove them with git worktree remove once applied.' };
+`,
+  interrogate: `/*---
+name: Interrogate
+description: Adversaries try to break a change in their own worktrees; only findings a verifier reproduces by rerunning the command survive. Reports, never fixes.
+args:
+  - key: target
+    label: Scope
+    default: the branch diff from its merge base with the default branch, plus uncommitted changes
+  - key: intent
+    label: Intent of the change (derived when empty)
+    default: ""
+  - key: adversaries
+    label: Number of adversaries (1-6)
+    default: "2"
+  - key: models
+    label: Adversary models (comma separated, rotated)
+    default: ""
+---*/
+const list = (s) => String(s || '').split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+const json = (text) => { try { return JSON.parse(text); } catch (e) { return null; } };
+const models = list(args.models);
+const n = Math.min(6, Math.max(1, parseInt(args.adversaries, 10) || models.length || 2));
+const seat = (i) => (models.length ? { model: models[i % models.length] } : {});
+const root = '/tmp/interrogate-' + Date.now().toString(36);
+const scope = 'Scope: ' + args.target;
+let intent = String(args.intent || '').trim();
+if (!intent) {
+  await phase('frame');
+  intent = String(await agent(
+    scope + '\\n\\nRestate in your own words what this change is meant to do and which behavior it must keep, ' +
+    'from the diff, the commit messages and any PR description. Do not edit any file. Answer in under 150 words.',
+    { label: 'intent', ...seat(0) }
+  ) || '').trim();
+  if (!intent) return { error: 'could not establish the intent of the change' };
+}
+const str = { type: 'string' };
+const claimSchema = { type: 'object', required: ['worktree', 'findings'], properties: {
+  worktree: str,
+  findings: { type: 'array', items: { type: 'object', required: ['title', 'command', 'output', 'expected'],
+    properties: { title: str, command: str, output: str, expected: str } } } } };
+await phase('attack');
+const raw = await parallel(Array.from({ length: n }, (_, i) => () => {
+  const path = root + '/adversary-' + (i + 1);
+  return agent(
+    scope + '\\nIntent: ' + intent + '\\n\\nBreak this change. Work only in your own copy at ' + path +
+    ': in a git repo create it with \\\`git worktree add --detach ' + path + ' HEAD\\\`, carry over uncommitted ' +
+    'changes with \\\`git diff HEAD --binary | git -C ' + path + ' apply\\\`, and copy untracked files in scope. ' +
+    'Never edit the main working tree. Prove each finding with a run against the real code, such as a failing ' +
+    'test, a repro script, or command output that shows the wrong behavior. For a design or plan, run a ' +
+    'prototype or probe the current tree. Keep repros in your copy and leave it in place. Report the copy path ' +
+    'as worktree, and each finding with a title, the exact command run from the worktree root, the output it ' +
+    'printed, and the output the intent requires. Leave out anything you did not run: style, naming, structure, ' +
+    'and risks that need a future change to matter. An empty findings list is a valid result.',
+    { label: 'adversary ' + (i + 1), schema: claimSchema, ...seat(i) }
+  );
+}));
+const reports = raw.map((text, i) => ({ adversary: i + 1, ...(json(text) || {}) }));
+const failed = reports.filter((r) => !Array.isArray(r.findings)).map((r) => r.adversary);
+const claimed = reports.filter((r) => Array.isArray(r.findings) && r.findings.length > 0);
+if (claimed.length === 0) return { intent, findings: [], failed, note: 'no verified findings' };
+await phase('verify');
+const verdict = json(await agent(
+  'Intent: ' + intent + '\\n\\nAdversaries claim these findings against the change; each lists the copy it ran in:\\n' +
+  JSON.stringify(claimed, null, 2) + '\\n\\nFor each finding, rerun its exact command from its worktree. Keep a ' +
+  'finding only when the output you get shows the failure and that failure breaks the intent; drop the rest. ' +
+  'Merge kept findings that share a root cause and list every adversary that found them. For each adversary, ' +
+  'count what you dropped and why. Do not fix anything and do not edit files outside those copies.',
+  { label: 'verify', schema: { type: 'object', required: ['findings', 'dropped'], properties: {
+    findings: { type: 'array', items: { type: 'object', required: ['title', 'command', 'output', 'breaks', 'foundBy'],
+      properties: { title: str, command: str, output: str, breaks: str, foundBy: { type: 'array', items: { type: 'integer' } } } } },
+    dropped: { type: 'array', items: { type: 'object', required: ['adversary', 'count', 'reason'],
+      properties: { adversary: { type: 'integer' }, count: { type: 'integer' }, reason: str } } } } }, ...seat(n) }
+));
+if (!verdict) return { intent, error: 'verification failed', unverified: claimed, failed };
+return { intent, findings: verdict.findings, dropped: verdict.dropped, failed,
+  note: 'Adversary copies stay under ' + root + '; remove them with git worktree remove when done.' };
+`,
 };
 
 let builtinCache: WorkflowPreset[] | undefined;

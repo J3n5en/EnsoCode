@@ -482,6 +482,97 @@ describe('workflow tool', () => {
         .filter((r) => r.operation === 'spawn');
       expect(spawns.every((r) => r.agentType === 'reviewer')).toBe(true);
     });
+
+    const runBuiltin = async (
+      preset: string,
+      args: Record<string, unknown>,
+      reply: (label: string, prompt: string) => FakeChild
+    ) => {
+      const { invoke } = fakeChildren((spawn) => reply(spawn.description, spawn.prompt));
+      const tool = createWorkflowTool({
+        invoke,
+        emit: vi.fn(),
+        loadPreset: (id) => loadWorkflowPreset(id, []),
+      });
+      const result = await tool.execute(
+        'call-x',
+        { preset, args },
+        undefined,
+        undefined,
+        {} as never
+      );
+      const spawns = invoke.mock.calls
+        .map(([request]) => request)
+        .filter((r) => r.operation === 'spawn') as (FakeSpawn & { model?: string })[];
+      return { result: (result.details as { result: Record<string, unknown> }).result, spawns };
+    };
+
+    it('arena：候选按模型轮换并行，评分标准只给评委，嫁接在评委选的底稿上并跳过掉队者', async () => {
+      const { result, spawns } = await runBuiltin(
+        'arena',
+        { task: 'build X', candidates: '3', models: 'A, B', rubric: 'R-SECRET' },
+        (label) => {
+          const n = /^candidate (\d)$/.exec(label)?.[1];
+          if (n === '2') return { runId: label, status: 'failed' };
+          if (n) {
+            const report = { path: `/tmp/c${n}`, summary: `s${n}`, rationale: `r${n}` };
+            return { runId: label, text: JSON.stringify(report) };
+          }
+          if (label === 'judge')
+            return { runId: label, text: JSON.stringify({ base: 3, reason: 'cleanest' }) };
+          return { runId: label, text: 'synthesized' };
+        }
+      );
+      const candidates = spawns.filter((s) => s.description.startsWith('candidate'));
+      expect(candidates.map((s) => s.model)).toEqual(['A', 'B', 'A']);
+      expect(candidates.every((s) => !s.prompt.includes('R-SECRET'))).toBe(true);
+      expect(spawns.find((s) => s.description === 'judge')?.prompt).toContain('R-SECRET');
+      const graft = spawns.find((s) => s.description === 'graft');
+      expect(graft?.prompt).toContain('/tmp/c3');
+      expect(graft?.prompt).toContain('/tmp/c1');
+      expect(graft?.prompt).toContain('cleanest');
+      expect(graft?.prompt).not.toContain('/tmp/c2');
+      expect(result).toMatchObject({ base: 3, dropped: [2], synthesis: 'synthesized' });
+    });
+
+    it('interrogate：没给意图先复述，只有复核重跑通过的发现留下', async () => {
+      const finding = { title: 't1', command: 'c1', output: 'o1', expected: 'e1' };
+      const { result, spawns } = await runBuiltin('interrogate', { adversaries: '2' }, (label) => {
+        if (label === 'intent') return { runId: label, text: 'INTENT-TEXT' };
+        if (label === 'adversary 1')
+          return {
+            runId: label,
+            text: JSON.stringify({ worktree: '/tmp/a1', findings: [finding] }),
+          };
+        if (label === 'adversary 2')
+          return { runId: label, text: JSON.stringify({ worktree: '/tmp/a2', findings: [] }) };
+        const verdict = {
+          findings: [{ title: 't1', command: 'c1', output: 'o1', breaks: 'b', foundBy: [1] }],
+          dropped: [],
+        };
+        return { runId: label, text: JSON.stringify(verdict) };
+      });
+      expect(spawns.map((s) => s.description)).toEqual([
+        'intent',
+        'adversary 1',
+        'adversary 2',
+        'verify',
+      ]);
+      expect(spawns[1]?.prompt).toContain('INTENT-TEXT');
+      expect(spawns[3]?.prompt).toContain('c1');
+      expect(spawns[3]?.prompt).toContain('/tmp/a1');
+      expect(result).toMatchObject({ intent: 'INTENT-TEXT', findings: [{ title: 't1' }] });
+    });
+
+    it('interrogate：给了意图不再复述，全部无发现时不启动复核', async () => {
+      const { result, spawns } = await runBuiltin(
+        'interrogate',
+        { intent: 'keep X', adversaries: '2' },
+        (label) => ({ runId: label, text: JSON.stringify({ worktree: '/tmp/w', findings: [] }) })
+      );
+      expect(spawns.map((s) => s.description)).toEqual(['adversary 1', 'adversary 2']);
+      expect(result).toMatchObject({ intent: 'keep X', findings: [] });
+    });
   });
 
   describe('model', () => {
