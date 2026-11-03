@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPluginPresetOverrides } from './agentHost';
+import { applyPluginPresetOverrides, pluginPresetInstruction } from './agentHost';
 
 const resolveModel = (model: { providerId: string; modelId: string }) =>
   model.modelId === 'missing'
@@ -78,5 +78,18 @@ describe('applyPluginPresetOverrides', () => {
         resolveModel,
       })
     ).toMatchObject({ ok: true, approvalMode: 'supervised' });
+  });
+});
+
+describe('pluginPresetInstruction', () => {
+  const global = { path: '/g.md', content: 'global' };
+
+  it('预设没带指令时沿用全局指令', () => {
+    expect(pluginPresetInstruction(undefined, () => global)).toEqual(global);
+  });
+
+  it('预设带指令时替换全局指令', () => {
+    const own = { path: '/p.md', content: 'preset' };
+    expect(pluginPresetInstruction(own, () => global)).toEqual(own);
   });
 });

@@ -967,7 +967,7 @@ export function spawnSession(
   const instruction = bot
     ? bot.instruction
     : pluginPreset?.ok
-      ? pluginPreset.instruction
+      ? pluginPresetInstruction(pluginPreset.instruction, () => resolveGlobalInstruction())
       : resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
@@ -1147,6 +1147,14 @@ export interface PluginPresetSpawnOverrides {
 }
 
 /** 插件预设覆盖：模型以预设为准，思考档覆盖，审批取更严，禁用工具并入 */
+/** 插件预设自带指令则替换全局指令，否则沿用全局指令 */
+export function pluginPresetInstruction<T>(
+  own: T | undefined,
+  global: () => T | undefined
+): T | undefined {
+  return own ?? global();
+}
+
 export function applyPluginPresetOverrides<T>(input: {
   model: T;
   thinkingLevel?: ThinkingLevel;
