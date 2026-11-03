@@ -454,6 +454,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       registerTool: (tool: ToolDefinition) => registered.push(tool),
       appendEntry: () => {},
       getAllTools: () => [],
+      getActiveTools: () => [],
       getSettings: () => ({}),
     });
     const sections: Record<string, string> = {};

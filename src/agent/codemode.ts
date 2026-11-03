@@ -97,6 +97,22 @@ export const CODEMODE_INPUTS_DOC =
   "\n\nLong verbatim text (file contents, patches, prose) can be passed without escaping in heredoc blocks: a line `// @input: name <<'EOF'`, the raw lines, then a line `EOF`. " +
   'The script reads it as `inputs.name` (a string). Do not declare your own `inputs`.';
 
+export const CODEMODE_FORBIDDEN_DOC =
+  '\n\nOrchestration, interaction and session-control tools cannot be called from codemode scripts via tools.*; ' +
+  'call them directly as top-level tools instead (see the codemode_forbidden_tools section).';
+
+const FORBIDDEN_SECTION_NAME = 'codemode_forbidden_tools';
+
+/** 只列本会话真正声明给模型的禁用工具，避免点出不存在的工具名 */
+export function renderCodemodeForbiddenSection(activeTools: readonly string[]): string {
+  const names = activeTools.filter((name) => CODEMODE_FORBIDDEN_TOOLS.has(name)).sort();
+  return names.length > 0
+    ? `These tools cannot be called from codemode scripts via tools.*; call them directly as top-level tools: ${names
+        .map((name) => `\`${name}\``)
+        .join(', ')}.`
+    : '';
+}
+
 /**
  * 展开 `// @input: name <<'EOF'` 原文块：块内文本原样进 `inputs`，块所在行替换为空行，
  * 声明前置到首个代码行同一行，脚本行号不变。无块原样返回。
@@ -249,9 +265,14 @@ export class CodemodeHost {
     else createToolSearchExtension()(activating);
 
     const section = renderMcpServersSection(deferredServers, codemode ? 'codemode' : 'tool_search');
-    if (section) {
+    if (section || codemode) {
       pi.on('before_agent_start', (event) => {
-        event.systemPromptOptions.sections[SECTION_NAME] = section;
+        const sections = event.systemPromptOptions.sections;
+        if (section) sections[SECTION_NAME] = section;
+        if (!codemode) return;
+        const forbidden = renderCodemodeForbiddenSection(pi.getActiveTools());
+        if (forbidden) sections[FORBIDDEN_SECTION_NAME] = forbidden;
+        else delete sections[FORBIDDEN_SECTION_NAME];
       });
     }
 
@@ -362,6 +383,9 @@ export function codemodeToolSnapshot(): ToolDefinition {
 
 function withInputsDoc<T extends { name: string; description: string }>(tool: T): T {
   return tool.name === CODEMODE_TOOL_NAME
-    ? { ...tool, description: `${tool.description}${CODEMODE_INPUTS_DOC}` }
+    ? {
+        ...tool,
+        description: `${tool.description}${CODEMODE_INPUTS_DOC}${CODEMODE_FORBIDDEN_DOC}`,
+      }
     : tool;
 }

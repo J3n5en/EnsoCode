@@ -3,9 +3,11 @@ import type { McpServerSpawnConfig } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CODEMODE_DEFAULT_TIMEOUT_MS,
+  CODEMODE_FORBIDDEN_TOOLS,
   CODEMODE_MAX_NESTED_CALLS,
   CODEMODE_MAX_TIMEOUT_MS,
   CodemodeHost,
+  codemodeToolSnapshot,
   looksLikeShellCommand,
   nestedToolCallParent,
   renderMcpServersSection,
@@ -15,7 +17,7 @@ import {
 
 type Handler = (event: Record<string, unknown>) => unknown;
 
-function fakePi() {
+function fakePi(activeTools: string[] = []) {
   const handlers = new Map<string, Handler[]>();
   const registered: ToolDefinition[] = [];
   const pi = {
@@ -25,6 +27,7 @@ function fakePi() {
     registerTool: (tool: ToolDefinition) => registered.push(tool),
     appendEntry: () => {},
     getAllTools: () => [],
+    getActiveTools: () => activeTools,
     getSettings: () => ({}),
   } as unknown as ExtensionAPI;
   const emit = async (event: string, payload: Record<string, unknown>) => {
@@ -52,8 +55,8 @@ const tool = (name: string): ToolDefinition =>
     execute: async () => ({ content: [], details: undefined }),
   }) as unknown as ToolDefinition;
 
-function install(host: CodemodeHost) {
-  const fake = fakePi();
+function install(host: CodemodeHost, activeTools?: string[]) {
+  const fake = fakePi(activeTools);
   const factory = host.extension as { factory: (pi: ExtensionAPI) => void };
   factory.factory(fake.pi);
   return fake;
@@ -229,6 +232,31 @@ describe('CodemodeHost', () => {
         input: { code: "// @input: body <<'EOF'\nunterminated" },
       })
     ).toMatchObject({ block: true, reason: expect.stringContaining('EOF') });
+  });
+
+  it('工具描述只给通用说明，不点名具体禁用工具', () => {
+    const { registered } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    for (const description of [
+      registered.find((t) => t.name === 'codemode')?.description ?? '',
+      codemodeToolSnapshot().description,
+    ]) {
+      expect(description).toContain('cannot be called from codemode scripts');
+      for (const name of CODEMODE_FORBIDDEN_TOOLS) expect(description).not.toContain(`\`${name}\``);
+    }
+  });
+
+  it('禁用工具段只列本会话已声明的禁用工具，无则不写', async () => {
+    const sectionOf = async (active: string[]) => {
+      const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }), active);
+      const sections: Record<string, string> = {};
+      await emit('before_agent_start', { systemPromptOptions: { sections } });
+      return sections.codemode_forbidden_tools;
+    };
+    const text = await sectionOf(['read', 'todo', 'subagent']);
+    expect(text).toContain('`subagent`, `todo`');
+    expect(text).not.toContain('`read`');
+    expect(text).not.toContain('submit_plan');
+    expect(await sectionOf(['read'])).toBeUndefined();
   });
 
   it('嵌套调用禁止编排类工具，并按父调用限次；父调用结束清零', async () => {
