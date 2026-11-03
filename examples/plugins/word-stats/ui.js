@@ -18,6 +18,7 @@ function parsePairs(text) {
   return rows;
 }
 
+/** @param {import('../../../types/enso-plugin').EnsoUi} enso */
 export function onLoad(enso) {
   const h = enso.React.createElement;
 

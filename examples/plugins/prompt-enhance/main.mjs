@@ -104,6 +104,7 @@ export async function enhance(enso, args, ctx) {
   return warning ? { ok: true, text, warning } : { ok: true, text };
 }
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   enso.renderer.handle('enhance', (args, ctx) => enhance(enso, args, ctx));
 }

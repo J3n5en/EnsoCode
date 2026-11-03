@@ -36,6 +36,7 @@ async function loadSnippets(dataDir) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   enso.triggers.register('snippet', {
     async candidates(query) {

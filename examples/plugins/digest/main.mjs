@@ -1,5 +1,6 @@
 let sessions = 0;
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   enso.events.on('session_start', () => {
     sessions += 1;

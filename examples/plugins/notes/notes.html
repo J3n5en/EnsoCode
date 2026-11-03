@@ -100,7 +100,9 @@
       const run = async (method, args) => {
         errorBox.textContent = '';
         try {
-          return await window.enso.call(method, args);
+          return await /** @type {import('../../../types/enso-plugin').EnsoView} */ (
+            window.enso
+          ).call(method, args);
         } catch (error) {
           errorBox.textContent = error.message;
           return null;

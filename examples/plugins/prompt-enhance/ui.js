@@ -68,6 +68,7 @@ const STYLE = `
   color: var(--muted-foreground); text-decoration: underline; cursor: pointer; }
 `;
 
+/** @param {import('../../../types/enso-plugin').EnsoUi} enso */
 export function onLoad(enso) {
   const { React } = enso;
   const h = React.createElement;

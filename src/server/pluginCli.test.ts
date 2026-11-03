@@ -1,8 +1,12 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
 } from '@shared/extensionPlugins/types';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatInstallPreview, formatPluginList, runPluginCommand } from './pluginCli';
 
 const preview: ExtensionPluginInstallPreview = {
@@ -233,5 +237,112 @@ describe('enso-server plugin', () => {
       runPluginCommand(['config', 'demo.hello', 'token='], { ...d, interactive: false })
     ).rejects.toThrow('交互');
     await expect(runPluginCommand(['config', 'demo.hello', 'oops'], d)).rejects.toThrow('用法');
+  });
+});
+
+const scratch: string[] = [];
+
+afterEach(() => {
+  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'enso-plugin-cli-'));
+  scratch.push(dir);
+  return dir;
+}
+
+const validManifest = {
+  schemaVersion: 1,
+  id: 'enso.example.hello',
+  name: 'Hello',
+  version: '0.1.0',
+  description: 'hi',
+  permissions: [] as string[],
+};
+
+describe('enso-server plugin validate / init', () => {
+  it('validate：清单不合法、入口缺失或不是文件时抛出错误，且不连接服务', async () => {
+    const root = tempDir();
+    const { call, deps: d } = deps();
+    await expect(runPluginCommand(['validate', join(root, 'missing')], d)).rejects.toThrow(
+      '找不到插件目录'
+    );
+    const bad = join(root, 'bad');
+    mkdirSync(bad);
+    writeFileSync(join(bad, 'enso-plugin.json'), '{');
+    await expect(runPluginCommand(['validate', bad], d)).rejects.toThrow('不是合法 JSON');
+    writeFileSync(join(bad, 'enso-plugin.json'), JSON.stringify({ ...validManifest, id: 'Hello' }));
+    await expect(runPluginCommand(['validate', bad], d)).rejects.toThrow('id 不合法');
+    writeFileSync(
+      join(bad, 'enso-plugin.json'),
+      JSON.stringify({ ...validManifest, engines: { enso: '>=99.0.0' } })
+    );
+    await expect(runPluginCommand(['validate', bad], d)).rejects.toThrow('需要 Enso >=99.0.0');
+
+    const plugin = join(root, 'plugin');
+    mkdirSync(plugin);
+    writeFileSync(
+      join(plugin, 'enso-plugin.json'),
+      JSON.stringify({
+        ...validManifest,
+        permissions: ['ui.slot'],
+        main: 'main.mjs',
+        renderer: 'ui.js',
+      })
+    );
+    await expect(runPluginCommand(['validate', plugin], d)).rejects.toThrow('入口不存在：main');
+    writeFileSync(join(plugin, 'main.mjs'), 'export {}\n');
+    mkdirSync(join(plugin, 'ui.js'));
+    await expect(runPluginCommand(['validate', plugin], d)).rejects.toThrow(
+      '入口不是文件：renderer'
+    );
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('validate：未知字段只警告，入口存在则通过', async () => {
+    const plugin = join(tempDir(), 'ok');
+    mkdirSync(plugin);
+    writeFileSync(join(plugin, 'main.mjs'), 'export {}\n');
+    writeFileSync(
+      join(plugin, 'enso-plugin.json'),
+      JSON.stringify({ ...validManifest, main: 'main.mjs', marketplace: true })
+    );
+    const { out, call, deps: d } = deps();
+    await runPluginCommand(['validate', plugin], d);
+    const text = out.join('\n');
+    expect(text).toContain('忽略未知字段 marketplace');
+    expect(text).toContain('通过');
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('init：生成最小插件并通过 validate；拒绝覆盖和非法 id', async () => {
+    const root = tempDir();
+    const { out, call, deps: d } = deps();
+    await runPluginCommand(['init', 'hello', '--id', 'enso.example.hello'], { ...d, cwd: root });
+    expect(call).not.toHaveBeenCalled();
+    const dir = join(root, 'hello');
+    const manifest = JSON.parse(readFileSync(join(dir, 'enso-plugin.json'), 'utf8'));
+    expect(manifest).toMatchObject({
+      schemaVersion: 1,
+      id: 'enso.example.hello',
+      main: 'main.mjs',
+      renderer: 'ui.js',
+    });
+    expect(manifest.contributes.agentTools[0].name).toBe('hello');
+    expect(readFileSync(join(dir, 'main.mjs'), 'utf8')).toContain("import('enso-plugin').EnsoMain");
+    expect(readFileSync(join(dir, 'ui.js'), 'utf8')).toContain("import('enso-plugin').EnsoUi");
+    expect(readFileSync(join(dir, 'jsconfig.json'), 'utf8')).toContain('enso-plugin.d.ts');
+    await runPluginCommand(['validate', dir], d);
+    expect(out.join('\n')).toContain('通过');
+    execFileSync(
+      'pnpm',
+      ['exec', 'tsc', '-p', join(dir, 'jsconfig.json'), '--pretty', 'false', '--noEmit'],
+      { encoding: 'utf8' }
+    );
+    await expect(runPluginCommand(['init', dir], d)).rejects.toThrow('已经有');
+    await expect(
+      runPluginCommand(['init', join(root, 'nope'), '--id', 'Hello'], d)
+    ).rejects.toThrow('id 不合法');
   });
 });

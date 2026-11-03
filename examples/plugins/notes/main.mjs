@@ -5,6 +5,7 @@ import { join } from 'node:path';
 const MAX_NOTES = 200;
 const MAX_TEXT = 8000;
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   const file = join(enso.dataDir, 'notes.json');
 

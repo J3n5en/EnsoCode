@@ -20,6 +20,7 @@ export function analyze(text, top = 5) {
   };
 }
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   enso.tools.register('count_words', async (args) => {
     const path = String(args.path ?? '');

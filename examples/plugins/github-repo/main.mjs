@@ -8,6 +8,7 @@ async function getJson(enso, url) {
   return JSON.parse(res.body);
 }
 
+/** @param {import('../../../types/enso-plugin').EnsoMain} enso */
 export function activate(enso) {
   enso.tools.register('repo_info', async (args) => {
     const repo = String(args.repo ?? '').trim();

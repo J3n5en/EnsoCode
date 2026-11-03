@@ -1,3 +1,4 @@
+/** @param {import('../../../types/enso-plugin').EnsoUi} enso */
 export function onLoad(enso) {
   const h = enso.React.createElement;
   const call = (method, args) => enso.dispatch('plugin.call', { method, args });

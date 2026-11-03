@@ -1,10 +1,14 @@
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isPluginId, parseExtensionPluginManifest } from '@shared/extensionPlugins/manifest';
 import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginSummary,
   RegistryNotice,
 } from '@shared/extensionPlugins/types';
+import { version } from '../../package.json';
 import type { PluginControlCommand } from './control';
 
 export const PLUGIN_USAGE = `用法: enso-server plugin <action>
@@ -22,7 +26,9 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   logs <id>                    插件进程日志末尾（console 输出与异常）
   config <id>                  查看配置项（密钥只显示是否已设置）
   config <id> key=value ...    设置；key= 留空则在终端里输入（不进 shell 历史）
-           [--unset key]       清除某项`;
+           [--unset key]       清除某项
+  validate <目录>              校验 enso-plugin.json，并确认 main / renderer 入口存在
+  init <目录> [--id <id>]      生成最小插件（清单、main.mjs、ui.js、类型引用）`;
 
 type Reply = Record<string, unknown> & { ok?: boolean; error?: string };
 
@@ -213,5 +219,197 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
     deps.log('完成');
     return;
   }
+  if (action === 'validate') {
+    if (!target || flags.length > 0) throw new Error(PLUGIN_USAGE);
+    runValidate(target, deps);
+    return;
+  }
+  if (action === 'init') {
+    if (!target) throw new Error(PLUGIN_USAGE);
+    runInit(target, flags, deps);
+    return;
+  }
   throw new Error(PLUGIN_USAGE);
+}
+
+const SCAFFOLD_FILES = ['enso-plugin.json', 'main.mjs', 'ui.js', 'jsconfig.json'] as const;
+
+function pluginDir(target: string, cwd: string): string {
+  return resolve(cwd, target);
+}
+
+function readManifestFile(dir: string): unknown {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, 'enso-plugin.json'), 'utf8');
+  } catch {
+    throw new Error('找不到 enso-plugin.json');
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error('enso-plugin.json 不是合法 JSON');
+  }
+}
+
+function entryErrors(dir: string, main?: string, renderer?: string): string[] {
+  const errors: string[] = [];
+  const check = (label: 'main' | 'renderer', rel: string | undefined) => {
+    if (!rel) return;
+    const abs = resolve(dir, rel);
+    const relTo = relative(dir, abs);
+    if (relTo.startsWith('..') || isAbsolute(relTo)) {
+      errors.push(`${label} 路径不合法`);
+      return;
+    }
+    try {
+      if (!statSync(abs).isFile()) errors.push(`入口不是文件：${label}（${rel}）`);
+    } catch {
+      errors.push(`入口不存在：${label}（${rel}）`);
+    }
+  };
+  check('main', main);
+  check('renderer', renderer);
+  return errors;
+}
+
+function runValidate(target: string, deps: PluginCliDeps): void {
+  const dir = pluginDir(target, deps.cwd);
+  let info: ReturnType<typeof statSync>;
+  try {
+    info = statSync(dir);
+  } catch {
+    throw new Error('找不到插件目录');
+  }
+  if (!info.isDirectory()) throw new Error('找不到插件目录');
+  const parsed = parseExtensionPluginManifest(readManifestFile(dir), version);
+  if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
+  for (const warning of parsed.warnings) deps.log(warning);
+  const missing = entryErrors(dir, parsed.manifest.main, parsed.manifest.renderer);
+  if (missing.length > 0) throw new Error(missing.join('\n'));
+  deps.log('通过');
+}
+
+function typesDeclaration(): string | null {
+  const starts = [dirname(fileURLToPath(import.meta.url)), process.cwd()];
+  for (const start of starts) {
+    let dir = start;
+    for (let i = 0; i < 8; i++) {
+      const candidate = join(dir, 'types', 'enso-plugin.d.ts');
+      if (existsSync(candidate)) return candidate;
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+
+function parseInitId(flags: string[]): string | undefined {
+  let id: string | undefined;
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i] ?? '';
+    if (flag !== '--id') throw new Error(PLUGIN_USAGE);
+    const value = flags[++i];
+    if (!value || value.startsWith('--') || id !== undefined) throw new Error(PLUGIN_USAGE);
+    id = value;
+  }
+  return id;
+}
+
+function defaultPluginId(dir: string): string {
+  const slug = basename(dir)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/^[0-9]+/, '');
+  const id = `enso.plugin.${slug || 'plugin'}`.slice(0, 40);
+  if (!isPluginId(id)) throw new Error('id 不合法');
+  return id;
+}
+
+function displayName(id: string): string {
+  const last = id.split('.').pop() ?? 'plugin';
+  return (last.charAt(0).toUpperCase() + last.slice(1)).slice(0, 60);
+}
+
+function jsconfig(typesPath: string) {
+  return {
+    compilerOptions: {
+      checkJs: true,
+      allowJs: true,
+      noEmit: true,
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      target: 'ESNext',
+      strict: true,
+      lib: ['ESNext', 'DOM'],
+      jsx: 'react-jsx',
+      skipLibCheck: true,
+      types: [],
+      paths: { 'enso-plugin': [typesPath] },
+    },
+    include: ['main.mjs', 'ui.js'],
+  };
+}
+
+const MAIN_SOURCE = `/**
+ * @param {import('enso-plugin').EnsoMain} enso
+ */
+export function activate(enso) {
+  enso.tools.register('hello', async (args) => {
+    const name = typeof args.name === 'string' ? args.name : 'world';
+    return \`hello \${name}\`;
+  });
+}
+`;
+
+const UI_SOURCE = `/**
+ * @param {import('enso-plugin').EnsoUi} enso
+ */
+export function onLoad(enso) {
+  enso.slots.register({
+    slot: 'composer.right',
+    component: () => enso.React.createElement('span', null, 'hello'),
+  });
+}
+`;
+
+function runInit(target: string, flags: string[], deps: PluginCliDeps): void {
+  const dir = pluginDir(target, deps.cwd);
+  const id = parseInitId(flags) ?? defaultPluginId(dir);
+  if (!isPluginId(id)) throw new Error('id 不合法');
+  if (existsSync(dir)) {
+    if (!statSync(dir).isDirectory()) throw new Error('找不到插件目录');
+    const clash = SCAFFOLD_FILES.find((name) => existsSync(join(dir, name)));
+    if (clash) throw new Error(`目录里已经有 ${clash}`);
+  } else mkdirSync(dir, { recursive: true });
+  const types = typesDeclaration();
+  const typesPath = types ? relative(dir, types).split('\\').join('/') : 'enso-plugin.d.ts';
+  const manifest = {
+    schemaVersion: 1,
+    id,
+    name: displayName(id),
+    version: '0.1.0',
+    description: '',
+    main: 'main.mjs',
+    renderer: 'ui.js',
+    permissions: ['agent.tool', 'ui.slot'],
+    contributes: {
+      agentTools: [
+        {
+          name: 'hello',
+          description: 'Say hello',
+          parameters: {
+            type: 'object',
+            properties: { name: { type: 'string' } },
+          },
+        },
+      ],
+    },
+  };
+  writeFileSync(join(dir, 'enso-plugin.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(join(dir, 'main.mjs'), MAIN_SOURCE);
+  writeFileSync(join(dir, 'ui.js'), UI_SOURCE);
+  writeFileSync(join(dir, 'jsconfig.json'), `${JSON.stringify(jsconfig(typesPath), null, 2)}\n`);
+  deps.log(`已生成 ${dir}`);
 }
