@@ -1,4 +1,5 @@
 import type { PluginHostToMain } from '@shared/extensionPlugins/protocol';
+import { failHostProcess } from './children';
 import { captureConsole, runPluginHost } from './host';
 
 /** 桌面走 utilityProcess 的 parentPort，服务端走 child_process 的 IPC */
@@ -22,8 +23,11 @@ runPluginHost({
 });
 
 process.on('uncaughtException', (error) => {
-  send({ t: 'log', level: 'error', message: error.stack ?? String(error) });
-  process.exit(1);
+  failHostProcess(
+    error,
+    (message) => send({ t: 'log', level: 'error', message }),
+    (code) => process.exit(code)
+  );
 });
 
 process.on('unhandledRejection', (reason) => {

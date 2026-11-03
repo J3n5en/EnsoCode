@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, realpath, stat, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   type ExtensionPluginManifest,
   type ExtensionPluginPermission,
@@ -21,6 +21,12 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FETCH_BYTES = 5 * 1024 * 1024;
 const MAX_DRAFT_BYTES = 32 * 1024;
 const MAX_REDIRECTS = 5;
+const SENSITIVE_REQUEST_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'cookie2',
+]);
 const MAX_MCP_ARGS_BYTES = 64 * 1024;
 const MAX_CALL_DEPTH = 3;
 const MAX_CLIPBOARD_BYTES = 1024 * 1024;
@@ -85,7 +91,10 @@ export interface GateDeps {
   ): Promise<{ content: string; isError: boolean }>;
   now(): number;
   progress?(invocationId: string, text: string): void;
-  writeArtifact?(pluginId: string, input: Record<string, unknown>): PluginArtifactInfo;
+  writeArtifact?(
+    pluginId: string,
+    input: Record<string, unknown>
+  ): PluginArtifactInfo | Promise<PluginArtifactInfo>;
   /** 用户是否允许该插件向非发起会话注入 */
   crossSessionInject?(pluginId: string): boolean;
   inject?(
@@ -198,6 +207,54 @@ const within = (parent: string, child: string) => {
 const covered = (path: string, scopes: string[]) =>
   scopes.some((s) => s === '.' || path === s || path.startsWith(`${s}/`));
 const utf8Bytes = (s: string) => Buffer.byteLength(s, 'utf8');
+const posixRel = (root: string, real: string) => relative(root, real).split(sep).join('/');
+const isEnoent = (error: unknown) =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code: unknown }).code === 'ENOENT';
+
+function dropSensitiveHeaders(headers: Record<string, string>): void {
+  for (const key of Object.keys(headers)) {
+    if (SENSITIVE_REQUEST_HEADERS.has(key.toLowerCase())) delete headers[key];
+  }
+}
+
+function dropHeader(headers: Record<string, string>, name: string): void {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name) delete headers[key];
+  }
+}
+
+async function readLimitedBody(response: Response): Promise<Buffer> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_FETCH_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw pluginError('TOO_LARGE', '响应过大');
+  }
+  const body = response.body;
+  if (!body) return Buffer.alloc(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      total += value.byteLength;
+      if (total > MAX_FETCH_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw pluginError('TOO_LARGE', '响应过大');
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks);
+}
 
 export class PluginHostGate {
   readonly invocations: InvocationTable;
@@ -358,8 +415,9 @@ export class PluginHostGate {
         return null;
       }
       case 'artifact.write': {
+        invocation();
         if (!this.deps.writeArtifact) throw pluginError('UNSUPPORTED', '当前环境不能写产出');
-        return this.deps.writeArtifact(pluginId, a);
+        return await this.deps.writeArtifact(pluginId, a);
       }
       case 'session.inject': {
         permit('agent.inject');
@@ -522,7 +580,7 @@ export class PluginHostGate {
     }
   }
 
-  /** 相对项目根解析；范围按清单 fs 判定，再经 realpath 确认没有借符号链接逃出项目根 */
+  /** 相对项目根解析；先 realpath，再确认仍在授权范围内，不能借符号链接逃出 */
   private async resolveProjectPath(
     inv: Invocation,
     path: unknown,
@@ -533,25 +591,53 @@ export class PluginHostGate {
     if (!isPluginRelativePath(path) || path === '.')
       throw pluginError('INVALID_ARGS', 'path 必须是项目内相对路径');
     const normalized = path.replace(/^\.\//, '');
-    if (!covered(normalized, scopes))
-      throw pluginError('PERMISSION_DENIED', `路径不在授权范围：${normalized}`);
     const root = await realpath(inv.projectRoot);
     const target = resolve(root, normalized);
-    let real: string;
-    if (forWrite) {
-      const parent = await realpath(dirname(target)).catch(() => {
-        throw pluginError('NOT_FOUND', '父目录不存在');
-      });
-      const existing = await lstat(target).catch(() => null);
-      if (existing?.isSymbolicLink()) throw pluginError('PERMISSION_DENIED', '不能写入符号链接');
-      real = resolve(parent, normalized.split('/').at(-1) ?? '');
-    } else {
-      real = await realpath(target).catch(() => {
-        throw pluginError('NOT_FOUND', '文件不存在');
-      });
+    const located = forWrite
+      ? await this.locateForWrite(target)
+      : {
+          real: await realpath(target).catch(() => {
+            throw pluginError('NOT_FOUND', '文件不存在');
+          }),
+          missingParent: false,
+        };
+    if (!within(root, located.real)) throw pluginError('PERMISSION_DENIED', '路径逃出了项目目录');
+    const rel = posixRel(root, located.real);
+    if (!covered(rel, scopes))
+      throw pluginError('PERMISSION_DENIED', `路径不在授权范围：${rel || normalized}`);
+    if (located.missingParent) throw pluginError('NOT_FOUND', '父目录不存在');
+    return located.real;
+  }
+
+  /** 写入目标不存在时，对最近一个已存在的父目录做 realpath，再拼回缺失部分 */
+  private async locateForWrite(target: string): Promise<{ real: string; missingParent: boolean }> {
+    const existing = await lstat(target).catch((error: unknown) => {
+      if (isEnoent(error)) return null;
+      throw error;
+    });
+    if (existing?.isSymbolicLink()) throw pluginError('PERMISSION_DENIED', '不能写入符号链接');
+    if (existing) return { real: await realpath(target), missingParent: false };
+
+    const missing: string[] = [];
+    let dir = target;
+    for (;;) {
+      const parent = dirname(dir);
+      if (parent === dir) throw pluginError('NOT_FOUND', '父目录不存在');
+      missing.unshift(basename(dir));
+      dir = parent;
+      let st: Awaited<ReturnType<typeof lstat>>;
+      try {
+        st = await lstat(dir);
+      } catch (error) {
+        if (isEnoent(error)) continue;
+        throw error;
+      }
+      if (!st.isDirectory() && !st.isSymbolicLink()) throw pluginError('NOT_FOUND', '父目录不存在');
+      return {
+        real: resolve(await realpath(dir), ...missing),
+        missingParent: missing.length > 1,
+      };
     }
-    if (!within(root, real)) throw pluginError('PERMISSION_DENIED', '路径逃出了项目目录');
-    return real;
   }
 
   private async fetch(
@@ -560,11 +646,12 @@ export class PluginHostGate {
     signal: AbortSignal | undefined
   ) {
     const init = isRecord(a.init) ? a.init : {};
-    const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET';
+    let method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET';
     const headers: Record<string, string> = {};
     if (isRecord(init.headers))
       for (const [k, v] of Object.entries(init.headers)) if (typeof v === 'string') headers[k] = v;
-    const body = typeof init.body === 'string' ? init.body : undefined;
+    const replayable = init.body === undefined || typeof init.body === 'string';
+    let body = typeof init.body === 'string' ? init.body : undefined;
     const responseType = init.responseType ?? 'text';
     if (responseType !== 'text' && responseType !== 'base64')
       throw pluginError('INVALID_ARGS', 'responseType 只能是 text 或 base64');
@@ -583,26 +670,35 @@ export class PluginHostGate {
       const response = await this.deps.fetch(parsed.href, {
         method,
         headers,
-        ...(body !== undefined && hop === 0 ? { body } : {}),
+        ...(body !== undefined ? { body } : {}),
         ...(signal ? { signal } : {}),
         redirect: 'manual',
       });
       const location = response.headers.get('location');
       if (response.status >= 300 && response.status < 400 && location) {
-        url = new URL(location, parsed).href;
+        const becomeGet =
+          response.status === 303 ||
+          ((response.status === 301 || response.status === 302) && method === 'POST');
+        if (becomeGet) {
+          method = 'GET';
+          body = undefined;
+          dropHeader(headers, 'content-type');
+          dropHeader(headers, 'content-length');
+        } else if (!replayable) {
+          throw pluginError('INVALID_ARGS', '重定向无法重放请求体');
+        }
+        const next = new URL(location, parsed);
+        if (next.origin !== parsed.origin) dropSensitiveHeaders(headers);
+        url = next.href;
+        await response.body?.cancel().catch(() => undefined);
         continue;
       }
-      const length = Number(response.headers.get('content-length') ?? 0);
-      if (length > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
+      const bytes = await readLimitedBody(response);
       const headersOut = Object.fromEntries(response.headers);
       if (responseType === 'base64') {
-        const bytes = Buffer.from(await response.arrayBuffer());
-        if (bytes.length > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
         return { status: response.status, headers: headersOut, body: bytes.toString('base64') };
       }
-      const text = await response.text();
-      if (utf8Bytes(text) > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
-      return { status: response.status, headers: headersOut, body: text };
+      return { status: response.status, headers: headersOut, body: bytes.toString('utf8') };
     }
     throw pluginError('TOO_MANY_REDIRECTS', '重定向次数过多');
   }

@@ -40,6 +40,7 @@ interface Pending {
 const DEFAULT_IDLE_MS = 5 * 60_000;
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
 const SHUTDOWN_GRACE_MS = 3_000;
+const STOP_FORCE_MS = 5_000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
@@ -51,6 +52,8 @@ export class PluginProcess {
   private child: WorkerProcess | null = null;
   private readyPromise: Promise<PluginRegistrations> | null = null;
   private stopping = false;
+  /** 服务主动 stop 后置上；空闲退出和加载失败都不置，调用可以重新拉起 */
+  private closed = false;
   private readonly pending = new Map<string, Pending>();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private stopWait: Promise<void> = Promise.resolve();
@@ -64,6 +67,7 @@ export class PluginProcess {
   }
 
   ready(): Promise<PluginRegistrations> {
+    if (this.closed) return Promise.reject(pluginError('PLUGIN_EXITED', '插件进程已退出'));
     this.readyPromise ??= this.spawn();
     return this.readyPromise;
   }
@@ -79,9 +83,8 @@ export class PluginProcess {
       timeoutMs: number;
     }
   ): Promise<unknown> {
-    await this.ready();
-    const child = this.child;
-    if (!child) throw pluginError('PLUGIN_EXITED', '插件进程已退出');
+    await this.ensureCallable();
+    if (!this.child || this.stopping) throw pluginError('PLUGIN_EXITED', '插件进程已退出');
     this.clearIdle();
     const id = `m${this.nextId++}`;
     return new Promise((resolve, reject) => {
@@ -105,6 +108,18 @@ export class PluginProcess {
     });
   }
 
+  /** 主动 stop 后直接失败。只有空闲退出才等旧进程结束再拉起 */
+  private async ensureCallable(): Promise<void> {
+    if (this.closed) throw pluginError('PLUGIN_EXITED', '插件进程已退出');
+    for (;;) {
+      if (this.stopping) await this.stopWait;
+      if (this.closed) throw pluginError('PLUGIN_EXITED', '插件进程已退出');
+      await this.ready();
+      if (this.closed) throw pluginError('PLUGIN_EXITED', '插件进程已退出');
+      if (!this.stopping && this.child) return;
+    }
+  }
+
   /** 主动取消一次调用：通知插件并立即以 ABORTED 失败 */
   cancel(invocationId: string): void {
     for (const [id, entry] of this.pending) {
@@ -117,8 +132,14 @@ export class PluginProcess {
     this.armIdle();
   }
 
-  /** 先发 shutdown，最多等 3 秒再 kill；进程自己退出则不再杀 */
+  /** 服务主动停进程：退出后不再拉起 */
   stop(): void {
+    this.closed = true;
+    this.beginStop();
+  }
+
+  /** 先发 shutdown，最多等 3 秒再 kill；再过 5 秒仍无 exit 则 SIGKILL 并结束等待 */
+  private beginStop(): void {
     this.clearIdle();
     const child = this.child;
     if (!child || this.stopping) return;
@@ -127,18 +148,47 @@ export class PluginProcess {
       this.finishStop = resolve;
     });
     this.post({ t: 'shutdown' });
-    const timer = setTimeout(() => {
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout>;
+    let forceTimer: ReturnType<typeof setTimeout>;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearTimeout(forceTimer);
+      if (this.child === child) {
+        this.child = null;
+        this.readyPromise = null;
+        this.clearIdle();
+        for (const [id, entry] of this.pending) {
+          this.pending.delete(id);
+          clearTimeout(entry.timer);
+          entry.reject(pluginError('PLUGIN_EXITED', '插件进程已退出'));
+        }
+        this.deps.onExit({ unexpected: false });
+      }
+      this.finishStop?.();
+      this.finishStop = null;
+    };
+    killTimer = setTimeout(() => {
       try {
         child.kill();
       } catch {
         // 进程已经退出
       }
     }, SHUTDOWN_GRACE_MS);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      this.finishStop?.();
-      this.finishStop = null;
-    });
+    forceTimer = setTimeout(() => {
+      if (typeof child.pid === 'number') {
+        try {
+          process.kill(child.pid, 'SIGKILL');
+        } catch {
+          // 进程已经退出
+        }
+      }
+      if (!settled) child.emit('exit');
+      finish();
+    }, SHUTDOWN_GRACE_MS + STOP_FORCE_MS);
+    child.once('exit', finish);
   }
 
   /** 停进程并等到它退出；没有进程时立即完成 */
@@ -170,7 +220,7 @@ export class PluginProcess {
         settled = true;
         clearTimeout(readyTimer);
         reject(pluginError('PLUGIN_INIT_FAILED', message));
-        this.stop();
+        this.beginStop();
       };
       const readyTimer = setTimeout(
         () => fail('插件加载超时'),
@@ -193,6 +243,7 @@ export class PluginProcess {
         this.onMessage(raw);
       });
       child.on('exit', () => {
+        if (this.child !== child) return;
         const unexpected = !this.stopping;
         this.child = null;
         this.readyPromise = null;
@@ -269,7 +320,7 @@ export class PluginProcess {
   private armIdle(): void {
     this.clearIdle();
     if (this.deps.resident || this.pending.size > 0 || !this.child) return;
-    this.idleTimer = setTimeout(() => this.stop(), this.deps.idleMs ?? DEFAULT_IDLE_MS);
+    this.idleTimer = setTimeout(() => this.beginStop(), this.deps.idleMs ?? DEFAULT_IDLE_MS);
   }
 
   private clearIdle(): void {

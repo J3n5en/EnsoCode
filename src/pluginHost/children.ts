@@ -95,3 +95,19 @@ export function killTrackedChildren(): void {
   }
   current.clear();
 }
+
+/** 未捕获异常退出前先关掉插件拉起的子进程，避免留下孤儿进程 */
+export function failHostProcess(
+  error: unknown,
+  report: (message: string) => void,
+  exit: (code: number) => void
+): void {
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  killTrackedChildren();
+  try {
+    report(message);
+  } catch {
+    // 上报失败也不能跳过退出
+  }
+  exit(1);
+}

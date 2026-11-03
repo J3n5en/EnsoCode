@@ -219,6 +219,179 @@ describe('PluginProcess', () => {
     expect(s.onExit).toHaveBeenCalledWith({ unexpected: false });
   });
 
+  it('主动 stop 后调用以 PLUGIN_EXITED 失败，并且不再拉起进程', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const first = s.child();
+    s.proc.stop();
+    let settled = false;
+    const result = s.proc.call(
+      'tool.execute',
+      { n: 1 },
+      { invocationId: 'i-stop', sessionId: null, projectRoot: null, timeoutMs: 1000 }
+    );
+    void result.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await flush();
+    expect(settled).toBe(true);
+    await expect(result).rejects.toMatchObject({ code: 'PLUGIN_EXITED' });
+    expect(s.children).toHaveLength(1);
+    expect(first.inbox.some((m) => m.t === 'call')).toBe(false);
+  });
+
+  it('空闲退出期间的调用等进程退出后发给新进程', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const first = s.child();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(first.inbox).toContainEqual({ t: 'shutdown' });
+    const result = s.proc.call(
+      'tool.execute',
+      { n: 1 },
+      { invocationId: 'i-idle', sessionId: null, projectRoot: null, timeoutMs: 1000 }
+    );
+    await flush();
+    expect(s.children).toHaveLength(1);
+    first.emit('exit', 0);
+    await flush();
+    expect(s.children).toHaveLength(2);
+    const second = s.children[1];
+    if (!second) throw new Error('no second child');
+    second.reply({ t: 'ready', registered });
+    await flush();
+    const sent = second.inbox.find((m) => m.t === 'call');
+    expect(sent?.t).toBe('call');
+    if (sent?.t === 'call') second.reply({ t: 'res', id: sent.id, ok: true, value: 'next' });
+    await expect(result).resolves.toBe('next');
+    expect(first.inbox.some((m) => m.t === 'call')).toBe(false);
+  });
+
+  it('空闲退出途中再 stop，调用不再拉起进程', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const first = s.child();
+    await vi.advanceTimersByTimeAsync(1000);
+    s.proc.stop();
+    let settled = false;
+    const result = s.proc.call(
+      'tool.execute',
+      { n: 1 },
+      { invocationId: 'i-closed', sessionId: null, projectRoot: null, timeoutMs: 1000 }
+    );
+    void result.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    first.emit('exit', 0);
+    await flush();
+    expect(settled).toBe(true);
+    await expect(result).rejects.toMatchObject({ code: 'PLUGIN_EXITED' });
+    expect(s.children).toHaveLength(1);
+  });
+
+  it('加载失败后的调用会重新拉起', async () => {
+    const s = setup();
+    const ready = s.proc.ready();
+    await flush();
+    s.child().reply({ t: 'init-error', message: 'boom' });
+    const failed = expect(ready).rejects.toMatchObject({ code: 'PLUGIN_INIT_FAILED' });
+    s.child().emit('exit', 1);
+    await failed;
+    const result = s.proc.call(
+      'tool.execute',
+      {},
+      { invocationId: 'i-retry', sessionId: null, projectRoot: null, timeoutMs: 1000 }
+    );
+    await flush();
+    expect(s.children).toHaveLength(2);
+    const second = s.children[1];
+    if (!second) throw new Error('no second child');
+    second.reply({ t: 'ready', registered });
+    await flush();
+    const sent = second.inbox.find((m) => m.t === 'call');
+    if (sent?.t !== 'call') throw new Error('no call');
+    second.reply({ t: 'res', id: sent.id, ok: true, value: 'again' });
+    await expect(result).resolves.toBe('again');
+  });
+
+  it('kill 后没有 exit 时改用 SIGKILL，迟到的 exit 不拆掉新进程', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const first = s.child();
+    first.pid = 424242;
+    first.kill = () => {
+      first.killed = true;
+      return true;
+    };
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = s.proc.call(
+      'tool.execute',
+      { n: 1 },
+      { invocationId: 'i-force', sessionId: null, projectRoot: null, timeoutMs: 1000 }
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(first.killed).toBe(true);
+    expect(kill).not.toHaveBeenCalled();
+    expect(s.children).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(kill).toHaveBeenCalledWith(424242, 'SIGKILL');
+    await flush();
+    expect(s.children).toHaveLength(2);
+    const second = s.children[1];
+    if (!second) throw new Error('no second child');
+    second.reply({ t: 'ready', registered });
+    await flush();
+    const sent = second.inbox.find((m) => m.t === 'call');
+    if (sent?.t !== 'call') throw new Error('no call');
+    second.reply({ t: 'res', id: sent.id, ok: true, value: 'next' });
+    await expect(result).resolves.toBe('next');
+    first.emit('exit', 0);
+    await flush();
+    expect(s.proc.running).toBe(true);
+    expect(second.listenerCount('exit')).toBeGreaterThan(0);
+    kill.mockRestore();
+  });
+
+  it('stop 收不到 exit 时 SIGKILL 并结束等待', async () => {
+    const s = setup();
+    await readyProcess(s);
+    const first = s.child();
+    first.pid = 515151;
+    first.kill = () => {
+      first.killed = true;
+      return true;
+    };
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const stopped = s.proc.whenStopped();
+      let settled = false;
+      void stopped.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(settled).toBe(false);
+      expect(first.killed).toBe(true);
+      expect(kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(kill).toHaveBeenCalledWith(515151, 'SIGKILL');
+      await flush();
+      expect(settled).toBe(true);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
   it('ready 超时视为加载失败', async () => {
     const s = setup();
     const ready = s.proc.ready();

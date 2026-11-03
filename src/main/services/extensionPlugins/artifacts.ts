@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import { pluginError } from './process';
@@ -30,10 +31,10 @@ export class ArtifactStore {
 
   constructor(private readonly root: string) {}
 
-  write(
+  async write(
     pluginId: string,
     input: { name?: unknown; text?: unknown; base64?: unknown; mime?: unknown }
-  ): PluginArtifactInfo {
+  ): Promise<PluginArtifactInfo> {
     this.ensure();
     const name = fileName(input.name);
     const hasText = typeof input.text === 'string';
@@ -48,10 +49,6 @@ export class ArtifactStore {
       throw pluginError('INVALID_ARGS', 'mime 不合法');
     if (body.length > MAX_BYTES) throw pluginError('TOO_LARGE', '产出超过 50MB');
     const list = this.entries(pluginId);
-    while (list.length >= MAX_COUNT) {
-      const oldest = list.shift();
-      if (oldest) this.unlink(pluginId, oldest.id);
-    }
     const entry: Entry = {
       id: randomUUID(),
       name,
@@ -61,8 +58,17 @@ export class ArtifactStore {
     };
     const dir = this.dir(pluginId);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${entry.id}.bin`), body, { mode: 0o600 });
+    const file = join(dir, `${entry.id}.bin`);
+    await writeFile(file, body, { mode: 0o600 });
+    if (this.byPlugin.get(pluginId) !== list) {
+      rmSync(file, { force: true });
+      throw pluginError('PLUGIN_REMOVED', '插件已卸载');
+    }
     list.push(entry);
+    while (list.length > MAX_COUNT) {
+      const oldest = list.shift();
+      if (oldest) this.unlink(pluginId, oldest.id);
+    }
     this.save(pluginId, list);
     return this.toInfo(pluginId, entry);
   }

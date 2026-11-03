@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExtensionPluginManifest } from '@shared/extensionPlugins/manifest';
@@ -115,6 +123,45 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('符号链接解析后仍须落在授权范围内，范围内的正常文件可读', async () => {
+    symlinkSync(join(root, 'secret.txt'), join(root, 'docs', 'leak.txt'));
+    symlinkSync(join(root, 'docs', 'a.md'), join(root, 'docs', 'alias.md'));
+    await expect(
+      gate.handle('a.b', 'fs.readText', { path: 'docs/leak.txt' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(
+      gate.handle('a.b', 'fs.readText', { path: 'docs/a.md' }, agentCall())
+    ).resolves.toBe('hello');
+    await expect(
+      gate.handle('a.b', 'fs.readText', { path: 'docs/alias.md' }, agentCall())
+    ).resolves.toBe('hello');
+  });
+
+  it('写入经符号链接逃出授权范围会被拒绝，范围内正常写入通过', async () => {
+    const notes = join(root, 'notes');
+    mkdirSync(notes);
+    symlinkSync(notes, join(root, 'out', 'linked'));
+    await expect(
+      gate.handle('a.b', 'fs.writeText', { path: 'out/linked/p.txt', text: 'x' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(
+      gate.handle('a.b', 'fs.writeText', { path: 'out/linked/sub/p.txt', text: 'x' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(existsSync(join(notes, 'p.txt'))).toBe(false);
+    expect(existsSync(join(notes, 'sub', 'p.txt'))).toBe(false);
+
+    mkdirSync(join(root, 'out', 'real'));
+    symlinkSync(join(root, 'out', 'real'), join(root, 'out', 'alias'));
+    await gate.handle('a.b', 'fs.writeText', { path: 'out/alias/p.txt', text: 'z' }, agentCall());
+    expect(readFileSync(join(root, 'out', 'real', 'p.txt'), 'utf8')).toBe('z');
+
+    await gate.handle('a.b', 'fs.writeText', { path: 'out/ok.txt', text: 'yes' }, agentCall());
+    expect(readFileSync(join(root, 'out', 'ok.txt'), 'utf8')).toBe('yes');
+    await expect(
+      gate.handle('a.b', 'fs.writeText', { path: 'out/missing/p.txt', text: 'x' }, agentCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('没有项目根（如 SSH 会话）时拒绝 fs', async () => {
     const inv = gate.invocations.create({
       pluginId: 'a.b',
@@ -155,6 +202,27 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('artifact.write 只能在宿主发起的调用里用', async () => {
+    const writeArtifact = vi.fn(() => ({
+      id: 'art-1',
+      pluginId: 'a.b',
+      name: 'a.txt',
+      mime: 'text/plain',
+      size: 2,
+      createdAt: 1,
+    }));
+    deps.writeArtifact = writeArtifact;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'artifact.write', { name: 'a.txt', text: 'hi' }, undefined)
+    ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+    expect(writeArtifact).not.toHaveBeenCalled();
+    await expect(
+      gate.handle('a.b', 'artifact.write', { name: 'a.txt', text: 'hi' }, agentCall())
+    ).resolves.toMatchObject({ id: 'art-1', name: 'a.txt' });
+    expect(writeArtifact).toHaveBeenCalledWith('a.b', { name: 'a.txt', text: 'hi' });
+  });
+
   it('net.fetch 只允许声明的域名，重定向到别的域名被拒绝', async () => {
     await expect(
       gate.handle('a.b', 'net.fetch', { url: 'https://api.example.com/x', init: {} }, undefined)
@@ -171,6 +239,166 @@ describe('PluginHostGate', () => {
     await expect(
       gate.handle('a.b', 'net.fetch', { url: 'https://api.example.com/x', init: {} }, undefined)
     ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('net.fetch 无 content-length 时超限立即停止读取', async () => {
+    const chunk = 1024 * 1024;
+    let pulled = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= 8) {
+          controller.close();
+          return;
+        }
+        pulled += 1;
+        controller.enqueue(new Uint8Array(chunk));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    deps.fetch = vi.fn(async () => new Response(stream));
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'net.fetch', { url: 'https://api.example.com/x', init: {} }, undefined)
+    ).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(8);
+  });
+
+  it('net.fetch 跨源重定向去掉敏感头，同源保留', async () => {
+    deps.manifest = () => manifest({ net: { domains: ['api.example.com', 'cdn.example.com'] } });
+    const seen: Array<Record<string, string>> = [];
+    deps.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const headers = init?.headers;
+      seen.push(
+        headers && typeof headers === 'object' && !Array.isArray(headers)
+          ? { ...(headers as Record<string, string>) }
+          : {}
+      );
+      if (url === 'https://api.example.com/start') {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://api.example.com/next' },
+        });
+      }
+      if (url === 'https://api.example.com/next') {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://cdn.example.com/file' },
+        });
+      }
+      return new Response('ok');
+    });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'net.fetch',
+        {
+          url: 'https://api.example.com/start',
+          init: { headers: { Authorization: 'Bearer s', Cookie: 'a=b', 'X-Trace': '1' } },
+        },
+        undefined
+      )
+    ).resolves.toMatchObject({ status: 200, body: 'ok' });
+    expect(seen).toHaveLength(3);
+    expect(seen[1]).toMatchObject({ Authorization: 'Bearer s', Cookie: 'a=b', 'X-Trace': '1' });
+    expect(seen[2]).toMatchObject({ 'X-Trace': '1' });
+    expect(seen[2]).not.toHaveProperty('Authorization');
+    expect(seen[2]).not.toHaveProperty('Cookie');
+  });
+
+  it('303 和 301/302 的 POST 改成 GET，并去掉 body 与 content 头', async () => {
+    const seen: { method?: string; body?: unknown; headers: Record<string, string> }[] = [];
+    deps.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers =
+        init?.headers && typeof init.headers === 'object' && !Array.isArray(init.headers)
+          ? { ...(init.headers as Record<string, string>) }
+          : {};
+      seen.push({ method: init?.method, body: init?.body, headers });
+      if (seen.length === 1) {
+        return new Response(null, { status: 303, headers: { location: '/done' } });
+      }
+      return new Response('ok');
+    });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'net.fetch',
+        {
+          url: 'https://api.example.com/start',
+          init: {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain', 'Content-Length': '3', 'X-Trace': '1' },
+            body: 'abc',
+          },
+        },
+        undefined
+      )
+    ).resolves.toMatchObject({ status: 200, body: 'ok' });
+    expect(seen[1]).toMatchObject({ method: 'GET' });
+    expect(seen[1]?.body).toBeUndefined();
+    expect(seen[1]?.headers['X-Trace']).toBe('1');
+    expect(seen[1]?.headers).not.toHaveProperty('Content-Type');
+    expect(seen[1]?.headers).not.toHaveProperty('Content-Length');
+  });
+
+  it('302 的 POST 改成 GET，307 保留方法和 body，301 的 PUT 也保留', async () => {
+    const seen: { method?: string; body?: unknown }[] = [];
+    let status = 302;
+    deps.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push({ method: init?.method, body: init?.body });
+      if (seen.length % 2 === 1) {
+        return new Response(null, { status, headers: { location: '/next' } });
+      }
+      return new Response('ok');
+    });
+    gate = new PluginHostGate(deps);
+    const post = {
+      url: 'https://api.example.com/start',
+      init: { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'abc' },
+    };
+    await gate.handle('a.b', 'net.fetch', post, undefined);
+    expect(seen[1]).toEqual({ method: 'GET', body: undefined });
+
+    seen.length = 0;
+    status = 307;
+    await gate.handle('a.b', 'net.fetch', post, undefined);
+    expect(seen[1]).toEqual({ method: 'POST', body: 'abc' });
+
+    seen.length = 0;
+    status = 301;
+    await gate.handle(
+      'a.b',
+      'net.fetch',
+      { url: 'https://api.example.com/start', init: { method: 'PUT', body: 'abc' } },
+      undefined
+    );
+    expect(seen[1]).toEqual({ method: 'PUT', body: 'abc' });
+  });
+
+  it('308 的 body 不能重放时拒绝', async () => {
+    let calls = 0;
+    deps.fetch = vi.fn(async () => {
+      calls += 1;
+      return new Response(null, { status: 308, headers: { location: '/next' } });
+    });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle(
+        'a.b',
+        'net.fetch',
+        {
+          url: 'https://api.example.com/start',
+          init: { method: 'POST', body: new Uint8Array([1]) },
+        },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    expect(calls).toBe(1);
   });
 
   it('没有权限时拒绝', async () => {
