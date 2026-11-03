@@ -5,6 +5,36 @@ import type { PluginEventName } from './events';
 /** 注入消息与工具进度的字符上限；gate、Main、worker 共用 */
 export const PLUGIN_INJECT_MAX_CHARS = 32 * 1024;
 export const PLUGIN_PROGRESS_MAX_CHARS = 16 * 1024;
+/** 注入消息可附带的图片：数量与单张 base64 长度上限 */
+export const PLUGIN_INJECT_MAX_IMAGES = 4;
+export const PLUGIN_INJECT_IMAGE_MAX_CHARS = 7 * 1024 * 1024;
+const PLUGIN_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+export interface PluginInjectImage {
+  data: string;
+  mimeType: string;
+}
+
+/** 合法则原样返回（去掉多余字段），否则 null；undefined 视为没有图片 */
+export function parsePluginInjectImages(value: unknown): PluginInjectImage[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PLUGIN_INJECT_MAX_IMAGES) return null;
+  const images: PluginInjectImage[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) return null;
+    const { data, mimeType } = item as Record<string, unknown>;
+    if (typeof mimeType !== 'string' || !PLUGIN_IMAGE_MIME.has(mimeType)) return null;
+    if (
+      typeof data !== 'string' ||
+      data.length === 0 ||
+      data.length > PLUGIN_INJECT_IMAGE_MAX_CHARS ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(data)
+    )
+      return null;
+    images.push({ data, mimeType });
+  }
+  return images;
+}
 /** 插件注入消息在会话里的 customType */
 export const PLUGIN_MESSAGE_TYPE = 'enso-plugin-message';
 
@@ -91,8 +121,10 @@ export const PLUGIN_HOST_APIS = [
   'tool.progress',
   /** 写一份产出文件；args { name, text | base64, mime? }，返回 { id, name, size, mime } */
   'artifact.write',
-  /** 向会话注入消息；args { sessionId?, text, deliverAs?, triggerTurn? } */
+  /** 向会话注入消息；args { sessionId?, text, images?, deliverAs?, triggerTurn? } */
   'session.inject',
+  /** 中止会话当前一轮；args { sessionId? }，权限同 session.inject */
+  'session.abort',
   /** 调用其他插件导出的方法；args { pluginId, name, args } */
   'plugin.call',
   'ui.clipboard',

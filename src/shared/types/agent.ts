@@ -36,6 +36,7 @@ import type {
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
 import {
+  AGENT_END_TEXT_MAX,
   CONTEXT_PART_ITEMS,
   CONTEXT_PART_KINDS,
   CONTEXT_USAGE_BUCKETS,
@@ -48,8 +49,10 @@ import {
   PLUGIN_PROGRESS_MAX_CHARS,
   type PluginAgentSource,
   type PluginArtifactInfo,
+  type PluginInjectImage,
   type PluginMessageSource,
   parsePluginAgentSource,
+  parsePluginInjectImages,
   parsePluginMessageSource,
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
@@ -1453,6 +1456,7 @@ export type AgentCommand =
       pluginId: string;
       pluginName: string;
       text: string;
+      images?: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
@@ -2188,6 +2192,15 @@ export const isDeliveryId = (value: unknown): value is string =>
 const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
   Object.keys(value).every((key) => allowed.includes(key));
 
+const PLUGIN_INJECT_KEYS = [
+  'type',
+  'identity',
+  'pluginId',
+  'pluginName',
+  'text',
+  'deliverAs',
+  'triggerTurn',
+] as const;
 const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
   Object.keys(value).length === keys.length && hasOnlyKeys(value, keys);
 
@@ -2268,7 +2281,13 @@ const hasPluginAgentKeys = (value: Record<string, unknown>, keys: readonly strin
 const isPluginObserveData = (event: string, data: unknown): boolean => {
   if (!isRecord(data)) return false;
   if (isInterceptEvent(event)) return isPluginInterceptPayload(event, data);
-  if (event === 'agent_start' || event === 'agent_end') return hasExactKeys(data, []);
+  if (event === 'agent_start') return hasExactKeys(data, []);
+  if (event === 'agent_end')
+    return (
+      hasOnlyKeys(data, ['text']) &&
+      (data.text === undefined ||
+        (typeof data.text === 'string' && data.text.length <= AGENT_END_TEXT_MAX))
+    );
   if (event === 'context_usage') return isContextUsagePayload(data);
   return (
     (event === 'session_start' || event === 'session_end' || event === 'after_compact') &&
@@ -3883,15 +3902,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'plugin-inject':
-      return hasExactKeys(value, [
-        'type',
-        'identity',
-        'pluginId',
-        'pluginName',
-        'text',
-        'deliverAs',
-        'triggerTurn',
-      ]) &&
+      return hasOnlyKeys(value, [...PLUGIN_INJECT_KEYS, 'images']) &&
+        PLUGIN_INJECT_KEYS.every((key) => key in value) &&
+        parsePluginInjectImages(value.images) !== null &&
         parseSessionIdentity(value.identity) &&
         isNonEmptyString(value.pluginId) &&
         value.pluginId.length <= 128 &&

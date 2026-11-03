@@ -11,6 +11,8 @@ import {
   type PluginArtifactInfo,
   type PluginHostApi,
   type PluginHostCapabilities,
+  type PluginInjectImage,
+  parsePluginInjectImages,
 } from '@shared/extensionPlugins/protocol';
 import { pluginError } from './process';
 
@@ -88,10 +90,12 @@ export interface GateDeps {
     input: {
       sessionId: string;
       text: string;
+      images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
   ): { ok: true } | { ok: false; error: string };
+  abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
   callPlugin?(
     callerId: string,
     targetId: string,
@@ -207,6 +211,22 @@ export class PluginHostGate {
     this.injects.set(pluginId, recent);
   }
 
+  /**
+   * 缺省发起会话；指向别的会话要用户授权跨会话。
+   * 常驻进程不在调用里（inv 为 null），只能凭跨会话授权指明会话。
+   */
+  private targetSession(
+    pluginId: string,
+    a: Record<string, unknown>,
+    inv: Invocation | null
+  ): string {
+    const sessionId = typeof a.sessionId === 'string' ? a.sessionId : (inv?.sessionId ?? null);
+    if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
+    if (sessionId !== inv?.sessionId && !this.deps.crossSessionInject?.(pluginId))
+      throw pluginError('PERMISSION_DENIED', '未允许向其他会话发送消息');
+    return sessionId;
+  }
+
   async handle(
     pluginId: string,
     api: PluginHostApi,
@@ -227,6 +247,7 @@ export class PluginHostGate {
       if (inv.cancelled) throw pluginError('ABORTED', '调用已取消');
       return inv;
     };
+    const optionalInvocation = () => (invocationId === undefined ? null : invocation());
     const gestured = (what: string) => {
       const inv = invocation();
       if (!inv.gesture || this.deps.now() - inv.createdAt > GESTURE_TTL_MS)
@@ -337,17 +358,16 @@ export class PluginHostGate {
       }
       case 'session.inject': {
         permit('agent.inject');
-        const inv = invocation();
-        const sessionId = typeof a.sessionId === 'string' ? a.sessionId : inv.sessionId;
-        if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
-        if (sessionId !== inv.sessionId && !this.deps.crossSessionInject?.(pluginId))
-          throw pluginError('PERMISSION_DENIED', '未允许向其他会话发送消息');
+        const sessionId = this.targetSession(pluginId, a, optionalInvocation());
         if (
           typeof a.text !== 'string' ||
           a.text.length === 0 ||
           a.text.length > PLUGIN_INJECT_MAX_CHARS
         )
           throw pluginError('INVALID_ARGS', 'text 不合法或超过 32K 字符');
+        const images = parsePluginInjectImages(a.images);
+        if (!images)
+          throw pluginError('INVALID_ARGS', 'images 不合法：最多 4 张 png/jpeg/webp/gif 的 base64');
         const deliverAs = a.deliverAs === undefined ? 'nextTurn' : a.deliverAs;
         if (deliverAs !== 'steer' && deliverAs !== 'followUp' && deliverAs !== 'nextTurn')
           throw pluginError('INVALID_ARGS', 'deliverAs 不合法');
@@ -359,10 +379,19 @@ export class PluginHostGate {
         const result = bridge(pluginId, {
           sessionId,
           text: a.text,
+          images,
           deliverAs,
           triggerTurn: a.triggerTurn === true,
         });
         if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
+        return null;
+      }
+      case 'session.abort': {
+        permit('agent.inject');
+        const sessionId = this.targetSession(pluginId, a, optionalInvocation());
+        if (!this.deps.abort) throw pluginError('UNSUPPORTED', '当前环境不能中止会话');
+        const result = this.deps.abort(pluginId, sessionId);
+        if (!result.ok) throw pluginError('ABORT_FAILED', result.error);
         return null;
       }
       case 'plugin.call': {
@@ -517,6 +546,9 @@ export class PluginHostGate {
     if (isRecord(init.headers))
       for (const [k, v] of Object.entries(init.headers)) if (typeof v === 'string') headers[k] = v;
     const body = typeof init.body === 'string' ? init.body : undefined;
+    const responseType = init.responseType ?? 'text';
+    if (responseType !== 'text' && responseType !== 'base64')
+      throw pluginError('INVALID_ARGS', 'responseType 只能是 text 或 base64');
     let url = typeof a.url === 'string' ? a.url : '';
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       let parsed: URL;
@@ -543,9 +575,15 @@ export class PluginHostGate {
       }
       const length = Number(response.headers.get('content-length') ?? 0);
       if (length > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
+      const headersOut = Object.fromEntries(response.headers);
+      if (responseType === 'base64') {
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.length > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
+        return { status: response.status, headers: headersOut, body: bytes.toString('base64') };
+      }
       const text = await response.text();
       if (utf8Bytes(text) > MAX_FETCH_BYTES) throw pluginError('TOO_LARGE', '响应过大');
-      return { status: response.status, headers: Object.fromEntries(response.headers), body: text };
+      return { status: response.status, headers: headersOut, body: text };
     }
     throw pluginError('TOO_MANY_REDIRECTS', '重定向次数过多');
   }

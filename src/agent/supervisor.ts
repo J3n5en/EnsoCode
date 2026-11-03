@@ -1975,6 +1975,7 @@ export class SessionSupervisor {
           pluginId: command.pluginId,
           pluginName: command.pluginName,
           text: command.text,
+          ...(command.images?.length ? { images: command.images } : {}),
           deliverAs: command.deliverAs,
           triggerTurn: command.triggerTurn,
         });

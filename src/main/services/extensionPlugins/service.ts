@@ -47,6 +47,7 @@ import {
   type PluginArtifactInfo,
   type PluginCallMethod,
   type PluginHostCapabilities,
+  type PluginInjectImage,
   type PluginToolResult,
 } from '@shared/extensionPlugins/protocol';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
@@ -142,10 +143,12 @@ export interface PluginSessionBridge {
       pluginId: string;
       pluginName: string;
       text: string;
+      images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
   ): { ok: true } | { ok: false; error: string };
+  abort(sessionId: string): { ok: true } | { ok: false; error: string };
 }
 
 export interface PluginToolOutcome {
@@ -253,6 +256,10 @@ export class ExtensionPluginService {
       progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
       writeArtifact: (pluginId, input) => this.artifacts.write(pluginId, input),
       inject: (pluginId, input) => this.inject(pluginId, input),
+      abort: (pluginId, sessionId) => {
+        const bridge = this.enabledManifest(pluginId) ? this.options.sessionBridge?.() : null;
+        return bridge ? bridge.abort(sessionId) : { ok: false, error: '当前环境不能中止会话' };
+      },
       crossSessionInject: (pluginId) =>
         this.records.find((r) => r.id === pluginId)?.crossSessionInject === true,
       callPlugin: (callerId, targetId, name, args, depth, caller) =>
@@ -1621,6 +1628,7 @@ export class ExtensionPluginService {
     input: {
       sessionId: string;
       text: string;
+      images: PluginInjectImage[];
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
@@ -1632,6 +1640,7 @@ export class ExtensionPluginService {
       pluginId,
       pluginName: manifest.name,
       text: input.text,
+      images: input.images,
       deliverAs: input.deliverAs,
       triggerTurn: input.triggerTurn,
     });

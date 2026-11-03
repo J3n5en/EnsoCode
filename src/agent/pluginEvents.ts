@@ -7,13 +7,14 @@ import type {
   ToolResultEventResult,
 } from '@earendil-works/pi-coding-agent';
 import {
+  AGENT_END_TEXT_MAX,
   CONTEXT_USAGE_BUCKETS,
   type ContextUsagePayload,
   isChildInterceptEvent,
   type PluginEventName,
   type PluginInterceptEvent,
 } from '@shared/extensionPlugins/events';
-import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
+import { PLUGIN_MESSAGE_TYPE, type PluginInjectImage } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan } from '@shared/extensionPlugins/types';
 import type { ContextOccupancy, PluginInterceptRequest, TokenUsage } from '@shared/types/agent';
 
@@ -36,6 +37,7 @@ export interface PluginInjectMessage {
   pluginId: string;
   pluginName: string;
   text: string;
+  images?: PluginInjectImage[];
   deliverAs: 'steer' | 'followUp' | 'nextTurn';
   triggerTurn: boolean;
 }
@@ -183,7 +185,12 @@ export class PluginEventInvoker {
       this.sender(
         {
           customType: PLUGIN_MESSAGE_TYPE,
-          content: message.text,
+          content: message.images?.length
+            ? [
+                { type: 'text' as const, text: message.text },
+                ...message.images.map((image) => ({ type: 'image' as const, ...image })),
+              ]
+            : message.text,
           display: true,
           details: { pluginId: message.pluginId, pluginName: message.pluginName },
         },
@@ -211,6 +218,22 @@ const textContent = (content: readonly { type?: string; text?: string }[]): stri
     .filter((part) => part.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text as string)
     .join('');
+
+/** 本轮最后一条助手消息的文字部分；agent_end.messages 只含本轮 */
+function lastAssistantText(messages: readonly unknown[] | undefined): string {
+  const last = [...(messages ?? [])]
+    .reverse()
+    .find((m) => (m as { role?: unknown })?.role === 'assistant') as
+    | { content?: unknown }
+    | undefined;
+  const parts = Array.isArray(last?.content) ? last.content : [];
+  return parts
+    .flatMap((p: { type?: unknown; text?: unknown }) =>
+      p?.type === 'text' && typeof p.text === 'string' ? [p.text] : []
+    )
+    .join('\n')
+    .slice(0, AGENT_END_TEXT_MAX);
+}
 
 function applyToolCall(
   input: Record<string, unknown>,
@@ -282,8 +305,8 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
         });
       }
       if (observe.has('agent_end')) {
-        pi.on('agent_end', () => {
-          invoker.notify('agent_end', {});
+        pi.on('agent_end', (event) => {
+          invoker.notify('agent_end', { text: lastAssistantText(event.messages) });
         });
       }
       if (observe.has('before_compact')) {

@@ -14,6 +14,9 @@ export const PLUGIN_EVENTS = [
 ] as const;
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
 
+/** agent_end 携带的本轮最终回复正文上限（字符） */
+export const AGENT_END_TEXT_MAX = 64 * 1024;
+
 /** context_usage 的分桶：与宿主上下文占用一致，不含已废弃的 projectMemory */
 export const CONTEXT_USAGE_BUCKETS = [
   'system',

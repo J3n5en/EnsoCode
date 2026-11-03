@@ -79,7 +79,7 @@ function createService(
     hostPath: '/unused',
     env: extra.env ?? { PATH: '/bin' },
     sourceEnv: extra.sourceEnv,
-    sessionBridge: () => ({ inject: bridge }),
+    sessionBridge: () => ({ inject: bridge, abort: vi.fn(() => ({ ok: true as const })) }),
     fork: fork as never,
     gate: {
       fetch: vi.fn(),

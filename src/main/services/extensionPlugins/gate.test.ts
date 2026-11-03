@@ -483,3 +483,100 @@ describe('PluginHostGate', () => {
     expect(seen?.aborted).toBe(true);
   });
 });
+
+describe('插件远程会话能力', () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).toString('base64');
+
+  it('net.fetch responseType=base64 原样返回二进制', async () => {
+    deps.fetch = vi.fn(async () => new Response(new Uint8Array([0, 255, 128]), { status: 200 }));
+    gate = new PluginHostGate(deps);
+    const res = await gate.handle(
+      'a.b',
+      'net.fetch',
+      { url: 'https://api.example.com/f', init: { responseType: 'base64' } },
+      undefined
+    );
+    expect(res).toMatchObject({ status: 200, body: Buffer.from([0, 255, 128]).toString('base64') });
+    await expect(
+      gate.handle(
+        'a.b',
+        'net.fetch',
+        { url: 'https://api.example.com/f', init: { responseType: 'blob' } },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+  });
+
+  it('session.inject 可带图片，校验类型、格式与数量', async () => {
+    const inject = vi.fn(() => ({ ok: true as const }));
+    deps.inject = inject;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    const images = [{ data: png, mimeType: 'image/png' }];
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', images }, agentCall())
+    ).resolves.toBeNull();
+    expect(inject).toHaveBeenLastCalledWith('a.b', expect.objectContaining({ images }));
+    for (const bad of [
+      [{ data: png, mimeType: 'text/html' }],
+      [{ data: '不是base64', mimeType: 'image/png' }],
+      Array.from({ length: 5 }, () => images[0]),
+      'x',
+    ])
+      await expect(
+        gate.handle('a.b', 'session.inject', { text: 'hi', images: bad }, agentCall())
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    expect(inject).toHaveBeenCalledTimes(1);
+  });
+
+  it('session.abort 中止会话，跨会话同样受授权约束', async () => {
+    const abort = vi.fn(() => ({ ok: true as const }));
+    deps.abort = abort;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.abort', {}, agentCall())).resolves.toBeNull();
+    expect(abort).toHaveBeenLastCalledWith('a.b', 's1');
+    await expect(
+      gate.handle('a.b', 'session.abort', { sessionId: 'other' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    deps.crossSessionInject = () => true;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.abort', { sessionId: 'other' }, agentCall())
+    ).resolves.toBeNull();
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.abort', {}, agentCall())).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+    });
+  });
+});
+
+describe('常驻进程里的会话操作', () => {
+  it('不在调用里：须指明会话且已允许跨会话，才能注入和中止', async () => {
+    const inject = vi.fn(() => ({ ok: true as const }));
+    const abort = vi.fn(() => ({ ok: true as const }));
+    deps.inject = inject;
+    deps.abort = abort;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, undefined)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    deps.crossSessionInject = () => true;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, undefined)
+    ).rejects.toMatchObject({
+      code: 'NO_SESSION',
+    });
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi', sessionId: 's1' }, undefined)
+    ).resolves.toBeNull();
+    await expect(
+      gate.handle('a.b', 'session.abort', { sessionId: 's1' }, undefined)
+    ).resolves.toBeNull();
+    expect(inject).toHaveBeenCalledTimes(1);
+    expect(abort).toHaveBeenCalledWith('a.b', 's1');
+  });
+});

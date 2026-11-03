@@ -59,6 +59,40 @@ describe('插件事件扩展', () => {
     );
   });
 
+  it('agent_end 带本轮最后一条助手回复的正文；没有文字时为空串', () => {
+    const { emit, handlers } = harness(plan({ observe: ['agent_end'] }));
+    handlers.get('agent_end')?.({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        { role: 'assistant', content: [{ type: 'text', text: '旧' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'x' },
+            { type: 'text', text: '答' },
+            { type: 'toolCall', id: 't', name: 'bash', arguments: {} },
+            { type: 'text', text: '案' },
+          ],
+        },
+        { role: 'toolResult', content: [{ type: 'text', text: 'ok' }] },
+      ],
+    } as never);
+    handlers.get('agent_end')?.({ messages: [] } as never);
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      { type: 'plugin-event', event: 'agent_end', data: { text: '答\n案' } },
+      { type: 'plugin-event', event: 'agent_end', data: { text: '' } },
+    ]);
+  });
+
+  it('agent_end 正文超长时截断', () => {
+    const { emit, handlers } = harness(plan({ observe: ['agent_end'] }));
+    handlers.get('agent_end')?.({
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'a'.repeat(70_000) }] }],
+    } as never);
+    const event = emit.mock.calls[0]?.[0] as { data: { text: string } } | undefined;
+    expect(event?.data.text.length).toBe(64 * 1024);
+  });
+
   it('观察型订阅 tool_call / tool_result / input 也会通知，且不等回复', async () => {
     const { emit, handlers } = harness(plan({ observe: ['input', 'tool_call', 'tool_result'] }));
     await handlers.get('tool_call')?.({
@@ -261,6 +295,24 @@ describe('插件事件扩展', () => {
       },
       { deliverAs: 'steer', triggerTurn: true }
     );
+  });
+
+  it('带图片的注入以文字加图片块发送', () => {
+    const { invoker, sendMessage } = harness(plan({ inject: true }));
+    invoker.deliver({
+      pluginId: 'example.demo',
+      pluginName: 'Demo',
+      text: 'hi',
+      images: [{ data: 'AAAA', mimeType: 'image/png' }],
+      deliverAs: 'followUp',
+      triggerTurn: true,
+    });
+    expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
+      content: [
+        { type: 'text', text: 'hi' },
+        { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+      ],
+    });
   });
 });
 

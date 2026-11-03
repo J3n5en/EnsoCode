@@ -1444,8 +1444,20 @@ export function registerPluginSessionBridge(
         return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
       if (!identity) return { ok: false, error: '会话不在运行' };
-      const sent = sendAgentCommand({ type: 'plugin-inject', identity, ...message });
+      const { images, ...rest } = message;
+      const sent = sendAgentCommand({
+        type: 'plugin-inject',
+        identity,
+        ...rest,
+        ...(images.length ? { images } : {}),
+      });
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法注入消息' };
+    },
+    abort(sessionId) {
+      const identity = lookup(sessionId);
+      if (!identity) return { ok: false, error: '会话不在运行' };
+      const sent = abortSession(identity);
+      return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法中止会话' };
     },
   });
 }
