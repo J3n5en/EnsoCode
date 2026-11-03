@@ -46,7 +46,6 @@ import {
   splitPlanPrefix,
   withPlanNote,
 } from '@shared/planMode';
-import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import {
   type MaskReport,
   mergeMaskReports,
@@ -93,6 +92,7 @@ import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { PluginCommandSpawn, PluginHookSpawn } from '@shared/types/plugins';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
@@ -1837,6 +1837,17 @@ export class SessionSupervisor {
         await managed.session.setModel(next);
         ensureAssistantUsage(managed.session.messages as unknown[]);
         managed.modelId = command.model.modelId;
+        const usage = managed.session.getContextUsage();
+        const compaction = managed.session.settingsManager.getCompactionSettings(
+          managed.session.model
+        );
+        if (
+          managed.status !== 'running' &&
+          managed.compaction !== 'running' &&
+          shouldCompactAfterModelSwitch(usage, compaction)
+        ) {
+          void this.runCompaction(managed);
+        }
         // 必须回报：Main 的 agentSessionIndex 只认 parent-ready 与本事件，
         // 不回报就会让后续派发的 selection 校验永远对不上（issue #30）。
         this.options.emit({
@@ -5899,6 +5910,15 @@ function modelFamilyOf(modelId: string): string {
   if (id.includes('gemini')) return 'gemini';
   const vendor = id.split(/[-/_]/)[0];
   return vendor || id;
+}
+
+/** 换模型后已有上下文吃掉了新窗口的压缩预留：立即压缩，免得下一轮直接超窗 */
+export function shouldCompactAfterModelSwitch(
+  usage: { tokens: number | null; contextWindow: number } | undefined,
+  settings: { enabled: boolean; reserveTokens: number }
+): boolean {
+  if (!settings.enabled || !usage || usage.tokens === null) return false;
+  return usage.tokens > usage.contextWindow - settings.reserveTokens;
 }
 
 /**

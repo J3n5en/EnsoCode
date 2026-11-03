@@ -88,7 +88,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
 });
 
 import { CheckpointManager } from './checkpoint/manager';
-import { SessionSupervisor } from './supervisor';
+import { SessionSupervisor, shouldCompactAfterModelSwitch } from './supervisor';
 
 const parent = {
   sessionId: 'parent',
@@ -693,6 +693,32 @@ describe('SessionSupervisor compact failure', () => {
 
     restore.mockRestore();
     await supervisor.shutdown();
+  });
+});
+
+describe('shouldCompactAfterModelSwitch', () => {
+  const settings = { enabled: true, reserveTokens: 32_768 };
+
+  it('换到更小窗口且已有上下文吃掉预留时要压缩', () => {
+    expect(
+      shouldCompactAfterModelSwitch({ tokens: 250_000, contextWindow: 272_000 }, settings)
+    ).toBe(true);
+  });
+
+  it('还留得下预留、压缩关着、或还没有用量时不压', () => {
+    expect(
+      shouldCompactAfterModelSwitch({ tokens: 200_000, contextWindow: 272_000 }, settings)
+    ).toBe(false);
+    expect(
+      shouldCompactAfterModelSwitch(
+        { tokens: 250_000, contextWindow: 272_000 },
+        { enabled: false, reserveTokens: 32_768 }
+      )
+    ).toBe(false);
+    expect(shouldCompactAfterModelSwitch({ tokens: null, contextWindow: 272_000 }, settings)).toBe(
+      false
+    );
+    expect(shouldCompactAfterModelSwitch(undefined, settings)).toBe(false);
   });
 });
 
