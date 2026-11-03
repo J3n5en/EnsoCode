@@ -46,6 +46,21 @@ export function viewStoragePatch(data: unknown): Record<string, string | null> |
   return patch;
 }
 
+export function viewThemePush(theme: 'light' | 'dark'): {
+  type: 'enso-theme';
+  theme: 'light' | 'dark';
+} {
+  return { type: 'enso-theme', theme };
+}
+
+/** 宿主经端口推来的主题；不是主题消息时返回 null */
+export function viewThemeNotice(data: unknown): 'light' | 'dark' | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const record = data as Record<string, unknown>;
+  if (record.type !== 'enso-theme') return null;
+  return record.theme === 'dark' || record.theme === 'light' ? record.theme : null;
+}
+
 export interface PluginViewRef {
   pluginId: string;
   pluginName: string;

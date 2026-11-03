@@ -29,6 +29,21 @@
         let seq = 0;
         let theme = 'light';
         const pending = new Map();
+        const themeListeners = new Set();
+        const applyTheme = (next) => {
+          const value = next === 'dark' ? 'dark' : 'light';
+          const changed = value !== theme;
+          theme = value;
+          if (document.documentElement) document.documentElement.dataset.theme = theme;
+          if (!changed) return;
+          for (const listener of [...themeListeners]) {
+            try {
+              listener(theme);
+            } catch {
+              /* 单个订阅失败不影响其余 */
+            }
+          }
+        };
         const store = Object.create(null);
         const persist = (patch) => {
           if (port) port.postMessage({ type: 'enso-storage', patch });
@@ -79,6 +94,11 @@
             get theme() {
               return theme;
             },
+            onTheme(listener) {
+              if (typeof listener !== 'function') return () => {};
+              themeListeners.add(listener);
+              return () => themeListeners.delete(listener);
+            },
             call(method, args) {
               if (!port) return Promise.reject(new Error('bridge not ready'));
               const id = ++seq;
@@ -118,6 +138,10 @@
           }
           port.onmessage = (message) => {
             const reply = message.data;
+            if (reply && reply.type === 'enso-theme') {
+              if (reply.theme === 'dark' || reply.theme === 'light') applyTheme(reply.theme);
+              return;
+            }
             const entry = reply && pending.get(reply.id);
             if (!entry) return;
             pending.delete(reply.id);

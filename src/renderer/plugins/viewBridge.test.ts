@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createViewBridge, decodeUtf8Base64, viewStoragePatch } from './viewBridge';
+import {
+  createViewBridge,
+  decodeUtf8Base64,
+  viewStoragePatch,
+  viewThemeNotice,
+  viewThemePush,
+} from './viewBridge';
 
 describe('侧栏页面桥', () => {
   it('转发 call 并带回结果', async () => {
@@ -46,5 +52,12 @@ describe('侧栏页面桥', () => {
     });
     expect(viewStoragePatch({ type: 'enso-storage', patch: { a: 1 } })).toBeNull();
     expect(viewStoragePatch({ id: 1, method: 'stats', args: {} })).toBeNull();
+  });
+
+  it('主题推送只接受 light 和 dark', () => {
+    expect(viewThemePush('dark')).toEqual({ type: 'enso-theme', theme: 'dark' });
+    expect(viewThemeNotice(viewThemePush('light'))).toBe('light');
+    expect(viewThemeNotice({ type: 'enso-theme', theme: 'blue' })).toBeNull();
+    expect(viewThemeNotice({ id: 1, ok: true, value: null })).toBeNull();
   });
 });

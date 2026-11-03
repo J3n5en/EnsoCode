@@ -49,6 +49,34 @@ describe('插件挂点登记', () => {
     expect(pluginBlock('c.d', 'x')).toBeTruthy();
   });
 
+  it('按加载代号清理，留下同一插件的其他代号', () => {
+    registerPluginSlot({
+      pluginId: 'a.b',
+      slot: 'block',
+      language: 'old',
+      component,
+      generation: 1,
+    });
+    registerPluginSlot({
+      pluginId: 'a.b',
+      slot: 'block',
+      language: 'new',
+      component,
+      generation: 2,
+    });
+    clearPluginSlots('a.b', 1);
+    expect(pluginBlock('a.b', 'old')).toBeUndefined();
+    expect(pluginBlock('a.b', 'new')).toBeTruthy();
+  });
+
+  it('同一插件多次登记得到不同 uid', () => {
+    registerPluginSlot({ pluginId: 'a.b', slot: 'composer.left', component });
+    registerPluginSlot({ pluginId: 'a.b', slot: 'composer.left', component });
+    const uids = pluginComposerSlots('left').map((entry) => entry.uid);
+    expect(uids).toHaveLength(2);
+    expect(new Set(uids).size).toBe(2);
+  });
+
   it('非法挂点或缺少必需字段时抛错', () => {
     expect(() =>
       registerPluginSlot({ pluginId: 'a.b', slot: 'nope' as never, component })

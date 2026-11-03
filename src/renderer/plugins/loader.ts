@@ -1,7 +1,12 @@
 import * as React from 'react';
 import { type ComponentType, createElement, type ReactElement } from 'react';
 import { type DraftRequest, type DraftResult, handleDraftRequest } from './draftBridge';
-import { clearPluginSlots, type PluginSlotEntry, registerPluginSlot } from './registry';
+import {
+  allocateSlotGeneration,
+  clearPluginSlots,
+  type PluginSlotEntry,
+  registerPluginSlot,
+} from './registry';
 
 export interface PluginRendererDeps {
   importModule(pluginId: string, rel: string): Promise<{ onLoad?: (enso: unknown) => unknown }>;
@@ -80,12 +85,15 @@ export async function loadPluginRenderer(
 ): Promise<{ dispose(): void }> {
   const mod = await deps.importModule(pluginId, rel);
   if (typeof mod.onLoad !== 'function') throw new Error('插件渲染模块没有导出 onLoad');
+  const generation = allocateSlotGeneration();
   const disposers: (() => void)[] = [];
+  let disposed = false;
   const enso = {
     React: deps.react,
     slots: {
-      register: (registration: Omit<PluginSlotEntry, 'pluginId'>) => {
-        const dispose = registerPluginSlot({ ...registration, pluginId });
+      register: (registration: Omit<PluginSlotEntry, 'pluginId' | 'uid'>) => {
+        if (disposed) return () => {};
+        const dispose = registerPluginSlot({ ...registration, pluginId, generation });
         disposers.push(dispose);
         return dispose;
       },
@@ -100,13 +108,17 @@ export async function loadPluginRenderer(
     const returned = await mod.onLoad(enso);
     if (typeof returned === 'function') disposers.push(returned as () => void);
   } catch (error) {
-    for (const dispose of disposers) dispose();
+    disposed = true;
+    for (const dispose of disposers.splice(0)) dispose();
+    clearPluginSlots(pluginId, generation);
     throw error;
   }
   return {
     dispose() {
+      if (disposed) return;
+      disposed = true;
       for (const dispose of disposers.splice(0)) dispose();
-      clearPluginSlots(pluginId);
+      clearPluginSlots(pluginId, generation);
     },
   };
 }

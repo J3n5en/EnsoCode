@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { inlinePluginViewHtml } from './inlineAssets';
-import { createViewBridge, decodeUtf8Base64, usePluginViews, viewStoragePatch } from './viewBridge';
+import {
+  createViewBridge,
+  decodeUtf8Base64,
+  usePluginViews,
+  viewStoragePatch,
+  viewThemePush,
+} from './viewBridge';
 
 const SHELL = 'plugin-view.html';
+
+function documentTheme(): 'light' | 'dark' {
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+}
 
 /**
  * 插件侧栏页面。外层 iframe 不加 sandbox：没有 allow-same-origin 的沙箱导航
@@ -34,6 +44,18 @@ export function PluginView({
     setError(null);
     let disposed = false;
     let channel: MessageChannel | null = null;
+    const pushTheme = () => {
+      try {
+        channel?.port1.postMessage(viewThemePush(documentTheme()));
+      } catch {
+        /* 端口已关闭 */
+      }
+    };
+    const themeObserver = new MutationObserver(pushTheme);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
     const handle = createViewBridge(async (method, args) => {
       const res = await window.electronAPI.extensionPlugins.call({
         pluginId,
@@ -79,7 +101,7 @@ export function PluginView({
         {
           type: 'enso-view-init',
           html,
-          theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+          theme: documentTheme(),
           storage: state.ok ? state.state : {},
         },
         '*',
@@ -90,6 +112,7 @@ export function PluginView({
     frame.src = new URL(SHELL, document.baseURI).href;
     return () => {
       disposed = true;
+      themeObserver.disconnect();
       window.removeEventListener('message', onReady);
       channel?.port1.close();
       frame.removeAttribute('src');

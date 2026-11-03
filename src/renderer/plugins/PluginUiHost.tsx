@@ -7,6 +7,7 @@ import { mergePluginCommands, setPluginCommands } from './commands';
 import { handleDraftRequest, prefillDraft } from './draftBridge';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
+import { syncPluginRenderers } from './rendererReload';
 import { handleSessionRequest, type SessionRequest } from './sessionBridge';
 import { setPluginTriggers } from './triggers';
 import { setPluginViews } from './viewBridge';
@@ -37,12 +38,10 @@ export function PluginUiHost() {
     // 与主输入框 focusKey 一致：子 Agent tab 打开时指向该 tab 的会话
     const deps = createRendererDeps(() => displayedConversationId(useSessionsStore.getState()));
     let generation = 0;
-    let handles: { dispose(): void }[] = [];
+    const loaded = new Map<string, { key: string; dispose(): void }>();
     const breakers = new Set<string>();
     const reload = () => {
       const mine = ++generation;
-      for (const handle of handles) handle.dispose();
-      handles = [];
       void window.electronAPI.extensionPlugins.list().then(async (list) => {
         if (mine !== generation) return;
         for (const { pluginName, event } of newInterceptBreakers(list, breakers)) {
@@ -79,21 +78,15 @@ export function PluginUiHost() {
               .map((trigger) => ({ pluginId: plugin.id, name: trigger.name }))
           )
         );
-        for (const plugin of list) {
-          if (plugin.state !== 'enabled' || !plugin.renderer) continue;
-          try {
-            const handle = await loadPluginRenderer(plugin.id, plugin.renderer, deps, {
+        await syncPluginRenderers(
+          loaded,
+          list,
+          (plugin) =>
+            loadPluginRenderer(plugin.id, plugin.renderer, deps, {
               draft: plugin.permissions.includes('composer.draft'),
-            });
-            if (mine !== generation) {
-              handle.dispose();
-              return;
-            }
-            handles.push(handle);
-          } catch (error) {
-            console.warn(`[plugin] ${plugin.id} 渲染模块加载失败`, error);
-          }
-        }
+            }),
+          () => mine === generation
+        );
       });
     };
     reload();
@@ -130,7 +123,8 @@ export function PluginUiHost() {
       setPluginCommands([]);
       setPluginTriggers([]);
       setPluginViews([]);
-      for (const handle of handles) handle.dispose();
+      for (const handle of loaded.values()) handle.dispose();
+      loaded.clear();
     };
   }, []);
   return null;

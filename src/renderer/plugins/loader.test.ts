@@ -157,4 +157,48 @@ describe('loadPluginRenderer', () => {
     );
     await expect(enso?.composer?.readDraft()).rejects.toMatchObject({ code: 'NO_SESSION' });
   });
+
+  it('旧一代卸载不会清掉新一代挂点', async () => {
+    const first = await loadPluginRenderer(
+      'a.b',
+      'ui.js',
+      deps((enso) => {
+        (enso as Enso).slots.register({
+          slot: 'message.action',
+          position: 'left',
+          component: () => null,
+        });
+      })
+    );
+    const second = await loadPluginRenderer(
+      'a.b',
+      'ui.js',
+      deps((enso) => {
+        (enso as Enso).slots.register({
+          slot: 'message.action',
+          position: 'right',
+          component: () => null,
+        });
+      })
+    );
+    first.dispose();
+    expect(pluginMessageActions('left')).toHaveLength(0);
+    expect(pluginMessageActions('right')).toHaveLength(1);
+    second.dispose();
+    expect(pluginMessageActions('right')).toHaveLength(0);
+  });
+
+  it('卸载之后再登记会被忽略', async () => {
+    let register: Enso['slots']['register'] | undefined;
+    const handle = await loadPluginRenderer(
+      'a.b',
+      'ui.js',
+      deps((enso) => {
+        register = (enso as Enso).slots.register;
+      })
+    );
+    handle.dispose();
+    register?.({ slot: 'message.action', position: 'left', component: () => null });
+    expect(pluginMessageActions('left')).toHaveLength(0);
+  });
 });
