@@ -147,7 +147,7 @@ export interface PluginSessionBridge {
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
-  ): { ok: true } | { ok: false; error: string };
+  ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
   abort(sessionId: string): { ok: true } | { ok: false; error: string };
 }
 

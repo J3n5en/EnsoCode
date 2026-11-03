@@ -12,7 +12,13 @@ export interface DraftTarget {
 
 export interface DraftRequest {
   sessionId: string;
-  op: 'readDraft' | 'insertText' | 'replaceDraft' | 'focusSession' | 'createSession';
+  op:
+    | 'readDraft'
+    | 'insertText'
+    | 'replaceDraft'
+    | 'focusSession'
+    | 'createSession'
+    | 'ensureSession';
   payload: Record<string, unknown>;
 }
 

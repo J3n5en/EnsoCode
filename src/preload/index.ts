@@ -1735,7 +1735,13 @@ const electronAPI = {
       callback: (request: {
         requestId: string;
         sessionId: string;
-        op: 'readDraft' | 'insertText' | 'replaceDraft' | 'focusSession' | 'createSession';
+        op:
+          | 'readDraft'
+          | 'insertText'
+          | 'replaceDraft'
+          | 'focusSession'
+          | 'createSession'
+          | 'ensureSession';
         payload: Record<string, unknown>;
       }) => void
     ): (() => void) => {

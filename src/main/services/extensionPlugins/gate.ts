@@ -27,10 +27,13 @@ const MAX_CLIPBOARD_BYTES = 1024 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
+/** 会话被唤起后等它就绪：worker 冷启动要加载 runtime/skill/MCP，可能十几秒 */
+const WAKE_READY_MS = 60_000;
+const WAKE_POLL_MS = 250;
 
 export type ComposerOp = 'readDraft' | 'insertText' | 'replaceDraft';
-/** 需要发起窗口配合的会话操作：切换到会话、在发起会话的项目里新建会话 */
-export type SessionUiOp = 'focusSession' | 'createSession';
+/** 需要窗口配合的会话操作：切换到会话、在发起会话的项目里新建会话、启动没在运行的会话 */
+export type SessionUiOp = 'focusSession' | 'createSession' | 'ensureSession';
 
 /** 插件看到的会话：只有标识与展示字段，不含路径 */
 export interface PluginSessionInfo {
@@ -94,7 +97,9 @@ export interface GateDeps {
       deliverAs: 'steer' | 'followUp' | 'nextTurn';
       triggerTurn: boolean;
     }
-  ): { ok: true } | { ok: false; error: string };
+  ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
+  /** 让主窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
+  wakeSession?(sessionId: string): Promise<void>;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
   callPlugin?(
     callerId: string,
@@ -376,13 +381,27 @@ export class PluginHostGate {
         const bridge = this.deps.inject;
         if (!bridge) throw pluginError('UNSUPPORTED', '当前环境不能注入消息');
         this.admitInject(pluginId);
-        const result = bridge(pluginId, {
+        const input: Parameters<typeof bridge>[1] = {
           sessionId,
           text: a.text,
           images,
           deliverAs,
           triggerTurn: a.triggerTurn === true,
-        });
+        };
+        let result = bridge(pluginId, input);
+        if (!result.ok && result.notRunning && this.deps.wakeSession) {
+          try {
+            await this.deps.wakeSession(sessionId);
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            throw pluginError('INJECT_FAILED', `${result.error}，启动失败：${reason}`);
+          }
+          const deadline = this.deps.now() + WAKE_READY_MS;
+          while (!result.ok && result.notRunning && this.deps.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS));
+            result = bridge(pluginId, input);
+          }
+        }
         if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
         return null;
       }

@@ -217,6 +217,26 @@ describe('resumeConversation model resolution', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('starts a never-sent conversation with the default model only when a fresh start is requested', async () => {
+    const global = provider('global');
+    settingsModule.useSettingsStore.setState({
+      providers: [global],
+      defaultModel: { providerId: global.id, modelId: 'model' },
+    });
+    const id = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    if (!id) throw new Error('conversation authority was not created');
+
+    await sessionsModule.useSessionsStore.getState().resumeConversation(id);
+    expect(spawn).not.toHaveBeenCalled();
+
+    await sessionsModule.useSessionsStore.getState().resumeConversation(id, { fresh: true });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: global.id, modelId: 'model', resumeFile: undefined })
+    );
+    expect(sessionsModule.useSessionsStore.getState().conversations[id].started).toBe(true);
+  });
+
   it('keeps lastProviderId and lastModelId in the restart persistence projection', async () => {
     const id = await resumableConversation('remembered', 'model');
     const partialize = sessionsModule.useSessionsStore.persist.getOptions().partialize;

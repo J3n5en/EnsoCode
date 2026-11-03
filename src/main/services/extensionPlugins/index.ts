@@ -11,7 +11,7 @@ import {
 import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
-import { rendererById } from '../renderers';
+import { localMainContents, rendererById } from '../renderers';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps, PluginSessionInfo } from './gate';
@@ -155,6 +155,16 @@ export function getExtensionPlugins(): ExtensionPluginService {
           payload,
           SESSION_UI_TIMEOUT_MS
         ),
+      // 后台投递没有发起窗口：交给本机主窗口启动，没有主窗口时如实失败
+      wakeSession: async (sessionId) => {
+        await getDraftBroker().request(
+          localMainContents()?.id ?? null,
+          sessionId,
+          'ensureSession',
+          {},
+          SESSION_UI_TIMEOUT_MS
+        );
+      },
       mcpTools: (target, signal) => (mcpBridge ? mcpBridge.mcpTools(target, signal) : noMcp()),
       mcpCall: (target, server, tool, args, signal) =>
         mcpBridge ? mcpBridge.mcpCall(target, server, tool, args, signal) : noMcp(),

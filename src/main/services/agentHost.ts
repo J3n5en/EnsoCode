@@ -1443,7 +1443,7 @@ export function registerPluginSessionBridge(
       if (message.text.length > PLUGIN_INJECT_MAX_CHARS)
         return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
-      if (!identity) return { ok: false, error: '会话不在运行' };
+      if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
       const { images, ...rest } = message;
       const sent = sendAgentCommand({
         type: 'plugin-inject',

@@ -20,6 +20,15 @@ const sessionDeps = {
   },
   create: (projectId: string) => useSessionsStore.getState().newConversation(projectId),
   prefill: prefillDraft,
+  ensure: async (id: string) => {
+    const sessions = useSessionsStore.getState();
+    const before = sessions.conversations[id];
+    if (before?.started || before?.spawning) return null;
+    await sessions.resumeConversation(id, { fresh: true });
+    const after = useSessionsStore.getState().conversations[id];
+    if (after?.started || after?.spawning) return null;
+    return after?.error ?? '无法启动会话：请检查默认模型与登录状态';
+  },
 };
 
 /** 挂一次：启用插件的渲染模块在宿主页面加载，登记挂点；停用或变更时收回 */
@@ -90,7 +99,11 @@ export function PluginUiHost() {
     reload();
     const unsubscribe = window.electronAPI.extensionPlugins.onChanged(reload);
     const unsubscribeDraft = window.electronAPI.extensionPlugins.onDraftRequest((request) => {
-      if (request.op === 'focusSession' || request.op === 'createSession') {
+      if (
+        request.op === 'focusSession' ||
+        request.op === 'createSession' ||
+        request.op === 'ensureSession'
+      ) {
         void handleSessionRequest(request as SessionRequest, sessionDeps)
           .catch((error: unknown) => ({
             ok: false as const,

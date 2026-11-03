@@ -442,7 +442,8 @@ interface SessionsState {
   resetBtwSession(id: string, rolePrompt: string): Promise<void>;
   disposeBtwConversation(id: string): Promise<void>;
   /** app 重启后从 jsonl 恢复会话并回放历史（未 started 且有 sessionFile 时有效） */
-  resumeConversation(id: string): Promise<void>;
+  /** fresh：从没发过消息的会话也用默认模型起一个新的 agent 会话（供插件后台投递） */
+  resumeConversation(id: string, options?: { fresh?: boolean }): Promise<void>;
   /** 上滑加载更早历史：只读 jsonl，不 spawn */
   loadOlderHistory(id: string): Promise<void>;
   /**
@@ -3332,7 +3333,7 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        async resumeConversation(id) {
+        async resumeConversation(id, options) {
           const conversation = get().conversations[id];
           if (
             !conversation ||
@@ -3344,7 +3345,7 @@ export const useSessionsStore = create<SessionsState>()(
           ) {
             return;
           }
-          if (!conversation.sessionFile) return;
+          if (!conversation.sessionFile && !options?.fresh) return;
           const settings = useSettingsStore.getState();
           const project = settings.projects.find((p) => p.id === conversation.projectId);
           if (!project) return;

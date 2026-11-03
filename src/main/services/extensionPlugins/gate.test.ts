@@ -469,6 +469,53 @@ describe('PluginHostGate', () => {
     expect(inject).toHaveBeenCalledTimes(5);
   });
 
+  it('目标会话没在运行时先请主窗口启动，就绪后再注入；启动失败或一直没就绪时如实报错', async () => {
+    const notRunning = { ok: false as const, error: '会话不在运行', notRunning: true as const };
+    let attempts = 0;
+    const inject = vi.fn(() => (++attempts < 3 ? notRunning : { ok: true as const }));
+    const wakeSession = vi.fn(async () => undefined);
+    deps.inject = inject;
+    deps.wakeSession = wakeSession;
+    deps.manifest = () => manifest({ permissions: ['agent.inject'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+    ).resolves.toBeNull();
+    expect(wakeSession).toHaveBeenCalledTimes(1);
+    expect(wakeSession).toHaveBeenCalledWith('s1');
+    expect(inject).toHaveBeenCalledTimes(3);
+
+    deps.inject = vi.fn(() => notRunning);
+    deps.wakeSession = vi.fn(async () => {
+      throw Object.assign(new Error('没有可用的模型'), { code: 'SESSION_FAILED' });
+    });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+    ).rejects.toMatchObject({
+      code: 'INJECT_FAILED',
+      message: expect.stringMatching(/不在运行.*没有可用的模型/),
+    });
+
+    deps.inject = vi.fn(() => {
+      now += 20_000;
+      return notRunning;
+    });
+    deps.wakeSession = vi.fn(async () => undefined);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INJECT_FAILED', message: '会话不在运行' });
+
+    deps.inject = vi.fn(() => ({ ok: false as const, error: '注入文本过长' }));
+    deps.wakeSession = vi.fn(async () => undefined);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INJECT_FAILED' });
+    expect(deps.wakeSession).not.toHaveBeenCalled();
+  });
+
   it('net.fetch 随调用取消中止', async () => {
     let seen: AbortSignal | undefined;
     deps.fetch = vi.fn(async (_url: string, init?: RequestInit) => {

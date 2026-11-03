@@ -8,6 +8,7 @@ function deps(patch: Partial<SessionBridgeDeps> = {}): SessionBridgeDeps {
     focus: vi.fn(),
     create: vi.fn(async () => 'n1'),
     prefill: vi.fn(),
+    ensure: vi.fn(async () => null),
     ...patch,
   };
 }
@@ -46,5 +47,23 @@ describe('handleSessionRequest', () => {
     await expect(
       handleSessionRequest({ sessionId: 'nope', op: 'createSession', payload: {} }, d)
     ).resolves.toMatchObject({ ok: false, code: 'NO_SESSION' });
+  });
+
+  it('按会话 id 启动会话：子会话和未知会话拒绝，启动失败带回原因', async () => {
+    const d = deps();
+    await expect(
+      handleSessionRequest({ sessionId: 'a', op: 'ensureSession', payload: {} }, d)
+    ).resolves.toEqual({ ok: true, value: null });
+    expect(d.ensure).toHaveBeenCalledWith('a');
+    await expect(
+      handleSessionRequest({ sessionId: 'a::c1', op: 'ensureSession', payload: {} }, d)
+    ).resolves.toMatchObject({ ok: false, code: 'UNSUPPORTED' });
+    await expect(
+      handleSessionRequest({ sessionId: 'zz', op: 'ensureSession', payload: {} }, d)
+    ).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    const failed = deps({ ensure: vi.fn(async () => '没有可用的模型') });
+    await expect(
+      handleSessionRequest({ sessionId: 'a', op: 'ensureSession', payload: {} }, failed)
+    ).resolves.toEqual({ ok: false, code: 'SESSION_FAILED', error: '没有可用的模型' });
   });
 });
