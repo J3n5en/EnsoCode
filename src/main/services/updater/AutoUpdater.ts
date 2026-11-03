@@ -2,6 +2,7 @@ import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
 import type { UpdateStatus } from '@shared/types/updater';
 import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
+import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
@@ -233,7 +234,7 @@ class AutoUpdaterService {
 
 /** electron-updater 的 UpdateInfo 收窄成可序列化的白名单形状 */
 function projectInfo(info: electronUpdater.UpdateInfo): UpdateStatus['info'] {
-  const notes = typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined;
+  const notes = normalizeReleaseNotes(info.releaseNotes);
   return {
     version: info.version,
     ...(notes ? { releaseNotes: notes } : {}),

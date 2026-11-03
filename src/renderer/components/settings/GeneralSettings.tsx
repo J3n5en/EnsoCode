@@ -6,6 +6,7 @@ import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { isAbsolutePathLike } from '@shared/worktreeRoot';
 import * as React from 'react';
+import { ReleaseNotesDialog } from '@/components/app/ReleaseNotesDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -665,6 +666,7 @@ function UpdateSection() {
   const [status, setStatus] = React.useState<UpdateStatus | null>(null);
   const [host, setHost] = React.useState<UpdaterState | null>(null);
   const [confirmRestart, setConfirmRestart] = React.useState(false);
+  const [notesOpen, setNotesOpen] = React.useState(false);
 
   React.useEffect(() => {
     let alive = true;
@@ -684,6 +686,9 @@ function UpdateSection() {
     };
   }, []);
   const server = host?.host === 'server' ? host : null;
+  const canDownload = host?.host === 'desktop' || (server !== null && server.mode !== 'manual');
+  const hasNotes =
+    (status?.status === 'available' || status?.status === 'downloaded') && !!status.info;
 
   const statusText = (): string | null => {
     if (!status) return null;
@@ -728,6 +733,16 @@ function UpdateSection() {
           </p>
           {text && <p className="mt-0.5 truncate text-xs text-muted-foreground">{text}</p>}
         </div>
+        {hasNotes && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setNotesOpen(true)}
+            className="ml-auto shrink-0"
+          >
+            {t('Release notes')}
+          </Button>
+        )}
         {status?.status === 'downloaded' ? (
           <Button
             size="sm"
@@ -736,7 +751,7 @@ function UpdateSection() {
           >
             {t('Restart to update')}
           </Button>
-        ) : server && server.mode !== 'manual' && status?.status === 'available' ? (
+        ) : canDownload && status?.status === 'available' ? (
           <Button
             size="sm"
             onClick={() => void window.electronAPI.updater.downloadUpdate()}
@@ -755,6 +770,12 @@ function UpdateSection() {
             {t('Check for updates')}
           </Button>
         )}
+        <ReleaseNotesDialog
+          open={notesOpen}
+          onOpenChange={setNotesOpen}
+          status={status}
+          canDownload={canDownload}
+        />
       </div>
       {server?.canRestart && (
         <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
