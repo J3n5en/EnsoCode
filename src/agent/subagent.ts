@@ -63,6 +63,57 @@ export function describeSubagentModels(
     .join('; ');
 }
 
+const SUBAGENT_OPERATIONS = [
+  'spawn',
+  'send',
+  'wait',
+  'report',
+  'list',
+  'message',
+  'stop',
+  'dismiss',
+] as const;
+
+const REQUIRED_FIELDS: Partial<Record<string, string[]>> = {
+  send: ['agentId', 'message'],
+  report: ['runId'],
+  stop: ['runId'],
+  dismiss: ['agentId'],
+  message: ['to', 'text'],
+};
+
+const SCHEMA_GATE_HINT = 'schema: object, gate: {commandRef: string}';
+const FIELD_HINTS: Partial<Record<string, string>> = {
+  spawn: `mode: task|coworker, name: non-empty string, wait: boolean, ${SCHEMA_GATE_HINT}`,
+  send: `delivery: auto|steer|next, expectedRunId: non-empty string, wait: boolean, ${SCHEMA_GATE_HINT}`,
+  wait: `until: all|any, timeoutMs: integer 0-${AGENT_WAIT_MAX_MS}`,
+  list: 'status: creating|ready|active|parked|closed, cursor: non-empty string, limit: integer 1-100',
+};
+
+/** normalize 返回空时点名缺失或非法的字段 */
+function describeInvalidSubagentParams(params: Record<string, unknown>): string {
+  const { operation } = params;
+  if (!SUBAGENT_OPERATIONS.includes(operation as (typeof SUBAGENT_OPERATIONS)[number])) {
+    return `unknown operation ${JSON.stringify(operation)}. Expected one of: ${SUBAGENT_OPERATIONS.join(', ')}`;
+  }
+  const op = operation as string;
+  const blank = (value: unknown) => typeof value !== 'string' || !value.trim();
+  const missing = (REQUIRED_FIELDS[op] ?? []).filter((key) => blank(params[key]));
+  if (op === 'wait') {
+    const runIds = Array.isArray(params.runIds)
+      ? params.runIds
+      : params.runId !== undefined
+        ? [params.runId]
+        : [];
+    if (runIds.length === 0) missing.push('runId or runIds');
+    else if (runIds.some(blank) || new Set(runIds).size !== runIds.length) {
+      return 'wait requires distinct non-empty run ids in runIds (or a single runId)';
+    }
+  }
+  if (missing.length > 0) return `${op} requires non-empty ${missing.join(' and ')}`;
+  return `check ${op} fields (${FIELD_HINTS[op] ?? (REQUIRED_FIELDS[op] ?? []).join(', ')})`;
+}
+
 export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefinition {
   const modelNames = deps.models.map((model) => model.name);
   const modelNotes = describeSubagentModels(deps.models);
@@ -209,7 +260,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       properties: {
         operation: {
           type: 'string',
-          enum: ['spawn', 'send', 'wait', 'report', 'list', 'message', 'stop', 'dismiss'],
+          enum: [...SUBAGENT_OPERATIONS],
         },
         mode: { type: 'string', enum: ['task', 'coworker'] },
         name: { type: 'string' },
@@ -281,8 +332,11 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
     } as unknown as ToolDefinition['parameters'],
     prepareArguments: clampWaitTimeout as unknown as ToolDefinition['prepareArguments'],
     async execute(toolCallId, params, signal) {
-      const request = normalize(clampWaitTimeout(params) as Record<string, unknown>);
-      if (!request) throw new Error('invalid subagent operation parameters');
+      const input = clampWaitTimeout(params) as Record<string, unknown>;
+      const request = normalize(input);
+      if (!request) {
+        throw new Error(`invalid subagent parameters: ${describeInvalidSubagentParams(input)}`);
+      }
       const waits =
         request.operation === 'wait' ||
         ((request.operation === 'spawn' || request.operation === 'send') && request.wait);

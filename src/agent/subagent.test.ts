@@ -94,6 +94,22 @@ describe('subagent unified control', () => {
     expect(guidelines).toMatch(/For a known file, symbol, or single fact, use the direct tool/);
     expect(guidelines).toMatch(/Treat the delivered report as your source of record/);
   });
+
+  it('参数不合法时点名缺失字段或非法 operation，不调用 Main', async () => {
+    const invoke = vi.fn();
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke });
+    const run = (params: Record<string, unknown>) =>
+      tool.execute('call', params, undefined, undefined, {} as never);
+    await expect(run({ operation: 'send', agentId: 'a1' })).rejects.toThrow(/send.*message/);
+    await expect(run({ operation: 'wait' })).rejects.toThrow(/wait.*runId/);
+    await expect(run({ operation: 'message', to: 'x' })).rejects.toThrow(/message.*text/);
+    await expect(run({ operation: 'bogus' })).rejects.toThrow(/unknown operation "bogus"/);
+    await expect(
+      run({ operation: 'spawn', description: 'd', prompt: 'p', mode: 'oneshot' })
+    ).rejects.toThrow(/check spawn fields \(mode: task\|coworker/);
+    await expect(run({ operation: 'list', limit: 0 })).rejects.toThrow(/limit: integer 1-100/);
+    expect(invoke).not.toHaveBeenCalled();
+  });
 });
 
 describe('CoworkerIdleReminder', () => {
