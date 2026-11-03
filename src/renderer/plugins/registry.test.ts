@@ -5,6 +5,7 @@ import {
   pluginBlock,
   pluginComposerSlots,
   pluginMessageActions,
+  pluginMessageLeaf,
   pluginThinkingBody,
   pluginToolCard,
   registerPluginSlot,
@@ -132,5 +133,20 @@ describe('插件挂点登记', () => {
         component: 'nope' as never,
       })
     ).toThrow('挂点需要组件函数');
+  });
+
+  it('回复叶子无需额外字段，多个注册只取第一个', () => {
+    const first = () => null;
+    const second = () => null;
+    registerPluginSlot({ pluginId: 'a.b', slot: 'composer.left', component });
+    const dispose = registerPluginSlot({
+      pluginId: 'a.b',
+      slot: 'message.leaf',
+      component: first,
+    });
+    registerPluginSlot({ pluginId: 'c.d', slot: 'message.leaf', component: second });
+    expect(pluginMessageLeaf()?.component).toBe(first);
+    dispose();
+    expect(pluginMessageLeaf()?.component).toBe(second);
   });
 });

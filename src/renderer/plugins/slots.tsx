@@ -124,6 +124,27 @@ export function PluginThinkingBody({
   );
 }
 
+/** 回复正文叶子后的追加内容。不订阅挂点版本，由调用方决定要不要渲染 */
+export function PluginMessageLeaf({
+  entry,
+  source,
+  final,
+  messageIndex,
+  sessionId,
+  Markdown,
+}: {
+  entry: PluginSlotEntry;
+  source: string;
+  final: boolean;
+  messageIndex: number;
+  sessionId: string | null;
+  Markdown: (props: { text: string }) => unknown;
+}) {
+  return (
+    <IsolatedSlot entry={entry} props={{ source, final, messageIndex, sessionId, Markdown }} />
+  );
+}
+
 export function PluginBlock({
   pluginId,
   lang,

@@ -1,7 +1,9 @@
 import { previewImageMime } from '@shared/markdownPreviewImage';
+import type { Element, ElementContent } from 'hast';
 import { FolderOpen } from 'lucide-react';
 import type { Root } from 'mdast';
 import {
+  Children,
   createContext,
   type MouseEvent,
   type ReactElement,
@@ -26,8 +28,9 @@ import { useI18n } from '@/i18n';
 import { openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { parsePluginFence } from '../../plugins/registry';
-import { PluginBlock } from '../../plugins/slots';
+import { type PluginSlotEntry, parsePluginFence, pluginMessageLeaf } from '../../plugins/registry';
+import { PluginBlock, PluginMessageLeaf } from '../../plugins/slots';
+import { usePluginSlotsVersion } from '../../plugins/usePluginSlots';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { highlightNode } from './highlightQuery';
@@ -105,6 +108,12 @@ export const MarkdownCtx = createContext<{
   streaming: boolean;
   searchQuery: string;
   activeNth: number;
+  /** 仅助手回复正文、且已有 message.leaf 插件时存在 */
+  leafSlot?: {
+    messageIndex: number;
+    sessionId: string | null;
+    entry: PluginSlotEntry;
+  } | null;
 }>({ text: '', streaming: false, searchQuery: '', activeNth: -1 });
 
 export interface MarkdownLinkContextValue {
@@ -526,16 +535,15 @@ export function markdownUrlTransform(value: string, key?: string, allowLocal = t
   return allowLocal && classifyFileReference(value).classification.kind === 'local' ? value : '';
 }
 
+const P_CLASS = 'my-2 leading-[1.7] first:mt-0 last:mb-0';
+const H12_CLASS = 'mt-3 mb-1.5 text-base font-semibold';
+const H3_CLASS = 'mt-2 mb-1 text-sm font-semibold';
+const TH_CLASS = 'whitespace-nowrap border-b border-border px-2 py-1 text-left font-medium';
+const TD_CLASS = 'whitespace-nowrap border-b border-border/50 px-2 py-1';
+
 /** 模块级稳定引用：react-markdown 按组件类型协调子树，内联对象每帧都会拆掉 CodeBlock */
 export const markdownComponents: Components = {
-  p: ({ children }) => {
-    const { searchQuery, activeNth } = useContext(MarkdownCtx);
-    return (
-      <p className="my-2 leading-[1.7] first:mt-0 last:mb-0">
-        {searchQuery.trim() ? highlightNode(children, searchQuery, activeNth, { n: 0 }) : children}
-      </p>
-    );
-  },
+  p: ({ children }) => <Paragraph className={P_CLASS}>{children}</Paragraph>,
   a: MarkdownAnchor,
   ul: ({ children }) => (
     <ul className="my-2 list-disc pl-5 space-y-1 marker:text-muted-foreground">{children}</ul>
@@ -543,9 +551,9 @@ export const markdownComponents: Components = {
   ol: ({ children }) => (
     <ol className="my-2 list-decimal pl-5 space-y-1 marker:text-muted-foreground">{children}</ol>
   ),
-  h1: ({ children }) => <h1 className="mt-3 mb-1.5 text-base font-semibold">{children}</h1>,
-  h2: ({ children }) => <h2 className="mt-3 mb-1.5 text-base font-semibold">{children}</h2>,
-  h3: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold">{children}</h3>,
+  h1: ({ children }) => <h1 className={H12_CLASS}>{children}</h1>,
+  h2: ({ children }) => <h2 className={H12_CLASS}>{children}</h2>,
+  h3: ({ children }) => <h3 className={H3_CLASS}>{children}</h3>,
   blockquote: ({ children, node }) => {
     const { t } = useI18n();
     const props = node?.properties as Record<string, unknown> | undefined;
@@ -651,34 +659,229 @@ export const markdownComponents: Components = {
       </div>
     );
   },
-  th: ({ children }) => (
-    <th className="whitespace-nowrap border-b border-border px-2 py-1 text-left font-medium">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => (
-    <td className="whitespace-nowrap border-b border-border/50 px-2 py-1">{children}</td>
-  ),
+  th: ({ children }) => <th className={TH_CLASS}>{children}</th>,
+  td: ({ children }) => <td className={TD_CLASS}>{children}</td>,
   hr: () => <hr className="my-3 border-border" />,
 };
 
+const BLOCK_TAGS = new Set([
+  'blockquote',
+  'div',
+  'dl',
+  'figure',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  'table',
+  'ul',
+]);
+
+/** 叶子后面跟着插槽 div，`last:mb-0` 不再命中，改为只留上边距 */
+const P_LEAF_CLASS = 'mt-2 mb-0 leading-[1.7] first:mt-0';
+const SLOT_CLASS = 'empty:hidden whitespace-normal';
+
+function isBlock(node: ElementContent): boolean {
+  return node.type === 'element' && BLOCK_TAGS.has(node.tagName);
+}
+
+/** 行内原文，以及该叶子元素是否已经写完（流式时只有结尾顶到 trim 后文末的算没写完） */
+function readLeaf(
+  node: Element | undefined,
+  text: string,
+  streaming: boolean
+): { source: string; final: boolean } | null {
+  let start: number | undefined;
+  let end: number | undefined;
+  for (const child of node?.children ?? []) {
+    if (isBlock(child)) break;
+    const from = child.position?.start?.offset;
+    const to = child.position?.end?.offset;
+    if (from == null || to == null) continue;
+    if (start == null) start = from;
+    end = to;
+  }
+  if (start == null || end == null) return null;
+  const source = text.slice(start, end);
+  if (!source.trim()) return null;
+  const blockEnd = node?.position?.end?.offset ?? end;
+  return { source, final: !streaming || blockEnd < text.trimEnd().length };
+}
+
+/** 表格单元格会丢掉纯空白文本节点，列表不会 */
+function reactCutIndex(children: ElementContent[], skipWhitespace: boolean): number | null {
+  let index = 0;
+  for (const child of children) {
+    if (skipWhitespace && child.type === 'text' && !child.value.trim()) continue;
+    if (isBlock(child)) return index;
+    index += 1;
+  }
+  return null;
+}
+
+type ActiveLeaf = {
+  source: string;
+  final: boolean;
+  messageIndex: number;
+  sessionId: string | null;
+  entry: PluginSlotEntry;
+};
+
+function useActiveLeaf(node?: Element): ActiveLeaf | null {
+  const { text, streaming, leafSlot } = useContext(MarkdownCtx);
+  if (!leafSlot) return null;
+  const read = readLeaf(node, text, streaming);
+  if (!read) return null;
+  return {
+    ...read,
+    messageIndex: leafSlot.messageIndex,
+    sessionId: leafSlot.sessionId,
+    entry: leafSlot.entry,
+  };
+}
+
+/** 译文再渲染时不传 leaf，避免 message.leaf 递归 */
+function LeafTranslationMarkdown({ text }: { text: string }) {
+  return <MarkdownView text={text} />;
+}
+
+function LeafAddon({ leaf }: { leaf: ActiveLeaf }) {
+  return (
+    <div className={SLOT_CLASS}>
+      <PluginMessageLeaf
+        entry={leaf.entry}
+        source={leaf.source}
+        final={leaf.final}
+        messageIndex={leaf.messageIndex}
+        sessionId={leaf.sessionId}
+        Markdown={LeafTranslationMarkdown}
+      />
+    </div>
+  );
+}
+
+function Paragraph({ children, className }: { children?: ReactNode; className: string }) {
+  const { searchQuery, activeNth } = useContext(MarkdownCtx);
+  return (
+    <p className={className}>
+      {searchQuery.trim() ? highlightNode(children, searchQuery, activeNth, { n: 0 }) : children}
+    </p>
+  );
+}
+
+function LeafP({ children, node }: { children?: ReactNode; node?: Element }) {
+  const leaf = useActiveLeaf(node);
+  if (!leaf) return <Paragraph className={P_CLASS}>{children}</Paragraph>;
+  return (
+    <>
+      <Paragraph className={P_LEAF_CLASS}>{children}</Paragraph>
+      <LeafAddon leaf={leaf} />
+    </>
+  );
+}
+
+function makeLeafHeading(Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6', className?: string) {
+  return function LeafHeading({ children, node }: { children?: ReactNode; node?: Element }) {
+    const leaf = useActiveLeaf(node);
+    const heading = <Tag className={className}>{children}</Tag>;
+    if (!leaf) return heading;
+    return (
+      <>
+        {heading}
+        <LeafAddon leaf={leaf} />
+      </>
+    );
+  };
+}
+
+function LeafCell({
+  tag,
+  className,
+  children,
+  node,
+}: {
+  tag: 'td' | 'th' | 'li';
+  className?: string;
+  children?: ReactNode;
+  node?: Element;
+}) {
+  const leaf = useActiveLeaf(node);
+  const Tag = tag;
+  if (!leaf) return <Tag className={className}>{children}</Tag>;
+  const cut = reactCutIndex(node?.children ?? [], tag !== 'li');
+  const nodes = Children.toArray(children);
+  return (
+    <Tag className={className}>
+      {cut == null ? nodes : nodes.slice(0, cut)}
+      <LeafAddon leaf={leaf} />
+      {cut == null ? null : nodes.slice(cut)}
+    </Tag>
+  );
+}
+
+const LeafH1 = makeLeafHeading('h1', H12_CLASS);
+const LeafH2 = makeLeafHeading('h2', H12_CLASS);
+const LeafH3 = makeLeafHeading('h3', H3_CLASS);
+const LeafH4 = makeLeafHeading('h4');
+const LeafH5 = makeLeafHeading('h5');
+const LeafH6 = makeLeafHeading('h6');
+
+const leafMarkdownComponents: Components = {
+  ...markdownComponents,
+  p: LeafP,
+  h1: LeafH1,
+  h2: LeafH2,
+  h3: LeafH3,
+  h4: LeafH4,
+  h5: LeafH5,
+  h6: LeafH6,
+  li: ({ children, node, className }) => (
+    <LeafCell tag="li" className={className} node={node}>
+      {children}
+    </LeafCell>
+  ),
+  th: ({ children, node }) => (
+    <LeafCell tag="th" className={TH_CLASS} node={node}>
+      {children}
+    </LeafCell>
+  ),
+  td: ({ children, node }) => (
+    <LeafCell tag="td" className={TD_CLASS} node={node}>
+      {children}
+    </LeafCell>
+  ),
+};
+
 /** assistant 正文的 markdown 渲染，样式内联为 Tailwind（项目未引入 typography 插件） */
-export function Markdown({
+function MarkdownView({
   text,
   streaming = false,
   searchQuery = '',
   activeNth = -1,
+  leafSlot = null,
 }: {
   text: string;
   streaming?: boolean;
   searchQuery?: string;
   activeNth?: number;
+  leafSlot?: {
+    messageIndex: number;
+    sessionId: string | null;
+    entry: PluginSlotEntry;
+  } | null;
 }) {
   const linkContext = useContext(MarkdownLinkContext);
   const allowLocalMarkdownLinks = linkContext !== null;
   const ctx = useMemo(
-    () => ({ text, streaming, searchQuery, activeNth }),
-    [text, streaming, searchQuery, activeNth]
+    () => ({ text, streaming, searchQuery, activeNth, ...(leafSlot ? { leafSlot } : {}) }),
+    [text, streaming, searchQuery, activeNth, leafSlot]
   );
   const urlTransform = useMemo(
     () => (value: string, key: string) => markdownUrlTransform(value, key, allowLocalMarkdownLinks),
@@ -689,12 +892,66 @@ export function Markdown({
       <div className={streaming ? 't-stream-live' : undefined}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
-          components={markdownComponents}
+          components={leafSlot ? leafMarkdownComponents : markdownComponents}
           urlTransform={urlTransform}
         >
           {text}
         </ReactMarkdown>
       </div>
     </MarkdownCtx.Provider>
+  );
+}
+
+function MarkdownLeafHost({
+  leaf,
+  ...rest
+}: {
+  text: string;
+  streaming?: boolean;
+  searchQuery?: string;
+  activeNth?: number;
+  leaf: { messageIndex: number; sessionId: string | null };
+}) {
+  usePluginSlotsVersion();
+  const entry = pluginMessageLeaf();
+  const leafSlot = useMemo(
+    () => (entry ? { messageIndex: leaf.messageIndex, sessionId: leaf.sessionId, entry } : null),
+    [entry, leaf.messageIndex, leaf.sessionId]
+  );
+  return <MarkdownView {...rest} leafSlot={leafSlot} />;
+}
+
+export function Markdown({
+  text,
+  streaming = false,
+  searchQuery = '',
+  activeNth = -1,
+  leaf,
+}: {
+  text: string;
+  streaming?: boolean;
+  searchQuery?: string;
+  activeNth?: number;
+  /** 只由助手回复正文传入。缺省时不挂 message.leaf，DOM 与原来一致 */
+  leaf?: { messageIndex: number; sessionId: string | null };
+}) {
+  if (!leaf) {
+    return (
+      <MarkdownView
+        text={text}
+        streaming={streaming}
+        searchQuery={searchQuery}
+        activeNth={activeNth}
+      />
+    );
+  }
+  return (
+    <MarkdownLeafHost
+      text={text}
+      streaming={streaming}
+      searchQuery={searchQuery}
+      activeNth={activeNth}
+      leaf={leaf}
+    />
   );
 }

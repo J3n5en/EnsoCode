@@ -315,6 +315,16 @@ export type EnsoSlotRegistration =
   | {
       slot: Extract<PluginSlotName, 'thinking.body'>;
       component: (props: { text: string; streaming: boolean; itemKey: string }) => unknown;
+    }
+  | {
+      slot: Extract<PluginSlotName, 'message.leaf'>;
+      component: (props: {
+        source: string;
+        final: boolean;
+        messageIndex: number;
+        sessionId: string | null;
+        Markdown: (props: { text: string }) => unknown;
+      }) => unknown;
     };
 
 /** `ui.js` 的 `onLoad(enso)`。`composer` 只在申请了 `composer.draft` 时存在。 */

@@ -412,6 +412,7 @@ export function onLoad(enso) {
 | `block` | `language` | `{ language, source }` | 可用 |
 | `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |
 | `thinking.body` | 无 | `{ text, streaming, itemKey }` | 可用。接管展开后的思考正文；多个插件只渲染先注册的那个，组件抛错时回退显示原文 |
+| `message.leaf` | 无 | `{ source, final, messageIndex, sessionId, Markdown }` | 可用。只在回复正文的文字叶子后追加，原文仍由宿主整体渲染。叶子是段落、标题、表格单元格，以及不包含段落的紧凑列表项；代码块、公式、分隔线和 HTML 不追加。`source` 是该叶子的行内 Markdown（不含 `#`、列表标记、表格竖线和引用标记），`final` 表示这个叶子是否已经写完，`messageIndex` / `sessionId` 与 `message.action` 相同。`Markdown` 是宿主的 Markdown 组件，用来渲染译文，且不会再次触发本挂点。多个插件只渲染先注册的那个；组件返回 null 或抛错时不追加内容，原文不受影响 |
 
 其它 `slot` 注册时直接报错。
 

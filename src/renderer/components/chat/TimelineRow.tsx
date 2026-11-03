@@ -1388,6 +1388,10 @@ function TextRow({
         streaming={item.streaming}
         searchQuery={searchQuery}
         activeNth={activeNth}
+        leaf={{
+          messageIndex: pluginActionProps.messageIndex,
+          sessionId: pluginActionProps.sessionId,
+        }}
       />
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
