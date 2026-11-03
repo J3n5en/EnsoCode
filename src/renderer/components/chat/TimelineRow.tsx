@@ -323,6 +323,40 @@ function UnattendedNoteBanner({ note }: { note: UnattendedNoteKind }) {
   );
 }
 
+/** 合成注入块（后台任务 / 子代理完成通知等）：多行时默认只露首行，点击展开全文 */
+function SyntheticNotice({ tag, body }: { tag: string; body: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const trimmed = body.trim();
+  const nl = trimmed.indexOf('\n');
+  const collapsible = nl > 0;
+  const Icon = tag.startsWith('coworker-') || tag === 'agent-notification' ? Bot : TerminalSquare;
+  return (
+    <div className="w-full rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+      <button
+        type="button"
+        disabled={!collapsible}
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-start gap-2 text-left enabled:hover:text-foreground"
+      >
+        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span className={cn('min-w-0 flex-1', collapsible ? 'truncate' : 'whitespace-pre-wrap')}>
+          {collapsible ? trimmed.slice(0, nl) : trimmed}
+        </span>
+        {collapsible && (
+          <ChevronRight
+            className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
+          />
+        )}
+      </button>
+      {collapsible && expanded && (
+        <pre className="mt-1.5 max-h-80 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+          {trimmed.slice(nl + 1)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 /** 主 agent 发给 coworker 的消息包裹 */
 const MAIN_AGENT_BLOCK =
   /^<message-from-main-agent>\n?([\s\S]*?)\n?<\/message-from-main-agent>\s*$/;
@@ -585,9 +619,7 @@ function UserText({
     return (
       <div className="flex w-full flex-col items-end gap-1.5">
         <UnattendedNoteBanner note={unattended.note} />
-        {remainder && (
-          <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />
-        )}
+        {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
       </div>
     );
   }
@@ -663,18 +695,7 @@ function UserText({
     );
   }
   const block = SYNTHETIC_BLOCK.exec(text);
-  if (block) {
-    return (
-      <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
-        {block[1].startsWith('coworker-') || block[1] === 'agent-notification' ? (
-          <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        ) : (
-          <TerminalSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="whitespace-pre-wrap">{block[2]}</span>
-      </div>
-    );
-  }
+  if (block) return <SyntheticNotice tag={block[1]} body={block[2]} />;
   const role = ROLE_PREFIX.exec(text);
   const rest = role ? text.slice(role[0].length) : text;
   const fromMain = MAIN_AGENT_BLOCK.exec(rest);
@@ -1490,7 +1511,11 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   const [log, setLog] = useState<string | null | undefined>(undefined);
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
   const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
-  const logPath = /read (\/.+?\.log) for the complete log/.exec(item.detail)?.[1] ?? null;
+  const logPath =
+    /(?:read (\/.+?\.log) for the complete log|Full log: (\/\S+?\.log))/
+      .exec(item.detail)
+      ?.slice(1)
+      .find(Boolean) ?? null;
 
   useEffect(() => {
     if (!expanded || !logPath || log !== undefined) return;
