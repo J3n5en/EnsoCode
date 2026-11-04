@@ -31,7 +31,21 @@ export function installThemeStyles(): void {
     if (state.themeId !== prev.themeId || state.accentColor !== prev.accentColor) {
       applyThemeTokens(state);
     }
+    if (state.userCssEnabled !== prev.userCssEnabled) void syncUserCss();
   });
+  window.electronAPI.appearance.onUserCssChanged(() => void syncUserCss());
+  void syncUserCss();
+}
+
+let userCssRead = 0;
+
+/** 只认最后一次读取：开关或文件在读取途中又变了，旧结果作废 */
+async function syncUserCss(): Promise<void> {
+  const read = ++userCssRead;
+  const css = useSettingsStore.getState().userCssEnabled
+    ? ((await window.electronAPI.appearance.readUserCss()) ?? '')
+    : '';
+  if (read === userCssRead) applyUserCss(css);
 }
 
 export function applyThemeCss(css: string): void {

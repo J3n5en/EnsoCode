@@ -175,6 +175,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setTheme: surfaces('appearance.theme'),
   setThemeId: excluded('Theme gallery choice may reference a device-local plugin theme.'),
   setAccentColor: surfaces('appearance.accent'),
+  setUserCssEnabled: excluded('User CSS injects a device-local user.css file.'),
   setLanguage: surfaces('general.language'),
   setTerminalTheme: surfaces('appearance.terminal-theme'),
   setTerminalFontSize: surfaces('appearance.terminal-font-size'),
@@ -641,6 +642,9 @@ export const IPC_PRODUCT_COVERAGE = {
     'Device idle-restart update policy; not an Enso capability.'
   ),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
+  APPEARANCE_USER_CSS_GET: excluded('User CSS injects a device-local user.css file.'),
+  APPEARANCE_USER_CSS_OPEN: excluded('Opens user.css in the host default editor.'),
+  APPEARANCE_USER_CSS_CHANGED: excluded('user.css change notification transport.'),
   COMPACTION_RESERVE_TOKENS_GET: excluded('Context compaction is a desktop session preference.'),
   COMPACTION_RESERVE_TOKENS_SET: excluded('Context compaction is a desktop session preference.'),
   UPDATER_STATUS: surfaces('updates.status'),

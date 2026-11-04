@@ -308,7 +308,9 @@ export function SettingsContent() {
             )}
             {activeCategory === 'general' && <GeneralSettings />}
             {activeCategory === 'shortcuts' && <KeybindingsSettings />}
-            {activeCategory === 'appearance' && <AppearanceSettings />}
+            {activeCategory === 'appearance' && (
+              <AppearanceSettings onOpenPlugins={() => openCategory('plugins')} />
+            )}
             {activeCategory === 'providers' && <ProvidersSettings />}
             {activeCategory === 'skills' && <SkillsSettings />}
             {activeCategory === 'plugins' && (

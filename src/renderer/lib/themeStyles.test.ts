@@ -15,6 +15,9 @@ const documentElement = {
 };
 
 vi.stubGlobal('navigator', { language: 'en-US' });
+let userCss: string | null = null;
+let notifyUserCssChanged = () => {};
+const readUserCss = vi.fn(async () => userCss);
 vi.stubGlobal('document', {
   documentElement,
   head: { append: (style: FakeStyle) => head.push(style) },
@@ -34,12 +37,21 @@ vi.stubGlobal('window', {
       onChanged: vi.fn(() => vi.fn()),
     },
     instructions: { delete: vi.fn(async () => ({ ok: true })) },
+    appearance: {
+      readUserCss,
+      onUserCssChanged: (callback: () => void) => {
+        notifyUserCssChanged = callback;
+        return () => {};
+      },
+    },
   },
 });
 
 let settings: typeof SettingsModule;
 let themeStyles: typeof ThemeStylesModule;
 const tokens = () => head.find((style) => style.id === 'enso-theme-tokens')?.textContent ?? '';
+const userCssSlot = () => head.find((style) => style.id === 'enso-user-css')?.textContent ?? '';
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('theme styles', () => {
   beforeAll(async () => {
@@ -78,6 +90,34 @@ describe('theme styles', () => {
     themeStyles.applyThemeCss('a{}');
     themeStyles.applyUserCss('b{}');
     expect(head.map((style) => style.textContent).slice(1)).toEqual(['a{}', 'b{}']);
+  });
+
+  it('用户 CSS 只在开关打开时注入，文件变化实时生效，关掉即清空', async () => {
+    themeStyles.applyUserCss('');
+    userCss = '[data-enso="composer"]{outline:2px solid red}';
+    notifyUserCssChanged();
+    await settle();
+    expect(userCssSlot()).toBe('');
+
+    settings.useSettingsStore.getState().setUserCssEnabled(true);
+    await settle();
+    expect(userCssSlot()).toBe(userCss);
+
+    userCss = 'a{color:red}';
+    notifyUserCssChanged();
+    await settle();
+    expect(userCssSlot()).toBe('a{color:red}');
+
+    userCss = null;
+    notifyUserCssChanged();
+    await settle();
+    expect(userCssSlot()).toBe('');
+
+    userCss = 'b{}';
+    notifyUserCssChanged();
+    settings.useSettingsStore.getState().setUserCssEnabled(false);
+    await settle();
+    expect(userCssSlot()).toBe('');
   });
 
   it('持久化里的非法强调色合并时落回默认值', () => {

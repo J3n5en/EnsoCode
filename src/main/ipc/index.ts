@@ -1,5 +1,6 @@
 import { registerAgentHandlers } from './agent';
 import { registerAppBadgeHandlers } from './appBadge';
+import { registerAppearanceHandlers } from './appearance';
 import { registerAssetHandlers } from './assets';
 import { registerMemberAgentTypes } from './botAgentTypes';
 import { registerBotHandlers } from './bots';
@@ -34,6 +35,7 @@ import { registerWorktreeHandlers } from './worktree';
 
 export function registerIpcHandlers(): void {
   registerSettingsHandlers();
+  registerAppearanceHandlers();
   registerModelDirectoryHandlers();
   registerProviderHandlers();
   registerAssetHandlers();

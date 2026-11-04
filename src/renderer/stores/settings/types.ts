@@ -355,6 +355,7 @@ export interface SettingsState {
   setTheme: (theme: Theme) => void;
   setThemeId: (themeId: import('@shared/theme/types').ThemeKey) => void;
   setAccentColor: (accent: import('@shared/accentColor').AccentColor) => void;
+  setUserCssEnabled: (enabled: boolean) => void;
   setLanguage: (language: Locale) => void;
   setTerminalTheme: (theme: string) => void;
   setTerminalFontSize: (size: number) => void;

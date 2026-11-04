@@ -306,6 +306,10 @@ export const useSettingsStore = create<SettingsState>()(
         set({ themeId });
       },
 
+      setUserCssEnabled: (userCssEnabled) => {
+        set({ userCssEnabled });
+      },
+
       setLanguage: (language) => {
         document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
         set({ language });
