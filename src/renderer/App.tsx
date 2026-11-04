@@ -467,7 +467,6 @@ export default function App() {
                   )}
                 </button>
               )}
-              {modeSwitch && <div className="mx-1.5">{modeSwitch}</div>}
               {desktopShell && (
                 <>
                   <button
@@ -490,6 +489,7 @@ export default function App() {
               )}
             </div>
           }
+          centered={modeSwitch ?? undefined}
           actions={desktopShell ? undefined : panelActions}
         />
       ) : (
