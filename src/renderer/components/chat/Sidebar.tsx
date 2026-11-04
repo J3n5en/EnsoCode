@@ -54,6 +54,7 @@ import {
 import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
@@ -184,6 +185,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
+  const chromeKind = useWindowChromeKind();
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -799,10 +801,15 @@ export function Sidebar({
       initial={false}
       animate={{ width: collapsed ? 48 : width }}
       transition={springStandard}
-      className="flex shrink-0 flex-col overflow-hidden border-r bg-background"
+      data-enso="sidebar"
+      className="flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed && (
         <div className="flex w-12 flex-1 flex-col items-center gap-1 py-2">
+          {/* 红绿灯占着折叠栏顶部 */}
+          {chromeKind === 'mac' && (
+            <div aria-hidden className="drag-region -mt-2 h-[44px] w-full shrink-0" />
+          )}
           <button
             type="button"
             onClick={onOpenSearch}
@@ -871,7 +878,13 @@ export function Sidebar({
         </div>
       )}
       <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
-        <div className="flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5">
+        <div
+          className={cn(
+            'flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5',
+            chromeKind !== 'mobile' && 'drag-region h-[44px]',
+            chromeKind === 'mac' && 'pl-[84px]'
+          )}
+        >
           {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
           <div className="flex min-w-0 items-center gap-1">
             <NodeSwitcher />

@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
+import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
@@ -72,6 +73,7 @@ const pickSuggestion = (prompt: string) => {
 
 export function ChatView() {
   const { t } = useI18n();
+  const shellChrome = useShellChrome();
   const providers = useMaterializedProviders();
   const virtualModels = useSettingsStore((state) => state.virtualModels);
   const customAgentTypes = useSettingsStore((state) => state.agentTypes);
@@ -328,11 +330,14 @@ export function ChatView() {
 
   if (!chrome) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1 bg-background text-center">
-        <p className="text-lg font-medium">EnsoCode</p>
-        <p className="text-sm text-muted-foreground">
-          {t('Create or select a project to start a conversation')}
-        </p>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {shellChrome && <ChromeRow data-enso="title-bar" />}
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 text-center">
+          <p className="text-lg font-medium">EnsoCode</p>
+          <p className="text-sm text-muted-foreground">
+            {t('Create or select a project to start a conversation')}
+          </p>
+        </div>
       </div>
     );
   }
@@ -346,7 +351,7 @@ export function ChatView() {
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <WorktreeMissingDialog conversationId={chrome.parentId} />
       <CoworkerTabs
         parentId={chrome.parentId}

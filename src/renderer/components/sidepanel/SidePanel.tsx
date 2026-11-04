@@ -21,7 +21,15 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import { createContext, type ReactElement, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  type ReactElement,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -31,6 +39,7 @@ import {
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
+import { holesClipPath } from '@/lib/backgroundClip';
 import {
   addSidePanelBrowser,
   addSidePanelWorkflow,
@@ -671,9 +680,15 @@ function ConversationDock({
 export function SidePanel({
   width: preferredWidth,
   resizing = false,
+  card = false,
+  belowWindowControls = false,
 }: {
   width: number;
   resizing?: boolean;
+  /** 桌面外壳：做成浮在画布上的圆角卡片 */
+  card?: boolean;
+  /** Windows/Linux 系统控件占着右上角，卡片从标题区下方开始 */
+  belowWindowControls?: boolean;
 }) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
@@ -746,7 +761,12 @@ export function SidePanel({
   useEffect(() => {
     const parent = asideRef.current?.parentElement;
     if (!parent) return;
-    const update = () => setWorkspaceW(parent.clientWidth);
+    const update = () => {
+      const style = getComputedStyle(parent);
+      setWorkspaceW(
+        parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      );
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(parent);
@@ -761,9 +781,9 @@ export function SidePanel({
    * dockview 的 resize 回调在 ResizeObserver 里又套了一层 rAF，至少滞后一帧；
    * aside 展开态是透明的（给 Browser 挖孔），若内容跟着 aside 逐帧重排，
    * 弹簧过冲/打开首帧时 aside 比内容宽出来的那一条就会露出没有面板遮罩的裸壁纸。
-   * 全屏 cover 态 aside 本身是实底，内容照常铺满。border-l 占 1px，内容按 content-box 扣掉。
+   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 border-l 占 1px，内容按 content-box 扣掉。
    */
-  const contentW = cover ? undefined : Math.max(0, width - (open ? 1 : 0));
+  const contentW = cover ? undefined : Math.max(0, width - (open && !card ? 1 : 0));
   const activeId = conversationId;
   const skipWidthAnim = shouldSkipSidePanelWidthAnim({
     resizing,
@@ -797,10 +817,25 @@ export function SidePanel({
           'flex min-h-0 flex-col overflow-hidden',
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
           open && !cover ? 'bg-transparent' : 'bg-background',
-          cover ? 'absolute inset-y-0 right-0' : 'relative shrink-0',
-          open && 'border-l'
+          !cover
+            ? 'relative shrink-0'
+            : !card
+              ? 'absolute inset-y-0 right-0'
+              : cn(
+                  'absolute right-[8px] bottom-[8px]',
+                  belowWindowControls ? 'top-[44px]' : 'top-[8px]'
+                ),
+          card
+            ? cn(
+                'rounded-[10px]',
+                open && 'shadow-surface',
+                belowWindowControls && !cover && 'mt-[36px]'
+              )
+            : open && 'border-l'
         )}
+        data-enso="side-panel"
       >
+        {open && !cover ? <SurfaceUnderHoles /> : null}
         {open && !cover && contentW !== undefined ? (
           // 过冲补条：只盖 [内容右边缘, aside 右边缘]，稳态宽度为 0，不会压到 Browser 挖孔
           <div
@@ -832,5 +867,24 @@ export function SidePanel({
         </div>
       </motion.aside>
     </>
+  );
+}
+
+/**
+ * 展开态面板底色：BackgroundLayer 现在铺的是画布色，面板自己铺卡片底，
+ * 同样按视口坐标挖掉 Browser guest 的矩形，guest 沉底时才能透出。
+ */
+function SurfaceUnderHoles() {
+  const ref = useRef<HTMLDivElement>(null);
+  const holes = useSidePanelStore((s) => s.browserHoles);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { left, top } = el.getBoundingClientRect();
+    const local = Object.values(holes).map((h) => ({ ...h, x: h.x - left, y: h.y - top }));
+    el.style.clipPath = holesClipPath(local) ?? '';
+  }, [holes]);
+  return (
+    <div ref={ref} aria-hidden className="pointer-events-none absolute inset-0 bg-background" />
   );
 }

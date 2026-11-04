@@ -13,6 +13,12 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
+import {
+  type ShellChrome,
+  ShellChromeContext,
+  useWindowChromeKind,
+  WindowControls,
+} from '@/components/app/WindowChrome';
 import { BotView } from '@/components/bots/BotView';
 import { ModeSwitch } from '@/components/bots/ModeSwitch';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
@@ -357,73 +363,101 @@ export default function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
+  const chromeKind = useWindowChromeKind();
+  // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
+  const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
+  // Windows/Linux 的系统控件固定在窗口右上角：右侧面板打开时它在面板卡片上方的画布条里
+  const controlsAboveSidePanel = desktopShell && sideOpen && chromeKind !== 'mac';
+  const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
+  const panelActions = (
+    <>
+      <button
+        type="button"
+        className={cn(
+          'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+          chatWide ? 'text-foreground' : 'text-muted-foreground',
+          isMobile && 'hidden'
+        )}
+        onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
+        aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
+        title={chatWide ? t('Use reading width') : t('Use full chat width')}
+      >
+        {chatWide ? (
+          <FoldHorizontal className="h-4 w-4" />
+        ) : (
+          <UnfoldHorizontal className="h-4 w-4" />
+        )}
+      </button>
+      {!remoteNodeActive && (
+        <button
+          type="button"
+          className={cn(
+            'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+            isMobile ? 'h-9 w-9' : 'h-7 w-7',
+            (botModeActive ? botPanelOpen : sideOpen) ? 'text-foreground' : 'text-muted-foreground'
+          )}
+          onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
+          aria-label={t('Toggle side panel')}
+          title={t('Toggle side panel')}
+        >
+          <PanelRight className="h-4 w-4" />
+        </button>
+      )}
+    </>
+  );
+  const shellChrome: ShellChrome | null = desktopShell
+    ? {
+        trailing: (
+          <>
+            {modeSwitch}
+            {panelActions}
+            {!controlsAboveSidePanel && <WindowControls kind={chromeKind} edgeGap={8} />}
+          </>
+        ),
+        trafficLightGap: chromeKind === 'mac' && collapsed,
+      }
+    : null;
+
   return (
-    <div className={cn('relative isolate flex flex-col', isMobile ? 'h-dvh' : 'h-screen')}>
+    <div
+      data-enso="canvas"
+      className={cn('relative isolate flex flex-col', isMobile ? 'h-dvh' : 'h-screen')}
+    >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
-      <TitleBar
-        title="EnsoCode"
-        centered={botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : undefined}
-        leading={
-          isMobile && !remoteNodeActive && !botModeActive ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                onClick={() => setDrawerOpen(true)}
-                aria-label={t('Conversations')}
-                title={t('Conversations')}
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-              {!(botModeEnabled && !remoteNodeActive) && (
-                <span className="text-sm font-medium text-muted-foreground">EnsoCode</span>
-              )}
-            </div>
-          ) : undefined
-        }
-        actions={
-          <>
-            <button
-              type="button"
-              className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                chatWide ? 'text-foreground' : 'text-muted-foreground',
-                isMobile && 'hidden'
-              )}
-              onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
-              aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
-              title={chatWide ? t('Use reading width') : t('Use full chat width')}
-            >
-              {chatWide ? (
-                <FoldHorizontal className="h-4 w-4" />
-              ) : (
-                <UnfoldHorizontal className="h-4 w-4" />
-              )}
-            </button>
-            {!remoteNodeActive && (
-              <button
-                type="button"
-                className={cn(
-                  'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                  isMobile ? 'h-9 w-9' : 'h-7 w-7',
-                  (botModeActive ? botPanelOpen : sideOpen)
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
+      {!desktopShell && (
+        <TitleBar
+          title={chromeKind === 'mobile' ? 'EnsoCode' : undefined}
+          centered={chromeKind === 'mobile' ? (modeSwitch ?? undefined) : undefined}
+          leading={
+            isMobile && !remoteNodeActive && !botModeActive ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                  onClick={() => setDrawerOpen(true)}
+                  aria-label={t('Conversations')}
+                  title={t('Conversations')}
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+                {!modeSwitch && (
+                  <span className="text-sm font-medium text-muted-foreground">EnsoCode</span>
                 )}
-                onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
-                aria-label={t('Toggle side panel')}
-                title={t('Toggle side panel')}
-              >
-                <PanelRight className="h-4 w-4" />
-              </button>
-            )}
-          </>
-        }
-      />
-      <UpdateBanner />
+              </div>
+            ) : undefined
+          }
+          actions={
+            <>
+              {chromeKind !== 'mobile' && modeSwitch}
+              {panelActions}
+            </>
+          }
+        />
+      )}
+      {!desktopShell && <UpdateBanner />}
       <div className="flex min-h-0 flex-1">
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
@@ -478,21 +512,50 @@ export default function App() {
                   onToggleCollapse={() => setCollapsed((v) => !v)}
                   onOpenSearch={() => setSearchOpen(true)}
                 />
-                {!collapsed && <ResizeHandle onResize={handleResize} />}
+                {!collapsed && <ResizeHandle gap={desktopShell} onResize={handleResize} />}
               </>
             )}
             <div
               ref={workspaceRef}
-              className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+              className={cn(
+                'relative flex min-h-0 min-w-0 flex-1 overflow-hidden',
+                desktopShell && 'py-[8px] pr-[8px]'
+              )}
             >
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div
+                data-enso="main"
+                className={cn(
+                  'flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+                  desktopShell && 'overflow-hidden rounded-[10px] shadow-surface'
+                )}
+              >
                 <PluginUiHost />
-                <ChatView />
+                <ShellChromeContext.Provider value={shellChrome}>
+                  <ChatView />
+                </ShellChromeContext.Provider>
+                {desktopShell && <UpdateBanner />}
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
-                <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
+                <ResizeHandle
+                  gap={desktopShell}
+                  onResize={handleSideResize}
+                  onResizingChange={setSideResizing}
+                />
               )}
-              <SidePanel width={sideWidth} resizing={sideResizing} />
+              {controlsAboveSidePanel && (
+                <div
+                  className="drag-region absolute top-0 right-0 flex h-[44px] justify-end"
+                  style={sideFullscreen ? { left: 0 } : { width: sideWidth + 8 }}
+                >
+                  <WindowControls kind={chromeKind} />
+                </div>
+              )}
+              <SidePanel
+                width={sideWidth}
+                resizing={sideResizing}
+                card={desktopShell}
+                belowWindowControls={controlsAboveSidePanel}
+              />
             </div>
           </DndContext>
         )}
