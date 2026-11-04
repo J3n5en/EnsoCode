@@ -35,7 +35,7 @@ interface SidePanelState {
   snapshotsByConversation: Record<string, SessionChangeSnapshots>;
   toggleOpen: () => void;
   ensureOpen: (conversationId?: string) => void;
-  nudgeWidth: (delta: number, workspaceWidth: number) => void;
+  nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   saveLayout: (conversationId: string, layout: SerializedDockview) => void;
@@ -90,10 +90,15 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({ uiByConversation: patchUi(get(), id, { open: true }) });
       },
 
-      nudgeWidth: (delta, workspaceWidth) => {
+      nudgeWidth: (delta, workspaceWidth, handleWidth) => {
         const id = activeConversationId();
         if (!id) return;
-        const width = resizeSidePanelWidth(uiFor(get(), id).width, delta, workspaceWidth);
+        const width = resizeSidePanelWidth(
+          uiFor(get(), id).width,
+          delta,
+          workspaceWidth,
+          handleWidth
+        );
         set({ uiByConversation: patchUi(get(), id, { width }), lastWidth: width });
       },
 

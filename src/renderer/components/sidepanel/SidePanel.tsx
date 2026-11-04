@@ -57,6 +57,7 @@ import { sanitizeSidePanelLayout } from '@/stores/sidePanel/layoutSanitize';
 import {
   CHAT_MIN_WIDTH,
   resolveSidePanelWidth,
+  SIDE_PANEL_GAP_WIDTH,
   SIDE_PANEL_HANDLE_WIDTH,
 } from '@/stores/sidePanel/width';
 import { useWorkflowRunsStore } from '@/stores/workflowRuns';
@@ -748,7 +749,8 @@ export function SidePanel({
   );
   const [cover, setCover] = useState(fullscreen);
   const [workspaceW, setWorkspaceW] = useState(0);
-  const width = resolveSidePanelWidth(preferredWidth, workspaceW);
+  const handleW = card ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH;
+  const width = resolveSidePanelWidth(preferredWidth, workspaceW, handleW);
   const asideRef = useRef<HTMLElement>(null);
   const [widthAnim, setWidthAnim] = useState({
     id: conversationId,
@@ -805,9 +807,7 @@ export function SidePanel({
         initial={false}
         animate={{ width: targetW }}
         style={
-          cover
-            ? undefined
-            : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + SIDE_PANEL_HANDLE_WIDTH}px))` }
+          cover ? undefined : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + handleW}px))` }
         }
         transition={sidePanelWidthTransition({ skip: skipWidthAnim, cover, targetW })}
         onAnimationComplete={() => {

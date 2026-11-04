@@ -74,6 +74,7 @@ import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
 const dndCollision: CollisionDetection = (args) => {
@@ -159,10 +160,6 @@ export default function App() {
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const handleSideResize = useCallback((deltaX: number) => {
-    const workspace = workspaceRef.current;
-    if (workspace) useSidePanelStore.getState().nudgeWidth(-deltaX, workspace.clientWidth);
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(WIDTH_KEY, String(width));
@@ -366,6 +363,24 @@ export default function App() {
   const chromeKind = useWindowChromeKind();
   // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
   const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
+  const handleSideResize = useCallback(
+    (deltaX: number) => {
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+      // 与 SidePanel 量宽口径一致：扣掉卡片外壳的画布内边距
+      const style = getComputedStyle(workspace);
+      const contentWidth =
+        workspace.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      useSidePanelStore
+        .getState()
+        .nudgeWidth(
+          -deltaX,
+          contentWidth,
+          desktopShell ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH
+        );
+    },
+    [desktopShell]
+  );
   // Windows/Linux 的系统控件固定在窗口右上角：右侧面板打开时它在面板卡片上方的画布条里
   const controlsAboveSidePanel = desktopShell && sideOpen && chromeKind !== 'mac';
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
