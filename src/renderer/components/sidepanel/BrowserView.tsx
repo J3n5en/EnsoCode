@@ -301,7 +301,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 border-b bg-background px-2 py-1">
+      <div className="flex h-[36px] shrink-0 items-center gap-1 border-b bg-background px-2">
         <button
           type="button"
           className={iconButton}

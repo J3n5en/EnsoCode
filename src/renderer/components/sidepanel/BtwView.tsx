@@ -178,7 +178,7 @@ export function BtwView({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
+      <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
         <ModeChip
           label={t('Contextual')}
           active={mode === 'contextual'}
