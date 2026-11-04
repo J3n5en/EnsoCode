@@ -234,6 +234,7 @@ export const zhTranslations: Record<string, string> = {
   Current: '当前',
   Recent: '最近',
   'No projects active in the last {{n}} days': '最近 {{n}} 天没有活跃项目',
+  'No projects in this group yet': '这个分组还没有项目',
   Actions: '动作',
   'No matching conversations': '没有匹配的会话',
   'Search messages...': '搜索消息...',
@@ -1083,7 +1084,6 @@ export const zhTranslations: Record<string, string> = {
   'New group': '新建分组',
   'Edit group': '编辑分组',
   'All groups': '全部分组',
-  'Add project or group': '添加项目或分组',
   'Search in {{group}}...': '在「{{group}}」中搜索...',
   'Delete group': '删除分组',
   'No color': '无颜色',
@@ -2295,6 +2295,7 @@ export const zhTranslations: Record<string, string> = {
   // 连接到节点（本机作为 guest 连别的 EnsoCode 桌面）
   'This computer': '本机',
   'Switch node': '切换节点',
+  '{{n}} remote': '{{n}} 个远程',
   'Connect to a node': '连接到节点',
   'Connect to a node…': '连接到节点…',
   Connect: '连接',

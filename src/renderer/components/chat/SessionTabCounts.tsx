@@ -3,13 +3,7 @@ import { useI18n } from '@/i18n';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { countSidePanelTabs } from '@/stores/sidePanel/tabCounts';
 
-export function SessionTabCounts({
-  conversationId,
-  row = false,
-}: {
-  conversationId: string;
-  row?: boolean;
-}) {
+export function SessionTabCounts({ conversationId }: { conversationId: string }) {
   const { t } = useI18n();
   const browsers = useSidePanelStore(
     (state) => countSidePanelTabs(state.layouts[conversationId]).browsers
@@ -18,7 +12,7 @@ export function SessionTabCounts({
     (state) => countSidePanelTabs(state.layouts[conversationId]).terminals
   );
   if (browsers === 0 && terminals === 0) return null;
-  const counts = (
+  return (
     <span
       data-slot="session-tab-counts"
       className="flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums text-muted-foreground/70"
@@ -42,11 +36,5 @@ export function SessionTabCounts({
         </span>
       )}
     </span>
-  );
-  if (!row) return counts;
-  return (
-    <div data-slot="conversation-tab-counts-row" className="col-start-2 min-w-0">
-      {counts}
-    </div>
   );
 }

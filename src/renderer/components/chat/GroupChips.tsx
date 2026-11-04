@@ -14,13 +14,13 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
 /** 侧栏弹层里的操作行（与节点切换器的行一致） */
-export const POPOVER_ROW_CLASS =
+const POPOVER_ROW_CLASS =
   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors';
 
-const CHIP_ICON_CLASS =
-  'flex size-6.5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground';
+const BAR_ICON_CLASS =
+  'flex size-4.5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 /** ⌄ 自身宽度 + 间距：按「没有 ⌄ 时」判断是否放得下，否则 ⌄ 占的位置会让它一直不消失 */
-const OVERFLOW_TRIGGER_SPACE = 30;
+const OVERFLOW_TRIGGER_SPACE = 24;
 const EDGE_FADE = 20;
 
 interface GroupChipsProps {
@@ -32,12 +32,14 @@ interface GroupChipsProps {
   ungroupedCount: number;
   query: string;
   onQueryChange: (query: string) => void;
+  searchOpen: boolean;
+  onSearchOpenChange: (open: boolean) => void;
   onSelect: (id: string) => void;
   onAddGroup: () => void;
   onEditGroup: (id: string) => void;
 }
 
-/** 侧栏分组标签条：横滑、拖动排序、接收项目拖入；放不下时出现 ⌄ 列出全部分组；末尾按钮就地展开会话搜索 */
+/** 侧栏分类条：横滑、拖动排序、接收项目拖入；放不下时出现 ⌄ 列出全部分组；搜索展开时就地换成搜索框 */
 export function GroupChips({
   groups,
   selectedId,
@@ -47,6 +49,8 @@ export function GroupChips({
   ungroupedCount,
   query,
   onQueryChange,
+  searchOpen,
+  onSearchOpenChange,
   onSelect,
   onAddGroup,
   onEditGroup,
@@ -54,7 +58,6 @@ export function GroupChips({
   const { t } = useI18n();
   const ordered = groups.slice().sort((a, b) => a.order - b.order);
   const hasGroups = ordered.length > 0;
-  const [searchOpen, setSearchOpen] = useState(false);
   const showSearch = searchOpen || query.length > 0;
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -130,7 +133,7 @@ export function GroupChips({
 
   const closeSearch = () => {
     onQueryChange('');
-    setSearchOpen(false);
+    onSearchOpenChange(false);
   };
 
   const fade = (on: boolean) => (on ? `${EDGE_FADE}px` : '0px');
@@ -140,123 +143,129 @@ export function GroupChips({
       : undefined;
 
   return (
-    <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
-      {showSearch && (
-        <label className="flex h-6.5 min-w-0 flex-1 cursor-text items-center gap-2 rounded-full border border-transparent bg-muted/60 pr-0.5 pl-2.5 text-xs text-muted-foreground transition-colors focus-within:border-brand/45">
-          <TextSearch className="size-3.5 shrink-0" />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return;
-              event.stopPropagation();
-              closeSearch();
-            }}
-            onBlur={() => {
-              // 切走窗口也会失焦，此时不收起
-              if (!query && document.hasFocus()) setSearchOpen(false);
-            }}
-            placeholder={placeholder}
-            className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-          />
+    <div className="group/bar shrink-0">
+      <div className="flex h-9 items-end gap-1.5 px-3.5">
+        {showSearch && (
+          <label className="mb-1 flex h-7 min-w-0 flex-1 cursor-text items-center gap-2 rounded-lg border border-transparent bg-foreground/5 pr-0.5 pl-2.5 text-xs text-muted-foreground transition-colors focus-within:border-brand/45">
+            <TextSearch className="size-3.5 shrink-0" />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.stopPropagation();
+                closeSearch();
+              }}
+              onBlur={() => {
+                // 切走窗口也会失焦，此时不收起
+                if (!query && document.hasFocus()) onSearchOpenChange(false);
+              }}
+              placeholder={placeholder}
+              className="h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+            />
+            <button
+              type="button"
+              onClick={closeSearch}
+              className="flex size-5 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-foreground/5 hover:text-foreground"
+              title={t('Close')}
+              aria-label={t('Close')}
+            >
+              <X className="size-3" />
+            </button>
+          </label>
+        )}
+        <div className={cn('flex min-w-0 flex-1 items-center gap-1.5', showSearch && 'hidden')}>
+          <div
+            ref={scrollRef}
+            onScroll={measure}
+            style={{ maskImage }}
+            className="relative min-w-0 overflow-x-auto [scrollbar-width:none]"
+          >
+            <div className="flex w-max gap-3.5">
+              <button
+                type="button"
+                data-selected={selectedId === ALL_GROUP_ID || undefined}
+                onClick={() => onSelect(ALL_GROUP_ID)}
+                className={tabClass(selectedId === ALL_GROUP_ID, false)}
+              >
+                <TabContent label={t('All')} count={totalCount} />
+              </button>
+              <button
+                type="button"
+                data-selected={selectedId === RECENT_GROUP_ID || undefined}
+                onClick={() => onSelect(RECENT_GROUP_ID)}
+                className={tabClass(selectedId === RECENT_GROUP_ID, false)}
+              >
+                <TabContent label={t('Recent')} count={recentCount} />
+              </button>
+              <SortableContext
+                items={ordered.map((group) => selectorGroupDropId(group.id))}
+                strategy={horizontalListSortingStrategy}
+              >
+                {ordered.map((group) => (
+                  <SortableGroupChip
+                    key={group.id}
+                    group={group}
+                    count={counts[group.id] ?? 0}
+                    selected={selectedId === group.id}
+                    onSelect={() => onSelect(group.id)}
+                  />
+                ))}
+              </SortableContext>
+              {hasGroups && (
+                <UngroupedChip
+                  label={t('Ungrouped')}
+                  count={ungroupedCount}
+                  selected={selectedId === UNGROUPED_GROUP_ID}
+                  onSelect={() => onSelect(UNGROUPED_GROUP_ID)}
+                />
+              )}
+            </div>
+          </div>
           <button
             type="button"
-            onClick={closeSearch}
-            className="flex size-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted hover:text-foreground"
-            title={t('Close')}
-            aria-label={t('Close')}
-          >
-            <X className="size-3" />
-          </button>
-        </label>
-      )}
-      <div className={cn('flex min-w-0 flex-1 items-center gap-1', showSearch && 'hidden')}>
-        <div
-          ref={scrollRef}
-          onScroll={measure}
-          style={{ maskImage }}
-          className="relative -my-1 min-w-0 flex-1 overflow-x-auto py-1 [scrollbar-width:none]"
-        >
-          <div className="flex w-max gap-1">
-            <button
-              type="button"
-              data-selected={selectedId === ALL_GROUP_ID || undefined}
-              onClick={() => onSelect(ALL_GROUP_ID)}
-              className={chipClass(selectedId === ALL_GROUP_ID, false)}
-            >
-              <ChipContent label={t('All')} count={totalCount} />
-            </button>
-            <button
-              type="button"
-              data-selected={selectedId === RECENT_GROUP_ID || undefined}
-              onClick={() => onSelect(RECENT_GROUP_ID)}
-              className={chipClass(selectedId === RECENT_GROUP_ID, false)}
-            >
-              <ChipContent label={t('Recent')} count={recentCount} />
-            </button>
-            <SortableContext
-              items={ordered.map((group) => selectorGroupDropId(group.id))}
-              strategy={horizontalListSortingStrategy}
-            >
-              {ordered.map((group) => (
-                <SortableGroupChip
-                  key={group.id}
-                  group={group}
-                  count={counts[group.id] ?? 0}
-                  selected={selectedId === group.id}
-                  onSelect={() => onSelect(group.id)}
-                />
-              ))}
-            </SortableContext>
-            {hasGroups && (
-              <UngroupedChip
-                label={t('Ungrouped')}
-                count={ungroupedCount}
-                selected={selectedId === UNGROUPED_GROUP_ID}
-                onSelect={() => onSelect(UNGROUPED_GROUP_ID)}
-              />
+            onClick={onAddGroup}
+            className={cn(
+              BAR_ICON_CLASS,
+              'opacity-0 focus-visible:opacity-100 group-hover/bar:opacity-100 [@media(hover:none)]:opacity-100'
             )}
-          </div>
+            title={t('New group')}
+            aria-label={t('New group')}
+          >
+            <Plus className="size-3" />
+          </button>
+          {edges.overflow && (
+            <GroupMenu
+              groups={ordered}
+              selectedId={selectedId}
+              counts={counts}
+              totalCount={totalCount}
+              recentCount={recentCount}
+              ungroupedCount={ungroupedCount}
+              onSelect={onSelect}
+              onAddGroup={onAddGroup}
+              onEditGroup={onEditGroup}
+            />
+          )}
         </div>
-        {edges.overflow && (
-          <GroupMenu
-            groups={ordered}
-            selectedId={selectedId}
-            counts={counts}
-            totalCount={totalCount}
-            recentCount={recentCount}
-            ungroupedCount={ungroupedCount}
-            onSelect={onSelect}
-            onAddGroup={onAddGroup}
-            onEditGroup={onEditGroup}
-          />
-        )}
-        <button
-          type="button"
-          onClick={() => setSearchOpen(true)}
-          className={CHIP_ICON_CLASS}
-          title={t('Search conversations...')}
-          aria-label={t('Search conversations...')}
-        >
-          <TextSearch className="size-3.5" />
-        </button>
       </div>
+      <div className="mx-3.5 h-px bg-border" />
     </div>
   );
 }
 
-function chipClass(selected: boolean, dropping: boolean) {
+function tabClass(selected: boolean, dropping: boolean) {
   return cn(
-    'flex h-6.5 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors',
+    'relative flex shrink-0 items-center whitespace-nowrap pt-1 pb-[7px] text-[0.78125rem] transition-colors',
     selected
-      ? 'bg-brand/12 font-medium text-foreground'
-      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-    dropping && 'bg-brand/10 text-foreground ring-1 ring-brand/40 ring-inset'
+      ? 'font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:rounded-full after:bg-foreground'
+      : 'text-subtle-foreground hover:text-foreground',
+    dropping && 'rounded-t-md bg-foreground/[0.075] text-foreground'
   );
 }
 
-function ChipContent({
+function TabContent({
   label,
   count,
   emoji,
@@ -269,16 +278,16 @@ function ChipContent({
 }) {
   return (
     <>
-      {emoji && <span className="text-[13px] leading-none">{emoji}</span>}
+      {emoji && <span className="mr-1 text-[13px] leading-none">{emoji}</span>}
       {color && (
         <span
-          className="size-2 shrink-0 rounded-full"
+          className="mr-1.5 size-1.5 shrink-0 rounded-full"
           style={{ backgroundColor: color }}
           aria-hidden
         />
       )}
       <span className="max-w-32 truncate">{label}</span>
-      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted-foreground/12 px-1 font-normal text-[10px] text-muted-foreground tabular-nums">
+      <span className="ml-1 font-normal text-[0.65625rem] text-subtle-foreground/75 tabular-nums">
         {count}
       </span>
     </>
@@ -316,14 +325,13 @@ function SortableGroupChip({
         transition,
       }}
       className={cn(
-        chipClass(selected, isOver && isProjectDrag(active?.data.current)),
-        isDragging &&
-          'relative z-10 cursor-grabbing bg-background text-foreground shadow-sm ring-1 ring-border'
+        tabClass(selected, isOver && isProjectDrag(active?.data.current)),
+        isDragging && 'z-10 cursor-grabbing text-foreground'
       )}
       {...attributes}
       {...listeners}
     >
-      <ChipContent label={group.name} count={count} emoji={group.emoji} color={group.color} />
+      <TabContent label={group.name} count={count} emoji={group.emoji} color={group.color} />
     </button>
   );
 }
@@ -351,9 +359,9 @@ function UngroupedChip({
       type="button"
       data-selected={selected || undefined}
       onClick={onSelect}
-      className={chipClass(selected, isOver && isProjectDrag(active?.data.current))}
+      className={tabClass(selected, isOver && isProjectDrag(active?.data.current))}
     >
-      <ChipContent label={label} count={count} />
+      <TabContent label={label} count={count} />
     </button>
   );
 }
@@ -388,11 +396,14 @@ function GroupMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className={cn(CHIP_ICON_CLASS, 'data-popup-open:bg-muted data-popup-open:text-foreground')}
+        className={cn(
+          BAR_ICON_CLASS,
+          'ml-auto data-popup-open:bg-foreground/5 data-popup-open:text-foreground'
+        )}
         title={t('All groups')}
         aria-label={t('All groups')}
       >
-        <ChevronDown className="size-3.5" />
+        <ChevronDown className="size-3" />
       </PopoverTrigger>
       <PopoverPopup side="bottom" align="end" className="w-56 [&_[data-slot=popover-viewport]]:p-1">
         <GroupMenuRow

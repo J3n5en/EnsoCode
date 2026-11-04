@@ -41,7 +41,7 @@ interface RemoteNodeSidebarProps {
 }
 
 const ICON_BUTTON_CLASS =
-  'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 
 /**
  * 远程节点侧栏：对方目录按项目分组，置顶/归档分栏（与本机侧栏、手机抽屉同语义）。
@@ -136,29 +136,6 @@ export function RemoteNodeSidebar({
       className="flex shrink-0 flex-col overflow-hidden border-r bg-background"
       style={{ width }}
     >
-      <div className="flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5">
-        <NodeSwitcher />
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => void window.electronAPI.nodes.openSettings(node.nodeId)}
-            disabled={!node.hostOnline}
-            className={cn(ICON_BUTTON_CLASS, !node.hostOnline && 'opacity-40')}
-            title={t('Node settings')}
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onNewConversation}
-            disabled={!canCreate}
-            className={cn(ICON_BUTTON_CLASS, !canCreate && 'opacity-40')}
-            title={t('New remote conversation')}
-          >
-            <SquarePen className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
       {/* 顶部只在列表上方留一条分隔线 */}
       <div className={cn('shrink-0 px-2 py-2', groups.length === 0 && 'border-b')}>
         <div className="relative">
@@ -345,6 +322,27 @@ export function RemoteNodeSidebar({
             )}
           </div>
         )}
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5 p-1.5">
+        <NodeSwitcher />
+        <button
+          type="button"
+          onClick={() => void window.electronAPI.nodes.openSettings(node.nodeId)}
+          disabled={!node.hostOnline}
+          className={cn(ICON_BUTTON_CLASS, !node.hostOnline && 'opacity-40')}
+          title={t('Node settings')}
+        >
+          <Settings className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onNewConversation}
+          disabled={!canCreate}
+          className={cn(ICON_BUTTON_CLASS, !canCreate && 'opacity-40')}
+          title={t('New remote conversation')}
+        >
+          <SquarePen className="h-4 w-4" />
+        </button>
       </div>
     </aside>
   );

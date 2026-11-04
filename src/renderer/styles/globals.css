@@ -278,36 +278,6 @@ html.enso-chat-wide .enso-chat-col {
   max-width: none;
 }
 
-/*
- * 侧栏项目下的会话竖线：每行画自己那段并向上盖住 gap-y-0.5 行距；有状态点的行在点上下断开，
- * 与会话区工具时间线同一画法。圆心 x = pl-2 + 半个图标列、y = py-1.5 + 半个行高，均为 1rem；
- * 全用 rem 跟随界面字号缩放。
- */
-.enso-conv-tree [data-slot='conversation-row'] {
-  position: relative;
-}
-.enso-conv-tree [data-slot='conversation-row']::before,
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::after {
-  content: '';
-  position: absolute;
-  left: calc(1rem - 0.5px);
-  width: 1px;
-  background-color: var(--color-border);
-  pointer-events: none;
-}
-.enso-conv-tree [data-slot='conversation-row']::before {
-  top: -0.125rem;
-  bottom: 0;
-}
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::before {
-  bottom: auto;
-  height: 0.625rem;
-}
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::after {
-  top: 1.5rem;
-  bottom: 0;
-}
-
 /**
  * @pierre/diffs（edit diff / read 文件视图）：shadow 内 host/pre/gutter/content/行
  * 多层元素都各自刷 --diffs-bg，若给它设半透明色会叠成近乎不透明。
