@@ -14,6 +14,53 @@ const TOOL_GATED: Partial<Record<SettingsCategory, string>> = {
 };
 const BOT_PAGES: readonly SettingsCategory[] = ['bots', 'botTemplates'];
 
+export type SettingsGroupId = 'app' | 'agent' | 'extensions' | 'connections' | 'system';
+
+export const SETTINGS_GROUPS: readonly {
+  id: SettingsGroupId;
+  label: string;
+  categories: readonly SettingsCategory[];
+}[] = [
+  {
+    id: 'app',
+    label: 'Application',
+    categories: ['general', 'appearance', 'shortcuts', 'voice', 'privacy'],
+  },
+  {
+    id: 'agent',
+    label: 'Models & agents',
+    categories: ['providers', 'presets', 'agents', 'instructions', 'memory'],
+  },
+  {
+    id: 'extensions',
+    label: 'Tools & extensions',
+    categories: ['tools', 'workflows', 'skills', 'mcp', 'plugins', 'claudePlugins'],
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    categories: ['phone', 'ssh'],
+  },
+  {
+    id: 'system',
+    label: 'System',
+    categories: ['usage', 'resources', 'experimental', 'bots', 'botTemplates'],
+  },
+];
+
+export function groupCategories<T extends { id: SettingsCategory }>(
+  items: readonly T[]
+): { id: SettingsGroupId; label: string; items: T[] }[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return SETTINGS_GROUPS.flatMap((group) => {
+    const grouped = group.categories.flatMap((id) => {
+      const item = byId.get(id);
+      return item ? [item] : [];
+    });
+    return grouped.length > 0 ? [{ id: group.id, label: group.label, items: grouped }] : [];
+  });
+}
+
 export function isCategoryVisible(
   category: SettingsCategory,
   disabledBuiltinTools: readonly string[],

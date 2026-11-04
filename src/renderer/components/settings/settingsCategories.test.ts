@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { SettingsCategory } from './constants';
-import { isCategoryVisible, resolveActiveCategory, visibleCategories } from './settingsCategories';
+import {
+  groupCategories,
+  isCategoryVisible,
+  resolveActiveCategory,
+  SETTINGS_GROUPS,
+  visibleCategories,
+} from './settingsCategories';
 
 const cats = [
   { id: 'general' as SettingsCategory },
@@ -57,6 +63,80 @@ describe('resolveActiveCategory', () => {
 describe('isCategoryVisible', () => {
   it('treats an unrelated disabled tool as irrelevant', () => {
     expect(isCategoryVisible('memory', ['browser'])).toBe(true);
+  });
+});
+
+const EVERY_SETTINGS_CATEGORY = {
+  general: true,
+  shortcuts: true,
+  voice: true,
+  appearance: true,
+  providers: true,
+  skills: true,
+  plugins: true,
+  claudePlugins: true,
+  mcp: true,
+  instructions: true,
+  presets: true,
+  agents: true,
+  workflows: true,
+  tools: true,
+  memory: true,
+  privacy: true,
+  phone: true,
+  ssh: true,
+  usage: true,
+  resources: true,
+  experimental: true,
+  bots: true,
+  botTemplates: true,
+} satisfies Record<SettingsCategory, true>;
+
+describe('SETTINGS_GROUPS', () => {
+  it('covers every settings category exactly once', () => {
+    const listed = SETTINGS_GROUPS.flatMap((group) => group.categories);
+    const expected = Object.keys(EVERY_SETTINGS_CATEGORY);
+    expect(listed).toHaveLength(expected.length);
+    expect(new Set(listed).size).toBe(listed.length);
+    expect([...listed].sort()).toEqual([...expected].sort());
+  });
+});
+
+describe('groupCategories', () => {
+  it('orders groups and items by the table, not the input', () => {
+    const shuffled = [
+      { id: 'ssh' as const, label: 'ssh' },
+      { id: 'privacy' as const, label: 'privacy' },
+      { id: 'general' as const, label: 'general' },
+      { id: 'voice' as const, label: 'voice' },
+      { id: 'phone' as const, label: 'phone' },
+    ];
+    expect(groupCategories(shuffled)).toEqual([
+      {
+        id: 'app',
+        label: 'Application',
+        items: [
+          { id: 'general', label: 'general' },
+          { id: 'voice', label: 'voice' },
+          { id: 'privacy', label: 'privacy' },
+        ],
+      },
+      {
+        id: 'connections',
+        label: 'Connections',
+        items: [
+          { id: 'phone', label: 'phone' },
+          { id: 'ssh', label: 'ssh' },
+        ],
+      },
+    ]);
+  });
+
+  it('drops a group when none of its categories are passed', () => {
+    expect(groupCategories([{ id: 'general' }, { id: 'usage' }]).map((group) => group.id)).toEqual([
+      'app',
+      'system',
+    ]);
   });
 });
 

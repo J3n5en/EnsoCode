@@ -53,7 +53,7 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { ResourcesSettings } from './ResourcesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { SshSettings } from './SshSettings';
-import { resolveActiveCategory, visibleCategories } from './settingsCategories';
+import { groupCategories, resolveActiveCategory, visibleCategories } from './settingsCategories';
 import { UsageSettings } from './UsageSettings';
 import { VoiceInputSettings } from './VoiceInputSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
@@ -164,30 +164,30 @@ export function SettingsContent() {
     <div className="flex h-full w-full">
       {/* Left: Category List */}
       {showList && (
-        <nav
-          className={cn(
-            'shrink-0 space-y-1 overflow-y-auto p-2',
-            isMobile ? 'w-full' : 'w-48 border-r'
-          )}
-        >
-          {categories.map((category) => (
-            <button
-              type="button"
-              key={category.id}
-              onClick={() => openCategory(category.id)}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md px-3 text-sm transition-colors',
-                isMobile ? 'py-3' : 'py-2',
-                category.sub && 'pl-8',
-                activeCategory === category.id && !isMobile
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-              )}
-            >
-              <category.icon className="h-4 w-4" />
-              {category.label}
-              {isMobile && <ChevronRight className="ml-auto h-4 w-4 opacity-60" />}
-            </button>
+        <nav className={cn('shrink-0 overflow-y-auto p-2', isMobile ? 'w-full' : 'w-48 border-r')}>
+          {groupCategories(categories).map((group, index) => (
+            <div key={group.id} className={cn('space-y-1', index > 0 && 'mt-3')}>
+              <div className="px-3 text-xs font-medium text-muted-foreground">{t(group.label)}</div>
+              {group.items.map((category) => (
+                <button
+                  type="button"
+                  key={category.id}
+                  onClick={() => openCategory(category.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-3 text-sm transition-colors',
+                    isMobile ? 'py-3' : 'py-2',
+                    category.sub && 'pl-8',
+                    activeCategory === category.id && !isMobile
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                  )}
+                >
+                  <category.icon className="h-4 w-4" />
+                  {category.label}
+                  {isMobile && <ChevronRight className="ml-auto h-4 w-4 opacity-60" />}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       )}
