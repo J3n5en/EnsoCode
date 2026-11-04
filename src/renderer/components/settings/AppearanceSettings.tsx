@@ -49,6 +49,8 @@ import {
   useSettingsStore,
 } from '@/stores/settings';
 import { fontWeightOptions } from './constants';
+import { FileOpeningSettings } from './FileOpeningSettings';
+import { SwitchRow } from './GeneralSettings';
 
 /** 背景图设置区：百分比滑块行（拖动时本地预览，松手才写 store，避免拖动中频繁 IPC） */
 function PercentSliderRow({
@@ -622,6 +624,95 @@ const ACCENT_LABELS = {
   graphite: 'Graphite',
 } as const satisfies Record<AccentColor, string>;
 
+function ConversationDisplaySection() {
+  const { t } = useI18n();
+  const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
+  const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
+  const compactReadOnlyTools = useSettingsStore((s) => s.compactReadOnlyTools);
+  const setCompactReadOnlyTools = useSettingsStore((s) => s.setCompactReadOnlyTools);
+  const expandLiveEdits = useSettingsStore((s) => s.expandLiveEdits);
+  const setExpandLiveEdits = useSettingsStore((s) => s.setExpandLiveEdits);
+  const expandLiveReasoning = useSettingsStore((s) => s.expandLiveReasoning);
+  const setExpandLiveReasoning = useSettingsStore((s) => s.setExpandLiveReasoning);
+  const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
+  const setAutoCollapseTurns = useSettingsStore((s) => s.setAutoCollapseTurns);
+  const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
+  const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
+  const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
+  const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
+  return (
+    <div className="space-y-6">
+      <h3 className="text-lg font-medium">{t('Conversation display')}</h3>
+      <div className="space-y-2">
+        <SwitchRow
+          rowId="appearance.openChangesOnFileEdit"
+          title={t('Open Changes when files are edited')}
+          description={t(
+            'Automatically show the side panel Changes tab after the agent edits a file'
+          )}
+          checked={openChangesOnFileEdit}
+          onChange={setOpenChangesOnFileEdit}
+        />
+        <SwitchRow
+          rowId="appearance.compactReadOnlyTools"
+          title={t('Compact read-only tool calls')}
+          description={t(
+            'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running'
+          )}
+          checked={compactReadOnlyTools}
+          onChange={setCompactReadOnlyTools}
+        />
+        <SwitchRow
+          rowId="appearance.expandLiveEdits"
+          title={t('Expand file edits while running')}
+          description={t(
+            'Automatically unfold diffs or written content from file modification tools while the agent is still running'
+          )}
+          checked={expandLiveEdits}
+          onChange={setExpandLiveEdits}
+        />
+        <SwitchRow
+          rowId="appearance.expandLiveReasoning"
+          title={t('Expand reasoning while streaming')}
+          description={t(
+            'Automatically unfold the thinking block while the model is still reasoning. It collapses again when reasoning ends.'
+          )}
+          checked={expandLiveReasoning}
+          onChange={setExpandLiveReasoning}
+        />
+        <SwitchRow
+          rowId="appearance.autoCollapseTurns"
+          title={t('Auto-collapse previous turns')}
+          description={t(
+            'After you send a new message, fold earlier turns down to the question, timestamp and duration; the latest turn stays expanded'
+          )}
+          checked={autoCollapseTurns}
+          onChange={setAutoCollapseTurns}
+        />
+        <SwitchRow
+          rowId="appearance.collapseCompletedActivity"
+          title={t('Collapse activity after reply')}
+          description={t(
+            'When a reply finishes, fold consecutive thinking and tool calls (including edits and commands) into one summary row; failed calls stay visible'
+          )}
+          checked={collapseCompletedActivity}
+          onChange={setCollapseCompletedActivity}
+        />
+        <SwitchRow
+          rowId="appearance.pinUnfinishedTodos"
+          title={t('Pin unfinished todos')}
+          description={t(
+            'Keep the latest todo list above the input while it has unfinished items, so it does not scroll away with the timeline'
+          )}
+          checked={pinUnfinishedTodos}
+          onChange={setPinUnfinishedTodos}
+        />
+      </div>
+      <FileOpeningSettings />
+    </div>
+  );
+}
+
 export function AppearanceSettings() {
   const {
     theme,
@@ -793,6 +884,8 @@ export function AppearanceSettings() {
           />
         ))}
       </div>
+
+      <ConversationDisplaySection />
 
       {/* Terminal Section */}
       <div className="border-t pt-6">

@@ -196,13 +196,13 @@ describe('buildSettingsCatalog', () => {
     'general.language',
     'general.windowsLocalShell',
     'general.terminalShell',
-    'general.openChangesOnFileEdit',
-    'general.compactReadOnlyTools',
-    'general.expandLiveEdits',
-    'general.expandLiveReasoning',
-    'general.autoCollapseTurns',
-    'general.collapseCompletedActivity',
-    'general.pinUnfinishedTodos',
+    'appearance.openChangesOnFileEdit',
+    'appearance.compactReadOnlyTools',
+    'appearance.expandLiveEdits',
+    'appearance.expandLiveReasoning',
+    'appearance.autoCollapseTurns',
+    'appearance.collapseCompletedActivity',
+    'appearance.pinUnfinishedTodos',
     'general.notifyMainAgentOnly',
     'general.smartCompactEnabled',
     'general.compactReserveTokens',
@@ -234,6 +234,25 @@ describe('buildSettingsCatalog', () => {
     const ids = catalog.map((e) => e.id);
     for (const id of staticIds) {
       expect(ids).toContain(id);
+    }
+  });
+
+  it('对话显示条目归外观页', () => {
+    const catalog = buildSettingsCatalog();
+    const moved = [
+      'openChangesOnFileEdit',
+      'compactReadOnlyTools',
+      'expandLiveEdits',
+      'expandLiveReasoning',
+      'autoCollapseTurns',
+      'collapseCompletedActivity',
+      'pinUnfinishedTodos',
+    ];
+    for (const suffix of moved) {
+      expect(catalog.find((entry) => entry.id === `appearance.${suffix}`)?.category).toBe(
+        'appearance'
+      );
+      expect(catalog.some((entry) => entry.id === `general.${suffix}`)).toBe(false);
     }
   });
 

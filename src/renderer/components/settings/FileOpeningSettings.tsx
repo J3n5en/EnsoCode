@@ -178,7 +178,7 @@ export function FileOpeningSettings() {
   };
 
   return (
-    <section className="space-y-3" data-settings-row="general.fileOpening">
+    <section className="space-y-3" data-settings-row="appearance.fileOpening">
       <div>
         <h4 className="text-sm font-medium">{t('File opening')}</h4>
         <p className="text-xs text-muted-foreground">

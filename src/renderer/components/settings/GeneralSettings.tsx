@@ -27,7 +27,6 @@ import {
 } from '@/stores/settings/autoArchiveIdleDays';
 import { CompactReserveTokensSection } from './CompactReserveTokensSection';
 import { ConfigSyncSettings } from './ConfigSyncSettings';
-import { FileOpeningSettings } from './FileOpeningSettings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { SmartCompactPicker } from './SmartCompactPicker';
 
@@ -46,41 +45,56 @@ export function GeneralSettings() {
   const { t } = useI18n();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h3 className="text-lg font-medium">{t('General')}</h3>
         <p className="text-sm text-muted-foreground">{t('General application settings')}</p>
       </div>
 
-      <div className="flex items-center gap-3" data-settings-row="general.language">
-        <span className="text-sm font-medium">{t('Language')}</span>
-        <Select
-          items={{ en: 'English', zh: '简体中文' }}
-          value={language}
-          onValueChange={(v) => setLanguage(v as 'en' | 'zh')}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="en">English</SelectItem>
-            <SelectItem value="zh">简体中文</SelectItem>
-          </SelectPopup>
-        </Select>
-      </div>
+      <section className="space-y-3">
+        <h4 className="text-sm font-semibold text-foreground/70">{t('Application')}</h4>
+        <div className="flex items-center gap-3" data-settings-row="general.language">
+          <span className="text-sm font-medium">{t('Language')}</span>
+          <Select
+            items={{ en: 'English', zh: '简体中文' }}
+            value={language}
+            onValueChange={(v) => setLanguage(v as 'en' | 'zh')}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="en">English</SelectItem>
+              <SelectItem value="zh">简体中文</SelectItem>
+            </SelectPopup>
+          </Select>
+        </div>
+        <NotificationSection />
+        <ProxySection />
+        <ConfigSyncSettings />
+        <UpdateSection />
+      </section>
 
-      <NotificationSection />
-      <AutoArchiveSection />
-      <SidePanelSection />
-      <FileOpeningSettings />
-      <SmartCompactPicker />
-      <CompactReserveTokensSection />
-      <WindowsLocalShellSection />
-      <TerminalShellSection />
-      <WorktreeRootSection />
-      <ProxySection />
-      <ConfigSyncSettings />
-      <UpdateSection />
+      <section className="space-y-3">
+        <h4 className="text-sm font-semibold text-foreground/70">{t('Agent runtime')}</h4>
+        <GenerationStallTimeoutRow />
+        <AutoRetryLimitRow />
+        <SmartCompactPicker />
+        <CompactReserveTokensSection />
+      </section>
+
+      <section className="space-y-3">
+        <h4 className="text-sm font-semibold text-foreground/70">{t('Sessions & worktrees')}</h4>
+        <AutoArchiveSection />
+        <ActiveRetentionMinutesRow />
+        <WorktreeRootSection />
+      </section>
+
+      <section className="space-y-3">
+        <h4 className="text-sm font-semibold text-foreground/70">{t('Terminal')}</h4>
+        <WindowsLocalShellSection />
+        <TerminalShellSection />
+      </section>
     </div>
   );
 }
@@ -102,24 +116,50 @@ function NotificationSection() {
   );
 }
 
-function SidePanelSection() {
+function GenerationStallTimeoutRow() {
   const { t } = useI18n();
-  const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
-  const setOpenChangesOnFileEdit = useSettingsStore((s) => s.setOpenChangesOnFileEdit);
-  const compactReadOnlyTools = useSettingsStore((s) => s.compactReadOnlyTools);
-  const setCompactReadOnlyTools = useSettingsStore((s) => s.setCompactReadOnlyTools);
-  const expandLiveEdits = useSettingsStore((s) => s.expandLiveEdits);
-  const setExpandLiveEdits = useSettingsStore((s) => s.setExpandLiveEdits);
-  const expandLiveReasoning = useSettingsStore((s) => s.expandLiveReasoning);
-  const setExpandLiveReasoning = useSettingsStore((s) => s.setExpandLiveReasoning);
-  const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
-  const setAutoCollapseTurns = useSettingsStore((s) => s.setAutoCollapseTurns);
-  const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
-  const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
-  const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
-  const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
   const generationStallTimeoutMin = useSettingsStore((s) => s.generationStallTimeoutMin);
   const setGenerationStallTimeoutMin = useSettingsStore((s) => s.setGenerationStallTimeoutMin);
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="general.generationStallTimeout"
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{t('Stop if no output')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Abort and retry the run when no tokens or tool results arrive for this long. Thinking counts as output.'
+          )}
+        </p>
+      </div>
+      <Select
+        items={Object.fromEntries(
+          GENERATION_STALL_TIMEOUT_MINUTES.map((value) => [
+            String(value),
+            value === 0 ? t('Never') : t('{{count}} min', { count: value }),
+          ])
+        )}
+        value={String(generationStallTimeoutMin)}
+        onValueChange={(value) => setGenerationStallTimeoutMin(Number(value))}
+      >
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {GENERATION_STALL_TIMEOUT_MINUTES.map((value) => (
+            <SelectItem key={value} value={String(value)}>
+              {value === 0 ? t('Never') : t('{{count}} min', { count: value })}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </div>
+  );
+}
+
+function AutoRetryLimitRow() {
+  const { t } = useI18n();
   const autoRetryLimit = useSettingsStore((s) => s.autoRetryLimit);
   const setAutoRetryLimit = useSettingsStore((s) => s.setAutoRetryLimit);
   const autoRetryOptions = AUTO_RETRY_LIMIT_OPTIONS.some((value) => value === autoRetryLimit)
@@ -133,171 +173,78 @@ function SidePanelSection() {
       : value === UNLIMITED_AUTO_RETRY
         ? t('Unlimited')
         : t('{{count}} times', { count: value });
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="general.autoRetryLimit"
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{t('Auto-retry on transient errors')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Retry with backoff (up to 60s apart) after 429, 5xx or network errors. Quota and billing errors are never retried. Unlimited keeps retrying until you cancel.'
+          )}
+        </p>
+      </div>
+      <Select
+        items={Object.fromEntries(
+          autoRetryOptions.map((value) => [String(value), autoRetryLabel(value)])
+        )}
+        value={String(autoRetryLimit)}
+        onValueChange={(value) => setAutoRetryLimit(Number(value))}
+      >
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {autoRetryOptions.map((value) => (
+            <SelectItem key={value} value={String(value)}>
+              {autoRetryLabel(value)}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </div>
+  );
+}
+
+function ActiveRetentionMinutesRow() {
+  const { t } = useI18n();
   const activeRetentionMinutes = useSettingsStore((s) => s.activeRetentionMinutes);
   const setActiveRetentionMinutes = useSettingsStore((s) => s.setActiveRetentionMinutes);
   const retentionLabel = (value: number) =>
     value === 0 ? t('Off') : t('{{count}} min', { count: value });
   return (
-    <div className="space-y-2">
-      <SwitchRow
-        rowId="general.openChangesOnFileEdit"
-        title={t('Open Changes when files are edited')}
-        description={t(
-          'Automatically show the side panel Changes tab after the agent edits a file'
-        )}
-        checked={openChangesOnFileEdit}
-        onChange={setOpenChangesOnFileEdit}
-      />
-      <SwitchRow
-        rowId="general.compactReadOnlyTools"
-        title={t('Compact read-only tool calls')}
-        description={t(
-          'Show read/grep/find/ls as one-line rows and fold consecutive tool calls while the agent is still running'
-        )}
-        checked={compactReadOnlyTools}
-        onChange={setCompactReadOnlyTools}
-      />
-      <SwitchRow
-        rowId="general.expandLiveEdits"
-        title={t('Expand file edits while running')}
-        description={t(
-          'Automatically unfold diffs or written content from file modification tools while the agent is still running'
-        )}
-        checked={expandLiveEdits}
-        onChange={setExpandLiveEdits}
-      />
-      <SwitchRow
-        rowId="general.expandLiveReasoning"
-        title={t('Expand reasoning while streaming')}
-        description={t(
-          'Automatically unfold the thinking block while the model is still reasoning. It collapses again when reasoning ends.'
-        )}
-        checked={expandLiveReasoning}
-        onChange={setExpandLiveReasoning}
-      />
-      <SwitchRow
-        rowId="general.autoCollapseTurns"
-        title={t('Auto-collapse previous turns')}
-        description={t(
-          'After you send a new message, fold earlier turns down to the question, timestamp and duration; the latest turn stays expanded'
-        )}
-        checked={autoCollapseTurns}
-        onChange={setAutoCollapseTurns}
-      />
-      <SwitchRow
-        rowId="general.collapseCompletedActivity"
-        title={t('Collapse activity after reply')}
-        description={t(
-          'When a reply finishes, fold consecutive thinking and tool calls (including edits and commands) into one summary row; failed calls stay visible'
-        )}
-        checked={collapseCompletedActivity}
-        onChange={setCollapseCompletedActivity}
-      />
-      <SwitchRow
-        rowId="general.pinUnfinishedTodos"
-        title={t('Pin unfinished todos')}
-        description={t(
-          'Keep the latest todo list above the input while it has unfinished items, so it does not scroll away with the timeline'
-        )}
-        checked={pinUnfinishedTodos}
-        onChange={setPinUnfinishedTodos}
-      />
-      <div
-        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-        data-settings-row="general.generationStallTimeout"
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Stop if no output')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Abort and retry the run when no tokens or tool results arrive for this long. Thinking counts as output.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            GENERATION_STALL_TIMEOUT_MINUTES.map((value) => [
-              String(value),
-              value === 0 ? t('Never') : t('{{count}} min', { count: value }),
-            ])
+    <div
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="general.activeRetentionMinutes"
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{t('Keep in Active after last message')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.'
           )}
-          value={String(generationStallTimeoutMin)}
-          onValueChange={(value) => setGenerationStallTimeoutMin(Number(value))}
-        >
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {GENERATION_STALL_TIMEOUT_MINUTES.map((value) => (
-              <SelectItem key={value} value={String(value)}>
-                {value === 0 ? t('Never') : t('{{count}} min', { count: value })}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        </p>
       </div>
-      <div
-        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-        data-settings-row="general.autoRetryLimit"
+      <Select
+        items={Object.fromEntries(
+          ACTIVE_RETENTION_MINUTES.map((value) => [String(value), retentionLabel(value)])
+        )}
+        value={String(activeRetentionMinutes)}
+        onValueChange={(value) => setActiveRetentionMinutes(Number(value))}
       >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Auto-retry on transient errors')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Retry with backoff (up to 60s apart) after 429, 5xx or network errors. Quota and billing errors are never retried. Unlimited keeps retrying until you cancel.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            autoRetryOptions.map((value) => [String(value), autoRetryLabel(value)])
-          )}
-          value={String(autoRetryLimit)}
-          onValueChange={(value) => setAutoRetryLimit(Number(value))}
-        >
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {autoRetryOptions.map((value) => (
-              <SelectItem key={value} value={String(value)}>
-                {autoRetryLabel(value)}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-      <div
-        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-        data-settings-row="general.activeRetentionMinutes"
-      >
-        <div className="min-w-0">
-          <p className="text-sm">{t('Keep in Active after last message')}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Viewed conversations stay in Active for this long after their last message or your last open while still in Active, then leave. Unviewed ones stay until you open them.'
-            )}
-          </p>
-        </div>
-        <Select
-          items={Object.fromEntries(
-            ACTIVE_RETENTION_MINUTES.map((value) => [String(value), retentionLabel(value)])
-          )}
-          value={String(activeRetentionMinutes)}
-          onValueChange={(value) => setActiveRetentionMinutes(Number(value))}
-        >
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {ACTIVE_RETENTION_MINUTES.map((value) => (
-              <SelectItem key={value} value={String(value)}>
-                {retentionLabel(value)}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {ACTIVE_RETENTION_MINUTES.map((value) => (
+            <SelectItem key={value} value={String(value)}>
+              {retentionLabel(value)}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
     </div>
   );
 }
