@@ -1,3 +1,5 @@
+import { createContext } from 'react';
+
 /**
  * Z-Index Token System
  * Defines the stacking order for various UI components in the application.
@@ -35,3 +37,6 @@ export const Z_INDEX = {
 } as const;
 
 export type ZIndex = keyof typeof Z_INDEX;
+
+/** 弹窗内容向内部下拉弹层下发的层级；弹窗外为普通下拉层级 */
+export const DropdownLayer = createContext<number>(Z_INDEX.DROPDOWN);

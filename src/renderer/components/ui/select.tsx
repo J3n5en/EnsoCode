@@ -2,9 +2,10 @@
 
 import { Select as SelectPrimitive } from '@base-ui/react/select';
 import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from 'lucide-react';
+import * as React from 'react';
 
 import { cn } from '@/lib/utils';
-import { Z_INDEX } from '@/lib/z-index';
+import { DropdownLayer } from '@/lib/z-index';
 
 const Select = SelectPrimitive.Root;
 
@@ -57,12 +58,13 @@ function SelectPopup({
   alignItemWithTrigger?: SelectPrimitive.Positioner.Props['alignItemWithTrigger'];
   zIndex?: number;
 }) {
+  const layer = React.useContext(DropdownLayer);
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Positioner
         alignItemWithTrigger={alignItemWithTrigger}
         className="select-none"
-        style={{ zIndex: zIndex ?? Z_INDEX.DROPDOWN }}
+        style={{ zIndex: zIndex ?? layer }}
         data-slot="select-positioner"
         sideOffset={sideOffset}
       >

@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { OverlayGuardHost } from '@/hooks/useOverlayGuard';
 import { useTrafficLightsGuard } from '@/hooks/useTrafficLightsGuard';
 import { cn } from '@/lib/utils';
-import { Z_INDEX } from '@/lib/z-index';
+import { DropdownLayer, Z_INDEX } from '@/lib/z-index';
 
 // Traffic lights guard is driven by the controlled `open` prop.
 // Uncontrolled Dialogs (without `open`) will not trigger the guard.
@@ -80,6 +80,8 @@ function DialogPopup({
     zIndexLevel === 'base' ? Z_INDEX.MODAL_CONTENT : Z_INDEX.NESTED_MODAL_CONTENT;
   const backdropZIndex =
     zIndexLevel === 'base' ? Z_INDEX.MODAL_BACKDROP : Z_INDEX.NESTED_MODAL_BACKDROP;
+  const dropdownZIndex =
+    zIndexLevel === 'base' ? Z_INDEX.DROPDOWN_IN_MODAL : Z_INDEX.DROPDOWN_IN_NESTED_MODAL;
 
   return (
     <DialogPortal>
@@ -101,7 +103,7 @@ function DialogPopup({
           data-slot="dialog-popup"
           {...props}
         >
-          {children}
+          <DropdownLayer.Provider value={dropdownZIndex}>{children}</DropdownLayer.Provider>
           {showCloseButton && (
             <DialogPrimitive.Close
               aria-label="Close"
