@@ -768,8 +768,9 @@ export function Composer({
       <div
         ref={setDropRef}
         data-slot="composer"
+        data-enso="composer"
         className={cn(
-          'rounded-2xl border bg-background shadow-float transition-[border-color,box-shadow] duration-200 focus-within:border-brand/45 focus-within:ring-3 focus-within:ring-brand/12',
+          'rounded-[24px] border bg-card shadow-[0_2px_6px_rgb(0_0_0/0.03),0_12px_32px_rgb(0_0_0/0.07)] transition-[border-color,box-shadow] duration-200 focus-within:border-foreground/20 [.dark_&]:shadow-[0_2px_6px_rgb(0_0_0/0.2),0_12px_32px_rgb(0_0_0/0.3)]',
           (dragging || dndOver) && 'border-brand/50 bg-brand/5',
           (agentRecipient || planMode) && 'border-primary/35 shadow-primary/5'
         )}
@@ -920,7 +921,7 @@ export function Composer({
           />
         </div>
         {agentRecipient && <p className="sr-only">{t('Send only to the selected Agent')}</p>}
-        <div className="flex items-center justify-between gap-1.5 px-2 pt-0.5 pb-2">
+        <div className="flex items-center justify-between gap-1.5 px-3 pt-0.5 pb-2.5">
           <div
             className={cn(
               'flex min-w-0 flex-1 items-center gap-1',
@@ -1001,7 +1002,7 @@ export function Composer({
             <Button
               variant="outline"
               size="icon"
-              className="size-8 shrink-0 rounded-[10px]"
+              className="size-8 shrink-0 rounded-full"
               onClick={onAbort}
               aria-label={t('Stop')}
             >
@@ -1010,7 +1011,7 @@ export function Composer({
           ) : (
             <Button
               size="icon"
-              className="size-8 shrink-0 rounded-[10px] border-brand bg-brand text-brand-foreground shadow-brand/24 hover:bg-brand/90 disabled:opacity-35"
+              className="size-8 shrink-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-35"
               onClick={handleSend}
               disabled={!hasContent || locked}
               aria-label={agentRecipient ? t('Send only to the selected Agent') : t('Send')}

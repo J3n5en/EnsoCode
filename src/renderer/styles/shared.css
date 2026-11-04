@@ -29,35 +29,6 @@
   }
 }
 
-/*
- * 工具时间线竖线：画在行容器上才能跨过行间距。节点 22px 居中于 30px 行高（上下缘 4px/26px），
- * 线段止于节点边缘，不从半透明节点底下穿过；带回复身份头（2rem）的行整体下移。
- */
-.enso-step-row {
-  position: relative;
-  --enso-step-top: 0px;
-}
-.enso-step-row[data-reply-head] {
-  --enso-step-top: 2rem;
-}
-.enso-step-row[data-step-prev]::before,
-.enso-step-row[data-step-next]::after {
-  content: '';
-  position: absolute;
-  left: calc(1rem + 10.5px);
-  width: 1px;
-  background-color: var(--color-border);
-  pointer-events: none;
-}
-.enso-step-row[data-step-prev]::before {
-  top: 0;
-  height: calc(var(--enso-step-top) + 4px);
-}
-.enso-step-row[data-step-next]::after {
-  top: calc(var(--enso-step-top) + 26px);
-  bottom: 0;
-}
-
 /* ── Shimmer text (15) — Thinking… 流光 ──────────────────────── */
 .t-shimmer {
   /* 挂在类上而非 :root：本文件先于两端的 transitions 模板变量加载，:root 上会被其写死的灰阶覆盖 */

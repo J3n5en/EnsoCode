@@ -30,9 +30,10 @@ import { NavRail } from './NavRail';
 import {
   isCompactRow,
   isToolStepRow,
-  ReplyHeader,
   RetryTurnButton,
+  SpeakerHeader,
   TimelineRow,
+  TurnMeta,
 } from './TimelineRow';
 import { nextTimelineReveal } from './timelineReveal';
 import {
@@ -40,19 +41,11 @@ import {
   type TimelineRowAnchor,
   virtuosoScrollIndex,
 } from './timelineRowOrigin';
+import { REPLY_ROW_KINDS, turnMetaTails } from './turnMeta';
 import { WelcomeSuggestions } from './WelcomeSuggestions';
 
-/** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。默认到 4xl 保持原阅读宽度，更宽再逐级加档。 */
-export const CHAT_COL =
-  'enso-chat-col mx-auto w-full max-w-2xl px-4 @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[84rem]:max-w-5xl @min-[96rem]:max-w-6xl @min-[112rem]:max-w-7xl';
-
-/** 可作为一轮回复开头、挂身份头的行 */
-const REPLY_ROW_KINDS: ReadonlySet<TimelineItem['kind']> = new Set([
-  'text',
-  'thinking',
-  'tool',
-  'tool-group',
-]);
+/** 消息列/输入区共用的列：正文 640px + 两侧 padding；宽模式由 globals.css 去掉 max-w */
+export const CHAT_COL = 'enso-chat-col mx-auto w-full max-w-[calc(640px+2rem)] px-4';
 
 /** 探后折叠组动效窗口：超过后行重挂（虚拟化滚回）不再重播 */
 const FOLD_MOTION_MS = 1000;
@@ -234,6 +227,7 @@ export function MessageTimeline({
       turnOverrides,
     ]
   );
+  const metaTails = useMemo(() => turnMetaTails(folded), [folded]);
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
     state: EMPTY_FOLD_MOTION,
@@ -499,8 +493,8 @@ export function MessageTimeline({
   // 探索→正文留一点距离
   const rowGap = (item: TimelineItem, index: number): string => {
     const next = folded[index + 1];
-    // 时间线上相邻的工具节点贴紧，由竖线串起
-    if (next !== undefined && isToolStepRow(item) && isToolStepRow(next)) return 'pb-1';
+    // 相邻的工具行贴紧，连成一段日志
+    if (next !== undefined && isToolStepRow(item) && isToolStepRow(next)) return 'pb-0';
     if (!compact) return 'pb-4';
     const nextCompact = next !== undefined && isCompactRow(next);
     if (isCompactRow(item)) return nextCompact ? 'pb-1' : 'pb-2';
@@ -508,10 +502,8 @@ export function MessageTimeline({
   };
   const renderRow = (item: TimelineItem, index: number) => {
     const prev = folded[index - 1];
-    const next = folded[index + 1];
-    const replyHead =
-      prev?.kind === 'user' && !prev.collapsed && REPLY_ROW_KINDS.has(item.kind) ? prev : undefined;
-    const step = isToolStepRow(item);
+    const replyStart = prev?.kind === 'user' && !prev.collapsed && REPLY_ROW_KINDS.has(item.kind);
+    const tailOwner = metaTails.get(item.key);
     const now = Date.now();
     const collapse = foldMotionRef.current.collapse.get(item.key);
     const folding = collapse && now - collapse.at < FOLD_MOTION_MS ? collapse : undefined;
@@ -522,9 +514,6 @@ export function MessageTimeline({
       <div
         key={item.key}
         data-nav-key={item.key}
-        data-reply-head={replyHead ? '' : undefined}
-        data-step-prev={step && prev && isToolStepRow(prev) ? '' : undefined}
-        data-step-next={step && next && isToolStepRow(next) ? '' : undefined}
         data-fold-collapse={folding ? (folding.pair ? 'pair' : 'toggle') : undefined}
         style={
           folding
@@ -536,21 +525,21 @@ export function MessageTimeline({
         className={cn(
           CHAT_COL,
           rowGap(item, index),
-          step && 'enso-step-row',
           revealing && 't-fold-reveal',
           '[overflow-wrap:anywhere]'
         )}
       >
-        {replyHead && (
-          <ReplyHeader
-            model={replyHead.replyModel}
-            at={replyHead.replyAt}
-            privacyMask={replyHead.replyPrivacyMask}
-          />
-        )}
+        {replyStart && <SpeakerHeader />}
         <RowErrorBoundary itemKey={item.key}>
           <TimelineRow item={item} onToggleGroup={toggleGroup} onToggleTurn={setTurnCollapsed} />
         </RowErrorBoundary>
+        {tailOwner && (
+          <TurnMeta
+            model={tailOwner.replyModel}
+            at={tailOwner.replyAt}
+            privacyMask={tailOwner.replyPrivacyMask}
+          />
+        )}
       </div>
     );
   };
@@ -615,7 +604,7 @@ export function MessageTimeline({
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
-      <div className="@container relative min-h-0 flex-1">
+      <div data-enso="timeline" className="@container relative min-h-0 flex-1">
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         {items.length === 0 && !busy ? (
           <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
