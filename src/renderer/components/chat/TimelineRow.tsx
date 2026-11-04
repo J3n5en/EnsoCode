@@ -1397,10 +1397,11 @@ function TextRow({
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" {...pluginActionProps} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
-          {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
+          {item.timestamp && !item.turnEnd && <span>{formatClock(item.timestamp)}</span>}
           {item.turnDurationMs !== undefined && (
             <span>
-              · {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
+              {item.timestamp && !item.turnEnd && '· '}
+              {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
             </span>
           )}
           {perfStr && <span>· {perfStr}</span>}
