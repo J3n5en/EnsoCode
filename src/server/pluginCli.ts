@@ -49,7 +49,7 @@ export function formatInstallPreview(p: ExtensionPluginInstallPreview): string {
     p.description,
     '',
     '插件代码会以本机用户身份运行，下列权限只约束它经 EnsoCode 调用的能力。',
-    `  权限：${list(p.permissions)}`,
+    ...(p.permissions.length > 0 || !p.styles ? [`  权限：${list(p.permissions)}`] : []),
     `  可读：${list(p.fsRead)}`,
     `  可写：${list(p.fsWrite)}`,
     `  网络：${list(p.netDomains)}`,

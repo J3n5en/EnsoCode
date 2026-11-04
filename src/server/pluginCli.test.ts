@@ -137,6 +137,12 @@ describe('enso-server plugin', () => {
     expect(text).toContain('sweep');
   });
 
+  it('只带主题 CSS 时权限行不写「无」', () => {
+    const text = formatInstallPreview({ ...preview, permissions: [] });
+    expect(text).toContain('修改界面样式');
+    expect(text).not.toContain('权限：无');
+  });
+
   it('list 提示登记表问题，notice-dismiss 确认后不再提示', async () => {
     const { out, call, deps: d } = deps();
     await runPluginCommand(['list'], d);

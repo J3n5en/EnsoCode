@@ -258,8 +258,15 @@ function PluginErrorText({ message }: { message: string }) {
   );
 }
 
-function PermissionLines({ permissions }: { permissions: readonly string[] }) {
-  if (permissions.length === 0) return <p className="text-muted-foreground text-xs">无特殊权限</p>;
+function PermissionLines({
+  permissions,
+  styles = false,
+}: {
+  permissions: readonly string[];
+  styles?: boolean;
+}) {
+  if (permissions.length === 0)
+    return styles ? null : <p className="text-muted-foreground text-xs">无特殊权限</p>;
   return (
     <ul className="space-y-0.5">
       {permissions.map((permission) => (
@@ -324,7 +331,7 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} />
+      <PermissionLines permissions={permissions} styles={styles} />
       {resident && (
         <p className="text-xs">
           常驻进程
