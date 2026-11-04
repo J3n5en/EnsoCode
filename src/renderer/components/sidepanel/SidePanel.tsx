@@ -855,7 +855,9 @@ export function SidePanel({
           if (!fullscreen) setCover(false);
         }}
         className={cn(
-          'flex min-h-0 flex-col overflow-hidden',
+          'flex min-h-0 flex-col',
+          // 顶栏态的描边/阴影画在盒外，放宽 4px 裁剪才能和对话卡片底边、右边一致
+          titleRow && !cover ? 'overflow-clip [overflow-clip-margin:4px]' : 'overflow-hidden',
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
           open && !cover ? 'bg-transparent' : titleRow && !cover ? '' : 'bg-background',
           !cover
@@ -896,9 +898,9 @@ export function SidePanel({
               ? undefined
               : {
                   width: contentW,
-                  // 顶栏态：面板内容自带实底，挖出卡片右上圆角（y=44 处）
+                  // 顶栏态：面板内容自带实底，挖出卡片右上圆角（y=44 处）与右下圆角
                   clipPath: titleRow
-                    ? 'shape(from 0 0, hline to 100%, vline to 44px, hline to calc(100% - 10px), arc to 100% 54px of 10px cw, vline to 100%, hline to 0, close)'
+                    ? 'shape(from 0 0, hline to 100%, vline to 44px, hline to calc(100% - 10px), arc to 100% 54px of 10px cw, vline to calc(100% - 10px), arc to calc(100% - 10px) 100% of 10px cw, hline to 0, close)'
                     : undefined,
                 }
           }
