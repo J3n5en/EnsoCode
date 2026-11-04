@@ -142,7 +142,28 @@ describe('pruneHistoricalImages', () => {
 });
 
 describe('sanitizeContextMessages', () => {
-  it('signed thinking 后直接 toolCall、没有 text 时补空 text，避免后续轮次 TypeError', () => {
+  // 真实场景：signed thinking + toolCall、没有 text 的 assistant 被无差别补 text:''，
+  // Kimi 的 Responses 网关下一轮直接 400（$.input[2].content[0].text = ''）。
+  // 空 message 兼容只属于 xAI openai-responses 的 wire 出口，通用清洗不能塞进上下文。
+  it('signed thinking 后直接 toolCall、没有 text 时保持原样，不补空 text', () => {
+    const thinking = {
+      type: 'thinking',
+      thinking: 'wait',
+      thinkingSignature: '{"id":"rs_1","type":"reasoning"}',
+    };
+    const call = { type: 'toolCall', id: 'c1', name: 'browser_cdp', arguments: {} };
+    const messages: ContextMessage[] = [
+      user(text('go')),
+      { role: 'assistant', content: [thinking, call] },
+      toolResult('c1', 'browser_cdp', text('done')),
+    ];
+    const out = sanitizeContextMessages(messages);
+    expect(out[1]?.content).toEqual([thinking, call]);
+    // 没有可清洗的东西就是原数组引用（不吃掉缓存前缀）
+    expect(out).toBe(messages);
+  });
+
+  it('toolResult 的 text 块缺 text 字段仍补空串，签名、工具配对和共享输入不变', () => {
     const thinking = {
       type: 'thinking',
       thinking: 'wait',
@@ -154,10 +175,13 @@ describe('sanitizeContextMessages', () => {
       { role: 'assistant', content: [thinking, call] },
       toolResult('c1', 'browser_cdp', { type: 'text' }),
     ];
+    const snapshot = structuredClone(messages);
     const out = sanitizeContextMessages(messages);
-    expect(out[1]?.content).toEqual([thinking, { type: 'text', text: '' }, call]);
+    expect(out[1]?.content).toEqual([thinking, call]);
     const resultParts = Array.isArray(out[2]?.content) ? out[2].content : [];
     expect((resultParts[0] as { text?: string } | undefined)?.text).toBe('');
+    expect(out[2]?.toolCallId).toBe('c1');
+    expect(messages).toEqual(snapshot);
   });
 
   it('已有 text 的 assistant 和完整 toolResult 不改写', () => {
