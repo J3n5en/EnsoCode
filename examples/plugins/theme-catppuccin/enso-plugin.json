@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "enso.example.catppuccin",
+  "name": "Catppuccin",
+  "version": "1.0.0",
+  "description": "Catppuccin Latte 与 Mocha 调色板，另有一段只使用锚点的 CSS。",
+  "permissions": [],
+  "contributes": {
+    "themes": [
+      {
+        "id": "catppuccin",
+        "name": "Catppuccin",
+        "path": "themes/catppuccin.json",
+        "css": "themes/catppuccin.css"
+      }
+    ]
+  }
+}

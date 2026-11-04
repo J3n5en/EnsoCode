@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "enso.example.nord",
+  "name": "Nord",
+  "version": "1.0.0",
+  "description": "Nord 浅色与深色调色板。只提供 JSON，不注入 CSS。",
+  "permissions": [],
+  "contributes": {
+    "themes": [{ "id": "nord", "name": "Nord", "path": "themes/nord.json" }]
+  }
+}

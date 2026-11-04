@@ -1,0 +1,18 @@
+[data-enso="composer"] {
+  border-radius: 28px;
+  border: 1px solid var(--input);
+}
+
+[data-enso="code-block"] {
+  background-color: var(--sunken);
+  border-radius: 8px;
+}
+
+[data-enso="message-user"] {
+  background-color: color-mix(in oklch, var(--brand) 14%, var(--background));
+  border-radius: 16px;
+}
+
+[data-enso="tool-row"] {
+  color: var(--subtle-foreground);
+}
