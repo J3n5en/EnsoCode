@@ -884,7 +884,8 @@ export function Sidebar({
           onEditGroup={(id) => setGroupEditor({ mode: 'edit', id })}
         />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pt-0.5 pb-2">
+        {/* 右侧不留 padding：8px 滚动条槽就是右边距，滚动条不再多占一列、挤到卡片边上 */}
+        <div className="min-h-0 flex-1 overflow-y-auto pt-0.5 pb-2 pl-1.5 [scrollbar-gutter:stable]">
           {orderedProjects.length === 0 && (
             <button
               type="button"
