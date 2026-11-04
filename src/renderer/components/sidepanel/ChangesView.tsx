@@ -28,6 +28,10 @@ import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
 import { GitChangesView } from './GitChangesView';
 
+// 自绘 header 必须固定高度并同步给 itemMetrics：CodeView 不测量 header，按默认 44px 估算会让
+// 容器比实际内容高（全折叠时下方大片空白、上方出现滚动）
+const FILE_HEADER_HEIGHT = 28;
+
 const CODE_VIEW_OPTIONS = {
   theme: CODE_THEME,
   diffStyle: 'split',
@@ -35,6 +39,7 @@ const CODE_VIEW_OPTIONS = {
   preferredHighlighter: 'shiki-js',
   overflow: 'scroll',
   stickyHeaders: true,
+  itemMetrics: { diffHeaderHeight: FILE_HEADER_HEIGHT },
 } as const;
 
 // overflow+maxHeight:100% 会撑满父级，sticky 把折叠列表顶下去；flex 子项按内容收缩。
@@ -320,7 +325,8 @@ function ChangeFileHeader({ item, onToggle }: { item: CodeViewItem; onToggle: ()
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 text-left font-mono text-xs hover:bg-muted/50"
+      style={{ height: FILE_HEADER_HEIGHT }}
+      className="flex w-full min-w-0 items-center gap-1.5 px-2 text-left font-mono text-xs hover:bg-muted/50"
     >
       {item.collapsed ? (
         <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
