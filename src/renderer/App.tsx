@@ -12,6 +12,7 @@ import {
   FoldHorizontal,
   Menu,
   PanelLeft,
+  PanelLeftClose,
   PanelRight,
   Search,
   SquarePen,
@@ -22,11 +23,9 @@ import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
-  MAC_TRAFFIC_LIGHT_INSET,
   type ShellChrome,
   ShellChromeContext,
   useWindowChromeKind,
-  WindowControls,
 } from '@/components/app/WindowChrome';
 import { BotView } from '@/components/bots/BotView';
 import { ModeSwitch } from '@/components/bots/ModeSwitch';
@@ -376,7 +375,6 @@ export default function App() {
   const chromeKind = useWindowChromeKind();
   // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
   const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
-  const macToolbar = desktopShell && chromeKind === 'mac' && collapsed && !isMobile;
   const handleSideResize = useCallback(
     (deltaX: number) => {
       const workspace = workspaceRef.current;
@@ -395,8 +393,6 @@ export default function App() {
     },
     [desktopShell]
   );
-  // Windows/Linux 的系统控件固定在窗口右上角：右侧面板打开时它在面板卡片上方的画布条里
-  const controlsAboveSidePanel = desktopShell && sideOpen && chromeKind !== 'mac';
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
   const panelActions = (
     <>
@@ -436,13 +432,7 @@ export default function App() {
   );
   const shellChrome: ShellChrome | null = desktopShell
     ? {
-        trailing: (
-          <>
-            {modeSwitch}
-            {panelActions}
-            {!controlsAboveSidePanel && <WindowControls kind={chromeKind} edgeGap={8} />}
-          </>
-        ),
+        trailing: panelActions,
       }
     : null;
 
@@ -455,10 +445,57 @@ export default function App() {
       <ToastProvider />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
-      {!desktopShell && (
+      {chromeKind !== 'mobile' ? (
         <TitleBar
-          title={chromeKind === 'mobile' ? 'EnsoCode' : undefined}
-          centered={chromeKind === 'mobile' ? (modeSwitch ?? undefined) : undefined}
+          className={cn(
+            desktopShell && 'border-b-0',
+            desktopShell && (chromeKind === 'windows' ? 'bg-canvas' : 'bg-transparent')
+          )}
+          leading={
+            <div className="flex items-center gap-0.5">
+              {!remoteNodeActive && (
+                <button
+                  type="button"
+                  className={TOOLBAR_BUTTON}
+                  onClick={() => setCollapsed((v) => !v)}
+                  title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
+                >
+                  {collapsed ? (
+                    <PanelLeft className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+              {modeSwitch && <div className="mx-1.5">{modeSwitch}</div>}
+              {desktopShell && (
+                <>
+                  <button
+                    type="button"
+                    className={TOOLBAR_BUTTON}
+                    onClick={() => setSearchOpen(true)}
+                    title={t('Search anything')}
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={TOOLBAR_BUTTON}
+                    onClick={startNewConversation}
+                    title={t('New conversation')}
+                  >
+                    <SquarePen className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
+          }
+          actions={desktopShell ? undefined : panelActions}
+        />
+      ) : (
+        <TitleBar
+          title="EnsoCode"
+          centered={modeSwitch ?? undefined}
           leading={
             isMobile && !remoteNodeActive && !botModeActive ? (
               <div className="flex items-center gap-1.5">
@@ -477,47 +514,10 @@ export default function App() {
               </div>
             ) : undefined
           }
-          actions={
-            <>
-              {chromeKind !== 'mobile' && modeSwitch}
-              {panelActions}
-            </>
-          }
+          actions={panelActions}
         />
       )}
       {!desktopShell && <UpdateBanner />}
-      {/* mac 折叠侧栏：红绿灯与侧栏入口并成窗口顶部一行，折叠栏与卡片都落在它下面 */}
-      {macToolbar && (
-        <div
-          className="drag-region flex h-[44px] shrink-0 items-center gap-0.5"
-          style={{ paddingLeft: MAC_TRAFFIC_LIGHT_INSET }}
-        >
-          <button
-            type="button"
-            className={TOOLBAR_BUTTON}
-            onClick={() => setCollapsed(false)}
-            title={t('Expand sidebar')}
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={TOOLBAR_BUTTON}
-            onClick={() => setSearchOpen(true)}
-            title={t('Search anything')}
-          >
-            <Search className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={TOOLBAR_BUTTON}
-            onClick={startNewConversation}
-            title={t('New conversation')}
-          >
-            <SquarePen className="h-4 w-4" />
-          </button>
-        </div>
-      )}
       <div className="flex min-h-0 flex-1">
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
@@ -579,7 +579,7 @@ export default function App() {
               ref={workspaceRef}
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 overflow-hidden',
-                desktopShell && (macToolbar ? 'pr-[8px] pb-[8px]' : 'py-[8px] pr-[8px]')
+                desktopShell && 'pr-[8px] pb-[8px]'
               )}
             >
               <div
@@ -602,20 +602,7 @@ export default function App() {
                   onResizingChange={setSideResizing}
                 />
               )}
-              {controlsAboveSidePanel && (
-                <div
-                  className="drag-region absolute top-0 right-0 flex h-[44px] justify-end"
-                  style={sideFullscreen ? { left: 0 } : { width: sideWidth + 8 }}
-                >
-                  <WindowControls kind={chromeKind} />
-                </div>
-              )}
-              <SidePanel
-                width={sideWidth}
-                resizing={sideResizing}
-                card={desktopShell}
-                belowWindowControls={controlsAboveSidePanel}
-              />
+              <SidePanel width={sideWidth} resizing={sideResizing} card={desktopShell} />
             </div>
           </DndContext>
         )}

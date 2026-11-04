@@ -10,9 +10,6 @@ import { cn } from '@/lib/utils';
 /** mobile = 窄屏或远程浏览器：没有系统窗口控件，沿用整行 TitleBar */
 export type WindowChromeKind = 'mobile' | 'mac' | 'windows' | 'linux';
 
-/** 红绿灯在 x=16 起、右缘约 76px；侧栏顶行与折叠栏都按它右缘再留 8px（与卡片缝一致） */
-export const MAC_TRAFFIC_LIGHT_INSET = 84;
-
 export function useWindowChromeKind(): WindowChromeKind {
   const mobile = useIsMobile() || Boolean(window.electronAPI.remote);
   if (mobile) return 'mobile';

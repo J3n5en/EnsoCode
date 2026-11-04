@@ -71,7 +71,8 @@ const ICON_BUTTON_CLASS =
 
 interface BotSidebarProps {
   width: number;
-  onCollapse: () => void;
+  /** 缺省时不画折叠按钮（桌面端在窗口顶栏） */
+  onCollapse?: () => void;
   onNewMember: () => void;
   onNewGroup: () => void;
   onNewTeam: () => void;
@@ -412,14 +413,18 @@ export function BotSidebar({
       </div>
 
       <div className="@container flex shrink-0 items-center justify-between border-t p-2">
-        <button
-          type="button"
-          onClick={onCollapse}
-          className={ICON_BUTTON_CLASS}
-          title={t('Collapse sidebar')}
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
+        {onCollapse ? (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className={ICON_BUTTON_CLASS}
+            title={t('Collapse sidebar')}
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        ) : (
+          <span />
+        )}
         <div className="flex items-center">
           <BotSearchButton className={ICON_BUTTON_CLASS} />
           {createActions.map(({ label, icon: Icon, onClick }) => (

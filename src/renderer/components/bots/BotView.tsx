@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Button } from '@/components/ui/button';
 import {
@@ -45,6 +46,7 @@ interface BotViewProps {
 
 /** Bot 模式整块内容区：成员/群聊侧栏 + 聊天 / 收件箱 */
 export function BotView({ sidebarWidth, collapsed, onToggleCollapse, onResize }: BotViewProps) {
+  const mobile = useWindowChromeKind() === 'mobile';
   const { t } = useI18n();
   const view = useBotsStore((s) => s.view);
   const chats = useBotsStore((s) => s.chats);
@@ -164,20 +166,23 @@ export function BotView({ sidebarWidth, collapsed, onToggleCollapse, onResize }:
           >
             <Settings className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            className={RAIL_BUTTON}
-            onClick={onToggleCollapse}
-            title={t('Expand sidebar')}
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
+          {/* 桌面端展开入口常驻窗口顶栏 */}
+          {mobile && (
+            <button
+              type="button"
+              className={RAIL_BUTTON}
+              onClick={onToggleCollapse}
+              title={t('Expand sidebar')}
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          )}
         </aside>
       ) : (
         <>
           <BotSidebar
             width={sidebarWidth}
-            onCollapse={onToggleCollapse}
+            onCollapse={mobile ? onToggleCollapse : undefined}
             onNewMember={openMember}
             onNewGroup={() => setNewGroup(true)}
             onNewTeam={openTeam}

@@ -37,7 +37,6 @@ import {
   Layers,
   Loader2,
   MessageSquarePlus,
-  PanelLeft,
   PanelLeftClose,
   Pencil,
   Pin,
@@ -54,7 +53,7 @@ import {
 import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { MAC_TRAFFIC_LIGHT_INSET, useWindowChromeKind } from '@/components/app/WindowChrome';
+import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
@@ -186,7 +185,7 @@ export function Sidebar({
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
   const chromeKind = useWindowChromeKind();
-  const macRail = collapsed && chromeKind === 'mac';
+  const mobile = chromeKind === 'mobile';
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -807,21 +806,7 @@ export function Sidebar({
     >
       {collapsed && (
         <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
-          {/* mac 上展开与搜索在窗口顶部工具栏（App），折叠栏只留其余入口 */}
-          {!macRail && (
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              className={ICON_BUTTON_CLASS}
-              title={
-                searchShortcut
-                  ? `${t('Search anything')} (${searchShortcut})`
-                  : t('Search anything')
-              }
-            >
-              <Search className="h-4 w-4" />
-            </button>
-          )}
+          {/* 展开/折叠与搜索常驻窗口顶栏（App），折叠栏只留其余入口 */}
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -869,43 +854,34 @@ export function Sidebar({
           >
             <Settings className="h-4 w-4" />
           </button>
-          {!macRail && (
-            <button
-              type="button"
-              onClick={onToggleCollapse}
-              className={ICON_BUTTON_CLASS}
-              title={t('Expand sidebar')}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </button>
-          )}
         </div>
       )}
       <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
         <div
           className={cn(
-            'flex h-12 shrink-0 items-center justify-between gap-1 pr-1.5 pl-1.5',
-            chromeKind !== 'mobile' && 'drag-region h-[44px]'
+            'flex shrink-0 items-center justify-between gap-1 pr-1.5 pl-1.5',
+            mobile ? 'h-12' : 'h-10'
           )}
-          style={chromeKind === 'mac' ? { paddingLeft: MAC_TRAFFIC_LIGHT_INSET } : undefined}
         >
           {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
           <div className="flex min-w-0 items-center gap-1 overflow-hidden">
             <NodeSwitcher />
           </div>
           <div className="flex shrink-0 items-center">
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              className={ICON_BUTTON_CLASS}
-              title={
-                searchShortcut
-                  ? `${t('Search anything')} (${searchShortcut})`
-                  : t('Search anything')
-              }
-            >
-              <Search className="h-4 w-4" />
-            </button>
+            {mobile && (
+              <button
+                type="button"
+                onClick={onOpenSearch}
+                className={ICON_BUTTON_CLASS}
+                title={
+                  searchShortcut
+                    ? `${t('Search anything')} (${searchShortcut})`
+                    : t('Search anything')
+                }
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            )}
             <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
               <PopoverTrigger
                 className={cn(
@@ -1595,14 +1571,19 @@ export function Sidebar({
         </div>
 
         <div className="flex shrink-0 items-center justify-between p-2">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className={ICON_BUTTON_CLASS}
-            title={t('Collapse sidebar')}
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+          {/* 桌面端折叠入口常驻窗口顶栏；移动端抽屉用它关闭 */}
+          {mobile ? (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className={ICON_BUTTON_CLASS}
+              title={t('Collapse sidebar')}
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          ) : (
+            <span />
+          )}
           <div className="flex items-center">
             {archivedCount > 0 && (
               <button

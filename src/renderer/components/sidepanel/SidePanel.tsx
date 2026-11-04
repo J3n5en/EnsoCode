@@ -682,14 +682,11 @@ export function SidePanel({
   width: preferredWidth,
   resizing = false,
   card = false,
-  belowWindowControls = false,
 }: {
   width: number;
   resizing?: boolean;
   /** 桌面外壳：做成浮在画布上的圆角卡片 */
   card?: boolean;
-  /** Windows/Linux 系统控件占着右上角，卡片从标题区下方开始 */
-  belowWindowControls?: boolean;
 }) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
@@ -821,17 +818,8 @@ export function SidePanel({
             ? 'relative shrink-0'
             : !card
               ? 'absolute inset-y-0 right-0'
-              : cn(
-                  'absolute right-[8px] bottom-[8px]',
-                  belowWindowControls ? 'top-[44px]' : 'top-[8px]'
-                ),
-          card
-            ? cn(
-                'rounded-[10px]',
-                open && 'shadow-surface',
-                belowWindowControls && !cover && 'mt-[36px]'
-              )
-            : open && 'border-l'
+              : 'absolute top-0 right-[8px] bottom-[8px]',
+          card ? cn('rounded-[10px]', open && 'shadow-surface') : open && 'border-l'
         )}
         data-enso="side-panel"
       >
