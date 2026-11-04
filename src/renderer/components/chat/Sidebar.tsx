@@ -7,7 +7,6 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import {
   ALL_GROUP_ID,
@@ -47,7 +46,6 @@ import {
   Search,
   Settings,
   Smartphone,
-  Sparkles,
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
@@ -164,7 +162,7 @@ const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
 const SCRATCH_COLLAPSED_KEY = 'enso-collapsed-scratch';
 
 const ICON_BUTTON_CLASS =
-  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground';
 
 interface SidebarProps {
   width?: number;
@@ -826,16 +824,6 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
-            }}
-            className={ICON_BUTTON_CLASS}
-            title={t('Ask Enso')}
-          >
-            <Sparkles className="h-4 w-4" />
-          </button>
           {window.electronAPI.remote && (
             <button
               type="button"
@@ -1570,9 +1558,9 @@ export function Sidebar({
           </SortableContext>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between p-2">
+        <div className="flex shrink-0 items-center gap-1 p-2">
           {/* 桌面端折叠入口常驻窗口顶栏；移动端抽屉用它关闭 */}
-          {mobile ? (
+          {mobile && (
             <button
               type="button"
               onClick={onToggleCollapse}
@@ -1581,10 +1569,16 @@ export function Sidebar({
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
-          ) : (
-            <span />
           )}
-          <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => window.electronAPI.window.openSettings()}
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            <span className="truncate">{t('Settings')}</span>
+          </button>
+          <div className="flex shrink-0 items-center">
             {archivedCount > 0 && (
               <button
                 type="button"
@@ -1596,16 +1590,6 @@ export function Sidebar({
                 <Archive className="h-4 w-4" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
-              }}
-              className={ICON_BUTTON_CLASS}
-              title={t('Ask Enso')}
-            >
-              <Sparkles className="h-4 w-4" />
-            </button>
             {window.electronAPI.remote && (
               <button
                 type="button"
@@ -1616,14 +1600,6 @@ export function Sidebar({
                 <Smartphone className="h-4 w-4" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => window.electronAPI.window.openSettings()}
-              className={ICON_BUTTON_CLASS}
-              title={t('Settings')}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
           </div>
         </div>
       </div>
