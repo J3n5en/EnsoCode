@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applyPluginPresetOverrides, pluginPresetInstruction } from './agentHost';
+import {
+  applyPluginPresetOverrides,
+  mergePresetPromptKit,
+  pluginPresetInstruction,
+  presetOverlay,
+} from './agentHost';
 
 const resolveModel = (model: { providerId: string; modelId: string }) =>
   model.modelId === 'missing'
@@ -91,5 +96,69 @@ describe('pluginPresetInstruction', () => {
   it('预设带指令时替换全局指令', () => {
     const own = { path: '/p.md', content: 'preset' };
     expect(pluginPresetInstruction(own, () => global)).toEqual(own);
+  });
+});
+
+describe('mergePresetPromptKit', () => {
+  it('没有叠加插件预设时保持自建预设', () => {
+    const own = { systemPrompt: 'role', systemPromptAppend: 'tail' };
+    expect(mergePresetPromptKit(own)).toEqual(own);
+  });
+
+  it('尾段自建在前、插件在后拼接；角色、加强、推脱补发以插件为准，插件没有则沿用自建', () => {
+    expect(
+      mergePresetPromptKit(
+        {
+          systemPrompt: 'own role',
+          systemPromptAppend: 'own tail',
+          systemPromptBoost: 'own boost',
+          refusalRetryPrompt: 'own retry',
+        },
+        { systemPromptAppend: 'plugin tail', systemPromptBoost: 'plugin boost' }
+      )
+    ).toEqual({
+      systemPrompt: 'own role',
+      systemPromptAppend: 'own tail\n\nplugin tail',
+      systemPromptBoost: 'plugin boost',
+      refusalRetryPrompt: 'own retry',
+    });
+    expect(mergePresetPromptKit({}, { systemPrompt: 'p', systemPromptAppend: 't' })).toEqual({
+      systemPrompt: 'p',
+      systemPromptAppend: 't',
+    });
+  });
+});
+
+describe('presetOverlay', () => {
+  const user = {
+    id: 'u',
+    name: 'U',
+    skillIds: [],
+    mcpServerIds: [],
+    pluginPresetId: 'plugin:enso.pstack:poteto',
+  };
+
+  it('直接选插件预设：插件预设本身，无自建预设', () => {
+    expect(presetOverlay('plugin:enso.pstack:poteto', () => user)).toEqual({
+      pluginPresetId: 'plugin:enso.pstack:poteto',
+      required: true,
+    });
+  });
+
+  it('自建预设叠加插件预设：可选叠加，失效时不阻断', () => {
+    expect(presetOverlay('u', () => user)).toEqual({
+      preset: user,
+      pluginPresetId: 'plugin:enso.pstack:poteto',
+      required: false,
+    });
+  });
+
+  it('自建预设未叠加或字段非法时不带插件预设', () => {
+    const plain = { ...user, pluginPresetId: undefined };
+    expect(presetOverlay('u', () => plain)).toEqual({ preset: plain, required: false });
+    expect(presetOverlay('u', () => ({ ...user, pluginPresetId: 'not-plugin' }))).toEqual({
+      preset: { ...user, pluginPresetId: 'not-plugin' },
+      required: false,
+    });
   });
 });

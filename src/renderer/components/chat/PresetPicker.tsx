@@ -65,7 +65,8 @@ export function PresetPicker({ presetId, onSelect, onModel, disabled }: PresetPi
               type="button"
               onClick={() => {
                 onSelect(option.id);
-                const model = pluginPresetModel(option.id, pluginPresets);
+                const overlay = presets.find((preset) => preset.id === option.id)?.pluginPresetId;
+                const model = pluginPresetModel(overlay ?? option.id, pluginPresets);
                 if (model) onModel?.(model);
                 setOpen(false);
               }}

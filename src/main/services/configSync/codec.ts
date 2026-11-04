@@ -7,6 +7,7 @@ import {
 import { parseAccentColor } from '@shared/accentColor';
 import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { parseCompactStrategy } from '@shared/compactStrategy';
+import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { parseOauthAccountPool } from '@shared/oauthAccountPool';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
@@ -170,6 +171,7 @@ const PRESET_KEYS = [
   'boostPromptId',
   'refusalRetry',
   'refusalRetryPromptId',
+  'pluginPresetId',
 ];
 const AGENT_TYPE_KEYS = [
   'id',
@@ -630,6 +632,12 @@ function validatePreset(raw: unknown): RecordValue {
   idList(entry.skillIds, 'preset.skillIds');
   idList(entry.mcpServerIds, 'preset.mcpServerIds');
   if (entry.instructionId !== undefined) stringField(entry, 'instructionId', 'preset', false);
+  if (
+    entry.pluginPresetId !== undefined &&
+    !isPluginPresetId(stringField(entry, 'pluginPresetId', 'preset'))
+  ) {
+    throw new Error('Invalid preset pluginPresetId');
+  }
   if (entry.refusalRetry !== undefined && typeof entry.refusalRetry !== 'boolean') {
     throw new Error('Invalid preset refusalRetry');
   }

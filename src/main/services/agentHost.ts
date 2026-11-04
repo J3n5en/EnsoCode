@@ -32,6 +32,7 @@ import {
   type ModelCredentialContext,
   modelUsability,
 } from '@shared/defaultModel';
+import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
@@ -937,43 +938,33 @@ export function spawnSession(
   const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
   const extensionPlugins = bot ? null : getExtensionPlugins();
-  const pluginPreset = extensionPlugins?.presetForSpawn(request.presetId);
-  if (pluginPreset && !pluginPreset.ok) return { ok: false, error: pluginPreset.error };
+  const overlay = bot ? undefined : presetOverlay(request.presetId, resolvePreset);
+  const overlayResult = extensionPlugins?.presetForSpawn(overlay?.pluginPresetId);
+  if (overlayResult && !overlayResult.ok && overlay?.required) {
+    return { ok: false, error: overlayResult.error };
+  }
+  // 自建预设叠加的插件预设失效（插件停用/卸载）时退回只用自建预设
+  const pluginPreset = overlayResult?.ok ? overlayResult : undefined;
   const preset: Preset | undefined = bot
     ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
-    : pluginPreset?.ok
-      ? undefined
-      : resolvePreset(request.presetId);
-  const promptKit = bot
+    : overlay?.preset;
+  const ownKit = bot
     ? { ok: true as const, systemPrompt: bot.systemPrompt }
-    : pluginPreset?.ok
-      ? {
-          ok: true as const,
-          ...(pluginPreset.systemPrompt ? { systemPrompt: pluginPreset.systemPrompt } : {}),
-          ...(pluginPreset.systemPromptAppend
-            ? { systemPromptAppend: pluginPreset.systemPromptAppend }
-            : {}),
-          ...(pluginPreset.systemPromptBoost
-            ? { systemPromptBoost: pluginPreset.systemPromptBoost }
-            : {}),
-          ...(pluginPreset.refusalRetryPrompt
-            ? { refusalRetryPrompt: pluginPreset.refusalRetryPrompt }
-            : {}),
-        }
-      : resolvePresetPromptKit(preset);
-  if (!promptKit.ok) {
+    : resolvePresetPromptKit(preset);
+  if (!ownKit.ok) {
     return { ok: false, error: '自定义系统提示词正文读取失败，请重新保存或恢复默认。' };
   }
+  const promptKit = mergePresetPromptKit(ownKit, pluginPreset);
   const instruction = bot
     ? bot.instruction
-    : pluginPreset?.ok
-      ? pluginPresetInstruction(pluginPreset.instruction, () => resolveGlobalInstruction())
-      : resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined);
+    : pluginPresetInstruction(pluginPreset?.instruction, () =>
+        resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
+      );
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
   const plugins = enabledPlugins(state);
   // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
-  const activePluginPreset = pluginPreset?.ok ? request.presetId : undefined;
+  const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
     ...(bot ? [] : plugins.skillPaths),
@@ -1041,7 +1032,7 @@ export function spawnSession(
     thinkingLevel: request.thinkingLevel,
     approvalMode: request.approvalMode,
     disabledTools,
-    preset: pluginPreset?.ok ? readPluginPresetOverrides(pluginPreset) : undefined,
+    preset: pluginPreset ? readPluginPresetOverrides(pluginPreset) : undefined,
     resolveModel: (model) => {
       const next = resolveModelSelection(
         model.providerId,
@@ -1153,6 +1144,49 @@ export function pluginPresetInstruction<T>(
   global: () => T | undefined
 ): T | undefined {
   return own ?? global();
+}
+
+/** 会话预设拆成「自建预设」和「插件预设」两层：直接选插件预设时它必须可用；自建预设叠加的插件预设可缺省 */
+export function presetOverlay(
+  presetId: string | undefined,
+  resolve: (id?: string) => Preset | undefined
+): { preset?: Preset; pluginPresetId?: string; required: boolean } {
+  if (presetId && isPluginPresetId(presetId)) return { pluginPresetId: presetId, required: true };
+  const preset = resolve(presetId);
+  const pluginPresetId =
+    preset?.pluginPresetId && isPluginPresetId(preset.pluginPresetId)
+      ? preset.pluginPresetId
+      : undefined;
+  return {
+    ...(preset ? { preset } : {}),
+    ...(pluginPresetId ? { pluginPresetId } : {}),
+    required: false,
+  };
+}
+
+interface PresetPromptKit {
+  systemPrompt?: string;
+  systemPromptAppend?: string;
+  systemPromptBoost?: string;
+  refusalRetryPrompt?: string;
+}
+
+/** 尾段自建在前、插件在后拼接；角色/加强/推脱补发以插件为准 */
+export function mergePresetPromptKit(
+  own: PresetPromptKit,
+  plugin?: PresetPromptKit
+): PresetPromptKit {
+  const pick = (key: keyof PresetPromptKit) => {
+    const value = plugin?.[key] || own[key];
+    return value ? { [key]: value } : {};
+  };
+  const tail = [own.systemPromptAppend, plugin?.systemPromptAppend].filter(Boolean).join('\n\n');
+  return {
+    ...pick('systemPrompt'),
+    ...(tail ? { systemPromptAppend: tail } : {}),
+    ...pick('systemPromptBoost'),
+    ...pick('refusalRetryPrompt'),
+  };
 }
 
 export function applyPluginPresetOverrides<T>(input: {

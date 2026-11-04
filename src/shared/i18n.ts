@@ -2083,6 +2083,11 @@ export const zhTranslations: Record<string, string> = {
   'Set as default': '设为默认',
   'Plugin preset unavailable': '插件预设不可用',
   'Bundled by {{plugin}}': '由插件 {{plugin}} 提供',
+  'Overlay plugin preset': '叠加插件预设',
+  'No overlay': '不叠加',
+  'Unavailable plugin preset': '插件预设不可用',
+  "Also loads the plugin preset's prompts, skills and overrides. Tails are joined (this preset first); the plugin's role, boost and refusal retry win. Ignored while the plugin is disabled.":
+    '额外加载插件预设的提示词、skill 和覆盖项。两边的尾段依次拼接（本预设在前），角色、加强段和推脱补发以插件为准。插件停用时忽略。',
   Default: '默认',
   None: '不注入',
   'Injection bundles of skills, MCP servers and instruction files, chosen per conversation':

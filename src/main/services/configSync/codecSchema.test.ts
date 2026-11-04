@@ -239,6 +239,23 @@ describe('config sync codec schema and crypto boundaries', () => {
     expect(() => validateBundle(input)).toThrow();
   });
 
+  it('预设可携带叠加的插件预设 id，格式不对则拒绝', () => {
+    const input = minimalBundle();
+    input.state.presets = [
+      {
+        id: 'preset-1',
+        name: 'With plugin',
+        skillIds: [],
+        mcpServerIds: [],
+        pluginPresetId: 'plugin:enso.pstack:poteto',
+      },
+    ];
+    expect(() => validateBundle(input)).not.toThrow();
+
+    input.state.presets = [{ ...input.state.presets[0]!, pluginPresetId: 'poteto' }];
+    expect(() => validateBundle(input)).toThrow();
+  });
+
   it('明文编码拒绝携带技能正文，避免未加密资源泄露', async () => {
     const input = minimalBundle();
     input.state.skills = [skill()];

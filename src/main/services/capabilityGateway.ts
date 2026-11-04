@@ -533,6 +533,7 @@ function parsePresetFields(
   const systemPromptTailId = optionalId('systemPromptTailId');
   const boostPromptId = optionalId('boostPromptId');
   const refusalRetryPromptId = optionalId('refusalRetryPromptId');
+  const pluginPresetId = optionalId('pluginPresetId');
   const refusalRetry = existing?.refusalRetry === true;
   return {
     ok: true,
@@ -546,6 +547,7 @@ function parsePresetFields(
       ...(boostPromptId ? { boostPromptId } : {}),
       ...(refusalRetry ? { refusalRetry: true } : {}),
       ...(refusalRetryPromptId ? { refusalRetryPromptId } : {}),
+      ...(pluginPresetId ? { pluginPresetId } : {}),
     },
   };
 }

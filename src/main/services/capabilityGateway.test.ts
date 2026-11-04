@@ -749,6 +749,7 @@ describe('CapabilityGateway preset system prompt lifecycle', () => {
         skillIds: [],
         mcpServerIds: [],
         systemPromptId,
+        pluginPresetId: 'plugin:enso.pstack:poteto',
       },
     ];
 
@@ -756,7 +757,12 @@ describe('CapabilityGateway preset system prompt lifecycle', () => {
       request('preset-edit', 'presets.edit', { id: 'preset-1', name: 'Renamed' })
     );
     expect(state.presets).toEqual([
-      expect.objectContaining({ id: 'preset-1', name: 'Renamed', systemPromptId }),
+      expect.objectContaining({
+        id: 'preset-1',
+        name: 'Renamed',
+        systemPromptId,
+        pluginPresetId: 'plugin:enso.pstack:poteto',
+      }),
     ]);
   });
 });
