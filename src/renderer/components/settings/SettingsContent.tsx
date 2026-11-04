@@ -196,7 +196,7 @@ export function SettingsContent() {
       {/* Left: Category List */}
       {showList && (
         <nav
-          className={cn('flex min-h-0 shrink-0 flex-col', isMobile ? 'w-full' : 'w-48 border-r')}
+          className={cn('flex min-h-0 shrink-0 flex-col', isMobile ? 'w-full' : 'w-56 border-r')}
         >
           <div className="sticky top-0 z-10 bg-background px-2 pt-2">
             <div className="relative">
@@ -220,47 +220,49 @@ export function SettingsContent() {
               <div className="px-3 py-2 text-xs text-muted-foreground">{t('No results')}</div>
             ) : (
               groupedCategories.map((group, index) => (
-                <div key={group.id} className={cn('space-y-1', index > 0 && 'mt-3')}>
-                  <div className="px-3 text-xs font-medium text-muted-foreground">
+                <div key={group.id} className={cn(index > 0 && 'mt-4')}>
+                  <div className="px-2 pb-1.5 text-xs font-semibold text-foreground/55">
                     {t(group.label)}
                   </div>
-                  {group.items.map((category) => (
-                    <div key={category.id}>
-                      <button
-                        type="button"
-                        onClick={() => openCategory(category.id)}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded-md px-3 text-sm transition-colors',
-                          isMobile ? 'py-3' : 'py-2',
-                          category.sub && 'pl-8',
-                          activeCategory === category.id && !isMobile
-                            ? 'bg-accent text-accent-foreground'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                        )}
-                      >
-                        <category.icon className="h-4 w-4" />
-                        {t(category.label)}
-                        {isMobile && <ChevronRight className="ml-auto h-4 w-4 opacity-60" />}
-                      </button>
-                      {category.hits.map((hit) => (
+                  <div className="space-y-0.5 rounded-lg bg-muted/60 p-1">
+                    {group.items.map((category) => (
+                      <div key={category.id}>
                         <button
                           type="button"
-                          key={hit.id}
-                          onClick={() => {
-                            openCategory(category.id);
-                            setFlashRowId(hit.id);
-                          }}
+                          onClick={() => openCategory(category.id)}
                           className={cn(
-                            'block w-full truncate rounded-md pr-3 text-left text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                            category.sub ? 'pl-14' : 'pl-9',
-                            isMobile ? 'py-2' : 'py-1'
+                            'flex w-full items-center gap-2 rounded-md px-3 text-sm transition-colors',
+                            isMobile ? 'py-3' : 'py-1.5',
+                            category.sub && 'pl-8',
+                            activeCategory === category.id && !isMobile
+                              ? 'bg-background text-foreground shadow-xs'
+                              : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
                           )}
                         >
-                          {t(hit.title)}
+                          <category.icon className="h-4 w-4" />
+                          {t(category.label)}
+                          {isMobile && <ChevronRight className="ml-auto h-4 w-4 opacity-60" />}
                         </button>
-                      ))}
-                    </div>
-                  ))}
+                        {category.hits.map((hit) => (
+                          <button
+                            type="button"
+                            key={hit.id}
+                            onClick={() => {
+                              openCategory(category.id);
+                              setFlashRowId(hit.id);
+                            }}
+                            className={cn(
+                              'block w-full truncate rounded-md pr-3 text-left text-xs text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                              category.sub ? 'pl-14' : 'pl-9',
+                              isMobile ? 'py-2' : 'py-1'
+                            )}
+                          >
+                            {t(hit.title)}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))
             )}
