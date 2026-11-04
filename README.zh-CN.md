@@ -29,7 +29,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/readme/chat.jpg" alt="EnsoCode 工作台：桌面端与手机伴侣" width="920" />
+  <img src="docs/readme/chat.zh-CN.jpg" alt="EnsoCode 工作台：桌面端与手机伴侣" width="920" />
 </p>
 <p align="center"><sub>同一会话两块屏幕：桌面工作台和手机伴侣。</sub></p>
 
@@ -93,7 +93,7 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 | **可停靠侧栏** | 文件树、会话改动、分栏终端、内嵌浏览器。 |
 
 <p align="center">
-  <img src="docs/readme/split-workbench.png" alt="侧栏：文件、改动、终端、浏览器" width="920" />
+  <img src="docs/readme/split-workbench.zh-CN.png" alt="右侧面板：会话改动与对话并排" width="920" />
 </p>
 <p align="center"><sub>文件、改动、终端、浏览器贴在会话旁边。</sub></p>
 
@@ -105,7 +105,7 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 - **自建服务端**：宿主跑在你自己的 Linux 或 macOS 上。客户端都关掉后，排队消息和 goal 继续跑；手机或浏览器配对后使用。见[无界面服务端](#无界面服务端)。
 
 <p align="center">
-  <img src="docs/readme/phone.png" alt="扫码配对手机伴侣" width="920" />
+  <img src="docs/readme/phone.zh-CN.png" alt="扫码配对手机伴侣" width="920" />
 </p>
 <p align="center"><sub>几秒配对。加密密钥留在设备上。</sub></p>
 
@@ -116,13 +116,13 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 | **技能、MCP、Slash、`@`** | `/skill:` 胶囊，`@` 联想文件和会话，多 MCP 服务。 |
 | **运行时预设** | 把模型策略、技能、MCP、系统 Prompt 打成一套。 |
 | **导入** | 扫描本机 Claude Code / Codex / Cursor，导入密钥、技能、MCP、指令和历史。 |
-| **外观** | Ghostty 终端配色、浅色/深色、背景图、毛玻璃。 |
+| **外观** | 内置与插件主题、强调色、user.css、Ghostty 终端配色、浅色/深色、背景图、毛玻璃。 |
 | **状态栏** | Token、费用、耗时、上下文用量、Coworker 数、审批档位。 |
 
 <p align="center">
-  <img src="docs/readme/appearance.png" alt="外观：主题与终端配色" width="920" />
+  <img src="docs/readme/appearance.zh-CN.png" alt="外观：主题图库与个性化" width="920" />
 </p>
-<p align="center"><sub>主题、Ghostty 配色、实时预览。</sub></p>
+<p align="center"><sub>内置与插件主题、强调色、user.css。</sub></p>
 
 ---
 

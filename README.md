@@ -93,7 +93,7 @@ No EnsoCode account. Model traffic goes to the provider you configured.
 | **Dockable side panel** | Files, session changes, split terminals, and an embedded browser. |
 
 <p align="center">
-  <img src="docs/readme/split-workbench.png" alt="Files, Changes, Terminal, and Browser in the side panel" width="920" />
+  <img src="docs/readme/split-workbench.png" alt="Side panel showing session changes next to the conversation" width="920" />
 </p>
 <p align="center"><sub>Files, Changes, Terminal, and Browser stay next to the conversation.</sub></p>
 
@@ -116,13 +116,13 @@ No EnsoCode account. Model traffic goes to the provider you configured.
 | **Skills, MCP, slash, `@`** | `/skill:` pills, `@` file and session autocomplete, multi-server MCP. |
 | **Runtime presets** | Bundle model policy, skills, MCP, and system prompt. |
 | **Import** | Scan local Claude Code, Codex, and Cursor setups; import keys, skills, MCP, instructions, and history. |
-| **Appearance** | Ghostty terminal palettes, light/dark, background image, glass opacity. |
+| **Appearance** | Built-in and plugin themes, accent color, user.css, Ghostty terminal palettes, light/dark, background image, glass opacity. |
 | **Status line** | Tokens, cost, elapsed time, context use, coworker count, approval mode. |
 
 <p align="center">
-  <img src="docs/readme/appearance.png" alt="Appearance settings: themes and terminal palettes" width="920" />
+  <img src="docs/readme/appearance.png" alt="Appearance settings: theme gallery and personalization" width="920" />
 </p>
-<p align="center"><sub>Themes, Ghostty palettes, and live preview.</sub></p>
+<p align="center"><sub>Built-in and plugin themes, accent color, and user.css.</sub></p>
 
 ---
 
