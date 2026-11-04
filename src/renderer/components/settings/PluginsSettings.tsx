@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogPanel,
   DialogTitle,
@@ -619,50 +620,58 @@ export function EnsoPluginsSettings({
           }
         />
       )}
-      {preview && (
-        <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-4">
-          <p className="font-medium text-sm">
-            {preview.name} {preview.version}
-            {preview.existingVersion && (
-              <span className="ml-2 text-muted-foreground">
-                {t('updating from {{version}}', { version: preview.existingVersion })}
-              </span>
-            )}
-          </p>
-          <PluginCapabilityBlock
-            permissions={preview.permissions}
-            env={preview.env}
-            interop={preview.interop}
-            resident={preview.resident}
-            events={preview.events}
-            schedules={preview.schedules}
-          />
-          {preview.mcpServers.map((server) => (
-            <p key={server.name} className="font-mono text-xs">
-              {server.command} {server.args.join(' ')}
-            </p>
-          ))}
-          {preview.mcpTools.length > 0 && (
-            <p className="text-muted-foreground text-xs">
-              {t('Host MCP tools it may call')}：
-              <span className="font-mono">{preview.mcpTools.join(', ')}</span>
-            </p>
+      <Dialog open={preview !== null} onOpenChange={(open) => !open && !busy && discard()}>
+        <DialogContent>
+          {preview && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {preview.name} {preview.version}
+                  {preview.existingVersion && (
+                    <span className="ml-2 text-base text-muted-foreground">
+                      {t('updating from {{version}}', { version: preview.existingVersion })}
+                    </span>
+                  )}
+                </DialogTitle>
+              </DialogHeader>
+              <DialogPanel className="space-y-3">
+                <PluginCapabilityBlock
+                  permissions={preview.permissions}
+                  env={preview.env}
+                  interop={preview.interop}
+                  resident={preview.resident}
+                  events={preview.events}
+                  schedules={preview.schedules}
+                />
+                {preview.mcpServers.map((server) => (
+                  <p key={server.name} className="font-mono text-xs">
+                    {server.command} {server.args.join(' ')}
+                  </p>
+                ))}
+                {preview.mcpTools.length > 0 && (
+                  <p className="text-muted-foreground text-xs">
+                    {t('Host MCP tools it may call')}：
+                    <span className="font-mono">{preview.mcpTools.join(', ')}</span>
+                  </p>
+                )}
+                {preview.warnings.map((warning) => (
+                  <p key={warning} className="text-muted-foreground text-xs">
+                    {warning}
+                  </p>
+                ))}
+              </DialogPanel>
+              <DialogFooter>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={discard}>
+                  {t('Cancel')}
+                </Button>
+                <Button size="sm" disabled={busy} onClick={() => void commit()}>
+                  {busy ? <Spinner /> : t('Install')}
+                </Button>
+              </DialogFooter>
+            </>
           )}
-          {preview.warnings.map((warning) => (
-            <p key={warning} className="text-muted-foreground text-xs">
-              {warning}
-            </p>
-          ))}
-          <div className="flex gap-2">
-            <Button size="sm" disabled={busy} onClick={() => void commit()}>
-              {busy ? <Spinner /> : t('Install')}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={discard}>
-              {t('Cancel')}
-            </Button>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
       {plugins.length === 0 && !preview && (
         <div className="rounded-lg border border-dashed px-3 py-10 text-center">
           <Puzzle className="mx-auto size-5 text-muted-foreground" />
@@ -728,7 +737,7 @@ export function EnsoPluginsSettings({
                         disabled={busy || downloading}
                         onClick={() => void restage(plugin.id)}
                       >
-                        {t('Update')}
+                        {downloading ? <Spinner /> : t('Update')}
                       </Button>
                     </p>
                   )}
