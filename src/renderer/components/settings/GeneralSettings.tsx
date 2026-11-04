@@ -52,7 +52,7 @@ export function GeneralSettings() {
       </div>
 
       <section className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground/70">{t('Application')}</h4>
+        <h4 className="border-b pb-2 text-base font-semibold">{t('Application')}</h4>
         <div className="flex items-center gap-3" data-settings-row="general.language">
           <span className="text-sm font-medium">{t('Language')}</span>
           <Select
@@ -76,7 +76,7 @@ export function GeneralSettings() {
       </section>
 
       <section className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground/70">{t('Agent runtime')}</h4>
+        <h4 className="border-b pb-2 text-base font-semibold">{t('Agent runtime')}</h4>
         <GenerationStallTimeoutRow />
         <AutoRetryLimitRow />
         <SmartCompactPicker />
@@ -84,14 +84,14 @@ export function GeneralSettings() {
       </section>
 
       <section className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground/70">{t('Sessions & worktrees')}</h4>
+        <h4 className="border-b pb-2 text-base font-semibold">{t('Sessions & worktrees')}</h4>
         <AutoArchiveSection />
         <ActiveRetentionMinutesRow />
         <WorktreeRootSection />
       </section>
 
       <section className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground/70">{t('Terminal')}</h4>
+        <h4 className="border-b pb-2 text-base font-semibold">{t('Terminal')}</h4>
         <WindowsLocalShellSection />
         <TerminalShellSection />
       </section>

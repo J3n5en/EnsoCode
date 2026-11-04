@@ -389,7 +389,7 @@ export function BuiltinToolsSettings() {
 
       {TOOL_SECTIONS.map((section) => (
         <section key={section.id} className="space-y-3">
-          <h4 className="text-sm font-semibold text-foreground/70">{t(section.label)}</h4>
+          <h4 className="border-b pb-2 text-base font-semibold">{t(section.label)}</h4>
           {builtinToolsInSection(BUILTIN_TOOLS, section.id).map((tool) => (
             <ToolRow
               key={tool.id}
