@@ -1532,7 +1532,7 @@ const electronAPI = {
     setViewport: (
       tabId: string,
       conversationId: string,
-      viewport: { x: number; y: number; width: number; height: number } | null,
+      viewport: { x: number; y: number; width: number; height: number; radius?: number } | null,
       covered = false
     ): Promise<BrowserTabState> =>
       ipcRenderer.invoke(
@@ -1573,7 +1573,7 @@ const electronAPI = {
     setDevToolsViewport: (
       tabId: string,
       conversationId: string,
-      viewport: { x: number; y: number; width: number; height: number } | null,
+      viewport: { x: number; y: number; width: number; height: number; radius?: number } | null,
       covered = false
     ): Promise<BrowserTabState> =>
       ipcRenderer.invoke(

@@ -29,7 +29,7 @@ const EMPTY: BrowserTabState = {
   holder: null,
 };
 
-type Rect = { x: number; y: number; width: number; height: number };
+type Rect = { x: number; y: number; width: number; height: number; radius?: number };
 
 const sameRect = (a: Rect | null, b: Rect | null) =>
   a === b ||
@@ -38,7 +38,8 @@ const sameRect = (a: Rect | null, b: Rect | null) =>
     a.x === b.x &&
     a.y === b.y &&
     a.width === b.width &&
-    a.height === b.height);
+    a.height === b.height &&
+    a.radius === b.radius);
 
 const MIN_PANE = 80;
 const DEFAULT_DEVTOOLS_RATIO = 0.42;
@@ -47,12 +48,21 @@ function readBox(el: HTMLElement | null): Rect | null {
   if (!el?.isConnected) return null;
   const box = el.getBoundingClientRect();
   if (box.width < 1 || box.height < 1) return null;
-  return {
+  const rect: Rect = {
     x: Math.round(box.left),
     y: Math.round(box.top),
     width: Math.round(box.width),
     height: Math.round(box.height),
   };
+  const radius = cardCornerRadius(el, box.bottom);
+  return radius > 0 ? { ...rect, radius } : rect;
+}
+
+/** 原生视图不受 CSS 圆角裁切：贴着圆角卡片底边时让 Main 给视图同样的圆角 */
+function cardCornerRadius(el: HTMLElement, bottom: number): number {
+  const card = el.closest<HTMLElement>('[data-slot="side-panel"]');
+  if (!card || Math.abs(card.getBoundingClientRect().bottom - bottom) > 1) return 0;
+  return Number.parseFloat(getComputedStyle(card).borderBottomLeftRadius) || 0;
 }
 
 /**

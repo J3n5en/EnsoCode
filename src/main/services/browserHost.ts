@@ -463,6 +463,7 @@ export class BrowserHost {
       }
       if (onTop && this.shown) {
         tab.view.setBounds(this.shown.viewport);
+        tab.view.setBorderRadius(this.shown.viewport.radius ?? 0);
         tab.view.setVisible(true);
         if (!this.shown.covered && !this.overlayActive) raise.push(tab.view);
         if (!tab.devtoolsOpen) {
@@ -480,6 +481,7 @@ export class BrowserHost {
       if (tab.devtools) {
         if (dtOnTop && this.shownDevtools) {
           tab.devtools.setBounds(this.shownDevtools.viewport);
+          tab.devtools.setBorderRadius(this.shownDevtools.viewport.radius ?? 0);
           tab.devtools.setVisible(true);
           if (!this.shownDevtools.covered && !this.overlayActive) raise.push(tab.devtools);
         } else {

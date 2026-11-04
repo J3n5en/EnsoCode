@@ -18,4 +18,16 @@ describe('parseBrowserViewport', () => {
     expect(parseBrowserViewport({ x: 0, y: 0, width: 50000, height: 1 })).toBeNull();
     expect(parseBrowserViewport({ x: 0, y: 0, width: 1, height: 1, z: 1 })).toBeNull();
   });
+  it('可选圆角：取整收下，越界或非数整体拒绝', () => {
+    expect(parseBrowserViewport({ x: 0, y: 0, width: 1, height: 1, radius: 9.6 })).toEqual({
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      radius: 10,
+    });
+    expect(parseBrowserViewport({ x: 0, y: 0, width: 1, height: 1, radius: -1 })).toBeNull();
+    expect(parseBrowserViewport({ x: 0, y: 0, width: 1, height: 1, radius: 999 })).toBeNull();
+    expect(parseBrowserViewport({ x: 0, y: 0, width: 1, height: 1, radius: '4' })).toBeNull();
+  });
 });
