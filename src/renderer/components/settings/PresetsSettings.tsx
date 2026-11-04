@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useScrollChain } from '@/hooks/useScrollChain';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { Z_INDEX } from '@/lib/z-index';
 import { type PluginPresetOption, useEnabledPluginPresets } from '@/plugins/usePluginPresets';
 import { useSettingsStore } from '@/stores/settings';
 import { ListFilterBar, matchesFilter } from './ListFilterBar';
@@ -623,7 +624,7 @@ function PluginPresetOverlayField({
         <SelectTrigger>
           <SelectValue />
         </SelectTrigger>
-        <SelectPopup>
+        <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
           {Object.entries(items).map(([id, label]) => (
             <SelectItem key={id} value={id}>
               {label}
