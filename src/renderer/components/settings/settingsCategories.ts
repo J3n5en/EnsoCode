@@ -1,3 +1,4 @@
+import { type SettingsSearchEntry, searchSettingsEntries } from '@shared/searchAnything';
 import type { SettingsCategory } from './constants';
 
 /**
@@ -92,4 +93,41 @@ export function resolveActiveCategory(
 ): SettingsCategory {
   if (isCategoryVisible(active, disabledBuiltinTools, botModeEnabled)) return active;
   return BOT_PAGES.includes(active) ? 'experimental' : 'tools';
+}
+
+export function searchCategories<T extends { id: SettingsCategory; label: string }>(
+  items: readonly T[],
+  entries: readonly SettingsSearchEntry[],
+  query: string,
+  translate?: (value: string) => string
+): Array<T & { hits: SettingsSearchEntry[] }> {
+  const trimmed = query.trim();
+  if (!trimmed) return items.map((item) => ({ ...item, hits: [] }));
+
+  const matched = searchSettingsEntries(
+    [
+      ...entries,
+      ...items.map((item) => ({
+        id: `${item.id}.root`,
+        category: item.id,
+        title: item.label,
+      })),
+    ],
+    trimmed,
+    { translate, limit: Number.POSITIVE_INFINITY }
+  );
+
+  const matchedCategories = new Set<string>();
+  const hitsByCategory = new Map<string, SettingsSearchEntry[]>();
+  for (const entry of matched) {
+    matchedCategories.add(entry.category);
+    if (entry.id.endsWith('.root')) continue;
+    const hits = hitsByCategory.get(entry.category);
+    if (hits) hits.push(entry);
+    else hitsByCategory.set(entry.category, [entry]);
+  }
+
+  return items.flatMap((item) =>
+    matchedCategories.has(item.id) ? [{ ...item, hits: hitsByCategory.get(item.id) ?? [] }] : []
+  );
 }

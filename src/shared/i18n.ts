@@ -245,6 +245,7 @@ export const zhTranslations: Record<string, string> = {
   'Remove from favorites': '取消收藏',
   'Search themes...': '搜索主题...',
   Settings: '设置',
+  'Search settings': '搜索设置',
   Application: '应用',
   'Models & agents': '模型与智能体',
   'Tools & extensions': '工具与扩展',

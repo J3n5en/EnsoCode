@@ -5,6 +5,7 @@ import {
   isCategoryVisible,
   resolveActiveCategory,
   SETTINGS_GROUPS,
+  searchCategories,
   visibleCategories,
 } from './settingsCategories';
 
@@ -161,5 +162,65 @@ describe('Bot mode page', () => {
     expect(resolveActiveCategory('bots', [], true)).toBe('bots');
     expect(resolveActiveCategory('botTemplates', [], false)).toBe('experimental');
     expect(resolveActiveCategory('botTemplates', [], true)).toBe('botTemplates');
+  });
+});
+
+describe('searchCategories', () => {
+  const items = [
+    { id: 'general' as const, label: 'General', mark: 1 },
+    { id: 'appearance' as const, label: 'Appearance', mark: 2 },
+  ];
+  const entries = [
+    { id: 'general.root', category: 'general', title: 'Onlyrootmarker' },
+    { id: 'general.language', category: 'general', title: 'Language' },
+    { id: 'appearance.theme', category: 'appearance', title: 'Theme mode' },
+  ];
+
+  it('returns every category with no hits when the query is empty', () => {
+    expect(searchCategories(items, entries, '   ')).toEqual([
+      { id: 'general', label: 'General', mark: 1, hits: [] },
+      { id: 'appearance', label: 'Appearance', mark: 2, hits: [] },
+    ]);
+  });
+
+  it('keeps a category whose translated name matches, without listing root rows', () => {
+    const translate = (text: string) => (text === 'Appearance' ? '外观' : text);
+    expect(searchCategories(items, entries, '外观', translate)).toEqual([
+      { id: 'appearance', label: 'Appearance', mark: 2, hits: [] },
+    ]);
+    expect(searchCategories(items, entries, 'Appear').map((item) => item.id)).toEqual([
+      'appearance',
+    ]);
+  });
+
+  it('keeps only the category of a matching row and lists that row', () => {
+    expect(searchCategories(items, entries, 'Language')).toEqual([
+      {
+        id: 'general',
+        label: 'General',
+        mark: 1,
+        hits: [{ id: 'general.language', category: 'general', title: 'Language' }],
+      },
+    ]);
+  });
+
+  it('omits catalog rows whose id ends in .root', () => {
+    const found = searchCategories(items, entries, 'general');
+    expect(found.map((item) => item.id)).toEqual(['general']);
+    expect(found[0]?.hits.map((hit) => hit.id)).toEqual(['general.language']);
+  });
+
+  it('returns no categories when nothing matches', () => {
+    expect(searchCategories(items, entries, 'zzzz-not-a-setting')).toEqual([]);
+  });
+
+  it('does not stop at the default settings search limit', () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({
+      id: `general.row${index}`,
+      category: 'general',
+      title: `Zebra option ${index}`,
+    }));
+    const found = searchCategories([{ id: 'general' as const, label: 'General' }], many, 'Zebra');
+    expect(found[0]?.hits).toHaveLength(25);
   });
 });

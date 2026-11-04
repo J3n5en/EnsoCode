@@ -2,7 +2,6 @@ import { botBrowserChatId } from '@shared/bots/browser';
 import { projectDisplayName } from '@shared/projectName';
 import type { BrowserSearchTab, SettingsSearchEntry } from '@shared/searchAnything';
 import {
-  buildSettingsCatalog,
   recentBrowserTabs,
   searchBrowserTabs,
   searchSettingsEntries,
@@ -48,6 +47,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
+import { useSettingsCatalog } from '@/hooks/useSettingsCatalog';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, formatBinding } from '@/lib/keybindings';
 import { addSidePanelBrowser } from '@/lib/sidePanelDock';
@@ -166,10 +166,6 @@ export function WorkspaceSearchDialog({
   const activeId = useSessionsStore((state) => state.activeId);
   const projects = useSettingsStore((state) => state.projects);
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
-  const providers = useSettingsStore((state) => state.providers);
-  const skills = useSettingsStore((state) => state.skills);
-  const mcpServers = useSettingsStore((state) => state.mcpServers);
-  const instructions = useSettingsStore((state) => state.instructions);
   const keybindings = useSettingsStore((state) => state.keybindings);
   const currentProjectId =
     (activeId ? conversations[activeId]?.projectId : undefined) ?? projects[0]?.id ?? '';
@@ -214,17 +210,7 @@ export function WorkspaceSearchDialog({
     [conversations, currentProjectId, open, scope]
   );
 
-  const settingsCatalog = useMemo(
-    () =>
-      buildSettingsCatalog({
-        providers: providers.map((item) => ({ id: item.id, name: item.name })),
-        skills: skills.map((item) => ({ id: item.id, name: item.name })),
-        mcpServers: mcpServers.map((item) => ({ id: item.id, name: item.name })),
-        instructions: instructions.map((item) => ({ id: item.id, name: item.name })),
-        sshConnections,
-      }),
-    [instructions, mcpServers, providers, skills, sshConnections]
-  );
+  const settingsCatalog = useSettingsCatalog(sshConnections);
 
   const settingsHits = useMemo(
     () =>
