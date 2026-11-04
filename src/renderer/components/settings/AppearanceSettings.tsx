@@ -1,6 +1,5 @@
 import { ACCENT_PRESETS } from '@shared/accentColor';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
-import { BUILTIN_THEMES } from '@shared/theme/builtinThemes';
 import { resolveTheme } from '@shared/theme/themeKey';
 import {
   ChevronLeft,
@@ -44,7 +43,9 @@ import {
   getXtermTheme,
   type XtermTheme,
 } from '@/lib/ghosttyTheme';
+import { availableThemes } from '@/lib/themeStyles';
 import { cn } from '@/lib/utils';
+import { usePluginThemesStore } from '@/stores/pluginThemes';
 import {
   ACCENT_COLORS,
   type AccentColor,
@@ -716,6 +717,7 @@ function ThemeSection({ onOpenPlugins }: { onOpenPlugins?: () => void }) {
   const { t } = useI18n();
   const themeId = useSettingsStore((s) => s.themeId);
   const setThemeId = useSettingsStore((s) => s.setThemeId);
+  const pluginThemes = usePluginThemesStore((s) => s.themes);
   const mode = useColorScheme();
   return (
     <section data-settings-row="appearance.themeGallery" className="space-y-3">
@@ -726,7 +728,7 @@ function ThemeSection({ onOpenPlugins }: { onOpenPlugins?: () => void }) {
         </p>
       </div>
       <ThemeGallery
-        themes={BUILTIN_THEMES}
+        themes={availableThemes(pluginThemes)}
         selected={themeId}
         mode={mode}
         onSelect={setThemeId}
@@ -786,6 +788,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
   } = useSettingsStore();
   const { t } = useI18n();
   const colorScheme = useColorScheme();
+  const pluginThemes = usePluginThemesStore((s) => s.themes);
 
   const themeModeOptions: {
     value: Theme;
@@ -803,7 +806,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
     label: t(ACCENT_LABELS[value]),
     swatch:
       value === 'theme'
-        ? resolveTheme(themeId)[colorScheme].accent
+        ? resolveTheme(themeId, availableThemes(pluginThemes))[colorScheme].accent
         : ACCENT_PRESETS[value][colorScheme],
   }));
 

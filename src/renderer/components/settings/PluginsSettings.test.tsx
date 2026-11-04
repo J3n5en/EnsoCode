@@ -92,6 +92,7 @@ const plugin = {
   running: true,
   configurable: true,
   crossSessionInject: false,
+  themes: [],
 };
 
 let root: Root;
