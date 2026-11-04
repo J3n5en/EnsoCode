@@ -6,6 +6,7 @@ import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type { ExtensionPluginInstallPreview } from '@shared/extensionPlugins/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { getDraftBroker, getExtensionPlugins } from '../services/extensionPlugins';
+import { setPluginAssetResolver } from '../services/localImageProtocol';
 import { remoteSenderById } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers } from '../services/renderers';
 import { pluginProjectRoot } from './agent';
@@ -235,6 +236,7 @@ let wired = false;
 /** Enso 插件的管理与运行期通道；安装来源的选择在桌面壳（pick-and-stage） */
 export function registerExtensionPluginHandlers(): void {
   const plugins = () => getExtensionPlugins();
+  setPluginAssetResolver((pluginId, rel) => plugins().assetPath(pluginId, rel));
   if (!wired) {
     wired = true;
     plugins().onChange(() => broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_CHANGED));

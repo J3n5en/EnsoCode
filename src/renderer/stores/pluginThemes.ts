@@ -1,4 +1,6 @@
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
+import { pluginAssetUrl } from '@shared/localImage';
+import { rewriteThemeCssUrls, themeCssReferencesLocalImage } from '@shared/theme/themeCss';
 import { parseThemeFile } from '@shared/theme/themeFile';
 import { pluginThemeKey } from '@shared/theme/themeKey';
 import type { ThemeDefinition } from '@shared/theme/types';
@@ -32,12 +34,20 @@ async function loadPlugin(plugin: ExtensionPluginSummary): Promise<Loaded> {
       const file = parseThemeFile(JSON.parse(await readText(plugin.id, contrib.path)));
       if (!file.ok) throw new Error(file.error);
       const { ok: _ok, ...palettes } = file;
+      let css: string | undefined;
+      if (contrib.css) {
+        const rawCss = await readText(plugin.id, contrib.css);
+        if (themeCssReferencesLocalImage(rawCss)) throw new Error('主题 CSS 不能引用 local-image:');
+        css = rewriteThemeCssUrls(rawCss, contrib.css, (rel) =>
+          pluginAssetUrl(plugin.id, rel, plugin.build)
+        );
+      }
       loaded.themes.push({
         id: pluginThemeKey(plugin.id, contrib.id),
         name: contrib.name,
         source: { kind: 'plugin', pluginId: plugin.id, pluginName: plugin.name },
         ...palettes,
-        ...(contrib.css ? { css: await readText(plugin.id, contrib.css) } : {}),
+        ...(css !== undefined ? { css } : {}),
       });
     } catch (error) {
       loaded.errors.push(

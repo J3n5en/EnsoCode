@@ -5,11 +5,13 @@ import { net } from '@platform';
 import { sniffImage } from '@shared/bots/cardPng';
 import {
   BOT_AVATAR_HOST,
+  IMAGE_EXTENSIONS,
   isMediaPath,
   isVideoPath,
   LOCAL_IMAGE_SCHEME,
   localImageUrlToPath,
   mediaExtension,
+  PLUGIN_ASSET_HOST,
   REMOTE_FETCH_HOST,
 } from '@shared/localImage';
 import { isBotId } from '@shared/types/bot';
@@ -18,6 +20,15 @@ let botAvatarResolver: (botId: string) => string | null = () => null;
 
 export function setBotAvatarResolver(resolve: (botId: string) => string | null): void {
   botAvatarResolver = resolve;
+}
+
+let pluginAssetResolver: ((pluginId: string, rel: string) => string | null) | null = null;
+
+/** 插件图片和字体的真实路径。返回 null 表示拒绝。 */
+export function setPluginAssetResolver(
+  resolve: ((pluginId: string, rel: string) => string | null) | null
+): void {
+  pluginAssetResolver = resolve;
 }
 
 /** botId → 该成员 avatar.png；非法 id / 无图返回 null */
@@ -49,6 +60,13 @@ const MIME_TYPES: Record<string, string> = {
   mov: 'video/quicktime',
 };
 
+const FONT_TYPES: Record<string, string> = {
+  woff2: 'font/woff2',
+  woff: 'font/woff',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
+};
+
 /** 远程桌面隧道复用同一套校验：浏览器里的 local-image 请求经隧道转到这里 */
 export async function handleLocalImageRequest(
   rawUrl: string,
@@ -67,7 +85,56 @@ export async function handleLocalImageRequest(
   if (url.hostname === BOT_AVATAR_HOST) {
     return serveBotAvatar(decodeURIComponent(url.pathname.slice(1)));
   }
+  if (url.hostname === PLUGIN_ASSET_HOST) return servePluginAsset(url);
   return serveLocalMedia(url, rangeHeader);
+}
+
+function pluginAssetType(ext: string): string | null {
+  if ((IMAGE_EXTENSIONS as readonly string[]).includes(ext)) return MIME_TYPES[ext] ?? null;
+  return FONT_TYPES[ext] ?? null;
+}
+
+function decodeSegment(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function servePluginAsset(url: URL): Promise<Response> {
+  const rawParts = url.pathname.split('/').filter((part) => part.length > 0);
+  if (rawParts.length < 2) return new Response('Bad path', { status: 400 });
+  const parts: string[] = [];
+  for (const raw of rawParts) {
+    const decoded = decodeSegment(raw);
+    if (decoded === null) return new Response('Bad path', { status: 400 });
+    parts.push(decoded);
+  }
+  const pluginId = parts[0] ?? '';
+  const rel = parts.slice(1).join('/');
+  const type = pluginAssetType(mediaExtension(rel));
+  if (!type) return new Response('Forbidden', { status: 403 });
+  let filePath: string | null;
+  try {
+    filePath = pluginAssetResolver?.(pluginId, rel) ?? null;
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+  if (!filePath) return new Response('Not found', { status: 404 });
+  try {
+    const data = new Uint8Array(await readFile(filePath));
+    // 字体跨源要 CORS。URL 带安装代号，可以长缓存。
+    return new Response(data, {
+      headers: {
+        'Content-Type': type,
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'max-age=31536000',
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
 }
 
 async function serveBotAvatar(botId: string): Promise<Response> {

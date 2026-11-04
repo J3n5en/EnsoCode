@@ -129,14 +129,18 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 调色板只换变量。主题的 `css` 是开放的，选择器不受限制，可以改应用里任意界面。因此带 `css` 的主题在安装和更新时要单独同意。对话框写的是「修改界面样式：主题 CSS 可以改变应用的任意界面」。一个插件只要有一项主题带了 `css`，就有这项能力。从没有变成有，要重新同意。不带 `css` 的主题没有这项。不要把样式写进 `permissions`，未知名字会被拒绝。
 
-主窗口和设置窗口的 CSP 里，`style-src` 只有 `'self'` 和 `'unsafe-inline'`。注入的 `<style>` 能生效，远程样式表和 `@import` 不能。`font-src` 只有 `'self'` 和 `data:`。不要在主题 CSS 里写远程 `url()`。解析失败的主题不进画廊，错误显示在该插件那一行。
+主窗口和设置窗口的 CSP 里，`style-src` 只有 `'self'` 和 `'unsafe-inline'`。注入的 `<style>` 能生效，远程样式表和 `@import` 不能。`font-src` 只有 `'self'` 和 `data:`。`local-image:` 协议本身绕过 CSP。不要在主题 CSS 里写远程 `url()`。
+
+主题 CSS 可以用相对 `url()` 引用插件目录里的图片和字体。扩展名是 png、jpg、jpeg、gif、webp、bmp、svg、jfif、avif、woff2、woff、ttf、otf。加载时按 CSS 文件所在目录解析，并改写成 `local-image://plugin-asset/...`。只改写 `url()`，`image-set("a.png")` 这类字符串写法要改成 `image-set(url("a.png"))`。越出插件目录或带反斜杠转义的地址不改写。只有已启用插件的文件能读到。
+
+主题 CSS 里不能出现 `local-image`，注释里也不行，CSS 转义或百分号编码拼出来的也算。出现则整份主题解析失败。`local-image` 还能代理远程地址、读本机任意图片，这条检查挡住的是这两种用法。`user.css` 不改写，也不做这条检查。解析失败的主题不进画廊，错误显示在该插件那一行。
 
 ## 写一个主题插件
 
 1. 建一个目录，放 `enso-plugin.json`。`schemaVersion` 为 `1`，`permissions` 为 `[]`。不需要 `main`。
 2. 在 `contributes.themes` 里加一项。`id` 不含 `/`，并匹配 `^[a-z][a-z0-9-]{0,31}$`。`path` 是插件目录内的相对路径，以 `.json` 结尾，不能是绝对路径，不能含 `..` 或反斜杠。
 3. JSON 里写全 `light` 和 `dark` 的九个字段。要改某一个派生变量，再加 `tokens`。
-4. 需要改圆角、间距或锚点上的布局时，再加 `css`，路径以 `.css` 结尾。只使用 `data-enso` 和上面的变量。不要加载远程资源。这一步会触发「修改界面样式」的同意。
+4. 需要改圆角、间距或锚点上的布局时，再加 `css`，路径以 `.css` 结尾。只使用 `data-enso` 和上面的变量。可以用相对 `url()` 引用插件目录内的图片和字体。不要加载远程资源。这一步会触发「修改界面样式」的同意。
 5. 设置里安装这个目录并启用。外观页的画廊里选它。插件停用后界面回到 `enso`，设置里的键还在。
 
 只换颜色的例子是 `examples/plugins/theme-nord`。调色板加 CSS 的例子是 `examples/plugins/theme-catppuccin`。清单字段也写在 [插件](plugins.md) 的「贡献」里。

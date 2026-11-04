@@ -8,6 +8,7 @@
  * - UNC / WSL 路径    `\\wsl.localhost\U\x`   → `local-image://wsl.localhost/U/x`
  * - POSIX 绝对路径    `/a/b.png`              → `local-image://posix/a/b.png`（固定 host）
  * - 远程图片代理      `local-image://remote-fetch/?url=<encoded>`（主进程 net.fetch 代理，绕过 CSP/CORS）
+ * - 插件图片和字体    `local-image://plugin-asset/<pluginId>/<rel>?v=<build>`
  */
 
 export const LOCAL_IMAGE_SCHEME = 'local-image';
@@ -30,6 +31,20 @@ export const REMOTE_FETCH_HOST = 'remote-fetch';
 export const BOT_AVATAR_HOST = 'bot-avatar';
 export const botAvatarUrl = (botId: string, version: number): string =>
   routed(`${LOCAL_IMAGE_SCHEME}://${BOT_AVATAR_HOST}/${encodeURIComponent(botId)}?v=${version}`);
+
+/** 插件目录内图片和字体的保留 host。v 是安装代号，换包后缓存失效 */
+export const PLUGIN_ASSET_HOST = 'plugin-asset';
+
+export function pluginAssetUrl(pluginId: string, rel: string, build: string): string {
+  const segments = rel
+    .split('/')
+    .filter((part) => part.length > 0)
+    .map((part) => encodeURIComponent(part));
+  const path = segments.length > 0 ? `/${segments.join('/')}` : '';
+  const id = encodeURIComponent(pluginId);
+  const version = encodeURIComponent(build);
+  return routed(`${LOCAL_IMAGE_SCHEME}://${PLUGIN_ASSET_HOST}/${id}${path}?v=${version}`);
+}
 
 export const IMAGE_EXTENSIONS = [
   'png',
@@ -88,7 +103,8 @@ export function toLocalImageUrl(filePath: string): string {
 /** local-image:// URL → 本地绝对路径；形状不合法返回 null */
 export function localImageUrlToPath(url: URL): string | null {
   const host = url.hostname;
-  if (!host || host === REMOTE_FETCH_HOST || host === BOT_AVATAR_HOST) return null;
+  if (!host || host === REMOTE_FETCH_HOST || host === BOT_AVATAR_HOST || host === PLUGIN_ASSET_HOST)
+    return null;
   const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (host === POSIX_HOST) {
     return `/${segments.join('/')}`;
