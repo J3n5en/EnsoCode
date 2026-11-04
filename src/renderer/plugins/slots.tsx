@@ -165,6 +165,7 @@ export function PluginComposerSlots({
   sessionId,
   draft,
   busy,
+  pluginPresetId,
 }: {
   side: 'left' | 'right';
   /** 草稿接口能写到的会话；侧栏等隔离输入框为 null */
@@ -172,6 +173,8 @@ export function PluginComposerSlots({
   /** 当前草稿的纯文本（不含文件 / 会话引用） */
   draft: string;
   busy: boolean;
+  /** 当前会话生效的插件预设 id；没有则为 null */
+  pluginPresetId: string | null;
 }) {
   usePluginSlotsVersion();
   const slots = pluginComposerSlots(side);
@@ -182,7 +185,7 @@ export function PluginComposerSlots({
         <IsolatedSlot
           key={`${entry.pluginId}:${entry.uid}`}
           entry={entry}
-          props={{ position: side, sessionId, draft, busy }}
+          props={{ position: side, sessionId, draft, busy, pluginPresetId }}
         />
       ))}
     </>

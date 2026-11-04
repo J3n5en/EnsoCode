@@ -410,7 +410,7 @@ export function onLoad(enso) {
 | `message.action` | `position: 'left' \| 'right'` | `{ position, text, messageIndex, sessionId }` | 可用。位于回复正文下方的操作条，`left` 在复制按钮之前，`right` 在复制按钮之后。`messageIndex` 是这条消息在会话里的下标，`sessionId` 是当前展示的会话 |
 | `tool.card` | `toolName` | `{ toolName, output, state }` | 可用。`output` 是工具结果文本，可能为 `null` |
 | `block` | `language` | `{ language, source }` | 可用 |
-| `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定；侧栏等独立输入框里 `sessionId` 为 `null` |
+| `composer.left` / `composer.right` | 无 | `{ position, sessionId, draft, busy, pluginPresetId }` | 可用。`draft` 是当前草稿的纯文本，`busy` 表示输入框被锁定。`pluginPresetId` 是当前会话生效的插件预设 id。直接选插件预设时是它本身。选自建预设且其 `pluginPresetId` 是合法插件预设 id 时是叠加的那个。否则为 `null`。侧栏等独立输入框里 `sessionId` 为 `null` |
 | `thinking.body` | 无 | `{ text, streaming, itemKey }` | 可用。接管展开后的思考正文；多个插件只渲染先注册的那个，组件抛错时回退显示原文 |
 | `message.leaf` | 无 | `{ source, final, messageIndex, sessionId, Markdown }` | 可用。只在回复正文的文字叶子后追加，原文仍由宿主整体渲染。叶子是段落、标题、表格单元格，以及不包含段落的紧凑列表项；代码块、公式、分隔线和 HTML 不追加。`source` 是该叶子的行内 Markdown（不含 `#`、列表标记、表格竖线和引用标记），`final` 表示这个叶子是否已经写完，`messageIndex` / `sessionId` 与 `message.action` 相同。`Markdown` 是宿主的 Markdown 组件，用来渲染译文，且不会再次触发本挂点。多个插件只渲染先注册的那个；组件返回 null 或抛错时不追加内容，原文不受影响 |
 

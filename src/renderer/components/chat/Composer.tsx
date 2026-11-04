@@ -70,6 +70,8 @@ interface ComposerProps {
   running: boolean;
   busy: boolean;
   focusKey?: string;
+  /** 当前会话生效的插件预设。侧栏和远程会话不传，挂点收到 null */
+  pluginPresetId?: string | null;
   /** 挂载/切会话时是否自动聚焦。移动端/远程桌面（PWA）默认 false，否则一进会话就弹出键盘挡住内容 */
   autoFocus?: boolean;
   /**
@@ -133,6 +135,7 @@ export function Composer({
   running,
   busy,
   focusKey,
+  pluginPresetId = null,
   autoFocus = !window.electronAPI?.remote,
   enterToSend = !isTouchRemote(),
   toolbar,
@@ -514,6 +517,7 @@ export function Composer({
     sessionId: isolated ? null : (focusKey ?? null),
     draft: editorPlain.replaceAll('\uFFFC', ''),
     busy: locked,
+    pluginPresetId,
   };
   // 仅快捷键触发，无绑定时不提示
   const steerAvailable =

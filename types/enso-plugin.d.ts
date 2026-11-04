@@ -310,6 +310,7 @@ export type EnsoSlotRegistration =
         sessionId: string | null;
         draft: string;
         busy: boolean;
+        pluginPresetId: string | null;
       }) => unknown;
     }
   | {

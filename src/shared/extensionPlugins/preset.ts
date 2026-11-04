@@ -1,3 +1,5 @@
+import type { Preset } from '../types/assets';
+
 // 插件预设的会话 id：plugin:<插件 id>:<预设 id>。插件 id 含点、不含冒号。
 
 const PREFIX = 'plugin:';
@@ -21,4 +23,22 @@ export function parsePluginPresetId(id: string): { pluginId: string; localId: st
 
 export function isPluginPresetId(id: string): boolean {
   return parsePluginPresetId(id) !== undefined;
+}
+
+/** 会话预设拆成「自建预设」和「插件预设」两层：直接选插件预设时它必须可用；自建预设叠加的插件预设可缺省 */
+export function presetOverlay(
+  presetId: string | undefined,
+  resolve: (id?: string) => Preset | undefined
+): { preset?: Preset; pluginPresetId?: string; required: boolean } {
+  if (presetId && isPluginPresetId(presetId)) return { pluginPresetId: presetId, required: true };
+  const preset = resolve(presetId);
+  const pluginPresetId =
+    preset?.pluginPresetId && isPluginPresetId(preset.pluginPresetId)
+      ? preset.pluginPresetId
+      : undefined;
+  return {
+    ...(preset ? { preset } : {}),
+    ...(pluginPresetId ? { pluginPresetId } : {}),
+    required: false,
+  };
 }

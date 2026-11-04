@@ -32,7 +32,7 @@ import {
   type ModelCredentialContext,
   modelUsability,
 } from '@shared/defaultModel';
-import { isPluginPresetId } from '@shared/extensionPlugins/preset';
+import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
@@ -1144,24 +1144,6 @@ export function pluginPresetInstruction<T>(
   global: () => T | undefined
 ): T | undefined {
   return own ?? global();
-}
-
-/** 会话预设拆成「自建预设」和「插件预设」两层：直接选插件预设时它必须可用；自建预设叠加的插件预设可缺省 */
-export function presetOverlay(
-  presetId: string | undefined,
-  resolve: (id?: string) => Preset | undefined
-): { preset?: Preset; pluginPresetId?: string; required: boolean } {
-  if (presetId && isPluginPresetId(presetId)) return { pluginPresetId: presetId, required: true };
-  const preset = resolve(presetId);
-  const pluginPresetId =
-    preset?.pluginPresetId && isPluginPresetId(preset.pluginPresetId)
-      ? preset.pluginPresetId
-      : undefined;
-  return {
-    ...(preset ? { preset } : {}),
-    ...(pluginPresetId ? { pluginPresetId } : {}),
-    required: false,
-  };
 }
 
 /** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Claude 插件在前，Enso 插件按生效的插件预设圈定 */

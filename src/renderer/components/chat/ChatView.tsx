@@ -1,6 +1,7 @@
 import { agentTypeDisplayName, ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
+import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
@@ -79,6 +80,7 @@ export function ChatView() {
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const voiceInputEnabled = useSettingsStore((state) => state.voiceInputEnabled);
   const voiceModel = useSettingsStore((state) => state.voiceModel);
+  const presets = useSettingsStore((state) => state.presets);
   const { status: speechStatus } = useSpeechStatus(voiceInputEnabled);
   // 按本窗口的选择判断：换模型后 Main 同步设置有延迟，status.selected 可能还是旧的
   const voiceReady =
@@ -86,6 +88,9 @@ export function ChatView() {
     speechStatus?.state !== 'unsupported' &&
     speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
   const chrome = useSessionsStore(useShallow(selectChatChrome));
+  const pluginPresetId =
+    presetOverlay(chrome?.presetId, (id) => presets.find((preset) => preset.id === id))
+      .pluginPresetId ?? null;
   const memberName = useMemberName(chrome?.displayedParentId ? chrome.agentType : undefined);
   const oauthSnapshot = useOauthCredentialStore((state) => state.snapshot);
   const enabledProviders = useUsableProviders();
@@ -472,6 +477,7 @@ export function ChatView() {
               Boolean(chrome.rewinding || chrome.restoringFiles)
             }
             focusKey={chrome.id}
+            pluginPresetId={pluginPresetId}
             planMode={planning}
             savePastedText={
               project?.kind === 'ssh'

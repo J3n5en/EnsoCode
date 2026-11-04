@@ -1,10 +1,10 @@
+import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { describe, expect, it } from 'vitest';
 import {
   applyPluginPresetOverrides,
   mergePresetPromptKit,
   pluginPresetInstruction,
   pluginSkillPathsForMenu,
-  presetOverlay,
 } from './agentHost';
 
 const resolveModel = (model: { providerId: string; modelId: string }) =>

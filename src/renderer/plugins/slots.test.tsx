@@ -46,18 +46,35 @@ describe('插件挂点错误隔离', () => {
     registerPluginSlot({
       pluginId: 'a.b',
       slot: 'composer.left',
-      component: () => createElement('i', { 'data-slot': 'one' }, 'one'),
+      component: (props) =>
+        createElement(
+          'i',
+          { 'data-slot': 'one', 'data-preset': String(props.pluginPresetId) },
+          'one'
+        ),
     });
     registerPluginSlot({
       pluginId: 'a.b',
       slot: 'composer.left',
-      component: () => createElement('i', { 'data-slot': 'two' }, 'two'),
+      component: (props) =>
+        createElement(
+          'i',
+          { 'data-slot': 'two', 'data-preset': String(props.pluginPresetId) },
+          'two'
+        ),
     });
     const html = renderToStaticMarkup(
-      createElement(PluginComposerSlots, { side: 'left', sessionId: 's1', draft: '', busy: false })
+      createElement(PluginComposerSlots, {
+        side: 'left',
+        sessionId: 's1',
+        draft: '',
+        busy: false,
+        pluginPresetId: 'plugin:enso.pstack:poteto',
+      })
     );
     expect(html).toContain('data-slot="one"');
     expect(html).toContain('data-slot="two"');
+    expect(html).toContain('data-preset="plugin:enso.pstack:poteto"');
   });
 
   it('没有思考正文挂点时仍渲染原文段落', () => {
