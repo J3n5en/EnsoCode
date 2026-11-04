@@ -607,7 +607,7 @@ export default function App() {
                   onToggleCollapse={() => setCollapsed((v) => !v)}
                   onOpenSearch={() => setSearchOpen(true)}
                 />
-                {!collapsed && <ResizeHandle gap={desktopShell} onResize={handleResize} />}
+                {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
               </>
             )}
             <div
