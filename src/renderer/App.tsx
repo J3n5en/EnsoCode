@@ -420,8 +420,9 @@ export default function App() {
     };
   }, [mainEl]);
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
-  // mac 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行（Windows/Linux 右上角是系统按钮）
-  const titleRowPanel = desktopShell && chromeKind === 'mac';
+  // 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行；Windows 原生按钮由面板 tab 条右端让位，
+  // Linux 自绘按钮在顶栏里会被面板盖住，保持独立卡片
+  const titleRowPanel = desktopShell && (chromeKind === 'mac' || chromeKind === 'windows');
   const sideInTitleRow =
     titleRowPanel &&
     sideOpen &&
@@ -482,18 +483,26 @@ export default function App() {
           leading={
             <div className="flex items-center gap-0.5">
               {!remoteNodeActive && (
-                <button
-                  type="button"
-                  className={TOOLBAR_BUTTON}
-                  onClick={() => setCollapsed((v) => !v)}
-                  title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
-                >
-                  {collapsed ? (
-                    <PanelLeft className="h-4 w-4" />
-                  ) : (
-                    <PanelLeftClose className="h-4 w-4" />
+                // Windows/Linux 顶栏贴左：开关居中落在折叠栏宽度内，与下方图标同一竖线
+                <div
+                  className={cn(
+                    chromeKind !== 'mac' && 'flex justify-center',
+                    chromeKind !== 'mac' && (desktopShell ? 'w-[48px]' : 'w-12')
                   )}
-                </button>
+                >
+                  <button
+                    type="button"
+                    className={TOOLBAR_BUTTON}
+                    onClick={() => setCollapsed((v) => !v)}
+                    title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
+                  >
+                    {collapsed ? (
+                      <PanelLeft className="h-4 w-4" />
+                    ) : (
+                      <PanelLeftClose className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               )}
               {desktopShell && (
                 <>
@@ -520,6 +529,7 @@ export default function App() {
           centered={modeSwitch ?? undefined}
           centerOver={desktopShell ? mainBox : undefined}
           className={cn(
+            chromeKind !== 'mac' && !remoteNodeActive && 'pl-0',
             desktopShell && 'border-b-0',
             desktopShell && (chromeKind === 'windows' ? 'bg-canvas' : 'bg-transparent'),
             // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐

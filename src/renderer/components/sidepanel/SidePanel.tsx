@@ -1,4 +1,5 @@
 import { botBrowserChatId } from '@shared/bots/browser';
+import { WINDOWS_CAPTION_BUTTONS_WIDTH } from '@shared/windowControls';
 import type {
   DockviewApi,
   DockviewReadyEvent,
@@ -31,6 +32,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -493,6 +495,7 @@ function SidePanelHeaderActions({
   const titleRow = useContext(TitleRowContext);
   const topRight = useIsTopRightGroup(containerApi, group);
   const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
+  const windows = useWindowChromeKind() === 'windows';
   return (
     <div className="flex h-full items-center gap-0.5">
       <button
@@ -558,6 +561,16 @@ function SidePanelHeaderActions({
         >
           <PanelRight className="h-4 w-4" />
         </button>
+      )}
+      {titleRow && topRight && windows && (
+        // 给 Windows 原生最小化/最大化/关闭让位（扣掉工作区 8px 右边距、tab 条右内边距与按钮间距）
+        <span
+          aria-hidden
+          className="shrink-0"
+          style={{
+            width: `calc(100vw - env(titlebar-area-width, calc(100vw - ${WINDOWS_CAPTION_BUTTONS_WIDTH}px)) - 19px)`,
+          }}
+        />
       )}
     </div>
   );
