@@ -1590,7 +1590,7 @@ export function Sidebar({
           </SortableContext>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t p-2">
+        <div className="flex shrink-0 items-center justify-between p-2">
           <button
             type="button"
             onClick={onToggleCollapse}

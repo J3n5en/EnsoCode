@@ -140,7 +140,7 @@ export function GroupChips({
       : undefined;
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b px-2 pb-2">
+    <div className="flex shrink-0 items-center gap-1 px-2 pb-2">
       {showSearch && (
         <label className="flex h-6.5 min-w-0 flex-1 cursor-text items-center gap-2 rounded-full border border-transparent bg-muted/60 pr-0.5 pl-2.5 text-xs text-muted-foreground transition-colors focus-within:border-brand/45">
           <TextSearch className="size-3.5 shrink-0" />
