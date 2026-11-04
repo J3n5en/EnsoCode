@@ -393,6 +393,32 @@ export default function App() {
     },
     [desktopShell]
   );
+  // Code/Bot 切换按对话卡片居中：侧栏、右侧面板开合与拖宽都会改变卡片宽度
+  const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
+  const [mainBox, setMainBox] = useState<{ left: number; right: number } | null>(null);
+  useEffect(() => {
+    const el = mainEl;
+    if (!el) {
+      setMainBox(null);
+      return;
+    }
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setMainBox((prev) =>
+        prev && prev.left === r.left && prev.right === r.right
+          ? prev
+          : { left: r.left, right: r.right }
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [mainEl]);
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
   // mac 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行（Windows/Linux 右上角是系统按钮）
   const titleRowPanel = desktopShell && chromeKind === 'mac';
@@ -403,47 +429,44 @@ export default function App() {
     !isMobile &&
     !botModeActive &&
     !remoteNodeActive;
+  const sideToggle = remoteNodeActive ? null : (
+    <button
+      type="button"
+      className={cn(
+        'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        isMobile ? 'h-9 w-9' : desktopShell ? TOOLBAR_BUTTON : 'h-7 w-7',
+        (botModeActive ? botPanelOpen : sideOpen) ? 'text-foreground' : 'text-muted-foreground'
+      )}
+      onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
+      aria-label={t('Toggle side panel')}
+      title={t('Toggle side panel')}
+    >
+      <PanelRight className="h-4 w-4" />
+    </button>
+  );
+  const chatWideToggle = (
+    <button
+      type="button"
+      className={cn(
+        'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        chatWide ? 'text-foreground' : 'text-muted-foreground',
+        isMobile && 'hidden'
+      )}
+      onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
+      aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
+      title={chatWide ? t('Use reading width') : t('Use full chat width')}
+    >
+      {chatWide ? <FoldHorizontal className="h-4 w-4" /> : <UnfoldHorizontal className="h-4 w-4" />}
+    </button>
+  );
   const panelActions = (
     <>
-      <button
-        type="button"
-        className={cn(
-          'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-          chatWide ? 'text-foreground' : 'text-muted-foreground',
-          isMobile && 'hidden'
-        )}
-        onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
-        aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
-        title={chatWide ? t('Use reading width') : t('Use full chat width')}
-      >
-        {chatWide ? (
-          <FoldHorizontal className="h-4 w-4" />
-        ) : (
-          <UnfoldHorizontal className="h-4 w-4" />
-        )}
-      </button>
-      {!remoteNodeActive && (
-        <button
-          type="button"
-          className={cn(
-            'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-            isMobile ? 'h-9 w-9' : 'h-7 w-7',
-            (botModeActive ? botPanelOpen : sideOpen) ? 'text-foreground' : 'text-muted-foreground'
-          )}
-          onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
-          aria-label={t('Toggle side panel')}
-          title={t('Toggle side panel')}
-        >
-          <PanelRight className="h-4 w-4" />
-        </button>
-      )}
+      {chatWideToggle}
+      {sideToggle}
     </>
   );
-  const shellChrome: ShellChrome | null = desktopShell
-    ? {
-        trailing: panelActions,
-      }
-    : null;
+  // 桌面外壳：右侧面板开关在窗口顶栏（面板升进顶栏时由面板 tab 条右端接管），卡片顶栏只留铺满开关
+  const shellChrome: ShellChrome | null = desktopShell ? { trailing: chatWideToggle } : null;
 
   return (
     <div
@@ -456,10 +479,6 @@ export default function App() {
       <OauthCredentialBootstrap />
       {chromeKind !== 'mobile' ? (
         <TitleBar
-          className={cn(
-            desktopShell && 'border-b-0',
-            desktopShell && (chromeKind === 'windows' ? 'bg-canvas' : 'bg-transparent')
-          )}
           leading={
             <div className="flex items-center gap-0.5">
               {!remoteNodeActive && (
@@ -499,8 +518,14 @@ export default function App() {
             </div>
           }
           centered={modeSwitch ?? undefined}
-          reserveRight={sideInTitleRow ? sideWidth + 8 : undefined}
-          actions={desktopShell ? undefined : panelActions}
+          centerOver={desktopShell ? mainBox : undefined}
+          className={cn(
+            desktopShell && 'border-b-0',
+            desktopShell && (chromeKind === 'windows' ? 'bg-canvas' : 'bg-transparent'),
+            // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐
+            desktopShell && chromeKind === 'mac' && 'pr-4'
+          )}
+          actions={desktopShell ? (sideInTitleRow ? undefined : sideToggle) : panelActions}
         />
       ) : (
         <TitleBar
@@ -595,6 +620,7 @@ export default function App() {
               )}
             >
               <div
+                ref={setMainEl}
                 data-enso="main"
                 className={cn(
                   'flex min-h-0 min-w-0 flex-1 flex-col bg-background',

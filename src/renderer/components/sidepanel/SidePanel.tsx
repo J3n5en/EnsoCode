@@ -16,6 +16,7 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
+  PanelRight,
   Plus,
   SquareTerminal,
   Workflow,
@@ -77,6 +78,30 @@ import './sidepanel-dock.css';
 
 /** dockview 的 part 组件在独立渲染树中,cwd 等上下文经 context 注入 */
 const PanelContext = createContext<{ conversationId?: string; projectId?: string }>({});
+/** 面板升进窗口顶栏行：右上角那组 tab 条接管窗口顶栏的面板开关 */
+const TitleRowContext = createContext(false);
+
+/** 该组的 tab 条是否在 dock 右上角（分屏后只有它挨着窗口顶栏右端） */
+function useIsTopRightGroup(
+  containerApi: DockviewApi,
+  group?: IDockviewHeaderActionsProps['group']
+): boolean {
+  const [topRight, setTopRight] = useState(!group);
+  useEffect(() => {
+    if (!group) return;
+    const check = () => {
+      const dock = group.element.closest('.dv-dockview')?.getBoundingClientRect();
+      const box = group.element.getBoundingClientRect();
+      setTopRight(
+        !!dock && Math.abs(box.top - dock.top) < 1 && Math.abs(box.right - dock.right) < 1
+      );
+    };
+    check();
+    const sub = containerApi.onDidLayoutChange(check);
+    return () => sub.dispose();
+  }, [containerApi, group]);
+  return topRight;
+}
 
 function nextTerminalTitle(api: DockviewApi, label: string): string {
   const count = api.panels.length;
@@ -465,6 +490,9 @@ function SidePanelHeaderActions({
   const toggleFullscreen = useSidePanelStore((s) => s.toggleFullscreen);
   const workflowAvailable = useWorkflowAvailable(projectId);
   const isMobile = useIsMobile();
+  const titleRow = useContext(TitleRowContext);
+  const topRight = useIsTopRightGroup(containerApi, group);
+  const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   return (
     <div className="flex h-full items-center gap-0.5">
       <button
@@ -520,6 +548,17 @@ function SidePanelHeaderActions({
           addPluginViewPanel(containerApi, conversationId, projectId, view, group)
         }
       />
+      {titleRow && topRight && (
+        <button
+          type="button"
+          className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+          onClick={toggleOpen}
+          aria-label={t('Toggle side panel')}
+          title={t('Toggle side panel')}
+        >
+          <PanelRight className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -866,9 +905,11 @@ export function SidePanel({
         >
           {visibleIds.length > 0 ? (
             <div className="relative min-h-0 flex-1">
-              {visibleIds.map((id) => (
-                <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
-              ))}
+              <TitleRowContext.Provider value={titleRow && !cover}>
+                {visibleIds.map((id) => (
+                  <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
+                ))}
+              </TitleRowContext.Provider>
             </div>
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
