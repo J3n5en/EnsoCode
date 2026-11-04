@@ -664,6 +664,28 @@ describe('agentHost 成员 agent type', () => {
       setNativeAgentTypeSource(null);
     }
   });
+
+  it('原生插件类型声明 agent_pick：配置了子代理模型才允许选模型，否则跟随会话', () => {
+    setSettings();
+    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
+    const picker = [
+      {
+        pluginId: 'example.demo',
+        name: 'demo:picker',
+        description: 'd',
+        systemPrompt: 'p',
+        tools: 'all' as const,
+        skillPaths: [],
+        modelMode: 'agent_pick' as const,
+      },
+    ];
+    const find = (hasModels: boolean) =>
+      configuredAgentTypes(new Set(), hasModels, noClaude, picker).find(
+        (entry) => entry.name === 'demo:picker'
+      );
+    expect(find(true)?.allowModelOverride).toBe(true);
+    expect(find(false)?.allowModelOverride).toBe(false);
+  });
 });
 
 describe('resolveModelSelection OAuth 目录物化', () => {

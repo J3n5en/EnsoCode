@@ -992,7 +992,7 @@ export function spawnSession(
         subagentModels.length > 0,
         plugins,
         // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
-        bot ? [] : undefined
+        bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
       );
   // 当前平台不能操作桌面时禁用 computer，避免模型反复调用必失败的工具
   const extraDisabledTools = options?.extraDisabledTools ?? [];

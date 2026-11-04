@@ -98,6 +98,8 @@ export interface PluginPresetContrib {
   name: string;
   skills: string[];
   mcpServers: string[];
+  /** 圈定的子代理类型：被任一预设列出的类型只在该预设生效时下发 */
+  agentTypes?: string[];
   instruction?: string;
   systemPrompt?: string;
   systemPromptTail?: string;
@@ -117,6 +119,8 @@ export interface PluginAgentTypeContrib {
   systemPrompt: string;
   tools: 'all' | 'readonly';
   skills: string[];
+  /** agent_pick：主 agent 派生时可选模型；缺省跟随会话 */
+  modelMode?: 'agent_pick';
 }
 
 export interface ExtensionPluginManifest {
@@ -512,6 +516,54 @@ export function parseExtensionPluginManifest(
     }
     return value;
   };
+  const agentTypes: PluginAgentTypeContrib[] = [];
+  const agentTypeRaw = list('agentTypes');
+  if (agentTypeRaw.length > MAX_PLUGIN_AGENT_TYPES)
+    errors.push(`子代理类型最多 ${MAX_PLUGIN_AGENT_TYPES} 个`);
+  for (const item of agentTypeRaw) {
+    const name = isRecord(item) ? item.name : undefined;
+    if (
+      !isRecord(item) ||
+      typeof name !== 'string' ||
+      name.length > MAX_AGENT_TYPE_NAME ||
+      !AGENT_TYPE_NAME.test(name) ||
+      isReservedAgentTypeName(name) ||
+      BUILTIN_AGENT_TYPES.some((builtin) => builtin.name === name)
+    ) {
+      errors.push(`子代理类型名不合法：${String(name)}`);
+      continue;
+    }
+    if (!isNonEmptyString(item.description, 1024))
+      errors.push(`子代理类型 ${name} 缺少 description`);
+    const systemPrompt = promptPath(item.systemPrompt, `子代理类型 ${name} 的 systemPrompt`);
+    if (item.systemPrompt === undefined) errors.push(`子代理类型 ${name} 缺少 systemPrompt`);
+    const tools = item.tools ?? 'all';
+    if (tools !== 'all' && tools !== 'readonly')
+      errors.push(`子代理类型 ${name} 的 tools 只能是 all 或 readonly`);
+    if (
+      item.modelMode !== undefined &&
+      item.modelMode !== 'follow' &&
+      item.modelMode !== 'agent_pick'
+    )
+      errors.push(`子代理类型 ${name} 的 modelMode 只能是 follow 或 agent_pick`);
+    const typeSkills = stringList(
+      item.skills,
+      `子代理类型 ${name} 的 skills`,
+      (p) => typeof p === 'string' && skills.includes(p)
+    );
+    if (Array.isArray(item.skills) && item.skills.some((p) => !skills.includes(p)))
+      errors.push(`子代理类型 ${name} 引用了未声明的 skill`);
+    agentTypes.push({
+      name,
+      description: typeof item.description === 'string' ? item.description.trim() : '',
+      systemPrompt: systemPrompt ?? '',
+      tools: tools === 'readonly' ? 'readonly' : 'all',
+      skills: typeSkills,
+      ...(item.modelMode === 'agent_pick' ? { modelMode: 'agent_pick' as const } : {}),
+    });
+  }
+  uniqueIds(agentTypes, '子代理类型');
+
   const presets: PluginPresetContrib[] = [];
   const presetRaw = list('presets');
   if (presetRaw.length > MAX_PRESETS) errors.push(`预设最多 ${MAX_PRESETS} 个`);
@@ -540,6 +592,16 @@ export function parseExtensionPluginManifest(
       )
     )
       errors.push(`预设 ${item.id} 引用了未声明的 MCP 服务`);
+    const presetAgentTypes = stringList(
+      item.agentTypes,
+      `预设 ${item.id} 的 agentTypes`,
+      (name) => typeof name === 'string' && agentTypes.some((type) => type.name === name)
+    );
+    if (
+      Array.isArray(item.agentTypes) &&
+      item.agentTypes.some((name) => !agentTypes.some((type) => type.name === name))
+    )
+      errors.push(`预设 ${item.id} 引用了未声明的子代理类型`);
     const instruction = promptPath(item.instruction, `预设 ${item.id} 的指令`);
     const systemPrompt = promptPath(item.systemPrompt, `预设 ${item.id} 的角色描述`);
     const systemPromptTail = promptPath(item.systemPromptTail, `预设 ${item.id} 的真尾`);
@@ -577,6 +639,7 @@ export function parseExtensionPluginManifest(
       name: typeof item.name === 'string' ? item.name.trim() : '',
       skills: presetSkills,
       mcpServers: presetMcp,
+      ...(presetAgentTypes.length > 0 ? { agentTypes: presetAgentTypes } : {}),
       ...(instruction ? { instruction } : {}),
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(systemPromptTail ? { systemPromptTail } : {}),
@@ -596,47 +659,6 @@ export function parseExtensionPluginManifest(
     });
   }
   uniqueIds(presets, '预设');
-
-  const agentTypes: PluginAgentTypeContrib[] = [];
-  const agentTypeRaw = list('agentTypes');
-  if (agentTypeRaw.length > MAX_PLUGIN_AGENT_TYPES)
-    errors.push(`子代理类型最多 ${MAX_PLUGIN_AGENT_TYPES} 个`);
-  for (const item of agentTypeRaw) {
-    const name = isRecord(item) ? item.name : undefined;
-    if (
-      !isRecord(item) ||
-      typeof name !== 'string' ||
-      name.length > MAX_AGENT_TYPE_NAME ||
-      !AGENT_TYPE_NAME.test(name) ||
-      isReservedAgentTypeName(name) ||
-      BUILTIN_AGENT_TYPES.some((builtin) => builtin.name === name)
-    ) {
-      errors.push(`子代理类型名不合法：${String(name)}`);
-      continue;
-    }
-    if (!isNonEmptyString(item.description, 1024))
-      errors.push(`子代理类型 ${name} 缺少 description`);
-    const systemPrompt = promptPath(item.systemPrompt, `子代理类型 ${name} 的 systemPrompt`);
-    if (item.systemPrompt === undefined) errors.push(`子代理类型 ${name} 缺少 systemPrompt`);
-    const tools = item.tools ?? 'all';
-    if (tools !== 'all' && tools !== 'readonly')
-      errors.push(`子代理类型 ${name} 的 tools 只能是 all 或 readonly`);
-    const typeSkills = stringList(
-      item.skills,
-      `子代理类型 ${name} 的 skills`,
-      (p) => typeof p === 'string' && skills.includes(p)
-    );
-    if (Array.isArray(item.skills) && item.skills.some((p) => !skills.includes(p)))
-      errors.push(`子代理类型 ${name} 引用了未声明的 skill`);
-    agentTypes.push({
-      name,
-      description: typeof item.description === 'string' ? item.description.trim() : '',
-      systemPrompt: systemPrompt ?? '',
-      tools: tools === 'readonly' ? 'readonly' : 'all',
-      skills: typeSkills,
-    });
-  }
-  uniqueIds(agentTypes, '子代理类型');
 
   const methods: PluginMethodContrib[] = [];
   for (const m of list('methods')) {

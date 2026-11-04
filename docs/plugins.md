@@ -139,7 +139,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
-- `presets`：`{ id, name, skills, mcpServers, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills` 和 `mcpServers` 只能引用本插件已经声明的 skill 目录和 MCP 服务名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
+- `presets`：`{ id, name, skills, mcpServers, agentTypes?, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills`、`mcpServers` 和 `agentTypes` 只能引用本插件已经声明的 skill 目录、MCP 服务名和子代理类型名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改；用户也可以在自建预设的「高级」里叠加它。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
 - `agentTypes`：`{ name, description, systemPrompt, tools?, skills? }`，最多 20 个，见下文「子代理类型」。
 - `methods`：`{ name, timeoutMs }`，给 `renderer.handle` 注册的方法声明更长的超时，1000 到 120000 毫秒的整数。没声明的方法 2 秒超时。
 - `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）或 `path`（可带 `pathKind: 'file' | 'directory'`）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
@@ -461,8 +461,9 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 | `systemPrompt` | 必填，插件目录里的 Markdown 文件，作为子代理的系统提示。安装时必须存在；运行时读不出（缺失、为空或超过 256KB）的类型会被跳过并写进插件日志 |
 | `tools` | `all`（缺省）或 `readonly`，按声明原样生效，不从工具名推断 |
 | `skills` | 可选，只能引用本插件 `skills` 里已声明的目录，派生这个类型的子代理时附加。不受预设范围影响 |
+| `modelMode` | 可选，`follow`（缺省）或 `agent_pick`。`agent_pick` 时主 agent 派生可传 `model` / `thinking`；用户没配置可选子代理模型时退回跟随会话 |
 
-类型跟随会话模型（`follow`）。插件启用后立即出现在子代理类型列表里，停用或卸载后立即消失；Bot 会话不下发 Enso 插件的子代理类型。
+插件启用后立即出现在子代理类型列表里，停用或卸载后立即消失；Bot 会话不下发 Enso 插件的子代理类型。被某个 `presets` 的 `agentTypes` 点名的类型只在那个预设生效时（直接选中，或被自建预设叠加）下发给会话；设置页列表和 @ 派发仍列出全部类型。
 
 同名时的优先级（名字去首尾空白、忽略大小写比较）：用户自定义类型 > Claude 插件的子代理 > Enso 插件。Enso 插件之间按插件 id 排序，排在前面的先占名字。被挤掉的类型写进对应插件的日志（每个类型只记一次）。
 

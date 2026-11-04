@@ -14,6 +14,7 @@ export type RuntimeAgentType = AgentTypeEntry & { pluginSkillPaths?: string[] };
 /** 原生 Enso 插件（enso-plugin.json）声明的子代理类型；正文与技能目录已由插件服务解析 */
 export interface NativePluginAgentDef extends PluginAgentDef {
   pluginId: string;
+  modelMode?: 'agent_pick';
 }
 
 /** 合并时因重名被丢弃的插件类型；shadowedBy 是占住名字的一方 */
@@ -64,13 +65,13 @@ export function pluginAgentTypeId(name: string): string {
 
 const nameKey = (name: string) => name.trim().toLowerCase();
 
-const toRuntime = (agent: PluginAgentDef): RuntimeAgentType => ({
+const toRuntime = (agent: PluginAgentDef & { modelMode?: 'agent_pick' }): RuntimeAgentType => ({
   id: pluginAgentTypeId(agent.name),
   name: agent.name,
   description: agent.description || agent.name,
   systemPrompt: agent.systemPrompt,
   tools: agent.tools,
-  modelMode: 'follow',
+  modelMode: agent.modelMode ?? 'follow',
   pluginSkillPaths: agent.skillPaths,
 });
 

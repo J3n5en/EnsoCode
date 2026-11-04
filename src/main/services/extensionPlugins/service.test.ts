@@ -614,6 +614,22 @@ describe('ExtensionPluginService', () => {
       expect(hits).toHaveLength(1);
       expect(hits[0]).toContain('demo:reviewer');
     });
+
+    it('被插件预设圈定的类型只在该预设生效时下发给会话，全局列表照常列出', async () => {
+      const scoped = JSON.parse(files()['enso-plugin.json']);
+      scoped.contributes.presets = [{ id: 'mode', name: 'Mode', agentTypes: ['demo:reviewer'] }];
+      await install({ ...files(), 'enso-plugin.json': JSON.stringify(scoped) });
+      await service.setEnabled('example.demo', true);
+      const names = (activePresetId?: string) =>
+        service.agentTypesForSpawn({ activePresetId }).map((t) => t.name);
+      expect(names()).toEqual(['worker-x']);
+      expect(names('user-preset')).toEqual(['worker-x']);
+      expect(names('plugin:example.demo:mode')).toEqual(['demo:reviewer', 'worker-x']);
+      expect(service.agentTypesForSpawn().map((t) => t.name)).toEqual([
+        'demo:reviewer',
+        'worker-x',
+      ]);
+    });
   });
 
   it('处理器上下文带上 Main 推导的项目根', async () => {

@@ -72,6 +72,15 @@ describe('mergePluginAgentTypes', () => {
     ]);
   });
 
+  it('原生插件类型声明 agent_pick 时保留，供主 agent 选模型', () => {
+    const { types } = mergePluginAgentTypes(
+      [],
+      [],
+      [native('example.a', 'a:picker', { modelMode: 'agent_pick' })]
+    );
+    expect(types[0]?.modelMode).toBe('agent_pick');
+  });
+
   it('同名优先级：用户自定义 > Claude 插件 > 原生插件，被丢弃的重名在返回值里', () => {
     const { types, dropped } = mergePluginAgentTypes(
       [custom('Shared')],

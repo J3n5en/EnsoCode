@@ -411,6 +411,29 @@ describe('parseExtensionPluginManifest', () => {
       expect(errorsOf(withTypes([agentType], []))).not.toEqual([]);
     });
 
+    it('modelMode 可声明 agent_pick，缺省跟随会话，其他值拒绝', () => {
+      const ok = parseExtensionPluginManifest(
+        withTypes([{ ...agentType, modelMode: 'agent_pick' }]),
+        '0.2.12'
+      );
+      expect(ok.ok && ok.manifest.contributes.agentTypes[0]?.modelMode).toBe('agent_pick');
+      expect(errorsOf(withTypes([{ ...agentType, modelMode: 'follow' }]))).toEqual([]);
+      expect(errorsOf(withTypes([{ ...agentType, modelMode: 'fixed' }]))).not.toEqual([]);
+    });
+
+    it('预设可用 agentTypes 圈定子代理类型，只能引用本插件声明的类型', () => {
+      const withPreset = (agentTypes: unknown) => ({
+        ...withTypes([agentType]),
+        contributes: {
+          ...withTypes([agentType]).contributes,
+          presets: [{ id: 'mode', name: 'Mode', agentTypes }],
+        },
+      });
+      const ok = parseExtensionPluginManifest(withPreset(['demo:reviewer']), '0.2.12');
+      expect(ok.ok && ok.manifest.contributes.presets[0]?.agentTypes).toEqual(['demo:reviewer']);
+      expect(errorsOf(withPreset(['demo:other']))).not.toEqual([]);
+    });
+
     it('同插件内 name 不能重复（忽略大小写），且最多 20 个', () => {
       expect(errorsOf(withTypes([agentType, { ...agentType }]))).not.toEqual([]);
       const many = Array.from({ length: 21 }, (_, i) => ({ ...agentType, name: `t${i}` }));
