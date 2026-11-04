@@ -1,12 +1,11 @@
 import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { WINDOWS_CAPTION_BUTTONS_WIDTH } from '@shared/windowControls';
-import { Copy, Minus, Sparkles, Square, X } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useRef } from 'react';
 import { useNativeWindowControls } from '@/hooks/useNativeWindowControls';
-import { useIsMobile } from '@/hooks/useViewport';
-import { useWindowMaximized } from '@/hooks/useWindowMaximized';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { LinuxWindowButtons, useWindowChromeKind } from './WindowChrome';
 
 interface TitleBarProps {
   title?: string;
@@ -23,6 +22,8 @@ interface TitleBarProps {
    * Keep the left title except on macOS, where traffic lights take precedence.
    */
   centered?: React.ReactNode;
+  /** 居中内容对齐的横向区间（窗口坐标，如对话卡片）；缺省按整行居中 */
+  centerOver?: { left: number; right: number } | null;
 }
 
 export function SummonEnsoButton({ label = true }: { label?: boolean }) {
@@ -51,20 +52,25 @@ export function SummonEnsoButton({ label = true }: { label?: boolean }) {
  * Preserve native caption controls and Snap Layouts on Windows, traffic lights
  * on macOS, and renderer caption controls on Linux.
  */
-export function TitleBar({ title, className, actions, leading, centered }: TitleBarProps) {
-  const { t } = useI18n();
-  // 窄屏或远程浏览器：没有系统窗口控件，不留红绿灯/原生按钮空间，也不画自绘按钮
-  const isMobile = useIsMobile() || Boolean(window.electronAPI.remote);
-  const isMac = !isMobile && window.electronAPI.env.platform === 'darwin';
-  const isWindows = !isMobile && window.electronAPI.env.platform === 'win32';
+export function TitleBar({
+  title,
+  className,
+  actions,
+  leading,
+  centered,
+  centerOver,
+}: TitleBarProps) {
+  const kind = useWindowChromeKind();
+  const isMac = kind === 'mac';
+  const isWindows = kind === 'windows';
   const headerRef = useRef<HTMLElement>(null);
   useNativeWindowControls(headerRef);
-  const maximized = useWindowMaximized();
   const nativeControlsInset = `calc(100% - env(titlebar-area-width, calc(100% - ${WINDOWS_CAPTION_BUTTONS_WIDTH}px)))`;
 
   return (
     <header
       ref={headerRef}
+      data-enso="title-bar"
       data-native-window-controls={isWindows || undefined}
       style={isWindows ? { paddingRight: nativeControlsInset } : undefined}
       className={cn(
@@ -83,7 +89,13 @@ export function TitleBar({ title, className, actions, leading, centered }: Title
       {centered && (
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={isWindows ? { right: nativeControlsInset } : undefined}
+          style={
+            centerOver
+              ? { left: centerOver.left, right: `calc(100% - ${centerOver.right}px)` }
+              : isWindows
+                ? { right: nativeControlsInset }
+                : undefined
+          }
         >
           <div className="no-drag pointer-events-auto">{centered}</div>
         </div>
@@ -91,35 +103,9 @@ export function TitleBar({ title, className, actions, leading, centered }: Title
 
       {actions && <div className="no-drag ml-auto flex items-center gap-1">{actions}</div>}
 
-      {!isMac && !isWindows && !isMobile && (
-        <div className={cn('no-drag flex h-full items-center', !actions && 'ml-auto')}>
-          <button
-            type="button"
-            className="flex h-full w-12 items-center justify-center hover:bg-muted"
-            onClick={() => window.electronAPI.window.minimize()}
-            aria-label={t('Minimize')}
-            title={t('Minimize')}
-          >
-            <Minus className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="flex h-full w-12 items-center justify-center hover:bg-muted"
-            onClick={() => window.electronAPI.window.maximize()}
-            aria-label={maximized ? t('Restore') : t('Maximize')}
-            title={maximized ? t('Restore') : t('Maximize')}
-          >
-            {maximized ? <Copy className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            type="button"
-            className="flex h-full w-12 items-center justify-center hover:bg-destructive hover:text-destructive-foreground"
-            onClick={() => window.electronAPI.window.close()}
-            aria-label={t('Close')}
-            title={t('Close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
+      {kind === 'linux' && (
+        <div className={cn('flex h-full', !actions && 'ml-auto')}>
+          <LinuxWindowButtons />
         </div>
       )}
     </header>

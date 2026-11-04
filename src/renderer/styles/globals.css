@@ -55,65 +55,16 @@
 }
 
 @layer base {
+  /* 颜色由 src/shared/theme 派生，运行时写入 #enso-theme-tokens */
   :root {
     color-scheme: light;
     --font-family-mono: "JetBrains Mono", "Menlo", monospace;
     --font-size-base: 14px;
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0.014 285.82);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0.014 285.82);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0.014 285.82);
-    --primary: oklch(0.205 0.014 285.82);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.965 0.003 285.82);
-    --secondary-foreground: oklch(0.205 0.014 285.82);
-    --muted: oklch(0.965 0.003 285.82);
-    --muted-foreground: oklch(0.556 0.014 285.82);
-    --accent: oklch(0.965 0.003 285.82);
-    --accent-foreground: oklch(0.205 0.014 285.82);
-    --destructive: oklch(0.577 0.245 27.33);
-    --destructive-foreground: oklch(0.985 0 0);
-    --success: oklch(0.527 0.154 150.07);
-    --success-foreground: oklch(0.985 0 0);
-    --warning: oklch(0.769 0.189 70.08);
-    --warning-foreground: oklch(0.205 0.014 285.82);
-    --info: oklch(0.623 0.214 259.81);
-    --info-foreground: oklch(0.985 0 0);
-    --border: oklch(0.922 0.003 285.82);
-    --input: oklch(0.922 0.003 285.82);
-    --ring: oklch(0.708 0.014 285.82);
     --radius: 0.5rem;
   }
 
   .dark {
     color-scheme: dark;
-    --background: oklch(0.145 0.014 285.82);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.145 0.014 285.82);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.145 0.014 285.82);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0.014 285.82);
-    --secondary: oklch(0.269 0.014 285.82);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0.014 285.82);
-    --muted-foreground: oklch(0.708 0.014 285.82);
-    --accent: oklch(0.269 0.014 285.82);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.396 0.141 25.72);
-    --destructive-foreground: oklch(0.985 0 0);
-    --success: oklch(0.527 0.154 150.07);
-    --success-foreground: oklch(0.985 0 0);
-    --warning: oklch(0.769 0.189 70.08);
-    --warning-foreground: oklch(0.205 0.014 285.82);
-    --info: oklch(0.623 0.214 259.81);
-    --info-foreground: oklch(0.985 0 0);
-    --border: oklch(0.269 0.014 285.82);
-    --input: oklch(0.269 0.014 285.82);
-    --ring: oklch(0.439 0.014 285.82);
   }
 }
 
@@ -191,6 +142,11 @@
     -webkit-app-region: no-drag;
   }
 
+  /* 卡片顶栏整行可拖，行内的可交互元素逐个豁免，免得每处手写 no-drag */
+  .drag-region :is(button, a, input, textarea, select, [role]) {
+    -webkit-app-region: no-drag;
+  }
+
   /**
    * 菜单组件 no-drag 覆盖规则
    *
@@ -210,22 +166,31 @@
     pointer-events: auto !important;
   }
 
-  /* Scrollbar styling */
+  /* 滚动条：8px 命中区里画 4px 细滑块，平时透明，只在滚动中（data-scrolling，见 lib/scrollbars）或指针落在滑块上时显示 */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
 
-  ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/20 rounded-full;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    background-color: transparent;
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/40;
+  [data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--color-foreground) 18%, transparent);
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in oklab, var(--color-foreground) 30%, transparent);
   }
 
   /* Disable text selection */
@@ -311,36 +276,6 @@ html.bg-image-enabled .shiki span {
 /* 聊天列铺满：覆盖 CHAT_COL 的阶梯 max-w，两侧只留 padding */
 html.enso-chat-wide .enso-chat-col {
   max-width: none;
-}
-
-/*
- * 侧栏项目下的会话竖线：每行画自己那段并向上盖住 gap-y-0.5 行距；有状态点的行在点上下断开，
- * 与会话区工具时间线同一画法。圆心 x = pl-2 + 半个图标列、y = py-1.5 + 半个行高，均为 1rem；
- * 全用 rem 跟随界面字号缩放。
- */
-.enso-conv-tree [data-slot='conversation-row'] {
-  position: relative;
-}
-.enso-conv-tree [data-slot='conversation-row']::before,
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::after {
-  content: '';
-  position: absolute;
-  left: calc(1rem - 0.5px);
-  width: 1px;
-  background-color: var(--color-border);
-  pointer-events: none;
-}
-.enso-conv-tree [data-slot='conversation-row']::before {
-  top: -0.125rem;
-  bottom: 0;
-}
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::before {
-  bottom: auto;
-  height: 0.625rem;
-}
-.enso-conv-tree [data-slot='conversation-row']:has([data-slot='conversation-status'])::after {
-  top: 1.5rem;
-  bottom: 0;
 }
 
 /**

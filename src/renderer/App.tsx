@@ -8,11 +8,25 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FoldHorizontal, Menu, PanelRight, UnfoldHorizontal } from 'lucide-react';
+import {
+  FoldHorizontal,
+  Menu,
+  PanelLeft,
+  PanelLeftClose,
+  PanelRight,
+  Search,
+  SquarePen,
+  UnfoldHorizontal,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
+import {
+  type ShellChrome,
+  ShellChromeContext,
+  useWindowChromeKind,
+} from '@/components/app/WindowChrome';
 import { BotView } from '@/components/bots/BotView';
 import { ModeSwitch } from '@/components/bots/ModeSwitch';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
@@ -68,6 +82,7 @@ import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
 const dndCollision: CollisionDetection = (args) => {
@@ -77,6 +92,16 @@ const dndCollision: CollisionDetection = (args) => {
 
 const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
+
+function startNewConversation() {
+  const sessions = useSessionsStore.getState();
+  const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+  const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
+  if (projectId) void sessions.newConversation(projectId);
+}
+
+const TOOLBAR_BUTTON =
+  'no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 420;
 
@@ -153,10 +178,6 @@ export default function App() {
   // 右侧面板:手柄在面板左缘,向左拖加宽;拖拽中暂停宽度 spring 动画防抖动
   const [sideResizing, setSideResizing] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const handleSideResize = useCallback((deltaX: number) => {
-    const workspace = workspaceRef.current;
-    if (workspace) useSidePanelStore.getState().nudgeWidth(-deltaX, workspace.clientWidth);
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(WIDTH_KEY, String(width));
@@ -243,12 +264,6 @@ export default function App() {
       // activeTabId 指向已删 coworker 时 indexOf = -1,+1 后回落主会话
       const current = tabs.indexOf(parent.activeTabId);
       sessions.selectTab(parent.id, tabs[(current + direction + tabs.length) % tabs.length]);
-    };
-    const startNewConversation = () => {
-      const sessions = useSessionsStore.getState();
-      const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
-      const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-      if (projectId) void sessions.newConversation(projectId);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
@@ -357,73 +372,187 @@ export default function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
+  const chromeKind = useWindowChromeKind();
+  // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
+  const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
+  const handleSideResize = useCallback(
+    (deltaX: number) => {
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+      // 与 SidePanel 量宽口径一致：扣掉卡片外壳的画布内边距
+      const style = getComputedStyle(workspace);
+      const contentWidth =
+        workspace.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      useSidePanelStore
+        .getState()
+        .nudgeWidth(
+          -deltaX,
+          contentWidth,
+          desktopShell ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH
+        );
+    },
+    [desktopShell]
+  );
+  // Code/Bot 切换按对话卡片居中：侧栏、右侧面板开合与拖宽都会改变卡片宽度
+  const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
+  const [mainBox, setMainBox] = useState<{ left: number; right: number } | null>(null);
+  useEffect(() => {
+    const el = mainEl;
+    if (!el) {
+      setMainBox(null);
+      return;
+    }
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setMainBox((prev) =>
+        prev && prev.left === r.left && prev.right === r.right
+          ? prev
+          : { left: r.left, right: r.right }
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [mainEl]);
+  const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
+  // mac 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行（Windows/Linux 右上角是系统按钮）
+  const titleRowPanel = desktopShell && chromeKind === 'mac';
+  const sideInTitleRow =
+    titleRowPanel &&
+    sideOpen &&
+    !sideFullscreen &&
+    !isMobile &&
+    !botModeActive &&
+    !remoteNodeActive;
+  const sideToggle = remoteNodeActive ? null : (
+    <button
+      type="button"
+      className={cn(
+        'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        isMobile ? 'h-9 w-9' : desktopShell ? TOOLBAR_BUTTON : 'h-7 w-7',
+        (botModeActive ? botPanelOpen : sideOpen) ? 'text-foreground' : 'text-muted-foreground'
+      )}
+      onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
+      aria-label={t('Toggle side panel')}
+      title={t('Toggle side panel')}
+    >
+      <PanelRight className="h-4 w-4" />
+    </button>
+  );
+  const chatWideToggle = (
+    <button
+      type="button"
+      className={cn(
+        'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
+        chatWide ? 'text-foreground' : 'text-muted-foreground',
+        isMobile && 'hidden'
+      )}
+      onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
+      aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
+      title={chatWide ? t('Use reading width') : t('Use full chat width')}
+    >
+      {chatWide ? <FoldHorizontal className="h-4 w-4" /> : <UnfoldHorizontal className="h-4 w-4" />}
+    </button>
+  );
+  const panelActions = (
+    <>
+      {chatWideToggle}
+      {sideToggle}
+    </>
+  );
+  // 桌面外壳：右侧面板开关在窗口顶栏（面板升进顶栏时由面板 tab 条右端接管），卡片顶栏只留铺满开关
+  const shellChrome: ShellChrome | null = desktopShell ? { trailing: chatWideToggle } : null;
+
   return (
-    <div className={cn('relative isolate flex flex-col', isMobile ? 'h-dvh' : 'h-screen')}>
+    <div
+      data-enso="canvas"
+      className={cn('relative isolate flex flex-col', isMobile ? 'h-dvh' : 'h-screen')}
+    >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
-      <TitleBar
-        title="EnsoCode"
-        centered={botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : undefined}
-        leading={
-          isMobile && !remoteNodeActive && !botModeActive ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                onClick={() => setDrawerOpen(true)}
-                aria-label={t('Conversations')}
-                title={t('Conversations')}
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-              {!(botModeEnabled && !remoteNodeActive) && (
-                <span className="text-sm font-medium text-muted-foreground">EnsoCode</span>
+      {chromeKind !== 'mobile' ? (
+        <TitleBar
+          leading={
+            <div className="flex items-center gap-0.5">
+              {!remoteNodeActive && (
+                <button
+                  type="button"
+                  className={TOOLBAR_BUTTON}
+                  onClick={() => setCollapsed((v) => !v)}
+                  title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
+                >
+                  {collapsed ? (
+                    <PanelLeft className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+              {desktopShell && (
+                <>
+                  <button
+                    type="button"
+                    className={TOOLBAR_BUTTON}
+                    onClick={() => setSearchOpen(true)}
+                    title={t('Search anything')}
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={TOOLBAR_BUTTON}
+                    onClick={startNewConversation}
+                    title={t('New conversation')}
+                  >
+                    <SquarePen className="h-4 w-4" />
+                  </button>
+                </>
               )}
             </div>
-          ) : undefined
-        }
-        actions={
-          <>
-            <button
-              type="button"
-              className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                chatWide ? 'text-foreground' : 'text-muted-foreground',
-                isMobile && 'hidden'
-              )}
-              onClick={() => useSettingsStore.getState().setChatWide(!chatWide)}
-              aria-label={chatWide ? t('Use reading width') : t('Use full chat width')}
-              title={chatWide ? t('Use reading width') : t('Use full chat width')}
-            >
-              {chatWide ? (
-                <FoldHorizontal className="h-4 w-4" />
-              ) : (
-                <UnfoldHorizontal className="h-4 w-4" />
-              )}
-            </button>
-            {!remoteNodeActive && (
-              <button
-                type="button"
-                className={cn(
-                  'flex items-center justify-center rounded-md transition-colors hover:bg-accent/50',
-                  isMobile ? 'h-9 w-9' : 'h-7 w-7',
-                  (botModeActive ? botPanelOpen : sideOpen)
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
+          }
+          centered={modeSwitch ?? undefined}
+          centerOver={desktopShell ? mainBox : undefined}
+          className={cn(
+            desktopShell && 'border-b-0',
+            desktopShell && (chromeKind === 'windows' ? 'bg-canvas' : 'bg-transparent'),
+            // 右侧面板开关与面板 tab 条右端（面板 8px 外边距 + 8px 内边距）对齐
+            desktopShell && chromeKind === 'mac' && 'pr-4'
+          )}
+          actions={desktopShell ? (sideInTitleRow ? undefined : sideToggle) : panelActions}
+        />
+      ) : (
+        <TitleBar
+          title="EnsoCode"
+          centered={modeSwitch ?? undefined}
+          leading={
+            isMobile && !remoteNodeActive && !botModeActive ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                  onClick={() => setDrawerOpen(true)}
+                  aria-label={t('Conversations')}
+                  title={t('Conversations')}
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+                {!modeSwitch && (
+                  <span className="text-sm font-medium text-muted-foreground">EnsoCode</span>
                 )}
-                onClick={botModeActive ? toggleBotPanel : toggleSidePanel}
-                aria-label={t('Toggle side panel')}
-                title={t('Toggle side panel')}
-              >
-                <PanelRight className="h-4 w-4" />
-              </button>
-            )}
-          </>
-        }
-      />
-      <UpdateBanner />
+              </div>
+            ) : undefined
+          }
+          actions={panelActions}
+        />
+      )}
+      {!desktopShell && <UpdateBanner />}
       <div className="flex min-h-0 flex-1">
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
@@ -478,21 +607,48 @@ export default function App() {
                   onToggleCollapse={() => setCollapsed((v) => !v)}
                   onOpenSearch={() => setSearchOpen(true)}
                 />
-                {!collapsed && <ResizeHandle onResize={handleResize} />}
+                {!collapsed && <ResizeHandle gap={desktopShell} onResize={handleResize} />}
               </>
             )}
             <div
               ref={workspaceRef}
-              className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+              className={cn(
+                'relative flex min-h-0 min-w-0 flex-1',
+                // mac 右侧面板要向上伸进顶栏行：只裁横向
+                titleRowPanel ? 'overflow-x-clip' : 'overflow-hidden',
+                // 卡片 1px 描边画在盒外，左/上各让出 1px 才不被裁掉；overflow-clip-margin 对单轴 clip 和 hidden 都不生效
+                desktopShell && '-mt-px -ml-px pt-px pr-[8px] pb-[8px] pl-px'
+              )}
             >
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div
+                ref={setMainEl}
+                data-enso="main"
+                className={cn(
+                  'flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+                  desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
+                  // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
+                  sideInTitleRow && 'rounded-r-none'
+                )}
+              >
                 <PluginUiHost />
-                <ChatView />
+                <ShellChromeContext.Provider value={shellChrome}>
+                  <ChatView />
+                </ShellChromeContext.Provider>
+                {desktopShell && <UpdateBanner />}
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
-                <ResizeHandle onResize={handleSideResize} onResizingChange={setSideResizing} />
+                <ResizeHandle
+                  gap={desktopShell && !sideInTitleRow}
+                  onResize={handleSideResize}
+                  onResizingChange={setSideResizing}
+                />
               )}
-              <SidePanel width={sideWidth} resizing={sideResizing} />
+              <SidePanel
+                width={sideWidth}
+                resizing={sideResizing}
+                card={desktopShell}
+                titleRow={titleRowPanel}
+              />
             </div>
           </DndContext>
         )}

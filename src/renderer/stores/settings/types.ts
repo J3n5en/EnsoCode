@@ -84,8 +84,12 @@ export type BackgroundSizeMode = 'cover' | 'contain' | 'repeat' | 'center';
 export interface SettingsState {
   // UI
   theme: Theme;
-  /** 界面强调色；写入 `html[data-accent]`，缺省 violet */
+  /** 界面主题；插件主题暂不可用时按 enso 渲染但保留原值 */
+  themeId: import('@shared/theme/types').ThemeKey;
+  /** 界面强调色；缺省跟随主题 */
   accentColor: import('@shared/accentColor').AccentColor;
+  /** 是否注入 userData/user.css */
+  userCssEnabled: boolean;
   language: Locale;
 
   /**
@@ -349,7 +353,9 @@ export interface SettingsState {
 
   // Setters
   setTheme: (theme: Theme) => void;
+  setThemeId: (themeId: import('@shared/theme/types').ThemeKey) => void;
   setAccentColor: (accent: import('@shared/accentColor').AccentColor) => void;
+  setUserCssEnabled: (enabled: boolean) => void;
   setLanguage: (language: Locale) => void;
   setTerminalTheme: (theme: string) => void;
   setTerminalFontSize: (size: number) => void;

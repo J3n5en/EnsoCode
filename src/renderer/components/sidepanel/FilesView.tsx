@@ -881,7 +881,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
           {openDocs.length > 0 && (
             <div
               ref={tabStripRef}
-              className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1"
+              className="flex h-[36px] shrink-0 items-center gap-1 overflow-x-auto border-b px-2"
             >
               {isMobile && (
                 <button

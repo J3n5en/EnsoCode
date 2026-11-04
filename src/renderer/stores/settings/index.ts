@@ -1,4 +1,4 @@
-import { type AccentColor, DEFAULT_ACCENT_COLOR, resolveAccentColor } from '@shared/accentColor';
+import { DEFAULT_ACCENT_COLOR, resolveAccentColor } from '@shared/accentColor';
 import { parseApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { DEFAULT_AUTO_RETRY_LIMIT, normalizeAutoRetryLimit } from '@shared/autoRetry';
 import {
@@ -42,6 +42,8 @@ import {
   type StatusLineSegmentId,
 } from '@shared/statusLine';
 import { parseTerminalShell } from '@shared/terminalShell';
+import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
+import type { ThemeKey } from '@shared/theme/types';
 import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { AgentMode, SourceAuthorityProjection } from '@shared/types/agent';
 import { DEFAULT_SPEECH_MODEL_ID, SYSTEM_MICROPHONE } from '@shared/types/speech';
@@ -117,7 +119,6 @@ function applyAppTheme(theme: Theme, terminalTheme: string): void {
 // Apply settings side effects (theme / font / lang) — 初次加载与多窗口同步时调用
 function applySettings(state: {
   theme: Theme;
-  accentColor?: AccentColor;
   terminalTheme: string;
   terminalFontFamily: string;
   terminalFontSize: number;
@@ -132,7 +133,6 @@ function applySettings(state: {
   }
   applyTerminalFont(state.terminalFontFamily, state.terminalFontSize);
   document.documentElement.lang = normalizeLocale(state.language) === 'zh' ? 'zh-CN' : 'en';
-  document.documentElement.dataset.accent = resolveAccentColor(state.accentColor);
   document.documentElement.classList.toggle('enso-chat-wide', Boolean(state.chatWide));
 }
 
@@ -148,7 +148,9 @@ function clampNumber(value: number, min: number, max: number, fallback: number):
 
 const initialState = {
   theme: 'system' as Theme,
+  themeId: DEFAULT_THEME_KEY as ThemeKey,
   accentColor: DEFAULT_ACCENT_COLOR,
+  userCssEnabled: false,
   language: getDefaultLocale(),
   fileOpenRules: [] as FileOpenRule[],
   contextMenuOpen: normalizeContextMenuOpen(undefined),
@@ -297,8 +299,15 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       setAccentColor: (accentColor) => {
-        document.documentElement.dataset.accent = accentColor;
         set({ accentColor });
+      },
+
+      setThemeId: (themeId) => {
+        set({ themeId });
+      },
+
+      setUserCssEnabled: (userCssEnabled) => {
+        set({ userCssEnabled });
       },
 
       setLanguage: (language) => {

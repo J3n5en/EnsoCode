@@ -14,6 +14,8 @@ export interface PluginGrant {
   /** 拦截型订阅的事件；只通知的不计 */
   intercepts: string[];
   resident: boolean;
+  /** 有主题带 CSS：可以改变应用任意界面 */
+  styles: boolean;
 }
 
 export function grantOf(manifest: ExtensionPluginManifest): PluginGrant {
@@ -37,6 +39,7 @@ export function grantOf(manifest: ExtensionPluginManifest): PluginGrant {
       .map((e) => e.event)
       .sort(),
     resident: manifest.resident,
+    styles: manifest.contributes.themes.some((theme) => theme.css !== undefined),
   };
 }
 
@@ -58,5 +61,6 @@ export function grantExpands(previous: PluginGrant, next: PluginGrant): boolean 
   if (grew(previous.interop, next.interop)) return true;
   if (grew(previous.intercepts, next.intercepts)) return true;
   if (next.resident && !previous.resident) return true;
+  if (next.styles && !previous.styles) return true;
   return next.renderer && !previous.renderer;
 }

@@ -1147,6 +1147,19 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROXY_APPLY, settings),
   },
 
+  appearance: {
+    readUserCss: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_USER_CSS_GET),
+    /** 不存在时先写入模板 */
+    openUserCss: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_USER_CSS_OPEN),
+    onUserCssChanged: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.APPEARANCE_USER_CSS_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APPEARANCE_USER_CSS_CHANGED, listener);
+    },
+  },
+
   compaction: {
     getReserveTokens: (): Promise<number | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.COMPACTION_RESERVE_TOKENS_GET),
@@ -1519,7 +1532,7 @@ const electronAPI = {
     setViewport: (
       tabId: string,
       conversationId: string,
-      viewport: { x: number; y: number; width: number; height: number } | null,
+      viewport: { x: number; y: number; width: number; height: number; radius?: number } | null,
       covered = false
     ): Promise<BrowserTabState> =>
       ipcRenderer.invoke(
@@ -1560,7 +1573,7 @@ const electronAPI = {
     setDevToolsViewport: (
       tabId: string,
       conversationId: string,
-      viewport: { x: number; y: number; width: number; height: number } | null,
+      viewport: { x: number; y: number; width: number; height: number; radius?: number } | null,
       covered = false
     ): Promise<BrowserTabState> =>
       ipcRenderer.invoke(

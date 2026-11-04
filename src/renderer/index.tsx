@@ -3,12 +3,17 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { DiffWorkerPool } from './components/chat/DiffWorkerPool';
 import { syncOverlayGuard } from './lib/overlayGuard';
+import { installScrollbarActivity } from './lib/scrollbars';
+import { installThemeStyles } from './lib/themeStyles';
 import { useBotsStore } from './stores/bots';
 import { useRemoteNodesStore } from './stores/remoteNodes';
 import { useSessionsStore } from './stores/sessions';
 import { useSettingsStore } from './stores/settings';
 import { useSidePanelStore } from './stores/sidePanel';
 import './styles/globals.css';
+
+installThemeStyles();
+installScrollbarActivity();
 
 // dev-only:e2e/调试可经 CDP 直达 store
 if (import.meta.env.DEV) {

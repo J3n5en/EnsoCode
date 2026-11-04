@@ -380,6 +380,11 @@ export const IPC_CHANNELS = {
   // Network proxy
   PROXY_APPLY: 'proxy:apply',
 
+  // userData/user.css：读取、首次写模板并用系统程序打开、文件变化广播
+  APPEARANCE_USER_CSS_GET: 'appearance:user-css:get',
+  APPEARANCE_USER_CSS_OPEN: 'appearance:user-css:open',
+  APPEARANCE_USER_CSS_CHANGED: 'appearance:user-css:changed',
+
   // pi 全局 settings.json 的 compaction.reserveTokens
   COMPACTION_RESERVE_TOKENS_GET: 'compaction:reserve-tokens-get',
   COMPACTION_RESERVE_TOKENS_SET: 'compaction:reserve-tokens-set',

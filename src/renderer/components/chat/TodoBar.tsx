@@ -14,9 +14,9 @@ export function TodoList({ todos }: { todos: TodoItem[] }) {
       {todos.map((todo) => (
         <li key={todo.content} className="flex items-start gap-1.5">
           {todo.status === 'completed' ? (
-            <Check className="mt-0.5 h-3 w-3 shrink-0 text-green-600 dark:text-green-500" />
+            <Check className="mt-0.5 h-3 w-3 shrink-0 text-brand" />
           ) : todo.status === 'in_progress' ? (
-            <CircleDot className="mt-0.5 h-3 w-3 shrink-0 text-blue-500" />
+            <CircleDot className="mt-0.5 h-3 w-3 shrink-0 text-brand" />
           ) : (
             <Circle className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
           )}
@@ -34,6 +34,26 @@ export function TodoList({ todos }: { todos: TodoItem[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** 清单进度条：强调色只用在完成比例上 */
+export function TodoProgress({
+  done,
+  total,
+  className,
+}: {
+  done: number;
+  total: number;
+  className?: string;
+}) {
+  return (
+    <div className={cn('h-0.5 overflow-hidden rounded-full bg-border', className)}>
+      <div
+        className="h-full rounded-full bg-brand transition-[width]"
+        style={{ width: `${total ? (done / total) * 100 : 0}%` }}
+      />
+    </div>
   );
 }
 
@@ -57,7 +77,10 @@ export function TodoBar({ conversationId }: { conversationId: string }) {
     list.todos.find((todo) => todo.status === 'in_progress') ??
     list.todos.find((todo) => todo.status === 'pending');
   return (
-    <div className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
+    <div
+      data-enso="todo"
+      className="mx-3 mb-1.5 rounded-[14px] border bg-card px-3 py-1.5 text-xs shadow-xs"
+    >
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -94,7 +117,8 @@ export function TodoBar({ conversationId }: { conversationId: string }) {
         </button>
       </div>
       {expanded && (
-        <div className="mt-1.5 max-h-48 overflow-y-auto">
+        <div className="mt-1.5 max-h-48 overflow-y-auto pb-0.5">
+          <TodoProgress done={done} total={list.todos.length} className="mb-2" />
           <TodoList todos={list.todos} />
         </div>
       )}

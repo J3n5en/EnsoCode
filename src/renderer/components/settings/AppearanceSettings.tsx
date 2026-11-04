@@ -1,7 +1,10 @@
+import { ACCENT_PRESETS } from '@shared/accentColor';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
+import { resolveTheme } from '@shared/theme/themeKey';
 import {
   ChevronLeft,
   ChevronRight,
+  FileCode,
   FolderOpen,
   Heart,
   ImageIcon,
@@ -31,6 +34,8 @@ import {
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { addToast } from '@/components/ui/toast';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import {
   defaultDarkTheme,
@@ -38,7 +43,9 @@ import {
   getXtermTheme,
   type XtermTheme,
 } from '@/lib/ghosttyTheme';
+import { availableThemes } from '@/lib/themeStyles';
 import { cn } from '@/lib/utils';
+import { usePluginThemesStore } from '@/stores/pluginThemes';
 import {
   ACCENT_COLORS,
   type AccentColor,
@@ -51,6 +58,7 @@ import {
 import { fontWeightOptions } from './constants';
 import { FileOpeningSettings } from './FileOpeningSettings';
 import { SwitchRow } from './GeneralSettings';
+import { AppearanceCard, AppearanceRow, ThemeGallery } from './ThemeGallery';
 
 /** 背景图设置区：百分比滑块行（拖动时本地预览，松手才写 store，避免拖动中频繁 IPC） */
 function PercentSliderRow({
@@ -607,16 +615,8 @@ function ThemeCombobox({
   );
 }
 
-/** 色块取各预设在亮色模式下的主色，与 globals.css 的 --brand 保持一致 */
-const ACCENT_SWATCHES: Record<AccentColor, string> = {
-  violet: 'oklch(0.54 0.2 280)',
-  indigo: 'oklch(0.53 0.19 265)',
-  teal: 'oklch(0.56 0.1 185)',
-  amber: 'oklch(0.64 0.16 55)',
-  graphite: 'oklch(0.27 0.01 285)',
-};
-
 const ACCENT_LABELS = {
+  theme: 'Follow theme',
   violet: 'Violet',
   indigo: 'Indigo',
   teal: 'Teal',
@@ -713,10 +713,64 @@ function ConversationDisplaySection() {
   );
 }
 
-export function AppearanceSettings() {
+function ThemeSection({ onOpenPlugins }: { onOpenPlugins?: () => void }) {
+  const { t } = useI18n();
+  const themeId = useSettingsStore((s) => s.themeId);
+  const setThemeId = useSettingsStore((s) => s.setThemeId);
+  const pluginThemes = usePluginThemesStore((s) => s.themes);
+  const mode = useColorScheme();
+  return (
+    <section data-settings-row="appearance.themeGallery" className="space-y-3">
+      <div>
+        <h3 className="text-lg font-medium">{t('Theme')}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t('Built-in and plugin themes; each one is a set of color tokens')}
+        </p>
+      </div>
+      <ThemeGallery
+        themes={availableThemes(pluginThemes)}
+        selected={themeId}
+        mode={mode}
+        onSelect={setThemeId}
+        onGetMore={onOpenPlugins}
+      />
+    </section>
+  );
+}
+
+function UserCssRow() {
+  const { t } = useI18n();
+  const enabled = useSettingsStore((s) => s.userCssEnabled);
+  const setEnabled = useSettingsStore((s) => s.setUserCssEnabled);
+  const open = async () => {
+    const result = await window.electronAPI.appearance.openUserCss();
+    if (!result.ok)
+      addToast({ type: 'error', title: t('Cannot open user.css'), description: result.error });
+  };
+  return (
+    <AppearanceRow
+      rowId="appearance.userCss"
+      title={t('Custom CSS')}
+      description={t('Inject user.css into every window; saved changes apply immediately')}
+    >
+      <Button variant="outline" size="sm" onClick={() => void open()}>
+        <FileCode />
+        {t('Open user.css')}
+      </Button>
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => setEnabled(checked === true)}
+        aria-label={t('Custom CSS')}
+      />
+    </AppearanceRow>
+  );
+}
+
+export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => void } = {}) {
   const {
     theme,
     setTheme,
+    themeId,
     accentColor,
     setAccentColor,
     terminalTheme,
@@ -733,6 +787,8 @@ export function AppearanceSettings() {
     toggleFavoriteTerminalTheme,
   } = useSettingsStore();
   const { t } = useI18n();
+  const colorScheme = useColorScheme();
+  const pluginThemes = usePluginThemesStore((s) => s.themes);
 
   const themeModeOptions: {
     value: Theme;
@@ -748,7 +804,10 @@ export function AppearanceSettings() {
   const accentOptions = ACCENT_COLORS.map((value) => ({
     value,
     label: t(ACCENT_LABELS[value]),
-    swatch: ACCENT_SWATCHES[value],
+    swatch:
+      value === 'theme'
+        ? resolveTheme(themeId, availableThemes(pluginThemes))[colorScheme].accent
+        : ACCENT_PRESETS[value][colorScheme],
   }));
 
   const [localFontSize, setLocalFontSize] = React.useState(globalFontSize);
@@ -825,192 +884,199 @@ export function AppearanceSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Theme Mode Section */}
-      <div data-settings-row="appearance.theme">
-        <h3 className="text-lg font-medium">{t('Theme mode')}</h3>
-        <p className="text-sm text-muted-foreground">{t('Choose interface theme')}</p>
-      </div>
+      <ThemeSection onOpenPlugins={onOpenPlugins} />
 
-      <div className="grid grid-cols-4 gap-3">
-        {themeModeOptions.map((option) => (
-          <button
-            type="button"
-            key={option.value}
-            onClick={() => setTheme(option.value)}
-            className={cn(
-              'flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-colors',
-              theme === option.value
-                ? 'border-primary bg-accent text-accent-foreground'
-                : 'border-transparent bg-muted/50 hover:bg-muted'
-            )}
-          >
-            <div
-              className={cn(
-                'flex h-10 w-10 items-center justify-center rounded-full',
-                theme === option.value
-                  ? 'bg-accent-foreground/20 text-accent-foreground'
-                  : 'bg-muted'
-              )}
-            >
-              <option.icon className="h-5 w-5" />
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-lg font-medium">{t('Personalization')}</h3>
+          <p className="text-sm text-muted-foreground">{t('Applied on top of any theme')}</p>
+        </div>
+        <AppearanceCard>
+          <AppearanceRow rowId="appearance.theme" title={t('Theme mode')}>
+            <div className="flex rounded-lg bg-muted p-0.5">
+              {themeModeOptions.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => setTheme(option.value)}
+                  aria-pressed={theme === option.value}
+                  className={cn(
+                    'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors',
+                    theme === option.value
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <option.icon className="size-3.5" />
+                  {option.label}
+                </button>
+              ))}
             </div>
-            <span className="text-sm font-medium">{option.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div data-settings-row="appearance.accent">
-        <h3 className="text-lg font-medium">{t('Accent color')}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t('Highlight color used across the interface')}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-3">
-        {accentOptions.map((option) => (
-          <button
-            type="button"
-            key={option.value}
-            onClick={() => setAccentColor(option.value)}
-            title={option.label}
-            aria-label={option.label}
-            aria-pressed={accentColor === option.value}
-            style={{ backgroundColor: option.swatch }}
-            className={cn(
-              'size-6 rounded-full transition-shadow',
-              accentColor === option.value &&
-                'ring-2 ring-offset-2 ring-offset-background ring-foreground/60'
+          </AppearanceRow>
+          <AppearanceRow
+            rowId="appearance.accent"
+            title={t('Accent color')}
+            description={t('Used for running state, checkmarks and plan mode')}
+          >
+            {accentOptions.map((option) =>
+              option.value === 'theme' ? (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => setAccentColor(option.value)}
+                  aria-pressed={accentColor === option.value}
+                  className={cn(
+                    'flex h-6 items-center gap-1.5 rounded-full border px-2 text-xs transition-shadow',
+                    accentColor === option.value && 'border-transparent ring-2 ring-foreground/60'
+                  )}
+                >
+                  <span
+                    data-theme-accent
+                    className="size-2.5 rounded-full"
+                    style={{ backgroundColor: option.swatch }}
+                  />
+                  {option.label}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => setAccentColor(option.value)}
+                  title={option.label}
+                  aria-label={option.label}
+                  aria-pressed={accentColor === option.value}
+                  style={{ backgroundColor: option.swatch }}
+                  className={cn(
+                    'size-5 rounded-full transition-shadow',
+                    accentColor === option.value &&
+                      'ring-2 ring-offset-2 ring-offset-card ring-foreground/60'
+                  )}
+                />
+              )
             )}
-          />
-        ))}
-      </div>
+          </AppearanceRow>
+          <UserCssRow />
+        </AppearanceCard>
+      </section>
 
       <ConversationDisplaySection />
 
-      {/* Terminal Section */}
-      <div className="border-t pt-6">
+      <div>
         <h3 className="text-lg font-medium">{t('Terminal')}</h3>
         <p className="text-sm text-muted-foreground">{t('Terminal appearance')}</p>
       </div>
 
-      {/* Preview */}
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{t('Preview')}</p>
-        <TerminalPreview
-          theme={previewTheme}
-          fontSize={localFontSize}
-          fontFamily={localFontFamily}
-          fontWeight={terminalFontWeight}
-        />
-      </div>
+      <TerminalPreview
+        theme={previewTheme}
+        fontSize={localFontSize}
+        fontFamily={localFontFamily}
+        fontWeight={terminalFontWeight}
+      />
 
-      {/* Theme Selector */}
-      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-        <span className="text-sm font-medium">{t('Color scheme')}</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePrevTheme}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex-1">
-            <ThemeCombobox
-              value={terminalTheme}
-              onValueChange={handleThemeChange}
-              themes={displayThemes}
-              favoriteThemes={favoriteTerminalThemes}
-              onToggleFavorite={toggleFavoriteTerminalTheme}
-              onThemeHover={setTerminalTheme}
-              showFavoritesOnly={showFavoritesOnly}
-              onShowFavoritesOnlyChange={setShowFavoritesOnly}
-              showEmptyFavoritesHint={showEmptyFavoritesHint}
-            />
+      <div className="space-y-3 rounded-lg border bg-card p-3.5">
+        <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+          <span className="text-sm font-medium">{t('Color scheme')}</span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={handlePrevTheme}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex-1">
+              <ThemeCombobox
+                value={terminalTheme}
+                onValueChange={handleThemeChange}
+                themes={displayThemes}
+                favoriteThemes={favoriteTerminalThemes}
+                onToggleFavorite={toggleFavoriteTerminalTheme}
+                onThemeHover={setTerminalTheme}
+                showFavoritesOnly={showFavoritesOnly}
+                onShowFavoritesOnlyChange={setShowFavoritesOnly}
+                showEmptyFavoritesHint={showEmptyFavoritesHint}
+              />
+            </div>
+            <Button variant="outline" size="icon" onClick={handleNextTheme}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="outline" size="icon" onClick={handleNextTheme}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
-      </div>
 
-      {/* Font Family */}
-      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-        <span className="text-sm font-medium">{t('Font')}</span>
-        <Input
-          value={localFontFamily}
-          onChange={(e) => setLocalFontFamily(e.target.value)}
-          onBlur={applyFontFamilyChange}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (e.key === 'Enter') {
-              applyFontFamilyChange();
-              e.currentTarget.blur();
-            }
-          }}
-          placeholder="JetBrains Mono, monospace"
-        />
-      </div>
-
-      {/* Font Size */}
-      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-        <span className="text-sm font-medium">{t('Font size')}</span>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+          <span className="text-sm font-medium">{t('Font')}</span>
           <Input
-            type="number"
-            value={localFontSize}
-            onChange={(e) => setLocalFontSize(Number(e.target.value))}
-            onBlur={applyFontSizeChange}
+            value={localFontFamily}
+            onChange={(e) => setLocalFontFamily(e.target.value)}
+            onBlur={applyFontFamilyChange}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter') {
-                applyFontSizeChange();
+                applyFontFamilyChange();
                 e.currentTarget.blur();
               }
             }}
-            min={8}
-            max={32}
-            className="w-20"
+            placeholder="JetBrains Mono, monospace"
           />
-          <span className="text-sm text-muted-foreground">px</span>
         </div>
-      </div>
 
-      {/* Font Weight */}
-      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-        <span className="text-sm font-medium">{t('Font weight')}</span>
-        <Select
-          items={fontWeightOptions}
-          value={terminalFontWeight}
-          onValueChange={(v) => setTerminalFontWeight(v as FontWeight)}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {fontWeightOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
+        <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+          <span className="text-sm font-medium">{t('Font size')}</span>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={localFontSize}
+              onChange={(e) => setLocalFontSize(Number(e.target.value))}
+              onBlur={applyFontSizeChange}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  applyFontSizeChange();
+                  e.currentTarget.blur();
+                }
+              }}
+              min={8}
+              max={32}
+              className="w-20"
+            />
+            <span className="text-sm text-muted-foreground">px</span>
+          </div>
+        </div>
 
-      {/* Font Weight Bold */}
-      <div className="grid grid-cols-[100px_1fr] items-center gap-4">
-        <span className="text-sm font-medium">{t('Bold font weight')}</span>
-        <Select
-          items={fontWeightOptions}
-          value={terminalFontWeightBold}
-          onValueChange={(v) => setTerminalFontWeightBold(v as FontWeight)}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {fontWeightOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+          <span className="text-sm font-medium">{t('Font weight')}</span>
+          <Select
+            items={fontWeightOptions}
+            value={terminalFontWeight}
+            onValueChange={(v) => setTerminalFontWeight(v as FontWeight)}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {fontWeightOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </div>
+
+        <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+          <span className="text-sm font-medium">{t('Bold font weight')}</span>
+          <Select
+            items={fontWeightOptions}
+            value={terminalFontWeightBold}
+            onValueChange={(v) => setTerminalFontWeightBold(v as FontWeight)}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {fontWeightOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </div>
       </div>
 
       {/* Background Image */}

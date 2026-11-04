@@ -31,6 +31,7 @@ const valid = {
     interop: [],
     intercepts: [],
     resident: false,
+    styles: false,
   },
   installedAt: 1,
   crossSessionInject: false,
@@ -151,5 +152,29 @@ describe('插件登记表', () => {
       JSON.stringify({ version: 2, plugins: [valid, { ...valid, dir: 'x' }] })
     );
     expect(readRegistry(root).plugins).toHaveLength(1);
+  });
+
+  it('缺 styles 的旧授权按未同意样式读入，类型不对的记录丢弃', () => {
+    const root = tempRoot();
+    const { styles: _styles, ...legacyGrant } = valid.grant;
+    writeFileSync(
+      join(root, 'registry.json'),
+      JSON.stringify({
+        version: 2,
+        plugins: [
+          {
+            ...valid,
+            grant: legacyGrant,
+            pending: { version: '2.0.0', dir: 'next', grant: legacyGrant },
+          },
+          { ...valid, id: 'a.s', grant: { ...valid.grant, styles: 'yes' } },
+        ],
+      })
+    );
+    const read = readRegistry(root);
+    expect(read.plugins.map((p) => [p.id, p.grant.styles, p.pending?.grant.styles])).toEqual([
+      ['example.demo', false, false],
+    ]);
+    expect(read.discarded).toEqual(['a.s']);
   });
 });

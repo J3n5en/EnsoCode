@@ -50,6 +50,7 @@ import { PluginArtifactList } from '@/plugins/artifactViews';
 import { coerceConfigValue } from '@/plugins/configValue';
 import { PluginIcon } from '@/plugins/PluginIcon';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
+import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { PluginMarket } from './PluginMarket';
@@ -257,8 +258,15 @@ function PluginErrorText({ message }: { message: string }) {
   );
 }
 
-function PermissionLines({ permissions }: { permissions: readonly string[] }) {
-  if (permissions.length === 0) return <p className="text-muted-foreground text-xs">无特殊权限</p>;
+function PermissionLines({
+  permissions,
+  styles = false,
+}: {
+  permissions: readonly string[];
+  styles?: boolean;
+}) {
+  if (permissions.length === 0)
+    return styles ? null : <p className="text-muted-foreground text-xs">无特殊权限</p>;
   return (
     <ul className="space-y-0.5">
       {permissions.map((permission) => (
@@ -303,6 +311,7 @@ function PluginCapabilityBlock({
   interop,
   resident,
   running,
+  styles,
   events,
   schedules,
 }: {
@@ -311,6 +320,7 @@ function PluginCapabilityBlock({
   interop?: readonly string[];
   resident?: boolean;
   running?: boolean;
+  styles?: boolean;
   events?: readonly { event: string; mode: string; failClosed?: boolean }[];
   schedules?: readonly {
     id: string;
@@ -321,13 +331,14 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} />
+      <PermissionLines permissions={permissions} styles={styles} />
       {resident && (
         <p className="text-xs">
           常驻进程
           {running === undefined ? '' : running ? '：运行中' : '：未运行'}
         </p>
       )}
+      {styles && <p className="text-xs">修改界面样式：主题 CSS 可以改变应用的任意界面</p>}
       {(env?.length ?? 0) > 0 && (
         <p className="text-xs">
           环境变量：<span className="font-mono">{env?.join(', ')}</span>
@@ -400,6 +411,7 @@ export function EnsoPluginsSettings({
 } = {}) {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
+  const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
   const [panel, setPanel] = React.useState<{
     kind: 'config' | 'logs' | 'artifacts';
@@ -665,6 +677,7 @@ export function EnsoPluginsSettings({
                   env={preview.env}
                   interop={preview.interop}
                   resident={preview.resident}
+                  styles={preview.styles}
                   events={preview.events}
                   schedules={preview.schedules}
                 />
@@ -772,6 +785,9 @@ export function EnsoPluginsSettings({
                     </p>
                   )}
                   {plugin.lastError && <PluginErrorText message={plugin.lastError.message} />}
+                  {themeErrors[plugin.id]?.map((error) => (
+                    <PluginErrorText key={error} message={`主题加载失败：${error}`} />
+                  ))}
                   {plugin.pendingVersion && (
                     <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
                       {t('{{version}} asks for more and is waiting for approval', {
@@ -906,6 +922,7 @@ export function EnsoPluginsSettings({
                   permissions={plugin.permissions}
                   resident={plugin.resident}
                   running={plugin.running}
+                  styles={plugin.themes.some((theme) => theme.css !== undefined)}
                   events={plugin.events}
                   schedules={plugin.schedules}
                 />

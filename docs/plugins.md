@@ -2,7 +2,7 @@
 
 插件是一个带 `enso-plugin.json` 的目录。安装后 Enso 把它复制到自己的数据目录里运行，不引用原路径。
 
-可以参考的完整例子在 [`examples/plugins/`](../examples/plugins/README.md)：`word-stats`（工具、结果卡片、代码块、skill）、`snippets`（补全、按钮、改草稿）、`notes`（侧栏页面、私有数据）、`github-repo`（网络请求、系统通知）、`prompt-enhance`（移植自 dsh-bce：调用宿主 MCP、长耗时方法、配置项、渲染模块直接改草稿）。
+可以参考的完整例子在 [`examples/plugins/`](../examples/plugins/README.md)：`word-stats`（工具、结果卡片、代码块、skill）、`snippets`（补全、按钮、改草稿）、`notes`（侧栏页面、私有数据）、`github-repo`（网络请求、系统通知）、`prompt-enhance`（移植自 dsh-bce：调用宿主 MCP、长耗时方法、配置项、渲染模块直接改草稿）、`theme-nord`（只提供调色板）、`theme-catppuccin`（调色板加 CSS）。
 
 ## 安装与管理
 
@@ -93,7 +93,7 @@
 
 ### 权限
 
-声明了某项贡献就必须申请对应权限，否则拒绝安装。
+声明了某项贡献就必须申请对应权限，否则拒绝安装。主题不在此列，见本表后面的样式能力。
 
 | 权限 | 何时需要 | 允许做什么 |
 | --- | --- | --- |
@@ -116,6 +116,8 @@
 | `session.read` | 要列出会话 | `enso.session.list` |
 | `session.focus` | 要切换到会话 | `enso.session.focus` |
 | `session.create` | 要新建会话 | `enso.session.create` |
+
+主题的 CSS 不进上表，也不要往 `permissions` 里写一个样式权限，未知名字会被拒绝。任一 `themes` 项带了 `css`，安装和更新对话框会多出「修改界面样式：主题 CSS 可改变应用任意界面」。这项从无到有时要重新同意。只提供调色板的主题没有这项。调色板、派生变量和锚点见 [主题](theming.md)。
 
 升级时如果权限、文件范围、域名、MCP 工具、透传变量、可调用的插件、拦截事件变多，或改成常驻，需要重新确认。
 
@@ -147,6 +149,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 - `schedules`：`{ id, intervalSeconds, timeoutMs? }`，最多 10 个。间隔 60 到 86400 秒，单次缺省 60 秒超时。
 - `exports`：`{ name, timeoutMs? }`，允许其他插件调用的方法。
 - `dynamic`：`{ tools?, commands? }`，运行期最多能额外注册多少工具（0–50）和命令（0–20），缺省都是 0。
+- `themes`：`{ id, name, path, css? }`。一项一个主题。`id` 不含 `/`，并匹配 `^[a-z][a-z0-9-]{0,31}$`，和插件 id 组成 `<插件 id>/<主题 id>`。`path` 与可选的 `css` 是插件目录内的相对路径，规则与其他路径相同。`path` 必须以 `.json` 结尾，`css` 必须以 `.css` 结尾。见 [主题](theming.md)。
 
 同一类贡献里的 `id` 或 `name` 不能重复。
 

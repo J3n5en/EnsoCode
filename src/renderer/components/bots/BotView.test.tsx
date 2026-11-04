@@ -29,6 +29,7 @@ vi.mock('@/stores/bots', () => {
   };
 });
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/components/app/WindowChrome', () => ({ useWindowChromeKind: () => 'mac' }));
 vi.mock('./BotComposer', () => ({ seedBotDraft: mocks.seedBotDraft }));
 vi.mock('./BotChatView', () => ({ BotChatView: () => null }));
 vi.mock('./BotInbox', () => ({ BotInbox: () => null }));

@@ -4,7 +4,6 @@ import { stripBotNotesUpdate } from '@shared/bots/notes';
 import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
-import { type UnattendedNoteKind, splitUnattendedPrefix } from '@shared/unattendedNote';
 import type { MaskReport } from '@shared/privacyMask/report';
 import type {
   AgentRunProgress,
@@ -12,6 +11,7 @@ import type {
   TodoItem,
   TurnPerf,
 } from '@shared/types/agent';
+import { splitUnattendedPrefix, type UnattendedNoteKind } from '@shared/unattendedNote';
 import { parseWorkflowPresetMessage } from '@shared/workflowPresetMessage';
 import {
   ArrowDownToLine,
@@ -26,23 +26,15 @@ import {
   ClipboardList,
   Copy,
   EyeOff,
-  FilePlus,
   FileText,
-  FolderOpen,
-  FoldVertical,
   GitBranch,
   GitCompare,
-  Globe,
   History,
-  Layers,
   ListTodo,
   LoaderCircle,
-  type LucideIcon,
   MessagesSquare,
   PackageMinus,
-  Pencil,
   RefreshCw,
-  Search,
   SkipForward,
   Sparkles,
   Target,
@@ -50,7 +42,6 @@ import {
   Undo2,
   UserRound,
   Workflow,
-  Wrench,
 } from 'lucide-react';
 import {
   memo,
@@ -110,7 +101,6 @@ import { CodeBlock } from './CodeBlock';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
 import { EditDiff } from './EditDiff';
-import { EnsoMark } from './EnsoMark';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
@@ -122,11 +112,11 @@ import { ReadFileView } from './ReadFileView';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
 import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
-import { StepNode, type StepNodeState } from './StepNode';
+import { StepDot } from './StepNode';
 import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
 import { TerminalOutput } from './TerminalOutput';
-import { TodoList } from './TodoBar';
+import { TodoList, TodoProgress } from './TodoBar';
 import { ZoomableImage } from './ZoomableImage';
 
 const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
@@ -559,7 +549,7 @@ function MentionRefChips({
 }
 
 export const USER_BUBBLE =
-  'max-w-[80%] rounded-2xl rounded-br-md border border-brand/15 bg-brand/8 px-4 py-2.5 text-sm dark:border-brand/25 dark:bg-brand/14';
+  'max-w-[82%] rounded-[10px] bg-muted px-3.5 py-[9px] text-[14.5px] leading-[1.6]';
 
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({
@@ -738,8 +728,40 @@ export function isCompactRow(item: TimelineItem): boolean {
   );
 }
 
-/** 每轮回复的身份头：标识 + 模型 + 时间，挂在本轮首个 assistant 行之上 */
-export function ReplyHeader({
+/** 手机 PWA 没有 subtle-foreground token，回落到 muted-foreground */
+const SUBTLE_TEXT = 'text-[color:var(--subtle-foreground,var(--muted-foreground))]';
+
+/** Bot 发言人身份头：挂在本轮首个 assistant 行之上；普通会话不显示 */
+export function SpeakerHeader() {
+  const speaker = useChatHost()?.speaker;
+  if (!speaker) return null;
+  return (
+    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
+      {speaker.image ? (
+        <img
+          src={speaker.image}
+          alt=""
+          draggable={false}
+          className="size-[22px] shrink-0 rounded-full object-cover"
+          style={{ backgroundColor: speaker.color }}
+        />
+      ) : (
+        <span
+          className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
+          style={{ backgroundColor: speaker.color }}
+        >
+          {[...speaker.name.trim()][0]?.toUpperCase() ?? '?'}
+        </span>
+      )}
+      <span className="shrink-0 truncate text-[13px] font-semibold text-foreground">
+        {speaker.name}
+      </span>
+    </div>
+  );
+}
+
+/** 回合末尾的淡色元信息：本轮模型 + 回复时间 */
+export function TurnMeta({
   model,
   at,
   privacyMask,
@@ -748,42 +770,16 @@ export function ReplyHeader({
   at?: number;
   privacyMask?: MaskReport;
 }) {
-  const speaker = useChatHost()?.speaker;
   return (
-    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
-      {speaker ? (
-        speaker.image ? (
-          <img
-            src={speaker.image}
-            alt=""
-            draggable={false}
-            className="size-[22px] shrink-0 rounded-full object-cover"
-            style={{ backgroundColor: speaker.color }}
-          />
-        ) : (
-          <span
-            className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
-            style={{ backgroundColor: speaker.color }}
-          >
-            {[...speaker.name.trim()][0]?.toUpperCase() ?? '?'}
-          </span>
-        )
-      ) : (
-        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-[7px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
-          <EnsoMark className="size-3.5" />
-        </span>
+    <div
+      className={cn(
+        'mt-1.5 flex h-5 min-w-0 items-center gap-1.5 text-[11.5px] select-none',
+        SUBTLE_TEXT
       )}
-      <span className="shrink-0 truncate text-[13px] font-semibold text-foreground">
-        {speaker?.name ?? 'Enso'}
+    >
+      <span className="min-w-0 truncate">
+        {[model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ')}
       </span>
-      {model && (
-        <span className="min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-          {model}
-        </span>
-      )}
-      {typeof at === 'number' && (
-        <span className="shrink-0 text-[11px] text-muted-foreground">{formatClock(at)}</span>
-      )}
       {privacyMask && <PrivacyMaskBadge report={privacyMask} />}
     </div>
   );
@@ -803,6 +799,7 @@ export const TimelineRow = memo(function TimelineRow({
       const isCollapsed = item.collapsed === true;
       return (
         <div
+          data-enso="message-user"
           className={cn('group/user flex flex-col gap-1.5', fromMain ? 'items-start' : 'items-end')}
         >
           {item.images.map((image, index) => (
@@ -1382,7 +1379,7 @@ function TextRow({
     sessionId: host ? host.sessionId : localSessionId,
   };
   return (
-    <div className="group text-sm">
+    <div data-enso="message-assistant" className="group text-[14.5px]">
       <Markdown
         text={item.text}
         streaming={item.streaming}
@@ -1400,10 +1397,11 @@ function TextRow({
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" {...pluginActionProps} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
-          {item.timestamp && <span>{formatClock(item.timestamp)}</span>}
+          {item.timestamp && !item.turnEnd && <span>{formatClock(item.timestamp)}</span>}
           {item.turnDurationMs !== undefined && (
             <span>
-              · {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
+              {item.timestamp && !item.turnEnd && '· '}
+              {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
             </span>
           )}
           {perfStr && <span>· {perfStr}</span>}
@@ -1477,14 +1475,17 @@ function ThinkingRow({
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const expanded = thinkingRowExpanded(userToggled, streaming, expandLiveReasoning);
   return (
-    <div>
+    <div data-enso="thinking">
       <button
         type="button"
         onClick={() => setUserToggled(!expanded)}
-        className="flex min-h-[26px] items-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className={cn(
+          'flex min-h-6 items-center gap-2 text-[13px] transition-colors hover:text-foreground',
+          SUBTLE_TEXT
+        )}
       >
-        <span className="flex size-[22px] shrink-0 items-center justify-center">
-          <Brain className={cn('h-3.5 w-3.5', streaming && 'animate-pulse text-brand')} />
+        <span className="flex size-3 shrink-0 items-center justify-center">
+          <Brain className={cn('size-3', streaming && 'animate-pulse text-brand')} />
         </span>
         {streaming ? (
           <span className="t-shimmer" data-text={t('Thinking…')}>
@@ -1696,15 +1697,21 @@ function ToolGroupRow({
       }}
       title={explore?.goal}
       data-explore-head={explore ? '' : undefined}
-      className="group/step flex min-h-[30px] w-full items-center gap-2 rounded-lg pr-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+      data-enso="tool-row"
+      className={cn(
+        'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
+        SUBTLE_TEXT
+      )}
     >
-      <StepNode icon={explore ? FoldVertical : Layers} state={item.exploring ? 'running' : 'ok'} />
+      <StepDot state={item.exploring ? 'running' : 'ok'} />
       {item.exploring ? (
         <span className="t-shimmer shrink-0 font-medium" data-text={label}>
           {label}
         </span>
       ) : (
-        <span className="shrink-0 font-medium text-foreground/90">{label}</span>
+        <span className="shrink-0 text-muted-foreground group-hover/step:text-foreground">
+          {label}
+        </span>
       )}
       <span className="min-w-0 flex-1 truncate">{detail.join(' · ')}</span>
       <ChevronRight
@@ -1719,7 +1726,7 @@ function ToolGroupRow({
       {head}
       <div
         data-slot="tool-details"
-        className="t-acc-reveal mt-1 mb-1.5 ml-[30px] overflow-hidden rounded-lg border border-border/70 bg-card text-sm shadow-xs"
+        className="t-acc-reveal mt-1 mb-1.5 ml-5 overflow-hidden rounded-lg border border-border/70 bg-card text-sm shadow-xs"
       >
         {explore.goal && (
           <div className="border-b border-border/60 px-3 py-2">
@@ -1989,24 +1996,25 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   if (item.plan && item.state !== 'error') return <PlanRow plan={item.plan} />;
 
   return (
-    <div data-tool-style={compact ? 'compact' : 'full'}>
+    <div data-enso="tool-row" data-tool-style={compact ? 'compact' : 'full'}>
       <div className="flex items-center gap-1">
         <button
           type="button"
           disabled={!expandable}
           onClick={() => setExpanded((v) => !v)}
           className={cn(
-            'group/step flex min-h-[30px] min-w-0 flex-1 items-center gap-2 rounded-lg pr-1.5 text-left text-[13px] transition-colors',
-            expandable && 'cursor-pointer hover:bg-muted/60'
+            'group/step flex min-h-6 min-w-0 flex-1 items-center gap-2 text-left text-[13px]',
+            SUBTLE_TEXT,
+            expandable && 'cursor-pointer'
           )}
         >
-          <ToolNode name={item.name} state={item.state} />
-          <span className={cn('shrink-0', compact ? 'text-foreground/80' : 'font-medium')}>
+          <StepDot state={item.state} />
+          <span className="shrink-0 text-muted-foreground transition-colors group-hover/step:text-foreground">
             {labelKey ? t(labelKey) : (mcp?.tool ?? item.name)}
           </span>
           <span
             className={cn(
-              'min-w-0 flex-1 truncate font-mono text-xs',
+              'min-w-0 flex-1 truncate font-mono text-[12px]',
               item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
             )}
           >
@@ -2081,10 +2089,10 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
         )}
       </div>
       {expanded && expandable && (
-        // 展开内容收进与工具名对齐的卡片，左侧留给时间线竖线
+        // 展开内容收进与工具名对齐的卡片
         <div
           data-slot="tool-details"
-          className="t-acc-reveal mt-1 mb-1.5 ml-[30px] overflow-hidden rounded-lg border border-border/70 bg-card shadow-xs"
+          className="t-acc-reveal mt-1 mb-1.5 ml-5 overflow-hidden rounded-lg border border-border/70 bg-card shadow-xs"
         >
           {mcp && (
             <div className="truncate border-b border-border/60 px-3 py-1 font-mono text-[10px] text-muted-foreground">
@@ -2268,14 +2276,15 @@ function TodoRow({ todos }: { todos: TodoItem[] }) {
   const { t } = useI18n();
   const done = todos.filter((todo) => todo.status === 'completed').length;
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-      <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+    <div data-enso="todo" className="rounded-lg border bg-card px-3 py-2">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <ListTodo className="h-3.5 w-3.5 shrink-0" />
-        <span className="font-medium">{t('Todos')}</span>
-        <span>
+        <span className="font-medium text-foreground">{t('Todos')}</span>
+        <span className="ml-auto tabular-nums">
           {done}/{todos.length}
         </span>
       </div>
+      <TodoProgress done={done} total={todos.length} className="mt-1.5 mb-2" />
       <TodoList todos={todos} />
     </div>
   );
@@ -2441,25 +2450,7 @@ function ShellRunStatusLive({
   return <ShellRunStatus startedAt={startedAt} deadlineAt={deadlineAt} output={output} />;
 }
 
-function toolIcon(name: string): LucideIcon {
-  if (name === 'read') return FileText;
-  if (name === 'ls') return FolderOpen;
-  if (name === 'grep' || name === 'find' || name === 'glob') return Search;
-  if (name === 'bash' || name === 'powershell' || name === 'task_output') return TerminalSquare;
-  if (name === 'edit' || name === 'apply_patch') return Pencil;
-  if (name === 'write') return FilePlus;
-  if (isSandboxTool(name)) return BoxSelect;
-  if (name === 'subagent') return Bot;
-  if (name.includes('web') || name.includes('fetch')) return Globe;
-  return Wrench;
-}
-
-/** 时间线节点：工具类型图标；运行中外圈强调色旋转，失败描红 */
-function ToolNode({ name, state }: { name: string; state: StepNodeState }) {
-  return <StepNode icon={toolIcon(name)} state={state} />;
-}
-
-/** 以时间线节点呈现、相邻时用竖线串起的行：普通工具行与工具组头 */
+/** 日志式工具行：普通工具行与工具组头，相邻时贴紧排 */
 export function isToolStepRow(item: TimelineItem): boolean {
   if (item.kind === 'tool-group') return true;
   return item.kind === 'tool' && !item.todos && !item.name.startsWith('goal_');

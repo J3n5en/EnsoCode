@@ -239,7 +239,7 @@ export function GitChangesView({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
+      <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
         {status && !disabled && !unavailable && !readError && (
           <div
             className="flex shrink-0 items-center gap-1"

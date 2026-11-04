@@ -118,8 +118,8 @@ function BackgroundShell({ children }: { children: React.ReactNode }) {
       className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
       style={{
         clipPath,
-        // 实心底：用原始令牌（--background），不能用会被重映射成半透明的 --color-background
-        backgroundColor: 'var(--background)',
+        // 实心画布：根容器不能铺底（会盖住挖孔），由这层代铺；卡片各自铺 bg-background
+        backgroundColor: 'var(--canvas)',
       }}
     >
       {children}

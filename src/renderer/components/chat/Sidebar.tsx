@@ -7,7 +7,6 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import {
   ALL_GROUP_ID,
@@ -34,10 +33,8 @@ import {
   Folders,
   GitBranchPlus,
   HardDriveDownload,
-  Layers,
   Loader2,
   MessageSquarePlus,
-  PanelLeft,
   PanelLeftClose,
   Pencil,
   Pin,
@@ -48,12 +45,13 @@ import {
   Search,
   Settings,
   Smartphone,
-  Sparkles,
+  TextSearch,
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
@@ -71,7 +69,7 @@ import {
   routeDrop,
   UNGROUPED_GROUP_DROP_ID,
 } from '@/components/chat/dragDrop';
-import { GroupChips, POPOVER_ROW_CLASS } from '@/components/chat/GroupChips';
+import { GroupChips } from '@/components/chat/GroupChips';
 import { GroupEditorDialog } from '@/components/chat/GroupEditorDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
@@ -109,7 +107,6 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from '@/components/ui/menu';
-import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { addToast } from '@/components/ui/toast';
 import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
@@ -161,10 +158,15 @@ import { WorktreeBadge } from './WorktreeBadge';
 import { WorktreeRenameDialog } from './WorktreeRenameDialog';
 
 const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
+const SHOW_MORE_CLASS =
+  'h-6.5 rounded-lg px-2 text-xs text-subtle-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 const SCRATCH_COLLAPSED_KEY = 'enso-collapsed-scratch';
 
 const ICON_BUTTON_CLASS =
-  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+  'flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
+/** 分区标题右侧的悬停按钮；无悬停的触屏常显 */
+const SECTION_ACTION_CLASS =
+  '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100';
 
 interface SidebarProps {
   width?: number;
@@ -184,6 +186,8 @@ export function Sidebar({
 }: SidebarProps) {
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
+  const chromeKind = useWindowChromeKind();
+  const mobile = chromeKind === 'mobile';
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -457,7 +461,7 @@ export function Sidebar({
   >(null);
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [listSearchOpen, setListSearchOpen] = useState(false);
   const [pendingProject, setPendingProject] = useState<{
     name: string;
     path: string;
@@ -799,20 +803,12 @@ export function Sidebar({
       initial={false}
       animate={{ width: collapsed ? 48 : width }}
       transition={springStandard}
-      className="flex shrink-0 flex-col overflow-hidden border-r bg-background"
+      data-enso="sidebar"
+      className="flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed && (
-        <div className="flex w-12 flex-1 flex-col items-center gap-1 py-2">
-          <button
-            type="button"
-            onClick={onOpenSearch}
-            className={ICON_BUTTON_CLASS}
-            title={
-              searchShortcut ? `${t('Search anything')} (${searchShortcut})` : t('Search anything')
-            }
-          >
-            <Search className="h-4 w-4" />
-          </button>
+        <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
+          {/* 展开/折叠与搜索常驻窗口顶栏（App），折叠栏只留其余入口 */}
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -832,16 +828,6 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
-            }}
-            className={ICON_BUTTON_CLASS}
-            title={t('Ask Enso')}
-          >
-            <Sparkles className="h-4 w-4" />
-          </button>
           {window.electronAPI.remote && (
             <button
               type="button"
@@ -860,79 +846,12 @@ export function Sidebar({
           >
             <Settings className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className={ICON_BUTTON_CLASS}
-            title={t('Expand sidebar')}
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
         </div>
       )}
-      <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
-        <div className="flex h-12 shrink-0 items-center justify-between pr-3 pl-1.5">
-          {/* 节点切换器：本机 / 已连的远程 EnsoCode 桌面 */}
-          <div className="flex min-w-0 items-center gap-1">
-            <NodeSwitcher />
-          </div>
-          <div className="flex items-center">
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              className={ICON_BUTTON_CLASS}
-              title={
-                searchShortcut
-                  ? `${t('Search anything')} (${searchShortcut})`
-                  : t('Search anything')
-              }
-            >
-              <Search className="h-4 w-4" />
-            </button>
-            <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
-              <PopoverTrigger
-                className={cn(
-                  ICON_BUTTON_CLASS,
-                  'data-popup-open:bg-muted data-popup-open:text-foreground'
-                )}
-                title={t('Add project or group')}
-                aria-label={t('Add project or group')}
-              >
-                <Plus className="h-4 w-4" />
-              </PopoverTrigger>
-              <PopoverPopup
-                side="bottom"
-                align="end"
-                className="w-44 [&_[data-slot=popover-viewport]]:p-1"
-              >
-                {[
-                  { icon: FolderPlus, label: t('Add project'), run: () => setAddOpen(true) },
-                  {
-                    icon: Layers,
-                    label: t('New group'),
-                    run: () => setGroupEditor({ mode: 'create' }),
-                  },
-                ].map(({ icon: Icon, label, run }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      run();
-                    }}
-                    className={cn(
-                      POPOVER_ROW_CLASS,
-                      'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    <Icon className="size-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{label}</span>
-                  </button>
-                ))}
-              </PopoverPopup>
-            </Popover>
-          </div>
-        </div>
+      <div
+        className={cn('flex h-full min-h-0 flex-col', mobile && 'pt-3', collapsed && 'hidden')}
+        style={{ width }}
+      >
         <GroupChips
           groups={projectGroups}
           selectedId={resolvedGroupId}
@@ -958,17 +877,20 @@ export function Sidebar({
           }
           query={listQuery}
           onQueryChange={setListQuery}
+          searchOpen={listSearchOpen}
+          onSearchOpenChange={setListSearchOpen}
           onSelect={selectGroup}
           onAddGroup={() => setGroupEditor({ mode: 'create' })}
           onEditGroup={(id) => setGroupEditor({ mode: 'edit', id })}
         />
 
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+        {/* 右侧不留 padding：8px 滚动条槽就是右边距，滚动条不再多占一列、挤到卡片边上 */}
+        <div className="min-h-0 flex-1 overflow-y-auto pt-0.5 pb-2 pl-1.5 [scrollbar-gutter:stable]">
           {orderedProjects.length === 0 && (
             <button
               type="button"
               onClick={() => setAddOpen(true)}
-              className="w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground"
+              className="mt-2 w-full rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-brand/50 hover:text-foreground"
             >
               {t('Add a project to start')}
             </button>
@@ -980,7 +902,7 @@ export function Sidebar({
                 expandScratch();
                 void newConversation(scratchProject.id);
               }}
-              className="w-full rounded-lg px-3 py-2 text-center text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="mt-1 w-full rounded-lg px-3 py-2 text-center text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             >
               {t('Start a temporary chat')}
             </button>
@@ -988,7 +910,7 @@ export function Sidebar({
           {visibleActiveIds.length > 0 && (
             <div data-slot="active-section">
               <SidebarSectionLabel>{t('Active')}</SidebarSectionLabel>
-              <div className="flex flex-col gap-y-0.5">
+              <div className="flex flex-col">
                 {visibleActiveIds.map((id) => (
                   <DraggableChat
                     key={id}
@@ -1034,7 +956,7 @@ export function Sidebar({
           {visiblePinnedIds.length > 0 && (
             <PinnedDropZone data-slot="pinned-section">
               <SidebarSectionLabel>{t('Pinned')}</SidebarSectionLabel>
-              <div className="flex flex-col gap-y-0.5">
+              <div className="flex flex-col">
                 <SortableContext
                   items={visiblePinnedIds.map((id) => pinnedChatDragId(id))}
                   strategy={verticalListSortingStrategy}
@@ -1074,12 +996,12 @@ export function Sidebar({
           )}
           {scratchSessionsEnabled && scratchProject && (
             <div data-slot="scratch-section">
-              <div className="group flex items-center pr-1">
+              <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground">
                 <button
                   type="button"
                   onClick={toggleScratchCollapsed}
                   aria-expanded={!scratchFolded}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  className="flex min-w-0 flex-1 items-center gap-1 text-left transition-colors hover:text-foreground"
                 >
                   <span className="min-w-0 truncate">{t('Temporary chats')}</span>
                   <ChevronRight
@@ -1088,13 +1010,13 @@ export function Sidebar({
                       !scratchFolded && 'rotate-90 opacity-0 group-hover:opacity-100'
                     )}
                   />
-                  <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                  <span className="ml-auto shrink-0 font-normal text-[0.6875rem] tabular-nums">
                     {scratchVisibleIds.length}
                   </span>
                 </button>
                 <button
                   type="button"
-                  className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className={SECTION_ACTION_CLASS}
                   title={t('Start a temporary chat')}
                   aria-label={t('Start a temporary chat')}
                   onClick={() => {
@@ -1102,7 +1024,7 @@ export function Sidebar({
                     void newConversation(scratchProject.id);
                   }}
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  <Plus className="size-3.25" />
                 </button>
               </div>
               <AnimatePresence initial={false}>
@@ -1115,7 +1037,7 @@ export function Sidebar({
                     variants={heightVariants}
                     className="overflow-hidden"
                   >
-                    <div className="flex flex-col gap-y-0.5">
+                    <div className="flex flex-col">
                       {scratchVisibleIds.map((id) => (
                         <ConversationRow
                           key={id}
@@ -1145,13 +1067,44 @@ export function Sidebar({
               </AnimatePresence>
             </div>
           )}
+          {orderedProjects.length > 0 && (
+            <SidebarSectionLabel
+              actions={
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setListSearchOpen(true)}
+                    className={cn(
+                      SECTION_ACTION_CLASS,
+                      (listSearchOpen || searching) && 'bg-foreground/5 text-foreground opacity-100'
+                    )}
+                    title={t('Search conversations...')}
+                    aria-label={t('Search conversations...')}
+                  >
+                    <TextSearch className="size-3.25" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddOpen(true)}
+                    className={SECTION_ACTION_CLASS}
+                    title={t('Add project')}
+                    aria-label={t('Add project')}
+                  >
+                    <Plus className="size-3.25" />
+                  </button>
+                </>
+              }
+            >
+              {t('Projects')}
+            </SidebarSectionLabel>
+          )}
           {pendingProject && (
-            <div className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-muted-foreground">
+            <div className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-muted-foreground">
               <span className="flex size-4 shrink-0 items-center justify-center">
                 <Loader2 className="size-4 animate-spin" />
               </span>
               <span
-                className="min-w-0 flex-1 truncate text-sm font-medium"
+                className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium"
                 title={pendingProject.path}
               >
                 {pendingProject.name}
@@ -1296,9 +1249,9 @@ export function Sidebar({
                           render={
                             (
                               <div ref={drag.setNodeRef} style={drag.style}>
-                                {/* 项目行：图标列（折叠态文件夹/hover 折叠箭头）+ 名称 + 悬停操作；整行可拖拽排序 */}
+                                {/* 项目行：折叠箭头 + 名称 + 悬停操作；整行可拖拽排序 */}
                                 <div
-                                  className="group flex w-full items-center gap-1 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60"
+                                  className="group flex h-8 w-full items-center gap-1 rounded-lg px-2 transition-colors hover:bg-foreground/5"
                                   {...drag.handleProps}
                                 >
                                   <button
@@ -1307,9 +1260,9 @@ export function Sidebar({
                                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                                     title={project.path}
                                   >
-                                    <IconSlot>{folded ? <FolderGit2 /> : <FolderOpen />}</IconSlot>
+                                    <FoldChevron folded={folded} />
                                     <span
-                                      className="min-w-0 flex-1 truncate text-sm font-medium"
+                                      className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-foreground"
                                       title={
                                         project.kind === 'ssh'
                                           ? `${project.sshHost}:${project.path}`
@@ -1323,7 +1276,7 @@ export function Sidebar({
                                         </span>
                                       )}
                                       {recentView && (
-                                        <span className="mt-0.5 block truncate text-[10px] font-normal text-muted-foreground">
+                                        <span className="ml-1.5 font-normal text-[0.6875rem] text-subtle-foreground">
                                           {projectGroups.find(
                                             (group) => group.id === project.groupId
                                           )?.name ?? t('Ungrouped')}
@@ -1358,12 +1311,13 @@ export function Sidebar({
 
                                     Keep the rightmost pin marker's space so losing row hover to the menu backdrop cannot shift the trigger and close the menu on mouseup.
                                   */}
-                                  {projectPinned && (
+                                  {(projectPinned || folded) && (
                                     <span
-                                      className="flex shrink-0 items-center justify-center rounded p-1 group-hover:opacity-0"
+                                      className="flex shrink-0 items-center justify-center gap-1 py-1 text-[0.6875rem] text-subtle-foreground tabular-nums group-hover:opacity-0"
                                       aria-hidden
                                     >
-                                      <Pin className="h-3.5 w-3.5 text-muted-foreground/70" />
+                                      {projectPinned && <Pin className="h-3.5 w-3.5" />}
+                                      {folded && projectConversations.length}
                                     </span>
                                   )}
                                 </div>
@@ -1376,7 +1330,7 @@ export function Sidebar({
                                       variants={heightVariants}
                                       className="overflow-hidden"
                                     >
-                                      <div className="enso-conv-tree mt-0.5 flex flex-col gap-y-0.5">
+                                      <div className="flex flex-col">
                                         {visibleConversations.slice(0, shownCount).map((id) => (
                                           <motion.div
                                             key={id}
@@ -1419,7 +1373,7 @@ export function Sidebar({
                                         ))}
                                         {!searching &&
                                           projectConversations.length > COLLAPSED_SESSION_LIMIT && (
-                                            <div className="flex items-center gap-1">
+                                            <div className="flex items-center gap-1 pl-6">
                                               {hiddenIds.length > 0 && (
                                                 <ContextMenu>
                                                   <ContextMenuTrigger
@@ -1436,7 +1390,7 @@ export function Sidebar({
                                                               ),
                                                             }))
                                                           }
-                                                          className="flex-1 rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                                                          className={SHOW_MORE_CLASS}
                                                         >
                                                           {t('Show {{n}} more', {
                                                             n: hiddenIds.length,
@@ -1472,7 +1426,7 @@ export function Sidebar({
                                                       ),
                                                     }))
                                                   }
-                                                  className="flex-1 rounded-lg py-1 text-center text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                                                  className={SHOW_MORE_CLASS}
                                                 >
                                                   {t('Collapse')}
                                                 </button>
@@ -1480,7 +1434,7 @@ export function Sidebar({
                                             </div>
                                           )}
                                         {visibleConversations.length === 0 && (
-                                          <p className="py-1.5 pl-8 text-xs text-muted-foreground">
+                                          <p className="py-1.5 pl-8 text-xs text-subtle-foreground">
                                             {t('No conversations yet')}
                                           </p>
                                         )}
@@ -1509,13 +1463,20 @@ export function Sidebar({
                   </p>
                 );
               }
+              if (!searching && orderedProjects.length > 0 && activeProjects.length === 0) {
+                return (
+                  <p className="px-2 py-1.5 text-xs text-subtle-foreground">
+                    {t('No projects in this group yet')}
+                  </p>
+                );
+              }
               if (resolvedGroupId === ALL_GROUP_ID && projectGroups.length > 0) {
                 return (
-                  <div className="space-y-4">
+                  <div>
                     {pinnedProjects.length > 0 && (
                       <div>
                         <SidebarSectionLabel>{t('Pinned projects')}</SidebarSectionLabel>
-                        <div className="space-y-1">{pinnedProjects.map(projectNode)}</div>
+                        <div>{pinnedProjects.map(projectNode)}</div>
                       </div>
                     )}
                     {groupSections.map((section) => {
@@ -1549,9 +1510,7 @@ export function Sidebar({
                                 variants={heightVariants}
                                 className="overflow-hidden"
                               >
-                                <div className="space-y-1 pt-0.5">
-                                  {section.projects.map(projectNode)}
-                                </div>
+                                <div>{section.projects.map(projectNode)}</div>
                               </motion.div>
                             )}
                           </AnimatePresence>
@@ -1566,9 +1525,9 @@ export function Sidebar({
                   <div className="space-y-2">
                     <div>
                       <SidebarSectionLabel>{t('Pinned projects')}</SidebarSectionLabel>
-                      <div className="space-y-1">{pinnedProjects.map(projectNode)}</div>
+                      <div>{pinnedProjects.map(projectNode)}</div>
                     </div>
-                    <div className="space-y-1">{unpinnedProjects.map(projectNode)}</div>
+                    <div>{unpinnedProjects.map(projectNode)}</div>
                   </div>
                 );
               }
@@ -1577,56 +1536,63 @@ export function Sidebar({
           </SortableContext>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t p-2">
+        <div className="flex shrink-0 items-center gap-0.5 p-1.5">
+          <NodeSwitcher />
+          {archivedCount > 0 && (
+            <button
+              type="button"
+              data-slot="archived-button"
+              onClick={openArchive}
+              className={ICON_BUTTON_CLASS}
+              title={`${t('Archived')} (${archivedCount})`}
+            >
+              <Archive className="h-4 w-4" />
+            </button>
+          )}
+          {window.electronAPI.remote && (
+            <button
+              type="button"
+              onClick={() => window.electronAPI.remote?.exitDesk()}
+              className={ICON_BUTTON_CLASS}
+              title={t('Compact view')}
+            >
+              <Smartphone className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
-            onClick={onToggleCollapse}
+            onClick={() => window.electronAPI.window.openSettings()}
             className={ICON_BUTTON_CLASS}
-            title={t('Collapse sidebar')}
+            title={t('Settings')}
+            aria-label={t('Settings')}
           >
-            <PanelLeftClose className="h-4 w-4" />
+            <Settings className="h-4 w-4" />
           </button>
-          <div className="flex items-center">
-            {archivedCount > 0 && (
+          {/* 桌面端搜索与折叠入口常驻窗口顶栏；移动端抽屉放在这里 */}
+          {mobile && (
+            <>
               <button
                 type="button"
-                data-slot="archived-button"
-                onClick={openArchive}
+                onClick={onOpenSearch}
                 className={ICON_BUTTON_CLASS}
-                title={`${t('Archived')} (${archivedCount})`}
+                title={
+                  searchShortcut
+                    ? `${t('Search anything')} (${searchShortcut})`
+                    : t('Search anything')
+                }
               >
-                <Archive className="h-4 w-4" />
+                <Search className="h-4 w-4" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
-              }}
-              className={ICON_BUTTON_CLASS}
-              title={t('Ask Enso')}
-            >
-              <Sparkles className="h-4 w-4" />
-            </button>
-            {window.electronAPI.remote && (
               <button
                 type="button"
-                onClick={() => window.electronAPI.remote?.exitDesk()}
+                onClick={onToggleCollapse}
                 className={ICON_BUTTON_CLASS}
-                title={t('Compact view')}
+                title={t('Collapse sidebar')}
               >
-                <Smartphone className="h-4 w-4" />
+                <PanelLeftClose className="h-4 w-4" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => window.electronAPI.window.openSettings()}
-              className={ICON_BUTTON_CLASS}
-              title={t('Settings')}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-          </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1721,7 +1687,7 @@ export function Sidebar({
                       />
                     )}
                   </div>
-                  <div className="flex flex-col gap-y-0.5">
+                  <div className="flex flex-col">
                     {group.ids.map((id) => (
                       <motion.div key={id} layout="position" transition={springStandard}>
                         <ConversationRow
@@ -1988,8 +1954,8 @@ function ProjectGroupHeader({
         opacity: sortableDrag.isDragging ? 0.4 : undefined,
       }}
       className={cn(
-        'group relative flex h-7 w-full select-none items-center rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
-        droppable.isOver && 'bg-brand/10 text-foreground',
+        'group relative flex w-full select-none items-center rounded-md pt-3.5 pr-2.5 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground transition-colors hover:text-foreground',
+        droppable.isOver && 'bg-foreground/5 text-foreground',
         sortable && 'cursor-grab'
       )}
       {...(sortable ? sortableDrag.listeners : {})}
@@ -2015,7 +1981,7 @@ function ProjectGroupHeader({
         />
         <span
           className={cn(
-            'ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums',
+            'ml-auto shrink-0 font-normal text-[0.6875rem] tabular-nums',
             onEdit && 'transition-opacity group-hover:opacity-0'
           )}
         >
@@ -2031,9 +1997,9 @@ function ProjectGroupHeader({
             onEdit();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="absolute inset-y-0 right-1 my-auto flex size-5 items-center justify-center rounded-md opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="absolute right-1.5 bottom-0.5 flex size-5 items-center justify-center rounded-[5px] opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground group-hover:opacity-100 [@media(hover:none)]:opacity-100"
         >
-          <Pencil className="h-3.5 w-3.5" />
+          <Pencil className="size-3.25" />
         </button>
       )}
     </div>
@@ -2073,19 +2039,19 @@ function ProjectDragPreview({
       className="pointer-events-none rounded-lg border bg-background/95 py-0.5 shadow-float"
       style={{ width: width ?? 224 }}
     >
-      <div className="flex items-center gap-2 px-2 py-2 text-sm font-medium">
-        <IconSlot>{folded ? <FolderGit2 /> : <FolderOpen />}</IconSlot>
+      <div className="flex h-8 items-center gap-2 px-2 text-[0.8125rem] font-medium">
+        <FoldChevron folded={folded} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
       </div>
       {!folded && (
-        <div className="flex flex-col gap-y-0.5">
+        <div className="flex flex-col">
           {shownIds.map((id) => {
             const conversation = conversations[id];
             if (!conversation) return null;
             return (
               <div
                 key={id}
-                className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 py-1.5 pr-2 pl-2 text-sm text-muted-foreground"
+                className="flex h-8 items-center gap-2 px-2 text-[0.8125rem] text-foreground/88"
               >
                 <ConversationDot conversation={conversation} />
                 <span className="min-w-0 truncate">
@@ -2418,11 +2384,10 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       className={cn(
-        // 会话行与项目行共用图标/文字基准，worktree 与浏览器/终端计数在第二行
-        'group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 rounded-lg py-1.5 pr-2 pl-2 text-sm transition-colors',
+        'group flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[0.8125rem] transition-colors',
         active
-          ? 'bg-brand/10 text-foreground dark:bg-brand/15'
-          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+          ? 'bg-foreground/[0.075] text-foreground dark:bg-foreground/10'
+          : 'text-foreground/88 hover:bg-foreground/5 hover:text-foreground'
       )}
       onClick={() => {
         if (!renaming) onSelect(id);
@@ -2440,10 +2405,10 @@ function ConversationRow({
       title={hoverTitle}
     >
       <ConversationDot conversation={conversation} />
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {sourceTitle && (
-            <span className="max-w-1/3 truncate text-[10px] text-muted-foreground/70">
+            <span className="max-w-1/3 truncate text-[0.6875rem] text-subtle-foreground">
               {t('Branched from {{title}}', { title: sourceTitle })}
             </span>
           )}
@@ -2460,11 +2425,13 @@ function ConversationRow({
             <span className="min-w-0 flex-1 truncate">
               {displayTitle}
               {subtitle && (
-                <span className="ml-1.5 text-[10px] text-muted-foreground">{subtitle}</span>
+                <span className="ml-1.5 text-[0.6875rem] text-subtle-foreground">{subtitle}</span>
               )}
             </span>
           )}
         </div>
+        {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
+        <SessionTabCounts conversationId={id} />
         {!renaming && (
           <TitleSummaryBadge
             pending={conversation.titleSummaryPending}
@@ -2474,18 +2441,18 @@ function ConversationRow({
         )}
         {!renaming &&
           (switchHint ? (
-            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-[0.6875rem] text-subtle-foreground tabular-nums">
               {switchHint}
             </span>
           ) : (
             <>
               {pinned && !archived && (
                 <Pin
-                  className="h-3 w-3 shrink-0 text-muted-foreground/70 group-hover:hidden"
+                  className="h-3 w-3 shrink-0 text-subtle-foreground group-hover:hidden"
                   aria-hidden
                 />
               )}
-              <span className="shrink-0 text-[10px] text-muted-foreground/80 tabular-nums group-hover:hidden">
+              <span className="shrink-0 text-[0.6875rem] text-subtle-foreground tabular-nums group-hover:hidden">
                 {formatRelativeTime(
                   conversation.lastActiveAt ?? conversation.createdAt,
                   locale,
@@ -2536,20 +2503,6 @@ function ConversationRow({
             </>
           ))}
       </div>
-      {isolated && worktree ? (
-        <div
-          data-slot="conversation-worktree-row"
-          className="col-span-2 grid min-w-0 grid-cols-subgrid"
-        >
-          <WorktreeBadge
-            worktree={worktree}
-            status={worktreeStatus}
-            after={<SessionTabCounts conversationId={id} />}
-          />
-        </div>
-      ) : (
-        <SessionTabCounts conversationId={id} row />
-      )}
     </div>
   );
   return (
@@ -2828,20 +2781,29 @@ function ProjectOverflowMenu({ actions }: { actions: ProjectAction[] }) {
   );
 }
 
-/** 区块标签:纯文字,不占图标列(对应不可折叠的 Active / Pinned 等分区) */
-function SidebarSectionLabel({ children }: { children: React.ReactNode }) {
+/** 区块标签:纯文字,不占图标列(对应不可折叠的 Active / Pinned 等分区);actions 悬停才显示 */
+function SidebarSectionLabel({
+  children,
+  actions,
+}: {
+  children: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
   return (
-    <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
-      <span className="truncate">{children}</span>
+    <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground">
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {actions}
     </div>
   );
 }
 
-/** 行首图标列:固定 16px,让项目/会话/分区三种行共用同一条图标基准线 */
-function IconSlot({ children }: { children: React.ReactNode }) {
+/** 项目行首的折叠箭头:与会话行状态点同占 16px 列 */
+function FoldChevron({ folded }: { folded: boolean }) {
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">
-      {children}
+    <span className="flex size-4 shrink-0 items-center justify-center text-subtle-foreground">
+      <ChevronRight
+        className={cn('size-3.5 transition-transform duration-150', !folded && 'rotate-90')}
+      />
     </span>
   );
 }

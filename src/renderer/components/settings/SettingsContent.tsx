@@ -28,6 +28,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import * as React from 'react';
+import { ChromeRow, useShellChrome, useWindowChromeKind } from '@/components/app/WindowChrome';
 import { useSettingsCatalog } from '@/hooks/useSettingsCatalog';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
@@ -190,15 +191,24 @@ export function SettingsContent() {
   const showList = !isMobile || mobileList;
   const showContent = !isMobile || !mobileList;
   const activeLabel = categories.find((c) => c.id === activeCategory)?.label;
+  const shell = useShellChrome();
+  const chromeKind = useWindowChromeKind();
 
   return (
     <div className="flex h-full w-full">
       {/* Left: Category List */}
       {showList && (
         <nav
-          className={cn('flex min-h-0 shrink-0 flex-col', isMobile ? 'w-full' : 'w-56 border-r')}
+          data-enso="settings-nav"
+          className={cn(
+            'flex min-h-0 shrink-0 flex-col',
+            isMobile ? 'w-full' : shell ? 'w-56' : 'w-56 border-r'
+          )}
         >
-          <div className="sticky top-0 z-10 bg-background px-2 pt-2">
+          {shell && chromeKind === 'mac' && (
+            <div aria-hidden className="drag-region -mb-2 h-[44px] shrink-0" />
+          )}
+          <div className={cn('sticky top-0 z-10 px-2 pt-2', !shell && 'bg-background')}>
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -272,53 +282,69 @@ export function SettingsContent() {
 
       {/* Right: Settings Panel */}
       {showContent && (
-        <div className={cn('flex-1 min-w-0 overflow-y-auto', isMobile ? 'px-4 pb-6' : 'p-6')}>
-          {isMobile && (
-            <button
-              type="button"
-              onClick={() => setMobileList(true)}
-              className="sticky top-0 z-10 -mx-4 mb-3 flex w-[calc(100%+2rem)] items-center gap-1 border-b bg-background px-2 py-2.5 text-sm font-medium"
-            >
-              <ChevronLeft className="h-5 w-5 text-muted-foreground" />
-              {activeLabel ? t(activeLabel) : null}
-            </button>
+        <div
+          data-enso="settings-content"
+          className={cn(
+            'flex min-w-0 flex-1 flex-col',
+            shell && 'my-[8px] mr-[8px] overflow-hidden rounded-[10px] bg-background shadow-surface'
           )}
-          {activeCategory === 'general' && <GeneralSettings />}
-          {activeCategory === 'shortcuts' && <KeybindingsSettings />}
-          {activeCategory === 'appearance' && <AppearanceSettings />}
-          {activeCategory === 'providers' && <ProvidersSettings />}
-          {activeCategory === 'skills' && <SkillsSettings />}
-          {activeCategory === 'plugins' && (
-            <EnsoPluginsSettings
-              requestedInstallUrl={pluginInstallUrl}
-              onRequestedInstallUrlConsumed={() => setPluginInstallUrl(null)}
-            />
-          )}
-          {activeCategory === 'claudePlugins' && <ClaudePluginsSettings />}
-          {activeCategory === 'mcp' && <McpSettings />}
-          {activeCategory === 'instructions' && <InstructionsSettings />}
-          {activeCategory === 'presets' && <PresetsSettings />}
-          {activeCategory === 'agents' && <AgentTypesSettings />}
-          {activeCategory === 'workflows' && <WorkflowsSettings />}
-          {activeCategory === 'tools' && <BuiltinToolsSettings />}
-          {activeCategory === 'memory' && (
-            <div className="space-y-8">
-              <MemorySettings onLibraryChanged={() => setMemoryRevision((n) => n + 1)} />
-              <MemoryKnowledge revision={memoryRevision} />
-              <MemoryLibrary revision={memoryRevision} />
-            </div>
-          )}
-          {activeCategory === 'phone' && <DevicesSettings />}
-          {activeCategory === 'ssh' && <SshSettings />}
-          {activeCategory === 'usage' && <UsageSettings />}
-          {activeCategory === 'privacy' && <PrivacySettings />}
-          {activeCategory === 'resources' && <ResourcesSettings />}
-          {activeCategory === 'voice' && <VoiceInputSettings />}
-          {activeCategory === 'experimental' && (
-            <ExperimentalSettings onOpenBots={() => setActiveCategory('bots')} />
-          )}
-          {activeCategory === 'bots' && <BotSettings />}
-          {activeCategory === 'botTemplates' && <BotTemplatesSettings />}
+        >
+          {shell && <ChromeRow data-enso="title-bar" />}
+          <div
+            className={cn(
+              'min-h-0 flex-1 overflow-y-auto',
+              isMobile ? 'px-4 pb-6' : shell ? 'px-6 pb-6' : 'p-6'
+            )}
+          >
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setMobileList(true)}
+                className="sticky top-0 z-10 -mx-4 mb-3 flex w-[calc(100%+2rem)] items-center gap-1 border-b bg-background px-2 py-2.5 text-sm font-medium"
+              >
+                <ChevronLeft className="h-5 w-5 text-muted-foreground" />
+                {activeLabel ? t(activeLabel) : null}
+              </button>
+            )}
+            {activeCategory === 'general' && <GeneralSettings />}
+            {activeCategory === 'shortcuts' && <KeybindingsSettings />}
+            {activeCategory === 'appearance' && (
+              <AppearanceSettings onOpenPlugins={() => openCategory('plugins')} />
+            )}
+            {activeCategory === 'providers' && <ProvidersSettings />}
+            {activeCategory === 'skills' && <SkillsSettings />}
+            {activeCategory === 'plugins' && (
+              <EnsoPluginsSettings
+                requestedInstallUrl={pluginInstallUrl}
+                onRequestedInstallUrlConsumed={() => setPluginInstallUrl(null)}
+              />
+            )}
+            {activeCategory === 'claudePlugins' && <ClaudePluginsSettings />}
+            {activeCategory === 'mcp' && <McpSettings />}
+            {activeCategory === 'instructions' && <InstructionsSettings />}
+            {activeCategory === 'presets' && <PresetsSettings />}
+            {activeCategory === 'agents' && <AgentTypesSettings />}
+            {activeCategory === 'workflows' && <WorkflowsSettings />}
+            {activeCategory === 'tools' && <BuiltinToolsSettings />}
+            {activeCategory === 'memory' && (
+              <div className="space-y-8">
+                <MemorySettings onLibraryChanged={() => setMemoryRevision((n) => n + 1)} />
+                <MemoryKnowledge revision={memoryRevision} />
+                <MemoryLibrary revision={memoryRevision} />
+              </div>
+            )}
+            {activeCategory === 'phone' && <DevicesSettings />}
+            {activeCategory === 'ssh' && <SshSettings />}
+            {activeCategory === 'usage' && <UsageSettings />}
+            {activeCategory === 'privacy' && <PrivacySettings />}
+            {activeCategory === 'resources' && <ResourcesSettings />}
+            {activeCategory === 'voice' && <VoiceInputSettings />}
+            {activeCategory === 'experimental' && (
+              <ExperimentalSettings onOpenBots={() => setActiveCategory('bots')} />
+            )}
+            {activeCategory === 'bots' && <BotSettings />}
+            {activeCategory === 'botTemplates' && <BotTemplatesSettings />}
+          </div>
         </div>
       )}
     </div>

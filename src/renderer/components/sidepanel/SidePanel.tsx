@@ -16,12 +16,21 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
+  PanelRight,
   Plus,
   SquareTerminal,
   Workflow,
   X,
 } from 'lucide-react';
-import { createContext, type ReactElement, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  type ReactElement,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -31,6 +40,7 @@ import {
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
+import { holesClipPath } from '@/lib/backgroundClip';
 import {
   addSidePanelBrowser,
   addSidePanelWorkflow,
@@ -48,6 +58,7 @@ import { sanitizeSidePanelLayout } from '@/stores/sidePanel/layoutSanitize';
 import {
   CHAT_MIN_WIDTH,
   resolveSidePanelWidth,
+  SIDE_PANEL_GAP_WIDTH,
   SIDE_PANEL_HANDLE_WIDTH,
 } from '@/stores/sidePanel/width';
 import { useWorkflowRunsStore } from '@/stores/workflowRuns';
@@ -67,6 +78,30 @@ import './sidepanel-dock.css';
 
 /** dockview 的 part 组件在独立渲染树中,cwd 等上下文经 context 注入 */
 const PanelContext = createContext<{ conversationId?: string; projectId?: string }>({});
+/** 面板升进窗口顶栏行：右上角那组 tab 条接管窗口顶栏的面板开关 */
+const TitleRowContext = createContext(false);
+
+/** 该组的 tab 条是否在 dock 右上角（分屏后只有它挨着窗口顶栏右端） */
+function useIsTopRightGroup(
+  containerApi: DockviewApi,
+  group?: IDockviewHeaderActionsProps['group']
+): boolean {
+  const [topRight, setTopRight] = useState(!group);
+  useEffect(() => {
+    if (!group) return;
+    const check = () => {
+      const dock = group.element.closest('.dv-dockview')?.getBoundingClientRect();
+      const box = group.element.getBoundingClientRect();
+      setTopRight(
+        !!dock && Math.abs(box.top - dock.top) < 1 && Math.abs(box.right - dock.right) < 1
+      );
+    };
+    check();
+    const sub = containerApi.onDidLayoutChange(check);
+    return () => sub.dispose();
+  }, [containerApi, group]);
+  return topRight;
+}
 
 function nextTerminalTitle(api: DockviewApi, label: string): string {
   const count = api.panels.length;
@@ -302,6 +337,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
   const isBrowser = props.api.id === 'browser' || props.api.id.startsWith('browser:');
   const tab = (
     <div
+      data-side-tab
+      data-active={active || undefined}
       className={cn(
         'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
         active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
@@ -453,6 +490,9 @@ function SidePanelHeaderActions({
   const toggleFullscreen = useSidePanelStore((s) => s.toggleFullscreen);
   const workflowAvailable = useWorkflowAvailable(projectId);
   const isMobile = useIsMobile();
+  const titleRow = useContext(TitleRowContext);
+  const topRight = useIsTopRightGroup(containerApi, group);
+  const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   return (
     <div className="flex h-full items-center gap-0.5">
       <button
@@ -508,6 +548,17 @@ function SidePanelHeaderActions({
           addPluginViewPanel(containerApi, conversationId, projectId, view, group)
         }
       />
+      {titleRow && topRight && (
+        <button
+          type="button"
+          className="ml-1 flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+          onClick={toggleOpen}
+          aria-label={t('Toggle side panel')}
+          title={t('Toggle side panel')}
+        >
+          <PanelRight className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -519,7 +570,7 @@ function Watermark(props: IWatermarkPanelProps) {
   const workflowAvailable = useWorkflowAvailable(projectId);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
+      <div className="enso-side-dock-header flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
         <SidePanelHeaderActions containerApi={props.containerApi} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
@@ -671,9 +722,15 @@ function ConversationDock({
 export function SidePanel({
   width: preferredWidth,
   resizing = false,
+  card = false,
+  titleRow = false,
 }: {
   width: number;
   resizing?: boolean;
+  /** 桌面外壳：做成浮在画布上的圆角卡片 */
+  card?: boolean;
+  /** mac 桌面外壳：并排时不做卡片，贴右/下边并伸进顶栏行，tab 条与顶栏齐平、左边线即分割 */
+  titleRow?: boolean;
 }) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
@@ -733,7 +790,8 @@ export function SidePanel({
   );
   const [cover, setCover] = useState(fullscreen);
   const [workspaceW, setWorkspaceW] = useState(0);
-  const width = resolveSidePanelWidth(preferredWidth, workspaceW);
+  const handleW = card && !titleRow ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH;
+  const width = resolveSidePanelWidth(preferredWidth, workspaceW, handleW);
   const asideRef = useRef<HTMLElement>(null);
   const [widthAnim, setWidthAnim] = useState({
     id: conversationId,
@@ -746,7 +804,12 @@ export function SidePanel({
   useEffect(() => {
     const parent = asideRef.current?.parentElement;
     if (!parent) return;
-    const update = () => setWorkspaceW(parent.clientWidth);
+    const update = () => {
+      const style = getComputedStyle(parent);
+      setWorkspaceW(
+        parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      );
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(parent);
@@ -761,9 +824,9 @@ export function SidePanel({
    * dockview 的 resize 回调在 ResizeObserver 里又套了一层 rAF，至少滞后一帧；
    * aside 展开态是透明的（给 Browser 挖孔），若内容跟着 aside 逐帧重排，
    * 弹簧过冲/打开首帧时 aside 比内容宽出来的那一条就会露出没有面板遮罩的裸壁纸。
-   * 全屏 cover 态 aside 本身是实底，内容照常铺满。border-l 占 1px，内容按 content-box 扣掉。
+   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 border-l 占 1px，内容按 content-box 扣掉。
    */
-  const contentW = cover ? undefined : Math.max(0, width - (open ? 1 : 0));
+  const contentW = cover ? undefined : Math.max(0, width - (open && !card ? 1 : 0));
   const activeId = conversationId;
   const skipWidthAnim = shouldSkipSidePanelWidthAnim({
     resizing,
@@ -785,27 +848,41 @@ export function SidePanel({
         initial={false}
         animate={{ width: targetW }}
         style={
-          cover
-            ? undefined
-            : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + SIDE_PANEL_HANDLE_WIDTH}px))` }
+          cover ? undefined : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + handleW}px))` }
         }
         transition={sidePanelWidthTransition({ skip: skipWidthAnim, cover, targetW })}
         onAnimationComplete={() => {
           if (!fullscreen) setCover(false);
         }}
         className={cn(
-          'flex min-h-0 flex-col overflow-hidden',
+          'flex min-h-0 flex-col',
+          // 顶栏态的描边/阴影画在盒外，放宽 4px 裁剪才能和对话卡片底边、右边一致
+          titleRow && !cover ? 'overflow-clip [overflow-clip-margin:4px]' : 'overflow-hidden',
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
-          open && !cover ? 'bg-transparent' : 'bg-background',
-          cover ? 'absolute inset-y-0 right-0' : 'relative shrink-0',
-          open && 'border-l'
+          open && !cover ? 'bg-transparent' : titleRow && !cover ? '' : 'bg-background',
+          !cover
+            ? 'relative shrink-0'
+            : !card
+              ? 'absolute inset-y-0 right-0'
+              : 'absolute top-0 right-[8px] bottom-[8px]',
+          titleRow && !cover
+            ? 'no-drag -mt-[44px] rounded-br-[10px]'
+            : card
+              ? cn('rounded-[10px]', open && 'shadow-surface')
+              : open && 'border-l'
         )}
+        data-enso="side-panel"
+        data-title-row={(titleRow && !cover) || undefined}
       >
+        {open && !cover ? <SurfaceUnderHoles titleRow={titleRow} /> : null}
         {open && !cover && contentW !== undefined ? (
           // 过冲补条：只盖 [内容右边缘, aside 右边缘]，稳态宽度为 0，不会压到 Browser 挖孔
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 bg-background"
+            className={cn(
+              'pointer-events-none absolute right-0 bottom-0 bg-background',
+              titleRow ? 'top-[44px]' : 'top-0'
+            )}
             style={{ left: contentW }}
           />
         ) : null}
@@ -816,13 +893,25 @@ export function SidePanel({
             // invisible 而非 hidden：关着时 dockview 也按目标宽度排好，打开首帧即满遮罩
             !open && 'invisible'
           )}
-          style={contentW !== undefined ? { width: contentW } : undefined}
+          style={
+            contentW === undefined
+              ? undefined
+              : {
+                  width: contentW,
+                  // 顶栏态：面板内容自带实底，挖出卡片右上圆角（y=44 处）与右下圆角
+                  clipPath: titleRow
+                    ? 'shape(from 0 0, hline to 100%, vline to 44px, hline to calc(100% - 10px), arc to 100% 54px of 10px cw, vline to calc(100% - 10px), arc to calc(100% - 10px) 100% of 10px cw, hline to 0, close)'
+                    : undefined,
+                }
+          }
         >
           {visibleIds.length > 0 ? (
             <div className="relative min-h-0 flex-1">
-              {visibleIds.map((id) => (
-                <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
-              ))}
+              <TitleRowContext.Provider value={titleRow && !cover}>
+                {visibleIds.map((id) => (
+                  <MountedConversationDock key={id} conversationId={id} hidden={id !== activeId} />
+                ))}
+              </TitleRowContext.Provider>
             </div>
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -831,6 +920,42 @@ export function SidePanel({
           )}
         </div>
       </motion.aside>
+    </>
+  );
+}
+
+/**
+ * 展开态面板底色：BackgroundLayer 现在铺的是画布色，面板自己铺卡片底，
+ * 同样按视口坐标挖掉 Browser guest 的矩形，guest 沉底时才能透出。
+ */
+function SurfaceUnderHoles({ titleRow }: { titleRow: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const holes = useSidePanelStore((s) => s.browserHoles);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { left, top } = el.getBoundingClientRect();
+    const local = Object.values(holes).map((h) => ({ ...h, x: h.x - left, y: h.y - top }));
+    el.style.clipPath = holesClipPath(local) ?? '';
+  }, [holes]);
+  return (
+    <>
+      {/* 顶栏态：tab 条透明落在画布上，卡片面只从 44px 起；阴影单独画并裁掉接缝一侧 */}
+      {titleRow && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-[44px] bottom-0 rounded-r-[10px] shadow-surface"
+          style={{ clipPath: 'inset(-24px -24px -24px 0)' }}
+        />
+      )}
+      <div
+        ref={ref}
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-x-0 bottom-0 bg-background',
+          titleRow ? 'top-[44px] rounded-r-[10px]' : 'top-0'
+        )}
+      />
     </>
   );
 }

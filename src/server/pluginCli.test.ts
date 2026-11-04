@@ -24,6 +24,7 @@ const preview: ExtensionPluginInstallPreview = {
   env: ['GITHUB_TOKEN'],
   interop: ['enso.example.github'],
   resident: true,
+  styles: true,
   events: [{ event: 'session_start', mode: 'observe', failClosed: false }],
   schedules: [{ id: 'sweep', intervalSeconds: 3600 }],
   tools: [{ name: 'greet', description: 'greet someone' }],
@@ -131,8 +132,15 @@ describe('enso-server plugin', () => {
       expect(text).toContain(part);
     expect(text).toContain('GITHUB_TOKEN');
     expect(text).toContain('常驻：是');
+    expect(text).toContain('修改界面样式：主题 CSS 可以改变应用的任意界面');
     expect(text).toContain('session_start');
     expect(text).toContain('sweep');
+  });
+
+  it('只带主题 CSS 时权限行不写「无」', () => {
+    const text = formatInstallPreview({ ...preview, permissions: [] });
+    expect(text).toContain('修改界面样式');
+    expect(text).not.toContain('权限：无');
   });
 
   it('list 提示登记表问题，notice-dismiss 确认后不再提示', async () => {

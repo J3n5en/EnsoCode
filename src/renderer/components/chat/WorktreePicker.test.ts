@@ -365,12 +365,10 @@ describe('WorktreeBadge', () => {
       'Readable task\nfeature/task\n/worktrees/task\nUncommitted changes · 2 unmerged commits'
     );
     const html = renderToStaticMarkup(createElement(WorktreeBadge, { worktree }));
-    expect(html).toContain('truncate">Readable task');
     expect(html).toContain('data-slot="worktree-label"');
-    expect(html).toContain('grid-cols-subgrid');
-    expect(html).toContain('text-muted-foreground/70');
-    expect(html).not.toContain('max-w-[35%]');
-    expect(html).not.toContain('bg-muted');
+    expect(html).toContain('title="Readable task\nfeature/task\n/worktrees/task');
+    expect(html).not.toContain('>Readable task<');
+    expect(html).toContain('lucide-git-branch');
   });
   it('distinguishes missing and unknown status from clean worktrees', () => {
     expect(worktreeHoverText(worktree, undefined, t)).toContain('Worktree status unknown');

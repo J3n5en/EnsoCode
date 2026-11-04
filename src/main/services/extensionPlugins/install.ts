@@ -193,6 +193,7 @@ async function verifyReferences(
     manifest.renderer,
     manifest.icon,
     ...manifest.contributes.views.map((v) => v.entry),
+    ...manifest.contributes.themes.flatMap((theme) => [theme.path, theme.css]),
   ].filter((p): p is string => typeof p === 'string');
   for (const rel of files) {
     if (!(await exists(resolve(pluginRoot, rel), 'file')))

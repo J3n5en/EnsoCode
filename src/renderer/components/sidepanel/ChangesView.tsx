@@ -238,7 +238,7 @@ export function ChangesView({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex shrink-0 gap-1 border-b px-2 py-1">
+      <div className="flex h-[36px] shrink-0 items-center gap-1 border-b px-2">
         <div ref={tabsRef} role="tablist" className="t-tabs">
           <span ref={pillRef} aria-hidden="true" className="t-tabs-pill" />
           <ModeTab active={mode === 'all'} onClick={() => setMode(conversationId, 'all')}>

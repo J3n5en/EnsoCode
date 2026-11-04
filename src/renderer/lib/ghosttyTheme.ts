@@ -290,6 +290,19 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
     : mixColors(theme.foreground, theme.background, 0.3);
   root.style.setProperty('--muted', mutedBg);
   root.style.setProperty('--muted-foreground', mutedFg);
+  root.style.setProperty(
+    '--subtle-foreground',
+    mixColors(theme.foreground, theme.background, 0.55)
+  );
+
+  root.style.setProperty('--canvas', mixColors(theme.background, '#000000', isDark ? 0.2 : 0.04));
+  root.style.setProperty('--sunken', mixColors(theme.background, '#000000', isDark ? 0.12 : 0.03));
+  root.style.setProperty(
+    '--elevation-surface',
+    isDark
+      ? `0 0 0 1px ${hexToRgba(theme.foreground, 6)}, 0 2px 8px rgb(0 0 0 / 0.3)`
+      : `0 0 0 1px ${hexToRgba(theme.foreground, 7)}, 0 1px 3px rgb(0 0 0 / 0.04)`
+  );
 
   // Accent - use blue mixed with background for softer appearance
   const accentColor = isDark ? theme.brightBlue : theme.blue;
@@ -338,6 +351,10 @@ export function clearTerminalThemeFromApp(): void {
     '--secondary-foreground',
     '--muted',
     '--muted-foreground',
+    '--subtle-foreground',
+    '--canvas',
+    '--sunken',
+    '--elevation-surface',
     '--accent',
     '--accent-foreground',
     '--destructive',

@@ -45,6 +45,29 @@
   padding: 0.25rem 0.5rem;
 }
 
+/* 面板 tab 条升进顶栏行：与顶栏同高、透明落在画布上，下方卡片面与对话卡片连成一片。
+   tab 做成与 Code/Bot 切换一致的胶囊：激活项是浮起的卡片底色。 */
+[data-title-row] .enso-side-dock .dv-tabs-and-actions-container,
+[data-title-row] .enso-side-dock-header {
+  height: 44px;
+  padding-block: 0;
+  background: transparent;
+  border-bottom: 0;
+}
+[data-title-row] .enso-side-dock [data-side-tab] {
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  padding-inline: 0.625rem;
+  background: transparent;
+}
+[data-title-row] .enso-side-dock [data-side-tab]:hover {
+  background: color-mix(in oklab, var(--color-foreground) 5%, transparent);
+}
+[data-title-row] .enso-side-dock [data-side-tab][data-active] {
+  background: var(--color-background);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-foreground) 8%, transparent);
+}
+
 .enso-side-dock .dv-tabs-container {
   height: auto;
   align-items: center;

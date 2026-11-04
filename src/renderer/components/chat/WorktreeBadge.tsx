@@ -1,6 +1,5 @@
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import { GitBranch } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { type TFunction, useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { worktreeDisplayName } from './worktreeUi';
@@ -22,40 +21,33 @@ export function worktreeHoverText(
   return [worktreeDisplayName(worktree), worktree.branch, worktree.path, state].join('\n');
 }
 
+/** 会话行内的 worktree 标记：只占一个分支图标，名称、分支、路径与状态放进悬停提示 */
 export function WorktreeBadge({
   worktree,
   status,
-  after,
 }: {
   worktree: SessionWorktree;
   status?: WorktreeStatus;
-  after?: ReactNode;
 }) {
   const { t } = useI18n();
   return (
     <span
       data-slot="worktree-label"
       title={worktreeHoverText(worktree, status, t)}
-      className="col-span-2 grid min-w-0 grid-cols-subgrid items-center text-[10px] leading-4 text-muted-foreground/70"
+      className="flex shrink-0 items-center"
     >
-      <span className="relative flex h-3 min-w-0 items-center justify-center">
-        <GitBranch
-          className={cn(
-            'absolute h-3 w-3 shrink-0',
-            status?.exists === false
-              ? 'text-destructive'
-              : status?.dirty
-                ? 'text-warning'
-                : (status?.ahead ?? 0) > 0
-                  ? 'text-info'
-                  : 'text-muted-foreground/60'
-          )}
-        />
-      </span>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate">{worktreeDisplayName(worktree)}</span>
-        {after}
-      </span>
+      <GitBranch
+        className={cn(
+          'size-2.75',
+          status?.exists === false
+            ? 'text-destructive'
+            : status?.dirty
+              ? 'text-warning'
+              : (status?.ahead ?? 0) > 0
+                ? 'text-info'
+                : 'text-subtle-foreground'
+        )}
+      />
     </span>
   );
 }

@@ -473,6 +473,7 @@ export function StatsLine({ conversationId }: StatsLineProps) {
   return (
     <div
       data-slot="stats-line"
+      data-enso="status-line"
       className="group relative flex h-7 items-center justify-center px-1"
     >
       {visibleSegments.length > 0 && (
@@ -488,7 +489,7 @@ export function StatsLine({ conversationId }: StatsLineProps) {
                 onMouseLeave={() => setHoveredId((current) => (current === id ? null : current))}
                 className={cn(
                   'relative flex items-center gap-1 text-[11px] tabular-nums',
-                  value.critical ? 'text-destructive' : 'text-muted-foreground/80'
+                  value.critical ? 'text-destructive' : 'text-subtle-foreground'
                 )}
               >
                 {id === 'context' && value.percent !== undefined ? (

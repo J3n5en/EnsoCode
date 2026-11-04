@@ -5,11 +5,17 @@
 @theme {
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* 外壳 token 只在桌面主题派生里定义；手机 PWA 扫描到桌面类名时回落到既有 token */
+  --color-canvas: var(--canvas, var(--background));
+  --color-sunken: var(--sunken, var(--muted));
+  --color-subtle-foreground: var(--subtle-foreground, var(--muted-foreground));
 
   --shadow-float: var(--elevation-float);
+  --shadow-surface: var(--elevation-surface, 0 0 #0000);
 }
 
 @layer base {
+  /* 手机 PWA 用的默认值；桌面端由主题 token 覆盖 */
   :root {
     --brand: oklch(0.54 0.2 280);
     --brand-foreground: oklch(0.985 0 0);
@@ -21,61 +27,6 @@
     --brand-foreground: oklch(0.205 0.014 285.82);
     --elevation-float: 0 1px 2px oklch(0 0 0 / 0.3), 0 16px 40px -12px oklch(0 0 0 / 0.55);
   }
-
-  /* 强调色预设：默认紫罗兰写在 :root/.dark，其余由设置写入 html[data-accent] */
-  html[data-accent='indigo'] {
-    --brand: oklch(0.53 0.19 265);
-  }
-  html.dark[data-accent='indigo'] {
-    --brand: oklch(0.7 0.14 265);
-  }
-  html[data-accent='teal'] {
-    --brand: oklch(0.56 0.1 185);
-  }
-  html.dark[data-accent='teal'] {
-    --brand: oklch(0.76 0.12 185);
-  }
-  html[data-accent='amber'] {
-    --brand: oklch(0.64 0.16 55);
-  }
-  html.dark[data-accent='amber'] {
-    --brand: oklch(0.78 0.14 70);
-  }
-  html[data-accent='graphite'] {
-    --brand: oklch(0.27 0.01 285);
-  }
-  html.dark[data-accent='graphite'] {
-    --brand: oklch(0.9 0.005 285);
-  }
-}
-
-/*
- * 工具时间线竖线：画在行容器上才能跨过行间距。节点 22px 居中于 30px 行高（上下缘 4px/26px），
- * 线段止于节点边缘，不从半透明节点底下穿过；带回复身份头（2rem）的行整体下移。
- */
-.enso-step-row {
-  position: relative;
-  --enso-step-top: 0px;
-}
-.enso-step-row[data-reply-head] {
-  --enso-step-top: 2rem;
-}
-.enso-step-row[data-step-prev]::before,
-.enso-step-row[data-step-next]::after {
-  content: '';
-  position: absolute;
-  left: calc(1rem + 10.5px);
-  width: 1px;
-  background-color: var(--color-border);
-  pointer-events: none;
-}
-.enso-step-row[data-step-prev]::before {
-  top: 0;
-  height: calc(var(--enso-step-top) + 4px);
-}
-.enso-step-row[data-step-next]::after {
-  top: calc(var(--enso-step-top) + 26px);
-  bottom: 0;
 }
 
 /* ── Shimmer text (15) — Thinking… 流光 ──────────────────────── */

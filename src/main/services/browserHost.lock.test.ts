@@ -68,6 +68,7 @@ vi.mock('electron', () => ({
     }
     setBackgroundColor() {}
     setBounds() {}
+    setBorderRadius() {}
     setVisible() {}
   },
 }));

@@ -16,6 +16,8 @@ export interface ExtensionPluginSummary {
   commands: { id: string; title: string }[];
   /** entry 是安装目录内的相对路径，渲染层经 asset 通道取内容 */
   views: { id: string; title: string; entry: string }[];
+  /** path / css 是安装目录内的相对路径，渲染层经 asset 通道取；没同意样式能力时不带 css */
+  themes: { id: string; name: string; path: string; css?: string }[];
   triggers: { symbol: PluginTriggerSymbol; name: string }[];
   hasRenderer: boolean;
   /** 渲染模块相对路径；渲染层经 asset 通道取源码，不是磁盘路径 */
@@ -107,6 +109,8 @@ export interface ExtensionPluginInstallPreview {
   env: string[];
   interop: string[];
   resident: boolean;
+  /** 有主题带 CSS，可以改变应用任意界面 */
+  styles: boolean;
   events: { event: string; mode: 'observe' | 'intercept'; failClosed: boolean }[];
   schedules: { id: string; intervalSeconds: number }[];
   tools: { name: string; description: string }[];

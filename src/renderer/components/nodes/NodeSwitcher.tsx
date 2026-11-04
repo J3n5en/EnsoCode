@@ -1,5 +1,5 @@
 import type { RemoteNodeStatus } from '@shared/types/nodes';
-import { Check, ChevronDown, Laptop, Monitor, Plus } from 'lucide-react';
+import { Check, ChevronsUpDown, Laptop, Monitor, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
@@ -23,8 +23,8 @@ export function NodeDot({ node, className }: { node: RemoteNodeStatus; className
   return <span className={cn('h-2 w-2 shrink-0 rounded-full', tone, className)} title={title} />;
 }
 
-/** 侧栏顶部的节点切换：本机 / 已连节点 / 连接新节点 */
-export function NodeSwitcher({ className }: { className?: string }) {
+/** 侧栏底部的节点切换：本机 / 已连节点 / 连接新节点 */
+export function NodeSwitcher() {
   const { t } = useI18n();
   const nodes = useRemoteNodesStore((s) => s.nodes);
   const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
@@ -35,25 +35,43 @@ export function NodeSwitcher({ className }: { className?: string }) {
   const active = activeNodeId === 'local' ? null : nodes.find((n) => n.nodeId === activeNodeId);
   const label = active ? active.label : t('This computer');
   const Icon = active ? Monitor : Laptop;
+  const subtitle = active
+    ? active.hostname && active.hostname !== active.label
+      ? active.hostname
+      : active.hostOnline
+        ? t('Online')
+        : active.connected
+          ? t('Remote desktop is offline')
+          : t('Connecting…')
+    : nodes.length > 0
+      ? t('{{n}} remote', { n: nodes.length })
+      : undefined;
 
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          className={cn(
-            'flex h-7 min-w-0 max-w-48 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors hover:bg-muted',
-            active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-            className
-          )}
+          className="flex h-8.5 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-foreground/5 data-popup-open:bg-foreground/5"
           title={t('Switch node')}
         >
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate font-medium">{label}</span>
-          {active && <NodeDot node={active} />}
-          <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+          <span className="flex size-5.5 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground shadow-xs ring-1 ring-border">
+            <Icon className="size-3.5" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 items-center gap-1.5 font-medium text-[0.8125rem] text-foreground leading-4">
+              <span className="truncate">{label}</span>
+              {active && <NodeDot node={active} />}
+            </span>
+            {subtitle && (
+              <span className="truncate text-[0.6875rem] text-subtle-foreground leading-3.5">
+                {subtitle}
+              </span>
+            )}
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-subtle-foreground" />
         </PopoverTrigger>
         <PopoverPopup
-          side="bottom"
+          side="top"
           align="start"
           className="w-60 [&_[data-slot=popover-viewport]]:p-1"
         >

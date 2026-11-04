@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import { CopyButton } from './CopyButton';
 import { codeToHtml } from './snippetHighlighter';
 
+/**
+ * sunken 底由外层画：shiki 在 pre 上内联浅色底、深色走 --shiki-dark-bg，两者都要压成透明。
+ * 手机 PWA 没有 sunken token，回落到 muted。
+ */
+const CODE_SURFACE =
+  'my-2 overflow-x-auto rounded-lg border bg-[var(--sunken,var(--muted))] text-xs leading-relaxed';
+
 /** 无语言标记时的轻量猜测（缩进代码块常见）；猜错也只是配色不同 */
 function guessLanguage(code: string): string {
   const head = code.trimStart();
@@ -47,8 +54,8 @@ export function CodeBlock({
 
   if (html == null) {
     return (
-      <div className="group/code relative">
-        <pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 font-mono text-xs leading-relaxed">
+      <div data-enso="code-block" className="group/code relative">
+        <pre className={`${CODE_SURFACE} p-3 font-mono`}>
           <code>{code}</code>
         </pre>
         {copy}
@@ -56,9 +63,9 @@ export function CodeBlock({
     );
   }
   return (
-    <div className="group/code relative">
+    <div data-enso="code-block" className="group/code relative">
       <div
-        className="my-2 overflow-x-auto rounded-md border text-xs leading-relaxed [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:p-3 [&_pre]:font-mono"
+        className={`${CODE_SURFACE} [&_pre]:m-0 [&_pre]:overflow-x-auto [&_pre]:bg-transparent! [&_pre]:p-3 [&_pre]:font-mono [&_pre]:[--shiki-dark-bg:transparent]!`}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
         dangerouslySetInnerHTML={{ __html: html }}
       />

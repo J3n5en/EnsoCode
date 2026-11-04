@@ -3,6 +3,8 @@ export interface ScreenRect {
   y: number;
   width: number;
   height: number;
+  /** guest 贴着圆角卡片时的圆角，挖孔跟着切圆 */
+  radius?: number;
 }
 
 const area = (r: ScreenRect) => Math.max(0, r.width) * Math.max(0, r.height);

@@ -48,7 +48,7 @@ export function useNativeWindowControls(ref: RefObject<HTMLElement | null>): voi
     const observer = new MutationObserver(schedule);
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['class', 'style', 'data-accent'],
+      attributeFilter: ['class', 'style', 'data-theme'],
     });
     observer.observe(header, { attributes: true, attributeFilter: ['class'] });
     const media = window.matchMedia('(prefers-color-scheme: dark)');

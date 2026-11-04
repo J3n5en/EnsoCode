@@ -281,6 +281,23 @@ describe('config sync sender-bound import flow', () => {
     settings.patchSettingsState('smartCompactModel', null);
   });
 
+  it('强调色跟随主题时不进导出包，旧客户端导入不会因未知值整包失败', async () => {
+    settings.patchSettingsState('skills', []);
+    settings.patchSettingsState('accentColor', 'theme');
+    const followTheme = join(userData, 'accent-theme.enso-config');
+    expect(await service.exportConfigToPath({ includeSecrets: false }, followTheme)).toMatchObject({
+      ok: true,
+    });
+    expect((await decodeBundle(readFileSync(followTheme))).state).not.toHaveProperty('accentColor');
+    settings.patchSettingsState('accentColor', 'teal');
+    expect(await service.exportConfigToPath({ includeSecrets: false }, followTheme)).toMatchObject({
+      ok: true,
+    });
+    expect((await decodeBundle(readFileSync(followTheme))).state).toMatchObject({
+      accentColor: 'teal',
+    });
+  });
+
   it('导出拒绝覆盖符号链接且不修改链接目标', async () => {
     settings.patchSettingsState('skills', []);
     settings.patchSettingsState('instructions', []);

@@ -2,6 +2,7 @@ import { coworkerTabTone } from '@shared/conversationDotTone';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
 import { Bot, MessageCircle, Pencil, Plus, RefreshCw, X, Zap } from 'lucide-react';
 import * as React from 'react';
+import { ChromeRow } from '@/components/app/WindowChrome';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
 import { reloadConversationFromMenu } from '@/components/chat/reloadConversationAction';
@@ -72,7 +73,7 @@ export function CoworkerTabs({
     );
 
   return (
-    <div className="flex items-center gap-1 border-b px-2 py-1">
+    <ChromeRow data-enso="session-tabs" className="border-b">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
         <RenameableTab
           id={parentId}
@@ -149,7 +150,7 @@ export function CoworkerTabs({
       </div>
       {trailing}
       {hiring && <HireCoworkerDialog parentId={parentId} onClose={() => setHiring(false)} />}
-    </div>
+    </ChromeRow>
   );
 }
 

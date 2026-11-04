@@ -3,6 +3,7 @@ import {
   CHAT_MIN_WIDTH,
   resizeSidePanelWidth,
   resolveSidePanelWidth,
+  SIDE_PANEL_GAP_WIDTH,
   SIDE_PANEL_HANDLE_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
 } from './width';
@@ -28,6 +29,10 @@ describe('resolveSidePanelWidth', () => {
   it('窄窗口优先保留聊天区，允许面板小于通常最小宽度', () => {
     expect(resolveSidePanelWidth(480, 500)).toBe(500 - chatReserve);
   });
+
+  it('卡片外壳下 8px 缝整宽计入聊天预留', () => {
+    expect(resolveSidePanelWidth(900, 1200, SIDE_PANEL_GAP_WIDTH)).toBe(1200 - CHAT_MIN_WIDTH - 8);
+  });
 });
 
 describe('resizeSidePanelWidth', () => {
@@ -51,5 +56,10 @@ describe('resizeSidePanelWidth', () => {
 
   it('工作区尚未量到时按偏好加减，不夹成 0', () => {
     expect(resizeSidePanelWidth(480, 20, 0)).toBe(500);
+  });
+
+  it('卡片外壳下拖到上限时聊天区仍留足最小宽度', () => {
+    const max = 1000 - CHAT_MIN_WIDTH - SIDE_PANEL_GAP_WIDTH;
+    expect(resizeSidePanelWidth(400, 1000, 1000, SIDE_PANEL_GAP_WIDTH)).toBe(max);
   });
 });

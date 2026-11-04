@@ -92,6 +92,7 @@ const plugin = {
   running: true,
   configurable: true,
   crossSessionInject: false,
+  themes: [],
 };
 
 let root: Root;
@@ -163,6 +164,19 @@ describe('ExtensionPluginsSection', () => {
 
     await act(async () => byText('收起详情').click());
     expect(container.textContent).not.toContain('agent.tool');
+  });
+
+  it('只带主题 CSS 的插件不再声称无特殊权限', async () => {
+    harness.list.mockResolvedValue([
+      { ...plugin, permissions: [], themes: [{ id: 'lab', name: 'Lab', css: 'x.css' }] },
+    ]);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+
+    await act(async () => byText('详情').click());
+    expect(container.textContent).toContain('修改界面样式');
+    expect(container.textContent).not.toContain('无特殊权限');
   });
 
   it('日志、配置、产出都开在弹窗层，不插进页面', async () => {
