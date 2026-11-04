@@ -44,7 +44,7 @@ describe('systemPromptStore', () => {
     const result = await readSystemPrompt();
     expect(result.ok).toBe(true);
     expect(result.content).toBe(
-      'You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.'
+      'You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.'
     );
   });
 });

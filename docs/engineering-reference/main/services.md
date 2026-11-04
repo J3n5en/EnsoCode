@@ -123,20 +123,20 @@ receipt 事件同理：发的是**绑定上下文的 `context.turnId`**（= 派�
 目前有三处。第一处：`src/agent/supervisor.ts` 的 `materializeSessionFile()` 调用
 `SessionManager._rewriteFile()`，并在成功重写后同步其私有 `flushed` 标记。
 
-**为什么需要**：pi 的 `_persist` 在会话出现第一条 assistant 消息前一个字节不写
-（避免留空会话文件），而纯派发的父容器按设计永远不跑主 coding 回合、永远没有
-assistant 消息。不干预的后果是父会话文件从未创建，重启后 `resumeConversation`
+**为什么需要**：Pi 1.5 的 `_persist` 在会话出现第一条 user 或 assistant 消息前一个字节不写
+（避免留空会话文件），而纯派发的父容器按设计永远不跑主 coding 回合、只有 custom
+entry。不干预的后果是父会话文件从未创建，重启后 `resumeConversation`
 报「会话文件已丢失」，**连带该会话下所有 child 的历史都打不开**。
 
 **升级 pi 时必须复检这一处**。回归测试（`src/agent/sessionPersistence.test.ts`）故意包含
-一条**上游行为基线断言**——“pi 当前在没有 assistant 消息时不落盘”；上游改了这个
+一条**上游行为基线断言**——“pi 当前在只有 custom entry 时不落盘”；上游改了这个
 启发式，该断言会先飘红提醒复检适配层是否还需要。
 
 Pi 0.87.1 的 `_rewriteFile()` 不设置 `flushed`；不显式同步时，首条 assistant
 会以 `wx` 创建已有文件并抛出 `EEXIST`。回归还须覆盖物化后追加首条 assistant、
 重开 JSONL 后消息仍存在。只有重写成功后才能设置该标记。
 
-第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.4.0
+第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.5.0
 私有 `_startRun`，通过每次调用独立的代理令 `_prepareRun` 返回空数组。Pi 1.2 起
 移除了旧 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
 `agent.continue()` 绕过自动重试、`agent_before_settle` 与 `agent_settled`，手工补发
@@ -157,7 +157,7 @@ post-run / before-settle / settled 生命周期。
 选号等待时取消与唯一结算）、`sessionAdapter.test.ts` 和 `supervisor.silentTurn.test.ts`。
 
 第三处：`sessionAdapter.steerActiveSession()` 针对 Bot 插话，以每次调用独立的代理拦截
-pi 1.4.0 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
+pi 1.5.0 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
 steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., streamingBehavior:'steer')`
 在 `started` 回调抛错：那时已经可能做过压缩并清空 nextTurn 消息。
 已入队但到 `agent_settled` 仍未消费的消息（如 abort）按对象引用从
@@ -176,8 +176,12 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 2. 回归测试断言**可观测结果**（文件落盘）而不是“调用了某私有方法”
 3. 在本节登记
 
+Pi 1.5 升级保留 TypeBox schema，`Type` / `Static` 从 `typebox` 直接导入；
+`pi-ai` 主入口已移除这些导出，工具参数改由 `pi-schema` 校验。上述三处私有接口
+已按真实 SDK 的持久化、续跑与插话回归复检。
+
 预设仅替换开头角色段落，不替换整份系统提示词。在 `before_agent_start` 用
-`replacePersonaParagraph` 匹配开头默认段落，`Available tools` 及之后的内容原样保留；
+`replacePersonaParagraph` 匹配开头默认段落，`<tools>` 及之后的内容原样保留；
 不使用 loader 的 `systemPrompt` / `systemPromptOverride`，避免绕过 pi 默认工具准则生成。
 设置页默认预览也只展示 `DEFAULT_PERSONA_PROMPT`；升级 pi 时复检默认段落，匹配失败时
 保留原文并追加角色描述。回归见 `systemPrompt.test.ts`、`supervisor.agentDispatch.test.ts`。
