@@ -107,6 +107,7 @@ export const zhTranslations: Record<string, string> = {
   'Choose interface theme': '选择界面主题',
   'Accent color': '强调色',
   'Highlight color used across the interface': '界面高亮使用的颜色',
+  'Follow theme': '跟随主题',
   Violet: '紫罗兰',
   Indigo: '靛蓝',
   Teal: '青绿',

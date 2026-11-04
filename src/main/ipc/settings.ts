@@ -56,7 +56,9 @@ const MAX_WAIT_MS = 5000;
 
 export const SETTINGS_STATE_FIELDS = [
   'theme',
+  'themeId',
   'accentColor',
+  'userCssEnabled',
   'language',
   'terminalTheme',
   'terminalFontSize',
@@ -206,6 +208,8 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'backgroundUrlPath',
   'backgroundRandomEnabled',
   'backgroundRefreshNonce',
+  'themeId',
+  'userCssEnabled',
   'lastApprovalMode',
   'memoryEmbeddingAutoDownload',
   'memoryModelIdleMinutes',

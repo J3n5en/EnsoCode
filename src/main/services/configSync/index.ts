@@ -165,6 +165,8 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   backgroundCodeOpacity: { mode: 'portable' },
   backgroundSizeMode: { mode: 'portable' },
   accentColor: { mode: 'portable' },
+  themeId: { mode: 'excluded', reason: 'theme may come from a device-local plugin' },
+  userCssEnabled: { mode: 'excluded', reason: 'user.css is a device-local file' },
   backgroundRefreshNonce: { mode: 'excluded', reason: 'device appearance preference' },
   providers: { mode: 'portable' },
   defaultModel: { mode: 'portable' },

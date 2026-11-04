@@ -24,6 +24,8 @@ type SettingsDataKey = Exclude<keyof SettingsState, SettingsActionKey>;
 export const SETTINGS_DATA_COVERAGE = {
   theme: surfaces('appearance.theme'),
   accentColor: surfaces('appearance.accent'),
+  themeId: excluded('Theme gallery choice may reference a device-local plugin theme.'),
+  userCssEnabled: excluded('User CSS injects a device-local user.css file.'),
   language: surfaces('general.language'),
   terminalTheme: surfaces('appearance.terminal-theme'),
   terminalFontSize: surfaces('appearance.terminal-font-size'),
@@ -171,6 +173,7 @@ export const SETTINGS_DATA_COVERAGE = {
 /** SettingsState 新增 action 时，此 Record 会在编译期要求登记或明确排除。 */
 export const SETTINGS_ACTION_COVERAGE = {
   setTheme: surfaces('appearance.theme'),
+  setThemeId: excluded('Theme gallery choice may reference a device-local plugin theme.'),
   setAccentColor: surfaces('appearance.accent'),
   setLanguage: surfaces('general.language'),
   setTerminalTheme: surfaces('appearance.terminal-theme'),

@@ -1,4 +1,6 @@
+import { ACCENT_PRESETS } from '@shared/accentColor';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
+import { resolveTheme } from '@shared/theme/themeKey';
 import {
   ChevronLeft,
   ChevronRight,
@@ -607,16 +609,8 @@ function ThemeCombobox({
   );
 }
 
-/** 色块取各预设在亮色模式下的主色，与 globals.css 的 --brand 保持一致 */
-const ACCENT_SWATCHES: Record<AccentColor, string> = {
-  violet: 'oklch(0.54 0.2 280)',
-  indigo: 'oklch(0.53 0.19 265)',
-  teal: 'oklch(0.56 0.1 185)',
-  amber: 'oklch(0.64 0.16 55)',
-  graphite: 'oklch(0.27 0.01 285)',
-};
-
 const ACCENT_LABELS = {
+  theme: 'Follow theme',
   violet: 'Violet',
   indigo: 'Indigo',
   teal: 'Teal',
@@ -717,6 +711,7 @@ export function AppearanceSettings() {
   const {
     theme,
     setTheme,
+    themeId,
     accentColor,
     setAccentColor,
     terminalTheme,
@@ -748,7 +743,7 @@ export function AppearanceSettings() {
   const accentOptions = ACCENT_COLORS.map((value) => ({
     value,
     label: t(ACCENT_LABELS[value]),
-    swatch: ACCENT_SWATCHES[value],
+    swatch: value === 'theme' ? resolveTheme(themeId).light.accent : ACCENT_PRESETS[value].light,
   }));
 
   const [localFontSize, setLocalFontSize] = React.useState(globalFontSize);

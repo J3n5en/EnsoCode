@@ -21,6 +21,35 @@ describe('文件链接右键打开设置水合', () => {
   });
 });
 
+describe('主题与强调色设置', () => {
+  const current = { editMode: 'apply_patch' as const, accentColor: 'theme' as const };
+
+  it('v16 → v17 把无法区分是否主动选择的 violet 迁为跟随主题，其他强调色不动', () => {
+    expect(migrateSettings({ accentColor: 'violet' }, 16)).toEqual({ accentColor: 'theme' });
+    expect(migrateSettings({ accentColor: 'teal' }, 16)).toEqual({ accentColor: 'teal' });
+    expect(migrateSettings({ theme: 'dark' }, 16)).toEqual({ theme: 'dark' });
+  });
+
+  it('新版本里主动选的 violet 不再被迁移', () => {
+    expect(SETTINGS_VERSION).toBeGreaterThanOrEqual(17);
+    const state = { accentColor: 'violet' };
+    expect(migrateSettings(state, SETTINGS_VERSION)).toBe(state);
+  });
+
+  it('水合时保留暂不可用的插件主题，坏主题 key 落回 enso', () => {
+    expect(mergeSettingsState({ themeId: 'acme.themes/nord' }, current)).toMatchObject({
+      themeId: 'acme.themes/nord',
+    });
+    expect(mergeSettingsState({ themeId: 'paper' }, current)).toMatchObject({ themeId: 'paper' });
+    for (const themeId of ['nord', '', 42, null, 'a/b/c']) {
+      expect(mergeSettingsState({ themeId }, current)).toMatchObject({ themeId: 'enso' });
+    }
+    expect(mergeSettingsState({}, { ...current, themeId: 'graphite' })).toMatchObject({
+      themeId: 'graphite',
+    });
+  });
+});
+
 describe('web search chain hydration', () => {
   const current = {
     editMode: 'apply_patch' as const,
