@@ -229,14 +229,12 @@ export function ChatView() {
   );
   const [projectSkills, setProjectSkills] = useState<{ name: string; description: string }[]>([]);
 
+  const skillCwd = loadLocalSkills ? (project?.path ?? '') : '';
+  const presetId = chrome?.presetId;
   useEffect(() => {
-    if (!project?.path || !loadLocalSkills) {
-      setProjectSkills([]);
-      return;
-    }
     let cancelled = false;
     window.electronAPI.assets
-      .listProjectSkills(project.path)
+      .listProjectSkills(skillCwd, presetId)
       .then((listed) => {
         if (!cancelled) setProjectSkills(listed);
       })
@@ -246,7 +244,7 @@ export function ChatView() {
     return () => {
       cancelled = true;
     };
-  }, [project?.path, loadLocalSkills]);
+  }, [skillCwd, presetId]);
 
   const chromeCommands = chrome?.commands;
   const pluginCommands = usePluginSlashCommands();

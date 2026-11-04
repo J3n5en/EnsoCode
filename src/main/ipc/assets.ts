@@ -15,7 +15,12 @@ import {
   saveCustomWorkflowPreset,
   workflowPresetRoots,
 } from '../../agent/workflowPresets';
-import { agentDataDir, customWorkflowPresetDir, readSettingsState } from '../services/agentHost';
+import {
+  agentDataDir,
+  customWorkflowPresetDir,
+  menuPluginSkillPaths,
+  readSettingsState,
+} from '../services/agentHost';
 import {
   instructionReader,
   occupancyForBuiltinTools,
@@ -25,7 +30,7 @@ import {
   parseOccupancyIds,
 } from '../services/assetOccupancy';
 import { collectAssetImport, scanLocalAssets } from '../services/assetScan';
-import { listProjectSkills } from '../services/assetScan/skills';
+import { listProjectSkills, listSkillsAt } from '../services/assetScan/skills';
 import { resolveLocalCwdForBrowser } from '../services/browserFileRoot';
 import { listInstalledPluginInfo } from '../services/claudePlugins';
 import {
@@ -96,27 +101,38 @@ export function registerAssetHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, (_event, cwd: unknown) => {
-    if (typeof cwd !== 'string' || !cwd) return [];
-    // 与 spawn 同一来源读开关、agentDir 与项目信任：菜单预览与实际注入的 skill 集合保持一致
-    const state = readSettingsState();
-    const projects: unknown[] = Array.isArray(state?.projects) ? state.projects : [];
-    const project = projects.find(
-      (entry): entry is { id: string } =>
-        Boolean(entry) &&
-        typeof entry === 'object' &&
-        (entry as { path?: unknown }).path === cwd &&
-        typeof (entry as { id?: unknown }).id === 'string'
-    );
-    return listProjectSkills(cwd, {
-      agentDir: path.join(agentDataDir(), 'pi-agent'),
-      trustedProjectCode: projectTrustedCode(projects, project?.id),
-      includeHarness: state?.loadHarnessAssets === true,
-    }).catch((error: unknown) => {
-      console.error('[assets] list project skills failed:', error);
-      return [];
-    });
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS,
+    (_event, cwd: unknown, presetId: unknown) => {
+      const agentDir = path.join(agentDataDir(), 'pi-agent');
+      // 插件 skill 只在 spawn 时进会话命令；新对话发送前按所选预设预览，与 spawn 同口径
+      const plugin = listSkillsAt(
+        menuPluginSkillPaths(typeof presetId === 'string' && presetId ? presetId : undefined),
+        agentDir
+      );
+      if (typeof cwd !== 'string' || !cwd) return plugin;
+      // 与 spawn 同一来源读开关、agentDir 与项目信任：菜单预览与实际注入的 skill 集合保持一致
+      const state = readSettingsState();
+      const projects: unknown[] = Array.isArray(state?.projects) ? state.projects : [];
+      const project = projects.find(
+        (entry): entry is { id: string } =>
+          Boolean(entry) &&
+          typeof entry === 'object' &&
+          (entry as { path?: unknown }).path === cwd &&
+          typeof (entry as { id?: unknown }).id === 'string'
+      );
+      return listProjectSkills(cwd, {
+        agentDir,
+        trustedProjectCode: projectTrustedCode(projects, project?.id),
+        includeHarness: state?.loadHarnessAssets === true,
+      })
+        .catch((error: unknown) => {
+          console.error('[assets] list project skills failed:', error);
+          return [];
+        })
+        .then((local) => [...plugin, ...local]);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.ASSETS_LIST_WORKFLOW_PRESETS, (_event, conversationId: unknown) => {
     if (typeof conversationId !== 'string' || !conversationId) return [];

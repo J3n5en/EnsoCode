@@ -1164,6 +1164,31 @@ export function presetOverlay(
   };
 }
 
+/** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Claude 插件在前，Enso 插件按生效的插件预设圈定 */
+export function pluginSkillPathsForMenu(
+  presetId: string | undefined,
+  deps: {
+    resolve: (id?: string) => Preset | undefined;
+    claude: readonly string[];
+    extension: {
+      presetForSpawn(id?: string): { ok: boolean } | undefined;
+      skillPathsForSpawn(activePresetId?: string): string[];
+    } | null;
+  }
+): string[] {
+  const { pluginPresetId } = presetOverlay(presetId, deps.resolve);
+  const active = deps.extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
+  return [...deps.claude, ...(deps.extension?.skillPathsForSpawn(active) ?? [])];
+}
+
+export function menuPluginSkillPaths(presetId: string | undefined): string[] {
+  return pluginSkillPathsForMenu(presetId, {
+    resolve: resolvePreset,
+    claude: enabledPlugins(readSettingsState()).skillPaths,
+    extension: getExtensionPlugins(),
+  });
+}
+
 interface PresetPromptKit {
   systemPrompt?: string;
   systemPromptAppend?: string;

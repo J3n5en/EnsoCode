@@ -3,6 +3,7 @@ import {
   applyPluginPresetOverrides,
   mergePresetPromptKit,
   pluginPresetInstruction,
+  pluginSkillPathsForMenu,
   presetOverlay,
 } from './agentHost';
 
@@ -160,5 +161,48 @@ describe('presetOverlay', () => {
       preset: { ...user, pluginPresetId: 'not-plugin' },
       required: false,
     });
+  });
+});
+
+describe('pluginSkillPathsForMenu', () => {
+  const user = {
+    id: 'u',
+    name: 'U',
+    skillIds: [],
+    mcpServerIds: [],
+    pluginPresetId: 'plugin:enso.pstack:poteto',
+  };
+  const extension = (ok: boolean) => ({
+    presetForSpawn: (id?: string) =>
+      id ? (ok ? { ok: true as const } : { ok: false as const, error: 'x' }) : undefined,
+    skillPathsForSpawn: (active?: string) => (active ? ['/p/always', '/p/scoped'] : ['/p/always']),
+  });
+
+  it('选中插件预设（直接或经自建预设叠加）时含它圈定的 skill，Claude 插件在前', () => {
+    for (const presetId of ['plugin:enso.pstack:poteto', 'u']) {
+      expect(
+        pluginSkillPathsForMenu(presetId, {
+          resolve: () => user,
+          claude: ['/c'],
+          extension: extension(true),
+        })
+      ).toEqual(['/c', '/p/always', '/p/scoped']);
+    }
+  });
+
+  it('没选插件预设或插件预设失效时只含不受预设圈定的 skill', () => {
+    expect(
+      pluginSkillPathsForMenu(undefined, {
+        resolve: () => undefined,
+        claude: [],
+        extension: extension(true),
+      })
+    ).toEqual(['/p/always']);
+    expect(
+      pluginSkillPathsForMenu('u', { resolve: () => user, claude: [], extension: extension(false) })
+    ).toEqual(['/p/always']);
+    expect(
+      pluginSkillPathsForMenu('u', { resolve: () => user, claude: ['/c'], extension: null })
+    ).toEqual(['/c']);
   });
 });
