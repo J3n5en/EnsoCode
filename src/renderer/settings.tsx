@@ -32,7 +32,6 @@ function SettingsApp() {
                 <WindowControls kind={chromeKind} edgeGap={8} />
               </>
             ),
-            trafficLightGap: false,
           }}
         >
           <SettingsContent />

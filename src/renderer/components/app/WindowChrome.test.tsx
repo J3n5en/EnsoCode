@@ -8,13 +8,12 @@ vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/hooks/useViewport', () => ({ useIsMobile: () => false }));
 
 const html = (node: React.ReactElement) => renderToStaticMarkup(node);
-const withShell = (trafficLightGap: boolean, child: React.ReactElement) =>
+const withShell = (child: React.ReactElement) =>
   createElement(
     ShellChromeContext.Provider,
     {
       value: {
         trailing: createElement('button', { type: 'button' }, 'act'),
-        trafficLightGap,
       },
     },
     child
@@ -41,11 +40,9 @@ describe('ChromeRow', () => {
     expect(row).not.toContain('act');
   });
 
-  it('桌面外壳下整行可拖并在右端挂动作，折叠侧栏时为红绿灯留位', () => {
-    const row = html(withShell(false, createElement(ChromeRow, null, 'tabs')));
+  it('桌面外壳下整行可拖并在右端挂动作', () => {
+    const row = html(withShell(createElement(ChromeRow, null, 'tabs')));
     expect(row).toContain('drag-region');
     expect(row.indexOf('tabs')).toBeLessThan(row.indexOf('act'));
-    expect(row).not.toContain('aria-hidden');
-    expect(html(withShell(true, createElement(ChromeRow, null, 'tabs')))).toContain('aria-hidden');
   });
 });

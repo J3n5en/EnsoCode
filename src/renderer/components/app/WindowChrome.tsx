@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils';
 /** mobile = 窄屏或远程浏览器：没有系统窗口控件，沿用整行 TitleBar */
 export type WindowChromeKind = 'mobile' | 'mac' | 'windows' | 'linux';
 
+/** 红绿灯在 x=16 起、右缘约 76px；侧栏顶行与折叠栏都按它右缘再留 8px（与卡片缝一致） */
+export const MAC_TRAFFIC_LIGHT_INSET = 84;
+
 export function useWindowChromeKind(): WindowChromeKind {
   const mobile = useIsMobile() || Boolean(window.electronAPI.remote);
   if (mobile) return 'mobile';
@@ -24,8 +27,6 @@ export function useWindowChromeKind(): WindowChromeKind {
 export interface ShellChrome {
   /** 顶栏右端：动作按钮，窗口最右侧时还包含系统控件 */
   trailing: ReactNode;
-  /** 侧栏折叠后红绿灯压在卡片顶栏左端，需要留位 */
-  trafficLightGap: boolean;
 }
 
 export const ShellChromeContext = createContext<ShellChrome | null>(null);
@@ -46,7 +47,6 @@ export function ChromeRow({ className, children, ...rest }: React.HTMLAttributes
         className
       )}
     >
-      {shell?.trafficLightGap && <div aria-hidden className="w-[30px] shrink-0" />}
       {children}
       {shell && (
         <div className="ml-auto flex shrink-0 items-center gap-1 self-stretch pr-2 has-[[data-window-controls]]:pr-0">

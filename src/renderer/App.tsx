@@ -429,7 +429,6 @@ export default function App() {
             {!controlsAboveSidePanel && <WindowControls kind={chromeKind} edgeGap={8} />}
           </>
         ),
-        trafficLightGap: chromeKind === 'mac' && collapsed,
       }
     : null;
 
