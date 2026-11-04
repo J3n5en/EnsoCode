@@ -166,22 +166,31 @@
     pointer-events: auto !important;
   }
 
-  /* Scrollbar styling */
+  /* 滚动条：8px 命中区里画 4px 细滑块，平时透明，只在滚动中（data-scrolling，见 lib/scrollbars）或指针落在滑块上时显示 */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
 
-  ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/20 rounded-full;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    background-color: transparent;
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/40;
+  [data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--color-foreground) 18%, transparent);
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in oklab, var(--color-foreground) 30%, transparent);
   }
 
   /* Disable text selection */

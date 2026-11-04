@@ -11,10 +11,12 @@ import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBoot
 import { SettingsContent } from '@/components/settings';
 import { ToastProvider } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { installScrollbarActivity } from '@/lib/scrollbars';
 import { installThemeStyles } from '@/lib/themeStyles';
 import './styles/globals.css';
 
 installThemeStyles();
+installScrollbarActivity();
 
 function SettingsApp() {
   const { t } = useI18n();
