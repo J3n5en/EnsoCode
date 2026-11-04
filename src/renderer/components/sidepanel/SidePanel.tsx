@@ -529,7 +529,7 @@ function Watermark(props: IWatermarkPanelProps) {
   const workflowAvailable = useWorkflowAvailable(projectId);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
+      <div className="enso-side-dock-header flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
         <SidePanelHeaderActions containerApi={props.containerApi} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
@@ -682,11 +682,14 @@ export function SidePanel({
   width: preferredWidth,
   resizing = false,
   card = false,
+  titleRow = false,
 }: {
   width: number;
   resizing?: boolean;
   /** 桌面外壳：做成浮在画布上的圆角卡片 */
   card?: boolean;
+  /** mac 桌面外壳：并排时不做卡片，贴右/下边并伸进顶栏行，tab 条与顶栏齐平、左边线即分割 */
+  titleRow?: boolean;
 }) {
   const { t } = useI18n();
   const activeIdForUi = useSessionsStore((s) => s.activeId);
@@ -780,9 +783,9 @@ export function SidePanel({
    * dockview 的 resize 回调在 ResizeObserver 里又套了一层 rAF，至少滞后一帧；
    * aside 展开态是透明的（给 Browser 挖孔），若内容跟着 aside 逐帧重排，
    * 弹簧过冲/打开首帧时 aside 比内容宽出来的那一条就会露出没有面板遮罩的裸壁纸。
-   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 border-l 占 1px，内容按 content-box 扣掉。
+   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 / 顶栏态 border-l 占 1px，内容按 content-box 扣掉。
    */
-  const contentW = cover ? undefined : Math.max(0, width - (open && !card ? 1 : 0));
+  const contentW = cover ? undefined : Math.max(0, width - (open && (!card || titleRow) ? 1 : 0));
   const activeId = conversationId;
   const skipWidthAnim = shouldSkipSidePanelWidthAnim({
     resizing,
@@ -819,9 +822,14 @@ export function SidePanel({
             : !card
               ? 'absolute inset-y-0 right-0'
               : 'absolute top-0 right-[8px] bottom-[8px]',
-          card ? cn('rounded-[10px]', open && 'shadow-surface') : open && 'border-l'
+          titleRow && !cover
+            ? cn('no-drag -mt-[44px] -mb-[8px]', open && '-mr-[8px] border-l')
+            : card
+              ? cn('rounded-[10px]', open && 'shadow-surface')
+              : open && 'border-l'
         )}
         data-enso="side-panel"
+        data-title-row={(titleRow && !cover) || undefined}
       >
         {open && !cover ? <SurfaceUnderHoles /> : null}
         {open && !cover && contentW !== undefined ? (

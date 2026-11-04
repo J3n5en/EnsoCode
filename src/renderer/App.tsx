@@ -394,6 +394,15 @@ export default function App() {
     [desktopShell]
   );
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
+  // mac 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行（Windows/Linux 右上角是系统按钮）
+  const titleRowPanel = desktopShell && chromeKind === 'mac';
+  const sideInTitleRow =
+    titleRowPanel &&
+    sideOpen &&
+    !sideFullscreen &&
+    !isMobile &&
+    !botModeActive &&
+    !remoteNodeActive;
   const panelActions = (
     <>
       <button
@@ -490,6 +499,7 @@ export default function App() {
             </div>
           }
           centered={modeSwitch ?? undefined}
+          reserveRight={sideInTitleRow ? sideWidth + 8 : undefined}
           actions={desktopShell ? undefined : panelActions}
         />
       ) : (
@@ -578,7 +588,9 @@ export default function App() {
             <div
               ref={workspaceRef}
               className={cn(
-                'relative flex min-h-0 min-w-0 flex-1 overflow-hidden',
+                'relative flex min-h-0 min-w-0 flex-1',
+                // mac 右侧面板要向上伸进顶栏行：只裁横向
+                titleRowPanel ? 'overflow-x-clip' : 'overflow-hidden',
                 desktopShell && 'pr-[8px] pb-[8px]'
               )}
             >
@@ -602,7 +614,12 @@ export default function App() {
                   onResizingChange={setSideResizing}
                 />
               )}
-              <SidePanel width={sideWidth} resizing={sideResizing} card={desktopShell} />
+              <SidePanel
+                width={sideWidth}
+                resizing={sideResizing}
+                card={desktopShell}
+                titleRow={titleRowPanel}
+              />
             </div>
           </DndContext>
         )}
