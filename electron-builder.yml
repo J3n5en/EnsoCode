@@ -102,6 +102,8 @@ mac:
   category: public.app-category.developer-tools
   hardenedRuntime: true
   gatekeeperAssess: false
+  # 公证与 staple 由 scripts/after-sign.mjs 负责，staple 断网可重试
+  notarize: false
   # electron-builder 默认三项 + 麦克风
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
@@ -123,6 +125,7 @@ linux:
 npmRebuild: false
 # 聚合 hook 仍会先调用 src/tooling/stripPackagedNatives.mjs，再放入目标架构 RTK。
 afterPack: ./scripts/after-pack.mjs
+afterSign: ./scripts/after-sign.mjs
 publish:
   provider: github
   owner: J3n5en
