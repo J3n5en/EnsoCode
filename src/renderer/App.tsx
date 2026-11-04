@@ -616,8 +616,8 @@ export default function App() {
                 'relative flex min-h-0 min-w-0 flex-1',
                 // mac 右侧面板要向上伸进顶栏行：只裁横向
                 titleRowPanel ? 'overflow-x-clip' : 'overflow-hidden',
-                // 卡片 1px 描边贴着容器左缘，放宽 1px 裁剪，否则左边框被裁掉、四边不一致
-                desktopShell && 'pr-[8px] pb-[8px] [overflow-clip-margin:1px]'
+                // 卡片 1px 描边画在盒外，左/上各让出 1px 才不被裁掉；overflow-clip-margin 对单轴 clip 和 hidden 都不生效
+                desktopShell && '-mt-px -ml-px pt-px pr-[8px] pb-[8px] pl-px'
               )}
             >
               <div
