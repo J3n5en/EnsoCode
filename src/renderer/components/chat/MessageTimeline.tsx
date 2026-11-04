@@ -227,7 +227,7 @@ export function MessageTimeline({
       turnOverrides,
     ]
   );
-  const metaTails = useMemo(() => turnMetaTails(folded), [folded]);
+  const metaTails = useMemo(() => turnMetaTails(folded, running), [folded, running]);
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
     state: EMPTY_FOLD_MOTION,
