@@ -15,10 +15,22 @@ const MODE_SELECTOR: Record<ThemeMode, string> = {
   dark: ':where(:root.dark)',
 };
 
+export const isSafeTokenValue = (value: string): boolean => !UNSAFE_VALUE.test(value);
+
+/** 只留 `--x` 键与不能逃出声明的非空字符串值 */
+export function sanitizeTokens(tokens: Record<string, unknown>): ThemeTokens {
+  const kept: ThemeTokens = {};
+  for (const [key, value] of Object.entries(tokens)) {
+    if (TOKEN_KEY.test(key) && typeof value === 'string' && value.trim() && isSafeTokenValue(value))
+      kept[key] = value.trim();
+  }
+  return kept;
+}
+
 export function tokensCss(selector: string, tokens: ThemeTokens): string {
-  const declarations = Object.entries(tokens)
-    .filter(([key, value]) => TOKEN_KEY.test(key) && value.trim() && !UNSAFE_VALUE.test(value))
-    .map(([key, value]) => `  ${key}: ${value.trim()};\n`);
+  const declarations = Object.entries(sanitizeTokens(tokens)).map(
+    ([key, value]) => `  ${key}: ${value};\n`
+  );
   return `${selector} {\n${declarations.join('')}}\n`;
 }
 

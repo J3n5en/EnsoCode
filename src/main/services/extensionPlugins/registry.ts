@@ -39,6 +39,7 @@ function isGrant(v: unknown): boolean {
     isStringArray(v.interop) &&
     isStringArray(v.intercepts) &&
     typeof v.resident === 'boolean' &&
+    (v.styles === undefined || typeof v.styles === 'boolean') &&
     Array.isArray(v.mcp) &&
     v.mcp.every(
       (s) =>
@@ -117,9 +118,11 @@ export function readRegistry(root: string): RegistryRead {
     }
     if (seen.has(item.id)) continue;
     seen.add(item.id);
-    const { lastError, source, ...rest } = item;
+    const { lastError, source, grant, pending, ...rest } = item;
     plugins.push({
       ...rest,
+      grant: withStyles(grant),
+      ...(pending ? { pending: { ...pending, grant: withStyles(pending.grant) } } : {}),
       ...(lastError && isLastError(lastError) ? { lastError } : {}),
       ...(isSource(source) ? { source } : {}),
     });
@@ -129,6 +132,9 @@ export function readRegistry(root: string): RegistryRead {
 
 const isLastError = (v: unknown) =>
   v === undefined || (isRecord(v) && typeof v.at === 'number' && typeof v.message === 'string');
+
+/** styles 晚于登记表版本加入：旧授权没同意过主题 CSS */
+const withStyles = (grant: PluginRecord['grant']) => ({ ...grant, styles: grant.styles === true });
 
 /** 只认绝对路径、http(s) 链接与市场插件 id；其它一律当作没有记录来源 */
 function isSource(v: unknown): v is NonNullable<PluginRecord['source']> {

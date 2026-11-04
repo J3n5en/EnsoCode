@@ -444,6 +444,71 @@ describe('parseExtensionPluginManifest', () => {
   });
 });
 
+describe('contributes.themes', () => {
+  const themePlugin = (themes: unknown) => ({
+    schemaVersion: 1,
+    id: 'enso.example.catppuccin',
+    name: 'Catppuccin',
+    version: '1.0.0',
+    permissions: [],
+    contributes: { themes },
+  });
+
+  it('只有主题的插件不需要 main 和权限，css 可选', () => {
+    const result = parseExtensionPluginManifest(
+      themePlugin([
+        {
+          id: 'catppuccin',
+          name: 'Catppuccin',
+          path: 'themes/catppuccin.json',
+          css: 'themes/catppuccin.css',
+        },
+        { id: 'latte', name: 'Latte', path: 'latte.json' },
+      ]),
+      '0.2.12'
+    );
+    expect(result.ok && result.manifest.contributes.themes).toEqual([
+      {
+        id: 'catppuccin',
+        name: 'Catppuccin',
+        path: 'themes/catppuccin.json',
+        css: 'themes/catppuccin.css',
+      },
+      { id: 'latte', name: 'Latte', path: 'latte.json' },
+    ]);
+  });
+
+  it('缺省为空数组', () => {
+    const result = parseExtensionPluginManifest(base(), '0.2.12');
+    expect(result.ok && result.manifest.contributes.themes).toEqual([]);
+  });
+
+  it.each<[string, unknown]>([
+    ['不是数组', { id: 'a', name: 'A', path: 'a.json' }],
+    ['不是对象', ['a']],
+    ['id 含斜杠', [{ id: 'a/b', name: 'A', path: 'a.json' }]],
+    ['id 大写', [{ id: 'Nord', name: 'A', path: 'a.json' }]],
+    ['id 过长', [{ id: `a${'b'.repeat(32)}`, name: 'A', path: 'a.json' }]],
+    ['缺名称', [{ id: 'a', path: 'a.json' }]],
+    ['path 不是 .json', [{ id: 'a', name: 'A', path: 'a.css' }]],
+    ['path 越界', [{ id: 'a', name: 'A', path: '../a.json' }]],
+    ['path 绝对路径', [{ id: 'a', name: 'A', path: '/etc/a.json' }]],
+    ['path 反斜杠', [{ id: 'a', name: 'A', path: 'themes\\a.json' }]],
+    ['css 不是 .css', [{ id: 'a', name: 'A', path: 'a.json', css: 'a.js' }]],
+    ['css 越界', [{ id: 'a', name: 'A', path: 'a.json', css: 'x/../../a.css' }]],
+    ['css 不是字符串', [{ id: 'a', name: 'A', path: 'a.json', css: true }]],
+    [
+      'id 重复',
+      [
+        { id: 'a', name: 'A', path: 'a.json' },
+        { id: 'a', name: 'B', path: 'b.json' },
+      ],
+    ],
+  ])('%s 时拒绝', (_label, themes) => {
+    expect(errorsOf(themePlugin(themes))).not.toEqual([]);
+  });
+});
+
 describe('isNewerPluginVersion', () => {
   it('按 x.y.z 数字比较，预发布版低于正式版', () => {
     expect(isNewerPluginVersion('1.10.0', '1.9.3')).toBe(true);

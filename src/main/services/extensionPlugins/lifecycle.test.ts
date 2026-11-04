@@ -14,6 +14,7 @@ const grant = (permissions: string[] = ['agent.tool']): PluginGrant => ({
   interop: [],
   intercepts: [],
   resident: false,
+  styles: false,
 });
 
 const record = (patch: Partial<PluginRecord> = {}): PluginRecord => ({

@@ -107,6 +107,50 @@ async function install(files: Record<string, string>) {
 }
 
 describe('ExtensionPluginService', () => {
+  it('只含主题的插件：预览带样式能力，启用后摘要列出主题、资源可读', async () => {
+    const themeManifest = JSON.stringify({
+      schemaVersion: 1,
+      id: 'example.theme',
+      name: 'Theme',
+      version: '1.0.0',
+      permissions: [],
+      contributes: {
+        themes: [
+          { id: 'night', name: 'Night', path: 'themes/night.json', css: 'themes/night.css' },
+        ],
+      },
+    });
+    const preview = await install({
+      'enso-plugin.json': themeManifest,
+      'themes/night.json': '{}',
+      'themes/night.css': 'a{}',
+    });
+    expect(preview).toMatchObject({ styles: true, permissions: [] });
+    expect(service.assetPath('example.theme', 'themes/night.css')).toBeNull();
+    await service.setEnabled('example.theme', true);
+    expect(service.list()[0]?.themes).toEqual([
+      { id: 'night', name: 'Night', path: 'themes/night.json', css: 'themes/night.css' },
+    ]);
+    expect(service.assetPath('example.theme', 'themes/night.css')).toMatch(/night\.css$/);
+    expect(service.assetPath('example.theme', '../registry.json')).toBeNull();
+  });
+
+  it('主题引用的文件缺失时拒绝暂存', async () => {
+    const result = await service.stage({
+      kind: 'dir',
+      path: writePlugin({
+        'enso-plugin.json': JSON.stringify({
+          schemaVersion: 1,
+          id: 'example.theme',
+          name: 'Theme',
+          version: '1.0.0',
+          contributes: { themes: [{ id: 'night', name: 'Night', path: 'night.json' }] },
+        }),
+      }),
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it('安装后默认停用，启用后工具进入会话下发列表', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     expect(service.list()[0]).toMatchObject({ id: 'example.demo', state: 'disabled' });

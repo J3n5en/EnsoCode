@@ -53,6 +53,13 @@ export interface PluginViewContrib {
   title: string;
   entry: string;
 }
+/** 主题：path 是调色板 JSON，css 可选且可改任意界面（grant.styles） */
+export interface PluginThemeContrib {
+  id: string;
+  name: string;
+  path: string;
+  css?: string;
+}
 export interface PluginTriggerContrib {
   symbol: PluginTriggerSymbol;
   name: string;
@@ -159,6 +166,7 @@ export interface ExtensionPluginManifest {
     events: PluginEventSubscription[];
     schedules: PluginScheduleContrib[];
     exports: PluginExportContrib[];
+    themes: PluginThemeContrib[];
     /** 运行期可额外注册的工具 / 命令上限 */
     dynamic: { tools: number; commands: number };
   };
@@ -463,6 +471,28 @@ export function parseExtensionPluginManifest(
     else views.push({ id: v.id, title: v.title as string, entry: v.entry });
   }
   uniqueIds(views, '侧栏页面');
+
+  const themes: PluginThemeContrib[] = [];
+  for (const theme of list('themes')) {
+    if (
+      !isRecord(theme) ||
+      typeof theme.id !== 'string' ||
+      !LOCAL_ID.test(theme.id) ||
+      !isNonEmptyString(theme.name, 40) ||
+      !isPluginRelativePath(theme.path) ||
+      !theme.path.endsWith('.json') ||
+      (theme.css !== undefined && (!isPluginRelativePath(theme.css) || !theme.css.endsWith('.css')))
+    )
+      errors.push(`主题不合法：${String(isRecord(theme) ? theme.id : theme)}`);
+    else
+      themes.push({
+        id: theme.id,
+        name: (theme.name as string).trim(),
+        path: theme.path,
+        ...(theme.css !== undefined ? { css: theme.css as string } : {}),
+      });
+  }
+  uniqueIds(themes, '主题');
 
   const triggers: PluginTriggerContrib[] = [];
   for (const t of list('triggers')) {
@@ -842,6 +872,7 @@ export function parseExtensionPluginManifest(
         events,
         schedules,
         exports: exportsList,
+        themes,
         dynamic,
       },
     },

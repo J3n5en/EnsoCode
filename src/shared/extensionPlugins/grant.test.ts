@@ -13,6 +13,7 @@ const grant = (patch: Partial<PluginGrant> = {}): PluginGrant => ({
   interop: [],
   intercepts: [],
   resident: false,
+  styles: false,
   ...patch,
 });
 
@@ -29,6 +30,7 @@ describe('grantExpands', () => {
       )
     ).toBe(false);
     expect(grantExpands(grant(), grant({ fsRead: ['docs/api'] }))).toBe(false);
+    expect(grantExpands(grant({ styles: true }), grant())).toBe(false);
   });
 
   it.each<[string, Partial<PluginGrant>]>([
@@ -54,6 +56,7 @@ describe('grantExpands', () => {
     ['新增可调用的插件', { interop: ['other.plugin'] }],
     ['新增拦截事件', { intercepts: ['tool_call'] }],
     ['改为常驻', { resident: true }],
+    ['主题开始带 CSS', { styles: true }],
   ])('%s 算扩大', (_label, patch) => {
     expect(grantExpands(grant(), grant(patch))).toBe(true);
   });

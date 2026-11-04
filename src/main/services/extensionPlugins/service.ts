@@ -331,6 +331,10 @@ export class ExtensionPluginService {
           })),
           commands: manifest.contributes.commands,
           views: manifest.contributes.views.map(({ id, title, entry }) => ({ id, title, entry })),
+          // css 只在用户同意过样式能力时下发，渲染层据此决定读不读
+          themes: manifest.contributes.themes.map(({ css, ...theme }) =>
+            css !== undefined && record.grant.styles ? { ...theme, css } : theme
+          ),
           triggers: manifest.contributes.triggers,
           hasRenderer: manifest.renderer !== undefined,
           ...(manifest.renderer ? { renderer: manifest.renderer } : {}),
@@ -412,6 +416,7 @@ export class ExtensionPluginService {
       env: m.env,
       interop: m.interop.call,
       resident: m.resident,
+      styles: grant.styles,
       events: m.contributes.events.map(({ event, mode, failClosed }) => ({
         event,
         mode,
