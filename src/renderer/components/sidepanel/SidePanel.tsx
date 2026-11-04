@@ -312,6 +312,8 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
   const isBrowser = props.api.id === 'browser' || props.api.id.startsWith('browser:');
   const tab = (
     <div
+      data-side-tab
+      data-active={active || undefined}
       className={cn(
         'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
         active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/50'
@@ -749,7 +751,7 @@ export function SidePanel({
   );
   const [cover, setCover] = useState(fullscreen);
   const [workspaceW, setWorkspaceW] = useState(0);
-  const handleW = card ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH;
+  const handleW = card && !titleRow ? SIDE_PANEL_GAP_WIDTH : SIDE_PANEL_HANDLE_WIDTH;
   const width = resolveSidePanelWidth(preferredWidth, workspaceW, handleW);
   const asideRef = useRef<HTMLElement>(null);
   const [widthAnim, setWidthAnim] = useState({
@@ -783,9 +785,9 @@ export function SidePanel({
    * dockview 的 resize 回调在 ResizeObserver 里又套了一层 rAF，至少滞后一帧；
    * aside 展开态是透明的（给 Browser 挖孔），若内容跟着 aside 逐帧重排，
    * 弹簧过冲/打开首帧时 aside 比内容宽出来的那一条就会露出没有面板遮罩的裸壁纸。
-   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 / 顶栏态 border-l 占 1px，内容按 content-box 扣掉。
+   * 全屏 cover 态 aside 本身是实底，内容照常铺满。非卡片态 border-l 占 1px，内容按 content-box 扣掉。
    */
-  const contentW = cover ? undefined : Math.max(0, width - (open && (!card || titleRow) ? 1 : 0));
+  const contentW = cover ? undefined : Math.max(0, width - (open && !card ? 1 : 0));
   const activeId = conversationId;
   const skipWidthAnim = shouldSkipSidePanelWidthAnim({
     resizing,
@@ -816,14 +818,14 @@ export function SidePanel({
         className={cn(
           'flex min-h-0 flex-col overflow-hidden',
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
-          open && !cover ? 'bg-transparent' : 'bg-background',
+          open && !cover ? 'bg-transparent' : titleRow && !cover ? '' : 'bg-background',
           !cover
             ? 'relative shrink-0'
             : !card
               ? 'absolute inset-y-0 right-0'
               : 'absolute top-0 right-[8px] bottom-[8px]',
           titleRow && !cover
-            ? cn('no-drag -mt-[44px] -mb-[8px]', open && '-mr-[8px] border-l')
+            ? 'no-drag -mt-[44px] rounded-br-[10px]'
             : card
               ? cn('rounded-[10px]', open && 'shadow-surface')
               : open && 'border-l'
@@ -831,12 +833,15 @@ export function SidePanel({
         data-enso="side-panel"
         data-title-row={(titleRow && !cover) || undefined}
       >
-        {open && !cover ? <SurfaceUnderHoles /> : null}
+        {open && !cover ? <SurfaceUnderHoles titleRow={titleRow} /> : null}
         {open && !cover && contentW !== undefined ? (
           // 过冲补条：只盖 [内容右边缘, aside 右边缘]，稳态宽度为 0，不会压到 Browser 挖孔
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 bg-background"
+            className={cn(
+              'pointer-events-none absolute right-0 bottom-0 bg-background',
+              titleRow ? 'top-[44px]' : 'top-0'
+            )}
             style={{ left: contentW }}
           />
         ) : null}
@@ -870,7 +875,7 @@ export function SidePanel({
  * 展开态面板底色：BackgroundLayer 现在铺的是画布色，面板自己铺卡片底，
  * 同样按视口坐标挖掉 Browser guest 的矩形，guest 沉底时才能透出。
  */
-function SurfaceUnderHoles() {
+function SurfaceUnderHoles({ titleRow }: { titleRow: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const holes = useSidePanelStore((s) => s.browserHoles);
   useLayoutEffect(() => {
@@ -881,6 +886,23 @@ function SurfaceUnderHoles() {
     el.style.clipPath = holesClipPath(local) ?? '';
   }, [holes]);
   return (
-    <div ref={ref} aria-hidden className="pointer-events-none absolute inset-0 bg-background" />
+    <>
+      {/* 顶栏态：tab 条透明落在画布上，卡片面只从 44px 起；阴影单独画并裁掉接缝一侧 */}
+      {titleRow && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-[44px] bottom-0 rounded-r-[10px] shadow-surface"
+          style={{ clipPath: 'inset(-24px -24px -24px 0)' }}
+        />
+      )}
+      <div
+        ref={ref}
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-x-0 bottom-0 bg-background',
+          titleRow ? 'top-[44px] rounded-r-[10px]' : 'top-0'
+        )}
+      />
+    </>
   );
 }

@@ -598,7 +598,9 @@ export default function App() {
                 data-enso="main"
                 className={cn(
                   'flex min-h-0 min-w-0 flex-1 flex-col bg-background',
-                  desktopShell && 'overflow-hidden rounded-[10px] shadow-surface'
+                  desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
+                  // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
+                  sideInTitleRow && 'rounded-r-none'
                 )}
               >
                 <PluginUiHost />
@@ -609,7 +611,7 @@ export default function App() {
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
                 <ResizeHandle
-                  gap={desktopShell}
+                  gap={desktopShell && !sideInTitleRow}
                   onResize={handleSideResize}
                   onResizingChange={setSideResizing}
                 />

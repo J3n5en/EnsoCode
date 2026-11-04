@@ -62,7 +62,12 @@ function readBox(el: HTMLElement | null): Rect | null {
 function cardCornerRadius(el: HTMLElement, bottom: number): number {
   const card = el.closest<HTMLElement>('[data-slot="side-panel"]');
   if (!card || Math.abs(card.getBoundingClientRect().bottom - bottom) > 1) return 0;
-  return Number.parseFloat(getComputedStyle(card).borderBottomLeftRadius) || 0;
+  const style = getComputedStyle(card);
+  return (
+    Number.parseFloat(style.borderBottomLeftRadius) ||
+    Number.parseFloat(style.borderBottomRightRadius) ||
+    0
+  );
 }
 
 /**
