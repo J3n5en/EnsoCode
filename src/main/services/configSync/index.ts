@@ -270,6 +270,8 @@ function portableState(state: Record<string, unknown>): Record<string, unknown> 
     delete result.hashlineEditEnabled;
   }
   delete result.bashInterceptEnabled;
+  // 旧版本不认识 'theme' 会整包拒绝导入；它本就是默认值，缺省时导入方保留本机设置
+  if (result.accentColor === 'theme') delete result.accentColor;
   for (const field of [
     'providers',
     'skills',
